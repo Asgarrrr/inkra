@@ -1,5 +1,7 @@
 # gpui-test Workspace Scaffold Implementation Plan
 
+**Status: implemented.** All 7 tasks completed, reviewed (spec compliance, code quality, red team), and merged on `feat/workspace-scaffold` — see `git log`. Step checkboxes below are left as originally written for historical reference, not live tracking.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Scaffold the `gpui-test` Cargo workspace (`core` + `app` crates) per the approved architecture design, with a tested text buffer in `core` and a minimal GPUI window in `app` that renders it, verified by a local CI script.
