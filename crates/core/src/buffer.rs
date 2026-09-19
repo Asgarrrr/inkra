@@ -9,21 +9,29 @@ impl Buffer {
         Self { text: text.into() }
     }
 
+    #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    #[must_use]
     pub fn char_len(&self) -> usize {
         self.text.chars().count()
     }
 
+    #[must_use]
     pub fn byte_offset(&self, char_offset: CharOffset) -> ByteOffset {
+        debug_assert!(
+            char_offset.0 <= self.char_len(),
+            "char offset {} out of bounds (buffer has {} chars)",
+            char_offset.0,
+            self.char_len()
+        );
         let byte = self
             .text
             .char_indices()
             .nth(char_offset.0)
-            .map(|(b, _)| b)
-            .unwrap_or(self.text.len());
+            .map_or(self.text.len(), |(b, _)| b);
         ByteOffset(byte)
     }
 
@@ -71,5 +79,12 @@ mod tests {
         let mut buf = Buffer::new("héllo");
         buf.delete(CharOffset(1), CharOffset(3)); // removes "él"
         assert_eq!(buf.text(), "hlo");
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn byte_offset_panics_on_out_of_range_char_offset() {
+        let buf = Buffer::new("abc");
+        let _ = buf.byte_offset(CharOffset(999));
     }
 }
