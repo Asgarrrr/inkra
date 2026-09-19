@@ -152,9 +152,9 @@ mod tests {
     #[test]
     fn new_edit_after_undo_clears_redo_stack() {
         let mut buf = Buffer::new("abc");
-        buf.insert(CharOffset(3), "d"); // "abcd"
-        let _ = buf.undo(); // back to "abc"
-        buf.insert(CharOffset(0), "X"); // "Xabc" — new edit
-        assert!(!buf.redo()); // old redo (re-adding "d") is gone
+        buf.insert(CharOffset(3), "d");
+        let _ = buf.undo();
+        buf.insert(CharOffset(0), "X");
+        assert!(!buf.redo());
     }
 }
