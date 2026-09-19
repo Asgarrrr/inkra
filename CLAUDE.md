@@ -12,6 +12,21 @@ d'un remplacement de Tauri sur Inkra. Design complet :
 - fmt: `cargo fmt --all -- --check`
 - run: `cargo run -p gpui-test-app`
 
+## GPUI Documentation (Hard Rule)
+
+Before writing or reviewing any code that touches `gpui`, check the local
+vendored source first — not training memory, not web search:
+
+- Source: `~/.cargo/registry/src/index.crates.io-*/gpui-0.2.2/src/` (exact
+  version pinned in `Cargo.lock`) — the most reliable reference, read/grep
+  it directly.
+- Rendered docs: `cargo doc -p gpui --no-deps`, then open
+  `target/doc/gpui/index.html`.
+
+Fall back to DeepWiki/web search only for what the vendored source can't
+answer: version history, GitHub issues/discussions, or how Zed itself uses
+`gpui` outside the crate.
+
 ## Architecture (Hard Rule)
 
 Workspace Cargo, deux crates, dépendance à sens unique :
