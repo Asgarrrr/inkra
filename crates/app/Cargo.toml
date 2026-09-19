@@ -1,0 +1,10 @@
+[package]
+name = "gpui-test-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui-test-core = { path = "../core" }
+
+[lints]
+workspace = true

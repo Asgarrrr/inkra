@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
-name = "gpui-test"
+name = "gpui-test-app"
+version = "0.1.0"
+dependencies = [
+ "gpui-test-core",
+]
+
+[[package]]
+name = "gpui-test-core"
 version = "0.1.0"
