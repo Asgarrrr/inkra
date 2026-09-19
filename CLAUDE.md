@@ -26,8 +26,10 @@ Workspace Cargo, deux crates, dépendance à sens unique :
   mouvement/sélection, implémentation `EntityInputHandler` (conversion
   offsets UTF-16 ↔ offsets `core`), `main()`.
 
-Ne jamais ajouter une dépendance qui inverse ce graphe. Vérifié en CI par
-`cargo tree -p gpui-test-core -i gpui` (doit échouer/retourner vide).
+Ne jamais ajouter une dépendance qui inverse ce graphe. Vérifié par
+`scripts/check.sh` (isolation check `cargo tree`, couvre normal/build/dev
+et toutes les cibles — durci après plusieurs contournements trouvés en
+red team, ne pas revenir à une commande `cargo tree` plus simple).
 
 En cas de doute sur la frontière d'un module : le mettre dans `core`
 seulement s'il ne dépend d'aucune info de layout ; sinon `app`.
@@ -65,7 +67,5 @@ même changement.
 
 ## Verification
 
-Définition de "done" : `cargo fmt --all -- --check`, `cargo clippy
---workspace --all-targets --all-features -- -D warnings`, `cargo tree -p
-gpui-test-core -i gpui` (vide), `cargo test --workspace`, `cargo build
---workspace --release` — tous verts.
+Définition de "done" : `./scripts/check.sh` tout vert (fmt, clippy -D
+warnings, isolation gpui, test, build --release).
