@@ -23,9 +23,17 @@ vendored source first — not training memory, not web search:
 - Rendered docs: `cargo doc -p gpui --no-deps`, then open
   `target/doc/gpui/index.html`.
 
-Fall back to DeepWiki/web search only for what the vendored source can't
-answer: version history, GitHub issues/discussions, or how Zed itself uses
-`gpui` outside the crate.
+Zed's own usage of `gpui` — especially `crates/editor/src/input.rs`
+(`EntityInputHandler`, IME marked ranges, UTF-16 offset conversion) — is
+mirrored locally at `vendor/zed-reference/crates/{gpui,editor,text,language}`
+(sparse shallow clone, gitignored, not part of this repo's history). Consult
+it before implementing any input/cursor/selection code — it's a working,
+production-hardened solution to exactly this problem. Refresh with
+`cd vendor/zed-reference && git pull` if it goes stale.
+
+Fall back to DeepWiki/web search only for what neither local source can
+answer: version history, GitHub issues/discussions, or design rationale
+not visible in the code itself.
 
 ## Architecture (Hard Rule)
 
