@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 gpui-test-core = { path = "../core" }
+gpui = "0.2"
 
 [lints]
 workspace = true
