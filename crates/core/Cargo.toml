@@ -5,3 +5,6 @@ edition = "2024"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest = "1"
