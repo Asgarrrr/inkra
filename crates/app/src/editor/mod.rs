@@ -91,18 +91,10 @@ impl EditorView {
     ///
     /// Every field reset below is a defect if skipped, so they are exhaustive
     /// rather than minimal.
-    // Two expectations, both self-removing — `expect` errors the moment it stops
-    // applying, so neither can outlive its reason:
-    //
-    // `dead_code`, outside tests only: the sidebar is the first production
-    // caller and lands with it. The alternative was writing the gate later,
-    // which leaves the swap untested until the sidebar exists.
-    //
     // `used_underscore_binding`: the underscore says the field is held only for
     // its `Drop`, and reassigning it is exactly this method's point. Renaming it
     // does not help — rustc exempts `_`-prefixed fields from "never read", so a
     // plain name trades this lint for that one.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the sidebar calls this"))]
     #[expect(
         clippy::used_underscore_binding,
         reason = "resubscribing is the point of the gate"
@@ -127,6 +119,16 @@ impl EditorView {
         self.scroll_handle = ScrollHandle::new();
 
         cx.notify();
+    }
+
+    /// The buffer this view currently edits.
+    ///
+    /// `#[cfg(test)]`: inside `editor/` the field is reachable directly, and no
+    /// production caller wants it — `open_buffer` sets it, nothing reads it
+    /// back. `sidebar.rs` is another module, so its test needs this.
+    #[cfg(test)]
+    pub(crate) fn buffer(&self) -> &Entity<Buffer> {
+        &self.buffer
     }
 
     /// The single path that mutates the buffer.

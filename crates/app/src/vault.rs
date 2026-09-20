@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui::{Context, Entity, Task, actions, prelude::*};
+use gpui::{App, Context, Entity, Task, actions, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs};
+use inkra_vault::{EntryId, Fs, Vault};
 
 actions!(vault, [Save]);
 
@@ -25,17 +25,109 @@ struct OpenNote {
 
 pub(crate) struct NoteStore {
     fs: Arc<dyn Fs>,
+    /// `None` when the app was launched on a single file, or on nothing: there
+    /// is then no tree to show and no id to open a note by.
+    vault: Option<Entity<Vault>>,
     open: HashMap<EntryId, OpenNote>,
     current: Option<EntryId>,
 }
 
 impl NoteStore {
-    pub(crate) fn new(fs: Arc<dyn Fs>) -> Self {
+    pub(crate) fn new(fs: Arc<dyn Fs>, vault: Option<Entity<Vault>>) -> Self {
         Self {
             fs,
+            vault,
             open: HashMap::new(),
             current: None,
         }
+    }
+
+    pub(crate) fn vault(&self) -> Option<&Entity<Vault>> {
+        self.vault.as_ref()
+    }
+
+    /// What the store itself still holds for a note.
+    ///
+    /// `#[cfg(test)]` because that is the truth today: nothing in the UI asks
+    /// the store for a buffer it did not just open, and a method only tests
+    /// call still fails `-D warnings` in the binary. The regression test needs
+    /// it — reading the buffer back out of the map is the only way to assert
+    /// the map kept it.
+    #[cfg(test)]
+    pub(crate) fn buffer_for(&self, id: EntryId) -> Option<&Entity<Buffer>> {
+        self.open.get(&id).map(|note| &note.buffer)
+    }
+
+    /// True when the note's buffer has moved past what was last written.
+    ///
+    /// A note that is not open has no buffer to differ from the file, so it is
+    /// never modified.
+    pub(crate) fn is_modified(&self, id: EntryId, cx: &App) -> bool {
+        self.open
+            .get(&id)
+            .is_some_and(|note| note.buffer.read(cx).version() != note.saved_version)
+    }
+
+    /// Loads a note, or returns the buffer already open for it.
+    ///
+    /// The map holds a **strong** handle, so an unsaved buffer survives being
+    /// switched away from. There is no close action in this slice, so buffers
+    /// live for the session; eviction is deferred with its trigger in the
+    /// design spec.
+    pub(crate) fn open_note(
+        &mut self,
+        id: EntryId,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<Entity<Buffer>>> {
+        if let Some(note) = self.open.get(&id) {
+            self.current = Some(id);
+            let buffer = note.buffer.clone();
+            cx.notify();
+            return Task::ready(Some(buffer));
+        }
+
+        let Some(vault) = self.vault.clone() else {
+            return Task::ready(None);
+        };
+        let Some(path) = vault.read(cx).absolute(id) else {
+            return Task::ready(None);
+        };
+        let fs = Arc::clone(&self.fs);
+
+        cx.spawn(async move |this, cx| {
+            let for_task = path.clone();
+            let loaded = cx
+                .background_spawn(async move { fs.load(&for_task).await })
+                .await
+                .ok()?;
+            this.update(cx, |this, cx| {
+                // Two clicks on one unopened note put two loads in flight.
+                // Whichever lands second must not replace what the first one
+                // already handed to the editor: that buffer may have been typed
+                // into, and replacing it would strand the text exactly the way
+                // a weak handle does.
+                if let Some(note) = this.open.get(&id) {
+                    this.current = Some(id);
+                    cx.notify();
+                    return note.buffer.clone();
+                }
+                let buffer = cx.new(|_| Buffer::new(loaded.text));
+                this.open.insert(
+                    id,
+                    OpenNote {
+                        buffer: buffer.clone(),
+                        path,
+                        // A freshly loaded note is clean, and `Buffer::version`
+                        // starts at zero, so nothing has moved past the file.
+                        saved_version: 0,
+                    },
+                );
+                this.current = Some(id);
+                cx.notify();
+                buffer
+            })
+            .ok()
+        })
     }
 
     /// Registers an already-loaded buffer as the current note.
@@ -122,20 +214,98 @@ impl NoteStore {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use gpui::{Focusable, TestAppContext, VisualTestContext, prelude::*};
+    use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, prelude::*};
     use inkra_text::{Buffer, ByteOffset};
     use inkra_vault::mem_fs::MemFs;
+    use inkra_vault::{EntryId, Vault};
 
     use super::{Fs, NoteStore};
     use crate::editor::EditorView;
     use crate::keymap::key_bindings;
     use crate::shell::AppShell;
+
+    /// Scans a two-note vault and returns the store plus both ids.
+    fn open_two_notes(
+        cx: &mut TestAppContext,
+        fs: Arc<dyn Fs>,
+    ) -> (Entity<NoteStore>, EntryId, EntryId) {
+        let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
+            .expect("scan the test vault");
+        // Resolved by name, never by index: the comparator decides the order and
+        // this test must not silently depend on it.
+        let id_of = |name: &str| {
+            scanned
+                .entries()
+                .find(|entry| entry.path.display_name() == name)
+                .map(|entry| entry.id)
+                .expect("entry exists")
+        };
+        let (a, b) = (id_of("a"), id_of("b"));
+        let vault = cx.update(|cx| cx.new(|_| scanned));
+        let store = cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))));
+        (store, a, b)
+    }
+
+    /// The same loss as the test below, by a narrower route: both loads are in
+    /// flight at once, so neither takes the already-open early return, and the
+    /// second would otherwise overwrite the entry the first one made — leaving
+    /// the editor holding a buffer the store no longer knows about.
+    #[gpui::test]
+    async fn two_loads_of_one_note_settle_on_one_buffer(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let first = store.update(cx, |store, cx| store.open_note(a, cx));
+        let second = store.update(cx, |store, cx| store.open_note(a, cx));
+        let (first, second) = (first.await, second.await);
+
+        let held = store.update(cx, |store, _| store.buffer_for(a).map(Entity::entity_id));
+        assert!(held.is_some(), "the note is open");
+        assert_eq!(first.map(|buffer| buffer.entity_id()), held);
+        assert_eq!(second.map(|buffer| buffer.entity_id()), held);
+    }
+
+    /// The defect: holding buffers weakly meant switching notes dropped the last
+    /// strong handle, so returning reloaded from disk and the unsaved text and
+    /// the whole undo history were gone, with no prompt.
+    #[gpui::test]
+    fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+
+        let (store, a, b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store.update(cx, |store, cx| store.open_note(a, cx).detach());
+        cx.run_until_parked();
+        store.update(cx, |store, cx| {
+            let buffer = store.buffer_for(a).cloned().expect("a is open");
+            buffer.update(cx, |buffer, _| buffer.insert(ByteOffset(0), "UNSAVED "));
+        });
+
+        store.update(cx, |store, cx| store.open_note(b, cx).detach());
+        cx.run_until_parked();
+        store.update(cx, |store, cx| store.open_note(a, cx).detach());
+        cx.run_until_parked();
+
+        store.update(cx, |store, cx| {
+            let buffer = store.buffer_for(a).expect("the buffer must still exist");
+            assert_eq!(buffer.read(cx).text(), "UNSAVED alpha");
+            assert!(
+                buffer.read(cx).version() != 0,
+                "the undo history survived too"
+            );
+        });
+    }
 
     /// Opens the window through `AppShell`, the way `main.rs` does.
     ///
@@ -148,12 +318,12 @@ mod tests {
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
         let notes = cx.update(|cx| {
             cx.new(|_| {
-                let mut store = NoteStore::new(fs);
+                let mut store = NoteStore::new(fs, None);
                 store.adopt(buffer, PathBuf::from("/vault/a.md"));
                 store
             })
         });
-        let window = cx.add_window(move |_, _| AppShell::new(editor, notes));
+        let window = cx.add_window(move |_, cx| AppShell::new(editor, notes, cx));
         window
             .update(cx, |shell, window, cx| {
                 window.focus(&shell.focus_handle(cx), cx);
@@ -201,7 +371,7 @@ mod tests {
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
         let notes = cx.update(|cx| {
             cx.new(|_| {
-                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>);
+                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None);
                 store.adopt(buffer.clone(), PathBuf::from("/vault/a.md"));
                 store
             })
