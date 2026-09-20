@@ -498,12 +498,23 @@ sidebar focused**.
 The indicator renders on the sidebar row. `AppShell` deferred a status bar
 (`2026-09-20-app-shell-layout-design.md:121`), so there is nowhere else.
 
-`NoteStore` observes each open `Entity<Buffer>` to drive it. CLAUDE.md's rule
-applies and is live here: **no observer on an `Entity<Buffer>` may call
-`.update()` or `.as_mut()` on that same buffer** — a second lease panics
+Built with **no observer at all** — the first draft said `NoteStore` would
+observe each open `Entity<Buffer>`, and that turned out to be redundant.
+`Sidebar::render_rows` reads the store and the row's buffer while it renders,
+gpui records every entity a window read during a draw
+(`app/entity_map.rs:213-214`, recorded by `window.rs:3421-3433`), and
+`App::notify` dirties any window that read the notifying entity
+(`app.rs:2789-2823`). An edit or a save therefore redraws the window on its
+own, and `.child(entity)` is uncached (`view.rs:100-104`), so the sidebar
+re-renders with it. Wrapping the sidebar in `Entity::cached` would break that
+and is the only way to reach the `dirty_views` check at `view.rs:483-498`.
+
+CLAUDE.md's rule still applies wherever an observer is added: **no observer on
+an `Entity<Buffer>` may call `.update()` or `.as_mut()` on that same buffer** —
+a second lease panics
 (`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:231`). The save path
 wants `finalize_transaction()` on the buffer, so it runs in the `Save` action
-handler, never inside the observer callback.
+handler.
 
 ### Launch states
 
@@ -513,7 +524,8 @@ All four were undefined in the first draft, and `EditorView::new` requires an
 | Situation | Behaviour |
 |---|---|
 | `cargo run -p inkra-app` with no argument | Empty `Buffer`, empty sidebar, no vault. The editor works; `⌘S` is a no-op |
-| Argument is not a directory, or unreadable | Message to stderr, exit 1 — as `main.rs:63-66` already does for window failure |
+| Argument is a readable file | The file is loaded into the buffer and `⌘S` writes it back, with no vault and an empty sidebar. Task 5's behaviour, kept rather than replaced: `EntryId::DETACHED` exists for exactly this note |
+| Argument is unreadable, or a directory that cannot be listed | Message to stderr, exit 1 — as `main.rs:63-66` already does for window failure |
 | Vault with zero `.md` files | Empty tree, empty buffer |
 | Vault scanned, nothing opened yet | Empty buffer until a row is clicked |
 
@@ -601,6 +613,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Flush dirty notes on quit | The app grows a close action, or a user loses work to `⌘Q`. | Nothing writes on quit today, so any dirty buffer is discarded silently. The narrow case — `⌘S` then `⌘Q` before the detached write lands — rides on the same fix: `App::shutdown` only awaits handlers registered through `on_app_quit` (`vendor/zed-reference/crates/gpui/src/app.rs:1057-1069`), and nothing registers one. Needs the auto-save-vs-prompt decision first |
 | Serialized writes per note | A vault on a network or FUSE mount, where one write outlives the next `⌘S`. | Two overlapping saves each capture their own `(text, version)` and race; if the older write lands last, the file holds stale text. Self-heals on the next save, since `saved_version` is then behind `version()`. Needs a delay hook in `MemFs` to test deterministically |
 | Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first |
+| Focusable sidebar | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` still delegates to the editor unconditionally. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
 | `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |

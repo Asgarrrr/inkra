@@ -6,23 +6,38 @@
 //! a status bar, multi-pane).
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement,
-    Render, Styled, Window, div, px, rgb,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, Styled, Window, div, px, rgb,
 };
 
 use crate::editor::EditorView;
+use crate::sidebar::Sidebar;
 use crate::vault::{NoteStore, Save};
 
 pub(crate) struct AppShell {
     editor: Entity<EditorView>,
     notes: Entity<NoteStore>,
+    sidebar: Entity<Sidebar>,
 }
 
 impl AppShell {
     /// `AppShell` composes the window; it does not decide what buffer opens in
     /// it.
-    pub(crate) fn new(editor: Entity<EditorView>, notes: Entity<NoteStore>) -> Self {
-        Self { editor, notes }
+    ///
+    /// The sidebar is built here rather than passed in, for the same reason:
+    /// it is part of the composition, and it needs nothing its two arguments do
+    /// not already carry.
+    pub(crate) fn new(
+        editor: Entity<EditorView>,
+        notes: Entity<NoteStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), editor.clone(), cx));
+        Self {
+            editor,
+            notes,
+            sidebar,
+        }
     }
 
     /// Detached rather than held: the shell outlives every save, and a `Task`
@@ -58,7 +73,12 @@ impl Render for AppShell {
             .child(
                 // flex_none (grow 0, shrink 0): never competes with the
                 // editor for space.
-                div().flex_none().w(px(180.)).h_full().bg(rgb(0x181818)),
+                div()
+                    .flex_none()
+                    .w(px(180.))
+                    .h_full()
+                    .bg(rgb(0x181818))
+                    .child(self.sidebar.clone()),
             )
             .child(
                 // flex_1 (grow 1, shrink 1, basis 0%) makes this wrapper
@@ -94,8 +114,8 @@ mod tests {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
-        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(Arc::new(MemFs::new()))));
-        let window = cx.add_window(move |_, _| AppShell::new(editor, notes));
+        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(Arc::new(MemFs::new()), None)));
+        let window = cx.add_window(move |_, cx| AppShell::new(editor, notes, cx));
         window
             .update(cx, |shell, window, cx| {
                 window.focus(&shell.focus_handle(cx), cx);
