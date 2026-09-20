@@ -68,6 +68,9 @@ area, not on every task:
 - Keep at least one `simulate_input`/`simulate_keystrokes` test. Nothing else
   proves the element registers its input handler during paint.
 - No snapshot or visual testing while the UI is an unstable prototype.
+- `check.sh` renders nothing. After touching the gpui dependency, its features,
+  or `TextElement`, run the app and look at it. A missing `font-kit` feature
+  silently renders no text while every test still passes.
 
 ## Don't recreate — it already exists
 
