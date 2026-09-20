@@ -143,7 +143,12 @@ impl EditorState {
         self.selection = Selection::new(ByteOffset(0)..buffer.len(), false);
     }
 
-    /// Returns whether anything was undone, so the caller can skip a repaint.
+    /// Returns whether anything was undone.
+    ///
+    /// Not a repaint gate: the app's mutation path notifies unconditionally,
+    /// which costs a wasted frame on an empty history and buys a repaint that
+    /// cannot be forgotten. The bool distinguishes "nothing to undo" from a
+    /// real undo for callers that need to tell them apart.
     pub fn undo(&mut self, buffer: &mut Buffer) -> bool {
         let Some(range) = buffer.undo() else {
             return false;

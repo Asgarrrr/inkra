@@ -68,17 +68,23 @@ impl EditorView {
         f(&mut self.state, &mut buffer)
     }
 
-    /// The single path that moves the cursor without touching the text.
+    /// The single path that changes view-local state without touching the text.
     ///
-    /// One gate rather than a `cx.notify()` per action, and the place the goal
-    /// column will be reset from once up and down exist — that state needs
-    /// font metrics, so it lives here while the selection it qualifies lives
-    /// in `inkra-editor`.
+    /// The buffer's observers must not fire for these: marking the buffer
+    /// changed when only this view's caret moved would lie to anything that
+    /// subscribes to real edits — an autosave, a vault reload.
+    fn update_state(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState)) {
+        f(&mut self.state);
+        cx.notify();
+    }
+
+    /// [`Self::update_state`] for the movements that need the buffer to
+    /// resolve. Also the place the goal column will be reset from once up and
+    /// down exist: that state needs font metrics, so it lives here while the
+    /// selection it qualifies lives in `inkra-editor`.
     fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
-        {
-            let buffer = self.buffer.read(cx);
-            f(&mut self.state, buffer);
-        }
+        let buffer = self.buffer.read(cx);
+        f(&mut self.state, buffer);
         cx.notify();
     }
 
@@ -86,6 +92,9 @@ impl EditorView {
         self.state.cursor()
     }
 
+    /// Unclipped, and derived from `last_layout`, which describes the text as
+    /// of the last paint. Both callers hand the result to
+    /// `EditorState::move_to`, which clips it.
     fn position_for_x(&self, x: Pixels) -> Option<ByteOffset> {
         let (bounds, line) = (self.last_bounds?, self.last_layout.as_ref()?);
         Some(ByteOffset(line.closest_index_for_x(x - bounds.left())))

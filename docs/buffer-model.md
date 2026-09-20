@@ -105,6 +105,17 @@ Cursor movement and deletion step by grapheme cluster, via
 `unicode-segmentation`. "e" plus a combining acute is one step; so is a ZWJ
 emoji sequence. Stepping by char splits both.
 
+## Cost
+
+`previous_grapheme` and `next_grapheme` are O(length of the document), not
+O(one step). Both build a `grapheme_indices` iterator over the whole text;
+`previous_grapheme` then walks it backwards from the end until it passes the
+offset. Every arrow key, backspace and delete pays one such scan.
+
+Fine for a note. It stops being fine at the scale where one keypress scans tens
+of kilobytes — the same trigger as the rope below, and they are fixed together:
+a rope replaces the scan with a chunk-local `GraphemeCursor`.
+
 ## Deferred
 
 Decisions made with reasons, so they are not relitigated from scratch:
