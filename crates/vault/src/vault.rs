@@ -99,7 +99,6 @@ impl Vault {
             if depth > MAX_DEPTH {
                 continue;
             }
-            // One unreadable folder must not lose the vault.
             let Ok(children) = fs.read_dir(&dir).await else {
                 continue;
             };
@@ -167,8 +166,6 @@ fn compare(a: &Entry, b: &Entry) -> Ordering {
         if x == y {
             continue;
         }
-        // A component is a directory when it is not the last one, or when the
-        // entry itself is a directory.
         let x_is_dir = i + 1 < a_components.len() || a.kind == Kind::Dir;
         let y_is_dir = i + 1 < b_components.len() || b.kind == Kind::Dir;
         return match (x_is_dir, y_is_dir) {

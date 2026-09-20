@@ -86,9 +86,6 @@ mod tests {
 
     #[test]
     fn a_current_dir_component_is_normalized_away() {
-        // `./a.md` and `a.md` name one file, and a join can produce either
-        // spelling. Left distinct, `depth()` indents a top-level note one level
-        // too deep and a `HashMap<RelPath, _>` holds the same file twice.
         let dotted = RelPath::new(Path::new("./a.md")).unwrap();
         assert_eq!(dotted, RelPath::new(Path::new("a.md")).unwrap());
         assert_eq!(dotted.depth(), 0);
