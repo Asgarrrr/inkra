@@ -225,9 +225,12 @@ So:
 
 - The structure chosen here is the one multi-pane will need, and costs nothing
   extra today.
-- Multi-pane is **not supported** until anchors land in `inkra-text`.
-- `inkra-vault` has the same prerequisite, for the same reason: a watched file
-  changing under an open buffer is "external reload".
+- Multi-pane is **not supported**. `inkra-text` grew anchors on 2026-09-20,
+  but nothing consumes them: `Selection` still holds raw `ByteOffset`s, so
+  what is left is anchored selections wired through `editor`.
+- `inkra-vault` needs the anchors *and* diff-based reload: the obvious
+  whole-buffer reload puts every anchor inside the replaced span, which
+  collapses all of them.
 
 Recorded so that whoever adds a second pane finds the blocker in the design
 rather than in a bug report.

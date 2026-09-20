@@ -91,8 +91,10 @@ area, not on every task:
 - No observer callback on an `Entity<Buffer>` may call `.update()` or
   `.as_mut()` on that same buffer — a second lease of one entity panics
   (`gpui/app/entity_map.rs:231`).
-- Two panes on one note is **not** supported. The wiring is in place; the
-  correctness is not, and needs anchors. Same prerequisite for file watching.
+- Two panes on one note is **not** supported. `Buffer` has anchors now, but
+  nothing uses them: `Selection` still holds raw offsets, so a second pane
+  needs anchored selections wired through `editor`. File watching needs that
+  plus diff-based reload — a whole-buffer reload collapses every anchor.
 
 ## Code
 
@@ -143,6 +145,8 @@ change that introduces something reusable.
 | Convert byte ↔ UTF-16 | `Buffer::to_utf16` / `from_utf16` | `text/src/buffer.rs` |
 | Step the cursor | `Buffer::previous_grapheme` / `next_grapheme` | `text/src/buffer.rs` |
 | Snap an offset onto a boundary | `Buffer::clip` | `text/src/buffer.rs` |
+| A position that survives edits | `Buffer::anchor` / `resolve` / `forget` | `text/src/buffer.rs` |
+| Which side of an edit a position sticks to | `Bias` | `text/src/anchor.rs` |
 | A cursor or selected region | `Selection` — `head`/`tail`/`set_head`/`collapse_to` | `editor/src/selection.rs` |
 | The remembered column for up/down | `Goal`, carried by `Selection` | `editor/src/selection.rs` |
 | Line count, line of an offset, a line's range | `Buffer::line_count` / `line_for_offset` / `line_range` | `text/src/buffer.rs` |

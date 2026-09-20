@@ -99,6 +99,57 @@ A caller that needs the exact selection from before an edit has to remember it
 itself. Zed does this with a side table in the editor layer keyed by
 transaction id (`editor.rs:1437-1450`), deliberately not inside the buffer.
 
+## Anchors
+
+A position that survives edits. `Buffer::anchor(offset, bias)` returns an
+`Anchor`; `resolve` reads it back as a `ByteOffset`, `forget` drops it. Every
+mutation of the text — `replace`, and the edits `undo` and `redo` replay —
+runs each live anchor through `transform` in `anchor.rs`. That function is the
+whole model: shift past the edit, or, at the edit's own start, let `Bias` pick
+a side.
+
+Not Zed's `Anchor`. Zed's carries a Lamport timestamp and a replica id and
+resolves by walking a `sum_tree` of insertion fragments. That machinery answers
+a question we do not have — which of two concurrent inserts at the same offset
+wins. `Buffer` is single-writer, one `String`, one edit-list undo stack. The
+shape that fits is the classic one: Emacs markers, relocated in place on every
+insertion and deletion.
+
+`Anchor` is an opaque handle into a table `Buffer` owns, not an offset a caller
+can read. So the representation can be swapped — for a CRDT, if collaborative
+editing is ever built — without touching a call site. It is deliberately not
+`Ord`: the handle is creation order, not document order, and comparing two
+anchors means resolving both first. It also carries no buffer identity, so
+resolving one against a *different* `Buffer` is silently wrong rather than a
+panic. Accepted while there is exactly one `Buffer` in the tree; revisit when
+`inkra-vault` introduces a second.
+
+Slots are never reused. `forget` tombstones one, and resolving a tombstoned
+handle panics — the caller-bug contract. Reuse without a generation counter
+turns that panic into a confident answer about somebody else's anchor. The
+price is that each edit walks every slot ever created rather than every live
+one: the same "fine for a note" trade as the grapheme scans above.
+
+### What an anchor does not survive
+
+An anchor strictly inside a deleted span collapses onto the edit's boundary and
+does not come back inside the text on undo. That is scope, not a limit of the
+model: Emacs restores markers through exactly this edit with a per-edit
+adjustment in its undo list, and `Edit { at, removed, inserted }` is the same
+shape of record and could carry the same adjustment. The cost is roughly
+another transform pass over the undo path. Nothing needs it yet.
+
+The boundaries are not symmetric, and the asymmetry is deliberate. A
+`Right`-biased anchor at the exact end of a *pure deletion* does round-trip
+through delete-then-undo. An anchor collapsed from *inside* a span moves
+boundary to boundary instead, and never re-enters the restored text. Both are
+pinned by tests, so a later "fix" to one cannot quietly be applied to the
+other.
+
+Whole-buffer reload is the case to watch. `replace(0..len, new_text)` puts
+every anchor inside the touched span, so every one of them collapses. File
+watching therefore needs anchors *and* diff-based reload, not anchors alone.
+
 ## Graphemes
 
 Cursor movement and deletion step by grapheme cluster, via
@@ -132,11 +183,3 @@ Decisions made with reasons, so they are not relitigated from scratch:
   `(byte, utf16)` pair only helps sequential typing, already the cheap case,
   and does nothing for select-all, click-into-middle, or protocol queries at
   arbitrary points — while adding an invalidation invariant to maintain.
-- **Anchors.** Not yet, but no longer open-ended: they are the named
-  prerequisite for two panes on one note and for the vault's file watching.
-  Every mutation currently goes through one path that re-derives the selection
-  immediately, so there is no second actor to rot a raw offset. A second
-  `EditorState` over the same `Buffer` would be exactly that actor — which is
-  why multi-pane is wired but unsupported. The version needed is
-  offset-shifting on edit (~25 lines), not Zed's CRDT `Anchor` with its Lamport
-  clock and replica id.

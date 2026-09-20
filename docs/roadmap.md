@@ -19,7 +19,6 @@ the uncertainty, for reasons given below.
 | Soft wrap | A real note measured to need it. | 3–5 d | — |
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | Soft wrap |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
-| Anchors | Named prerequisite of multi-pane and of the vault — see the modular architecture design doc. | not sized | — |
 
 Sequential total for the five sized editor items: roughly 11–17 working days.
 
