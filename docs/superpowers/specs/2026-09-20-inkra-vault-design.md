@@ -572,9 +572,16 @@ Infallible operations still panic on caller bugs.
 pub enum VaultError {
     Io { path: PathBuf, source: io::Error },
     NotUtf8 { path: PathBuf },
-    OutsideRoot { path: PathBuf },
 }
 ```
+
+`OutsideRoot` was drafted here as a third variant and is not built. Nothing
+constructs it: `RelPath::new` rejects `..` and absolute paths by returning
+`None`, and the scan skips what it cannot make relative. A variant no code
+path can produce is a lie in the API, the same objection that keeps
+`Vault::by_path` and `saved_mtime` out. It returns with the command layer
+under Deferred, which is the first code that validates a caller-supplied path
+against the root.
 
 ## Testing
 

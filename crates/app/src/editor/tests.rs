@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use gpui::{
     Context, Entity, EntityInputHandler, TestAppContext, VisualTestContext, Window, prelude::*,
@@ -1021,7 +1022,7 @@ fn editing_after_a_swap_still_notifies(cx: &mut TestAppContext) {
     let before = notified.load(Ordering::SeqCst);
 
     second.update(cx, |buffer, cx| {
-        buffer.insert(at(0), "x");
+        buffer.transact_at(Instant::now(), |buffer| buffer.insert(at(0), "x"));
         cx.notify();
     });
     cx.run_until_parked();
