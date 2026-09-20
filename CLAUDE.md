@@ -19,8 +19,11 @@ area, not on every task:
 - [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why the
   dependency points at a git rev, and the accessibility gap accepted when
   GPUI was adopted.
+- [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
+  — the crate split, what multi-pane and markdown actually cost, and the
+  claims red/blue review withdrew.
 - [docs/superpowers/specs/2026-09-19-gpui-test-architecture-design.md](./docs/superpowers/specs/2026-09-19-gpui-test-architecture-design.md)
-  — original design review.
+  — original design review, superseded.
 
 ## Commands
 
@@ -28,7 +31,7 @@ area, not on every task:
 - test: `cargo test --workspace`
 - lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - fmt: `cargo fmt --all -- --check`
-- run: `cargo run -p gpui-test-app`
+- run: `cargo run -p inkra-app`
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
 
 ## GPUI (hard rule)
@@ -44,21 +47,37 @@ area, not on every task:
 
 ## Architecture (hard rule)
 
-- `crates/core` → `crates/app`, one way. Never add a dependency that inverts it.
-- `core` has zero gpui dependency. Enforced by `scripts/check.sh`; that check
-  was hardened after red-team bypasses — do not simplify it.
-- Unsure where something belongs? `core` if it needs no layout information,
-  otherwise `app`.
+- `inkra-text` → `inkra-editor` → `inkra-app`, one way. Never add a dependency
+  that inverts it.
+- `text` and `editor` have zero gpui dependency. Enforced by `scripts/check.sh`;
+  that check was hardened after red-team bypasses — do not simplify it. A new
+  crate below `app` goes in its loop in the same change.
+- Where does it belong?
+  - no layout, no filesystem, no clock → `text` (a property of the text) or
+    `editor` (a property of editing it)
+  - pixels, font metrics, a `Window`, a clock, the platform → `app`
+  - filesystem and network live in `app` until a dedicated crate earns its
+    place. Never in `text` or `editor`.
+- `EditorView` has exactly two gates to its state, and new actions go through
+  them rather than around: `edit_buffer` for anything touching the text,
+  `move_cursor` for anything moving the caret. `Buffer` cannot notify for
+  itself, so a mutation outside `edit_buffer` is a repaint silently lost.
+- No observer callback on an `Entity<Buffer>` may call `.update()` or
+  `.as_mut()` on that same buffer — a second lease of one entity panics
+  (`entity_map.rs:116`).
+- Two panes on one note is **not** supported. The wiring is in place; the
+  correctness is not, and needs anchors. Same prerequisite for file watching.
 
 ## Code
 
 - Offsets are `ByteOffset` and `Utf16Offset`. Never mix them. Never add a char
   offset.
 - Mutate the buffer only through `Buffer::transact_at`. Never call
-  `replace`/`insert`/`delete` bare from `app`.
+  `replace`/`insert`/`delete` bare from above `text`.
 - Call `Buffer::finalize_transaction` around anything that must not merge into
   adjacent typing — paste, reformat.
-- `core` never reads a clock. Take the `Instant` from the caller.
+- Only `app` reads a clock. `text` and `editor` take the `Instant` from the
+  caller.
 - Move and delete by grapheme, never by char.
 - Infallible buffer operations panic on caller bugs — no `Result`. Reserve
   `thiserror` for genuinely fallible boundaries (file I/O).
@@ -66,12 +85,16 @@ area, not on every task:
 
 ## Testing
 
-- `core`: `#[test]` plus `proptest` over edit sequences. Commit
-  `.proptest-regressions`.
-- `app`: `#[gpui::test]` headless. Reach `EntityInputHandler` through the
-  `with_editor` helper — its methods all need a `Window`.
-- Keep at least one `simulate_input`/`simulate_keystrokes` test. Nothing else
-  proves the element registers its input handler during paint.
+- `text` and `editor`: `#[test]` plus `proptest` over edit sequences. Commit
+  `.proptest-regressions`. A test that does not need a `Window` does not belong
+  in `app`.
+- `app`: `#[gpui::test]` headless, in `editor/tests.rs`. Reach
+  `EntityInputHandler` through the `with_editor` helper — its methods all need
+  a `Window`.
+- Every key binding needs a `simulate_keystrokes` test. The action handlers are
+  thin delegations, so a test that calls one directly proves nothing about the
+  binding, the `actions!` mapping, or the repaint gate — and a wrong binding
+  passes `check.sh`. Use the `dispatching` helper.
 - No snapshot or visual testing while the UI is still unstable.
 - `check.sh` renders nothing. After touching the gpui dependency, its features,
   or `TextElement`, run the app and look at it. A missing `font-kit` feature
@@ -84,14 +107,20 @@ change that introduces something reusable.
 
 | Need | Use | Where |
 |---|---|---|
-| Edit text | `Buffer::replace`, `insert`, `delete` | `core/src/buffer.rs` |
-| One undo step per gesture | `Buffer::transact_at` / `transact` | `core/src/buffer.rs` |
-| Stop the next edit merging in | `Buffer::finalize_transaction` | `core/src/buffer.rs` |
-| Undo/redo, returns the touched range | `Buffer::undo` / `redo` | `core/src/buffer.rs` |
-| Convert byte ↔ UTF-16 | `Buffer::to_utf16` / `from_utf16` | `core/src/buffer.rs` |
-| Step the cursor | `Buffer::previous_grapheme` / `next_grapheme` | `core/src/buffer.rs` |
-| Snap an offset onto a boundary | `Buffer::clip` | `core/src/buffer.rs` |
-| UTF-16 ranges at the protocol edge | `EditorView::range_to_utf16` / `range_from_utf16` | `app/src/main.rs` |
-| Target range of an IME edit | `EditorView::target_range` | `app/src/main.rs` |
-| Mutate the buffer from the UI | `EditorView::edit` | `app/src/main.rs` |
-| Paint text, cursor, selection | `TextElement` | `app/src/main.rs` |
+| Edit text | `Buffer::replace`, `insert`, `delete` | `text/src/buffer.rs` |
+| One undo step per gesture | `Buffer::transact_at` / `transact` | `text/src/buffer.rs` |
+| Stop the next edit merging in | `Buffer::finalize_transaction` | `text/src/buffer.rs` |
+| Undo/redo, returns the touched range | `Buffer::undo` / `redo` | `text/src/buffer.rs` |
+| Convert byte ↔ UTF-16 | `Buffer::to_utf16` / `from_utf16` | `text/src/buffer.rs` |
+| Step the cursor | `Buffer::previous_grapheme` / `next_grapheme` | `text/src/buffer.rs` |
+| Snap an offset onto a boundary | `Buffer::clip` | `text/src/buffer.rs` |
+| A cursor or selected region | `Selection` — `head`/`tail`/`set_head`/`collapse_to` | `editor/src/selection.rs` |
+| Edit, delete, move, undo from a gesture | `EditorState` | `editor/src/state.rs` |
+| Movements resolvable without metrics | `LogicalMovement` | `editor/src/state.rs` |
+| Mutate the buffer from the UI | `EditorView::edit_buffer` | `app/src/editor/mod.rs` |
+| Move the caret from the UI | `EditorView::move_cursor` | `app/src/editor/mod.rs` |
+| UTF-16 ranges at the protocol edge | `EditorView::range_to_utf16` / `range_from_utf16` | `app/src/editor/input.rs` |
+| Target range of an IME edit | `EditorView::target_range` | `app/src/editor/input.rs` |
+| Paint text, cursor, selection | `TextElement` | `app/src/editor/element.rs` |
+| Build a styled run | `TextStyle::to_run` / `highlight` | gpui `style.rs:426`, `:475` |
+| A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |

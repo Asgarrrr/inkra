@@ -2012,23 +2012,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpui-test-app"
-version = "0.1.0"
-dependencies = [
- "gpui",
- "gpui-test-core",
- "gpui_platform",
-]
-
-[[package]]
-name = "gpui-test-core"
-version = "0.1.0"
-dependencies = [
- "proptest 1.11.0",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "gpui_apple"
 version = "0.1.0"
 source = "git+https://github.com/zed-industries/zed?rev=526c95d474b2bf800e95aab30222fa0341f08e19#526c95d474b2bf800e95aab30222fa0341f08e19"
@@ -2591,6 +2574,32 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "inkra-app"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "gpui_platform",
+ "inkra-editor",
+ "inkra-text",
+]
+
+[[package]]
+name = "inkra-editor"
+version = "0.1.0"
+dependencies = [
+ "inkra-text",
+ "proptest 1.11.0",
+]
+
+[[package]]
+name = "inkra-text"
+version = "0.1.0"
+dependencies = [
+ "proptest 1.11.0",
+ "unicode-segmentation",
 ]
 
 [[package]]

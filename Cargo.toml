@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/app"]
+members = ["crates/text", "crates/editor", "crates/app"]
+
+[workspace.dependencies]
+inkra-text = { path = "crates/text" }
+inkra-editor = { path = "crates/editor" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

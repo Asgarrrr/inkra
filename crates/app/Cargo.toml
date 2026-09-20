@@ -1,10 +1,11 @@
 [package]
-name = "gpui-test-app"
+name = "inkra-app"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-gpui-test-core = { path = "../core" }
+inkra-text = { workspace = true }
+inkra-editor = { workspace = true }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
 # font-kit is opt-in since the platform crates were split out of gpui. Without
 # it macOS renders no text at all, and only says so through a log warning.

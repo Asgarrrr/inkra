@@ -1,0 +1,195 @@
+//! The invariant the per-method tests only imply: whatever sequence of
+//! gestures a user performs, the selection stays addressable in the text.
+//!
+//! It holds today because every path that shortens the buffer — an edit, an
+//! undo, a redo — also collapses the selection. Anchors are what will be
+//! needed to keep it true once a second view can edit the same buffer.
+
+use std::time::{Duration, Instant};
+
+use inkra_editor::{EditorState, LogicalMovement, Selection};
+use inkra_text::{Buffer, ByteOffset};
+use proptest::prelude::*;
+
+#[derive(Debug, Clone)]
+enum Gesture {
+    Type(String),
+    Backspace,
+    Delete,
+    Move(Movement, bool),
+    /// A click: an arbitrary offset, which may land mid-character.
+    MoveTo(usize, bool),
+    SelectAll,
+    Undo,
+    Redo,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Movement {
+    Left,
+    Right,
+    DocStart,
+    DocEnd,
+}
+
+impl From<Movement> for LogicalMovement {
+    fn from(movement: Movement) -> Self {
+        match movement {
+            Movement::Left => Self::Left,
+            Movement::Right => Self::Right,
+            Movement::DocStart => Self::DocStart,
+            Movement::DocEnd => Self::DocEnd,
+        }
+    }
+}
+
+fn text_strategy() -> impl Strategy<Value = String> {
+    prop_oneof![
+        "[a-zA-Z]{1,3}",
+        Just("é".to_string()),
+        Just("日".to_string()),
+        Just("🎉".to_string()),
+        Just("e\u{301}".to_string()),
+        Just("👨\u{200d}👩\u{200d}👧".to_string()),
+    ]
+}
+
+fn movement_strategy() -> impl Strategy<Value = Movement> {
+    prop_oneof![
+        Just(Movement::Left),
+        Just(Movement::Right),
+        Just(Movement::DocStart),
+        Just(Movement::DocEnd),
+    ]
+}
+
+fn gesture_strategy() -> impl Strategy<Value = Gesture> {
+    prop_oneof![
+        4 => text_strategy().prop_map(Gesture::Type),
+        2 => Just(Gesture::Backspace),
+        2 => Just(Gesture::Delete),
+        4 => (movement_strategy(), any::<bool>()).prop_map(|(m, extend)| Gesture::Move(m, extend)),
+        2 => (any::<usize>(), any::<bool>()).prop_map(|(at, extend)| Gesture::MoveTo(at, extend)),
+        1 => Just(Gesture::SelectAll),
+        2 => Just(Gesture::Undo),
+        1 => Just(Gesture::Redo),
+    ]
+}
+
+fn assert_addressable(buffer: &Buffer, state: &EditorState) -> Result<(), TestCaseError> {
+    let selection = state.selection();
+    prop_assert!(
+        selection.start() <= selection.end(),
+        "selection {}..{} is inverted",
+        selection.start(),
+        selection.end()
+    );
+    prop_assert!(
+        selection.end() <= buffer.len(),
+        "selection end {} escapes a buffer of {} bytes",
+        selection.end(),
+        buffer.len()
+    );
+    prop_assert!(
+        buffer.text().is_char_boundary(selection.start().0)
+            && buffer.text().is_char_boundary(selection.end().0),
+        "selection {}..{} splits a character in {:?}",
+        selection.start(),
+        selection.end(),
+        buffer.text()
+    );
+
+    if let Some(marked) = state.marked_range() {
+        prop_assert!(
+            marked.end <= buffer.len(),
+            "composing region {}..{} escapes a buffer of {} bytes",
+            marked.start,
+            marked.end,
+            buffer.len()
+        );
+        prop_assert!(
+            buffer.text().is_char_boundary(marked.start.0)
+                && buffer.text().is_char_boundary(marked.end.0),
+            "composing region {}..{} splits a character",
+            marked.start,
+            marked.end
+        );
+    }
+
+    // Slicing is what every consumer ultimately does with these offsets; if the
+    // assertions above are right this cannot panic, which is the point.
+    let _ = &buffer.text()[selection.start().0..selection.end().0];
+    Ok(())
+}
+
+proptest! {
+    #[test]
+    fn the_selection_stays_addressable_through_any_gesture_sequence(
+        initial in prop::collection::vec(text_strategy(), 0..4),
+        gestures in prop::collection::vec(gesture_strategy(), 0..40),
+    ) {
+        let mut buffer = Buffer::new(initial.concat());
+        let mut state = EditorState::new(Selection::at(buffer.len()));
+        let start = Instant::now();
+
+        assert_addressable(&buffer, &state)?;
+
+        for (index, gesture) in gestures.into_iter().enumerate() {
+            // Spread the gestures past GROUP_INTERVAL so undo steps stay
+            // separable rather than all coalescing into one.
+            let now = start + Duration::from_millis(500) * u32::try_from(index).unwrap_or(u32::MAX);
+
+            match gesture {
+                Gesture::Type(text) => {
+                    let range = state.selection().range();
+                    state.edit(&mut buffer, now, range, &text);
+                }
+                Gesture::Backspace => state.backspace(&mut buffer, now),
+                Gesture::Delete => state.delete(&mut buffer, now),
+                Gesture::Move(movement, extend) => {
+                    state.move_(&buffer, movement.into(), extend);
+                }
+                Gesture::MoveTo(at, extend) => {
+                    state.move_to(&buffer, ByteOffset(at % (buffer.len().0 + 1)), extend);
+                }
+                Gesture::SelectAll => state.select_all(&buffer),
+                Gesture::Undo => {
+                    state.undo(&mut buffer);
+                }
+                Gesture::Redo => {
+                    state.redo(&mut buffer);
+                }
+            }
+
+            assert_addressable(&buffer, &state)?;
+        }
+    }
+
+    /// Typing into a selection replaces exactly that selection, and leaves the
+    /// cursor after the inserted text — the property every other editing
+    /// gesture is built on.
+    #[test]
+    fn typing_over_a_selection_replaces_exactly_it(
+        parts in prop::collection::vec(text_strategy(), 1..6),
+        anchor in any::<usize>(),
+        head in any::<usize>(),
+        typed in text_strategy(),
+    ) {
+        let text = parts.concat();
+        let mut buffer = Buffer::new(text.clone());
+        let mut state = EditorState::new(Selection::at(ByteOffset(0)));
+
+        state.move_to(&buffer, ByteOffset(anchor % (text.len() + 1)), false);
+        state.move_to(&buffer, ByteOffset(head % (text.len() + 1)), true);
+
+        let range = state.selection().range();
+        let mut expected = text.clone();
+        expected.replace_range(range.start.0..range.end.0, &typed);
+
+        state.edit(&mut buffer, Instant::now(), range.clone(), &typed);
+
+        prop_assert_eq!(buffer.text(), expected.as_str());
+        prop_assert_eq!(state.cursor(), ByteOffset(range.start.0 + typed.len()));
+        prop_assert!(state.selection().is_empty());
+    }
+}

@@ -1,6 +1,6 @@
 # Text model
 
-Living reference for `crates/core`. Rules live in `CLAUDE.md`; this explains
+Living reference for `crates/text`. Rules live in `CLAUDE.md`; this explains
 why they are what they are. Update it when the model changes.
 
 ## Offsets
@@ -18,7 +18,7 @@ nothing byte offsets don't — every consumer wanted either storage positions or
 protocol positions — and it added a conversion hop on a path already crossing
 two coordinate systems.
 
-Byte ↔ UTF-16 conversion lives in `core` rather than next to the protocol code
+Byte ↔ UTF-16 conversion lives in `text` rather than next to the protocol code
 in `app`. It is a property of the text with no layout input, so the boundary
 rule puts it there; keeping it in one place also means a future rope can make
 it sub-linear without touching `app`.
@@ -53,7 +53,7 @@ one step per character. `finalize_transaction` seals the current step so the
 next edit cannot merge into it — use it around a paste or a reformat, which
 should not be swallowed by adjacent typing.
 
-`core` never reads a clock. The caller supplies `now`. A buffer that calls
+`text` never reads a clock. The caller supplies `now`. A buffer that calls
 `Instant::now()` internally needs a `cfg(test)` override to be testable, and a
 type that behaves differently under test than in production is exactly where
 bugs hide. Zed takes the override approach (`text.rs:226-230`); we took the
@@ -121,8 +121,11 @@ Decisions made with reasons, so they are not relitigated from scratch:
   `(byte, utf16)` pair only helps sequential typing, already the cheap case,
   and does nothing for select-all, click-into-middle, or protocol queries at
   arbitrary points — while adding an invalidation invariant to maintain.
-- **Anchors.** Not yet. Every mutation currently goes through one path that
-  re-derives the selection immediately, so there is no second actor to rot a
-  raw offset. The trigger is multi-cursor, external reload, or background
-  formatting. The version needed then is offset-shifting on edit (~25 lines),
-  not Zed's CRDT `Anchor` with its Lamport clock and replica id.
+- **Anchors.** Not yet, but no longer open-ended: they are the named
+  prerequisite for two panes on one note and for the vault's file watching.
+  Every mutation currently goes through one path that re-derives the selection
+  immediately, so there is no second actor to rot a raw offset. A second
+  `EditorState` over the same `Buffer` would be exactly that actor — which is
+  why multi-pane is wired but unsupported. The version needed is
+  offset-shifting on edit (~25 lines), not Zed's CRDT `Anchor` with its Lamport
+  clock and replica id.
