@@ -605,6 +605,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
 | `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |
 | `SumTree` entries | The same profile shows the `Vec` costing anything. | Internal to `Vault`; no consumer changes |
+| Case-insensitive `MemFs` | A path-keyed lookup lands — `Vault::by_path` above — where `Notes.md` and `notes.md` must resolve to one entry. | `MemFs` keys a case-sensitive `BTreeMap<PathBuf, _>`, so the identity proptest's `Op::RecaseName` is a plain rename of one inode. That is the right shape for identity, which is keyed by inode and has no case-folding branch, but it does not exercise case folding itself. A path index would be the first code that could diverge |
 
 ## Rejected alternatives
 

@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+# The seed below came from deliberately re-keying `Vault::rescan` by path to
+# confirm this proptest discriminates the two designs. It shrank to a single
+# rename, spelled as a recase — the smallest input path-keyed identity fails,
+# though not proof that case folding itself was exercised: `MemFs` is
+# case-sensitive and `Vault` has no case-folding branch. Kept so that input is
+# replayed before any generated one.
+cc f1106e88280ff63347467c12132c930e7d452f6c8fbc01f008361edd6bd2fa6f # shrinks to ops = [RecaseName(0)]
