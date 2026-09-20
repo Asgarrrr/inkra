@@ -3,7 +3,7 @@
 //! Same discipline as `ByteOffset` and `Utf16Offset` in `inkra-text`: the
 //! invariant lives in the type, so no caller has to remember it.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -13,18 +13,24 @@ impl RelPath {
     /// `None` when the path is absolute, contains `..`, or has a prefix or
     /// root component. Escaping the vault root is not an error to report to
     /// the user, it is a path the vault refuses to name.
+    ///
+    /// A `.` component is dropped rather than refused: `Path::new("./a.md")`
+    /// and `Path::new("a.md")` are not equal and do not have the same component
+    /// count, yet they name one file, and a join can legitimately produce
+    /// either. Refusing the first would lose a real note; keeping both
+    /// spellings would indent it one level too deep and let one file occupy two
+    /// keys in a `HashMap<RelPath, _>`.
     #[must_use]
     pub fn new(path: &Path) -> Option<Self> {
-        let escapes = path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        });
-        if escapes {
-            return None;
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::Normal(part) => normalized.push(part),
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            }
         }
-        Some(Self(Arc::from(path)))
+        Some(Self(Arc::from(normalized.as_path())))
     }
 
     #[must_use]
@@ -76,6 +82,20 @@ mod tests {
     fn a_parent_component_is_rejected_anywhere_in_the_path() {
         assert!(RelPath::new(Path::new("../secrets.md")).is_none());
         assert!(RelPath::new(Path::new("notes/../../secrets.md")).is_none());
+    }
+
+    #[test]
+    fn a_current_dir_component_is_normalized_away() {
+        // `./a.md` and `a.md` name one file, and a join can produce either
+        // spelling. Left distinct, `depth()` indents a top-level note one level
+        // too deep and a `HashMap<RelPath, _>` holds the same file twice.
+        let dotted = RelPath::new(Path::new("./a.md")).unwrap();
+        assert_eq!(dotted, RelPath::new(Path::new("a.md")).unwrap());
+        assert_eq!(dotted.depth(), 0);
+        assert_eq!(
+            RelPath::new(Path::new("notes/./today.md")).unwrap(),
+            RelPath::new(Path::new("notes/today.md")).unwrap()
+        );
     }
 
     #[test]
