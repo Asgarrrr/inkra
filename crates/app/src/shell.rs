@@ -19,8 +19,8 @@ pub(crate) struct AppShell {
 }
 
 impl AppShell {
-    /// Takes an already-built editor and note store: `AppShell` composes the
-    /// window, it does not decide what buffer opens in it.
+    /// `AppShell` composes the window; it does not decide what buffer opens in
+    /// it.
     pub(crate) fn new(editor: Entity<EditorView>, notes: Entity<NoteStore>) -> Self {
         Self { editor, notes }
     }

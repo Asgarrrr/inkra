@@ -187,8 +187,9 @@ mod tests {
         );
     }
 
-    /// The save is a no-op when nothing moved, so an untouched note is never
-    /// rewritten — and the version comparison that decides it is exercised.
+    /// The file starts out holding text the buffer never had, so a write of any
+    /// kind would show — which is what makes the version comparison, and not
+    /// just a matching write, the thing under test.
     #[gpui::test]
     fn cmd_s_on_an_untouched_note_leaves_the_file_alone(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());

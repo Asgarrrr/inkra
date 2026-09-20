@@ -23,8 +23,7 @@ use vault::NoteStore;
 
 actions!(inkra, [Quit]);
 
-/// The note named on the command line, already loaded: where it came from and
-/// what it holds.
+/// The note named on the command line, already loaded.
 ///
 /// The path travels with the text because `⌘S` needs somewhere to write back
 /// to. `None` means no argument was given, which is the empty-buffer launch
@@ -80,8 +79,6 @@ fn main() {
                 let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
                 let notes = cx.new(|_| {
                     let mut store = NoteStore::new(Arc::new(RealFs));
-                    // Without a path there is no current note, so `⌘S` has
-                    // nothing to write and says so by doing nothing.
                     if let Some(path) = path {
                         store.adopt(buffer, path);
                     }
