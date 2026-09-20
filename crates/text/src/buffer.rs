@@ -15,14 +15,26 @@ pub const GROUP_INTERVAL: Duration = Duration::from_millis(300);
 /// size of the edit rather than the size of the buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Edit {
+    /// Monotonic across this buffer's whole life, assigned when the edit is
+    /// applied. [`Buffer::version`] is the id of the last applied edit.
+    ///
+    /// On the edit, not on the [`Transaction`]: [`Buffer::close`] merges by
+    /// extending `previous.edits` in place, so a transaction's identity does
+    /// not move when the text does.
+    id: u64,
     at: ByteOffset,
     removed: String,
     inserted: String,
 }
 
 impl Edit {
+    /// Keeps the same id: this is one point in history, undone. Only
+    /// [`Buffer::undo`] builds an inversion, and it drops it after applying —
+    /// the version survives undo and redo because the original transaction
+    /// moves between the stacks intact.
     fn inverted(&self) -> Self {
         Self {
+            id: self.id,
             at: self.at,
             removed: self.inserted.clone(),
             inserted: self.removed.clone(),
@@ -52,6 +64,7 @@ pub struct Buffer {
     open: Option<Vec<Edit>>,
     depth: usize,
     grouping_blocked: bool,
+    next_edit_id: u64,
     /// Every anchor ever created here, `None` once forgotten. Slots are never
     /// reused — see [`Buffer::forget`].
     anchors: Vec<Option<AnchorState>>,
@@ -66,6 +79,7 @@ impl Buffer {
             open: None,
             depth: 0,
             grouping_blocked: false,
+            next_edit_id: 1,
             anchors: Vec::new(),
         }
     }
@@ -83,6 +97,25 @@ impl Buffer {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
+    }
+
+    /// Identifies the text's position in its own history.
+    ///
+    /// Two buffers are not comparable through this; it answers one question,
+    /// for one buffer: has the text moved since a version I previously held.
+    /// `app` stores the version it last wrote to disk and compares.
+    ///
+    /// Zed reaches the same property with a `clock::Global` version vector and
+    /// a memoized `has_unsaved_edits`
+    /// (`vendor/zed-reference/crates/language/src/buffer.rs:139`, `:2493`). It
+    /// counts operations, which is the granularity adopted here. Ours is a
+    /// single `u64` because we have one writer.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        self.undo_stack
+            .last()
+            .and_then(|transaction| transaction.edits.last())
+            .map_or(0, |edit| edit.id)
     }
 
     /// Runs `f` with every edit it makes grouped into a single undo step that
@@ -176,7 +209,10 @@ impl Buffer {
 
         self.text.replace_range(range.start.0..range.end.0, text);
         self.shift_anchors(range.start, removed.len(), text.len());
+        let id = self.next_edit_id;
+        self.next_edit_id += 1;
         self.record(Edit {
+            id,
             at: range.start,
             removed,
             inserted: text.to_string(),
@@ -695,6 +731,76 @@ mod tests {
             .map(|edit| edit.removed.len() + edit.inserted.len())
             .sum();
         assert_eq!(recorded, 1);
+    }
+
+    #[test]
+    fn version_starts_at_zero_and_moves_with_an_edit() {
+        let mut buffer = Buffer::new("abc");
+        assert_eq!(buffer.version(), 0);
+        buffer.insert(ByteOffset(3), "x");
+        assert_ne!(buffer.version(), 0);
+    }
+
+    /// The defect that motivated per-edit ids.
+    ///
+    /// `close` merges an edit that lands within `GROUP_INTERVAL` by extending
+    /// the previous transaction in place, so a transaction's identity does not
+    /// move even though the text changed. With the id on the transaction, this
+    /// reports "saved" over unsaved text and the edit is lost on quit.
+    #[test]
+    fn version_moves_when_an_edit_merges_into_the_previous_transaction() {
+        let mut buffer = Buffer::new("abc");
+        let t0 = Instant::now();
+        buffer.transact_at(t0, |b| b.insert(ByteOffset(3), "x"));
+        let saved = buffer.version();
+
+        buffer.transact_at(t0 + Duration::from_millis(120), |b| {
+            b.insert(ByteOffset(4), "y");
+        });
+
+        assert_eq!(buffer.text(), "abcxy");
+        assert_eq!(buffer.undo_stack.len(), 1, "the edits must have merged");
+        assert_ne!(
+            buffer.version(),
+            saved,
+            "a merged edit still changes the text, so the version must move"
+        );
+    }
+
+    #[test]
+    fn undo_returns_the_version_to_its_earlier_value() {
+        let mut buffer = Buffer::new("abc");
+        buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+        let after_first = buffer.version();
+        buffer.finalize_transaction();
+        buffer.transact(|b| b.insert(ByteOffset(4), "y"));
+
+        buffer.undo();
+
+        assert_eq!(buffer.text(), "abcx");
+        assert_eq!(buffer.version(), after_first);
+    }
+
+    #[test]
+    fn redo_restores_the_same_version() {
+        let mut buffer = Buffer::new("abc");
+        buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+        let after_edit = buffer.version();
+        buffer.undo();
+        buffer.redo();
+        assert_eq!(buffer.version(), after_edit);
+    }
+
+    #[test]
+    fn a_divergent_edit_after_undo_cannot_collide_with_the_history_it_replaced() {
+        let mut buffer = Buffer::new("abc");
+        buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+        let replaced = buffer.version();
+        buffer.undo();
+        buffer.transact(|b| b.insert(ByteOffset(3), "z"));
+
+        assert_eq!(buffer.text(), "abcz");
+        assert_ne!(buffer.version(), replaced);
     }
 
     #[test]
