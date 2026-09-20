@@ -32,11 +32,10 @@ fn initial_text() -> Result<String, String> {
     // rather than fatal; aborting here would contradict it.
     let Some(argument) = std::env::args_os().nth(1) else {
         // No argument: an empty buffer, per the launch-state table in
-        // `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. That
-        // retires the hardcoded demo note this replaced, which was also the
-        // only thing making a bare `cargo run` exercise per-line layout and
-        // the scroll container. Nothing renders in `check.sh`, so that
-        // eyeball pass now needs a tall file passed on the command line.
+        // `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. Nothing
+        // renders in `check.sh` and a bare `cargo run` now exercises neither
+        // per-line layout nor the scroll container, so the eyeball pass needs
+        // a tall file named on the command line.
         return Ok(String::new());
     };
     let path = PathBuf::from(argument);
