@@ -5,7 +5,13 @@ edition = "2024"
 
 [dependencies]
 gpui-test-core = { path = "../core" }
-gpui = "0.2"
+gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+    "test-support",
+] }
 
 [lints]
 workspace = true

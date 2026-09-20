@@ -1,10 +1,15 @@
-use gpui_test_core::{Buffer, CharOffset};
+use gpui_test_core::{Buffer, ByteOffset, Utf16Offset};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
 enum Op {
     Insert(usize, String),
     Delete(usize, usize),
+    /// Two edits that must collapse into a single undo step.
+    ReplaceInTransaction(usize, usize, String),
+    /// Two inserts at *different* positions in one transaction — the case that
+    /// exercises inverting a multi-edit transaction in reverse order.
+    InsertTwiceInTransaction(usize, usize, String, String),
     Undo,
     Redo,
 }
@@ -17,74 +22,158 @@ fn text_strategy() -> impl Strategy<Value = String> {
         Just("日".to_string()),
         Just("🎉".to_string()),
         Just("café".to_string()),
+        Just("e\u{301}".to_string()),
+        Just("👨\u{200d}👩\u{200d}👧".to_string()),
     ]
 }
 
 fn op_strategy() -> impl Strategy<Value = Op> {
     prop_oneof![
         3 => (any::<usize>(), text_strategy()).prop_map(|(at, text)| Op::Insert(at, text)),
-        3 => (any::<usize>(), any::<usize>()).prop_map(|(a, b)| Op::Delete(a.min(b), a.max(b))),
+        3 => (any::<usize>(), any::<usize>()).prop_map(|(a, b)| Op::Delete(a, b)),
+        2 => (any::<usize>(), any::<usize>(), text_strategy())
+            .prop_map(|(a, b, text)| Op::ReplaceInTransaction(a, b, text)),
+        2 => (any::<usize>(), any::<usize>(), text_strategy(), text_strategy())
+            .prop_map(|(a, b, first, second)| Op::InsertTwiceInTransaction(a, b, first, second)),
         1 => Just(Op::Undo),
         1 => Just(Op::Redo),
     ]
+}
+
+/// Maps an arbitrary index onto a char boundary of `text`, so generated offsets
+/// are always valid without the strategy knowing the buffer contents.
+fn boundary(text: &str, index: usize) -> usize {
+    let boundaries: Vec<usize> = text
+        .char_indices()
+        .map(|(byte, _)| byte)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    boundaries[index % boundaries.len()]
+}
+
+fn ordered_boundaries(text: &str, a: usize, b: usize) -> (usize, usize) {
+    let (a, b) = (boundary(text, a), boundary(text, b));
+    (a.min(b), a.max(b))
 }
 
 proptest! {
     #[test]
     fn buffer_matches_reference_model(ops in prop::collection::vec(op_strategy(), 0..30)) {
         let mut buf = Buffer::new("");
-        let mut model: Vec<char> = Vec::new();
-        let mut model_undo: Vec<Vec<char>> = Vec::new();
-        let mut model_redo: Vec<Vec<char>> = Vec::new();
+        let mut model = String::new();
+        let mut model_undo: Vec<String> = Vec::new();
+        let mut model_redo: Vec<String> = Vec::new();
 
         for op in ops {
             match op {
                 Op::Insert(at, text) => {
-                    let at = at % (model.len() + 1);
+                    let at = boundary(&model, at);
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.insert(CharOffset(at), &text);
-                    model.splice(at..at, text.chars());
+                    buf.insert(ByteOffset(at), &text);
+                    model.insert_str(at, &text);
                 }
                 Op::Delete(start, end) => {
-                    if model.is_empty() {
+                    let (start, end) = ordered_boundaries(&model, start, end);
+                    if start == end {
                         continue;
                     }
-                    let start = start % model.len();
-                    let end = (start + 1 + end % model.len().max(1)).min(model.len());
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.delete(CharOffset(start), CharOffset(end));
-                    model.splice(start..end, std::iter::empty());
+                    buf.delete(ByteOffset(start)..ByteOffset(end));
+                    model.replace_range(start..end, "");
+                }
+                Op::ReplaceInTransaction(start, end, text) => {
+                    let (start, end) = ordered_boundaries(&model, start, end);
+                    model_undo.push(model.clone());
+                    model_redo.clear();
+                    buf.transact(|buf| {
+                        buf.delete(ByteOffset(start)..ByteOffset(end));
+                        buf.insert(ByteOffset(start), &text);
+                    });
+                    model.replace_range(start..end, &text);
+                }
+                Op::InsertTwiceInTransaction(first_at, second_at, first, second) => {
+                    let first_at = boundary(&model, first_at);
+                    model_undo.push(model.clone());
+                    model_redo.clear();
+
+                    // The second position is chosen against the text as it
+                    // stands *after* the first insert, matching what a caller
+                    // composing two edits would actually compute.
+                    let mut expected = model.clone();
+                    expected.insert_str(first_at, &first);
+                    let second_at = boundary(&expected, second_at);
+                    expected.insert_str(second_at, &second);
+
+                    buf.transact(|buf| {
+                        buf.insert(ByteOffset(first_at), &first);
+                        buf.insert(ByteOffset(second_at), &second);
+                    });
+                    model = expected;
                 }
                 Op::Undo => {
-                    let buf_did_undo = buf.undo();
+                    let undone = buf.undo().is_some();
                     match model_undo.pop() {
-                        Some(prev) => {
-                            prop_assert!(buf_did_undo, "model had undo history but Buffer::undo() returned false");
-                            model_redo.push(std::mem::replace(&mut model, prev));
+                        Some(previous) => {
+                            prop_assert!(undone, "model had undo history but Buffer::undo() returned None");
+                            model_redo.push(std::mem::replace(&mut model, previous));
                         }
                         None => {
-                            prop_assert!(!buf_did_undo, "model had no undo history but Buffer::undo() returned true");
+                            prop_assert!(!undone, "model had no undo history but Buffer::undo() returned Some");
                         }
                     }
                 }
                 Op::Redo => {
-                    let buf_did_redo = buf.redo();
+                    let redone = buf.redo().is_some();
                     match model_redo.pop() {
                         Some(next) => {
-                            prop_assert!(buf_did_redo, "model had redo history but Buffer::redo() returned false");
+                            prop_assert!(redone, "model had redo history but Buffer::redo() returned None");
                             model_undo.push(std::mem::replace(&mut model, next));
                         }
                         None => {
-                            prop_assert!(!buf_did_redo, "model had no redo history but Buffer::redo() returned true");
+                            prop_assert!(!redone, "model had no redo history but Buffer::redo() returned Some");
                         }
                     }
                 }
             }
 
-            let expected: String = model.iter().collect();
-            prop_assert_eq!(buf.text(), expected.as_str());
+            prop_assert_eq!(buf.text(), model.as_str());
         }
+    }
+
+    #[test]
+    fn utf16_offsets_round_trip_on_every_char_boundary(
+        parts in prop::collection::vec(text_strategy(), 0..10)
+    ) {
+        let buf = Buffer::new(parts.concat());
+        for (byte, _) in buf.text().char_indices().chain(std::iter::once((buf.text().len(), ' '))) {
+            let offset = ByteOffset(byte);
+            prop_assert_eq!(buf.from_utf16(buf.to_utf16(offset)), offset);
+        }
+        prop_assert_eq!(
+            buf.to_utf16(buf.len()),
+            Utf16Offset(buf.text().encode_utf16().count())
+        );
+    }
+
+    #[test]
+    fn grapheme_steps_walk_the_whole_buffer_and_stay_on_boundaries(
+        parts in prop::collection::vec(text_strategy(), 0..10)
+    ) {
+        let buf = Buffer::new(parts.concat());
+
+        let mut offset = ByteOffset(0);
+        let mut steps = 0;
+        while offset < buf.len() {
+            let next = buf.next_grapheme(offset);
+            prop_assert!(next > offset, "next_grapheme must advance");
+            prop_assert!(buf.text().is_char_boundary(next.0));
+            prop_assert_eq!(buf.previous_grapheme(next), offset);
+            offset = next;
+            steps += 1;
+            prop_assert!(steps <= buf.len().0, "grapheme walk failed to terminate");
+        }
+        prop_assert_eq!(offset, buf.len());
     }
 }
