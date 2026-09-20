@@ -8,8 +8,11 @@ mod editor;
 mod keymap;
 mod shell;
 
+use std::path::PathBuf;
+
 use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
 use inkra_text::Buffer;
+use inkra_vault::{Fs, RealFs};
 
 use editor::EditorView;
 use keymap::key_bindings;
@@ -17,10 +20,43 @@ use shell::AppShell;
 
 actions!(inkra, [Quit]);
 
+/// The note named on the command line, already loaded.
+///
+/// Reading the file before the window opens is deliberate: there is nothing to
+/// show until it succeeds, and a failure should exit rather than flash an
+/// empty window. Once the sidebar exists, loads move to a background task.
+fn initial_text() -> Result<String, String> {
+    // `args_os`, not `args`: the latter panics on an argument that is not valid
+    // UTF-8, and a path on Unix need not be. `RelPath::display_name`
+    // (`crates/vault/src/path.rs`) already treats such a name as renderable
+    // rather than fatal; aborting here would contradict it.
+    let Some(argument) = std::env::args_os().nth(1) else {
+        // No argument: an empty buffer, per the launch-state table in
+        // `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. That
+        // retires the hardcoded demo note this replaced, which was also the
+        // only thing making a bare `cargo run` exercise per-line layout and
+        // the scroll container. Nothing renders in `check.sh`, so that
+        // eyeball pass now needs a tall file passed on the command line.
+        return Ok(String::new());
+    };
+    let path = PathBuf::from(argument);
+    futures::executor::block_on(RealFs.load(&path))
+        .map(|loaded| loaded.text)
+        .map_err(|error| format!("{error}"))
+}
+
 fn main() {
     gpui_platform::application().run(|cx: &mut App| {
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());
+
+        let text = match initial_text() {
+            Ok(text) => text,
+            Err(message) => {
+                eprintln!("{message}");
+                std::process::exit(1);
+            }
+        };
 
         let bounds = Bounds::centered(None, size(px(600.0), px(320.0)), cx);
         let window = cx.open_window(
@@ -29,22 +65,7 @@ fn main() {
                 ..Default::default()
             },
             |_, cx| {
-                // Multi-line, and taller than the window, so that starting the
-                // app exercises per-line layout and the scroll container —
-                // neither of which any test renders.
-                let buffer = cx.new(|_| {
-                    Buffer::new(
-                        "héllo 😀 — type here\n\
-                         Enter splits a line, up and down keep their column.\n\
-                         \n\
-                         An empty line above.\n\
-                         A much longer line, so the ragged right edge has \
-                         something to be ragged about.\n\
-                         short\n\
-                         six\nseven\neight\nnine\nten\neleven\ntwelve\n\
-                         thirteen — past the window, so scrolling has to work",
-                    )
-                });
+                let buffer = cx.new(|_| Buffer::new(text));
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
                 cx.new(|_| AppShell::new(editor))
             },
