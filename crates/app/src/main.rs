@@ -7,8 +7,10 @@
 mod editor;
 mod keymap;
 mod shell;
+mod vault;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
 use inkra_text::Buffer;
@@ -17,15 +19,21 @@ use inkra_vault::{Fs, RealFs};
 use editor::EditorView;
 use keymap::key_bindings;
 use shell::AppShell;
+use vault::NoteStore;
 
 actions!(inkra, [Quit]);
 
-/// The note named on the command line, already loaded.
+/// The note named on the command line, already loaded: where it came from and
+/// what it holds.
+///
+/// The path travels with the text because `⌘S` needs somewhere to write back
+/// to. `None` means no argument was given, which is the empty-buffer launch
+/// state: there is no current note, so saving is a no-op.
 ///
 /// Reading the file before the window opens is deliberate: there is nothing to
 /// show until it succeeds, and a failure should exit rather than flash an
 /// empty window. Once the sidebar exists, loads move to a background task.
-fn initial_text() -> Result<String, String> {
+fn initial_note() -> Result<Option<(PathBuf, String)>, String> {
     // `args_os`, not `args`: the latter panics on an argument that is not valid
     // UTF-8, and a path on Unix need not be. `RelPath::display_name`
     // (`crates/vault/src/path.rs`) already treats such a name as renderable
@@ -36,11 +44,11 @@ fn initial_text() -> Result<String, String> {
         // renders in `check.sh` and a bare `cargo run` now exercises neither
         // per-line layout nor the scroll container, so the eyeball pass needs
         // a tall file named on the command line.
-        return Ok(String::new());
+        return Ok(None);
     };
     let path = PathBuf::from(argument);
     futures::executor::block_on(RealFs.load(&path))
-        .map(|loaded| loaded.text)
+        .map(|loaded| Some((path, loaded.text)))
         .map_err(|error| format!("{error}"))
 }
 
@@ -49,8 +57,8 @@ fn main() {
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());
 
-        let text = match initial_text() {
-            Ok(text) => text,
+        let note = match initial_note() {
+            Ok(note) => note,
             Err(message) => {
                 eprintln!("{message}");
                 std::process::exit(1);
@@ -64,9 +72,22 @@ fn main() {
                 ..Default::default()
             },
             |_, cx| {
+                let (path, text) = match note {
+                    Some((path, text)) => (Some(path), text),
+                    None => (None, String::new()),
+                };
                 let buffer = cx.new(|_| Buffer::new(text));
-                let editor = cx.new(|cx| EditorView::new(buffer, cx));
-                cx.new(|_| AppShell::new(editor))
+                let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
+                let notes = cx.new(|_| {
+                    let mut store = NoteStore::new(Arc::new(RealFs));
+                    // Without a path there is no current note, so `⌘S` has
+                    // nothing to write and says so by doing nothing.
+                    if let Some(path) = path {
+                        store.adopt(buffer, path);
+                    }
+                    store
+                });
+                cx.new(|_| AppShell::new(editor, notes))
             },
         );
 
