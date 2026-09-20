@@ -6,7 +6,11 @@ edition = "2024"
 [dependencies]
 gpui-test-core = { path = "../core" }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
+# font-kit is opt-in since the platform crates were split out of gpui. Without
+# it macOS renders no text at all, and only says so through a log warning.
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+    "font-kit",
+] }
 
 [dev-dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
