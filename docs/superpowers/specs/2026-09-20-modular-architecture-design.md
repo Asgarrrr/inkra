@@ -1,8 +1,10 @@
 # Modular architecture
 
-Status: proposed, awaiting approval. Revised after red/blue team review — every
-claim below that cites a file:line was verified against the vendored gpui
-source, not against memory.
+Status: implemented (2026-09-20). Revised after red/blue team review, then
+again after the review of the implementation — every claim below that cites a
+file:line was verified against the vendored gpui source, not against memory.
+Line references to `main.rs` describe the pre-restructure file, kept because
+they are what the argument was made against.
 
 ## Why now
 
@@ -94,7 +96,11 @@ pub struct EditorState {
     pub marked_range: Option<Range<ByteOffset>>,
 }
 
-pub enum LogicalMovement { Left, Right, LineStart, LineEnd, DocStart, DocEnd }
+pub enum LogicalMovement { Left, Right, DocStart, DocEnd }
+// LineStart/LineEnd were in the sketch and deliberately not shipped: with one
+// line they are indistinguishable from DocStart/DocEnd, and a *logical* line
+// start dies at soft-wrap anyway, where Home needs font metrics. Home and End
+// map to the document ends until the line index exists.
 
 impl EditorState {
     pub fn edit(&mut self, buffer: &mut Buffer, now: Instant, range: Range<ByteOffset>, text: &str);
@@ -107,7 +113,11 @@ impl EditorState {
 }
 ```
 
-The state does not own the `Buffer`; it borrows it per operation. Verified: the
+The state does not own the `Buffer`; it borrows it per operation. This is
+**prepared for** multi-pane, not **justified by** it — see below, where that
+claim is withdrawn. Today a `Buffer` owned outright would behave identically
+for a single view. What the borrowing shape buys is that the change, when
+anchors land, is not a rewrite. Verified: the
 `&mut Buffer`-per-call shape compiles under this workspace's edition 2024
 disjoint closure captures — `self.buffer.update(cx, |buf, _| self.state.edit(buf, …))`
 borrows disjoint fields. The cost is ergonomic, not a borrow-check wall: the
@@ -146,10 +156,13 @@ the caller passes `Buffer::new("…")`; tomorrow it passes one built from a file
 `EditorView` never learns where text comes from. One line, moved during a
 restructure that touches it anyway.
 
-Cost, stated rather than waved away: each `Entity` access is an entity-map
-lookup (`entity_map.rs:108-138`) where today it is a struct field read, on the
-`prepaint` hot path. Not measured. The earlier draft claimed it "costs
-nothing"; that claim is withdrawn.
+Cost, stated rather than waved away: `prepaint` now does two entity accesses
+per frame where it did one, because the buffer moved from a struct field to a
+handle. Each is a `SecondaryMap` access — `slotmap`, so a dense array index,
+not a hash lookup (`entity_map.rs:6`, `:130-139`) — plus an `FxHashSet` insert
+for access tracking. An earlier draft called this "costs nothing" and a review
+pass called it a `HashMap` lookup; both were wrong in opposite directions. It
+is two O(1) array reads per frame.
 
 ### The notification obligation
 
@@ -160,6 +173,16 @@ failure. Therefore:
 
 - All buffer mutation goes through **one** method on `EditorView`, the way
   `EditorView::edit` is the single path today. Not one call site per action.
+- View-local state that owes a repaint but must *not* mark the buffer changed
+  goes through a second gate, `update_state`. Marking the buffer dirty because
+  a caret moved would lie to anything subscribed to real edits — an autosave, a
+  vault reload. `unmark_text` belongs here: dropping the composing region
+  removes its underline.
+- The price of an unforgettable repaint is a spurious one. `GpuiBorrow` notifies
+  on drop whether or not the closure changed anything, so undo on an empty
+  history now schedules a frame it previously skipped. A wasted frame is worth
+  more than a lost one; `EditorState::undo`/`redo` still return whether they did
+  anything, for callers that need to tell.
 - That method uses `Entity::as_mut`, whose `GpuiBorrow` guard calls `notify` on
   `Drop` (`app.rs:2164-2419`), rather than `update` with a hand-written
   `cx.notify()`.

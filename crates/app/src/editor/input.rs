@@ -9,6 +9,7 @@ use std::ops::Range;
 use std::time::Instant;
 
 use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window, point};
+use inkra_editor::EditorState;
 use inkra_text::{Buffer, ByteOffset, Utf16Offset};
 
 use super::EditorView;
@@ -26,15 +27,18 @@ impl EditorView {
 
     /// The range an input-method edit applies to, following GPUI's precedence:
     /// explicit range, else the composing range, else the selection.
+    ///
+    /// Takes the state rather than `&self` so it can be called from inside the
+    /// `edit_buffer` closure, which already holds both under one lease.
     fn target_range(
-        &self,
+        state: &EditorState,
         buffer: &Buffer,
         range_utf16: Option<&Range<usize>>,
     ) -> Range<ByteOffset> {
         range_utf16
             .map(|range| Self::range_from_utf16(buffer, range))
-            .or_else(|| self.state.marked_range())
-            .unwrap_or_else(|| self.state.selection().range())
+            .or_else(|| state.marked_range())
+            .unwrap_or_else(|| state.selection().range())
     }
 }
 
@@ -71,8 +75,10 @@ impl EntityInputHandler for EditorView {
         Some(Self::range_to_utf16(self.buffer.read(cx), &range))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
-        self.state.set_marked_range(None);
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        // Through the gate: dropping the composing region removes its underline,
+        // so it owes a repaint like any other view-state change.
+        self.update_state(cx, |state| state.set_marked_range(None));
     }
 
     fn replace_text_in_range(
@@ -82,9 +88,11 @@ impl EntityInputHandler for EditorView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = self.target_range(self.buffer.read(cx), range_utf16.as_ref());
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| state.edit(buffer, now, range, new_text));
+        self.edit_buffer(cx, |state, buffer| {
+            let range = Self::target_range(state, buffer, range_utf16.as_ref());
+            state.edit(buffer, now, range, new_text);
+        });
     }
 
     fn replace_and_mark_text_in_range(
@@ -95,11 +103,11 @@ impl EntityInputHandler for EditorView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = self.target_range(self.buffer.read(cx), range_utf16.as_ref());
-        let start = range.start;
         let now = Instant::now();
 
         self.edit_buffer(cx, |state, buffer| {
+            let range = Self::target_range(state, buffer, range_utf16.as_ref());
+            let start = range.start;
             state.edit(buffer, now, range, new_text);
 
             state.set_marked_range(

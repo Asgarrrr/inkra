@@ -6,7 +6,9 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-use gpui::{Context, EntityInputHandler, TestAppContext, VisualTestContext, Window, prelude::*};
+use gpui::{
+    Context, Entity, EntityInputHandler, TestAppContext, VisualTestContext, Window, prelude::*,
+};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::EditorView;
@@ -20,26 +22,23 @@ fn with_editor<R>(
     text: &str,
     f: impl FnOnce(&mut EditorView, &mut Window, &mut Context<EditorView>) -> R,
 ) -> R {
-    let text = text.to_string();
-    let window = cx.add_window(move |_, cx| {
-        let buffer = cx.new(|_| Buffer::new(text));
-        EditorView::new(buffer, cx)
-    });
-    window.update(cx, f).unwrap()
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
+    window_on(cx, buffer).update(cx, f).unwrap()
 }
 
-/// A window with the real key bindings installed, for tests that drive
+fn window_on(cx: &mut TestAppContext, buffer: Entity<Buffer>) -> gpui::WindowHandle<EditorView> {
+    cx.add_window(move |_, cx| EditorView::new(buffer, cx))
+}
+
+/// A focused window with the real key bindings installed, for tests that drive
 /// dispatch rather than calling handlers directly.
 fn dispatching(
     cx: &mut TestAppContext,
     text: &str,
 ) -> (gpui::WindowHandle<EditorView>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
-    let text = text.to_string();
-    let window = cx.add_window(move |_, cx| {
-        let buffer = cx.new(|_| Buffer::new(text));
-        EditorView::new(buffer, cx)
-    });
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
+    let window = window_on(cx, buffer);
     window
         .update(cx, |view, window, cx| window.focus(&view.focus_handle, cx))
         .unwrap();
@@ -260,20 +259,26 @@ fn the_delete_and_redo_bindings_dispatch(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The buffer lives in its own entity, so a view only repaints if it observes
-/// it. Dropping that subscription is silent — this is what catches it.
+/// The buffer lives in its own entity, so a view repaints on someone else's
+/// edit only through the subscription `EditorView::new` installs. That
+/// subscription unsubscribes on `Drop`, so losing it is silent.
+///
+/// This observes the *second view*, not the buffer: observing the buffer would
+/// pass even with the subscription deleted, since the edit notifies the buffer
+/// either way. Delete `_buffer_changed` or the `cx.observe` call in
+/// `EditorView::new` and this test must fail.
 #[gpui::test]
-fn a_second_view_is_notified_when_the_first_one_edits(cx: &mut TestAppContext) {
+fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("abc")));
+    let editing = window_on(cx, buffer.clone());
+    let watching = window_on(cx, buffer);
 
-    let shared = buffer.clone();
-    let window = cx.add_window(move |_, cx| EditorView::new(shared, cx));
+    let watching_view: Entity<EditorView> = watching.update(cx, |_, _, cx| cx.entity()).unwrap();
+    let repainted = std::rc::Rc::new(std::cell::Cell::new(false));
+    let flag = repainted.clone();
+    let _subscription = cx.update(|cx| cx.observe(&watching_view, move |_, _| flag.set(true)));
 
-    let observer_woke = std::rc::Rc::new(std::cell::Cell::new(false));
-    let flag = observer_woke.clone();
-    let _subscription = cx.update(|cx| cx.observe(&buffer, move |_, _| flag.set(true)));
-
-    window
+    editing
         .update(cx, |view, window, cx| {
             view.replace_text_in_range(None, "Z", window, cx);
         })
@@ -281,9 +286,14 @@ fn a_second_view_is_notified_when_the_first_one_edits(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert!(
-        observer_woke.get(),
-        "editing through one view did not notify observers of the shared buffer"
+        repainted.get(),
+        "the second view was not notified when the first one edited the shared buffer"
     );
+    watching
+        .update(cx, |view, _, cx| {
+            assert_eq!(view.buffer.read(cx).text(), "abcZ");
+        })
+        .unwrap();
 }
 
 #[gpui::test]
