@@ -30,10 +30,14 @@ release is a snapshot roughly eleven months stale, and it carries the same
 version string as the in-tree source, so the version tells you nothing about
 which one you have.
 
-`Cargo.toml` therefore points at the git rev, not the published crate. That
+`Cargo.toml` therefore builds the in-tree source, not the published crate. That
 buys the widget layer and costs semver: the pin is a commit of a monorepo that
 changes daily, and it drags in Zed's own crates (`gpui_platform`, `gpui_macos`,
 …) plus their forks of `font-kit` and `scap`.
+
+Since 2026-09-20 the pin is a **path dependency** on `vendor/zed-reference`
+rather than a git rev, so the source read and the source compiled are the same
+files. Same commit, same trade-off; see the GPUI rule in `CLAUDE.md`.
 
 ## What the AccessKit bridge actually does
 

@@ -268,7 +268,8 @@ Block-level live preview is **not** covered, and two mechanisms say so:
   there is no per-run line height either.
 - `uniform_list` cannot place rows of differing height. Its entire vertical
   algorithm is `item_height = longest_item_size.height`
-  (`elements/uniform_list.rs:350`) and `item_top = item_height * ix` (`:400`) —
+  (`gpui/src/elements/uniform_list.rs:371`) and `item_top = item_height * ix`
+  (`:497`) —
   one scalar times an index, with no per-item table. A rendered heading or a
   padded code fence puts every subsequent row at the wrong `y`.
 
