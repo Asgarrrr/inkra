@@ -1,5 +1,11 @@
 # Accessibility: where GPUI stands
 
+> **Status: known gap, deliberately deferred (2026-09-20).** Measured and
+> understood; no decision taken. Prototype work continues on GPUI without it.
+> Revisit before committing Inkra to GPUI — not after. Re-run
+> `scripts/ax-text-probe.swift` first, since the answer changes the day gpui's
+> bridge gains text properties.
+
 Checked 2026-09-20 against `gpui` 0.2.2 from crates.io and Zed at
 `526c95d474b2bf800e95aab30222fa0341f08e19`. Re-check both if either moves.
 
