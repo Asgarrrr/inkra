@@ -163,3 +163,4 @@ change that introduces something reusable.
 | Build a styled run | `TextStyle::to_run` / `highlight` | gpui `style.rs:559`, `:510` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
+| The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
