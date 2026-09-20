@@ -1,17 +1,22 @@
 # Accessibility: where GPUI stands
 
-> **Status: known gap, deliberately deferred (2026-09-20).** Measured and
-> understood; no decision taken. Prototype work continues on GPUI without it.
-> Revisit before committing Inkra to GPUI — not after. Re-run
-> `scripts/ax-text-probe.swift` first, since the answer changes the day gpui's
-> bridge gains text properties.
+> **Status: accepted risk (2026-09-20).** GPUI is adopted for Inkra with this
+> gap open and unresolved. The measurements below still hold; what changed is
+> the decision, not the finding. Inkra therefore ships without screen-reader
+> access to document text until someone closes the gap in gpui's AccessKit
+> bridge — a known debt with a known owner-less cost, carried deliberately.
+>
+> Re-run `scripts/ax-text-probe.swift` before acting on anything here: the
+> answer changes the day gpui's bridge gains text properties, and that is the
+> cheapest path to paying the debt off.
 
 Checked 2026-09-20 against `gpui` 0.2.2 from crates.io and Zed at
 `526c95d474b2bf800e95aab30222fa0341f08e19`. Re-check both if either moves.
 
-Screen-reader support is a **requirement** for Inkra, so this is the finding
-that decides whether GPUI can replace Tauri — not multi-line layout, not
-input handling.
+Screen-reader support was stated as a **requirement** for Inkra, which made
+this — not multi-line layout, not input handling — the finding that decided
+the GPUI-versus-Tauri question. The decision went to GPUI anyway. The
+requirement did not disappear with it; it became the debt described above.
 
 ## Two gpui builds, same version number
 

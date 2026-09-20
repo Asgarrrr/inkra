@@ -110,7 +110,9 @@ emoji sequence. Stepping by char splits both.
 Decisions made with reasons, so they are not relitigated from scratch:
 
 - **Rope.** Not yet. `String` plus O(n) offset conversion has no measured
-  problem at prototype sizes. When it does: `ropey` is the leading candidate,
+  problem at the sizes handled so far — a note, not a repository. The trigger
+  is a measured one: a real vault, a real file. When it fires: `ropey` is the
+  leading candidate,
   but it ships no grapheme segmentation, so `previous_grapheme`/`next_grapheme`
   become a manual chunk-walking `GraphemeCursor` (~40-60 lines) — not a
   dependency swap. Both `ropey` and `crop` were outside our 12-month freshness
