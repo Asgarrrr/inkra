@@ -6,21 +6,29 @@
 //! a status bar, multi-pane).
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
-    Window, div, px, rgb,
+    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement,
+    Render, Styled, Window, div, px, rgb,
 };
 
 use crate::editor::EditorView;
+use crate::vault::{NoteStore, Save};
 
 pub(crate) struct AppShell {
     editor: Entity<EditorView>,
+    notes: Entity<NoteStore>,
 }
 
 impl AppShell {
-    /// Takes an already-built editor: `AppShell` composes the window, it
-    /// does not decide what buffer opens in it.
-    pub(crate) fn new(editor: Entity<EditorView>) -> Self {
-        Self { editor }
+    /// Takes an already-built editor and note store: `AppShell` composes the
+    /// window, it does not decide what buffer opens in it.
+    pub(crate) fn new(editor: Entity<EditorView>, notes: Entity<NoteStore>) -> Self {
+        Self { editor, notes }
+    }
+
+    /// Detached rather than held: the shell outlives every save, and a `Task`
+    /// dropped on the spot would cancel the write it just started.
+    fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
+        self.notes.update(cx, NoteStore::save_current).detach();
     }
 }
 
@@ -35,8 +43,15 @@ impl Render for AppShell {
     // literals are the idiomatic gpui color form; clippy's suggested
     // underscore grouping obscures the RGB byte boundaries.
     #[allow(clippy::unreadable_literal)]
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            // Scoped here rather than on `EditorView`: the sidebar will be
+            // focusable, and a binding scoped to the editor would do nothing
+            // while a note row holds focus. The action still reaches this
+            // handler from the editor, because dispatch walks from the focused
+            // node up to the root.
+            .key_context("AppShell")
+            .on_action(cx.listener(Self::save))
             .flex()
             .flex_row()
             .size_full()
@@ -59,10 +74,13 @@ impl Render for AppShell {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use std::sync::Arc;
+
     use gpui::{Focusable, TestAppContext, VisualTestContext, prelude::*};
     use inkra_text::Buffer;
+    use inkra_vault::mem_fs::MemFs;
 
-    use super::{AppShell, EditorView};
+    use super::{AppShell, EditorView, NoteStore};
     use crate::keymap::key_bindings;
 
     /// The one regression this file exists to guard: the existing
@@ -76,7 +94,8 @@ mod tests {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
-        let window = cx.add_window(move |_, _| AppShell::new(editor));
+        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(Arc::new(MemFs::new()))));
+        let window = cx.add_window(move |_, _| AppShell::new(editor, notes));
         window
             .update(cx, |shell, window, cx| {
                 window.focus(&shell.focus_handle(cx), cx);

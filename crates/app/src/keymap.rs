@@ -5,6 +5,7 @@ use crate::editor::actions::{
     Backspace, Delete, DocEnd, DocStart, Down, End, Home, Left, Newline, Redo, Right, SelectAll,
     SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
 };
+use crate::vault::Save;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
     vec![
@@ -29,5 +30,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-z", Undo, None),
         KeyBinding::new("cmd-shift-z", Redo, None),
         KeyBinding::new("cmd-q", Quit, None),
+        // Bound at the AppShell context, not EditorView's: the sidebar is
+        // focusable, and a binding scoped to the editor would do nothing while
+        // a note row has focus.
+        KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]
 }

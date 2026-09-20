@@ -1,6 +1,6 @@
 //! The command-line surface: what the binary does before a window exists.
 //!
-//! Spawns the real binary instead of calling `initial_text` directly. The thing
+//! Spawns the real binary instead of calling `initial_note` directly. The thing
 //! under test is argument handling, and the arguments belong to the process —
 //! an in-process test would have to fake them and would then prove nothing
 //! about `std::env::args_os`. Both cases exit before `open_window`, so this

@@ -598,6 +598,8 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Create / rename / delete | The vault stops being read-only in practice. | Adds a command layer and collision errors |
 | CRLF round-trip | A user reports that saving rewrote their line endings. | Requires storing the file's original ending per note |
 | Atomic save | A crash or a full disk truncates a note. | `atomic_write`, `crates/fs/src/fs.rs:974` |
+| Flush dirty notes on quit | The app grows a close action, or a user loses work to `⌘Q`. | Nothing writes on quit today, so any dirty buffer is discarded silently. The narrow case — `⌘S` then `⌘Q` before the detached write lands — rides on the same fix: `App::shutdown` only awaits handlers registered through `on_app_quit` (`vendor/zed-reference/crates/gpui/src/app.rs:1057-1069`), and nothing registers one. Needs the auto-save-vs-prompt decision first |
+| Serialized writes per note | A vault on a network or FUSE mount, where one write outlives the next `⌘S`. | Two overlapping saves each capture their own `(text, version)` and race; if the older write lands last, the file holds stale text. Self-heals on the next save, since `saved_version` is then behind `version()`. Needs a delay hook in `MemFs` to test deterministically |
 | Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
