@@ -4,3 +4,7 @@
 //! No gpui, no workspace dependency — `Fs::load` returns a `String` and `app`
 //! builds the `Buffer`. See
 //! `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
+
+mod path;
+
+pub use path::RelPath;
