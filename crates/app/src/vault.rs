@@ -92,14 +92,19 @@ impl NoteStore {
             return Task::ready(());
         };
 
-        // Scoped so the `GpuiBorrow` lease ends before anything else touches
-        // the app: a second lease of one entity panics rather than failing to
-        // compile (`gpui/app/entity_map.rs:231`).
-        let (text, version) = {
-            let mut buffer = note.buffer.as_mut(cx);
+        // `update`, never `as_mut`: the latter notifies the buffer's observers
+        // when its `GpuiBorrow` drops (`gpui/src/app.rs:3280-3286`), and
+        // `finalize_transaction` changes no text. Reporting an edit that did
+        // not happen would lie to anything subscribing to real ones — the same
+        // invariant `EditorView::update_state` keeps for caret moves.
+        //
+        // The lease also ends with the closure, so nothing below can take a
+        // second one, which panics rather than failing to compile
+        // (`gpui/app/entity_map.rs:231`).
+        let (text, version) = note.buffer.update(cx, |buffer, _| {
             buffer.finalize_transaction();
             (buffer.text().to_owned(), buffer.version())
-        };
+        });
         if version == note.saved_version {
             return Task::ready(());
         }
@@ -129,9 +134,10 @@ impl NoteStore {
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use gpui::{Focusable, TestAppContext, VisualTestContext, prelude::*};
-    use inkra_text::Buffer;
+    use inkra_text::{Buffer, ByteOffset};
     use inkra_vault::mem_fs::MemFs;
 
     use super::{Fs, NoteStore};
@@ -184,6 +190,55 @@ mod tests {
         assert_eq!(
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
             Some("beforeX")
+        );
+    }
+
+    /// Saving changes no text, so the buffer's observers must not fire for it.
+    /// `editor/mod.rs` states that invariant for caret moves and the reason
+    /// holds here: an autosave or a vault reload subscribing to real edits
+    /// would be told the text moved when only `grouping_blocked` did.
+    ///
+    /// The trap is that `Entity::as_mut` notifies unconditionally when its
+    /// `GpuiBorrow` drops (`gpui/src/app.rs:3280-3286`), while `update` leaves
+    /// the decision to the callee. Swapping the two back reintroduces this.
+    #[gpui::test]
+    fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+
+        let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
+        let notes = cx.update(|cx| {
+            cx.new(|_| {
+                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>);
+                store.adopt(buffer.clone(), PathBuf::from("/vault/a.md"));
+                store
+            })
+        });
+        // Dirty, so the save reaches the write rather than the early return.
+        buffer.update(cx, |buffer, _| buffer.insert(ByteOffset(0), "X"));
+
+        // Subscribed after the edit: the edit itself is a legitimate notify,
+        // and only what the save does is under test.
+        let notified = Arc::new(AtomicUsize::new(0));
+        let _guard = cx.update(|cx| {
+            let notified = Arc::clone(&notified);
+            cx.observe(&buffer, move |_, _| {
+                notified.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+
+        notes.update(cx, NoteStore::save_current).detach();
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("Xbefore"),
+            "the save must still have happened"
+        );
+        assert_eq!(
+            notified.load(Ordering::SeqCst),
+            0,
+            "a save changes no text, so nothing may observe one"
         );
     }
 
