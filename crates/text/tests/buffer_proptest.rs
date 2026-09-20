@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use inkra_text::{Buffer, ByteOffset, Utf16Offset};
 use proptest::prelude::*;
 
@@ -103,6 +105,7 @@ proptest! {
         let mut model = String::new();
         let mut model_undo: Vec<String> = Vec::new();
         let mut model_redo: Vec<String> = Vec::new();
+        let mut observations: Vec<(u64, String)> = Vec::new();
 
         for op in ops {
             match op {
@@ -179,6 +182,50 @@ proptest! {
             }
 
             prop_assert_eq!(buf.text(), model.as_str());
+            observations.push((buf.version(), buf.text().to_owned()));
+        }
+
+        // Equal versions imply equal text. The converse does not hold: undoing
+        // and retyping the same characters reaches the same text at a new
+        // version. This holds for a per-transaction id too — nothing here
+        // calls `transact_at`, so nothing merges; the merge case is
+        // `version_moves_whenever_a_timed_edit_changes_the_text`.
+        for (i, (version_i, text_i)) in observations.iter().enumerate() {
+            for (version_j, text_j) in observations.iter().skip(i + 1) {
+                if version_i == version_j {
+                    prop_assert_eq!(text_i, text_j);
+                }
+            }
+        }
+    }
+
+    /// The version must move on every edit that moves the text, including one
+    /// that merges into the previous transaction. Delays straddle
+    /// `GROUP_INTERVAL` (300 ms), so both the merging and the non-merging
+    /// branch of `close` are exercised. A per-transaction id passes every
+    /// other property in this file and fails here.
+    #[test]
+    fn version_moves_whenever_a_timed_edit_changes_the_text(
+        edits in prop::collection::vec((any::<usize>(), text_strategy(), 0u64..600), 1..20)
+    ) {
+        let mut buf = Buffer::new("");
+        let mut now = Instant::now();
+
+        for (at, text, delay) in edits {
+            let at = boundary(buf.text(), at);
+            let before = buf.version();
+            now += Duration::from_millis(delay);
+
+            // Every generated string is non-empty, so every insert moves the
+            // text and owes a new version.
+            buf.transact_at(now, |buf| buf.insert(ByteOffset(at), &text));
+
+            prop_assert!(
+                buf.version() > before,
+                "version {} did not advance past {}",
+                buf.version(),
+                before
+            );
         }
     }
 
