@@ -1,8 +1,9 @@
 //! The vault tree.
 //!
 //! Rendered as a linear walk over path-ordered entries, never as a per-frame
-//! tree rebuild: `inkra_vault`'s comparator guarantees a directory's
-//! descendants are contiguous, so collapsing one is a forward skip.
+//! tree rebuild: component-wise path ordering puts a directory's descendants in
+//! a contiguous run after it, so collapsing one is a forward skip. `inkra_vault`
+//! upholds that; see the `compare` comment there for which part of it does.
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -374,8 +375,12 @@ mod tests {
     /// calling `activate`, because it is the layout that decides whether a
     /// click can land at all, and no test that calls `activate` directly can
     /// see that. Discriminating for `.w_full()` on the row: without it the row
-    /// shrinks to its label — 8px here, since text measures to nothing in a
-    /// headless test — and the click at x=20 misses.
+    /// shrinks to `pl(8.)` plus its label, and the label is the file *stem*,
+    /// `a`. Headless text is measured, not dropped — `NoopTextSystem` advances
+    /// 0.6 × `font_size` per glyph
+    /// (`vendor/zed-reference/crates/gpui/src/platform.rs:1288-1296`) — so one
+    /// glyph at the default 16px rem ends the row at 17.6px, and the click at
+    /// x=20 misses by 2.4px.
     ///
     /// Not discriminating for `.size_full()` on the list. The sidebar is this
     /// window's root, and a root's `auto` size is stretched to fill

@@ -149,15 +149,25 @@ impl Vault {
 }
 
 /// Orders entries so that a directory is immediately followed by its whole
-/// subtree, which is what lets the sidebar collapse a folder with a forward
-/// skip instead of a tree rebuild.
+/// subtree, and so that directories precede files at each level.
 ///
-/// Neither obvious encoding works. Plain path bytes put `a/b.md` between `a/b`
-/// and `a/b/c.md`, because `.` (0x2E) sorts below `/` (0x2F). Sorting by
-/// `(kind, path)` puts every directory before every file. So: compare
-/// component by component, and at the first difference prefer the one whose
-/// component *at that position* is a directory — which is not the same as the
-/// entry being a directory.
+/// Only the second half is this function's doing. `RelPath` derives `Ord` from
+/// `Arc<Path>`, and `Path: Ord` compares component by component, so an ancestor
+/// is a strict component prefix of its descendants and nothing sorts between
+/// them. Contiguity is a theorem of that ordering. The sidebar's collapse-skip
+/// rests on it, and it survives replacing this function with `a.path.cmp`.
+///
+/// What this adds is sibling order: at the first differing component, prefer
+/// the one that is a directory *at that position*, which is not the same as the
+/// entry being a directory. Without it `b.md` sorts above `c`, and a top-level
+/// file renders between two directories. That is cosmetic, not load-bearing.
+///
+/// Two encodings were rejected and must not come back as simplifications,
+/// because both lose contiguity. Raw path *bytes* put `Projects.md` between
+/// `Projects` and `Projects/plan.md`, since `.` (0x2E) sorts below `/` (0x2F);
+/// the Obsidian folder-note pattern reaches that on the first vault. Sorting by
+/// `(kind, path)` hoists every directory above every file, so an unrelated
+/// top-level directory lands inside another directory's run.
 fn compare(a: &Entry, b: &Entry) -> Ordering {
     let a_components: Vec<_> = a.path.as_path().components().collect();
     let b_components: Vec<_> = b.path.as_path().components().collect();
@@ -296,9 +306,15 @@ mod tests {
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
     }
 
-    /// Byte order puts `a/b.md` between directory `a/b` and its own children,
-    /// because `.` is 0x2E and `/` is 0x2F. The Obsidian folder-note pattern
-    /// hits this immediately.
+    /// Pins component-wise ordering, not `compare`. The assertion holds
+    /// unchanged under a plain `path.cmp`, and no data would change that: a
+    /// folder note is always `<dir>.md`, so the directory is always a byte
+    /// prefix of it and sorts first either way. Dirs-first never gets a chance
+    /// to speak here; that property belongs to the sibling test below.
+    ///
+    /// Kept because byte ordering does break it — `.` (0x2E) below `/` (0x2F)
+    /// wedges `Projects.md` between `Projects` and its children — and the
+    /// Obsidian folder-note pattern reaches that on the first real vault.
     #[test]
     fn a_folder_note_does_not_split_its_folder_from_its_children() {
         let fs = MemFs::new();
@@ -328,14 +344,18 @@ mod tests {
 
     /// The invariant the sidebar's collapse-skip rests on, asserted directly.
     ///
-    /// The tree needs a *second* top-level directory to have any teeth. With
-    /// only one, `(kind, path)` ordering has nothing to hoist above the files
-    /// and so keeps the run contiguous by accident; `zz` is what it wedges
-    /// between `Projects` and `Projects/deep/x.md`. Contiguity alone cannot
-    /// catch a comparator that stays component-wise but stops preferring
-    /// directories — component order makes an ancestor a strict prefix of its
-    /// descendants, so the run holds regardless. That property is the sibling
-    /// test's, not this one's.
+    /// It cannot discriminate `compare` from a plain `path.cmp`, and no data
+    /// would help: under component-wise ordering contiguity is a theorem.
+    /// Anything sorting between a path and its extensions shares the ancestor's
+    /// components, so it *is* a descendant. Read that the reassuring way round:
+    /// simplifying `compare` to `path.cmp` would cost sibling order, which the
+    /// test above pins, and not this.
+    ///
+    /// Kept because it is the only direct guard on the property the sidebar
+    /// walks, and the two rejected encodings do break it — byte order wedges
+    /// `Projects.md` at index 1, `(kind, path)` wedges `zz` at index 2. The
+    /// second top-level directory is what gives the `(kind, path)` case teeth:
+    /// with only one, there is nothing to hoist above the files.
     #[test]
     fn every_directorys_descendants_are_contiguous() {
         let fs = MemFs::new();
