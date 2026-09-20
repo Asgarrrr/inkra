@@ -15,10 +15,14 @@ area, not on every task:
 - [docs/buffer-model.md](./docs/buffer-model.md) — offsets, transactions, undo,
   and the options already rejected with reasons.
 - [docs/gpui-notes.md](./docs/gpui-notes.md) — what GPUI provides, input
-  protocol traps, path to multi-line.
-- [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why the
-  dependency points at a git rev, and the accessibility gap accepted when
-  GPUI was adopted.
+  protocol traps, why `uniform_list` was not adopted.
+- [docs/roadmap.md](./docs/roadmap.md) — the work deliberately left out, the
+  trigger that brings each item back, and what it is estimated to cost. Read it
+  before starting soft wrap, virtualization, CRLF or multi-cursor; each was
+  deferred for a reason recorded there.
+- [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why we build
+  Zed's in-tree gpui rather than the published crate, and the accessibility gap
+  accepted when GPUI was adopted.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
