@@ -603,6 +603,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
+| `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |
 | `SumTree` entries | The same profile shows the `Vec` costing anything. | Internal to `Vault`; no consumer changes |
 
 ## Rejected alternatives

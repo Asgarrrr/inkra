@@ -8,6 +8,7 @@
 pub mod fs;
 mod path;
 mod real_fs;
+mod vault;
 
 #[cfg(feature = "test-support")]
 pub mod mem_fs;
@@ -15,3 +16,4 @@ pub mod mem_fs;
 pub use fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, VaultError};
 pub use path::RelPath;
 pub use real_fs::RealFs;
+pub use vault::{Entry, EntryId, Vault};

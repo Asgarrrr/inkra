@@ -11,18 +11,9 @@ use std::sync::Arc;
 
 use gpui::{Context, Entity, Task, actions, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::Fs;
+use inkra_vault::{EntryId, Fs};
 
 actions!(vault, [Save]);
-
-/// Which open note a buffer belongs to.
-///
-/// A placeholder: the vault model lands in a later slice and replaces this
-/// with an id derived from the file's `(device, inode)` pair, so that a
-/// renamed note keeps its identity. Until then ids are handed out in sequence
-/// by [`NoteStore::adopt`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct EntryId(u32);
 
 /// What is known about one open note's relationship to its file.
 struct OpenNote {
@@ -36,7 +27,6 @@ pub(crate) struct NoteStore {
     fs: Arc<dyn Fs>,
     open: HashMap<EntryId, OpenNote>,
     current: Option<EntryId>,
-    next_id: u32,
 }
 
 impl NoteStore {
@@ -45,7 +35,6 @@ impl NoteStore {
             fs,
             open: HashMap::new(),
             current: None,
-            next_id: 0,
         }
     }
 
@@ -55,18 +44,21 @@ impl NoteStore {
     /// loads a note on click, lands later. `saved_version` starts at
     /// `Buffer::version`'s own starting value, so a freshly loaded note is
     /// clean and `⌘S` no-ops until something is typed.
+    ///
+    /// The note is keyed by `EntryId::DETACHED` because there is no vault
+    /// behind it: the file was named on the command line, not found by a scan.
+    /// No scanned entry can carry that id, so the two cannot collide once the
+    /// sidebar starts opening notes by their real ones.
     pub(crate) fn adopt(&mut self, buffer: Entity<Buffer>, path: PathBuf) {
-        let id = EntryId(self.next_id);
-        self.next_id += 1;
         self.open.insert(
-            id,
+            EntryId::DETACHED,
             OpenNote {
                 buffer,
                 path,
                 saved_version: 0,
             },
         );
-        self.current = Some(id);
+        self.current = Some(EntryId::DETACHED);
     }
 
     /// Writes the current note. A no-op when nothing has changed since the
