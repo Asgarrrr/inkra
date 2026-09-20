@@ -239,18 +239,25 @@ The tree renders as a linear walk over `entries`, so collapsing a directory
 must be a forward skip. That requires: **a directory's descendants occupy a
 contiguous run immediately after it.**
 
-Plain byte ordering breaks this. `.` is `0x2E` and `/` is `0x2F`, so
-`"a/b.md" < "a/b/c.md"`: the sibling file `a/b.md` sorts *between* directory
-`a/b` and its own children. The Obsidian folder-note pattern — `Projects/`
-beside `Projects.md` — hits this immediately.
+Contiguity comes from **component-wise** ordering, which `RelPath` already has:
+it derives `Ord` from `Arc<Path>`, and `Path: Ord` compares component by
+component. An ancestor is then a strict component prefix of its descendants, and
+anything sorting between a path and its extensions shares those components, so
+it *is* a descendant. Contiguity is a theorem of that ordering, not something
+the comparator establishes.
 
-Sorting by `(kind, path)` breaks it differently: that puts *every* directory
+Two encodings would lose it, and neither may return as a simplification. Plain
+**byte** ordering: `.` is `0x2E` and `/` is `0x2F`, so `"a/b.md" < "a/b/c.md"`
+and the sibling file `a/b.md` sorts *between* directory `a/b` and its own
+children. The Obsidian folder-note pattern — `Projects/` beside `Projects.md` —
+hits this immediately. Sorting by `(kind, path)`: that puts *every* directory
 before *every* file, so `a`, `c`, `a/z.md`, `b.md`, `c/y.md`, and the walk
 renders `a/z.md` indented under `c`.
 
-The comparator is therefore **component-wise**, and applies dirs-first at the
-**first differing component**, using that component's kind rather than the
-entry's:
+What the comparator adds on top of `Path: Ord` is **sibling order**: dirs-first
+at the **first differing component**, using that component's kind rather than
+the entry's. Without it `b.md` sorts above `c`. That is cosmetic — the subtree
+stays contiguous either way:
 
 ```
 compare(x, y):
@@ -265,7 +272,10 @@ Prefix tests use `Path::starts_with`, which is component-wise, never
 `Projects.md`.
 
 A `#[test]` asserts the invariant directly: for every directory entry at index
-`i` with `k` descendants, those descendants occupy exactly `i+1 .. i+1+k`.
+`i` with `k` descendants, those descendants occupy exactly `i+1 .. i+1+k`. It
+cannot discriminate the comparator from a plain `path.cmp` — contiguity is a
+theorem of component order — so it is paired with a test that pins sibling
+order, which is the only part `compare` owns.
 
 ### Derived, not stored
 
@@ -639,6 +649,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |
 | `SumTree` entries | The same profile shows the `Vec` costing anything. | Internal to `Vault`; no consumer changes |
 | Case-insensitive `MemFs` | A path-keyed lookup lands — `Vault::by_path` above — where `Notes.md` and `notes.md` must resolve to one entry. | `MemFs` keys a case-sensitive `BTreeMap<PathBuf, _>`, so the identity proptest's `Op::RecaseName` is a plain rename of one inode. That is the right shape for identity, which is keyed by inode and has no case-folding branch, but it does not exercise case folding itself. A path index would be the first code that could diverge |
+| The plan's copy of the comparator rationale | Task 13 sweeps documentation, or someone reads the plan as a live description rather than a record. | `docs/superpowers/plans/2026-09-20-inkra-vault.md:1818`, `:1894` and `:2212` still embed the listings the "Ordering" section above just corrected — contiguity attributed to the comparator, and the byte-order trap stated as if it applied to `Path: Ord`. Left alone because the plan records phases already checked off; nothing is built against it |
 
 ## Rejected alternatives
 
