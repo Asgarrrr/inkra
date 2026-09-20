@@ -3,17 +3,21 @@ use std::time::Instant;
 
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::selection::Selection;
+use crate::selection::{Goal, Selection};
 
 /// Movements resolvable from the text alone.
 ///
-/// Up, down, click-to-offset and wrap-aware line ends are deliberately absent:
-/// they need font metrics, so they are resolved in the layer that has them and
-/// arrive here as [`EditorState::move_to`].
+/// Up, down and click-to-offset are deliberately absent: they need font
+/// metrics, so they are resolved in the layer that has them and arrive here as
+/// [`EditorState::move_to`]. [`LogicalMovement::LineStart`] and `LineEnd` are
+/// *logical* line ends — with soft wrap they would stop matching the visible
+/// ends of a wrapped row, and would move up here too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalMovement {
     Left,
     Right,
+    LineStart,
+    LineEnd,
     DocStart,
     DocEnd,
 }
@@ -83,8 +87,18 @@ impl EditorState {
     ) {
         let start = range.start;
         buffer.transact_at(now, |buffer| buffer.replace(range, text));
-        self.selection.collapse_to(ByteOffset(start.0 + text.len()));
+        // The goal goes with the composing region: an edit moves the text under
+        // the caret, so a column remembered before it no longer describes it.
+        self.selection
+            .collapse_to(ByteOffset(start.0 + text.len()), Goal::None);
         self.marked_range = None;
+    }
+
+    /// Replaces the selection with `text`, or inserts at the caret when there is
+    /// none — what typing a character does, and what pasting will do.
+    pub fn insert(&mut self, buffer: &mut Buffer, now: Instant, text: &str) {
+        let range = self.selection.range();
+        self.edit(buffer, now, range, text);
     }
 
     pub fn backspace(&mut self, buffer: &mut Buffer, now: Instant) {
@@ -122,20 +136,49 @@ impl EditorState {
             LogicalMovement::Right if collapsing => self.selection.end(),
             LogicalMovement::Left => buffer.previous_grapheme(self.cursor()),
             LogicalMovement::Right => buffer.next_grapheme(self.cursor()),
+            // From the head, so Home after a shift-selection lands on the line
+            // the caret is on rather than the one the anchor is on.
+            LogicalMovement::LineStart => self.line(buffer).start,
+            LogicalMovement::LineEnd => self.line(buffer).end,
             LogicalMovement::DocStart => ByteOffset(0),
             LogicalMovement::DocEnd => buffer.len(),
         };
         self.move_to(buffer, target, extend);
     }
 
-    /// The entry point for movements resolved elsewhere — a mouse click, and
-    /// later up and down.
+    /// The logical line the caret is on, excluding its terminating newline.
+    fn line(&self, buffer: &Buffer) -> Range<ByteOffset> {
+        buffer.line_range(buffer.line_for_offset(self.cursor()))
+    }
+
+    /// The entry point for movements resolved elsewhere — a mouse click, or a
+    /// wrap-aware line end once soft wrap exists.
+    ///
+    /// Clears the goal column. Anything that must keep one is a vertical move
+    /// and uses [`EditorState::move_vertically`].
     pub fn move_to(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool) {
+        self.place(buffer, offset, extend, Goal::None);
+    }
+
+    /// Up and down. They need font metrics, so the caller resolves both the
+    /// target offset and the column to remember; this is the one entry point
+    /// that carries a goal through instead of dropping it.
+    pub fn move_vertically(
+        &mut self,
+        buffer: &Buffer,
+        offset: ByteOffset,
+        extend: bool,
+        goal: Goal,
+    ) {
+        self.place(buffer, offset, extend, goal);
+    }
+
+    fn place(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool, goal: Goal) {
         let offset = buffer.clip(offset);
         if extend {
-            self.selection.set_head(offset);
+            self.selection.set_head(offset, goal);
         } else {
-            self.selection.collapse_to(offset);
+            self.selection.collapse_to(offset, goal);
         }
     }
 
@@ -169,7 +212,7 @@ impl EditorState {
     /// Places the cursor on text that just moved under it, and drops a
     /// composing region that no longer describes anything.
     fn settle_on(&mut self, buffer: &Buffer, offset: ByteOffset) {
-        self.selection.collapse_to(buffer.clip(offset));
+        self.selection.collapse_to(buffer.clip(offset), Goal::None);
         self.marked_range = None;
     }
 }
@@ -331,6 +374,88 @@ mod tests {
         state.move_(&buffer, LogicalMovement::DocEnd, false);
         state.move_(&buffer, LogicalMovement::Right, false);
         assert_eq!(state.cursor(), buffer.len());
+    }
+
+    #[test]
+    fn home_and_end_go_to_the_line_ends_not_the_document_ends() {
+        let (buffer, mut state) = editor("aaa\nbbb\nccc");
+        state.move_to(&buffer, at(5), false);
+
+        state.move_(&buffer, LogicalMovement::LineStart, false);
+        assert_eq!(state.cursor(), at(4));
+        state.move_(&buffer, LogicalMovement::LineEnd, false);
+        assert_eq!(state.cursor(), at(7));
+    }
+
+    #[test]
+    fn the_document_ends_are_still_reachable() {
+        let (buffer, mut state) = editor("aaa\nbbb");
+        state.move_(&buffer, LogicalMovement::DocStart, false);
+        assert_eq!(state.cursor(), at(0));
+        state.move_(&buffer, LogicalMovement::DocEnd, false);
+        assert_eq!(state.cursor(), buffer.len());
+    }
+
+    #[test]
+    fn home_on_an_already_home_cursor_stays_put() {
+        let (buffer, mut state) = editor("aaa\nbbb");
+        state.move_to(&buffer, at(4), false);
+        state.move_(&buffer, LogicalMovement::LineStart, false);
+        assert_eq!(state.cursor(), at(4));
+        state.move_(&buffer, LogicalMovement::LineStart, false);
+        assert_eq!(state.cursor(), at(4));
+    }
+
+    #[test]
+    fn both_line_ends_of_an_empty_line_are_the_same_offset() {
+        let (buffer, mut state) = editor("a\n\nb");
+        state.move_to(&buffer, at(2), false);
+        state.move_(&buffer, LogicalMovement::LineEnd, false);
+        assert_eq!(state.cursor(), at(2));
+        state.move_(&buffer, LogicalMovement::LineStart, false);
+        assert_eq!(state.cursor(), at(2));
+    }
+
+    #[test]
+    fn end_then_right_crosses_to_the_next_line() {
+        // The newline separates the lines rather than belonging to either, so
+        // the end of one and the start of the next are one grapheme apart.
+        let (buffer, mut state) = editor("aa\nbb");
+        state.move_to(&buffer, at(0), false);
+        state.move_(&buffer, LogicalMovement::LineEnd, false);
+        assert_eq!(state.cursor(), at(2));
+        state.move_(&buffer, LogicalMovement::Right, false);
+        assert_eq!(state.cursor(), at(3));
+    }
+
+    #[test]
+    fn home_from_a_selection_uses_the_line_the_caret_is_on() {
+        let (buffer, mut state) = editor("aaa\nbbb");
+        state.move_to(&buffer, at(7), false);
+        state.move_(&buffer, LogicalMovement::Left, true);
+        state.move_(&buffer, LogicalMovement::LineStart, false);
+        assert_eq!(state.cursor(), at(4));
+    }
+
+    #[test]
+    fn insert_splits_the_line_at_the_caret() {
+        let (mut buffer, mut state) = editor("abcd");
+        state.move_to(&buffer, at(2), false);
+        state.insert(&mut buffer, Instant::now(), "\n");
+        assert_eq!(buffer.text(), "ab\ncd");
+        assert_eq!(state.cursor(), at(3));
+        assert_eq!(buffer.line_count(), 2);
+    }
+
+    #[test]
+    fn insert_replaces_the_selection_in_one_undo_step() {
+        let (mut buffer, mut state) = editor("abc");
+        state.select_all(&buffer);
+        state.insert(&mut buffer, Instant::now(), "\n");
+        assert_eq!(buffer.text(), "\n");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "abc");
     }
 
     #[test]

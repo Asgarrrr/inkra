@@ -19,14 +19,29 @@ fn main() {
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());
 
-        let bounds = Bounds::centered(None, size(px(600.0), px(200.0)), cx);
+        let bounds = Bounds::centered(None, size(px(600.0), px(320.0)), cx);
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
             |_, cx| {
-                let buffer = cx.new(|_| Buffer::new("héllo 😀 — type here"));
+                // Multi-line, and taller than the window, so that starting the
+                // app exercises per-line layout and the scroll container —
+                // neither of which any test renders.
+                let buffer = cx.new(|_| {
+                    Buffer::new(
+                        "héllo 😀 — type here\n\
+                         Enter splits a line, up and down keep their column.\n\
+                         \n\
+                         An empty line above.\n\
+                         A much longer line, so the ragged right edge has \
+                         something to be ragged about.\n\
+                         short\n\
+                         six\nseven\neight\nnine\nten\neleven\ntwelve\n\
+                         thirteen — past the window, so scrolling has to work",
+                    )
+                });
                 cx.new(|cx| EditorView::new(buffer, cx))
             },
         );

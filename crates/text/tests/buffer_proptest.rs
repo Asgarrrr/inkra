@@ -24,6 +24,12 @@ fn text_strategy() -> impl Strategy<Value = String> {
         Just("café".to_string()),
         Just("e\u{301}".to_string()),
         Just("👨\u{200d}👩\u{200d}👧".to_string()),
+        // Newlines belong in the shared strategy, not a line-index-only one:
+        // undo, grapheme stepping and UTF-16 conversion all have to survive
+        // them too, and until multi-line they were never generated.
+        Just("\n".to_string()),
+        Just("\n\n".to_string()),
+        Just("a\nb".to_string()),
     ]
 }
 
@@ -54,6 +60,40 @@ fn boundary(text: &str, index: usize) -> usize {
 fn ordered_boundaries(text: &str, a: usize, b: usize) -> (usize, usize) {
     let (a, b) = (boundary(text, a), boundary(text, b));
     (a.min(b), a.max(b))
+}
+
+/// Every invariant the line index owes its callers, checked against `text()`
+/// rather than against a second implementation of the same scan.
+fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
+    let count = buf.line_count();
+    prop_assert_eq!(buf.lines().count(), count);
+
+    let mut expected_start = ByteOffset(0);
+    for line in 0..count {
+        let range = buf.line_range(line);
+
+        prop_assert_eq!(range.start, expected_start, "line {} starts late", line);
+        prop_assert!(range.start <= range.end, "line {} is inverted", line);
+        prop_assert!(
+            !buf.text()[range.start.0..range.end.0].contains('\n'),
+            "line {} holds a newline",
+            line
+        );
+        // Every offset on the line resolves back to it, both edges included.
+        prop_assert_eq!(buf.line_for_offset(range.start), line);
+        prop_assert_eq!(buf.line_for_offset(range.end), line);
+
+        // The next line starts one byte past this one's newline.
+        expected_start = ByteOffset(range.end.0 + 1);
+    }
+    prop_assert_eq!(buf.line_range(count - 1).end, buf.len());
+
+    let (offsets, texts): (Vec<_>, Vec<_>) = buf.lines().unzip();
+    prop_assert_eq!(texts.join("\n"), buf.text());
+    for (line, start) in offsets.into_iter().enumerate() {
+        prop_assert_eq!(start, buf.line_range(line).start);
+    }
+    Ok(())
 }
 
 proptest! {
@@ -155,6 +195,28 @@ proptest! {
             buf.to_utf16(buf.len()),
             Utf16Offset(buf.text().encode_utf16().count())
         );
+    }
+
+    /// The line index is derived from the text on every call, so the thing to
+    /// prove is that its four views agree with each other and with `text()` —
+    /// including after edits, which is where a cached index would drift.
+    #[test]
+    fn the_line_index_stays_consistent_across_edits(
+        parts in prop::collection::vec(text_strategy(), 0..8),
+        edits in prop::collection::vec((any::<usize>(), text_strategy()), 0..8),
+    ) {
+        let mut buf = Buffer::new(parts.concat());
+        check_line_index(&buf)?;
+
+        for (at, text) in edits {
+            let at = boundary(buf.text(), at);
+            buf.insert(ByteOffset(at), &text);
+            check_line_index(&buf)?;
+        }
+
+        while buf.undo().is_some() {
+            check_line_index(&buf)?;
+        }
     }
 
     #[test]

@@ -8,5 +8,5 @@
 mod selection;
 mod state;
 
-pub use selection::Selection;
+pub use selection::{Goal, Selection};
 pub use state::{EditorState, LogicalMovement};
