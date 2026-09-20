@@ -398,7 +398,11 @@ moment the editor switched away from it. There is no close action in this
 slice, so buffers are held for the session; 200 markdown notes is not a memory
 concern, and the trigger for eviction is recorded under Deferred.
 
-It also holds `saved_version` and `saved_mtime` per open note.
+It also holds `saved_version` per open note, and that alone: `saved_mtime` was
+drafted here and deliberately not written. Nothing in this slice reads an
+mtime, and a field that is only ever written fails `-D warnings` — the same
+reason `Vault::by_path` is listed and not built. It returns with conflict
+detection, which is what needs it; see Deferred.
 
 The map deduplicates: opening an already-open note returns the same entity.
 That is the shape "two panes on one note" needs later, which CLAUDE.md
@@ -411,6 +415,22 @@ view holding both it and the editor.
 
 `open_note(EntryId) -> Task<Result<Entity<Buffer>>>` runs the load through
 `cx.background_spawn` and resolves on the foreground.
+
+It does **not** record which note is current. That is `set_current`, the single
+writer, called by the clicking view once the buffer is actually bound to the
+editor. The two are written on different schedules otherwise — the load's and
+the view's — and `save_current` reads `current`: a `current` naming a note the
+editor does not hold makes `⌘S` find a clean note and return early, so the
+dirty text on screen is never written and nothing reports it. Same category as
+critical defect 1.
+
+The clicking view holds its activation `Task` rather than detaching it, so a
+new click drops the previous one and cancels it
+(`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`). Without
+that, a load abandoned mid-flight still lands and rebinds the editor behind a
+later, deliberate click. This is the opposite of `AppShell::save`, which
+detaches deliberately: a save has no successor, and dropping its task would
+cancel the write it just started.
 
 ### `EditorView::open_buffer` — a third gate
 
@@ -606,12 +626,12 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Item | Trigger | Notes |
 |---|---|---|
 | File watcher + diff reload | A second process edits a note — a sync client, another editor. | Needs anchored selections; `apply_diff`, `crates/language/src/buffer.rs:2459` |
-| Conflict detection | Lands with the watcher. | `has_conflict`, `crates/language/src/buffer.rs:2531` |
+| Conflict detection | Lands with the watcher. | Needs `saved_mtime` per open note, which `NoteStore` deliberately does not carry today — `Fs::load` and `Fs::save` both already return the `Mtime` to seed it from. `has_conflict`, `crates/language/src/buffer.rs:2531` |
 | Create / rename / delete | The vault stops being read-only in practice. | Adds a command layer and collision errors |
 | CRLF round-trip | A user reports that saving rewrote their line endings. | Requires storing the file's original ending per note |
 | Atomic save | A crash or a full disk truncates a note. | `atomic_write`, `crates/fs/src/fs.rs:974` |
 | Flush dirty notes on quit | The app grows a close action, or a user loses work to `⌘Q`. | Nothing writes on quit today, so any dirty buffer is discarded silently. The narrow case — `⌘S` then `⌘Q` before the detached write lands — rides on the same fix: `App::shutdown` only awaits handlers registered through `on_app_quit` (`vendor/zed-reference/crates/gpui/src/app.rs:1057-1069`), and nothing registers one. Needs the auto-save-vs-prompt decision first |
-| Serialized writes per note | A vault on a network or FUSE mount, where one write outlives the next `⌘S`. | Two overlapping saves each capture their own `(text, version)` and race; if the older write lands last, the file holds stale text. Self-heals on the next save, since `saved_version` is then behind `version()`. Needs a delay hook in `MemFs` to test deterministically |
+| Serialized writes per note | A vault on a network or FUSE mount, where one write outlives the next `⌘S`. | Two overlapping saves each capture their own `(text, version)` and race; if the older write lands last, the file holds stale text. Self-heals on the next save, since `saved_version` is then behind `version()`. Needs a delay hook in `MemFs` to test deterministically. `MemFs::block_load` is that hook for loads; the save path needs the same gate |
 | Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first |
 | Focusable sidebar | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` still delegates to the editor unconditionally. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |

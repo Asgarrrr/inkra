@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use gpui::{
     Context, Div, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    Styled, Window, div, px, rgb, uniform_list,
+    Styled, Task, Window, div, px, rgb, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
 
@@ -25,6 +25,15 @@ pub(crate) struct Sidebar {
     expanded: HashSet<EntryId>,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
+    /// The click currently being served. Held, never detached: a new click
+    /// replaces it, and dropping a `Task` cancels it
+    /// (`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`), so a
+    /// superseded load can never rebind the editor behind a later click.
+    ///
+    /// The opposite of `AppShell::save`, which detaches deliberately — see the
+    /// comment there. A save has no successor to be superseded by, and
+    /// dropping its task would cancel the write it just started.
+    activation: Option<Task<()>>,
 }
 
 #[derive(Clone)]
@@ -46,6 +55,7 @@ impl Sidebar {
             editor,
             expanded: HashSet::new(),
             visible: Vec::new(),
+            activation: None,
         };
         sidebar.rebuild(cx);
         sidebar
@@ -91,20 +101,27 @@ impl Sidebar {
 
     /// A directory toggles; a note loads and is handed to
     /// `EditorView::open_buffer`.
+    ///
+    /// Binding the buffer and recording the note as current happen together,
+    /// with no `await` between them, so nothing can observe one without the
+    /// other. Assigning the task drops whatever click it supersedes, which
+    /// cancels that load before it can rebind anything.
     fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
         if row.kind == Kind::Dir {
             self.toggle(row.id, cx);
             return;
         }
         let editor = self.editor.clone();
+        let notes = self.notes.clone();
+        let id = row.id;
         let opened = self
             .notes
             .update(cx, |notes, cx| notes.open_note(row.id, cx));
-        cx.spawn(async move |_, cx| {
+        self.activation = Some(cx.spawn(async move |_, cx| {
             let Some(buffer) = opened.await else { return };
             editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx));
-        })
-        .detach();
+            notes.update(cx, |notes, cx| notes.set_current(id, cx));
+        }));
     }
 
     /// The rows `uniform_list` asked for.
@@ -223,9 +240,19 @@ mod tests {
 
     /// The same, with a sidebar that is never drawn.
     fn open(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, Entity<EditorView>) {
-        let (notes, editor) = parts(cx, fs);
-        let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes, editor.clone(), cx)));
+        let (sidebar, _notes, editor) = open_with_store(cx, fs);
         (sidebar, editor)
+    }
+
+    /// The same again, keeping the store: the tests about which note is
+    /// *current* have to read it.
+    fn open_with_store(
+        cx: &mut TestAppContext,
+        fs: Arc<dyn Fs>,
+    ) -> (Entity<Sidebar>, Entity<NoteStore>, Entity<EditorView>) {
+        let (notes, editor) = parts(cx, fs);
+        let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes.clone(), editor.clone(), cx)));
+        (sidebar, notes, editor)
     }
 
     /// Every visible row, top to bottom, with a trailing `/` on directories.
@@ -369,6 +396,162 @@ mod tests {
         // The load runs on a background task.
         visual.run_until_parked();
 
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.buffer().read(cx).text(), "alpha");
+        });
+    }
+
+    /// A vault of two notes, a sidebar over it, and both rows resolved by name.
+    fn two_notes(
+        cx: &mut TestAppContext,
+        fs: &Arc<MemFs>,
+    ) -> (
+        Entity<Sidebar>,
+        Entity<NoteStore>,
+        Entity<EditorView>,
+        Row,
+        Row,
+    ) {
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (sidebar, notes, editor) = open_with_store(cx, Arc::clone(fs) as Arc<dyn Fs>);
+        let a = row(&sidebar, cx, "a");
+        let b = row(&sidebar, cx, "b");
+        (sidebar, notes, editor, a, b)
+    }
+
+    /// An abandoned load must not land on top of a later, deliberate click.
+    ///
+    /// Click `b`, change your mind while it is still loading, click `a` —
+    /// already open, so it resolves without touching the filesystem at all.
+    /// When `b`'s load finally lands, nothing may rebind the editor to it and
+    /// nothing may record it as current. `save_current` reads `current`, so a
+    /// `current` the editor disagrees with does not save the wrong file: it
+    /// saves *nothing*, because the note it picks is clean and the version
+    /// comparison returns early. The note on screen stays dirty with no error.
+    ///
+    /// Deterministic under the randomizing test scheduler
+    /// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:641-643`):
+    /// only one load is ever in flight, and the gate decides when it lands.
+    #[gpui::test]
+    fn an_abandoned_load_does_not_supersede_a_later_click(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
+
+        // Opened up front so the click below takes the already-open path.
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
+        cx.run_until_parked();
+
+        let gate = fs.block_load("/vault/b.md");
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
+        cx.run_until_parked();
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
+        cx.run_until_parked();
+
+        gate.release();
+        cx.run_until_parked();
+
+        editor.update(cx, |editor, cx| {
+            assert_eq!(
+                editor.buffer().read(cx).text(),
+                "alpha",
+                "the last note clicked is the note the editor ends on"
+            );
+        });
+        notes.update(cx, |notes, _| {
+            assert_eq!(
+                notes.current(),
+                Some(a.id),
+                "`save_current` reads this; pointing it at the abandoned note \
+                 makes `cmd-s` a silent no-op"
+            );
+        });
+    }
+
+    /// Two loads clicked in a row leave `current` naming the note the editor
+    /// holds.
+    ///
+    /// Both notes are unopened, so both take the slow path, and both gates are
+    /// held while the second click supersedes the first. Against the unfixed
+    /// code both loads land and whichever lands last wins, which is why the
+    /// gates release in the opposite order to the clicks. Against the fixed
+    /// code there is no such interleaving to resolve: clicking `b` drops
+    /// `activation`, which tears `a`'s whole load chain down — continuation,
+    /// `open_note` task, and the `gate_a` wait inside it — during the
+    /// `run_until_parked` below. `gate_a.release()` then has nothing left to
+    /// release, and the test would pass with the two releases in either order.
+    #[gpui::test]
+    fn the_current_note_is_the_one_in_the_editor(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
+
+        let gate_a = fs.block_load("/vault/a.md");
+        let gate_b = fs.block_load("/vault/b.md");
+
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
+        cx.run_until_parked();
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
+        cx.run_until_parked();
+
+        gate_b.release();
+        cx.run_until_parked();
+        gate_a.release();
+        cx.run_until_parked();
+
+        let current = notes
+            .update(cx, |notes, _| notes.current())
+            .expect("a note is current");
+        assert_eq!(current, b.id, "the last click wins");
+
+        let in_store = notes.update(cx, |notes, _| {
+            notes.buffer_for(current).map(Entity::entity_id)
+        });
+        let in_editor = editor.update(cx, |editor, _| editor.buffer().entity_id());
+        assert_eq!(
+            in_store,
+            Some(in_editor),
+            "the current note and the editor's buffer are the same entity"
+        );
+    }
+
+    /// Clicking an already-open note must not record it as current before the
+    /// editor holds it.
+    ///
+    /// Needs no second note in flight and no cancellation: the click resolves
+    /// without a load, but the editor is still rebound one turn later, from the
+    /// spawned task. `⌘S` in that window reads `current`, finds the freshly
+    /// clicked note clean, and returns early — so the dirty note still on
+    /// screen is never written and nothing says so.
+    ///
+    /// This is what makes `set_current` a *single writer placed after the
+    /// bind*, rather than something `open_note` may do on its own schedule.
+    #[gpui::test]
+    fn a_click_records_the_note_only_once_the_editor_holds_it(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
+
+        // Both notes get opened, so the third click takes the already-open
+        // path — the one that resolves with no load at all.
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
+        cx.run_until_parked();
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
+        cx.run_until_parked();
+
+        // Deliberately not parked: this is the turn between the click and the
+        // rebind, and `⌘S` can land in it.
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
+
+        assert_eq!(
+            notes.update(cx, |notes, _| notes.current()),
+            Some(b.id),
+            "the editor still holds `b`, so `b` is still the note a save writes"
+        );
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.buffer().read(cx).text(), "beta");
+        });
+
+        cx.run_until_parked();
+        assert_eq!(notes.update(cx, |notes, _| notes.current()), Some(a.id));
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.buffer().read(cx).text(), "alpha");
         });
