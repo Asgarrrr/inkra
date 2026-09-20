@@ -555,7 +555,10 @@ impl Render for EditorView {
     #[allow(clippy::unreadable_literal)]
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id("editor")
             .key_context("EditorView")
+            .role(gpui::Role::MultilineTextInput)
+            .aria_label("Document")
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))

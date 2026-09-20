@@ -62,16 +62,44 @@ Two things that bound the problem:
   stability contract, as a prerequisite for shipping Inkra. Tauri gives the
   browser's accessibility tree for free.
 
-## Not yet verified
+## Confirmed at runtime
 
-This is a source-level conclusion. It has **not** been confirmed with
-VoiceOver. To close that gap:
+Measured, not inferred. `scripts/ax-text-probe.swift` queries the running
+editor's real macOS accessibility tree through `AXUIElement`:
 
 ```
-cd ~/.cargo/git/checkouts/zed-*/526c95d
-cargo run -p gpui --example a11y
+found text node after 2 poll(s)
+role: AXTextArea
+title: Document
+
+--- what a screen reader would read ---
+AXValue: ABSENT
+AXNumberOfCharacters: ABSENT
+AXSelectedText: ABSENT
+AXSelectedTextRange: ABSENT
+AXVisibleCharacterRange: ABSENT
+AXInsertionPointLineNumber: ABSENT
+
+AXFocusedUIElement role: AXWindow
 ```
 
-Turn VoiceOver on (⌘F5) and check what it announces. The example covers
-buttons, a switch and a list — if text navigation is genuinely missing, no
-amount of correct widget markup will expose document content.
+The markup half works. `.id(…).role(Role::MultilineTextInput).aria_label(…)`
+produces a correctly-roled, correctly-labelled `AXTextArea` covering the
+editor's bounds — so AccessKit is wired up and reaching macOS.
+
+Every text attribute on it is absent. VoiceOver would find "Document, text
+area" and be unable to read one character of it, report the caret, or report
+the selection. Keyboard focus also resolves to the window rather than the text
+area.
+
+This matches the bridge exactly: it sets label, focus, focusable, children and
+window title, and nothing else.
+
+Two traps when re-running the probe:
+
+- The tree is built **asynchronously**. Reading it immediately after launch
+  returns a tree with no `AXTextArea` at all — a false negative. The probe
+  polls for up to 20 s rather than sleeping a fixed amount.
+- Without `.role(…)` the editor appears as a bare `AXGroup`. The text
+  attributes that show up on a naive tree walk belong to the title bar's
+  10×16 px `AXStaticText`, not to the document.
