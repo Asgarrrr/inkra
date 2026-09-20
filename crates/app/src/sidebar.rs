@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use gpui::{
-    Context, Div, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    App, Context, Div, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
     Styled, Task, Window, div, px, rgb, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
@@ -125,6 +125,21 @@ impl Sidebar {
         }));
     }
 
+    /// What one row says: its name, plus a dot while the note has edits the
+    /// file does not.
+    ///
+    /// Split out of `render_rows` only so a test can read it. `render_rows`
+    /// returns `Div`s, and nothing gets the text back out of one, so the marker
+    /// was otherwise assertable only by eye.
+    fn row_label(&self, row: &Row, cx: &App) -> String {
+        let dot = if self.notes.read(cx).is_modified(row.id, cx) {
+            " •"
+        } else {
+            ""
+        };
+        format!("{}{dot}", row.name)
+    }
+
     /// The rows `uniform_list` asked for.
     ///
     /// Reached through `cx.processor`, which holds the sidebar entity and
@@ -147,18 +162,13 @@ impl Sidebar {
                 // by `window.rs:3421-3433`), and `App::notify` dirties any
                 // window that read the notifying entity
                 // (`app.rs:2789-2823`). Both the store and the row's buffer are
-                // read right here, so an edit or a save redraws this window;
-                // `.child(entity)` is uncached (`view.rs:100-104`), so the
-                // sidebar re-renders with it and the dot follows. A `cx.observe`
-                // would add nothing. Wrapping the sidebar in `Entity::cached`
-                // would break it — that is the only way to reach the
-                // `dirty_views` check at `view.rs:483-498`.
-                let dot = if self.notes.read(cx).is_modified(row.id, cx) {
-                    " •"
-                } else {
-                    ""
-                };
-                let label = format!("{}{dot}", row.name);
+                // read by the call below, inside this draw, so an edit or a save
+                // redraws this window; `.child(entity)` is uncached
+                // (`view.rs:100-104`), so the sidebar re-renders with it and the
+                // dot follows. A `cx.observe` would add nothing. Wrapping the
+                // sidebar in `Entity::cached` would break it — that is the only
+                // way to reach the `dirty_views` check at `view.rs:483-498`.
+                let label = self.row_label(&row, cx);
                 // Saturating rather than cast: `Vault::scan` stops at depth 64,
                 // so nothing here is lost, and a lossy `as f32` is denied.
                 let depth = f32::from(u8::try_from(row.depth).unwrap_or(u8::MAX));
@@ -214,9 +224,10 @@ impl Render for Sidebar {
 mod tests {
     use std::path::Path;
     use std::sync::Arc;
+    use std::time::Instant;
 
     use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, point, prelude::*, px};
-    use inkra_text::Buffer;
+    use inkra_text::{Buffer, ByteOffset};
     use inkra_vault::mem_fs::MemFs;
     use inkra_vault::{Fs, Vault};
 
@@ -270,6 +281,15 @@ mod tests {
             Kind::Dir => format!("{}/", row.name),
             Kind::Note => row.name.clone(),
         }
+    }
+
+    /// What each visible row actually says, dot included — `labels` above
+    /// rebuilds the name itself and so cannot see the marker.
+    fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
+        sidebar.update(cx, |sidebar, cx| {
+            let rows = sidebar.visible.clone();
+            rows.iter().map(|row| sidebar.row_label(row, cx)).collect()
+        })
     }
 
     fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row {
@@ -560,5 +580,43 @@ mod tests {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.buffer().read(cx).text(), "alpha");
         });
+    }
+
+    /// The dot is the only sign a note is unsaved, and `NoteStore::is_modified`
+    /// has no caller but the row label — so until this, nothing said the marker
+    /// appears on an edit or clears on a save.
+    ///
+    /// Asserts on the label rather than on `is_modified`: the predicate passes
+    /// with the dot deleted from the row, which is the half that is actually
+    /// only ever checked by eye. Only the second note is edited, so the test
+    /// also fails a marker painted on every row.
+    #[gpui::test]
+    fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (sidebar, notes, editor, _a, b) = two_notes(cx, &fs);
+
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            row_labels(&sidebar, cx),
+            ["a", "b"],
+            "opening a note changes nothing about it"
+        );
+
+        let buffer = editor.update(cx, |editor, _| editor.buffer().clone());
+        buffer.update(cx, |buffer, _| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        });
+
+        assert_eq!(row_labels(&sidebar, cx), ["a", "b •"]);
+
+        notes.update(cx, NoteStore::save_current).detach();
+        cx.run_until_parked();
+
+        assert_eq!(
+            row_labels(&sidebar, cx),
+            ["a", "b"],
+            "the write caught the file up, so the note is no longer modified"
+        );
     }
 }

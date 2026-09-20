@@ -41,6 +41,11 @@ pub struct DirEntry {
     pub identity: FileIdentity,
 }
 
+/// Only `text` has a caller in `app` today. The other two come from the same
+/// `stat` and are what conflict detection seeds `saved_mtime` from — the
+/// Deferred table in `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`
+/// names `Fs::load` as that source. `identity` is also the only assertion that
+/// `RealFs` reports a real inode (`crates/vault/tests/real_fs.rs`).
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub text: String,
@@ -54,8 +59,6 @@ pub enum VaultError {
     Io { path: PathBuf, source: io::Error },
     #[error("{path}: not valid UTF-8")]
     NotUtf8 { path: PathBuf },
-    #[error("{path}: outside the vault root")]
-    OutsideRoot { path: PathBuf },
 }
 
 pub type Result<T> = std::result::Result<T, VaultError>;

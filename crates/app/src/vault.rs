@@ -246,6 +246,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
     use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, prelude::*};
     use inkra_text::{Buffer, ByteOffset};
@@ -315,7 +316,11 @@ mod tests {
         cx.run_until_parked();
         store.update(cx, |store, cx| {
             let buffer = store.buffer_for(a).cloned().expect("a is open");
-            buffer.update(cx, |buffer, _| buffer.insert(ByteOffset(0), "UNSAVED "));
+            buffer.update(cx, |buffer, _| {
+                buffer.transact_at(Instant::now(), |buffer| {
+                    buffer.insert(ByteOffset(0), "UNSAVED ");
+                });
+            });
         });
 
         store.update(cx, |store, cx| store.open_note(b, cx).detach());
@@ -403,7 +408,9 @@ mod tests {
             })
         });
         // Dirty, so the save reaches the write rather than the early return.
-        buffer.update(cx, |buffer, _| buffer.insert(ByteOffset(0), "X"));
+        buffer.update(cx, |buffer, _| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        });
 
         // Subscribed after the edit: the edit itself is a legitimate notify,
         // and only what the save does is under test.

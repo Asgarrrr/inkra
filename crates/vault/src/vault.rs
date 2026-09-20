@@ -27,6 +27,11 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
+    /// Nothing reads this yet. Kept because conflict detection is the side of
+    /// the comparison the scan owns: `saved_mtime` seeds from `Fs::load`, and
+    /// what it is compared *against* is the file's mtime as of the last walk.
+    /// See the Conflict detection row under Deferred in
+    /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
     pub mtime: Mtime,
 }
 
@@ -38,11 +43,6 @@ pub struct Vault {
 }
 
 impl Vault {
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     /// Never returns the `Vec`. Swapping the container for a `SumTree` the day
     /// a profile asks for one must stay internal.
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
