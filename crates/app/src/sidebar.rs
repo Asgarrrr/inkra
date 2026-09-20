@@ -278,6 +278,69 @@ mod tests {
         assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
     }
 
+    /// Expanding a folder reveals its children, not its grandchildren.
+    ///
+    /// Each nested folder keeps its own expansion state, so opening `Projects`
+    /// must not open `Projects/deep` with it. Found by eye in the render pass:
+    /// the one-level test above cannot see this.
+    #[gpui::test]
+    fn expanding_a_folder_leaves_its_nested_folders_collapsed(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/Projects/deep/x.md", "x");
+        fs.insert_file("/vault/Projects/plan.md", "p");
+
+        let (sidebar, _editor) = open(cx, fs as Arc<dyn Fs>);
+        assert_eq!(labels(&sidebar, cx), ["Projects/"]);
+
+        let projects = row(&sidebar, cx, "Projects/");
+        sidebar.update(cx, |sidebar, cx| sidebar.activate(&projects, cx));
+
+        assert_eq!(
+            labels(&sidebar, cx),
+            ["Projects/", "deep/", "plan"],
+            "`x` lives inside `deep`, which nobody expanded"
+        );
+    }
+
+    /// One click activates one row.
+    ///
+    /// `uniform_list` lays every item out as its own root
+    /// (`gpui/elements/uniform_list.rs:508-510`), so nothing in the type system
+    /// stops each row's `on_mouse_down` from seeing the same press. With four
+    /// rows, a press on the first must toggle the folder and leave the notes
+    /// shut — a list that dispatched to all of them would end up showing the
+    /// last note instead.
+    #[gpui::test]
+    fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/Projects/plan.md", "plan");
+        fs.insert_file("/vault/Projects.md", "folder note");
+        fs.insert_file("/vault/a.md", "alpha");
+
+        let (notes, editor) = parts(cx, fs as Arc<dyn Fs>);
+        let for_window = editor.clone();
+        let window = cx.add_window(move |_, cx| Sidebar::new(notes, for_window, cx));
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+
+        // The first row is the folder `Projects`, at rows of `h(px(22.))`.
+        visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
+        visual.run_until_parked();
+
+        editor.update(cx, |editor, cx| {
+            assert_eq!(
+                editor.buffer().read(cx).text(),
+                "",
+                "pressing a folder must open no note at all"
+            );
+        });
+        let sidebar = window.root(cx).expect("root view");
+        assert_eq!(
+            labels(&sidebar, cx),
+            ["Projects/", "plan", "Projects", "a"],
+            "exactly one row responded"
+        );
+    }
+
     /// Clicking a note is a load followed by `EditorView::open_buffer`.
     ///
     /// Driven through a real mouse event on a drawn window rather than by
