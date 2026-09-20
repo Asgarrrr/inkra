@@ -1,5 +1,6 @@
 //! The vault model: what notes exist, and what each one is.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -140,10 +141,44 @@ impl Vault {
             }
         }
 
+        found.sort_by(compare);
+
         self.by_identity = next_by_identity;
         self.entries = found;
         Ok(())
     }
+}
+
+/// Orders entries so that a directory is immediately followed by its whole
+/// subtree, which is what lets the sidebar collapse a folder with a forward
+/// skip instead of a tree rebuild.
+///
+/// Neither obvious encoding works. Plain path bytes put `a/b.md` between `a/b`
+/// and `a/b/c.md`, because `.` (0x2E) sorts below `/` (0x2F). Sorting by
+/// `(kind, path)` puts every directory before every file. So: compare
+/// component by component, and at the first difference prefer the one whose
+/// component *at that position* is a directory — which is not the same as the
+/// entry being a directory.
+fn compare(a: &Entry, b: &Entry) -> Ordering {
+    let a_components: Vec<_> = a.path.as_path().components().collect();
+    let b_components: Vec<_> = b.path.as_path().components().collect();
+
+    for (i, (x, y)) in a_components.iter().zip(b_components.iter()).enumerate() {
+        if x == y {
+            continue;
+        }
+        // A component is a directory when it is not the last one, or when the
+        // entry itself is a directory.
+        let x_is_dir = i + 1 < a_components.len() || a.kind == Kind::Dir;
+        let y_is_dir = i + 1 < b_components.len() || b.kind == Kind::Dir;
+        return match (x_is_dir, y_is_dir) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => x.cmp(y),
+        };
+    }
+    // One is an ancestor of the other: the ancestor comes first.
+    a_components.len().cmp(&b_components.len())
 }
 
 #[cfg(test)]
@@ -158,6 +193,13 @@ mod tests {
 
     fn scan(fs: &MemFs) -> Vault {
         block_on(Vault::scan(fs, Path::new("/vault"))).expect("scan")
+    }
+
+    fn ordered_paths(fs: &MemFs) -> Vec<String> {
+        scan(fs)
+            .entries()
+            .map(|e| e.path.as_path().to_string_lossy().into_owned())
+            .collect()
     }
 
     #[test]
@@ -255,5 +297,76 @@ mod tests {
         fs.insert_file("/vault/sub/b.md", "b");
 
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
+    }
+
+    /// Byte order puts `a/b.md` between directory `a/b` and its own children,
+    /// because `.` is 0x2E and `/` is 0x2F. The Obsidian folder-note pattern
+    /// hits this immediately.
+    #[test]
+    fn a_folder_note_does_not_split_its_folder_from_its_children() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/Projects/plan.md", "p");
+        fs.insert_file("/vault/Projects.md", "n");
+
+        assert_eq!(
+            ordered_paths(&fs),
+            vec!["Projects", "Projects/plan.md", "Projects.md"]
+        );
+    }
+
+    /// Sorting by `(kind, path)` puts every directory before every file, so
+    /// `a/z.md` would render indented under `c`.
+    #[test]
+    fn a_directorys_children_follow_it_rather_than_all_other_directories() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a/z.md", "z");
+        fs.insert_file("/vault/c/y.md", "y");
+        fs.insert_file("/vault/b.md", "b");
+
+        assert_eq!(
+            ordered_paths(&fs),
+            vec!["a", "a/z.md", "c", "c/y.md", "b.md"]
+        );
+    }
+
+    /// The invariant the sidebar's collapse-skip rests on, asserted directly.
+    ///
+    /// The tree needs a *second* top-level directory to have any teeth. With
+    /// only one, `(kind, path)` ordering has nothing to hoist above the files
+    /// and so keeps the run contiguous by accident; `zz` is what it wedges
+    /// between `Projects` and `Projects/deep/x.md`. Contiguity alone cannot
+    /// catch a comparator that stays component-wise but stops preferring
+    /// directories — component order makes an ancestor a strict prefix of its
+    /// descendants, so the run holds regardless. That property is the sibling
+    /// test's, not this one's.
+    #[test]
+    fn every_directorys_descendants_are_contiguous() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/Projects/plan.md", "p");
+        fs.insert_file("/vault/Projects/deep/x.md", "x");
+        fs.insert_file("/vault/Projects.md", "n");
+        fs.insert_file("/vault/a.md", "a");
+        fs.insert_file("/vault/zz/other.md", "o");
+
+        let vault = scan(&fs);
+        let entries: Vec<_> = vault.entries().collect();
+
+        for (i, entry) in entries.iter().enumerate() {
+            if entry.kind != Kind::Dir {
+                continue;
+            }
+            let descendants = entries
+                .iter()
+                .filter(|c| c.path != entry.path && c.path.starts_with(&entry.path))
+                .count();
+            for offset in 1..=descendants {
+                assert!(
+                    entries[i + offset].path.starts_with(&entry.path),
+                    "{:?} is not contiguous: index {} breaks the run",
+                    entry.path.as_path(),
+                    i + offset
+                );
+            }
+        }
     }
 }
