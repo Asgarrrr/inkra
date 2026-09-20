@@ -82,6 +82,53 @@ impl EditorView {
         }
     }
 
+    /// The third gate: replaces the buffer this view edits.
+    ///
+    /// `edit_buffer` hands out `&mut Buffer` and `move_cursor` a `&Buffer`;
+    /// neither can rebind `self.buffer`, and going through them would push the
+    /// new note's text onto the *previous* note's undo stack — `⌘Z` would then
+    /// restore one file into another.
+    ///
+    /// Every field reset below is a defect if skipped, so they are exhaustive
+    /// rather than minimal.
+    // Two expectations, both self-removing — `expect` errors the moment it stops
+    // applying, so neither can outlive its reason:
+    //
+    // `dead_code`, outside tests only: the sidebar is the first production
+    // caller and lands with it. The alternative was writing the gate later,
+    // which leaves the swap untested until the sidebar exists.
+    //
+    // `used_underscore_binding`: the underscore says the field is held only for
+    // its `Drop`, and reassigning it is exactly this method's point. Renaming it
+    // does not help — rustc exempts `_`-prefixed fields from "never read", so a
+    // plain name trades this lint for that one.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the sidebar calls this"))]
+    #[expect(
+        clippy::used_underscore_binding,
+        reason = "resubscribing is the point of the gate"
+    )]
+    pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
+        // Rebuilt, not kept: the old `Subscription` unsubscribes when it drops,
+        // and keeping it would observe the closed note forever.
+        self._buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
+        self.buffer = buffer;
+
+        // Offset 0, unlike `new`, which seats the caret at `end`. Opening a
+        // note starts at the top; resuming the session does not.
+        self.state = EditorState::new(Selection::at(ByteOffset(0)));
+        self.is_selecting = false;
+
+        // `last_layout` describes the previous note's text. `reveal_line`
+        // early-returns on `None`, so a stale non-`None` layout would scroll the
+        // new note by the old note's geometry.
+        self.last_layout = None;
+        self.last_bounds = None;
+        self.last_text_top = None;
+        self.scroll_handle = ScrollHandle::new();
+
+        cx.notify();
+    }
+
     /// The single path that mutates the buffer.
     ///
     /// Uses `as_mut` rather than `update`: the `GpuiBorrow` guard notifies the

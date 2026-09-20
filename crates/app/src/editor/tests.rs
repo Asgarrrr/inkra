@@ -6,6 +6,9 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use gpui::{
     Context, Entity, EntityInputHandler, TestAppContext, VisualTestContext, Window, prelude::*,
 };
@@ -989,5 +992,64 @@ fn undoing_with_an_empty_history_leaves_the_text_alone(cx: &mut TestAppContext) 
         view.undo(&Undo, window, cx);
         view.redo(&Redo, window, cx);
         assert_eq!(view.buffer.read(cx).text(), "abc");
+    });
+}
+
+/// The defect: `_buffer_changed` is a `Subscription` that unsubscribes on drop.
+/// Swapping the buffer without re-observing leaves the view watching the closed
+/// note — edits to the new one repaint nothing, with no compiler warning.
+///
+/// This observes the *view*, not the buffer: observing the buffer would pass
+/// with the re-subscription deleted, since the edit notifies the buffer either
+/// way. Delete the `cx.observe` line in `open_buffer` and this must fail.
+#[gpui::test]
+fn editing_after_a_swap_still_notifies(cx: &mut TestAppContext) {
+    let first = cx.update(|cx| cx.new(|_| Buffer::new("first")));
+    let second = cx.update(|cx| cx.new(|_| Buffer::new("second")));
+    let editor = cx.update(|cx| cx.new(|cx| EditorView::new(first, cx)));
+
+    let notified = Arc::new(AtomicUsize::new(0));
+    let _guard = cx.update(|cx| {
+        let notified = Arc::clone(&notified);
+        cx.observe(&editor, move |_, _| {
+            notified.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    editor.update(cx, |view, cx| view.open_buffer(second.clone(), cx));
+    cx.run_until_parked();
+    let before = notified.load(Ordering::SeqCst);
+
+    second.update(cx, |buffer, cx| {
+        buffer.insert(at(0), "x");
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    assert!(
+        notified.load(Ordering::SeqCst) > before,
+        "the view must observe the buffer it now holds"
+    );
+}
+
+#[gpui::test]
+fn a_swap_resets_the_caret_and_any_ime_composition(cx: &mut TestAppContext) {
+    let first = cx.update(|cx| cx.new(|_| Buffer::new("first")));
+    let second = cx.update(|cx| cx.new(|_| Buffer::new("a much longer second note")));
+    let editor = cx.update(|cx| cx.new(|cx| EditorView::new(first, cx)));
+
+    editor.update(cx, |view, cx| {
+        view.state.set_marked_range(Some(at(0)..at(2)));
+        view.open_buffer(second, cx);
+    });
+
+    editor.update(cx, |view, _| {
+        assert_eq!(view.cursor(), at(0), "a note opens at the top");
+        assert_eq!(
+            view.state.marked_range(),
+            None,
+            "an in-flight composition must not survive into another document"
+        );
+        assert!(view.last_layout.is_none(), "stale geometry must be cleared");
     });
 }
