@@ -78,6 +78,12 @@ area, not on every task:
   them rather than around: `edit_buffer` for anything touching the text,
   `move_cursor` for anything moving the caret. `Buffer` cannot notify for
   itself, so a mutation outside `edit_buffer` is a repaint silently lost.
+- Every pixel ↔ offset conversion goes through `DocumentLayout`. It is built in
+  `prepaint` and describes the *previous* frame's text, so all its line lookups
+  clamp: a stale read is a caret one frame late, never an index out of bounds.
+- `Selection::set_head` and `collapse_to` take a `Goal` so no caret move can
+  silently inherit a stale column. Only `EditorState::move_vertically` passes a
+  real one; everything else states `Goal::None`.
 - No observer callback on an `Entity<Buffer>` may call `.update()` or
   `.as_mut()` on that same buffer — a second lease of one entity panics
   (`gpui/app/entity_map.rs:231`).
@@ -131,6 +137,13 @@ change that introduces something reusable.
 | Step the cursor | `Buffer::previous_grapheme` / `next_grapheme` | `text/src/buffer.rs` |
 | Snap an offset onto a boundary | `Buffer::clip` | `text/src/buffer.rs` |
 | A cursor or selected region | `Selection` — `head`/`tail`/`set_head`/`collapse_to` | `editor/src/selection.rs` |
+| The remembered column for up/down | `Goal`, carried by `Selection` | `editor/src/selection.rs` |
+| Line count, line of an offset, a line's range | `Buffer::line_count` / `line_for_offset` / `line_range` | `text/src/buffer.rs` |
+| Walk every line once, with offsets | `Buffer::lines` | `text/src/buffer.rs` |
+| Replace the selection with text | `EditorState::insert` | `editor/src/state.rs` |
+| Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
+| Any pixel ↔ offset conversion | `DocumentLayout` | `app/src/editor/element.rs` |
+| Resolve up/down against metrics | `EditorView::move_vertically` | `app/src/editor/mod.rs` |
 | Edit, delete, move, undo from a gesture | `EditorState` | `editor/src/state.rs` |
 | Movements resolvable without metrics | `LogicalMovement` | `editor/src/state.rs` |
 | Mutate the buffer from the UI | `EditorView::edit_buffer` | `app/src/editor/mod.rs` |

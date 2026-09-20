@@ -287,6 +287,84 @@ impl Buffer {
             .unwrap_or_else(|| self.len())
     }
 
+    /// Number of logical lines. A newline separates two lines rather than
+    /// belonging to either, so an empty buffer is one line and `"a\n"` is two —
+    /// the second empty.
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.newlines_before(self.text.len()) + 1
+    }
+
+    /// The line containing `offset`, counting from zero.
+    ///
+    /// An offset past the end answers for the last line rather than panicking:
+    /// callers reach this from layout, which lags the text by a frame.
+    #[must_use]
+    pub fn line_for_offset(&self, offset: ByteOffset) -> usize {
+        self.newlines_before(offset.0.min(self.text.len()))
+    }
+
+    /// The line's text, *excluding* its terminating newline.
+    ///
+    /// So `line_range(0).end` and `line_range(1).start` are different offsets in
+    /// `"a\nb"`, and both are places a cursor may sit. That is what makes `End`
+    /// then `Right` cross to the next line instead of standing still.
+    ///
+    /// # Panics
+    /// If `line >= line_count()`.
+    #[must_use]
+    pub fn line_range(&self, line: usize) -> Range<ByteOffset> {
+        let start = if line == 0 {
+            0
+        } else {
+            let mut seen = 0;
+            let found = self.text.bytes().position(|byte| {
+                seen += usize::from(byte == b'\n');
+                seen == line
+            });
+            assert!(
+                found.is_some(),
+                "line {line} is past the last line {}",
+                self.line_count() - 1
+            );
+            found.map_or(0, |index| index + 1)
+        };
+        let end = self.text[start..]
+            .find('\n')
+            .map_or(self.text.len(), |index| start + index);
+        ByteOffset(start)..ByteOffset(end)
+    }
+
+    /// Every line with the offset it starts at, in one pass.
+    ///
+    /// The element calls this once per frame. Going through
+    /// [`Buffer::line_range`] per line instead would rescan from the top each
+    /// time, turning an O(n) frame into O(n · lines).
+    pub fn lines(&self) -> impl Iterator<Item = (ByteOffset, &str)> {
+        let mut start = 0;
+        self.text.split('\n').map(move |line| {
+            let at = ByteOffset(start);
+            start += line.len() + 1;
+            (at, line)
+        })
+    }
+
+    /// Counts by byte, not by char: a `\n` byte can never appear inside a
+    /// multi-byte sequence, so this is correct at any index and needs no char
+    /// boundary from the caller.
+    // clippy suggests the `bytecount` crate. A whole dependency to count one
+    // byte value fails the project's dependency rule, and the alternative that
+    // avoids the lint — slicing to `&str` and counting `matches` — would need a
+    // char boundary from the caller, which is exactly what this is built not to
+    // need. Revisit if a profile ever shows this scan mattering.
+    #[allow(clippy::naive_bytecount)]
+    fn newlines_before(&self, end: usize) -> usize {
+        self.text.as_bytes()[..end]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+    }
+
     /// Snaps an offset into range and back onto a char boundary.
     #[must_use]
     pub fn clip(&self, offset: ByteOffset) -> ByteOffset {
@@ -589,6 +667,100 @@ mod tests {
         let buf = Buffer::new("ab");
         assert_eq!(buf.previous_grapheme(at(0)), at(0));
         assert_eq!(buf.next_grapheme(at(2)), at(2));
+    }
+
+    #[test]
+    fn an_empty_buffer_is_one_empty_line() {
+        let buf = Buffer::new("");
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.line_range(0), at(0)..at(0));
+        assert_eq!(buf.lines().collect::<Vec<_>>(), vec![(at(0), "")]);
+    }
+
+    #[test]
+    fn a_trailing_newline_opens_an_empty_last_line() {
+        let buf = Buffer::new("a\n");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line_range(1), at(2)..at(2));
+    }
+
+    #[test]
+    fn consecutive_newlines_each_open_a_line() {
+        let buf = Buffer::new("\n\n");
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.line_range(0), at(0)..at(0));
+        assert_eq!(buf.line_range(1), at(1)..at(1));
+        assert_eq!(buf.line_range(2), at(2)..at(2));
+    }
+
+    #[test]
+    fn a_line_range_excludes_its_terminating_newline() {
+        let buf = Buffer::new("ab\ncd");
+        assert_eq!(buf.line_range(0), at(0)..at(2));
+        assert_eq!(buf.line_range(1), at(3)..at(5));
+    }
+
+    #[test]
+    fn a_newline_is_a_separator_so_its_two_sides_are_different_offsets() {
+        // End of line 0 and start of line 1 are 2 and 3, not both 2. Right from
+        // the end of a line must land on the start of the next one.
+        let buf = Buffer::new("ab\ncd");
+        assert_eq!(buf.line_range(0).end, at(2));
+        assert_eq!(buf.line_range(1).start, at(3));
+        assert_eq!(buf.next_grapheme(at(2)), at(3));
+    }
+
+    #[test]
+    fn line_for_offset_answers_at_both_edges_of_a_line() {
+        let buf = Buffer::new("ab\ncd");
+        assert_eq!(buf.line_for_offset(at(0)), 0);
+        assert_eq!(buf.line_for_offset(at(2)), 0);
+        // Offset 3 is the newline's far side: the start of line 1.
+        assert_eq!(buf.line_for_offset(at(3)), 1);
+        assert_eq!(buf.line_for_offset(at(5)), 1);
+    }
+
+    #[test]
+    fn line_for_offset_past_the_end_answers_for_the_last_line() {
+        let buf = Buffer::new("ab\ncd");
+        assert_eq!(buf.line_for_offset(at(999)), 1);
+    }
+
+    #[test]
+    fn a_multi_byte_char_does_not_split_a_line() {
+        // "é" is 2 bytes and holds no 0x0a, so counting newlines by byte is safe.
+        let buf = Buffer::new("é\né");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line_range(0), at(0)..at(2));
+        assert_eq!(buf.line_range(1), at(3)..at(5));
+    }
+
+    #[test]
+    #[should_panic(expected = "past the last line")]
+    fn a_line_past_the_end_is_refused() {
+        let _ = Buffer::new("a\nb").line_range(2);
+    }
+
+    #[test]
+    fn lines_agrees_with_line_range() {
+        let buf = Buffer::new("ab\n\ncd\n");
+        for (line, (start, text)) in buf.lines().enumerate() {
+            let range = buf.line_range(line);
+            assert_eq!(start, range.start, "line {line} start");
+            assert_eq!(text, &buf.text()[range.start.0..range.end.0], "line {line}");
+        }
+        assert_eq!(buf.lines().count(), buf.line_count());
+    }
+
+    #[test]
+    fn the_line_index_follows_an_edit() {
+        let mut buf = Buffer::new("ab");
+        assert_eq!(buf.line_count(), 1);
+        buf.insert(at(1), "\n");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line_range(1), at(2)..at(3));
+        buf.undo();
+        assert_eq!(buf.line_count(), 1);
     }
 
     #[test]

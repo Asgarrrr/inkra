@@ -8,7 +8,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window, point};
+use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window};
 use inkra_editor::EditorState;
 use inkra_text::{Buffer, ByteOffset, Utf16Offset};
 
@@ -134,17 +134,14 @@ impl EntityInputHandler for EditorView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let line = self.last_layout.as_ref()?;
+        let layout = self.last_layout.as_ref()?;
         let range = Self::range_from_utf16(self.buffer.read(cx), &range_utf16);
-        Some(Bounds::from_corners(
-            point(
-                element_bounds.left() + line.x_for_index(range.start.0),
-                element_bounds.top(),
-            ),
-            point(
-                element_bounds.left() + line.x_for_index(range.end.0),
-                element_bounds.bottom(),
-            ),
+        // `range_bounds` is element-relative and already clamped to the line
+        // holding `range.start`; the platform wants window coordinates.
+        let local = layout.range_bounds(&range);
+        Some(Bounds::new(
+            element_bounds.origin + local.origin,
+            local.size,
         ))
     }
 
@@ -155,9 +152,9 @@ impl EntityInputHandler for EditorView {
         cx: &mut Context<Self>,
     ) -> Option<usize> {
         let bounds = self.last_bounds?;
-        let line = self.last_layout.as_ref()?;
-        let index = line.index_for_x(position.x - bounds.left())?;
+        let layout = self.last_layout.as_ref()?;
+        let offset = layout.offset_for_position(position - bounds.origin);
         let buffer = self.buffer.read(cx);
-        Some(buffer.to_utf16(buffer.clip(ByteOffset(index))).0)
+        Some(buffer.to_utf16(buffer.clip(offset)).0)
     }
 }
