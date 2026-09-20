@@ -2,7 +2,11 @@
 set -euo pipefail
 
 echo "==> cargo fmt --check"
-cargo fmt --all -- --check
+# Not `--all`: that flag also formats local path dependencies, and gpui is one
+# since the checkout moved into `vendor/`. In `--check` mode it merely couples
+# our gate to zed's formatting; run bare, it would rewrite the very source
+# CLAUDE.md tells us to read, silently diverging it from the rev.
+cargo fmt -p inkra-text -p inkra-editor -p inkra-app -- --check
 
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings

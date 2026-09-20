@@ -4,13 +4,23 @@ Living reference for what GPUI 0.2.2 actually provides. Rules live in
 `CLAUDE.md`. Every claim here was checked against the vendored source at the
 line cited — if you change the pinned version, re-check them.
 
-Paths below are relative to
-`~/.cargo/registry/src/index.crates.io-*/gpui-0.2.2/`.
+Paths below are relative to the **checkout we actually compile**,
+`vendor/zed-reference/crates/`, and are prefixed with the crate
+(`gpui/src/...`, `gpui_macos/src/...`). It is a path dependency, so that
+directory is the build input, not a copy of it.
+
+Two other copies of gpui exist on a typical machine: `gpui-0.2.2` in the cargo
+*registry*, and whatever `~/.cargo/git/checkouts/zed-*/` still holds from the
+earlier git dependency. Reading the registry one is how a batch of line numbers
+in this file and in the code comments came to be wrong; they were corrected on
+2026-09-20. Do not go back to either — see `CLAUDE.md`.
 
 ## Where to look
 
-- `src/` — the pinned source. The reliable reference; grep it directly.
-- `examples/input.rs` — a complete, working single-line text input with
+- `gpui/src/` — the pinned source. The reliable reference; grep it directly.
+- `gpui_macos/src/`, `gpui_apple/src/` — the macOS platform layer, split out of
+  `gpui` and no longer under `gpui/src/platform/`.
+- `gpui/examples/input.rs` — a complete, working single-line text input with
   `EntityInputHandler`, IME marked ranges, selection and mouse hit-testing.
   This is the template for input work. Ours is a close relative of it.
 - `cargo doc -p gpui --no-deps`, then `target/doc/gpui/index.html`.
@@ -39,7 +49,7 @@ gpui_platform = { git = "...", rev = "...", features = ["font-kit"] }
 Without it, macOS renders **no text at all** — quads still paint, so a cursor
 and backgrounds appear over an empty document. `ShapedLine::paint` returns
 `Ok`, shaping reports a plausible width, and the colour is correct. The only
-signal is a `log::warn!` in `gpui_macos/src/platform.rs:216` that an app
+signal is a `log::warn!` in `gpui_macos/src/platform.rs:219` that an app
 without a logger never sees.
 
 `./scripts/check.sh` cannot catch this: no test renders. **Run the app and look
@@ -80,20 +90,20 @@ state needs a `GlobalElementId`, and ours already lives on the entity.
 
 | Need | API | Location |
 |---|---|---|
-| Shape one line | `WindowTextSystem::shape_line` | `src/text_system.rs:365` |
-| Shape multi-line, wrapped | `WindowTextSystem::shape_text` → `SmallVec<[WrappedLine; 1]>` | `src/text_system.rs:409` |
-| Paint run backgrounds (wrap-aware) | `ShapedLine`/`WrappedLine::paint_background` | `src/text_system/line.rs:86`, `:158` |
-| Pixel position → byte index | `WrappedLineLayout::index_for_position`, `closest_index_for_position` | `src/text_system/line_layout.rs:283`, `:296` |
-| Byte index → pixel position | `WrappedLineLayout::position_for_index` | `src/text_system/line_layout.rs:362` |
-| Merge highlight ranges into runs | `StyledText::compute_runs` | `src/elements/text.rs:208` |
+| Shape one line | `WindowTextSystem::shape_line` | `gpui/src/text_system.rs:638` |
+| Shape multi-line, wrapped | `WindowTextSystem::shape_text` → `SmallVec<[WrappedLine; 1]>` | `gpui/src/text_system.rs:750` |
+| Paint run backgrounds (wrap-aware) | `ShapedLine`/`WrappedLine::paint_background` | `gpui/src/text_system/line.rs:160`, `:417` |
+| Pixel position → byte index | `WrappedLineLayout::index_for_position`, `closest_index_for_position` | `gpui/src/text_system/line_layout.rs:348`, `:361` |
+| Byte index → pixel position | `WrappedLineLayout::position_for_index` | `gpui/src/text_system/line_layout.rs:427` |
+| Merge highlight ranges into runs | `StyledText::compute_runs` | `gpui/src/elements/text.rs:453` |
 
 `shape_line` is **structurally single-line**: it asserts `text.find('\n').is_none()`
-(`src/text_system.rs:373`). That is the current ceiling. `shape_text` splits on
+(`gpui/src/text_system.rs:645`). That is the current ceiling. `shape_text` splits on
 newlines and wraps internally.
 
 There is a real frame-to-frame layout cache keyed on
 `(text, font_size, runs, wrap_width, force_width)` with a previous/current
-double buffer (`src/text_system/line_layout.rs:392-531`). Rebuilding the whole
+double buffer (`gpui/src/text_system/line_layout.rs:457-560`). Rebuilding the whole
 document into one `SharedString` per frame is correct but makes the cache
 useless across edits — one keystroke invalidates the single key covering
 everything. Splitting per logical line fixes this for free: unedited lines keep
@@ -118,7 +128,7 @@ Not started. Ordered, each step one file:
    the whole document.
 4. Wrap the per-line rendering in `uniform_list` with row height
    `window.line_height()`, deferring soft-wrap. Constant row height is exactly
-   `uniform_list`'s assumption (`src/elements/uniform_list.rs:1-5`).
+   `uniform_list`'s assumption (`gpui/src/elements/uniform_list.rs`).
 5. Replace the hand-rolled selection quad with `background_color` on the
    selection `TextRun` plus `paint_background`, which is already wrap-boundary
    aware and so survives step 7.
@@ -131,8 +141,9 @@ Not started. Ordered, each step one file:
 
 `uniform_list` is a stepping stone, not a foundation. Its whole vertical
 algorithm is `item_height = longest_item_size.height`
-(`src/elements/uniform_list.rs:350`) and `item_top = item_height * ix`
-(`:400`) — one scalar times an index. Correct for plain lines of text;
+(`gpui/src/elements/uniform_list.rs:371`) and `item_top = item_height * ix`
+(`gpui/src/elements/uniform_list.rs:497`) — one scalar times an index.
+Correct for plain lines of text;
 unusable the moment a row differs in height, which is what markdown live
 preview means. Expect to replace it with a custom element then, as Zed did.
 

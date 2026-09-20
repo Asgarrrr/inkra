@@ -6,15 +6,18 @@ edition = "2024"
 [dependencies]
 inkra-text = { workspace = true }
 inkra-editor = { workspace = true }
-gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
+# Path, not git: the source we compile and the source CLAUDE.md tells us to read
+# are then provably the same files. Restore the checkout with
+# `./scripts/vendor-gpui.sh`; `vendor/` is gitignored.
+gpui = { path = "../../vendor/zed-reference/crates/gpui" }
 # font-kit is opt-in since the platform crates were split out of gpui. Without
 # it macOS renders no text at all, and only says so through a log warning.
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", features = [
     "font-kit",
 ] }
 
 [dev-dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
     "test-support",
 ] }
 

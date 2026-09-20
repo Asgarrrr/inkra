@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/text", "crates/editor", "crates/app"]
+# Without this, cargo treats the vendored zed checkout as part of *this*
+# workspace and tries to inherit `edition` from our root instead of zed's.
+exclude = ["vendor"]
 
 [workspace.dependencies]
 inkra-text = { path = "crates/text" }
