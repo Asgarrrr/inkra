@@ -68,6 +68,10 @@ impl Sidebar {
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.visible.clear();
         let Some(vault) = self.notes.read(cx).vault().cloned() else {
+            // Unreachable today — the vault is fixed at construction. Notifying
+            // anyway so that emptying the tree repaints it if that ever stops
+            // being true, rather than leaving the old rows on screen.
+            cx.notify();
             return;
         };
         // Collected rather than iterated in place: the walk borrows `cx`, and
@@ -167,7 +171,7 @@ impl Sidebar {
                 // (`view.rs:100-104`), so the sidebar re-renders with it and the
                 // dot follows. A `cx.observe` would add nothing. Wrapping the
                 // sidebar in `Entity::cached` would break it — that is the only
-                // way to reach the `dirty_views` check at `view.rs:483-498`.
+                // way to reach the `dirty_views` check at `view.rs:488`.
                 let label = self.row_label(&row, cx);
                 // Saturating rather than cast: `Vault::scan` stops at depth 64,
                 // so nothing here is lost, and a lossy `as f32` is denied.
@@ -211,7 +215,7 @@ impl Render for Sidebar {
             cx.processor(Self::render_rows),
         )
         // Required: `ListSizingBehavior` defaults to `Auto`
-        // (`gpui/elements/list.rs:190-192`), whose branch requests layout
+        // (`gpui/elements/list.rs:192-193`), whose branch requests layout
         // with no children (`uniform_list.rs:315-318`). Without this the
         // list resolves to zero height inside the sidebar's fixed-width div
         // and paints nothing.

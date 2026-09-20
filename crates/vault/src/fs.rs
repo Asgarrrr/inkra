@@ -66,7 +66,13 @@ pub type Result<T> = std::result::Result<T, VaultError>;
 #[async_trait]
 pub trait Fs: Send + Sync {
     /// Entries directly inside `path`. Not recursive: `Vault::scan` drives the
-    /// walk so it can impose a depth limit and refuse to follow symlinks.
+    /// walk, which is what lets it impose a depth limit.
+    ///
+    /// Filtering is this method's obligation, not the scan's, and an
+    /// implementation that skips it reopens a hazard the design closed. Yield
+    /// only directories and `*.md`; never a dotfile; never a symlink, which is
+    /// how the walk avoids link loops without having to detect them.
+    /// `RealFs::read_dir` is the reference.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
     /// Reads and normalizes line endings. `\r\n` and a lone `\r` both become

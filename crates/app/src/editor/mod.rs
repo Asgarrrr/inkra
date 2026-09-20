@@ -82,15 +82,25 @@ impl EditorView {
         }
     }
 
-    /// The third gate: replaces the buffer this view edits.
+    /// Replaces the buffer this view edits — the only gate that may.
     ///
-    /// `edit_buffer` hands out `&mut Buffer` and `move_cursor` a `&Buffer`;
-    /// neither can rebind `self.buffer`, and going through them would push the
-    /// new note's text onto the *previous* note's undo stack — `⌘Z` would then
-    /// restore one file into another.
+    /// The four gates to this view's state, and what each is for:
+    /// `open_buffer` rebinds `self.buffer`; `edit_buffer` mutates the text;
+    /// `update_state` changes view-local state without touching the buffer;
+    /// `move_cursor` moves the caret and needs the buffer to resolve.
     ///
-    /// Every field reset below is a defect if skipped, so they are exhaustive
-    /// rather than minimal.
+    /// None of the other three can rebind `self.buffer`, and routing an open
+    /// through `edit_buffer` would push the new note's text onto the
+    /// *previous* note's undo stack — `⌘Z` would then restore one file into
+    /// another.
+    ///
+    /// The field resets below are exhaustive by construction: every mutable
+    /// field of the view is reset except `focus_handle`, which must survive
+    /// the swap. Exhaustive is not the same as each being a proven defect —
+    /// only `state` and `_buffer_changed` carry a regression test
+    /// (`a_swap_resets_the_caret_and_any_ime_composition`,
+    /// `editing_after_a_swap_still_notifies`). Reset a new field here when you
+    /// add one; do not read this as a claim that each has been demonstrated.
     // `used_underscore_binding`: the underscore says the field is held only for
     // its `Drop`, and reassigning it is exactly this method's point. Renaming it
     // does not help — rustc exempts `_`-prefixed fields from "never read", so a

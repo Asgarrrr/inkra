@@ -89,7 +89,7 @@ impl NoteStore {
     /// Deliberately does **not** set `current`. This resolves on whichever
     /// schedule the load takes, and the editor is rebound on the caller's; a
     /// note recorded here would be the one whose load landed last rather than
-    /// the one on screen. `set_current` is the single writer, called by the
+    /// the one on screen. `set_current` records it instead, called by the
     /// caller once it has actually bound the buffer.
     pub(crate) fn open_note(
         &mut self,
@@ -141,11 +141,15 @@ impl NoteStore {
         })
     }
 
-    /// Records which note `save_current` writes and the sidebar dots.
+    /// Records which note `save_current` writes.
     ///
-    /// The single writer of `current` for anything the sidebar opens, and it
-    /// runs after the buffer is bound to the editor, never when a load happens
-    /// to land. `adopt` is the one other writer, and it keeps the same rule:
+    /// Not the sidebar's dots: those are per row and come from
+    /// `is_modified(row.id)`, which never reads `current`. What reaches them
+    /// from here is only the repaint.
+    ///
+    /// The writer of `current` for anything the sidebar opens, and it runs
+    /// after the buffer is bound to the editor, never when a load happens to
+    /// land. `adopt` is the one other writer, and it keeps the same rule:
     /// it is synchronous, and `main.rs` has already built the editor around
     /// that buffer by the time it runs.
     ///
