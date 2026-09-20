@@ -2570,6 +2570,7 @@ dependencies = [
  "gpui_platform",
  "inkra-editor",
  "inkra-text",
+ "proptest 1.11.0",
 ]
 
 [[package]]

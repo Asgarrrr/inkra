@@ -6,13 +6,15 @@
 pub(crate) mod actions;
 mod element;
 mod input;
+mod scroll;
 #[cfg(test)]
 mod tests;
 
 use gpui::{
     App, Bounds, Context, CursorStyle, Entity, FocusHandle, Focusable, InteractiveElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, px, rgb,
+    Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, point, px,
+    rgb,
 };
 use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
 use inkra_text::{Buffer, ByteOffset};
@@ -38,9 +40,20 @@ pub(crate) struct EditorView {
     /// it is clamped for exactly that reason; see `DocumentLayout`.
     last_layout: Option<DocumentLayout>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// Where the text would start at zero scroll, as of the last paint.
+    ///
+    /// Deliberately stored rather than derived as `last_bounds.origin.y -
+    /// scroll_handle.offset().y` on demand: `last_bounds` already has the
+    /// offset of the frame that produced it baked in, while `offset()` is a
+    /// live cell. Two cursor moves inside one update — or a wheel scroll — put
+    /// the two out of step, and subtracting a newer offset from an older
+    /// bounds counts the scroll twice.
+    last_text_top: Option<Pixels>,
     /// gpui applies the scroll offset to this element's children in `prepaint`
-    /// (`gpui/elements/div.rs:2027`), so `last_bounds` already arrives scrolled and nothing
-    /// downstream subtracts the offset itself.
+    /// (`gpui/elements/div.rs:2027`), so `last_bounds` already arrives scrolled
+    /// and every hit-test downstream stays correct without subtracting it.
+    /// `last_text_top` is the one place that does subtract it, to undo exactly
+    /// this — see its own comment.
     scroll_handle: ScrollHandle,
     /// Held deliberately. `Subscription` unsubscribes on `Drop`, so letting
     /// this field go silently stops the view repainting when the buffer
@@ -63,6 +76,7 @@ impl EditorView {
             is_selecting: false,
             last_layout: None,
             last_bounds: None,
+            last_text_top: None,
             scroll_handle: ScrollHandle::new(),
             _buffer_changed: buffer_changed,
         }
@@ -80,7 +94,14 @@ impl EditorView {
         f: impl FnOnce(&mut EditorState, &mut Buffer) -> R,
     ) -> R {
         let mut buffer = self.buffer.as_mut(cx);
-        f(&mut self.state, &mut buffer)
+        let result = f(&mut self.state, &mut buffer);
+        let line = buffer.line_for_offset(self.state.cursor());
+        // Explicit, though the borrow checker does not need it: otherwise the
+        // lease outlives `reveal_line`, and a second lease panics at runtime
+        // rather than failing to compile (`gpui/app/entity_map.rs:231`).
+        drop(buffer);
+        self.reveal_line(line);
+        result
     }
 
     /// The single path that changes view-local state without touching the text.
@@ -98,7 +119,47 @@ impl EditorView {
     fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
         let buffer = self.buffer.read(cx);
         f(&mut self.state, buffer);
+        // Before `cx.notify()`, not after: `Entity::read` ties the borrow to
+        // `cx` rather than to the entity, so a last use of `buffer` past the
+        // notify holds an immutable borrow of `cx` across a mutable one.
+        let line = buffer.line_for_offset(self.state.cursor());
         cx.notify();
+        self.reveal_line(line);
+    }
+
+    /// Scrolls `line` into view, if it is not there already.
+    ///
+    /// Called from both gates rather than from the action handlers, for the
+    /// reason the gates exist at all: a reveal added by hand at each call site
+    /// is one the next action forgets. Clicks and drags come through here too
+    /// and cost nothing — they resolve a point the user just pointed at, so the
+    /// line is on screen by construction.
+    ///
+    /// Applied now rather than deferred to prepaint, because the containing
+    /// `div` reads and clamps the offset *before* it prepaints its children
+    /// (`gpui/elements/div.rs:2390-2392`, then `:2027`). Writing it here lands
+    /// in this frame; writing it from `TextElement::prepaint` would land in the
+    /// next one. The unclamped write is deliberate — see [`scroll::reveal`].
+    fn reveal_line(&mut self, line: usize) {
+        let (Some(text_top), Some(layout)) = (self.last_text_top, self.last_layout.as_ref()) else {
+            return;
+        };
+        let viewport = self.scroll_handle.bounds();
+        // Nothing has been prepainted yet, so there is no viewport to reveal
+        // into: `ScrollHandle::bounds` is `Bounds::default()` until the first
+        // `clamp_scroll_position` writes it (`gpui/elements/div.rs:2484`).
+        if viewport.size.height <= px(0.) {
+            return;
+        }
+
+        let top = text_top + layout.line_height() * line;
+        let line = top..top + layout.line_height();
+        let viewport = viewport.top()..viewport.bottom();
+
+        if let Some(offset) = scroll::reveal(line, viewport, self.scroll_handle.offset().y) {
+            self.scroll_handle
+                .set_offset(point(self.scroll_handle.offset().x, offset));
+        }
     }
 
     /// Up and down, the only movements that need font metrics.
