@@ -61,7 +61,13 @@ impl Vault {
             .map(|entry| self.root.join(entry.path.as_path()))
     }
 
-    /// Walks the tree from `root`, keeping `*.md` and every directory.
+    /// Walks the tree from `root`, keeping whatever `Fs::read_dir` yields.
+    ///
+    /// The walk owns the depth limit and nothing else. Which entries exist at
+    /// all — `*.md` only, no dotfiles, no symlinks — is the `Fs`
+    /// implementation's obligation, not this one's: see `RealFs::read_dir`.
+    /// The distinction matters for a second backend, which must reimplement
+    /// those filters rather than inherit them from here.
     ///
     /// Iterative rather than recursive: an async recursive function needs
     /// boxing at every level, and an explicit worklist gives the depth limit
