@@ -106,6 +106,15 @@ impl MemFs {
         state.dirs.remove(path);
     }
 
+    /// A second name for the same file: one identity, two paths. What the scan
+    /// has to collapse to a single entry.
+    pub fn hard_link(&self, from: &Path, to: impl Into<PathBuf>) {
+        let mut state = self.state();
+        if let Some(entry) = state.files.get(from).cloned() {
+            state.files.insert(to.into(), entry);
+        }
+    }
+
     /// Moves a file, keeping its identity — which is what a real rename does.
     pub fn rename(&self, from: &Path, to: impl Into<PathBuf>) {
         let mut state = self.state();
