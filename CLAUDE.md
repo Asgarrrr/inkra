@@ -34,7 +34,7 @@ area, not on every task:
 - build: `cargo build --workspace`
 - test: `cargo test --workspace`
 - lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -- --check`
+- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -- --check`
 - run: `cargo run -p inkra-app`
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
 
@@ -56,7 +56,8 @@ area, not on every task:
   wrong. Hence the vendored checkout.
 - Never run `cargo fmt --all`: `--all` includes local path dependencies, so it
   rewrites the vendored gpui source and diverges it from the pinned commit.
-  `check.sh` names our three crates explicitly for that reason.
+  `check.sh` names our own crates explicitly for that reason. A new workspace
+  member must be added to that list in the same change, or it goes unformatted.
 - The platform layer is no longer under `gpui/src/platform/`: macOS lives in
   the sibling crates `gpui_macos` and `gpui_apple`.
 - Start input work from `crates/gpui/examples/input.rs` in that checkout.
@@ -69,7 +70,7 @@ area, not on every task:
 
 - `inkra-text` → `inkra-editor` → `inkra-app`, one way. Never add a dependency
   that inverts it.
-- `text` and `editor` have zero gpui dependency. Enforced by `scripts/check.sh`;
+- `text`, `editor` and `vault` have zero gpui dependency. Enforced by `scripts/check.sh`;
   that check was hardened after red-team bypasses — do not simplify it. A new
   crate below `app` goes in its loop in the same change.
 - Where does it belong?

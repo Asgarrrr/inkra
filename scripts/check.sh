@@ -6,12 +6,12 @@ echo "==> cargo fmt --check"
 # since the checkout moved into `vendor/`. In `--check` mode it merely couples
 # our gate to zed's formatting; run bare, it would rewrite the very source
 # CLAUDE.md tells us to read, silently diverging it from the rev.
-cargo fmt -p inkra-text -p inkra-editor -p inkra-app -- --check
+cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -- --check
 
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-echo "==> gpui isolation check (text and editor must not depend on gpui, any dependency kind, any target)"
+echo "==> gpui isolation check (every crate below app must not depend on gpui, any dependency kind, any target)"
 # Captured into a variable (not piped directly into grep) so a `cargo tree`
 # failure itself trips `set -e` instead of being masked by grep's own exit
 # status. Checks normal, build, and dev edges: a `gpui` dev-dependency on
@@ -26,7 +26,7 @@ echo "==> gpui isolation check (text and editor must not depend on gpui, any dep
 # silently swallow a genuine match.
 # Every crate below `app`. Adding one here is the cheap half of adding it to
 # the workspace; skipping it silently drops the guarantee for that crate.
-for crate in inkra-text inkra-editor; do
+for crate in inkra-text inkra-editor inkra-vault; do
   tree_output=$(cargo tree -p "$crate" -e normal,build,dev --target=all)
   if grep -qE '(^|[[:space:]])gpui v[0-9]' <<< "$tree_output"; then
     echo "ERROR: $crate depends on gpui — it must stay gpui-free" >&2

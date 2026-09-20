@@ -2590,6 +2590,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkra-vault"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "inkra-vault",
+ "proptest 1.11.0",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
