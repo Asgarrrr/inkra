@@ -106,20 +106,35 @@ No cursor blink primitive exists in gpui 0.2.2. Zed implements its own
 
 Not started. Ordered, each step one file:
 
-1. Add a logical line index to `core::Buffer` — line count, line start offset,
-   line containing offset. Pure `&str` scanning, no layout input, so `core`.
-   Wrapped-line layout depends on font metrics and stays in `app`.
-2. Iterate logical lines in `TextElement::prepaint`, shaping per line instead
-   of once for the whole document.
-3. Wrap the per-line rendering in `uniform_list` with row height
+1. Add a logical line index to `Buffer` (`crates/text/src/buffer.rs`) — line
+   count, line start offset, line containing offset. Pure `&str` scanning, no
+   layout input, so it belongs in `text`. Wrapped-line layout depends on font
+   metrics and stays in `app`.
+2. Turn `LogicalMovement::DocStart`/`DocEnd` into `LineStart`/`LineEnd`
+   (`crates/editor/src/state.rs`) now that something can answer them, and
+   repoint the Home and End handlers at them.
+3. Iterate logical lines in `TextElement::prepaint`
+   (`crates/app/src/editor/element.rs`), shaping per line instead of once for
+   the whole document.
+4. Wrap the per-line rendering in `uniform_list` with row height
    `window.line_height()`, deferring soft-wrap. Constant row height is exactly
    `uniform_list`'s assumption (`src/elements/uniform_list.rs:1-5`).
-4. Replace the hand-rolled selection quad with `background_color` on the
+5. Replace the hand-rolled selection quad with `background_color` on the
    selection `TextRun` plus `paint_background`, which is already wrap-boundary
-   aware and so survives step 6.
-5. Add up/down actions on `index_for_position`/`position_for_index`.
-6. Only then, profiled on a real file: decide whether soft-wrap justifies an
+   aware and so survives step 7.
+6. Add up and down. They need font metrics, so they resolve in `app` and reach
+   the editor through `EditorState::move_to`, via
+   `index_for_position`/`position_for_index`. The goal column lives in `app`
+   and is reset in `EditorView::move_cursor` — see the design doc.
+7. Only then, profiled on a real file: decide whether soft-wrap justifies an
    incremental wrap map.
+
+`uniform_list` is a stepping stone, not a foundation. Its whole vertical
+algorithm is `item_height = longest_item_size.height`
+(`src/elements/uniform_list.rs:350`) and `item_top = item_height * ix`
+(`:400`) — one scalar times an index. Correct for plain lines of text;
+unusable the moment a row differs in height, which is what markdown live
+preview means. Expect to replace it with a custom element then, as Zed did.
 
 Do **not** port Zed's `display_map`/`wrap_map` (`editor/src/display_map/wrap_map.rs`).
 It exists to keep wrap boundaries correct under concurrent edits at scale, and

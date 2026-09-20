@@ -1,9 +1,9 @@
 // Probes the running editor's macOS accessibility tree for the attributes a
 // screen reader needs to read a document. See docs/gpui-accessibility.md.
 //
-//   cargo run -p gpui-test-app &
+//   cargo run -p inkra-app &
 //   swiftc -O scripts/ax-text-probe.swift -o /tmp/ax-text-probe
-//   /tmp/ax-text-probe $(pgrep -n gpui-test-app)
+//   /tmp/ax-text-probe $(pgrep -n inkra-app)
 //
 // Requires Accessibility permission for the terminal in
 // System Settings > Privacy & Security > Accessibility.

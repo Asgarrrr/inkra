@@ -7,7 +7,7 @@ cargo fmt --all -- --check
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-echo "==> gpui isolation check (core must not depend on gpui, any dependency kind, any target)"
+echo "==> gpui isolation check (text and editor must not depend on gpui, any dependency kind, any target)"
 # Captured into a variable (not piped directly into grep) so a `cargo tree`
 # failure itself trips `set -e` instead of being masked by grep's own exit
 # status. Checks normal, build, and dev edges: a `gpui` dev-dependency on
@@ -20,11 +20,15 @@ echo "==> gpui isolation check (core must not depend on gpui, any dependency kin
 # the pipe while `echo` is still writing — the resulting SIGPIPE (128+13)
 # outranks grep's real (successful) exit code under `pipefail` and would
 # silently swallow a genuine match.
-tree_output=$(cargo tree -p gpui-test-core -e normal,build,dev --target=all)
-if grep -qE '(^|[[:space:]])gpui v[0-9]' <<< "$tree_output"; then
-  echo "ERROR: gpui-test-core depends on gpui — core must stay gpui-free" >&2
-  exit 1
-fi
+# Every crate below `app`. Adding one here is the cheap half of adding it to
+# the workspace; skipping it silently drops the guarantee for that crate.
+for crate in inkra-text inkra-editor; do
+  tree_output=$(cargo tree -p "$crate" -e normal,build,dev --target=all)
+  if grep -qE '(^|[[:space:]])gpui v[0-9]' <<< "$tree_output"; then
+    echo "ERROR: $crate depends on gpui — it must stay gpui-free" >&2
+    exit 1
+  fi
+done
 
 echo "==> cargo test"
 cargo test --workspace

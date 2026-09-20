@@ -1,4 +1,4 @@
-use gpui_test_core::{Buffer, ByteOffset, Utf16Offset};
+use inkra_text::{Buffer, ByteOffset, Utf16Offset};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
