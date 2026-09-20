@@ -1,7 +1,11 @@
 # gpui-test
 
-Prototype: full-Rust text editor in GPUI, evaluating whether it can replace
-Tauri on Inkra.
+Inkra's application skeleton: a full-Rust note editor on GPUI. The evaluation
+against Tauri closed on 2026-09-20 — GPUI is adopted, accessibility gap
+included and accepted.
+
+The editor is one component. The target is a note application: a vault of
+markdown files, links and backlinks, search, panes.
 
 Everything in this repo — docs, comments, commits, identifiers — is English.
 
@@ -13,7 +17,8 @@ area, not on every task:
 - [docs/gpui-notes.md](./docs/gpui-notes.md) — what GPUI provides, input
   protocol traps, path to multi-line.
 - [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why the
-  dependency points at a git rev, and the open blocker for Inkra.
+  dependency points at a git rev, and the accessibility gap accepted when
+  GPUI was adopted.
 - [docs/superpowers/specs/2026-09-19-gpui-test-architecture-design.md](./docs/superpowers/specs/2026-09-19-gpui-test-architecture-design.md)
   — original design review.
 
@@ -67,7 +72,7 @@ area, not on every task:
   `with_editor` helper — its methods all need a `Window`.
 - Keep at least one `simulate_input`/`simulate_keystrokes` test. Nothing else
   proves the element registers its input handler during paint.
-- No snapshot or visual testing while the UI is an unstable prototype.
+- No snapshot or visual testing while the UI is still unstable.
 - `check.sh` renders nothing. After touching the gpui dependency, its features,
   or `TextElement`, run the app and look at it. A missing `font-kit` feature
   silently renders no text while every test still passes.

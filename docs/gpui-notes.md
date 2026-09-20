@@ -124,4 +124,5 @@ Not started. Ordered, each step one file:
 Do **not** port Zed's `display_map`/`wrap_map` (`editor/src/display_map/wrap_map.rs`).
 It exists to keep wrap boundaries correct under concurrent edits at scale, and
 it is why Zed needed a fully custom element instead of `uniform_list`. Weeks of
-work, against a prototype whose question is whether multi-line works at all.
+work, for a problem a note application does not have until it is measured to
+have it.
