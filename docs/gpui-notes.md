@@ -112,32 +112,19 @@ an identical key and skip platform shaping.
 No cursor blink primitive exists in gpui 0.2.2. Zed implements its own
 (`vendor/zed-reference/crates/editor/src/blink_manager.rs`).
 
-## Path to multi-line
+## Multi-line
 
-Not started. Ordered, each step one file:
+**Done**, on 2026-09-20. The ordered sketch that used to sit here was superseded
+before it was built and is kept only in
+`superpowers/specs/2026-09-20-multiline-plan.md`, which records what review
+changed and why. Three of its steps were reversed in the process: `uniform_list`
+was never adopted, the selection quad stayed hand-rolled in four cases rather
+than moving to `background_color` on a `TextRun`, and the goal column lives in
+`editor` rather than `app`.
 
-1. Add a logical line index to `Buffer` (`crates/text/src/buffer.rs`) — line
-   count, line start offset, line containing offset. Pure `&str` scanning, no
-   layout input, so it belongs in `text`. Wrapped-line layout depends on font
-   metrics and stays in `app`.
-2. Turn `LogicalMovement::DocStart`/`DocEnd` into `LineStart`/`LineEnd`
-   (`crates/editor/src/state.rs`) now that something can answer them, and
-   repoint the Home and End handlers at them.
-3. Iterate logical lines in `TextElement::prepaint`
-   (`crates/app/src/editor/element.rs`), shaping per line instead of once for
-   the whole document.
-4. Wrap the per-line rendering in `uniform_list` with row height
-   `window.line_height()`, deferring soft-wrap. Constant row height is exactly
-   `uniform_list`'s assumption (`gpui/src/elements/uniform_list.rs`).
-5. Replace the hand-rolled selection quad with `background_color` on the
-   selection `TextRun` plus `paint_background`, which is already wrap-boundary
-   aware and so survives step 7.
-6. Add up and down. They need font metrics, so they resolve in `app` and reach
-   the editor through `EditorState::move_to`, via
-   `index_for_position`/`position_for_index`. The goal column lives in `app`
-   and is reset in `EditorView::move_cursor` — see the design doc.
-7. Only then, profiled on a real file: decide whether soft-wrap justifies an
-   incremental wrap map.
+What is still out — soft wrap, virtualization, CRLF, multi-cursor — is in
+`roadmap.md` with the trigger that brings each one back. The two gpui facts
+that decide those choices are below.
 
 `uniform_list` is a stepping stone, not a foundation. Its whole vertical
 algorithm is `item_height = longest_item_size.height`
