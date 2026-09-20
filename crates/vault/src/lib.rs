@@ -5,6 +5,11 @@
 //! builds the `Buffer`. See
 //! `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
 
+pub mod fs;
 mod path;
 
+#[cfg(feature = "test-support")]
+pub mod mem_fs;
+
+pub use fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, VaultError};
 pub use path::RelPath;
