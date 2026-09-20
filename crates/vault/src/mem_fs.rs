@@ -106,8 +106,7 @@ impl MemFs {
         state.dirs.remove(path);
     }
 
-    /// Moves a file, keeping its identity — which is what a real rename does,
-    /// and what the identity proptest exists to check.
+    /// Moves a file, keeping its identity — which is what a real rename does.
     pub fn rename(&self, from: &Path, to: impl Into<PathBuf>) {
         let mut state = self.state();
         if let Some(entry) = state.files.remove(from) {
@@ -192,8 +191,8 @@ mod tests {
     use crate::fs::{Fs, Kind, VaultError};
     use std::path::{Path, PathBuf};
 
-    /// Task 8 scans with `read_dir` alone, so every directory on the way to a
-    /// note has to exist without being inserted by hand.
+    /// The scan walks with `read_dir` alone, so every directory on the way to
+    /// a note has to exist without being inserted by hand.
     #[test]
     fn inserting_a_file_creates_its_parent_directories() {
         let fs = MemFs::new();
@@ -245,8 +244,8 @@ mod tests {
         assert!(matches!(result, Err(VaultError::Io { .. })));
     }
 
-    /// The identity rules the `EntryId` tests in Task 8 rest on: a rename is
-    /// the same file, a recreated file is a different one.
+    /// Identity tracks the file, not the name: a rename is the same file, a
+    /// recreated file is a different one.
     #[test]
     fn a_rename_keeps_the_identity_and_a_recreated_file_gets_a_new_one() {
         let fs = MemFs::new();

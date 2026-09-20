@@ -47,10 +47,10 @@ fn a_missing_note_exits_one_and_names_the_path() {
     );
 }
 
-/// Regression, found by review of this task. `std::env::args` unwraps every
-/// argument into a `String`, so a filename that is not valid UTF-8 panicked —
-/// and the panic crossed the macOS FFI boundary as a non-unwinding abort, so
-/// the process died on SIGABRT with a backtrace instead of naming the path.
+/// `std::env::args` unwraps every argument into a `String`, so a filename that
+/// is not valid UTF-8 panicked — and the panic crossed the macOS FFI boundary
+/// as a non-unwinding abort, so the process died on SIGABRT with a backtrace
+/// instead of naming the path.
 /// A Unix path is bytes, and `RelPath::display_name` (`crates/vault/src/path.rs`)
 /// already treats a non-UTF-8 name as renderable rather than fatal.
 #[test]
