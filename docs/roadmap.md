@@ -14,22 +14,39 @@ the uncertainty, for reasons given below.
 
 | Item | Trigger | Estimate | Blocked by |
 |---|---|---|---|
-| Scroll to reveal the cursor | Fired. Typing past the bottom edge loses the caret today. | ~0.5 d | — |
+| Horizontal scroll and reveal | A note with lines long enough to push the caret off the right edge. | 1–2 d | — |
 | CRLF normalization | File I/O or a paste action, whichever lands first. | ~0.5 d | `inkra-vault` |
 | Soft wrap | A real note measured to need it. | 3–5 d | — |
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | Soft wrap |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 | Anchors | Named prerequisite of multi-pane and of the vault — see the modular architecture design doc. | not sized | — |
 
-Sequential total for the five sized editor items: roughly 11–16 working days.
+Sequential total for the five sized editor items: roughly 11–17 working days.
 
-### Scroll to reveal the cursor
+### Horizontal scroll and reveal
 
-The only item whose trigger has already fired. `DocumentLayout` gives the
-cursor's y, so this is `ScrollHandle::set_offset` against `offset()` and
-`bounds()`, driven from the two gates (`edit_buffer`, `move_cursor`). It is
-testable: gpui force-draws dirty windows as the effect queue drains under
-`cfg(test)`, so `last_layout` is fresh between two simulated keystrokes.
+The vertical half shipped on 2026-09-20; see
+`superpowers/specs/2026-09-20-scroll-to-cursor-plan.md`. The horizontal half did
+not, and it is not the same size.
+
+Long lines are already clipped rather than overflowing: with `overflow.y` set to
+`Scroll` and `overflow.x` left `Visible`, `Style::overflow_mask` masks to the
+element's bounds on **both** axes (`gpui/style.rs:668-672`). So the caret can be
+lost off the right edge today, silently.
+
+Three costs the vertical half did not pay:
+
+- `TextElement::request_layout` reports `width: relative(1.)`. Scrolling
+  horizontally needs the real width of the widest line, which means measuring
+  every line's advance rather than only the shaped ones.
+- The `div` needs `overflow_x_scroll`, which changes wheel behaviour on both
+  axes: a zero delta is remapped between them only while the other axis is not
+  `Scroll` (`gpui/elements/div.rs:3348-3365`).
+- The x position of a column is only known after shaping. Zed runs its
+  horizontal pass after line layout for exactly that reason
+  (`editor/src/element.rs:9383-9402`), which puts it in prepaint — the placement
+  the vertical half rejected, because our `div` reads the offset before our
+  element prepaints.
 
 ### CRLF normalization
 
@@ -81,11 +98,10 @@ here, so the two cannot drift.
 
 ## Ordering
 
-Only two constraints are real:
+Only one constraint is real: soft wrap before virtualization.
 
-1. Soft wrap before virtualization.
-2. Scroll to reveal the cursor before anything else — it is the only visible
-   defect today, and it is independent of the rest.
+Scroll to reveal the cursor used to be the second, as the only visible defect.
+It shipped, so the list no longer has a forced first item.
 
 Everything else is free. Spending three weeks on this list before the vault,
 links and search exist is a choice about what the application is, not a

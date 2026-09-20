@@ -55,6 +55,58 @@ without a logger never sees.
 `./scripts/check.sh` cannot catch this: no test renders. **Run the app and look
 at it after any change to the gpui dependency, its features, or `TextElement`.**
 
+## Scrolling: where the offset is read, and where it is written
+
+A `div` with `.overflow_y_scroll()` and `.track_scroll(&handle)` scrolls itself
+and handles the wheel without further wiring. What is not obvious is *when* it
+reads the offset, which decides where an application can usefully write one.
+
+Within one frame, for a `div` with a tracked handle:
+
+1. `Div::prepaint` measures the children and computes `content_size`
+   (`elements/div.rs:1984-2007`).
+2. `Interactivity::prepaint` calls `clamp_scroll_position`
+   (`elements/div.rs:2390-2391`), which clamps the offset to
+   `[-(content_size - bounds), 0]` (`:2467-2479`) and writes `bounds` and
+   `max_offset` back into the handle (`:2482-2485`).
+3. The clamped offset is applied to the children:
+   `window.with_element_offset(scroll_offset, ...)` (`:2027`), inside the
+   closure `f` that step 2 invokes at `:2392`.
+4. The children prepaint, then paint.
+
+So an offset written **before** the frame lands in that frame, already clamped
+against the frame's own content size. An offset written **during** a child's
+`prepaint` is a frame late: step 3 has already run. This is why Zed's placement
+does not transfer — `EditorElement` autoscrolls inside its own `prepaint`
+(`editor/src/element.rs:8728-8755`) and can do so because it owns its layout and
+re-takes its snapshot in place.
+
+Other facts worth not rediscovering:
+
+- **The offset is negative when scrolled down** (`elements/div.rs:4391-4393`).
+  `max_offset()` is the positive magnitude.
+- **`ScrollHandle::set_offset` does not clamp** (`elements/div.rs:4394-4397`).
+  Its `mut position` parameter is never mutated. Clamping is step 2 of the next
+  frame — which is what makes writing an offset for a document that just grew
+  correct, rather than one line short.
+- **`bounds()` and `max_offset()` are stale until the first prepaint.**
+  `ScrollHandle::bounds()` is `Bounds::default()` before step 2 ever runs, so
+  code that reveals something into the viewport needs a guard for it.
+- **`bounds()` is the padded box**, not the content box.
+
+Four primitives look applicable to "scroll something into view" and are not:
+
+- `Window::request_autoscroll` (`window.rs:4089`) is consumed only by `List`
+  (`elements/list.rs:1278`). `Div` never calls `take_autoscroll`.
+- `ScrollHandle::scroll_to_item` (`elements/div.rs:4316`) indexes the tracked
+  `div`'s **children**. An editor with one child element has nothing to index.
+- `Div::on_children_prepainted` (`elements/div.rs:1810`) is skipped entirely
+  when a `ScrollHandle` is tracked: the tracked branch at `:1986-1995` never
+  populates `children_bounds`, so the listener receives an empty `Vec`.
+- The public `ScrollStrategy` with `Top`/`Center`/`Bottom`
+  (`elements/uniform_list.rs:84-99`) belongs to `UniformListScrollHandle`.
+  `ScrollHandle`'s own strategy enum (`elements/div.rs:4232-4237`) is private.
+
 ## Input protocol
 
 `EntityInputHandler` speaks UTF-16 offsets throughout. An element registers its

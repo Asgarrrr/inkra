@@ -20,6 +20,8 @@ gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", feat
 gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
     "test-support",
 ] }
+# For the scroll geometry only, which is pixel arithmetic and needs no window.
+proptest = "1"
 
 [lints]
 workspace = true

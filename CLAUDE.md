@@ -116,7 +116,10 @@ area, not on every task:
   in `app`.
 - `app`: `#[gpui::test]` headless, in `editor/tests.rs`. Reach
   `EntityInputHandler` through the `with_editor` helper — its methods all need
-  a `Window`.
+  a `Window`. What must not live here is an *editing-semantics* test, which
+  belongs in `text` or `editor`. A plain `#[test]` over pixel geometry is fine
+  and preferable: pixels cannot move down a layer, and `scroll.rs` is the
+  precedent.
 - Every key binding needs a `simulate_keystrokes` test. The action handlers are
   thin delegations, so a test that calls one directly proves nothing about the
   binding, the `actions!` mapping, or the repaint gate — and a wrong binding
@@ -147,6 +150,8 @@ change that introduces something reusable.
 | Replace the selection with text | `EditorState::insert` | `editor/src/state.rs` |
 | Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
 | Any pixel ↔ offset conversion | `DocumentLayout` | `app/src/editor/element.rs` |
+| Scroll a line into view | `EditorView::reveal_line` | `app/src/editor/mod.rs` |
+| The geometry behind it, window-free | `scroll::reveal` | `app/src/editor/scroll.rs` |
 | Resolve up/down against metrics | `EditorView::move_vertically` | `app/src/editor/mod.rs` |
 | Edit, delete, move, undo from a gesture | `EditorState` | `editor/src/state.rs` |
 | Movements resolvable without metrics | `LogicalMovement` | `editor/src/state.rs` |

@@ -52,6 +52,10 @@ impl DocumentLayout {
         self.lines.len()
     }
 
+    pub(super) fn line_height(&self) -> Pixels {
+        self.line_height
+    }
+
     pub(super) fn top_for_line(&self, line: usize) -> Pixels {
         #[allow(clippy::cast_precision_loss)]
         let line = line as f32;
@@ -360,6 +364,11 @@ impl Element for TextElement {
         self.editor.update(cx, |editor, _| {
             editor.last_layout = Some(layout);
             editor.last_bounds = Some(bounds);
+            // Read here rather than recomputed later: the offset in the handle
+            // right now is the one this frame's `bounds` was translated by
+            // (`gpui/elements/div.rs:2390-2392`, then `:2027`), so subtracting
+            // it leaves the y the text would have at zero scroll.
+            editor.last_text_top = Some(bounds.origin.y - editor.scroll_handle.offset().y);
         });
     }
 }
