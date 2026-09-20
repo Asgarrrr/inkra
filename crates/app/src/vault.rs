@@ -58,6 +58,17 @@ impl NoteStore {
         self.open.get(&id).map(|note| &note.buffer)
     }
 
+    /// The note `save_current` would write.
+    ///
+    /// `#[cfg(test)]` for the same reason as `buffer_for`: nothing in the UI
+    /// asks, and an unread method fails `-D warnings`. The tests that this
+    /// exists for assert the thing the UI cannot — that `current` and the
+    /// buffer bound to the editor are the same note.
+    #[cfg(test)]
+    pub(crate) fn current(&self) -> Option<EntryId> {
+        self.current
+    }
+
     /// True when the note's buffer has moved past what was last written.
     ///
     /// A note that is not open has no buffer to differ from the file, so it is
@@ -74,16 +85,19 @@ impl NoteStore {
     /// switched away from. There is no close action in this slice, so buffers
     /// live for the session; eviction is deferred with its trigger in the
     /// design spec.
+    ///
+    /// Deliberately does **not** set `current`. This resolves on whichever
+    /// schedule the load takes, and the editor is rebound on the caller's; a
+    /// note recorded here would be the one whose load landed last rather than
+    /// the one on screen. `set_current` is the single writer, called by the
+    /// caller once it has actually bound the buffer.
     pub(crate) fn open_note(
         &mut self,
         id: EntryId,
         cx: &mut Context<Self>,
     ) -> Task<Option<Entity<Buffer>>> {
         if let Some(note) = self.open.get(&id) {
-            self.current = Some(id);
-            let buffer = note.buffer.clone();
-            cx.notify();
-            return Task::ready(Some(buffer));
+            return Task::ready(Some(note.buffer.clone()));
         }
 
         let Some(vault) = self.vault.clone() else {
@@ -107,8 +121,6 @@ impl NoteStore {
                 // into, and replacing it would strand the text exactly the way
                 // a weak handle does.
                 if let Some(note) = this.open.get(&id) {
-                    this.current = Some(id);
-                    cx.notify();
                     return note.buffer.clone();
                 }
                 let buffer = cx.new(|_| Buffer::new(loaded.text));
@@ -122,12 +134,29 @@ impl NoteStore {
                         saved_version: 0,
                     },
                 );
-                this.current = Some(id);
                 cx.notify();
                 buffer
             })
             .ok()
         })
+    }
+
+    /// Records which note `save_current` writes and the sidebar dots.
+    ///
+    /// The single writer of `current` for anything the sidebar opens, and it
+    /// runs after the buffer is bound to the editor, never when a load happens
+    /// to land. `adopt` is the one other writer, and it keeps the same rule:
+    /// it is synchronous, and `main.rs` has already built the editor around
+    /// that buffer by the time it runs.
+    ///
+    /// Ignores a note that is not open: nothing can be current that has no
+    /// buffer, and `save_current` would silently pick nothing.
+    pub(crate) fn set_current(&mut self, id: EntryId, cx: &mut Context<Self>) {
+        if !self.open.contains_key(&id) {
+            return;
+        }
+        self.current = Some(id);
+        cx.notify();
     }
 
     /// Registers an already-loaded buffer as the current note.

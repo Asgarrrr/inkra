@@ -7,11 +7,15 @@ edition = "2024"
 # `MemFs` is gated so it never reaches a release binary. It must still compile
 # under `cargo test --workspace`, which check.sh runs WITHOUT --all-features —
 # hence the self dev-dependency below. Same pattern app uses for gpui.
-test-support = []
+test-support = ["dep:futures"]
 
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
+# `MemFs::block_load` only, so it rides the `test-support` gate: a test that
+# needs two loads in flight at once needs one of them to park, and parking
+# needs a real waker. Same version the dev-dependency below already pulls in.
+futures = { version = "0.3", optional = true }
 
 [dev-dependencies]
 inkra-vault = { path = ".", features = ["test-support"] }

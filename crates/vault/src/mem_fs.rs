@@ -1,8 +1,9 @@
 //! An in-memory `Fs` for tests.
 //!
-//! A `BTreeMap` and an injectable error, not a simulated kernel. Zed's
-//! `FakeFs` is 2207 lines (`vendor/zed-reference/crates/fs/src/fs.rs:1440-3646`)
-//! because it amortizes over hundreds of scanner tests; ours does not.
+//! A `BTreeMap`, an injectable error and one load gate, not a simulated
+//! kernel. Zed's `FakeFs` is 2207 lines
+//! (`vendor/zed-reference/crates/fs/src/fs.rs:1440-3646`) because it amortizes
+//! over hundreds of scanner tests; ours does not.
 //!
 //! Compiled under clippy's `--all-features`, so it is held to
 //! `unwrap_used = "deny"` like everything else.
@@ -14,6 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
+use futures::channel::oneshot;
 
 use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, VaultError};
 
@@ -26,6 +28,9 @@ struct State {
     /// its children are unreachable anyway, since the walk never descends past
     /// a directory it could not read.
     unreadable: Option<PathBuf>,
+    /// The next `load` of each of these paths parks until its `LoadGate` is
+    /// released or dropped. See `MemFs::block_load`.
+    blocked: BTreeMap<PathBuf, oneshot::Receiver<()>>,
 }
 
 pub struct MemFs {
@@ -127,12 +132,45 @@ impl MemFs {
         self.state().unreadable = Some(path.into());
     }
 
+    /// Parks the next `load` of `path` until the returned gate is released or
+    /// dropped.
+    ///
+    /// The one piece of latency this fake models, and it earns its place: a
+    /// `BTreeMap` resolves instantly, so without it no test can hold one note's
+    /// load open while another note's completes — which is the only shape in
+    /// which the editor and `NoteStore::current` can disagree.
+    ///
+    /// One gate parks one load. A second load of the same path runs unimpeded
+    /// unless it is gated again.
+    // No `#[must_use]`: `LoadGate` carries its own, and dropping the returned
+    // gate on the spot would release the load immediately.
+    pub fn block_load(&self, path: impl Into<PathBuf>) -> LoadGate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked.insert(path.into(), wait);
+        LoadGate(release)
+    }
+
     #[must_use]
     pub fn read_to_string(&self, path: &Path) -> Option<String> {
         self.state()
             .files
             .get(path)
             .map(|(text, _, _)| text.clone())
+    }
+}
+
+/// Holds one `MemFs::load` parked. Releasing or dropping it lets that load
+/// finish.
+#[must_use]
+pub struct LoadGate(oneshot::Sender<()>);
+
+impl LoadGate {
+    /// Lets the parked load finish. Dropping the gate does the same; use this
+    /// name when the moment the load lands is the point of the test.
+    pub fn release(self) {
+        // Errs when the load was cancelled before it ever parked — which is
+        // exactly what a superseded click is supposed to do to it.
+        let _ = self.0.send(());
     }
 }
 
@@ -172,6 +210,15 @@ impl Fs for MemFs {
     }
 
     async fn load(&self, path: &Path) -> Result<Loaded> {
+        // Taken out of the map, and the guard dropped, before the await: a
+        // `MutexGuard` held across one would make this future non-`Send`, which
+        // `async_trait` requires. A dropped sender resolves the receiver with
+        // an error, which releases the load just as a send does.
+        let blocked = self.state().blocked.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
+
         let state = self.state();
         let Some((text, mtime, identity)) = state.files.get(path) else {
             return Err(VaultError::Io {
