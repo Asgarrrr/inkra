@@ -132,10 +132,8 @@ impl NoteStore {
 
     /// Registers an already-loaded buffer as the current note.
     ///
-    /// The only way a note becomes current in this slice: the sidebar, which
-    /// loads a note on click, lands later. `saved_version` starts at
-    /// `Buffer::version`'s own starting value, so a freshly loaded note is
-    /// clean and `⌘S` no-ops until something is typed.
+    /// `saved_version` starts at `Buffer::version`'s own starting value, so a
+    /// freshly loaded note is clean and `⌘S` no-ops until something is typed.
     ///
     /// The note is keyed by `EntryId::DETACHED` because there is no vault
     /// behind it: the file was named on the command line, not found by a scan.
@@ -230,7 +228,6 @@ mod tests {
     use crate::keymap::key_bindings;
     use crate::shell::AppShell;
 
-    /// Scans a two-note vault and returns the store plus both ids.
     fn open_two_notes(
         cx: &mut TestAppContext,
         fs: Arc<dyn Fs>,

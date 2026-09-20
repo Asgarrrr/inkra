@@ -56,7 +56,6 @@ proptest! {
 
         let mut vault = block_on(Vault::scan(&fs, Path::new("/vault"))).expect("scan");
 
-        // What each surviving file is expected to still be called, by id.
         let mut expected: Vec<(EntryId, PathBuf)> = vault
             .entries()
             .map(|e| (e.id, e.path.as_path().to_path_buf()))
