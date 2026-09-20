@@ -1,16 +1,19 @@
 //! Inkra: a note editor on GPUI.
 //!
 //! This file is the bootstrap and nothing else. Editing semantics live in
-//! `inkra-editor`, the text model in `inkra-text`, and the view in `editor/`.
+//! `inkra-editor`, the text model in `inkra-text`, the editor view in
+//! `editor/`, and the window's outer layout in `shell.rs`.
 
 mod editor;
 mod keymap;
+mod shell;
 
 use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
 use inkra_text::Buffer;
 
 use editor::EditorView;
 use keymap::key_bindings;
+use shell::AppShell;
 
 actions!(inkra, [Quit]);
 
@@ -42,7 +45,8 @@ fn main() {
                          thirteen — past the window, so scrolling has to work",
                     )
                 });
-                cx.new(|cx| EditorView::new(buffer, cx))
+                let editor = cx.new(|cx| EditorView::new(buffer, cx));
+                cx.new(|_| AppShell::new(editor))
             },
         );
 
