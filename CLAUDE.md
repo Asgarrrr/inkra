@@ -131,6 +131,10 @@ area, not on every task:
     screen records that replacement on the *previous* note's undo stack, so `⌘Z`
     restores one file into another. `open_buffer` also resubscribes and clears
     the cached layout, which `edit_buffer` has no reason to do.
+  - An action that mutates neither the buffer nor `EditorState` takes **none**
+    of the four, and must not: `copy` reads with `buffer.read`, because
+    `edit_buffer`'s `as_mut` notifies unconditionally and would schedule an
+    autosave for a `⌘C` that changed nothing. It is the only such action today.
 - `NoteStore::current` names the note `⌘S` writes — and only that. It does not
   gate writing in general: the periodic writer writes every dirty note whatever
   is current, and so does the quit flush. What `current` decides is which note
@@ -182,7 +186,16 @@ area, not on every task:
 - Mutate the buffer only through `Buffer::transact_at`. Never call
   `replace`/`insert`/`delete` bare from above `text`.
 - Call `Buffer::finalize_transaction` around anything that must not merge into
-  adjacent typing — paste, reformat.
+  adjacent typing — paste, reformat. **Both sides.** `Buffer::close` clears
+  `grouping_blocked` the moment it pushes a transaction, so one call beforehand
+  stops the gesture merging backwards and leaves the next keystroke free to
+  merge forwards into it. Zed gets away with one call because its paste goes
+  through the ungrouped `Buffer::transact`; every mutation here carries a `now`.
+  And skip both calls when the gesture turns out to edit nothing: the flag set
+  by a transaction that never lands splits the typing run it sits in.
+- `Buffer` assumes LF. Every door text takes to reach one — `Fs::load`, and a
+  paste — calls `inkra_vault::normalize_line_endings` first. A third source of
+  outside text owes the same call before it reaches `EditorState`.
 - A `Stamp` is compared with `!=`, never with an ordering: a sync client that
   preserves a file's original modified date hands back an mtime *older* than the
   one we wrote, and `>` calls that unchanged and overwrites it. It never carries
@@ -302,6 +315,9 @@ change that introduces something reusable.
 | Line count, line of an offset, a line's range | `Buffer::line_count` / `line_for_offset` / `line_range` | `text/src/buffer.rs` |
 | Walk every line once, with offsets | `Buffer::lines` | `text/src/buffer.rs` |
 | Replace the selection with text | `EditorState::insert` | `editor/src/state.rs` |
+| Copy, cut or paste the selection | `EditorState::copy` / `cut` / `paste`, returning `Copied` | `editor/src/state.rs` |
+| Whether a clipboard item is a whole line, and so inserts above the caret's | `Copied::whole_line` — carried, never inferred from a trailing newline | `editor/src/state.rs` |
+| CRLF and lone CR to LF, on every door into a buffer — a load, and a paste | `inkra_vault::normalize_line_endings` | `vault/src/fs.rs` |
 | Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
 | Any pixel ↔ offset conversion | `DocumentLayout` | `app/src/editor/element.rs` |
 | Scroll a line into view | `EditorView::reveal_line` | `app/src/editor/mod.rs` |
@@ -336,7 +352,6 @@ change that introduces something reusable.
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
 | A failed read or write | `VaultError`, `inkra_vault::Result` | `vault/src/fs.rs` |
-| CRLF and lone CR to LF | `fs::normalize_line_endings` | `vault/src/fs.rs` |
 | Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
 | Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
