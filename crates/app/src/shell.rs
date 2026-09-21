@@ -165,7 +165,7 @@ mod tests {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
             .expect("scan the test vault");
         let vault = cx.update(|cx| cx.new(|_| scanned));
-        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))));
+        let notes = cx.update(|cx| cx.new(|cx| NoteStore::new(fs, Some(vault), cx)));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer, cx)));
         let window = cx.add_window({
@@ -227,7 +227,7 @@ mod tests {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
-        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(Arc::new(MemFs::new()), None)));
+        let notes = cx.update(|cx| cx.new(|cx| NoteStore::new(Arc::new(MemFs::new()), None, cx)));
         let window = cx.add_window(move |_, cx| AppShell::new(editor, notes, cx));
         window
             .update(cx, |shell, window, cx| {

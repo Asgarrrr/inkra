@@ -97,7 +97,7 @@ fn main() {
                 let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
                 let vault = scanned.map(|vault| cx.new(|_| vault));
                 let notes = cx.new(|cx| {
-                    let mut store = NoteStore::new(Arc::new(RealFs), vault);
+                    let mut store = NoteStore::new(Arc::new(RealFs), vault, cx);
                     if let Some(path) = note {
                         store.adopt(buffer, path, cx);
                     }

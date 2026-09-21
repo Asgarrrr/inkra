@@ -191,7 +191,7 @@ mod tests {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
             .expect("scan the test vault");
         let vault = cx.update(|cx| cx.new(|_| scanned));
-        cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))))
+        cx.update(|cx| cx.new(|cx| NoteStore::new(fs, Some(vault), cx)))
     }
 
     /// The same, with a sidebar that is never drawn.

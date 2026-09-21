@@ -1,11 +1,11 @@
-//! An in-memory `Fs` for tests: a `BTreeMap`, an injectable error and one load
-//! gate, not a simulated kernel. Zed's `FakeFs` is 2207 lines
+//! An in-memory `Fs` for tests: a `BTreeMap`, injectable errors and gates on
+//! both I/O paths, not a simulated kernel. Zed's `FakeFs` is 2207 lines
 //! (`vendor/zed-reference/crates/fs/src/fs.rs:1440-3646`) because it amortizes
 //! over hundreds of scanner tests; ours does not.
 //!
 //! Compiled under `--all-features`, so `unwrap_used = "deny"` applies here too.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -25,9 +25,14 @@ struct State {
     /// its children are unreachable anyway, since the walk never descends past
     /// a directory it could not read.
     unreadable: Option<PathBuf>,
-    /// The next `load` of each of these paths parks until its `LoadGate` is
+    /// Every `save` of these paths fails. Models a read-only file, a full disk,
+    /// or a directory the process cannot write into. See `make_unwritable`.
+    unwritable: BTreeSet<PathBuf>,
+    /// The next `load` of each of these paths parks until its `Gate` is
     /// released or dropped. See `MemFs::block_load`.
-    blocked: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    /// The same, for the next `save` of each path. See `MemFs::block_save`.
+    blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
 }
 
 pub struct MemFs {
@@ -129,6 +134,17 @@ impl MemFs {
         self.state().unreadable = Some(path.into());
     }
 
+    /// Every `save` of `path` fails from now on. Sticky rather than one-shot:
+    /// the conditions it models — a read-only file, a full disk — do not clear
+    /// themselves, and a note whose write failed stays dirty, so a one-shot
+    /// injector would be repaired by the very next autosave.
+    ///
+    /// Without it nothing can fail a write, and `SaveFailed` can be deleted
+    /// from the write path with the whole suite still green.
+    pub fn make_unwritable(&self, path: impl Into<PathBuf>) {
+        self.state().unwritable.insert(path.into());
+    }
+
     /// Parks the next `load` of `path` until the returned gate is released or
     /// dropped. One gate parks one load.
     ///
@@ -136,12 +152,28 @@ impl MemFs {
     /// instantly, so without it no test can hold one note's load open while
     /// another completes — the only shape in which the editor and
     /// `NoteStore::current` can disagree.
-    // No `#[must_use]`: `LoadGate` carries its own, and dropping the returned
-    // gate on the spot would release the load immediately.
-    pub fn block_load(&self, path: impl Into<PathBuf>) -> LoadGate {
+    // No `#[must_use]`: `Gate` carries its own, and dropping the returned gate
+    // on the spot would release the operation immediately.
+    pub fn block_load(&self, path: impl Into<PathBuf>) -> Gate {
         let (release, wait) = oneshot::channel();
-        self.state().blocked.insert(path.into(), wait);
-        LoadGate(release)
+        self.state().blocked_loads.insert(path.into(), wait);
+        Gate(release)
+    }
+
+    /// The same, for the next `save` of `path`.
+    ///
+    /// A write that outlives the turn that issued it is the only way to reach
+    /// two writers of one note: the periodic chain's write still in flight when
+    /// a second one is issued from outside the chain — `⌘S` queued behind it,
+    /// or the quit flush, which cannot await the chain at all. Without this
+    /// gate every `MemFs` write completes inside the call that started it, so
+    /// that interleaving never occurs and neither the ordering guard nor the
+    /// cancel path can be put under test.
+    // No `#[must_use]`: see `block_load`.
+    pub fn block_save(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_saves.insert(path.into(), wait);
+        Gate(release)
     }
 
     #[must_use]
@@ -153,17 +185,17 @@ impl MemFs {
     }
 }
 
-/// Holds one `MemFs::load` parked. Releasing or dropping it lets that load
-/// finish.
+/// Holds one `MemFs::load` or `MemFs::save` parked. Releasing or dropping it
+/// lets that operation finish.
 #[must_use]
-pub struct LoadGate(oneshot::Sender<()>);
+pub struct Gate(oneshot::Sender<()>);
 
-impl LoadGate {
-    /// Lets the parked load finish. Dropping the gate does the same; use this
-    /// name when the moment the load lands is the point of the test.
+impl Gate {
+    /// Lets the parked operation finish. Dropping the gate does the same; use
+    /// this name when the moment it lands is the point of the test.
     pub fn release(self) {
-        // Errs when the load was cancelled before it ever parked — which is
-        // exactly what a superseded click is supposed to do to it.
+        // Errs when the operation was cancelled before it ever parked — which
+        // is exactly what a superseded click is supposed to do to a load.
         let _ = self.0.send(());
     }
 }
@@ -208,7 +240,7 @@ impl Fs for MemFs {
         // `MutexGuard` held across one would make this future non-`Send`, which
         // `async_trait` requires. A dropped sender resolves the receiver with
         // an error, which releases the load just as a send does.
-        let blocked = self.state().blocked.remove(path);
+        let blocked = self.state().blocked_loads.remove(path);
         if let Some(wait) = blocked {
             let _ = wait.await;
         }
@@ -237,6 +269,23 @@ impl Fs for MemFs {
     /// No link count is modelled, so this always takes the replacing path —
     /// `RealFs::save` falls back to writing in place when `nlink > 1`.
     async fn save(&self, path: &Path, text: &str) -> Result<Saved> {
+        // Parked before the insert, and the guard dropped before the await for
+        // the same `Send` reason as `load`. A gated write must not have landed
+        // while it is still held: a test that releases the gate is asserting
+        // that *this* write is the one reaching the file.
+        let blocked = self.state().blocked_saves.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
+        // Checked after the gate, so a blocked write still fails where a real
+        // one would — at the end, having consumed the time.
+        if self.state().unwritable.contains(path) {
+            return Err(VaultError::Io {
+                path: path.to_path_buf(),
+                source: io::Error::from(io::ErrorKind::PermissionDenied),
+            });
+        }
+
         self.insert_file(path.to_path_buf(), text);
 
         let mut state = self.state();
@@ -252,6 +301,7 @@ impl Fs for MemFs {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
     use futures::executor::block_on;
 
     use super::MemFs;
@@ -333,6 +383,49 @@ mod tests {
             panic!("load must succeed after the recreation");
         };
         assert_ne!(recreated.identity, before.identity);
+    }
+
+    /// The injector the `SaveFailed` path needs: without it every write
+    /// succeeds and the error arm is unreachable from any test.
+    #[test]
+    fn an_unwritable_file_reports_an_error_and_keeps_its_old_text() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        fs.make_unwritable("/vault/a.md");
+
+        let result = block_on(fs.save(Path::new("/vault/a.md"), "after"));
+
+        assert!(matches!(result, Err(VaultError::Io { .. })));
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("before"),
+            "a failed write leaves the file as it was"
+        );
+    }
+
+    /// The gate has to hold the *write*, not just the future: a test that
+    /// releases it is asserting the write lands at that moment and not before.
+    #[test]
+    fn a_blocked_save_does_not_reach_the_file_until_the_gate_releases() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+
+        let gate = fs.block_save("/vault/a.md");
+        let mut write = Box::pin(fs.save(Path::new("/vault/a.md"), "after"));
+        // Polled once so the future reaches the gate and parks there.
+        assert!(write.as_mut().now_or_never().is_none());
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("before"),
+            "the write is in flight and must not have landed"
+        );
+
+        gate.release();
+        assert!(block_on(write).is_ok());
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("after")
+        );
     }
 
     #[test]

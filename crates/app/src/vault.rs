@@ -12,7 +12,7 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 use gpui::{App, Context, Entity, EventEmitter, Subscription, Task, actions, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::{EntryId, Fs, Saved, Vault};
 
 actions!(vault, [Save]);
 
@@ -33,6 +33,71 @@ const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
 pub(crate) struct SaveFailed(pub(crate) EntryId);
 
 impl EventEmitter<SaveFailed> for NoteStore {}
+
+/// Serialises one note's writes, and drops one that a newer write overtook.
+///
+/// One note normally has exactly one writer: `schedule_save` chains every write
+/// behind the previous one. The quit flush is the exception, and cannot be
+/// chained — `App::shutdown` blocks the foreground session while it polls the
+/// quit futures (`gpui/src/app.rs:1073`,
+/// `scheduler/src/test_scheduler.rs:100`, `:362`), so a quit write that awaited
+/// the `cx.spawn` chain would wait for a task that can never resume. It
+/// therefore issues its own write, and for a moment a note has two.
+///
+/// Dropping `NoteStore` does not settle this. `windows.clear()` releases the
+/// store before the quit futures are polled, which cancels the chain's `Task`
+/// — but cancelling a `Task` only stops it being polled *again*
+/// (`async-task/src/task.rs:440-445`), and `RealFs::save` has no `.await` in
+/// it, so a write a background thread already began runs to its `rename()`
+/// regardless. The loser of that race is whichever `rename()` lands last, and
+/// without ordering that can be the *older* text.
+///
+/// The lock alone cannot order them: `futures::lock::Mutex` documents no
+/// fairness at all (`futures-util-0.3.34/src/lock/mutex.rs:14-21`), so
+/// acquisition order is not issue order. The sequence is what decides; the lock
+/// only stops the two `rename()`s interleaving.
+struct Writer {
+    /// The sequence of the newest write that reached the filesystem.
+    ///
+    /// Locked and unlocked entirely inside a background task. No foreground
+    /// code may hold this guard: the quit future is polled while the foreground
+    /// session is blocked, so a guard held by a `cx.spawn` chain would never be
+    /// released and shutdown would spin until its timeout.
+    written: futures::lock::Mutex<u64>,
+}
+
+/// Writes one note's text, unless a newer write already landed.
+///
+/// `None` means exactly that — overtaken, not failed. The caller must not
+/// report it as a failure, and must not advance `saved_version`: the text on
+/// disk is the *other* write's, not this one's.
+///
+/// Free rather than a method because both writers call it from a background
+/// task, where no `App` is reachable (`gpui/src/app.rs:1004-1013` holds the
+/// `RefCell` across the whole of `shutdown`).
+async fn write_through(
+    writer: Arc<Writer>,
+    fs: Arc<dyn Fs>,
+    path: PathBuf,
+    text: String,
+    seq: u64,
+) -> Option<inkra_vault::Result<Saved>> {
+    let mut written = writer.written.lock().await;
+    if seq < *written {
+        return None;
+    }
+    let result = fs.save(&path, &text).await;
+    // Only a write that landed advances the mark, so the field keeps meaning
+    // what it says. Not covered by a test, and deliberately so: sequences are
+    // minted monotonically and used once, so a retry always carries a higher
+    // number than the failure before it, and no reachable interleaving can tell
+    // the two versions apart. The guard is here to keep the invariant true for
+    // the next reader of `written`, not because a test demands it.
+    if result.is_ok() {
+        *written = seq;
+    }
+    Some(result)
+}
 
 struct OpenNote {
     buffer: Entity<Buffer>,
@@ -57,6 +122,9 @@ struct OpenNote {
     /// during a pending window would be absorbed by `scheduled` and write
     /// nothing, up to `AUTOSAVE_DELAY` late.
     cancel: Option<oneshot::Sender<()>>,
+    /// Shared with every write of this note, and with the quit flush. See
+    /// `Writer`.
+    writer: Arc<Writer>,
 }
 
 pub(crate) struct NoteStore {
@@ -69,17 +137,39 @@ pub(crate) struct NoteStore {
     /// never schedules a write, so a note edited and then switched away from
     /// would keep its changes only in memory.
     observers: HashMap<EntryId, Subscription>,
+    /// Stamps every write with its issue order. Minted where the text is
+    /// captured, under `&mut App`, so the order is the order the writes were
+    /// decided — which `Buffer::version` cannot give: an undo *lowers* the
+    /// version (`text/src/buffer.rs:114-119`), so a flush after an undo would
+    /// carry a lower number than the write it has to beat.
+    next_write: u64,
+    /// Unsubscribes the quit flush when the store goes. Never read; holding it
+    /// is the whole point, because dropping a `Subscription` cancels it.
+    _quit: Subscription,
 }
 
 impl NoteStore {
-    pub(crate) fn new(fs: Arc<dyn Fs>, vault: Option<Entity<Vault>>) -> Self {
+    pub(crate) fn new(
+        fs: Arc<dyn Fs>,
+        vault: Option<Entity<Vault>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             fs,
             vault,
             open: HashMap::new(),
             current: None,
             observers: HashMap::new(),
+            next_write: 0,
+            _quit: cx.on_app_quit(Self::flush_all),
         }
+    }
+
+    /// Issue order for one write. Wraps only after 2^64 writes, which at the
+    /// autosave cadence is longer than the universe has been running.
+    fn next_seq(&mut self) -> u64 {
+        self.next_write += 1;
+        self.next_write
     }
 
     pub(crate) fn vault(&self) -> Option<&Entity<Vault>> {
@@ -200,6 +290,11 @@ impl NoteStore {
                 save: None,
                 scheduled: false,
                 cancel: None,
+                // Zero is below every minted sequence, which starts at one, so
+                // the first write of a note is never mistaken for a stale one.
+                writer: Arc::new(Writer {
+                    written: futures::lock::Mutex::new(0),
+                }),
             },
         );
     }
@@ -270,6 +365,64 @@ impl NoteStore {
         }
     }
 
+    /// Writes every dirty note, once, as the application quits.
+    ///
+    /// Split deliberately. The synchronous half runs while the store is still
+    /// alive: `App::shutdown` invokes the quit observers (`gpui/src/app.rs:1060`)
+    /// *before* `windows.clear()` (`:1064`), so the buffers, the vault and the
+    /// paths are all still reachable here. Everything the write needs is copied
+    /// out now.
+    ///
+    /// The returned future touches no `App` at all, and must not: shutdown
+    /// holds the `AppCell` borrowed across the whole poll loop
+    /// (`gpui/src/app.rs:1004-1013`), and `AsyncApp::update` would panic on the
+    /// second borrow. It also does no bookkeeping — nothing reads
+    /// `saved_version` after the process exits.
+    ///
+    /// Each write is spawned onto the **background** executor. A foreground
+    /// task cannot advance during the block (`test_scheduler.rs:362`), so a
+    /// flush that awaited one would wait out the timeout and write nothing. The
+    /// `Task`s are moved into the future rather than detached, because a
+    /// dropped `Task` is cancelled.
+    ///
+    /// Does not preempt or cancel the pending chain: it cannot: see `Writer`
+    /// for why the two writers are ordered instead of serialised.
+    fn flush_all(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
+        // Collected before any sequence is minted, so the `self.open` borrow
+        // ends before `next_seq` needs `&mut self`.
+        let dirty: Vec<_> = self
+            .open
+            .iter()
+            .filter_map(|(id, note)| {
+                let buffer = note.buffer.read(cx);
+                if buffer.version() == note.saved_version {
+                    return None;
+                }
+                // Resolved exactly as `write` does, and for the same reason: a
+                // rename moves the entry and never refreshes `OpenNote.path`.
+                let path = if *id == EntryId::DETACHED {
+                    note.path.clone()
+                } else {
+                    self.vault.as_ref()?.read(cx).absolute(*id)?
+                };
+                Some((Arc::clone(&note.writer), path, buffer.text().to_owned()))
+            })
+            .collect();
+
+        let fs = Arc::clone(&self.fs);
+        let writes: Vec<_> = dirty
+            .into_iter()
+            .map(|(writer, path, text)| {
+                let seq = self.next_seq();
+                cx.background_spawn(write_through(writer, Arc::clone(&fs), path, text, seq))
+            })
+            .collect();
+
+        async move {
+            futures::future::join_all(writes).await;
+        }
+    }
+
     /// Writes one note, once. A no-op when nothing changed.
     ///
     /// The version is captured **with** the text, before the spawn, so
@@ -281,7 +434,7 @@ impl NoteStore {
     /// Reached only from a `schedule_save` chain, which is what gives a note
     /// exactly one writer at a time.
     async fn write(id: EntryId, this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp) {
-        let Ok(Some((fs, path, text, version))) = this.update(cx, |this, cx| {
+        let Ok(Some((fs, writer, path, text, version, seq))) = this.update(cx, |this, cx| {
             let note = this.open.get(&id)?;
             // `update`, never `as_mut`: the latter notifies on drop
             // (`gpui/src/app.rs:3280-3286`) and `finalize_transaction` changes
@@ -303,14 +456,24 @@ impl NoteStore {
             } else {
                 this.vault.as_ref()?.read(cx).absolute(id)?
             };
-            Some((Arc::clone(&this.fs), path, text, version))
+            let writer = Arc::clone(&note.writer);
+            let fs = Arc::clone(&this.fs);
+            let seq = this.next_seq();
+            Some((fs, writer, path, text, version, seq))
         }) else {
             return;
         };
 
         let written = cx
-            .background_spawn(async move { fs.save(&path, &text).await })
+            .background_spawn(write_through(writer, fs, path, text, seq))
             .await;
+        // Overtaken by a newer write, which is only reachable from the quit
+        // flush. Not a failure: the file holds text newer than this one's, so
+        // reporting it would be wrong and advancing `saved_version` would claim
+        // this write's version reached disk when the other one's did.
+        let Some(written) = written else {
+            return;
+        };
         let _ = this.update(cx, |this, cx| {
             let Ok(saved) = written else {
                 // The note keeps its old `saved_version`, so it stays dirty and
@@ -345,7 +508,7 @@ mod tests {
     use inkra_vault::mem_fs::MemFs;
     use inkra_vault::{EntryId, Vault};
 
-    use super::{AUTOSAVE_DELAY, Fs, NoteStore};
+    use super::{AUTOSAVE_DELAY, Fs, NoteStore, SaveFailed};
     use crate::editor::EditorView;
     use crate::keymap::key_bindings;
     use crate::shell::AppShell;
@@ -366,7 +529,7 @@ mod tests {
         };
         let (a, b) = (id_of("a"), id_of("b"));
         let vault = cx.update(|cx| cx.new(|_| scanned));
-        let store = cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))));
+        let store = cx.update(|cx| cx.new(|cx| NoteStore::new(fs, Some(vault), cx)));
         (store, a, b)
     }
 
@@ -428,24 +591,34 @@ mod tests {
 
     /// `with_editor` and `dispatching` (`editor/tests.rs`) root the window at
     /// `EditorView`, so neither can prove an `AppShell`-scoped binding fires.
-    fn open_shell(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> VisualTestContext {
+    /// Returns the store as well as the window: it is built here, so a test
+    /// that needs to subscribe to it or read `is_modified` takes it from the
+    /// helper rather than reaching through `AppShell`, whose fields are private
+    /// to `shell.rs`.
+    fn open_shell(
+        cx: &mut TestAppContext,
+        fs: Arc<dyn Fs>,
+    ) -> (VisualTestContext, Entity<NoteStore>) {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
         let notes = cx.update(|cx| {
             cx.new(|cx| {
-                let mut store = NoteStore::new(fs, None);
+                let mut store = NoteStore::new(fs, None, cx);
                 store.adopt(buffer, PathBuf::from("/vault/a.md"), cx);
                 store
             })
         });
-        let window = cx.add_window(move |_, cx| AppShell::new(editor, notes, cx));
+        let window = cx.add_window({
+            let notes = notes.clone();
+            move |_, cx| AppShell::new(editor, notes, cx)
+        });
         window
             .update(cx, |shell, window, cx| {
                 window.focus(&shell.focus_handle(cx), cx);
             })
             .unwrap();
-        VisualTestContext::from_window(window.into(), cx)
+        (VisualTestContext::from_window(window.into(), cx), notes)
     }
 
     /// Focus is in `EditorView`; the binding is scoped to `AppShell`. Proves
@@ -455,7 +628,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         // The caret opens at the end of the buffer (`EditorView::new`).
         visual.simulate_input("X");
         visual.simulate_keystrokes("cmd-s");
@@ -478,7 +651,7 @@ mod tests {
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
         let notes = cx.update(|cx| {
             cx.new(|cx| {
-                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None);
+                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx);
                 store.adopt(buffer.clone(), PathBuf::from("/vault/a.md"), cx);
                 store
             })
@@ -519,7 +692,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         visual.simulate_input("X");
         cx.executor().advance_clock(AUTOSAVE_DELAY);
         cx.run_until_parked();
@@ -538,7 +711,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         visual.simulate_input("X");
         cx.executor().advance_clock(AUTOSAVE_DELAY / 2);
         cx.run_until_parked();
@@ -559,7 +732,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         let mut expected = "before".to_owned();
         for round in 1..=3 {
             // The second keystroke lands inside the pending window. Under an
@@ -589,7 +762,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         // Schedules the periodic chain; its deadline is one full delay away.
         visual.simulate_input("X");
         visual.simulate_keystrokes("cmd-s");
@@ -600,6 +773,173 @@ mod tests {
             Some("beforeX"),
             "cmd-s must not wait for the deadline it preempted"
         );
+    }
+
+    fn writer() -> Arc<super::Writer> {
+        Arc::new(super::Writer {
+            written: futures::lock::Mutex::new(0),
+        })
+    }
+
+    /// The ordering guard, driven directly rather than raced.
+    ///
+    /// A `#[gpui::test]` cannot put this under test honestly. `TestScheduler`
+    /// runs every runnable on the one thread driving the block
+    /// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:308-417`),
+    /// so it can model "queued and not yet polled" but never the production
+    /// hazard, which is a background thread already inside `rename()`. And a
+    /// test that let the scheduler pick the order would assert whatever seed 0
+    /// happens to produce, for as long as gpui's scheduling weights stay put.
+    ///
+    /// Driving `write_through` by hand fixes both: it needs no window, no
+    /// scheduler and no clock, so each interleaving is chosen rather than
+    /// hoped for. The `scroll.rs` precedent — a plain `#[test]` in `app` for
+    /// something that cannot move down a layer.
+    #[test]
+    fn a_later_write_wins_when_it_lands_second() {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+        let writer = writer();
+        let dyn_fs = Arc::clone(&fs) as Arc<dyn Fs>;
+
+        let older = super::write_through(
+            Arc::clone(&writer),
+            Arc::clone(&dyn_fs),
+            PathBuf::from("/vault/a.md"),
+            "older".to_owned(),
+            1,
+        );
+        let newer = super::write_through(
+            writer,
+            dyn_fs,
+            PathBuf::from("/vault/a.md"),
+            "newer".to_owned(),
+            2,
+        );
+        assert!(futures::executor::block_on(older).is_some_and(|r| r.is_ok()));
+        assert!(futures::executor::block_on(newer).is_some_and(|r| r.is_ok()));
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("newer")
+        );
+    }
+
+    /// The R2 revert, forced. Without the sequence the older write lands last
+    /// and the file holds text the user had already replaced — the loss this
+    /// whole feature exists to prevent, arriving through the quit flush that is
+    /// supposed to be the safety net.
+    #[test]
+    fn a_later_write_wins_when_it_lands_first() {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+        let writer = writer();
+        let dyn_fs = Arc::clone(&fs) as Arc<dyn Fs>;
+
+        let newer = super::write_through(
+            Arc::clone(&writer),
+            Arc::clone(&dyn_fs),
+            PathBuf::from("/vault/a.md"),
+            "newer".to_owned(),
+            2,
+        );
+        let older = super::write_through(
+            writer,
+            dyn_fs,
+            PathBuf::from("/vault/a.md"),
+            "older".to_owned(),
+            1,
+        );
+        assert!(futures::executor::block_on(newer).is_some_and(|r| r.is_ok()));
+
+        // `None`, not `Some(Err(_))`: overtaken is not failed, and a caller
+        // that reported it would raise `SaveFailed` for a write that was
+        // simply too late to matter.
+        assert!(
+            futures::executor::block_on(older).is_none(),
+            "the stale write must be skipped, not merely reported"
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("newer"),
+            "the older write must not have reached the file at all"
+        );
+    }
+
+    /// The defect the cancel channel introduced, reachable only with a write
+    /// slow enough to outlive the turn that issued it.
+    ///
+    /// `⌘S` installs a chain whose timer is already ready, then the next
+    /// keystroke replaces `note.cancel` and drops that chain's sender. The
+    /// receiver resolves `Err(Canceled)`, and treating that as a cancel makes
+    /// the gesture that promises "write now" write nothing until the periodic
+    /// deadline. The clock never advances past the release here, so only a
+    /// chain that distinguishes a dropped sender from a deliberate send can
+    /// produce the assertion below.
+    #[gpui::test]
+    fn a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let gate = fs.block_save("/vault/a.md");
+
+        // Parks the periodic chain inside its write, so everything below queues
+        // behind a write that is still in flight.
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        visual.simulate_keystrokes("cmd-s");
+        // Lands while the `⌘S` chain is queued: it replaces the sender that
+        // chain is selecting on.
+        visual.simulate_input("Y");
+
+        gate.release();
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("beforeXY"),
+            "the cmd-s chain must reach its write once the one it queued \
+             behind finishes"
+        );
+    }
+
+    /// `SaveFailed` is the only report a failed write has. Nothing else in the
+    /// suite can fail one, so without this the emit — and `AppShell`'s
+    /// subscription to it — can be deleted with the workspace still green.
+    #[gpui::test]
+    fn a_failed_write_reports_it_and_leaves_the_note_dirty(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+        fs.make_unwritable("/vault/a.md");
+
+        let (mut visual, notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let failures = Arc::new(AtomicUsize::new(0));
+        let _guard = cx.update(|cx| {
+            let failures = Arc::clone(&failures);
+            cx.subscribe(&notes, move |_, _: &SaveFailed, _| {
+                failures.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert_eq!(failures.load(Ordering::SeqCst), 1, "the write failed once");
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("before")
+        );
+        notes.update(cx, |notes, cx| {
+            assert!(
+                notes.is_modified(EntryId::DETACHED, cx),
+                "a note whose write failed stays dirty, so the next edit retries"
+            );
+        });
     }
 
     /// A note left behind is written, so its edits do not sit in memory until
@@ -682,6 +1022,78 @@ mod tests {
         );
     }
 
+    /// The gap `⌘Q` used to leave: every dirty note reaches disk, not just the
+    /// one `⌘S` would have picked.
+    ///
+    /// Quit through `TestAppContext::quit`, which calls `App::shutdown`
+    /// directly (`gpui/src/app/test_context.rs:233`). `cx.quit()` inside an
+    /// `update` would be `App::quit` — `self.platform.quit()`, whose test
+    /// implementation is an empty body — and would prove nothing.
+    ///
+    /// Claims only that the flush is wired up and completes. It does **not**
+    /// claim the 200 ms `SHUTDOWN_TIMEOUT` is met: under `TestScheduler` the
+    /// block's bound is a random tick count and the clock jumps to the next
+    /// timer without consulting any deadline
+    /// (`scheduler/src/test_scheduler.rs:110-118`, `:441-448`).
+    #[gpui::test]
+    fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store.update(cx, |store, cx| store.open_note(a, cx).detach());
+        store.update(cx, |store, cx| store.open_note(b, cx).detach());
+        cx.run_until_parked();
+        // Only `b` is current, so a flush that reused `save_current` would
+        // write `b` and lose `a`.
+        store.update(cx, |store, cx| store.set_current(b, cx));
+        for id in [a, b] {
+            store.update(cx, |store, cx| {
+                let buffer = store.buffer_for(id).cloned().expect("the note is open");
+                buffer.update(cx, |buffer, _| {
+                    buffer.transact_at(Instant::now(), |buffer| {
+                        buffer.insert(ByteOffset(0), "EDITED ");
+                    });
+                });
+            });
+        }
+
+        cx.quit();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("EDITED alpha"),
+            "the note that was not current must still be written"
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/b.md")).as_deref(),
+            Some("EDITED beta")
+        );
+    }
+
+    /// The version comparison, at quit. Without it every note on screen is
+    /// rewritten on every exit, which on a synced vault is a burst of
+    /// no-op changes the sync client still has to carry.
+    #[gpui::test]
+    fn quitting_leaves_a_clean_note_alone(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        // Text the buffer never held, so any write at all shows.
+        fs.insert_file("/vault/a.md", "on disk, not in the buffer");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store.update(cx, |store, cx| store.open_note(a, cx).detach());
+        cx.run_until_parked();
+
+        cx.quit();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("on disk, not in the buffer")
+        );
+    }
+
     /// The file holds text the buffer never had, so a write of any kind shows —
     /// putting the version comparison under test, not just a matching write.
     #[gpui::test]
@@ -689,7 +1101,7 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "on disk, not in the buffer");
 
-        let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
         visual.simulate_keystrokes("cmd-s");
         cx.run_until_parked();
 
