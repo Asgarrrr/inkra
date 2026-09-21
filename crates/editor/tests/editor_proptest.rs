@@ -192,4 +192,50 @@ proptest! {
         prop_assert_eq!(state.cursor(), ByteOffset(range.start.0 + typed.len()));
         prop_assert!(state.selection().is_empty());
     }
+
+    /// Cut then paste puts the text back. The one exception is stated rather
+    /// than excluded: a whole-line cut of a last line with no terminator gives
+    /// it one, because `cut` synthesizes the newline so that a cut line stays a
+    /// line wherever it is pasted. See the clipboard design document.
+    ///
+    /// The caret round-trips only for a selection. After a line cut it lands at
+    /// the start of the line *below* the restored one, as it does in Zed, since
+    /// the cut left it at the line start the paste then pushed down.
+    #[test]
+    fn cut_then_paste_restores_the_text(
+        parts in prop::collection::vec(text_strategy(), 1..6),
+        trailing_newline in any::<bool>(),
+        anchor in any::<usize>(),
+        head in any::<usize>(),
+    ) {
+        let mut text = parts.join("\n");
+        if trailing_newline {
+            text.push('\n');
+        }
+
+        let mut buffer = Buffer::new(text.clone());
+        let mut state = EditorState::new(Selection::at(ByteOffset(0)));
+        state.move_to(&buffer, ByteOffset(anchor % (text.len() + 1)), false);
+        state.move_to(&buffer, ByteOffset(head % (text.len() + 1)), true);
+
+        let selection = state.selection().range();
+        let line = buffer.line_range(buffer.line_for_offset(state.cursor()));
+        // The only case that gains a newline: nothing selected, and the caret's
+        // line runs to the end of the buffer with nothing terminating it.
+        let gains_a_newline = selection.is_empty() && line.end >= buffer.len();
+
+        let copied = state.cut(&mut buffer, Instant::now());
+        state.paste(&mut buffer, Instant::now(), &copied);
+
+        let expected = if gains_a_newline {
+            format!("{text}\n")
+        } else {
+            text.clone()
+        };
+        prop_assert_eq!(buffer.text(), expected.as_str());
+
+        if !selection.is_empty() {
+            prop_assert_eq!(state.cursor(), selection.end);
+        }
+    }
 }

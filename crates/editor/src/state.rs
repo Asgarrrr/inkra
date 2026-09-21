@@ -35,6 +35,21 @@ enum Direction {
     Forward,
 }
 
+/// What a copy took, and how a paste of it should land.
+///
+/// `whole_line` is carried rather than inferred from the text. Plenty of
+/// ordinary clipboard content ends in a newline — a whole file, a command's
+/// output, a paragraph from a web page — and none of it should be inserted
+/// above the caret's line. The flag records how the text was *selected*, which
+/// no inspection of the text can recover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Copied {
+    pub text: String,
+    /// The copy was a whole line: `text` ends with `\n`, and pasting it at a
+    /// bare caret inserts a line above rather than splitting the current one.
+    pub whole_line: bool,
+}
+
 /// One view's editing state over a buffer it does not own.
 ///
 /// The buffer arrives per operation rather than being held, because a note
@@ -106,6 +121,105 @@ impl EditorState {
     pub fn insert(&mut self, buffer: &mut Buffer, now: Instant, text: &str) {
         let range = self.selection.range();
         self.edit(buffer, now, range, text);
+    }
+
+    /// What `⌘C` takes. Reads only: a copy owes no repaint and must not mark
+    /// the note dirty.
+    #[must_use]
+    pub fn copy(&self, buffer: &Buffer) -> Copied {
+        self.target(buffer).1
+    }
+
+    /// [`EditorState::copy`], then removes what it took.
+    ///
+    /// Sealed on both sides, like [`EditorState::paste`]: a cut is a gesture of
+    /// its own and must not swallow the typing around it.
+    pub fn cut(&mut self, buffer: &mut Buffer, now: Instant) -> Copied {
+        let (range, copied) = self.target(buffer);
+        // An empty range is the empty last line: there is a line to copy but no
+        // byte to remove. Editing anyway would leave `grouping_blocked` set by
+        // a transaction that never lands.
+        if !range.is_empty() {
+            buffer.finalize_transaction();
+            self.edit(buffer, now, range, "");
+            buffer.finalize_transaction();
+        }
+        copied
+    }
+
+    /// What `⌘V` does.
+    ///
+    /// Finalizing on *both* sides is load-bearing. [`Buffer::close`] clears the
+    /// flag the moment it pushes a transaction, so sealing only beforehand
+    /// leaves the next keystroke free to merge into the paste. Zed avoids this
+    /// by pasting through the ungrouped `Buffer::transact`; every mutation here
+    /// carries a `now` and groups.
+    pub fn paste(&mut self, buffer: &mut Buffer, now: Instant, copied: &Copied) {
+        // Before the seal, not after: a paste of nothing must leave the
+        // surrounding typing run intact rather than splitting it in two.
+        if copied.text.is_empty() {
+            return;
+        }
+
+        buffer.finalize_transaction();
+        if copied.whole_line && self.selection.is_empty() {
+            let caret = self.cursor();
+            let start = self.line(buffer).start;
+            self.edit(buffer, now, start..start, &copied.text);
+            // The insertion sits entirely before the caret, so the caret keeps
+            // its column on the line that moved down. `edit` would have left it
+            // at the start of that line instead.
+            self.selection
+                .collapse_to(ByteOffset(caret.0 + copied.text.len()), Goal::None);
+        } else {
+            self.insert(buffer, now, &copied.text);
+        }
+        buffer.finalize_transaction();
+    }
+
+    /// The range a copy or a cut acts on, and what it puts on the clipboard.
+    ///
+    /// The two differ only on a last line with no terminator: the range stops
+    /// at the end of the text, while the text gains the `\n` the line does not
+    /// have. That asymmetry is deliberate and is where we part company with
+    /// Zed, whose cut copies exactly the bytes it removes. Ours guarantees that
+    /// a whole-line item is a whole line wherever it lands — which is what
+    /// cutting a line is for — and pays for it by giving an unterminated last
+    /// line its terminator when the cut is pasted straight back.
+    fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
+        if !self.selection.is_empty() {
+            let range = self.selection.range();
+            let text = buffer.text()[range.start.0..range.end.0].to_string();
+            return (
+                range,
+                Copied {
+                    text,
+                    whole_line: false,
+                },
+            );
+        }
+
+        let line = self.line(buffer);
+        // `line_range` stops before the newline, so anything left after it is
+        // one, and there is exactly one byte of it.
+        let terminated = line.end < buffer.len();
+        let end = if terminated {
+            ByteOffset(line.end.0 + 1)
+        } else {
+            line.end
+        };
+        let mut text = buffer.text()[line.start.0..end.0].to_string();
+        if !terminated {
+            text.push('\n');
+        }
+
+        (
+            line.start..end,
+            Copied {
+                text,
+                whole_line: true,
+            },
+        )
     }
 
     pub fn backspace(&mut self, buffer: &mut Buffer, now: Instant) {
@@ -463,6 +577,192 @@ mod tests {
 
         assert!(state.undo(&mut buffer));
         assert_eq!(buffer.text(), "abc");
+    }
+
+    fn line(text: &str) -> Copied {
+        Copied {
+            text: text.to_string(),
+            whole_line: true,
+        }
+    }
+
+    fn span(text: &str) -> Copied {
+        Copied {
+            text: text.to_string(),
+            whole_line: false,
+        }
+    }
+
+    #[test]
+    fn copy_takes_exactly_the_selection() {
+        let (buffer, mut state) = editor("abc");
+        state.move_to(&buffer, at(0), false);
+        state.move_to(&buffer, at(2), true);
+        assert_eq!(state.copy(&buffer), span("ab"));
+    }
+
+    #[test]
+    fn copy_with_no_selection_takes_the_whole_line_and_its_newline() {
+        let (buffer, mut state) = editor("x\ny\n");
+        state.move_to(&buffer, at(0), false);
+        assert_eq!(state.copy(&buffer), line("x\n"));
+    }
+
+    #[test]
+    fn copy_on_an_unterminated_last_line_still_ends_in_a_newline() {
+        // The synthesized newline is what makes the item a whole line wherever
+        // it is pasted, rather than one that welds itself onto another.
+        let (buffer, mut state) = editor("x\ny");
+        state.move_to(&buffer, at(3), false);
+        assert_eq!(state.copy(&buffer), line("y\n"));
+    }
+
+    #[test]
+    fn cut_removes_what_it_put_on_the_clipboard_in_one_undo_step() {
+        let (mut buffer, mut state) = editor("abc");
+        state.move_to(&buffer, at(0), false);
+        state.move_to(&buffer, at(2), true);
+
+        assert_eq!(state.cut(&mut buffer, Instant::now()), span("ab"));
+        assert_eq!(buffer.text(), "c");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "abc");
+    }
+
+    #[test]
+    fn cut_with_no_selection_removes_the_newline_too() {
+        let (mut buffer, mut state) = editor("x\ny");
+        state.move_to(&buffer, at(0), false);
+
+        assert_eq!(state.cut(&mut buffer, Instant::now()), line("x\n"));
+        assert_eq!(buffer.text(), "y");
+    }
+
+    #[test]
+    fn cut_on_an_empty_last_line_copies_a_newline_and_removes_nothing() {
+        let (mut buffer, mut state) = editor("x\n");
+        state.move_to(&buffer, at(2), false);
+
+        assert_eq!(state.cut(&mut buffer, Instant::now()), line("\n"));
+        assert_eq!(buffer.text(), "x\n");
+        assert!(!state.undo(&mut buffer), "an empty removal is not an edit");
+    }
+
+    #[test]
+    fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
+        // The seal is skipped along with the edit. Left set by a transaction
+        // that never lands, `grouping_blocked` would break the next run apart.
+        let (mut buffer, mut state) = editor("x\n");
+        let start = Instant::now();
+
+        state.move_to(&buffer, at(0), false);
+        state.insert(&mut buffer, start, "a");
+        state.move_to(&buffer, buffer.len(), false);
+        state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
+        state.move_to(&buffer, at(1), false);
+        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
+        assert_eq!(buffer.text(), "abx\n");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "x\n", "both keystrokes were one run");
+    }
+
+    #[test]
+    fn pasting_a_span_replaces_the_selection() {
+        let (mut buffer, mut state) = editor("abc");
+        state.select_all(&buffer);
+        state.paste(&mut buffer, Instant::now(), &span("Z"));
+        assert_eq!(buffer.text(), "Z");
+    }
+
+    #[test]
+    fn pasting_a_line_over_a_selection_replaces_it_like_any_other_text() {
+        let (mut buffer, mut state) = editor("abc");
+        state.select_all(&buffer);
+        state.paste(&mut buffer, Instant::now(), &line("Z\n"));
+        assert_eq!(buffer.text(), "Z\n");
+    }
+
+    #[test]
+    fn pasting_a_line_at_a_bare_caret_inserts_above_and_keeps_the_column() {
+        let (mut buffer, mut state) = editor("abc\ndef");
+        // Line 1, column 1: between 'd' and 'e'.
+        state.move_to(&buffer, at(5), false);
+
+        state.paste(&mut buffer, Instant::now(), &line("XY\n"));
+        assert_eq!(buffer.text(), "abc\nXY\ndef");
+        // Still between 'd' and 'e', now one line further down. Left to `edit`,
+        // the caret would have landed at offset 7, the start of "def".
+        assert_eq!(state.cursor(), at(8));
+    }
+
+    #[test]
+    fn a_paste_merges_with_the_typing_on_neither_side() {
+        let (mut buffer, mut state) = editor("");
+        let start = Instant::now();
+
+        state.insert(&mut buffer, start, "a");
+        state.paste(
+            &mut buffer,
+            start + inkra_text::GROUP_INTERVAL / 2,
+            &span("Z"),
+        );
+        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
+        assert_eq!(buffer.text(), "aZb");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "aZ", "the typing after it is its own step");
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "a", "and so is the paste");
+    }
+
+    #[test]
+    fn a_cut_merges_with_the_typing_on_neither_side() {
+        let (mut buffer, mut state) = editor("xy");
+        let start = Instant::now();
+
+        state.insert(&mut buffer, start, "a");
+        state.move_(&buffer, LogicalMovement::Left, true);
+        state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
+        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
+        assert_eq!(buffer.text(), "xyb");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "xy", "the typing after it is its own step");
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "xya", "and so is the cut");
+    }
+
+    #[test]
+    fn a_paste_of_nothing_changes_nothing_and_splits_no_run() {
+        let (mut buffer, mut state) = editor("");
+        let start = Instant::now();
+
+        state.insert(&mut buffer, start, "a");
+        state.paste(
+            &mut buffer,
+            start + inkra_text::GROUP_INTERVAL / 2,
+            &span(""),
+        );
+        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
+        assert_eq!(buffer.text(), "ab");
+
+        assert!(state.undo(&mut buffer));
+        assert_eq!(buffer.text(), "", "both keystrokes were one run");
+    }
+
+    #[test]
+    fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
+        // The stated price of synthesizing the newline in `cut` as well as in
+        // `copy`. Pinned so it cannot change without someone deciding to.
+        let (mut buffer, mut state) = editor("a");
+        state.move_to(&buffer, at(0), false);
+
+        let copied = state.cut(&mut buffer, Instant::now());
+        assert_eq!(buffer.text(), "");
+        state.paste(&mut buffer, Instant::now(), &copied);
+        assert_eq!(buffer.text(), "a\n");
     }
 
     #[test]
