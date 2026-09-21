@@ -242,11 +242,19 @@ different shape.
 
 | Concern | Crate | Depends on |
 |---|---|---|
-| Open, save, watch files; vault paths | `inkra-vault` | `text` **+ anchors** |
+| Open, save, watch files; vault paths | `inkra-vault` | ~~`text` **+ anchors**~~ — superseded, see below |
 | Parse markdown; inline styling | `inkra-markdown` | `text` |
 | Links, backlinks, search | `inkra-index` | `vault`, `markdown` |
 | Panes, tabs, sidebar, command palette | `app` | all |
 | Accessibility text nodes | `app` | shaped lines; see the gap doc |
+
+The `inkra-vault` row is superseded by
+`2026-09-20-inkra-vault-design.md`, which built it. The crate depends on
+**nothing** in the workspace, not `inkra-text`: `Fs::load` returns a `String`
+and `app` builds the `Buffer`. Anchors belong to diff-based reload, which sits
+above the vault rather than inside it, and is deferred there with its trigger.
+The row is left in place rather than deleted because it records what was
+believed when the split was designed.
 
 Placement rule, for CLAUDE.md:
 

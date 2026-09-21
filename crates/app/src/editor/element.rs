@@ -10,23 +10,17 @@ use std::ops::Range;
 use gpui::{
     App, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, HighlightStyle, LayoutId,
     PaintQuad, Pixels, Point, ShapedLine, SharedString, Style, TextAlign, TextRun, TextStyle,
-    UnderlineStyle, Window, fill, point, prelude::*, px, relative, rgba, size,
+    UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
 };
 use inkra_text::{Buffer, ByteOffset};
 
 use super::EditorView;
+use crate::theme;
 
 /// Painted past the end of a line that is selected through its line break, so a
 /// selected newline is visible rather than stopping flush against the last
 /// glyph. A fraction of the line height, because there is no glyph to measure.
 const NEWLINE_STUB: f32 = 0.25;
-
-// RRGGBBAA hex is the idiomatic gpui colour form; clippy's underscore grouping
-// would obscure the byte boundaries.
-#[allow(clippy::unreadable_literal)]
-const SELECTION_COLOR: u32 = 0x3311ff55;
-#[allow(clippy::unreadable_literal)]
-const CURSOR_COLOR: u32 = 0x4ea1ffff;
 
 struct LineLayout {
     shaped: ShapedLine,
@@ -152,7 +146,7 @@ impl DocumentLayout {
                 let top = self.top_for_line(line);
                 fill(
                     Bounds::from_corners(point(left, top), point(right, top + self.line_height)),
-                    rgba(SELECTION_COLOR),
+                    theme::selection(),
                 )
             })
             .collect()
@@ -298,7 +292,7 @@ impl Element for TextElement {
             let at = layout.position_for_offset(cursor);
             let quad = fill(
                 Bounds::new(bounds.origin + at, size(px(2.), layout.line_height)),
-                rgba(CURSOR_COLOR),
+                theme::cursor(),
             );
             (Vec::new(), Some(quad))
         } else {

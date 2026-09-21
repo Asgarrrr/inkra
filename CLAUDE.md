@@ -23,6 +23,22 @@ area, not on every task:
 - [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why we build
   Zed's in-tree gpui rather than the published crate, and the accessibility gap
   accepted when GPUI was adopted.
+- [docs/superpowers/specs/2026-09-20-inkra-vault-design.md](./docs/superpowers/specs/2026-09-20-inkra-vault-design.md)
+  — the `Fs` seam, why entry identity is `(device, inode)`, the launch-state
+  table, and what saving deliberately leaves out (atomic writes, conflict
+  detection, file watching) with the trigger for each.
+- [docs/superpowers/specs/2026-09-21-autosave-design.md](./docs/superpowers/specs/2026-09-21-autosave-design.md)
+  — why the cadence is periodic rather than an idle debounce, why the write is
+  atomic when Zed's is not, and why the quit flush cannot reuse the write
+  chain. Its four **Corrected** notes are where implementing it disagreed with
+  designing it. Read this before touching the save path; the vault spec above
+  describes the pre-autosave picture.
+- [docs/superpowers/specs/2026-09-21-conflict-detection-design.md](./docs/superpowers/specs/2026-09-21-conflict-detection-design.md)
+  — why a `Stamp` is compared with `!=` and never with an ordering, why the
+  expectation lives on the `Writer` rather than on the note, and why the quit
+  flush is ordered against the periodic chain instead of serialised with it.
+  Read it with the autosave spec above; it extends that write path rather than
+  replacing it.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
@@ -34,7 +50,7 @@ area, not on every task:
 - build: `cargo build --workspace`
 - test: `cargo test --workspace`
 - lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -- --check`
+- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -- --check`
 - run: `cargo run -p inkra-app`
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
 
@@ -56,7 +72,8 @@ area, not on every task:
   wrong. Hence the vendored checkout.
 - Never run `cargo fmt --all`: `--all` includes local path dependencies, so it
   rewrites the vendored gpui source and diverges it from the pinned commit.
-  `check.sh` names our three crates explicitly for that reason.
+  `check.sh` names our own crates explicitly for that reason. A new workspace
+  member must be added to that list in the same change, or it goes unformatted.
 - The platform layer is no longer under `gpui/src/platform/`: macOS lives in
   the sibling crates `gpui_macos` and `gpui_apple`.
 - Start input work from `crates/gpui/examples/input.rs` in that checkout.
@@ -69,19 +86,81 @@ area, not on every task:
 
 - `inkra-text` → `inkra-editor` → `inkra-app`, one way. Never add a dependency
   that inverts it.
-- `text` and `editor` have zero gpui dependency. Enforced by `scripts/check.sh`;
+- `inkra-vault` sits beside that chain, not in it: `app` depends on it, it
+  depends on no other crate in the workspace. Keep it that way — it is the
+  seam a second `Fs` backend plugs into, and a dependency on `text` or
+  `editor` would drag editing semantics into the filesystem layer.
+- `text`, `editor` and `vault` have zero gpui dependency. Enforced by `scripts/check.sh`;
   that check was hardened after red-team bypasses — do not simplify it. A new
   crate below `app` goes in its loop in the same change.
 - Where does it belong?
   - no layout, no filesystem, no clock → `text` (a property of the text) or
     `editor` (a property of editing it)
   - pixels, font metrics, a `Window`, a clock, the platform → `app`
-  - filesystem and network live in `app` until a dedicated crate earns its
-    place. Never in `text` or `editor`.
-- `EditorView` has exactly two gates to its state, and new actions go through
-  them rather than around: `edit_buffer` for anything touching the text,
-  `move_cursor` for anything moving the caret. `Buffer` cannot notify for
-  itself, so a mutation outside `edit_buffer` is a repaint silently lost.
+  - a colour or a text size → `app/src/theme.rs`, never a literal at the call
+    site. `rgb` and `rgba` read the same `u32` differently, so a bare hex does
+    not say whether its low byte is blue or alpha; naming the colour takes that
+    choice away from the render method. The chrome scale (`UI_*`) must be
+    **stated** wherever chrome text is drawn: gpui's default line box is
+    `phi()` — 25.89 px on a 16 px default — and a row shorter than that clips
+    its own text under `overflow_hidden`.
+  - reading or writing a file → `vault`, behind the `Fs` trait. `app` chooses
+    the path and holds the `Arc<dyn Fs>`; it opens no file itself, which is
+    what lets every `app` test run against `MemFs` instead of the real disk.
+  - binding a file to a `Buffer` → `app` (`NoteStore`). `Fs::load` returns a
+    `Loaded` — text, `Mtime`, `FileIdentity` — and `app` unpacks the `text`
+    field into `Buffer::new`; `vault` must not learn what a `Buffer` is.
+  - network still has no home. It goes in `app` until a crate earns it, never
+    in `text`, `editor` or `vault`.
+- A vault entry is identified by `(device, inode)` — `FileIdentity` — and never
+  by its path. A rename keeps its `EntryId`; a file recreated at the same path
+  gets a new one. Keying by path instead would make a rename look like a delete
+  plus a create, and the open buffer for that note would lose its file.
+- `EditorView` has four gates to its state, and new actions go through them
+  rather than around:
+  - `edit_buffer` — the only path that mutates the text. It leases the buffer
+    with `as_mut`, which notifies on drop; `Buffer` cannot notify for itself, so
+    a mutation outside this gate is a repaint silently lost.
+  - `move_cursor` — caret moves that need the buffer to resolve. Reads the
+    buffer, notifies the view only.
+  - `update_state` — `EditorState` changes that must not touch the text.
+    `unmark_text` is the only caller: dropping a composing region owes a
+    repaint, but no buffer observer may see a text change that did not happen.
+  - `open_buffer` — the only path that may rebind the buffer entity. An open
+    cannot go through `edit_buffer`: replacing the text of the buffer already on
+    screen records that replacement on the *previous* note's undo stack, so `⌘Z`
+    restores one file into another. `open_buffer` also resubscribes and clears
+    the cached layout, which `edit_buffer` has no reason to do.
+- `NoteStore::current` names the note `⌘S` writes — and only that. It does not
+  gate writing in general: the periodic writer writes every dirty note whatever
+  is current, and so does the quit flush. What `current` decides is which note
+  `⌘S` targets and which note a switch writes on the way out. It must always be
+  the note the editor is displaying. It has exactly two writers. `set_current` is
+  the one the UI uses, and `AppShell::open_note` calls it immediately after
+  `EditorView::open_buffer`, with no `await` between the two, so nothing can
+  observe one without the other. `adopt` is the exception, and keeps the rule by
+  being synchronous: it runs before the window opens, for the file named on the
+  command line. `open_note` deliberately does not write it — it resolves on the
+  load's schedule, so it would record whichever load landed last rather than the
+  note on screen. A `current` the editor disagrees with does not save the wrong
+  file: it saves **nothing**. The note it picks is clean, so `save_current`
+  returns early at the version comparison and `⌘S` is a silent no-op. Since
+  autosave landed this no longer loses the edit — the periodic writer picks the
+  dirty note up at its deadline — but it still breaks the promise `⌘S` makes,
+  which is that the write happens *now*.
+- A widget that can open a note **emits `sidebar::NoteActivated`**; it never
+  holds an `Entity<EditorView>`. `AppShell` subscribes and routes, so a tab bar
+  or a backlinks panel plugs into the same seam with no change to the sidebar.
+  The emit is deliberately indirect on top of that: a direct synchronous
+  callback would re-enter the `Sidebar` while `activate` still holds its lease,
+  and a second lease of one entity panics. The event is delivered when the
+  *outermost* update flushes — the window's event dispatch, or a test's own
+  top-level `update` — not when the nested `activate` call returns.
+- A window-wide action binds at the `AppShell` key context, not `EditorView`'s
+  — `cmd-s` (`app/src/keymap.rs`) is the precedent. `EditorView`'s context only
+  fires while the editor has focus, and the sidebar can hold focus once it
+  becomes focusable, so an action meant to fire regardless of which pane is
+  focused goes on `AppShell`.
 - Every pixel ↔ offset conversion goes through `DocumentLayout`. It is built in
   `prepaint` and describes the *previous* frame's text, so all its line lookups
   clamp: a stale read is a caret one frame late, never an index out of bounds.
@@ -90,7 +169,7 @@ area, not on every task:
   real one; everything else states `Goal::None`.
 - No observer callback on an `Entity<Buffer>` may call `.update()` or
   `.as_mut()` on that same buffer — a second lease of one entity panics
-  (`gpui/app/entity_map.rs:231`).
+  (`gpui/src/app/entity_map.rs:231`).
 - Two panes on one note is **not** supported. `Buffer` has anchors now, but
   nothing uses them: `Selection` still holds raw offsets, so a second pane
   needs anchored selections wired through `editor`. File watching needs that
@@ -104,11 +183,24 @@ area, not on every task:
   `replace`/`insert`/`delete` bare from above `text`.
 - Call `Buffer::finalize_transaction` around anything that must not merge into
   adjacent typing — paste, reformat.
+- A `Stamp` is compared with `!=`, never with an ordering: a sync client that
+  preserves a file's original modified date hands back an mtime *older* than the
+  one we wrote, and `>` calls that unchanged and overwrites it. It never carries
+  the identity either — our own save renames, so `(device, inode)` moves on
+  every write we make ourselves, and comparing it would flag each of them.
+- No write may destroy bytes it did not put there. `Fs::save` takes the caller's
+  expectation and, when the file disagrees, preserves its current bytes beside
+  it **before** replacing them: between the two steps the bytes exist twice, so
+  no crash point loses them. A second `Fs` backend owes the same ordering.
 - Only `app` reads a clock. `text` and `editor` take the `Instant` from the
-  caller.
+  caller; `vault` takes every `Mtime` from the filesystem, never from
+  `SystemTime::now`. Conflict detection compares a freshly stated
+  `Stamp` against the one `Loaded`/`Saved` returned, inside `Fs::save` — a
+  process-clock stamp would not agree with a later stat of the same file.
 - Move and delete by grapheme, never by char.
 - Infallible buffer operations panic on caller bugs — no `Result`. Reserve
-  `thiserror` for genuinely fallible boundaries (file I/O).
+  `thiserror` for genuinely fallible boundaries — file I/O, which is
+  `VaultError`. Do not add a second error enum there.
 - Never disable a lint, test, or type check to get green. Fix it and say so.
 
 ## Testing
@@ -116,12 +208,69 @@ area, not on every task:
 - `text` and `editor`: `#[test]` plus `proptest` over edit sequences. Commit
   `.proptest-regressions`. A test that does not need a `Window` does not belong
   in `app`.
-- `app`: `#[gpui::test]` headless, in `editor/tests.rs`. Reach
-  `EntityInputHandler` through the `with_editor` helper — its methods all need
-  a `Window`. What must not live here is an *editing-semantics* test, which
-  belongs in `text` or `editor`. A plain `#[test]` over pixel geometry is fine
-  and preferable: pixels cannot move down a layer, and `scroll.rs` is the
-  precedent.
+- `vault`: the same `#[test]` plus `proptest` discipline, over `EntryId`
+  stability across add/remove/rename sequences — commit its
+  `.proptest-regressions` too. One exception to headless testing everywhere
+  else: `vault/tests/real_fs.rs` runs `RealFs` against a real temp directory,
+  because a fake filesystem cannot prove the real one's symlink and dotfile
+  filtering. `vault/tests/conflict_proptest.rs` carries the second property: no
+  save destroys what it found. It is conditional on the expectation, and has to
+  be — a save that finds what it expected is replacing its own bytes and may.
+- `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
+  exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault.rs`. A test
+  reaches only what its own file roots the window at: `with_editor` and
+  `dispatching` root at `EditorView`, so neither can prove an `AppShell`-scoped
+  binding such as `cmd-s` fires. Reach `EntityInputHandler` through
+  `with_editor` — its methods all need a `Window`. What must not live in `app`
+  is an *editing-semantics* test, which belongs in `text` or `editor`. A plain
+  `#[test]` over pixel geometry is fine and preferable: pixels cannot move down
+  a layer, and `scroll.rs` is the precedent.
+- A test of where an activated note *goes* roots at `AppShell`, in `shell.rs`,
+  for the same reason `cmd-s` does: the subscription that routes
+  `NoteActivated` is set up in `AppShell::new`, so a window rooted at `Sidebar`
+  cannot reach it. `sidebar.rs` keeps only the click→emit half, which it
+  asserts by subscribing to the `Sidebar` itself — and which therefore proves
+  nothing about `AppShell`'s wiring.
+- `app` tests use `MemFs`, never the real filesystem. Its two gates are what
+  make a race reproducible: `block_load` holds one load open while another
+  finishes — the only way to reach the state where the editor and
+  `NoteStore::current` disagree — and `block_save` holds a write open past the
+  turn that issued it, which is the only way one note gets two writers.
+  `make_unwritable` is the only way a write fails at all.
+- A purely visual constant is guarded only where a behaviour reads it. The
+  editor's line height kills six tests when deleted, because scroll and
+  hit-testing resolve through it; the sidebar's type killed none, because the
+  row pitch was fixed independently with `.h()`. So a chrome row states its
+  `line_height` and takes **no** height of its own — the row *is* its line box,
+  which both stops it clipping its text and ties the pitch to the statement, so
+  deleting the statement moves every row and a click test fails. Pin such a test
+  far enough down the list for the drift to pass one whole row, and take the
+  pitches by measurement rather than arithmetic: gpui renders 22.5 px where
+  `phi()` on 14 px computes 22.65, and a test sized from the computed figure
+  passes against the real one.
+- A test of the write **ordering** does not belong in a `#[gpui::test]`.
+  `TestScheduler` runs every runnable on the one thread driving the block
+  (`scheduler/src/test_scheduler.rs:308-417`), so it can model "queued and not
+  yet polled" but never the real hazard, which is a background thread already
+  inside `rename()`. And a test that let the scheduler choose the order would
+  assert whatever seed 0 happens to produce. Drive `write_through` directly
+  instead and force each order — a plain `#[test]`, the `scroll.rs` precedent.
+  What *does* belong in a `#[gpui::test]` is the **wiring** that feeds the
+  ordering: that the quit flush shares the note's `Writer` and mints a higher
+  sequence than the chain write it overlaps. Reach it by calling `flush_all`
+  directly, not through `cx.quit()` — the gate holding the chain's write open
+  has to be released from outside, and `quit` does not return until the flush
+  completes. Hold the returned future: its writes are `Task`s moved into it, and
+  a dropped `Task` is cancelled.
+- Quit through `TestAppContext::quit`, which calls `App::shutdown`
+  (`gpui/src/app/test_context.rs:233`). `cx.quit()` inside an `update` is
+  `App::quit` — `self.platform.quit()` — and `TestPlatform::quit` has an empty
+  body, so it fires no quit observer and proves nothing. Do not assert the
+  200 ms `SHUTDOWN_TIMEOUT`: the block's bound under the test scheduler is a
+  random tick count (`test_scheduler.rs:110-118`).
+- What the binary does before a window exists is tested in `app/tests/cli.rs`,
+  which spawns the real binary: argument handling belongs to the process, and
+  an in-process test would have to fake `std::env::args_os` and prove nothing.
 - Every key binding needs a `simulate_keystrokes` test. The action handlers are
   thin delegations, so a test that calls one directly proves nothing about the
   binding, the `actions!` mapping, or the repaint gate — and a wrong binding
@@ -142,6 +291,7 @@ change that introduces something reusable.
 | One undo step per gesture | `Buffer::transact_at` / `transact` | `text/src/buffer.rs` |
 | Stop the next edit merging in | `Buffer::finalize_transaction` | `text/src/buffer.rs` |
 | Undo/redo, returns the touched range | `Buffer::undo` / `redo` | `text/src/buffer.rs` |
+| Has the text moved since a version I held | `Buffer::version` | `text/src/buffer.rs` |
 | Convert byte ↔ UTF-16 | `Buffer::to_utf16` / `from_utf16` | `text/src/buffer.rs` |
 | Step the cursor | `Buffer::previous_grapheme` / `next_grapheme` | `text/src/buffer.rs` |
 | Snap an offset onto a boundary | `Buffer::clip` | `text/src/buffer.rs` |
@@ -165,6 +315,50 @@ change that introduces something reusable.
 | Target range of an IME edit | `EditorView::target_range` | `app/src/editor/input.rs` |
 | Paint text, cursor, selection | `TextElement` | `app/src/editor/element.rs` |
 | Build a styled run | `TextStyle::to_run` / `highlight` | gpui `style.rs:559`, `:510` |
+| Swap which note the editor shows | `EditorView::open_buffer` | `app/src/editor/mod.rs` |
+| Change view state without touching the text | `EditorView::update_state` | `app/src/editor/mod.rs` |
+| Read or write a file | `Fs` — `read_dir` / `load` / `save` | `vault/src/fs.rs` |
+| What a note looked like on disk, and the unit every write compares | `Stamp` — `(mtime, size)` | `vault/src/fs.rs` |
+| Where a conflicting write puts the bytes it must not destroy | `Saved::preserved` | `vault/src/fs.rs` |
+| Name that file | `conflict_path` (private) | `vault/src/conflict.rs` |
+| Render a Unix timestamp without a date crate | `format_utc` (private) | `vault/src/civil.rs` |
+| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault.rs` |
+| List the vault again from a running window | `Vault::collect` then `Vault::apply` — `rescan` holds `&mut self` across an await, so an entity cannot call it | `vault/src/vault.rs` |
+| What a write produced — a save renames, so the identity moves | `Saved` | `vault/src/fs.rs` |
+| Carry an `EntryId` across the inode change a save causes | `Vault::reidentify` | `vault/src/vault.rs` |
+| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
+| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
+| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
+| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
+| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
+| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
+| What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
+| A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
+| Directory or note | `Kind` | `vault/src/fs.rs` |
+| A failed read or write | `VaultError`, `inkra_vault::Result` | `vault/src/fs.rs` |
+| CRLF and lone CR to LF | `fs::normalize_line_endings` | `vault/src/fs.rs` |
+| Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
+| An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
+| Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
+| Model an external writer in a test | `MemFs::insert_file` — it keeps the path's identity, as a second process rewriting in place does | `vault/src/mem_fs.rs` |
+| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
+| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
+| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
+| A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
+| What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
+| What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
+| A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
+| Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
+| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault.rs` |
+| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar.rs` |
+| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
+| Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
+| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault.rs` |
+| A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
+| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
+| A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
+| A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
+| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |

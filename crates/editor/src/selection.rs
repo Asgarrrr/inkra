@@ -1,3 +1,9 @@
+//! Where the caret is, what it has selected, and the column it remembers.
+//!
+//! `set_head` and `collapse_to` take a `Goal` so no caret move can silently
+//! inherit a stale column: only a vertical move carries a real one, and every
+//! other caller has to say `Goal::None` out loud.
+
 use std::ops::Range;
 
 use inkra_text::ByteOffset;

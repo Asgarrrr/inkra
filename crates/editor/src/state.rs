@@ -1,3 +1,10 @@
+//! Editing as a gesture: what a keystroke, a movement or a delete does to the
+//! text and the caret.
+//!
+//! Everything here is resolvable without metrics. A movement that needs to know
+//! how tall a line is — up, down, a click — stops at `LogicalMovement` and is
+//! finished in `app`, which is the layer that has a font.
+
 use std::ops::Range;
 use std::time::Instant;
 
