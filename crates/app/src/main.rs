@@ -8,12 +8,16 @@ mod editor;
 mod keymap;
 mod shell;
 mod sidebar;
+mod theme;
 mod vault;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
+use gpui::{
+    App, Bounds, Focusable, Pixels, Size, WindowBounds, WindowOptions, actions, prelude::*, px,
+    size,
+};
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
 
@@ -23,6 +27,12 @@ use shell::AppShell;
 use vault::NoteStore;
 
 actions!(inkra, [Quit]);
+
+/// The window a first launch gets. The previous 600x320 predates the sidebar:
+/// it left 420 px of editor beside it, about eleven lines of body text. Not
+/// persisted — restoring the last size and position is deferred, with the rest
+/// of the window state.
+const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
 
 /// What the command-line argument named, already read.
 enum Launch {
@@ -83,7 +93,7 @@ fn main() {
             }
         };
 
-        let bounds = Bounds::centered(None, size(px(600.0), px(320.0)), cx);
+        let bounds = Bounds::centered(None, WINDOW_SIZE, cx);
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

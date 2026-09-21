@@ -7,7 +7,10 @@
 
 mod civil;
 mod conflict;
-pub mod fs;
+// Private, and re-exported whole below: a `pub mod` gave every type two public
+// paths — `inkra_vault::Fs` and `inkra_vault::fs::Fs` — and no caller outside
+// this crate ever used the second.
+mod fs;
 mod path;
 mod real_fs;
 mod vault;

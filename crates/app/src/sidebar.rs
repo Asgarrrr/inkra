@@ -7,11 +7,17 @@ use std::ops::Range;
 
 use gpui::{
     App, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, Styled, Subscription, Window, div, px, rgb, uniform_list,
+    ParentElement, Pixels, Render, Styled, Subscription, Window, div, px, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
 
+use crate::theme;
 use crate::vault::NoteStore;
+
+/// The left gutter every row starts from, and what each level of nesting adds.
+const INDENT_BASE: Pixels = px(8.);
+/// See [`INDENT_BASE`].
+const INDENT_STEP: Pixels = px(12.);
 
 /// Where the note goes is `AppShell`'s to decide, so any widget that can open
 /// one — a tab bar, a backlinks panel — plugs in by emitting this, with no
@@ -123,7 +129,6 @@ impl Sidebar {
     /// `cx.processor` re-enters the sidebar entity here
     /// (`gpui/src/app/context.rs:260-267`); that is the only reason
     /// `cx.listener` is reachable from `uniform_list`'s `&mut App` closure.
-    #[allow(clippy::unreadable_literal)]
     fn render_rows(
         &mut self,
         range: Range<usize>,
@@ -145,14 +150,20 @@ impl Sidebar {
                     // Load-bearing: an `auto` width is clickable only where the
                     // text reaches (`elements/uniform_list.rs:508-510`).
                     .w_full()
-                    .h(px(22.))
-                    .pl(px(8. + 12. * depth))
+                    // A row is exactly one line box tall, which is what stops it
+                    // clipping its own text. The pair has to be stated: gpui's
+                    // default line box is `phi()` — 25.89 px — and the row used
+                    // to be 22, so `overflow_hidden` below ate the difference.
+                    .h(theme::UI_LINE_HEIGHT)
+                    .text_size(theme::UI_TEXT_SIZE)
+                    .line_height(theme::UI_LINE_HEIGHT)
+                    .pl(INDENT_BASE + INDENT_STEP * depth)
                     // Load-bearing: row height is measured from item 0 alone
                     // (`elements/uniform_list.rs:658-680`), so a wrapping
                     // filename overflows its row.
                     .whitespace_nowrap()
                     .overflow_hidden()
-                    .text_color(rgb(0xd0d0d0))
+                    .text_color(theme::sidebar_text())
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |sidebar, _event, _window, cx| {
@@ -178,6 +189,16 @@ impl Render for Sidebar {
     }
 }
 
+/// The vertical centre of row `ix`, for a test that clicks one.
+///
+/// Lives beside the row height rather than in a test module, so `shell.rs` uses
+/// the same definition: two suites clicking the sidebar must not each hard-code
+/// the pitch and drift from it.
+#[cfg(test)]
+pub(crate) fn row_center(ix: f32) -> Pixels {
+    theme::UI_LINE_HEIGHT * (ix + 0.5)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -194,7 +215,7 @@ mod tests {
     use inkra_vault::mem_fs::MemFs;
     use inkra_vault::{Fs, Vault};
 
-    use super::{Kind, NoteActivated, Row, Sidebar};
+    use super::{Kind, NoteActivated, Row, Sidebar, row_center};
     use crate::vault::NoteStore;
 
     /// Stops short of the sidebar: `add_window` constructs the view itself.
@@ -361,8 +382,8 @@ mod tests {
 
         let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
 
-        // The first row is the folder `Projects`, at rows of `h(px(22.))`.
-        visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
+        // The first row is the folder `Projects`.
+        visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
         visual.run_until_parked();
 
         assert_eq!(
@@ -382,7 +403,7 @@ mod tests {
     /// `auto` row around the stem `a` ends at 17.6px and x=20 misses.
     ///
     /// Does *not* cover `.size_full()`: a window root resolves its percentage
-    /// against the test display's definite bounds, never the real 180px parent
+    /// against the test display's definite bounds, never the real `SIDEBAR_WIDTH` parent
     /// in `shell.rs`. The folder keeps a sibling note so that clicking it
     /// proves no *other* row reported either.
     #[gpui::test]
@@ -394,8 +415,8 @@ mod tests {
         let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
         let (seen, _guard) = watch(&sidebar, cx);
 
-        // Row 0 is the folder `Projects`, at rows of `h(px(22.))`.
-        visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
+        // Row 0 is the folder `Projects`.
+        visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
         visual.run_until_parked();
         assert!(
             seen.borrow().is_empty(),
@@ -404,7 +425,7 @@ mod tests {
 
         // Expanded, so `a` is now row 2: `Projects/`, `plan`, `a`.
         let a = row(&sidebar, cx, "a");
-        visual.simulate_click(point(px(20.), px(22. * 2. + 11.)), Modifiers::none());
+        visual.simulate_click(point(px(20.), row_center(2.)), Modifiers::none());
         visual.run_until_parked();
         assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
     }
