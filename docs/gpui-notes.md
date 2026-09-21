@@ -138,6 +138,52 @@ is the sanctioned pattern, not a shortcut (`examples/input.rs:558-561`).
 `Element::id()` returning `None` costs nothing here: persistent per-element
 state needs a `GlobalElementId`, and ours already lives on the entity.
 
+## Entities: leases, notification, and caching
+
+- **`as_mut` always notifies on drop; `update` never notifies on its own.**
+  `Context::as_mut` (`app.rs:3019`) returns a `GpuiBorrow`, whose `Drop` impl
+  unconditionally calls `self.app.notify(lease.id)` (`app.rs:3280`).
+  `Context::update_entity` (`app.rs:3002`) does not — the closure must call
+  `cx.notify()` itself. Choose `as_mut` when the mutation always warrants a
+  repaint and forgetting `cx.notify()` must be impossible. Choose `update`
+  when the mutation may change nothing observable: a spurious notify lies to
+  every subscriber expecting a real edit.
+
+- **A second lease of one entity panics at runtime, not at compile time.**
+  Leasing (`EntityMap::lease`, `entity_map.rs:138`) removes the entity from
+  the map for the duration of the borrow; a second `read`/`update`/`as_mut`
+  while it is out hits `double_lease_panic` (`entity_map.rs:231-232`).
+  Consequence: an explicit `drop()` before a call that re-enters the entity is
+  load-bearing, and no observer callback may `update`/`as_mut` the entity it
+  observes.
+
+- **`Entity::read` borrows the context, not the entity.** Its signature is
+  `pub fn read<'a>(&self, cx: &'a App) -> &'a T` (`entity_map.rs:485`) — the
+  returned reference's lifetime is tied to `cx`, not to `self`. Compute what
+  you need from it before calling `cx.notify()`, or the borrow checker rejects
+  holding an immutable borrow of `cx` across the mutable one `notify` needs.
+
+- **Reading an entity during a draw is a subscription; `Entity::cached`
+  breaks it.** `read_inner` records every entity read into
+  `accessed_entities` (`entity_map.rs:213-214`); `Window::record_entities_accessed`
+  (`window.rs:3421-3433`) folds that set into `App::notify`'s invalidation path
+  (`app.rs:2790-2824`) each frame. `.child(entity)` goes through the default,
+  uncached `IntoElement` impl for `Entity<V>` (`view.rs:100-104`), so reading
+  an entity inside `render` already repaints on its changes — an explicit
+  `cx.observe` adds nothing. `Entity::cached`/`AnyView::cached` skip
+  re-rendering unless the entity was notified, the window is refreshing, or
+  bounds/text style changed (`view.rs:488`) — exactly the check that breaks
+  the read-during-draw subscription.
+
+- **`cx.processor` is how a `'static` framework callback re-enters a view.**
+  `Context::processor` (`context.rs:260-267`) closes over the entity and
+  returns a `Fn(E, &mut Window, &mut App) -> R + 'static` that calls
+  `view.update(cx, ...)` internally. `uniform_list`'s `render_items` closure is
+  `impl 'static + Fn(Range<usize>, &mut Window, &mut App) -> Vec<R>`
+  (`elements/uniform_list.rs:25`) — no `Context<T>` reaches it, so
+  `cx.listener` (`context.rs:246`) cannot be called inside it. Build the
+  callback with `cx.processor` before handing it to `uniform_list`.
+
 ## Text layout
 
 | Need | API | Location |
@@ -186,8 +232,52 @@ Correct for plain lines of text;
 unusable the moment a row differs in height, which is what markdown live
 preview means. Expect to replace it with a custom element then, as Zed did.
 
+Using it correctly needs three styles on every row, independent of the height
+assumption above. Each item is laid out as its own root —
+`item.layout_as_root(available_space, window, cx)`
+(`gpui/src/elements/uniform_list.rs:508`) — and width comes from
+`measure_item` (`gpui/src/elements/uniform_list.rs:658-679`), which despite the
+local variable name `longest_item_size` above measures a single item,
+`item_to_measure_index` (default `0`), not the actual widest one. Three
+consequences: a row without `w_full` is clickable only where its text reaches;
+a row without `whitespace_nowrap` overflows the row it was measured for if it
+wraps at paint; the list itself needs `size_full`, because
+`ListSizingBehavior::Auto` — the default (`gpui/src/elements/list.rs:192-193`)
+— lays out from `window.request_layout(style, None, cx)` alone
+(`gpui/src/elements/uniform_list.rs:315-318`), with no measurement of content,
+and resolves to zero height inside a sized parent.
+
 Do **not** port Zed's `display_map`/`wrap_map` (`editor/src/display_map/wrap_map.rs`).
 It exists to keep wrap boundaries correct under concurrent edits at scale, and
 it is why Zed needed a fully custom element instead of `uniform_list`. Weeks of
 work, for a problem a note application does not have until it is measured to
 have it.
+
+## Headless testing: what a `#[gpui::test]` actually exercises
+
+- **Headless text is measured, not dropped.** `NoopTextSystem::layout_line`
+  (`gpui/src/platform.rs:1288-1296`) advances the cursor by
+  `font_size * 600 / 1000` — 0.6 × font_size — per glyph, double that for the
+  emoji glyph id, rather than returning zero-width runs. A pixel-coordinate
+  click test is therefore meaningful in a headless test: positions are
+  synthetic but consistent, not degenerate.
+
+- **A window root's `auto` size is stretched to fill.** `Window::draw` treats
+  the root element like a web page's root: `auto` fills the viewport
+  (`gpui/src/window.rs:3536-3545`, `stretch_auto_size_to_fill`). A test that
+  makes a view the window root cannot discriminate sizing that only matters
+  inside a constrained parent — those stay eyeball checks, not assertions.
+
+- **Dropping a `Task` cancels it and everything it awaits.** `scheduler::Task`'s
+  doc comment states it plainly (`scheduler/src/executor.rs:389-390`): drop
+  cancels immediately; `detach()` is the only way to let it keep running, and
+  it gives up any way to return a value. Holding a task in a field is
+  therefore a cancellation policy — assigning over it supersedes the old work.
+  Reach for `detach()` only when there is no successor to supersede it with.
+
+- **The test scheduler randomizes execution order by default.**
+  `TestScheduler::schedule_background_with_priority` draws a random insertion
+  index when `randomize_order` is set (`scheduler/src/test_scheduler.rs:641-643`),
+  which defaults to `true` (`scheduler/src/test_scheduler.rs:763`). A test with
+  two concurrent tasks needs an explicit gate — a channel, a flag — to be
+  deterministic.
