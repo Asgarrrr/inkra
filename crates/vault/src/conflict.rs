@@ -26,7 +26,7 @@ pub(crate) fn conflict_path(
 ) -> PathBuf {
     let stem = note
         .file_stem()
-        .unwrap_or_else(|| note.as_os_str())
+        .unwrap_or(note.as_os_str())
         .to_string_lossy()
         .into_owned();
     let when = format_utc(preserved.0);
