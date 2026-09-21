@@ -390,7 +390,7 @@ mod tests {
 
         assert_eq!(row_labels(&sidebar, cx), ["a", "b •"]);
 
-        notes.update(cx, NoteStore::save_current).detach();
+        notes.update(cx, NoteStore::save_current);
         cx.run_until_parked();
 
         assert_eq!(

@@ -96,10 +96,10 @@ fn main() {
                 let buffer = cx.new(|_| Buffer::new(text));
                 let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
                 let vault = scanned.map(|vault| cx.new(|_| vault));
-                let notes = cx.new(|_| {
+                let notes = cx.new(|cx| {
                     let mut store = NoteStore::new(Arc::new(RealFs), vault);
                     if let Some(path) = note {
-                        store.adopt(buffer, path);
+                        store.adopt(buffer, path, cx);
                     }
                     store
                 });
