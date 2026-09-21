@@ -2569,6 +2569,7 @@ dependencies = [
  "futures",
  "gpui",
  "gpui_platform",
+ "image",
  "inkra-editor",
  "inkra-text",
  "inkra-vault",
