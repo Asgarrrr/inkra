@@ -114,7 +114,16 @@ impl Fs for RealFs {
     }
 
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
-        let existing = fs::metadata(path).ok();
+        // `.ok()` here would read every error as "the file is not there" and
+        // go straight to the replace. `ENOENT` is the only error that means
+        // that; `ESTALE`, `EIO` or `EACCES` on a network or FUSE mount leave a
+        // file we cannot describe, and a rename over it is the clobber this
+        // whole parameter exists to prevent.
+        let existing = match fs::metadata(path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(io_error(path, error)),
+        };
 
         // Preserved *before* the replace, never after: between the two steps
         // the bytes exist twice, so no crash point loses them. The reverse
@@ -176,6 +185,13 @@ fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
     });
 
     let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
+    // The same guard `replace` uses, for the same reason: `?` unlinks nothing.
+    // Without it a failure part-way through `write_all` — `ENOSPC` is the
+    // ordinary one — leaves a truncated file whose name says "preserved". The
+    // retry then finds that name taken and appends ` 2`, so the user is left
+    // with two conflict files, one of which is a lie.
+    let mut guard = TempFile(Some(destination.clone()));
+
     let mut file =
         fs::File::create(&destination).map_err(|source| io_error(&destination, source))?;
     file.write_all(&bytes)
@@ -190,6 +206,7 @@ fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
     fs::set_permissions(&destination, metadata.permissions())
         .map_err(|source| io_error(&destination, source))?;
 
+    guard.disarm();
     Ok(destination)
 }
 

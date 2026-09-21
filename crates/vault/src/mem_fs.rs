@@ -358,7 +358,7 @@ mod tests {
     use super::MemFs;
     use crate::fs::{Fs, Kind, Mtime, Stamp, VaultError};
     use std::path::{Path, PathBuf};
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
     /// `expect` is denied in this file, so the load goes through the `let Ok`
     /// shape the rest of the module uses.
@@ -529,6 +529,32 @@ mod tests {
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
             Some("ours")
         );
+    }
+
+    /// The comparison site, not the derived `PartialEq`. Every other conflict
+    /// test moves the file's mtime *forward*, so all of them stay green if
+    /// `!=` is relaxed to `>`. This one has the file older than the
+    /// expectation — the shape a sync client produces when it preserves an
+    /// original modified date — and is the only test that fails under that
+    /// relaxation.
+    #[test]
+    fn a_file_older_than_the_expectation_still_conflicts() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "theirs");
+        let actual = stamp_of(&fs, "/vault/a.md");
+
+        let from_the_future = Stamp {
+            mtime: Mtime(actual.mtime.0 + Duration::from_mins(1)),
+            size: actual.size,
+        };
+        let Ok(saved) = block_on(fs.save(Path::new("/vault/a.md"), "ours", from_the_future)) else {
+            panic!("save must succeed");
+        };
+
+        let Some(preserved) = saved.preserved else {
+            panic!("a file older than the expectation is still not the file we expected");
+        };
+        assert_eq!(fs.read_to_string(&preserved).as_deref(), Some("theirs"));
     }
 
     #[test]
