@@ -18,7 +18,10 @@ mod vault;
 #[cfg(feature = "test-support")]
 pub mod mem_fs;
 
-pub use fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError};
+pub use fs::{
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
+    normalize_line_endings,
+};
 pub use path::RelPath;
 pub use real_fs::RealFs;
 pub use vault::{Entry, EntryId, Vault};
