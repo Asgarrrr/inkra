@@ -84,18 +84,24 @@ carets is an open question here, not a known design being typed in.
 
 `inkra-vault` ships open, list and save. Saving is atomic — a temp file renamed
 over the destination — and a note writes itself on a timer, on a note switch,
-and as the application quits, not only on `⌘S`.
+and as the application quits, not only on `⌘S`. A write that finds the file
+changed underneath it preserves those bytes beside the note before replacing
+them, so no write destroys what it did not put there.
 
-What it deliberately leaves out — the file watcher, diff-based reload, conflict
-detection, create/rename/delete, serializing writes *across* notes, buffer
-eviction, reporting a failed open, an empty state for the unnamed launch
-buffer, and the native folder picker — is recorded with a trigger each in the
-Deferred table of `superpowers/specs/2026-09-20-inkra-vault-design.md`.
+What it deliberately leaves out — the file watcher, diff-based reload,
+create/rename/delete, serializing writes *across* notes, buffer eviction,
+reporting a failed open, an empty state for the unnamed launch buffer, and the
+native folder picker — is recorded with a trigger each in the Deferred table of
+`superpowers/specs/2026-09-20-inkra-vault-design.md`.
 
-Conflict detection is the largest honest hole. A write every two seconds over a
-file a sync client or `git checkout` just changed is a silent clobber, and
-autosave made that continuous where `⌘S`-only needed the user to press a key at
-the wrong moment.
+What conflict detection did **not** close is the clean note. A buffer with no
+unsaved edits never reaches a write, so it never reaches the check, and a note
+changed on disk keeps showing stale text until it is reopened. Fixing that needs
+the watcher, and acting on it needs diff-based reload, which needs anchored
+selections. See `superpowers/specs/2026-09-21-conflict-detection-design.md` for
+what the check covers, and for the two gaps it leaves open inside its own
+scope — the window between the stat and the rename, and two writes inside one
+timestamp granule that happen to share a length.
 
 Not repeated here, for the same reason as the section below: one table, one
 place to change it. Read the trigger before building any of them; several look

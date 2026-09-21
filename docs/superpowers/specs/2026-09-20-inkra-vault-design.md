@@ -647,8 +647,8 @@ Not a follow-up. Each of these is wrong the moment this ships:
 
 | Item | Trigger | Notes |
 |---|---|---|
-| File watcher + diff reload | A second process edits a note — a sync client, another editor. | Needs anchored selections; `apply_diff`, `crates/language/src/buffer.rs:2459` |
-| Conflict detection | Lands with the watcher. Sharper since autosave: a write every `AUTOSAVE_DELAY` over a file a sync client or `git checkout` just changed is a silent clobber, where `⌘S`-only needed the user to press a key at the wrong moment. | Needs `saved_mtime` per open note, which `OpenNote` still does not carry — `Fs::load` and `Fs::save` both already return the `Mtime` to seed it from. Blocked by `-D warnings` until its first reader lands, which is the check itself. `has_conflict`, `crates/language/src/buffer.rs:2531` |
+| File watcher + diff reload | A *clean* note changed on disk shows stale text until it is reopened. No longer gates conflict detection, which shipped without it — see `2026-09-21-conflict-detection-design.md`. | Needs anchored selections; `apply_diff`, `crates/language/src/buffer.rs:2459` |
+| ~~Conflict detection~~ | **Closed 2026-09-21.** `Fs::save` takes a required `Stamp` and preserves the file's bytes beside the note before replacing them. Its premise here — that it "lands with the watcher" — was wrong: that describes Zed's implementation, not a constraint. | `2026-09-21-conflict-detection-design.md` |
 | Create / rename / delete | The vault stops being read-only in practice. | Adds a command layer and collision errors |
 | CRLF round-trip | A user reports that saving rewrote their line endings. | Requires storing the file's original ending per note |
 | Serialized writes across notes | A vault on a network or FUSE mount, where writes to *different* notes contend. | The per-note case is closed: `Writer` (`app/src/vault.rs`) orders one note's writes by a monotonic sequence and serialises them with an async lock, and `MemFs::block_save` is the hook that tests it. Nothing coordinates across notes, and nothing yet shows it needs to |
