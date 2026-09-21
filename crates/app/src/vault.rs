@@ -171,13 +171,22 @@ impl NoteStore {
             let written = cx
                 .background_spawn(async move { fs.save(&path, &text).await })
                 .await;
-            if let Err(error) = written {
-                eprintln!("save failed: {error}");
-                return;
-            }
+            let saved = match written {
+                Ok(saved) => saved,
+                Err(error) => {
+                    eprintln!("save failed: {error}");
+                    return;
+                }
+            };
             let _ = this.update(cx, |this, cx| {
                 if let Some(note) = this.open.get_mut(&id) {
                     note.saved_version = version;
+                }
+                // The write replaced the file, so the entry's `(device, inode)`
+                // moved. Re-keying here is what keeps the `EntryId` — and with
+                // it every buffer in `open` — alive across the next rescan.
+                if let Some(vault) = this.vault.clone() {
+                    vault.update(cx, |vault, _| vault.reidentify(id, saved.identity));
                 }
                 cx.notify();
             });

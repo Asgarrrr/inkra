@@ -54,6 +54,27 @@ impl Vault {
             .map(|entry| self.root.join(entry.path.as_path()))
     }
 
+    /// Re-key an entry after a write replaced the file. `RealFs::save` renames a
+    /// temp file over the destination, so a saved note's `(device, inode)` is
+    /// not the one it was scanned with. Without this the next `rescan` finds an
+    /// identity it has never seen, mints a fresh `EntryId` for it, and leaves
+    /// every caller keyed by the old one holding a note that no longer exists.
+    ///
+    /// A no-op when `id` names no live entry. A `rescan` landing between the
+    /// write and this call has already minted that fresh id and committed it to
+    /// `entries`; re-keying on top would leave `by_identity` and `entries`
+    /// disagreeing about which id the path carries, and a click on the row would
+    /// open a second buffer on the same file.
+    pub fn reidentify(&mut self, id: EntryId, identity: FileIdentity) {
+        if !self.entries.iter().any(|entry| entry.id == id) {
+            return;
+        }
+        // By value, not by key: `by_identity` maps identity → id, and the
+        // identity we are replacing is precisely the one we no longer know.
+        self.by_identity.retain(|_, mapped| *mapped != id);
+        self.by_identity.insert(identity, id);
+    }
+
     /// The walk owns the depth limit and nothing else. Which entries exist —
     /// `*.md` only, no dotfiles, no symlinks — is `Fs`'s obligation (see
     /// `RealFs::read_dir`), so a second backend must reimplement those filters.
@@ -271,6 +292,63 @@ mod tests {
         assert_eq!(
             before, after,
             "nothing changed on disk, so no id may change"
+        );
+    }
+
+    /// A save replaces the file, so the entry's identity moves. Re-keying is
+    /// what keeps the id — and with it whatever buffer a caller holds under it.
+    #[test]
+    fn a_save_keeps_the_entry_id_across_a_rescan() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        let mut vault = scan(&fs);
+        let id = vault.entries().next().expect("one entry").id;
+
+        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        vault.reidentify(id, saved.identity);
+        block_on(vault.rescan(&fs)).expect("rescan");
+
+        assert_eq!(
+            vault.entry(id).map(|e| e.path.display_name()).as_deref(),
+            Some("a")
+        );
+    }
+
+    /// The failure `reidentify` exists to prevent, pinned so removing the call
+    /// fails here rather than silently orphaning an open buffer.
+    #[test]
+    fn a_save_without_reidentify_loses_the_entry_id() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        let mut vault = scan(&fs);
+        let id = vault.entries().next().expect("one entry").id;
+
+        block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        block_on(vault.rescan(&fs)).expect("rescan");
+
+        assert!(vault.entry(id).is_none(), "the old id names nothing");
+    }
+
+    /// A rescan between the write and the re-key has already minted a new id
+    /// for the path. Re-keying on top of it would leave `by_identity` and
+    /// `entries` naming different ids for one file.
+    #[test]
+    fn reidentify_ignores_an_entry_a_rescan_already_replaced() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        let mut vault = scan(&fs);
+        let stale = vault.entries().next().expect("one entry").id;
+
+        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        block_on(vault.rescan(&fs)).expect("rescan");
+        let minted = vault.entries().next().expect("one entry").id;
+        vault.reidentify(stale, saved.identity);
+        block_on(vault.rescan(&fs)).expect("rescan");
+
+        assert_eq!(
+            vault.entries().next().map(|e| e.id),
+            Some(minted),
+            "the id the rescan committed is the one that survives"
         );
     }
 

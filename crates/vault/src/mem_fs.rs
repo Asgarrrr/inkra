@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
-use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, VaultError};
+use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, VaultError};
 
 #[derive(Default)]
 struct State {
@@ -227,9 +227,26 @@ impl Fs for MemFs {
         })
     }
 
-    async fn save(&self, path: &Path, text: &str) -> Result<Mtime> {
+    /// Mints a **fresh** identity, unlike `insert_file`, which keeps the path's
+    /// existing one. That asymmetry is the point: `insert_file` models an
+    /// external writer rewriting a file in place, while `RealFs::save` renames a
+    /// temp file over the destination and so changes the inode. A fake that kept
+    /// the identity here would hide every re-keying bug from every `app` test,
+    /// since they all run on `MemFs`.
+    ///
+    /// No link count is modelled, so this always takes the replacing path —
+    /// `RealFs::save` falls back to writing in place when `nlink > 1`.
+    async fn save(&self, path: &Path, text: &str) -> Result<Saved> {
         self.insert_file(path.to_path_buf(), text);
-        Ok(Self::now())
+
+        let mut state = self.state();
+        let identity = Self::fresh_identity(&mut state);
+        let mtime = Self::now();
+        if let Some((_, stored_mtime, stored_identity)) = state.files.get_mut(path) {
+            *stored_mtime = mtime;
+            *stored_identity = identity;
+        }
+        Ok(Saved { mtime, identity })
     }
 }
 
