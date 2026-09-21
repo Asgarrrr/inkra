@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::RelPath;
-use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
+use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Mtime, Result};
 
 /// Guards against a pathological tree; no real vault approaches it.
 const MAX_DEPTH: usize = 64;
@@ -103,9 +103,33 @@ impl Vault {
     ///
     /// Never, today. See `scan`.
     pub async fn rescan(&mut self, fs: &dyn Fs) -> Result<()> {
-        let mut found: Vec<Entry> = Vec::new();
-        let mut next_by_identity = HashMap::new();
-        let mut worklist = vec![(self.root.clone(), 0usize)];
+        let children = Self::collect(fs, &self.root).await?;
+        self.apply(children);
+        Ok(())
+    }
+
+    /// Everything on disk under `root`, flattened, depth-limited.
+    ///
+    /// Split from `apply` because it awaits and `apply` needs `&mut self`: an
+    /// `Entity<Vault>` hands out `&mut Vault` only for the body of a
+    /// synchronous closure, so a caller holding the entity runs this half
+    /// first and gives the result to the other.
+    ///
+    /// One divergence from the walk this replaced, stated rather than hidden:
+    /// a directory is descended into before the filters in `apply` have run on
+    /// it, where the old walk descended only after they passed. Unreachable in
+    /// both directions — POSIX forbids a hard link to a directory, so the
+    /// collapse never fires on one, and `strip_prefix` cannot fail for a child
+    /// of the root the walk descended from.
+    ///
+    /// # Errors
+    ///
+    /// Never, today: an unreadable directory is skipped rather than reported,
+    /// so one folder cannot lose the vault. The `Result` is the seam a second
+    /// `Fs` backend will need.
+    pub async fn collect(fs: &dyn Fs, root: &Path) -> Result<Vec<DirEntry>> {
+        let mut found = Vec::new();
+        let mut worklist = vec![(root.to_path_buf(), 0usize)];
 
         while let Some((dir, depth)) = worklist.pop() {
             if depth > MAX_DEPTH {
@@ -116,45 +140,63 @@ impl Vault {
             };
 
             for child in children {
-                let Ok(relative) = child.path.strip_prefix(&self.root) else {
-                    continue;
-                };
-                let Some(path) = RelPath::new(relative) else {
-                    continue;
-                };
-
-                // Hard links collapse, first path wins. Before minting, so the
-                // duplicate neither burns an id nor overwrites the survivor's
-                // map entry — either shifts the survivor's id next rescan.
-                if next_by_identity.contains_key(&child.identity) {
-                    continue;
-                }
-                let id = if let Some(existing) = self.by_identity.get(&child.identity) {
-                    *existing
-                } else {
-                    let id = EntryId(self.next_id);
-                    self.next_id += 1;
-                    id
-                };
-                next_by_identity.insert(child.identity, id);
-
                 if child.kind == Kind::Dir {
                     worklist.push((child.path.clone(), depth + 1));
                 }
-                found.push(Entry {
-                    id,
-                    path,
-                    kind: child.kind,
-                    mtime: child.mtime,
-                });
+                found.push(child);
             }
+        }
+        Ok(found)
+    }
+
+    /// Mints and reuses ids for what `collect` found. Ids are keyed by
+    /// `(device, inode)`, so a rename keeps its id and a recreated file takes a
+    /// new one.
+    pub fn apply(&mut self, children: Vec<DirEntry>) {
+        let mut found: Vec<Entry> = Vec::new();
+        let mut next_by_identity = HashMap::new();
+
+        for child in children {
+            let Ok(relative) = child.path.strip_prefix(&self.root) else {
+                continue;
+            };
+            let Some(path) = RelPath::new(relative) else {
+                continue;
+            };
+
+            // Hard links collapse, first path wins. Before minting, so the
+            // duplicate neither burns an id nor overwrites the survivor's
+            // map entry — either shifts the survivor's id next rescan.
+            if next_by_identity.contains_key(&child.identity) {
+                continue;
+            }
+            let id = if let Some(existing) = self.by_identity.get(&child.identity) {
+                *existing
+            } else {
+                let id = EntryId(self.next_id);
+                self.next_id += 1;
+                id
+            };
+            next_by_identity.insert(child.identity, id);
+
+            found.push(Entry {
+                id,
+                path,
+                kind: child.kind,
+                mtime: child.mtime,
+            });
         }
 
         found.sort_by(compare);
 
         self.by_identity = next_by_identity;
         self.entries = found;
-        Ok(())
+    }
+
+    /// Where the vault starts. `app` needs it to drive `collect` itself.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 }
 
