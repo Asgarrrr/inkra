@@ -249,6 +249,11 @@ change that introduces something reusable.
 | Swap which note the editor shows | `EditorView::open_buffer` | `app/src/editor/mod.rs` |
 | Change view state without touching the text | `EditorView::update_state` | `app/src/editor/mod.rs` |
 | Read or write a file | `Fs` — `read_dir` / `load` / `save` | `vault/src/fs.rs` |
+| What a write produced — a save renames, so the identity moves | `Saved` | `vault/src/fs.rs` |
+| Carry an `EntryId` across the inode change a save causes | `Vault::reidentify` | `vault/src/vault.rs` |
+| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
+| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
+| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
