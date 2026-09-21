@@ -54,6 +54,14 @@ pub(crate) fn sidebar_text() -> Rgba {
     rgb(0xd0d0d0)
 }
 
+/// The empty state's text, on `editor_background`.
+///
+/// Dimmer than `sidebar_text`, not a reuse of it: that one is calibrated against
+/// `sidebar_background`, a different literal.
+pub(crate) fn placeholder_text() -> Rgba {
+    rgb(0x6a6a6a)
+}
+
 /// Translucent: it paints over the text rather than under it.
 pub(crate) fn selection() -> Rgba {
     rgba(0x3311ff55)

@@ -96,9 +96,17 @@ them, so no write destroys what it did not put there.
 
 What it deliberately leaves out — the file watcher, diff-based reload,
 create/rename/delete, serializing writes *across* notes, buffer eviction,
-reporting a failed open, an empty state for the unnamed launch buffer, and the
-native folder picker — is recorded with a trigger each in the Deferred table of
+reporting a failed open, and the native folder picker — is recorded with a
+trigger each in the Deferred table of
 `superpowers/specs/2026-09-20-inkra-vault-design.md`.
+
+The unnamed launch buffer has left that table. It is closed, by removal rather
+than by saving: a launch with no note builds no editor at all, and `AppShell`
+renders an empty state, so there is no untracked buffer left to lose. That empty
+state names no action, because both it would want — the folder picker and
+creating a note — are still deferred. Which is the strongest argument for doing
+create/rename/delete next. See
+`superpowers/plans/2026-09-21-empty-state.md`.
 
 What conflict detection did **not** close is the clean note. A buffer with no
 unsaved edits never reaches a write, so it never reaches the check, and a note

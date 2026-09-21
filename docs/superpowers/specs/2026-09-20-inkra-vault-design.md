@@ -522,11 +522,13 @@ only the editor (`crates/app/src/shell.rs:16`).
 - Bound in `keymap.rs` — the only binding site (`:9-32`) — at the `AppShell`
   key context, **not** at `EditorView`'s (`crates/app/src/editor/mod.rs:269`).
 
-This matters because the sidebar is focusable. `AppShell::focus_handle`
-currently delegates unconditionally to the editor (`shell.rs:28-30`); once a
-sidebar row can take focus, a `⌘S` bound to the editor context would do nothing
-while the sidebar is focused. The regression test presses `⌘S` **with the
-sidebar focused**.
+This matters because the sidebar is focusable. `AppShell::focus_handle` returns
+the editor's handle whenever there is an editor, and `AppShell`'s own otherwise
+— **corrected 2026-09-21**; it delegated unconditionally when this was written,
+because the editor was unconditional. Either way it is never the sidebar's: once
+a sidebar row can take focus, a `⌘S` bound to the editor context would do
+nothing while the sidebar is focused. The regression test presses `⌘S` **with
+the sidebar focused**.
 
 ### The modified indicator, and a re-entrancy hazard
 
@@ -558,11 +560,11 @@ All four were undefined in the first draft, and `EditorView::new` requires an
 
 | Situation | Behaviour |
 |---|---|
-| `cargo run -p inkra-app` with no argument | Empty `Buffer`, empty sidebar, no vault. The editor works; `⌘S` is a no-op |
+| `cargo run -p inkra-app` with no argument | **Superseded 2026-09-21.** No buffer and no editor at all: `AppShell` renders its empty state, and `⌘S` is a no-op that still reaches its handler. The original row — an empty `Buffer` the editor worked on — is the hole the empty state closed; see `2026-09-21-empty-state.md` |
 | Argument is a readable file | The file is loaded into the buffer and `⌘S` writes it back, with no vault and an empty sidebar. Task 5's behaviour, kept rather than replaced: `EntryId::DETACHED` exists for exactly this note |
 | Argument is unreadable, or a directory that cannot be listed | Message to stderr, exit 1 — as `main.rs:63-66` already does for window failure |
-| Vault with zero `.md` files | Empty tree, empty buffer |
-| Vault scanned, nothing opened yet | Empty buffer until a row is clicked |
+| Vault with zero `.md` files | Empty tree, empty state |
+| Vault scanned, nothing opened yet | The empty state, reading `Select a note.`, until a row is clicked |
 
 The native picker exists (`vendor/zed-reference/crates/gpui/src/app.rs:1687`
 `prompt_for_paths`) and is deferred: this slice is about the vault, not a
@@ -655,8 +657,8 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first. Evicting a note now also means cancelling its pending write chain, dropping its observer `Subscription`, and dropping its `Arc<Writer>` — a note re-opened afterwards starts a fresh sequence, which is sound only because its old writes are gone too |
 | Report a failed open | A user clicks a note that was deleted, renamed or made unreadable since the scan. | Nothing happens at all today: `NoteStore::open_note` discards the `VaultError` with `.await.ok()?` and `AppShell::open_note` bails on the `None`. Asymmetric with `save_current`, which at least reaches stderr. Rides on the same surfacing decision as the row below — a GUI app has nowhere to put an error yet |
 | A home for user-visible errors | The first of these that a user rather than a developer hits. | Both failure paths above end in `eprintln!` or silence, and a released binary has no terminal attached. Needs a status line or a transient banner; `AppShell` is where it would live |
-| Save the unnamed launch buffer | A user types into the window before clicking any row and loses it. Autosave made this worse, not better: every *other* note now saves itself, so the one buffer that silently does not is the one the user was never taught to press `⌘S` in. | Launching on a vault builds a real empty `Buffer` but calls no `adopt`, so it gets no observer, no sidebar row and no quit flush, and `save_current` returns at the `None` guard. Decided with the user: render an empty state instead, so there is no buffer to lose. Planned in `docs/superpowers/plans/2026-09-21-autosave-quit-flush.md`, step 3, split out for its own review |
-| Focusable sidebar | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` still delegates to the editor unconditionally. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
+| ~~Save the unnamed launch buffer~~ | **Closed 2026-09-21**, by removal rather than by saving. There is no unnamed launch buffer any more: `bootstrap::root` builds a `Buffer` and an `EditorView` only for `Launch::Note`, and `AppShell` renders an empty state for the other two. Nothing can be typed into a buffer nobody tracks, because there is nothing to type into. Naming and saving such a buffer still needs the create/rename/delete row above. See `docs/superpowers/plans/2026-09-21-empty-state.md` |
+| Focusable sidebar | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` never returns a sidebar handle — it returns the editor's when there is one, and `AppShell`'s own otherwise. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
 | `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |

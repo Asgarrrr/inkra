@@ -39,9 +39,9 @@ const VAULT: &[(&str, &str)] = &[
 pub(crate) fn catalogue() -> &'static [Scene] {
     &[
         Scene {
-            name: "editor-empty",
-            shows: "launch with no argument: an empty buffer, an empty sidebar",
-            open: editor_empty,
+            name: "empty-no-vault",
+            shows: "launch with no argument: the empty state, and no editor at all",
+            open: empty_no_vault,
         },
         Scene {
             name: "editor-text",
@@ -71,7 +71,14 @@ pub(crate) fn catalogue() -> &'static [Scene] {
     ]
 }
 
-fn editor_empty(stage: &mut Stage) -> WindowHandle<AppShell> {
+/// The launch state with nothing to edit. Focused, because the focus lands on
+/// `AppShell`'s own handle here rather than an editor's, and a shot is the only
+/// way to see that it lands somewhere harmless.
+///
+/// The vault-with-no-note variant of the empty state needs no scene of its own:
+/// `sidebar-vault` below already opens a vault and clicks a directory, not a
+/// note, so it draws that state beside the tree.
+fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_nothing();
     stage.focus(window);
     window
