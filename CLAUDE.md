@@ -170,6 +170,15 @@ area, not on every task:
   `replace`/`insert`/`delete` bare from above `text`.
 - Call `Buffer::finalize_transaction` around anything that must not merge into
   adjacent typing — paste, reformat.
+- A `Stamp` is compared with `!=`, never with an ordering: a sync client that
+  preserves a file's original modified date hands back an mtime *older* than the
+  one we wrote, and `>` calls that unchanged and overwrites it. It never carries
+  the identity either — our own save renames, so `(device, inode)` moves on
+  every write we make ourselves, and comparing it would flag each of them.
+- No write may destroy bytes it did not put there. `Fs::save` takes the caller's
+  expectation and, when the file disagrees, preserves its current bytes beside
+  it **before** replacing them: between the two steps the bytes exist twice, so
+  no crash point loses them. A second `Fs` backend owes the same ordering.
 - Only `app` reads a clock. `text` and `editor` take the `Instant` from the
   caller; `vault` takes every `Mtime` from the filesystem, never from
   `SystemTime::now`. Conflict detection (deferred) will compare a freshly
@@ -191,7 +200,9 @@ area, not on every task:
   `.proptest-regressions` too. One exception to headless testing everywhere
   else: `vault/tests/real_fs.rs` runs `RealFs` against a real temp directory,
   because a fake filesystem cannot prove the real one's symlink and dotfile
-  filtering.
+  filtering. `vault/tests/conflict_proptest.rs` carries the second property: no
+  save destroys what it found. It is conditional on the expectation, and has to
+  be — a save that finds what it expected is replacing its own bytes and may.
 - `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
   exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault.rs`. A test
   reaches only what its own file roots the window at: `with_editor` and
@@ -276,6 +287,12 @@ change that introduces something reusable.
 | Swap which note the editor shows | `EditorView::open_buffer` | `app/src/editor/mod.rs` |
 | Change view state without touching the text | `EditorView::update_state` | `app/src/editor/mod.rs` |
 | Read or write a file | `Fs` — `read_dir` / `load` / `save` | `vault/src/fs.rs` |
+| What a note looked like on disk, and the unit every write compares | `Stamp` — `(mtime, size)` | `vault/src/fs.rs` |
+| Where a conflicting write puts the bytes it must not destroy | `Saved::preserved` | `vault/src/fs.rs` |
+| Name that file | `conflict_path` (private) | `vault/src/conflict.rs` |
+| Render a Unix timestamp without a date crate | `format_utc` (private) | `vault/src/civil.rs` |
+| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault.rs` |
+| List the vault again from a running window | `Vault::collect` then `Vault::apply` — `rescan` holds `&mut self` across an await, so an entity cannot call it | `vault/src/vault.rs` |
 | What a write produced — a save renames, so the identity moves | `Saved` | `vault/src/fs.rs` |
 | Carry an `EntryId` across the inode change a save causes | `Vault::reidentify` | `vault/src/vault.rs` |
 | Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
@@ -291,6 +308,8 @@ change that introduces something reusable.
 | CRLF and lone CR to LF | `fs::normalize_line_endings` | `vault/src/fs.rs` |
 | Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
+| Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
+| Model an external writer in a test | `MemFs::insert_file` — it keeps the path's identity, as a second process rewriting in place does | `vault/src/mem_fs.rs` |
 | Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
 | Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
 | Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
