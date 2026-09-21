@@ -1,7 +1,5 @@
-//! A path known to be relative to the vault root, with no `..`.
-//!
-//! Same discipline as `ByteOffset` and `Utf16Offset` in `inkra-text`: the
-//! invariant lives in the type, so no caller has to remember it.
+//! A path known to be relative to the vault root, with no `..`. Same discipline
+//! as `ByteOffset`: the invariant lives in the type.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -10,16 +8,14 @@ use std::sync::Arc;
 pub struct RelPath(Arc<Path>);
 
 impl RelPath {
-    /// `None` when the path is absolute, contains `..`, or has a prefix or
-    /// root component. Escaping the vault root is not an error to report to
-    /// the user, it is a path the vault refuses to name.
+    /// `None` when the path is absolute, contains `..`, or has a prefix or root
+    /// component: escaping the root is a path the vault refuses to name, not an
+    /// error to report.
     ///
-    /// A `.` component is dropped rather than refused: `Path::new("./a.md")`
-    /// and `Path::new("a.md")` are not equal and do not have the same component
-    /// count, yet they name one file, and a join can legitimately produce
-    /// either. Refusing the first would lose a real note; keeping both
-    /// spellings would indent it one level too deep and let one file occupy two
-    /// keys in a `HashMap<RelPath, _>`.
+    /// A `.` component is dropped, not refused: `./a.md` and `a.md` name one
+    /// file but are unequal and differ in component count. Refusing the first
+    /// loses a real note; keeping both indents it one level too deep and lets
+    /// one file occupy two keys in a `HashMap<RelPath, _>`.
     #[must_use]
     pub fn new(path: &Path) -> Option<Self> {
         let mut normalized = PathBuf::new();
@@ -51,9 +47,8 @@ impl RelPath {
         self.0.starts_with(&other.0)
     }
 
-    /// The name shown in the sidebar. Lossy rather than fallible: a filename
-    /// that is not valid UTF-8 should render with replacement characters, not
-    /// disappear from the vault.
+    /// Lossy rather than fallible: a filename that is not valid UTF-8 should
+    /// render with replacement characters, not vanish from the vault.
     #[must_use]
     pub fn display_name(&self) -> String {
         self.0

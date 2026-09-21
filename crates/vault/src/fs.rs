@@ -1,9 +1,5 @@
-//! The seam between the vault and the filesystem.
-//!
-//! Async on purpose. On local disk it buys nothing — `RealFs` performs a
-//! blocking read inside the future, because its callers already run under
-//! gpui's background executor. What it buys is the shape: a remote backend
-//! later is a second `impl Fs` and nothing else moves.
+//! Async buys nothing on local disk — `RealFs` blocks inside the future — but
+//! it buys the shape: a remote backend later is a second `impl Fs`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,11 +7,9 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
-/// What a file *is*, independent of what it is called.
-///
 /// Paired, not inode alone: an inode is unique only within one filesystem, and
-/// nothing stops a vault root spanning a mount point. Zed's `Entry` carries
-/// the inode by itself (`vendor/zed-reference/crates/worktree/src/worktree.rs:3963`).
+/// nothing stops a vault root spanning a mount point. Zed's `Entry` carries the
+/// inode by itself (`vendor/zed-reference/crates/worktree/src/worktree.rs:3963`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileIdentity {
     pub device: u64,
@@ -31,8 +25,7 @@ pub enum Kind {
     Note,
 }
 
-/// Everything the scan needs, so `read_dir` alone is enough to recurse and no
-/// fourth `metadata` method is required.
+/// Everything the scan needs, so there is no fourth `metadata` method.
 #[derive(Debug, Clone)]
 pub struct DirEntry {
     pub path: PathBuf,
@@ -41,11 +34,9 @@ pub struct DirEntry {
     pub identity: FileIdentity,
 }
 
-/// Only `text` has a caller in `app` today. The other two come from the same
-/// `stat` and are what conflict detection seeds `saved_mtime` from — the
-/// Deferred table in `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`
-/// names `Fs::load` as that source. `identity` is also the only assertion that
-/// `RealFs` reports a real inode (`crates/vault/tests/real_fs.rs`).
+/// Only `text` has a caller today. `mtime` is what conflict detection will seed
+/// `saved_mtime` from (Deferred in
+/// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`).
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub text: String,
@@ -65,31 +56,22 @@ pub type Result<T> = std::result::Result<T, VaultError>;
 
 #[async_trait]
 pub trait Fs: Send + Sync {
-    /// Entries directly inside `path`. Not recursive: `Vault::scan` drives the
-    /// walk, which is what lets it impose a depth limit.
-    ///
-    /// Filtering is this method's obligation, not the scan's, and an
-    /// implementation that skips it reopens a hazard the design closed. Yield
-    /// only directories and `*.md`; never a dotfile; never a symlink, which is
-    /// how the walk avoids link loops without having to detect them.
-    /// `RealFs::read_dir` is the reference.
+    /// Direct children only: `Vault::scan` drives the walk, which is what lets
+    /// it impose a depth limit. Filtering is this method's obligation, not the
+    /// scan's — yield only directories and `*.md`, never a dotfile, never a
+    /// symlink, which is how the walk avoids link loops without detecting them.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
-    /// Reads and normalizes line endings. `\r\n` and a lone `\r` both become
-    /// `\n` before the text can reach a `Buffer`, which assumes no `\r`
-    /// anywhere.
+    /// Normalizes line endings: `Buffer` assumes no `\r` anywhere.
     async fn load(&self, path: &Path) -> Result<Loaded>;
 
-    /// Truncating write, not atomic — same as Zed
-    /// (`vendor/zed-reference/crates/fs/src/fs.rs:1019-1035`). Atomic save is
-    /// deferred with its trigger in the spec.
+    /// Truncating, not atomic — same as Zed (`crates/fs/src/fs.rs:1019-1035`);
+    /// atomic save is deferred with its trigger in the spec.
     async fn save(&self, path: &Path, text: &str) -> Result<Mtime>;
 }
 
-/// Normalizes CRLF and lone CR to LF.
-///
-/// `docs/roadmap.md:18` gave CRLF normalization the trigger "file I/O or a
-/// paste action, whichever lands first". This is that file I/O.
+/// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
+/// I/O or a paste action, whichever lands first".
 #[must_use]
 pub fn normalize_line_endings(text: &str) -> String {
     if !text.contains('\r') {

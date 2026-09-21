@@ -1,16 +1,11 @@
-//! The platform filesystem.
+//! Blocking `std::fs` inside the future, deliberately not `smol::fs`: that
+//! would move a blocking read onto a second thread pool when callers already
+//! run under gpui's `cx.background_spawn`, adding six crates for no
+//! performance. Zed does use it (`vendor/zed-reference/crates/fs/src/fs.rs:738`).
 //!
-//! Every method performs blocking `std::fs` work inside the future, and does
-//! not use `smol`. `smol::fs` sits on the `blocking` crate's thread pool, so
-//! on local disk it only moves a blocking read onto a different pool — and our
-//! callers already run under gpui's `cx.background_spawn`, which is one.
-//! Copying Zed that far would add six crates and buy no performance; Zed's own
-//! `RealFs` is written against `smol::fs`
-//! (`vendor/zed-reference/crates/fs/src/fs.rs:738`).
-//!
-//! Unix-only: `FileIdentity` needs `dev`/`ino`, which only the unix
-//! `MetadataExt` exposes. Windows has an equivalent pair behind a different
-//! API, so porting is a second `identity_of`, not a redesign.
+//! Unix-only: `FileIdentity` needs `dev`/`ino`, exposed only by the unix
+//! `MetadataExt`. Windows has an equivalent pair, so porting is a second
+//! `identity_of`, not a redesign.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -64,8 +59,7 @@ impl Fs for RealFs {
                 continue;
             }
 
-            // `symlink_metadata` does not follow the link, which is how the
-            // scan avoids symlink loops without needing to detect them.
+            // `symlink_metadata` does not follow the link: no loop detection.
             let metadata = fs::symlink_metadata(&entry_path)
                 .map_err(|source| io_error(&entry_path, source))?;
             if metadata.is_symlink() {
@@ -91,12 +85,10 @@ impl Fs for RealFs {
     }
 
     async fn load(&self, path: &Path) -> Result<Loaded> {
-        // Stat before reading, not after. A write landing between the two
-        // calls is unavoidable without locking, but the order decides which
-        // way the race falls: stat-first pairs new text with an old mtime, so
-        // a later conflict check errs toward "changed on disk". Read-first
-        // pairs stale text with a fresh mtime, which reads as "unchanged" and
-        // silently overwrites the other writer on the next save.
+        // Stat before reading. The interleaving is unavoidable without locking,
+        // but the order decides which way it falls: stat-first errs toward
+        // "changed on disk", read-first reads as "unchanged" and silently
+        // overwrites the other writer on the next save.
         let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
         let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
         let text = String::from_utf8(bytes).map_err(|_| VaultError::NotUtf8 {

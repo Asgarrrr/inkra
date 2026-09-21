@@ -1,9 +1,7 @@
-//! The binding between files and buffers.
-//!
-//! Holds **strong** `Entity<Buffer>` handles. Weak ones would drop an unsaved
-//! buffer the moment the editor switched away from it, losing the text and the
-//! undo history with no prompt — see critical defect 2 in
-//! `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
+//! The binding between files and buffers. Handles are **strong**: weak ones
+//! dropped an unsaved buffer the moment the editor switched away, losing the
+//! text and the undo history with no prompt (critical defect 2 in
+//! `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,7 +13,6 @@ use inkra_vault::{EntryId, Fs, Vault};
 
 actions!(vault, [Save]);
 
-/// What is known about one open note's relationship to its file.
 struct OpenNote {
     buffer: Entity<Buffer>,
     path: PathBuf,
@@ -25,8 +22,7 @@ struct OpenNote {
 
 pub(crate) struct NoteStore {
     fs: Arc<dyn Fs>,
-    /// `None` when the app was launched on a single file, or on nothing: there
-    /// is then no tree to show and no id to open a note by.
+    /// `None` when launched on a single file, or on nothing.
     vault: Option<Entity<Vault>>,
     open: HashMap<EntryId, OpenNote>,
     current: Option<EntryId>,
@@ -46,51 +42,30 @@ impl NoteStore {
         self.vault.as_ref()
     }
 
-    /// What the store itself still holds for a note.
-    ///
-    /// `#[cfg(test)]` because that is the truth today: nothing in the UI asks
-    /// the store for a buffer it did not just open, and a method only tests
-    /// call still fails `-D warnings` in the binary. The regression test needs
-    /// it — reading the buffer back out of the map is the only way to assert
-    /// the map kept it.
+    /// `#[cfg(test)]` because nothing in the UI asks, and an unread method
+    /// fails `-D warnings`. The only way to assert the map kept a buffer.
     #[cfg(test)]
     pub(crate) fn buffer_for(&self, id: EntryId) -> Option<&Entity<Buffer>> {
         self.open.get(&id).map(|note| &note.buffer)
     }
 
-    /// The note `save_current` would write.
-    ///
-    /// `#[cfg(test)]` for the same reason as `buffer_for`: nothing in the UI
-    /// asks, and an unread method fails `-D warnings`. The tests that this
-    /// exists for assert the thing the UI cannot — that `current` and the
-    /// buffer bound to the editor are the same note.
+    /// The note `save_current` would write. `#[cfg(test)]`, as above.
     #[cfg(test)]
     pub(crate) fn current(&self) -> Option<EntryId> {
         self.current
     }
 
-    /// True when the note's buffer has moved past what was last written.
-    ///
-    /// A note that is not open has no buffer to differ from the file, so it is
-    /// never modified.
+    /// A note that is not open has no buffer to differ from the file.
     pub(crate) fn is_modified(&self, id: EntryId, cx: &App) -> bool {
         self.open
             .get(&id)
             .is_some_and(|note| note.buffer.read(cx).version() != note.saved_version)
     }
 
-    /// Loads a note, or returns the buffer already open for it.
-    ///
-    /// The map holds a **strong** handle, so an unsaved buffer survives being
-    /// switched away from. There is no close action in this slice, so buffers
-    /// live for the session; eviction is deferred with its trigger in the
-    /// design spec.
-    ///
-    /// Deliberately does **not** set `current`. This resolves on whichever
-    /// schedule the load takes, and the editor is rebound on the caller's; a
-    /// note recorded here would be the one whose load landed last rather than
-    /// the one on screen. `set_current` records it instead, called by the
-    /// caller once it has actually bound the buffer.
+    /// Buffers live for the session; eviction is deferred, with its trigger in
+    /// the spec. Deliberately does **not** set `current`: this resolves on the
+    /// load's schedule, so it would record whichever load landed last rather
+    /// than the note on screen.
     pub(crate) fn open_note(
         &mut self,
         id: EntryId,
@@ -115,11 +90,8 @@ impl NoteStore {
                 .await
                 .ok()?;
             this.update(cx, |this, cx| {
-                // Two clicks on one unopened note put two loads in flight.
-                // Whichever lands second must not replace what the first one
-                // already handed to the editor: that buffer may have been typed
-                // into, and replacing it would strand the text exactly the way
-                // a weak handle does.
+                // Two clicks on one unopened note race. The second must not
+                // replace a buffer the editor may already have been typed into.
                 if let Some(note) = this.open.get(&id) {
                     return note.buffer.clone();
                 }
@@ -129,8 +101,7 @@ impl NoteStore {
                     OpenNote {
                         buffer: buffer.clone(),
                         path,
-                        // A freshly loaded note is clean, and `Buffer::version`
-                        // starts at zero, so nothing has moved past the file.
+                        // `Buffer::version` starts at zero: a fresh note is clean.
                         saved_version: 0,
                     },
                 );
@@ -141,20 +112,10 @@ impl NoteStore {
         })
     }
 
-    /// Records which note `save_current` writes.
-    ///
-    /// Not the sidebar's dots: those are per row and come from
-    /// `is_modified(row.id)`, which never reads `current`. What reaches them
-    /// from here is only the repaint.
-    ///
-    /// The writer of `current` for anything the sidebar opens, and it runs
-    /// after the buffer is bound to the editor, never when a load happens to
-    /// land. `adopt` is the one other writer, and it keeps the same rule:
-    /// it is synchronous, and `main.rs` has already built the editor around
-    /// that buffer by the time it runs.
-    ///
-    /// Ignores a note that is not open: nothing can be current that has no
-    /// buffer, and `save_current` would silently pick nothing.
+    /// Records which note `save_current` writes, and runs after the bind, never
+    /// when a load happens to land. `adopt` is the only other writer and keeps
+    /// the rule by being synchronous. Ignores a note that is not open —
+    /// `save_current` would silently pick nothing.
     pub(crate) fn set_current(&mut self, id: EntryId, cx: &mut Context<Self>) {
         if !self.open.contains_key(&id) {
             return;
@@ -163,15 +124,8 @@ impl NoteStore {
         cx.notify();
     }
 
-    /// Registers an already-loaded buffer as the current note.
-    ///
-    /// `saved_version` starts at `Buffer::version`'s own starting value, so a
-    /// freshly loaded note is clean and `⌘S` no-ops until something is typed.
-    ///
-    /// The note is keyed by `EntryId::DETACHED` because there is no vault
-    /// behind it: the file was named on the command line, not found by a scan.
-    /// No scanned entry can carry that id, so the two cannot collide once the
-    /// sidebar starts opening notes by their real ones.
+    /// Keyed by `EntryId::DETACHED`: the file was named on the command line,
+    /// and no scanned entry can carry that id.
     pub(crate) fn adopt(&mut self, buffer: Entity<Buffer>, path: PathBuf) {
         self.open.insert(
             EntryId::DETACHED,
@@ -184,21 +138,14 @@ impl NoteStore {
         self.current = Some(EntryId::DETACHED);
     }
 
-    /// Writes the current note. A no-op when nothing has changed since the
-    /// last write.
-    ///
-    /// The version is captured **with** the text, before the task is spawned.
-    /// `⌘S` is async, so keystrokes can land while the write is in flight;
-    /// recording the captured version rather than a later one leaves those
-    /// edits correctly dirty.
-    ///
-    /// `finalize_transaction` runs here, in the action handler, and never in an
-    /// observer callback: a second lease of one entity panics
+    /// A no-op when nothing changed. The version is captured **with** the text,
+    /// before the spawn, so keystrokes landing mid-write stay dirty.
+    /// `finalize_transaction` runs here and never in an observer callback: a
+    /// second lease of one entity panics
     /// (`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:231`).
     ///
-    /// Two things this deliberately does not do, both under Deferred in the
-    /// design spec with their triggers: it does not order overlapping writes to
-    /// one note, and nothing waits for the write on quit.
+    /// Deferred in the spec, with triggers: ordering overlapping writes to one
+    /// note, and waiting for the write on quit.
     pub(crate) fn save_current(&mut self, cx: &mut Context<Self>) -> Task<()> {
         let Some(id) = self.current else {
             return Task::ready(());
@@ -207,15 +154,9 @@ impl NoteStore {
             return Task::ready(());
         };
 
-        // `update`, never `as_mut`: the latter notifies the buffer's observers
-        // when its `GpuiBorrow` drops (`gpui/src/app.rs:3280-3286`), and
-        // `finalize_transaction` changes no text. Reporting an edit that did
-        // not happen would lie to anything subscribing to real ones — the same
-        // invariant `EditorView::update_state` keeps for caret moves.
-        //
-        // The lease also ends with the closure, so nothing below can take a
-        // second one, which panics rather than failing to compile
-        // (`gpui/app/entity_map.rs:231`).
+        // `update`, never `as_mut`: the latter notifies on drop
+        // (`gpui/src/app.rs:3280-3286`) and `finalize_transaction` changes no
+        // text. The lease also ends with the closure, before the next one.
         let (text, version) = note.buffer.update(cx, |buffer, _| {
             buffer.finalize_transaction();
             (buffer.text().to_owned(), buffer.version())
@@ -268,8 +209,7 @@ mod tests {
     ) -> (Entity<NoteStore>, EntryId, EntryId) {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
             .expect("scan the test vault");
-        // Resolved by name, never by index: the comparator decides the order and
-        // this test must not silently depend on it.
+        // By name, never by index: the comparator decides the order.
         let id_of = |name: &str| {
             scanned
                 .entries()
@@ -283,10 +223,8 @@ mod tests {
         (store, a, b)
     }
 
-    /// The same loss as the test below, by a narrower route: both loads are in
-    /// flight at once, so neither takes the already-open early return, and the
-    /// second would otherwise overwrite the entry the first one made — leaving
-    /// the editor holding a buffer the store no longer knows about.
+    /// Neither load takes the already-open early return, so the second would
+    /// overwrite the first's entry and the store would forget a live buffer.
     #[gpui::test]
     async fn two_loads_of_one_note_settle_on_one_buffer(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
@@ -305,9 +243,8 @@ mod tests {
         assert_eq!(second.map(|buffer| buffer.entity_id()), held);
     }
 
-    /// The defect: holding buffers weakly meant switching notes dropped the last
-    /// strong handle, so returning reloaded from disk and the unsaved text and
-    /// the whole undo history were gone, with no prompt.
+    /// The defect: weak handles meant switching notes dropped the last one, so
+    /// returning reloaded from disk and lost the text and the undo history.
     #[gpui::test]
     fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
@@ -342,11 +279,8 @@ mod tests {
         });
     }
 
-    /// Opens the window through `AppShell`, the way `main.rs` does.
-    ///
-    /// Neither `with_editor` nor `dispatching` (`crates/app/src/editor/tests.rs`)
-    /// does: both make `EditorView` the window root, so neither can prove a
-    /// binding scoped to the `AppShell` key context ever fires.
+    /// `with_editor` and `dispatching` (`editor/tests.rs`) root the window at
+    /// `EditorView`, so neither can prove an `AppShell`-scoped binding fires.
     fn open_shell(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> VisualTestContext {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
@@ -367,21 +301,17 @@ mod tests {
         VisualTestContext::from_window(window.into(), cx)
     }
 
-    /// Focus sits in the editor, whose own key context is `EditorView`. The
-    /// binding is scoped to `AppShell`, so this is what proves the action still
-    /// dispatches up the tree to the shell's `on_action` rather than being
-    /// swallowed by the focused node's context.
+    /// Focus is in `EditorView`; the binding is scoped to `AppShell`. Proves
+    /// the action dispatches up the tree rather than being swallowed.
     #[gpui::test]
     fn cmd_s_writes_the_current_note(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
         let mut visual = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-        // The caret opens at the end of the buffer (`EditorView::new`), so the
-        // typed character lands after the loaded text.
+        // The caret opens at the end of the buffer (`EditorView::new`).
         visual.simulate_input("X");
         visual.simulate_keystrokes("cmd-s");
-        // The write runs on a background task; without this the assertion races it.
         cx.run_until_parked();
 
         assert_eq!(
@@ -390,14 +320,9 @@ mod tests {
         );
     }
 
-    /// Saving changes no text, so the buffer's observers must not fire for it.
-    /// `editor/mod.rs` states that invariant for caret moves and the reason
-    /// holds here: an autosave or a vault reload subscribing to real edits
-    /// would be told the text moved when only `grouping_blocked` did.
-    ///
-    /// The trap is that `Entity::as_mut` notifies unconditionally when its
-    /// `GpuiBorrow` drops (`gpui/src/app.rs:3280-3286`), while `update` leaves
-    /// the decision to the callee. Swapping the two back reintroduces this.
+    /// A save changes no text, so no observer may fire: only `grouping_blocked`
+    /// moved. Swapping `update` back to `as_mut` reintroduces this, because
+    /// `as_mut` notifies unconditionally (`gpui/src/app.rs:3280-3286`).
     #[gpui::test]
     fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
@@ -416,8 +341,7 @@ mod tests {
             buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
         });
 
-        // Subscribed after the edit: the edit itself is a legitimate notify,
-        // and only what the save does is under test.
+        // Subscribed after the edit: that notify is legitimate.
         let notified = Arc::new(AtomicUsize::new(0));
         let _guard = cx.update(|cx| {
             let notified = Arc::clone(&notified);
@@ -441,9 +365,8 @@ mod tests {
         );
     }
 
-    /// The file starts out holding text the buffer never had, so a write of any
-    /// kind would show — which is what makes the version comparison, and not
-    /// just a matching write, the thing under test.
+    /// The file holds text the buffer never had, so a write of any kind shows —
+    /// putting the version comparison under test, not just a matching write.
     #[gpui::test]
     fn cmd_s_on_an_untouched_note_leaves_the_file_alone(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
