@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
 use inkra_text::Buffer;
-use inkra_vault::{Fs, RealFs, Vault};
+use inkra_vault::{Fs, RealFs, Vault, Stamp};
 
 use editor::EditorView;
 use keymap::key_bindings;
@@ -32,8 +32,10 @@ enum Launch {
     /// layout nor the scroll container, so the eyeball pass needs an argument.
     Nothing,
     /// One file, with no vault behind it. The path travels with the text
-    /// because `⌘S` needs somewhere to write back to.
-    Note(PathBuf, String),
+    /// because `⌘S` needs somewhere to write back to, and the `Stamp` because
+    /// the first write of this note compares against it — a note adopted
+    /// without one could not tell its own file from a changed one.
+    Note(PathBuf, String, Stamp),
     /// A directory: the vault, scanned. No note is open until a row is clicked.
     Vault(Vault),
 }
@@ -64,7 +66,7 @@ fn launch() -> Result<Launch, String> {
             .map_err(|error| format!("{error}"));
     }
     futures::executor::block_on(RealFs.load(&path))
-        .map(|loaded| Launch::Note(path, loaded.text))
+        .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
         .map_err(|error| format!("{error}"))
 }
 
@@ -90,7 +92,7 @@ fn main() {
             |_, cx| {
                 let (text, note, scanned) = match launched {
                     Launch::Nothing => (String::new(), None, None),
-                    Launch::Note(path, text) => (text, Some(path), None),
+                    Launch::Note(path, text, stamp) => (text, Some((path, stamp)), None),
                     Launch::Vault(vault) => (String::new(), None, Some(vault)),
                 };
                 let buffer = cx.new(|_| Buffer::new(text));
@@ -98,8 +100,8 @@ fn main() {
                 let vault = scanned.map(|vault| cx.new(|_| vault));
                 let notes = cx.new(|cx| {
                     let mut store = NoteStore::new(Arc::new(RealFs), vault, cx);
-                    if let Some(path) = note {
-                        store.adopt(buffer, path, cx);
+                    if let Some((path, stamp)) = note {
+                        store.adopt(buffer, path, stamp, cx);
                     }
                     store
                 });

@@ -12,7 +12,7 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 use gpui::{App, Context, Entity, EventEmitter, Subscription, Task, actions, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs, Saved, Vault};
+use inkra_vault::{EntryId, Fs, Saved, Stamp, Vault};
 
 actions!(vault, [Save]);
 
@@ -33,6 +33,18 @@ const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
 pub(crate) struct SaveFailed(pub(crate) EntryId);
 
 impl EventEmitter<SaveFailed> for NoteStore {}
+
+/// A write found the file changed underneath it and preserved the other
+/// version beside the note. Emitted for the same reason as `SaveFailed`: the
+/// deferred status line gets one seam to subscribe to rather than two that grew
+/// apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConflictPreserved {
+    pub(crate) id: EntryId,
+    pub(crate) path: PathBuf,
+}
+
+impl EventEmitter<ConflictPreserved> for NoteStore {}
 
 /// Serialises one note's writes, and drops one that a newer write overtook.
 ///
@@ -57,13 +69,29 @@ impl EventEmitter<SaveFailed> for NoteStore {}
 /// acquisition order is not issue order. The sequence is what decides; the lock
 /// only stops the two `rename()`s interleaving.
 struct Writer {
-    /// The sequence of the newest write that reached the filesystem.
+    /// The newest write that reached the filesystem, and what it left behind.
     ///
     /// Locked and unlocked entirely inside a background task. No foreground
     /// code may hold this guard: the quit future is polled while the foreground
     /// session is blocked, so a guard held by a `cx.spawn` chain would never be
     /// released and shutdown would spin until its timeout.
-    written: futures::lock::Mutex<u64>,
+    state: futures::lock::Mutex<WriterState>,
+}
+
+/// The expectation lives here, and not beside `saved_version` on `OpenNote`,
+/// because a write captures its text under `&mut App` and only *then* waits for
+/// the lock. A second write issued while the first is in flight would therefore
+/// carry a stamp the first is about to invalidate, find a file it did not
+/// recognise — one it had just written itself — and preserve our own new text
+/// into a conflict file. Ordinary typing would mint junk beside every note.
+///
+/// Read after the lock, the expectation is always what our own last write
+/// actually produced, or what the load returned before there was one.
+struct WriterState {
+    /// The sequence of the newest write that reached the filesystem.
+    written: u64,
+    /// What the file looked like after that write.
+    stamp: Stamp,
 }
 
 /// Writes one note's text, unless a newer write already landed.
@@ -82,19 +110,20 @@ async fn write_through(
     text: String,
     seq: u64,
 ) -> Option<inkra_vault::Result<Saved>> {
-    let mut written = writer.written.lock().await;
-    if seq < *written {
+    let mut state = writer.state.lock().await;
+    if seq < state.written {
         return None;
     }
-    let result = fs.save(&path, &text).await;
+    let result = fs.save(&path, &text, state.stamp).await;
     // Only a write that landed advances the mark, so the field keeps meaning
     // what it says. Not covered by a test, and deliberately so: sequences are
     // minted monotonically and used once, so a retry always carries a higher
     // number than the failure before it, and no reachable interleaving can tell
     // the two versions apart. The guard is here to keep the invariant true for
     // the next reader of `written`, not because a test demands it.
-    if result.is_ok() {
-        *written = seq;
+    if let Ok(saved) = &result {
+        state.written = seq;
+        state.stamp = saved.stamp;
     }
     Some(result)
 }
@@ -229,8 +258,9 @@ impl NoteStore {
                 if let Some(note) = this.open.get(&id) {
                     return note.buffer.clone();
                 }
+                let stamp = loaded.stamp;
                 let buffer = cx.new(|_| Buffer::new(loaded.text));
-                this.track(id, buffer.clone(), path, cx);
+                this.track(id, buffer.clone(), path, stamp, cx);
                 cx.notify();
                 buffer
             })
@@ -259,8 +289,14 @@ impl NoteStore {
 
     /// Keyed by `EntryId::DETACHED`: the file was named on the command line,
     /// and no scanned entry can carry that id.
-    pub(crate) fn adopt(&mut self, buffer: Entity<Buffer>, path: PathBuf, cx: &mut Context<Self>) {
-        self.track(EntryId::DETACHED, buffer, path, cx);
+    pub(crate) fn adopt(
+        &mut self,
+        buffer: Entity<Buffer>,
+        path: PathBuf,
+        stamp: Stamp,
+        cx: &mut Context<Self>,
+    ) {
+        self.track(EntryId::DETACHED, buffer, path, stamp, cx);
         self.current = Some(EntryId::DETACHED);
     }
 
@@ -274,6 +310,7 @@ impl NoteStore {
         id: EntryId,
         buffer: Entity<Buffer>,
         path: PathBuf,
+        stamp: Stamp,
         cx: &mut Context<Self>,
     ) {
         let observer = cx.observe(&buffer, move |this, _buffer, cx| {
@@ -290,10 +327,14 @@ impl NoteStore {
                 save: None,
                 scheduled: false,
                 cancel: None,
-                // Zero is below every minted sequence, which starts at one, so
-                // the first write of a note is never mistaken for a stale one.
                 writer: Arc::new(Writer {
-                    written: futures::lock::Mutex::new(0),
+                    state: futures::lock::Mutex::new(WriterState {
+                        // Zero is below every minted sequence, which starts at
+                        // one, so the first write of a note is never mistaken
+                        // for a stale one.
+                        written: 0,
+                        stamp,
+                    }),
                 }),
             },
         );
@@ -429,6 +470,39 @@ impl NoteStore {
         }
     }
 
+    /// Lists the vault again, so a file this process did not create through
+    /// the editor reaches the tree.
+    ///
+    /// The only caller is the conflict path, and deliberately so: a full
+    /// directory walk every `AUTOSAVE_DELAY` would not be free, and a conflict
+    /// is rare. It is also the first production caller of the scan at all —
+    /// nothing rescans after startup, so without this the preserved file would
+    /// sit on disk unmentioned until the next launch, and the only signal this
+    /// feature has would not fire.
+    ///
+    /// Two halves because `Vault::apply` needs `&mut Vault` and the walk
+    /// awaits: an entity hands out `&mut` only inside a synchronous closure.
+    /// Takes `&self` rather than reading the entity back: the only caller runs
+    /// inside an `update`, which already holds the lease, and a second read of
+    /// one entity panics (`gpui/src/app/entity_map.rs:156`).
+    fn rescan(&self, cx: &mut Context<Self>) {
+        let Some(vault) = self.vault.clone() else {
+            return;
+        };
+        let fs = Arc::clone(&self.fs);
+        cx.spawn(async move |_, cx| {
+            let root = vault.read_with(cx, |vault, _| vault.root().to_path_buf());
+            let Ok(children) = Vault::collect(&*fs, &root).await else {
+                return;
+            };
+            let _ = vault.update(cx, |vault, cx| {
+                vault.apply(children);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Writes one note, once. A no-op when nothing changed.
     ///
     /// The version is captured **with** the text, before the spawn, so
@@ -496,6 +570,13 @@ impl NoteStore {
             if let Some(vault) = this.vault.clone() {
                 vault.update(cx, |vault, _| vault.reidentify(id, saved.identity));
             }
+            if let Some(preserved) = saved.preserved.clone() {
+                cx.emit(ConflictPreserved {
+                    id,
+                    path: preserved,
+                });
+                this.rescan(cx);
+            }
             cx.notify();
         });
     }
@@ -514,7 +595,9 @@ mod tests {
     use inkra_vault::mem_fs::MemFs;
     use inkra_vault::{EntryId, Vault};
 
-    use super::{AUTOSAVE_DELAY, Fs, NoteStore, SaveFailed};
+    use inkra_vault::{Mtime, Stamp};
+
+    use super::{AUTOSAVE_DELAY, ConflictPreserved, Fs, NoteStore, SaveFailed};
     use crate::editor::EditorView;
     use crate::keymap::key_bindings;
     use crate::shell::AppShell;
@@ -606,12 +689,18 @@ mod tests {
         fs: Arc<dyn Fs>,
     ) -> (VisualTestContext, Entity<NoteStore>) {
         cx.update(|cx| cx.bind_keys(key_bindings()));
-        let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
+        // Loaded rather than a literal that happens to agree with the file:
+        // `adopt` needs the real stamp, and a fabricated one would make the
+        // first write of every test built on this helper see a mismatch, mint
+        // a conflict file, and quietly defeat the tests that count the vault.
+        let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("every caller inserts /vault/a.md first");
+        let buffer = cx.update(|cx| cx.new(|_| Buffer::new(loaded.text.clone())));
         let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
         let notes = cx.update(|cx| {
             cx.new(|cx| {
                 let mut store = NoteStore::new(fs, None, cx);
-                store.adopt(buffer, PathBuf::from("/vault/a.md"), cx);
+                store.adopt(buffer, PathBuf::from("/vault/a.md"), loaded.stamp, cx);
                 store
             })
         });
@@ -654,11 +743,18 @@ mod tests {
         let fs = Arc::new(MemFs::new());
         fs.insert_file("/vault/a.md", "before");
 
-        let buffer = cx.update(|cx| cx.new(|_| Buffer::new("before")));
+        let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("the file was just inserted");
+        let buffer = cx.update(|cx| cx.new(|_| Buffer::new(loaded.text.clone())));
         let notes = cx.update(|cx| {
             cx.new(|cx| {
                 let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx);
-                store.adopt(buffer.clone(), PathBuf::from("/vault/a.md"), cx);
+                store.adopt(
+                    buffer.clone(),
+                    PathBuf::from("/vault/a.md"),
+                    loaded.stamp,
+                    cx,
+                );
                 store
             })
         });
@@ -782,9 +878,204 @@ mod tests {
         );
     }
 
+    /// The defect the expectation's placement exists to avoid, in its simplest
+    /// reachable form. The second write's expectation cannot be the stamp the
+    /// *load* returned: our own first write already invalidated it. A note
+    /// taking its expectation from `OpenNote` would mint a conflict file
+    /// holding its own text on the second keystroke of an ordinary session.
+    #[gpui::test]
+    fn a_second_write_does_not_conflict_with_the_first(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+        visual.simulate_input("Y");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("beforeXY")
+        );
+        let entries =
+            futures::executor::block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+        assert_eq!(
+            entries.len(),
+            1,
+            "a write must not conflict with our own previous one"
+        );
+    }
+
+    /// The same, with the two writes genuinely overlapping rather than
+    /// sequential: `block_save` holds the first open past the turn that issued
+    /// it, which is the only way a second write is issued while the first is
+    /// still in flight.
+    #[gpui::test]
+    fn an_overlapping_write_does_not_conflict_with_the_one_in_flight(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+
+        let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let gate = fs.block_save("/vault/a.md");
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        visual.simulate_input("Y");
+        visual.simulate_keystrokes("cmd-s");
+        gate.release();
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        let entries =
+            futures::executor::block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+        assert_eq!(
+            entries.len(),
+            1,
+            "neither write may conflict with the other"
+        );
+    }
+
+    /// An external writer changes the note between the load and the write. Its
+    /// text survives under a new name, and the note holds what is on screen.
+    #[gpui::test]
+    fn an_external_change_is_preserved_beside_the_note(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+        let (mut visual, notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let announced = Arc::new(AtomicUsize::new(0));
+        let _guard = cx.update(|cx| {
+            let announced = Arc::clone(&announced);
+            cx.subscribe(&notes, move |_, _: &ConflictPreserved, _| {
+                announced.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+
+        // `insert_file` keeps the path's identity, exactly as a second process
+        // rewriting a file in place would.
+        fs.insert_file("/vault/a.md", "theirs");
+
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("beforeX"),
+            "the note keeps its path and holds what is on screen"
+        );
+        let entries =
+            futures::executor::block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+        let preserved = entries
+            .iter()
+            .find(|entry| entry.path.to_string_lossy().contains("conflict"))
+            .expect("a conflict file");
+        assert_eq!(
+            fs.read_to_string(&preserved.path).as_deref(),
+            Some("theirs")
+        );
+        assert_eq!(announced.load(Ordering::SeqCst), 1);
+    }
+
+    /// The conflict file's only route to the user. Nothing else in the running
+    /// application rescans, so without this the file sits on disk unmentioned
+    /// until the next launch.
+    ///
+    /// `open_two_notes`, not `open_shell`: the latter is the DETACHED path —
+    /// `NoteStore::new(fs, None, cx)` — and has no vault at all, so the rescan
+    /// branch is unreachable under it. This test needs no window; it asserts on
+    /// the vault's contents, not on a frame.
+    #[gpui::test]
+    async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("the note opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+        let before = store.read_with(cx, |store, cx| {
+            store.vault().expect("a vault").read(cx).entries().count()
+        });
+
+        fs.insert_file("/vault/a.md", "theirs");
+        // `update` plus an explicit `notify`: the observer `track` installs is
+        // the autosave trigger, and `Buffer` cannot notify for itself. Without
+        // the notify nothing schedules and the write never happens.
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| {
+                buffer.insert(ByteOffset(0), "X");
+            });
+            cx.notify();
+        });
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        let after = store.read_with(cx, |store, cx| {
+            store.vault().expect("a vault").read(cx).entries().count()
+        });
+        assert_eq!(after, before + 1, "the preserved file is listed");
+    }
+
+    /// An ordinary write must not walk the directory. A conflict is rare;
+    /// `AUTOSAVE_DELAY` is not.
+    #[gpui::test]
+    async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("the note opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+
+        // A scan of an unreadable directory yields nothing, so a rescan here
+        // would empty the tree. Counting afterwards is what makes this test
+        // about scanning rather than about the file's text.
+        fs.make_unreadable("/vault");
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| {
+                buffer.insert(ByteOffset(0), "X");
+            });
+            cx.notify();
+        });
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("Xalpha")
+        );
+        let entries = store.read_with(cx, |store, cx| {
+            store.vault().expect("a vault").read(cx).entries().count()
+        });
+        assert_eq!(entries, 2, "no rescan ran, so the tree is intact");
+    }
+
     fn writer() -> Arc<super::Writer> {
         Arc::new(super::Writer {
-            written: futures::lock::Mutex::new(0),
+            state: futures::lock::Mutex::new(super::WriterState {
+                written: 0,
+                // These tests drive `write_through` directly against a file
+                // they wrote themselves, so the seed is never what the note
+                // carries — which is the point: the first write of each is
+                // expected to find a mismatch and preserve, and they assert on
+                // the note's final text, which is unaffected either way.
+                stamp: Stamp {
+                    mtime: Mtime(std::time::SystemTime::UNIX_EPOCH),
+                    size: 0,
+                },
+            }),
         })
     }
 
