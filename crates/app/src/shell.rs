@@ -7,13 +7,19 @@
 
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Task, Window, div, px, rgb,
+    ParentElement, Pixels, Render, Styled, Task, Window, div, px,
 };
 use inkra_vault::EntryId;
 
 use crate::editor::EditorView;
 use crate::sidebar::{NoteActivated, Sidebar};
+use crate::theme;
 use crate::vault::{NoteStore, Save, SaveFailed};
+
+/// Wide enough for a nested note name at the deepest indent the sidebar draws
+/// before it starts truncating. Fixed rather than resizable: the drag handle is
+/// deferred, with its trigger in the app-shell spec.
+const SIDEBAR_WIDTH: Pixels = px(220.);
 
 pub(crate) struct AppShell {
     editor: Entity<EditorView>,
@@ -96,10 +102,6 @@ impl Focusable for AppShell {
 }
 
 impl Render for AppShell {
-    // Matches EditorView::render's own allow (editor/mod.rs): RRGGBB hex
-    // literals are the idiomatic gpui color form; clippy's suggested
-    // underscore grouping obscures the RGB byte boundaries.
-    #[allow(clippy::unreadable_literal)]
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             // Scoped here rather than on `EditorView`: the sidebar will be
@@ -117,9 +119,9 @@ impl Render for AppShell {
                 // editor for space.
                 div()
                     .flex_none()
-                    .w(px(180.))
+                    .w(SIDEBAR_WIDTH)
                     .h_full()
-                    .bg(rgb(0x181818))
+                    .bg(theme::sidebar_background())
                     .child(self.sidebar.clone()),
             )
             .child(
@@ -149,9 +151,10 @@ mod tests {
 
     use super::{AppShell, EditorView, EntryId, NoteActivated, NoteStore, Sidebar};
     use crate::keymap::key_bindings;
+    use crate::sidebar::row_center;
 
     /// Rooted at `AppShell`, not at the `Sidebar`: that puts the sidebar under
-    /// its real 180px parent, and it is the only way to reach the subscription
+    /// its real `SIDEBAR_WIDTH` parent, and it is the only way to reach the subscription
     /// `AppShell::new` sets up.
     fn open_vault(
         cx: &mut TestAppContext,
@@ -256,7 +259,7 @@ mod tests {
         let (window, _sidebar, _notes, editor) = open_vault(cx, fs as Arc<dyn Fs>);
         let mut visual = VisualTestContext::from_window(window.into(), cx);
         // Vertical middle of the first row, past its `pl`.
-        visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
+        visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
         visual.run_until_parked();
 
         editor.update(cx, |editor, cx| {

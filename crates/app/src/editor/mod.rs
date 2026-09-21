@@ -12,11 +12,11 @@ use gpui::{
     App, Bounds, Context, CursorStyle, Entity, FocusHandle, Focusable, InteractiveElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, point, px,
-    rgb,
 };
 use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
 use inkra_text::{Buffer, ByteOffset};
 
+use crate::theme;
 use element::{DocumentLayout, TextElement};
 
 /// Local: up and down are not resolvable without font metrics.
@@ -246,8 +246,6 @@ impl Focusable for EditorView {
 }
 
 impl Render for EditorView {
-    // Underscore grouping (0x001e_1e1e) obscures the RGB byte boundaries.
-    #[allow(clippy::unreadable_literal)]
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         div()
             .id("editor")
@@ -283,10 +281,10 @@ impl Render for EditorView {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll_handle)
-            .bg(rgb(0x1e1e1e))
-            .text_color(rgb(0xffffff))
-            .text_size(px(18.))
-            .line_height(px(28.))
+            .bg(theme::editor_background())
+            .text_color(theme::editor_text())
+            .text_size(theme::BODY_TEXT_SIZE)
+            .line_height(theme::BODY_LINE_HEIGHT)
             .p_4()
             .child(TextElement {
                 editor: cx.entity(),

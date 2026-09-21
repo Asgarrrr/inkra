@@ -118,7 +118,7 @@ pub trait Fs: Send + Sync {
 /// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
 /// I/O or a paste action, whichever lands first".
 #[must_use]
-pub fn normalize_line_endings(text: &str) -> String {
+pub(crate) fn normalize_line_endings(text: &str) -> String {
     if !text.contains('\r') {
         return text.to_owned();
     }

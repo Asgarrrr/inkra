@@ -33,6 +33,12 @@ area, not on every task:
   chain. Its four **Corrected** notes are where implementing it disagreed with
   designing it. Read this before touching the save path; the vault spec above
   describes the pre-autosave picture.
+- [docs/superpowers/specs/2026-09-21-conflict-detection-design.md](./docs/superpowers/specs/2026-09-21-conflict-detection-design.md)
+  — why a `Stamp` is compared with `!=` and never with an ordering, why the
+  expectation lives on the `Writer` rather than on the note, and why the quit
+  flush is ordered against the periodic chain instead of serialised with it.
+  Read it with the autosave spec above; it extends that write path rather than
+  replacing it.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
@@ -91,6 +97,13 @@ area, not on every task:
   - no layout, no filesystem, no clock → `text` (a property of the text) or
     `editor` (a property of editing it)
   - pixels, font metrics, a `Window`, a clock, the platform → `app`
+  - a colour or a text size → `app/src/theme.rs`, never a literal at the call
+    site. `rgb` and `rgba` read the same `u32` differently, so a bare hex does
+    not say whether its low byte is blue or alpha; naming the colour takes that
+    choice away from the render method. The chrome scale (`UI_*`) must be
+    **stated** wherever chrome text is drawn: gpui's default line box is
+    `phi()` — 25.89 px on a 16 px default — and a row shorter than that clips
+    its own text under `overflow_hidden`.
   - reading or writing a file → `vault`, behind the `Fs` trait. `app` chooses
     the path and holds the `Arc<dyn Fs>`; it opens no file itself, which is
     what lets every `app` test run against `MemFs` instead of the real disk.
@@ -336,3 +349,5 @@ change that introduces something reusable.
 | A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
+| A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
+| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |
