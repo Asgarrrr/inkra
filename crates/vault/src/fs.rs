@@ -113,6 +113,36 @@ pub trait Fs: Send + Sync {
     /// Returns the identity the file carries **afterwards**, which a rename
     /// changes. See `Saved`.
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved>;
+
+    /// Creates an empty note or a directory. Fails if anything already exists
+    /// at `path`, rather than taking it over.
+    ///
+    /// One method with a `Kind` rather than two: the two differ only in which
+    /// node type lands, and the caller already carries the `Kind`. Returns the
+    /// new identity, which is how a caller finds the entry the next scan mints
+    /// for it — by inode, never by path, so a scan racing the create cannot
+    /// hand back a different file that happens to share the name.
+    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
+
+    /// Moves `from` to `to`, and never replaces a *different* file at `to`.
+    ///
+    /// Returns nothing because nothing moves: no implementation of this may
+    /// change the inode, so a caller holding `from`'s identity still holds
+    /// `to`'s. `Vault::apply` keys every `EntryId` on that, which is what makes
+    /// a rename keep its entry.
+    ///
+    /// `to` naming the *same* file as `from` is a rename, not a collision: on a
+    /// case-insensitive or normalization-insensitive volume that is how the
+    /// stored spelling of a name is changed, and it is the only way a user can
+    /// fix the capitalisation of their own note.
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()>;
+
+    /// Moves a note to the platform trash, from where the user can recover it.
+    ///
+    /// Notes only. A directory would take its whole subtree with it, which
+    /// needs a prompt that counts what it destroys and the closing of every
+    /// buffer inside it; both are deferred.
+    async fn trash(&self, path: &Path) -> Result<()>;
 }
 
 /// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file

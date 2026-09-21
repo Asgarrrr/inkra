@@ -95,7 +95,7 @@ proptest! {
                         let from = PathBuf::from("/vault").join(&path);
                         let to = format!("/vault/{n}.md");
                         if fs.read_to_string(Path::new(&to)).is_none() {
-                            fs.rename(&from, &to);
+                            block_on(fs.rename(&from, Path::new(&to))).expect("rename");
                             expected[i] = (id, PathBuf::from(format!("{n}.md")));
                         }
                     }
@@ -105,12 +105,12 @@ proptest! {
                         let from = PathBuf::from("/vault").join(&path);
                         let lowered = path.to_string_lossy().to_lowercase();
                         let to = PathBuf::from("/vault").join(&lowered);
-                        // Same occupied-destination guard as `Op::Rename`:
-                        // `MemFs::rename` overwrites, so an unguarded recase
-                        // would delete another tracked file behind the
-                        // harness's back and fail the wrong assertion.
+                        // Same occupied-destination guard as `Op::Rename`.
+                        // `Fs::rename` refuses one rather than overwriting, so
+                        // without this the harness would `expect` on a failure
+                        // the operation is entitled to report.
                         if fs.read_to_string(&from).is_some() && fs.read_to_string(&to).is_none() {
-                            fs.rename(&from, to);
+                            block_on(fs.rename(&from, &to)).expect("rename");
                             expected[i] = (id, PathBuf::from(lowered));
                         }
                     }
