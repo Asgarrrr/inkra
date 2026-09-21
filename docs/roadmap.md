@@ -15,12 +15,11 @@ the uncertainty, for reasons given below.
 | Item | Trigger | Estimate | Blocked by |
 |---|---|---|---|
 | Horizontal scroll and reveal | A note with lines long enough to push the caret off the right edge. | 1–2 d | — |
-| CRLF normalization | File I/O or a paste action, whichever lands first. | ~0.5 d | `inkra-vault` |
 | Soft wrap | A real note measured to need it. | 3–5 d | — |
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | Soft wrap |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 
-Sequential total for the five sized editor items: roughly 11–17 working days.
+Sequential total for the four sized editor items: roughly 10–16 working days.
 
 ### Horizontal scroll and reveal
 
@@ -46,12 +45,6 @@ Three costs the vertical half did not pay:
   (`editor/src/element.rs:9383-9402`), which puts it in prepaint — the placement
   the vertical half rejected, because our `div` reads the offset before our
   element prepaints.
-
-### CRLF normalization
-
-Small in isolation. It stays deferred because nothing can put a `\r` in the
-buffer today — there is no file I/O and no paste action — so writing it now
-means writing a normalizer no input can reach.
 
 ### Soft wrap
 
@@ -86,6 +79,25 @@ The genuine risk is the IME, not the editing. The macOS input protocol assumes
 a single `marked_range`, and `EntityInputHandler` is written against that
 assumption throughout `input.rs`. What composition should even mean with N
 carets is an open question here, not a known design being typed in.
+
+## Vault
+
+`inkra-vault` ships open, list and save. What it deliberately leaves out — the
+file watcher, diff-based reload, conflict detection, create/rename/delete,
+atomic save, flushing dirty notes on quit, serializing overlapping writes,
+buffer eviction, reporting a failed open, and the native folder picker — is
+recorded with a trigger each in the Deferred table of
+`superpowers/specs/2026-09-20-inkra-vault-design.md`.
+
+Not repeated here, for the same reason as the section below: one table, one
+place to change it. Read the trigger before building any of them; several look
+independent and are not.
+
+CRLF normalization has left this document. Its trigger was "file I/O or a paste
+action, whichever lands first", and file I/O landed: `Fs::load` normalizes
+before text can reach a `Buffer`. The CRLF *round-trip* — preserving a file's
+original line endings on save — is a different item and is in that same
+Deferred table.
 
 ## Application
 
