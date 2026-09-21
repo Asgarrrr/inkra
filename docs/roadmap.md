@@ -82,12 +82,20 @@ carets is an open question here, not a known design being typed in.
 
 ## Vault
 
-`inkra-vault` ships open, list and save. What it deliberately leaves out — the
-file watcher, diff-based reload, conflict detection, create/rename/delete,
-atomic save, flushing dirty notes on quit, serializing overlapping writes,
-buffer eviction, reporting a failed open, and the native folder picker — is
-recorded with a trigger each in the Deferred table of
-`superpowers/specs/2026-09-20-inkra-vault-design.md`.
+`inkra-vault` ships open, list and save. Saving is atomic — a temp file renamed
+over the destination — and a note writes itself on a timer, on a note switch,
+and as the application quits, not only on `⌘S`.
+
+What it deliberately leaves out — the file watcher, diff-based reload, conflict
+detection, create/rename/delete, serializing writes *across* notes, buffer
+eviction, reporting a failed open, an empty state for the unnamed launch
+buffer, and the native folder picker — is recorded with a trigger each in the
+Deferred table of `superpowers/specs/2026-09-20-inkra-vault-design.md`.
+
+Conflict detection is the largest honest hole. A write every two seconds over a
+file a sync client or `git checkout` just changed is a silent clobber, and
+autosave made that continuous where `⌘S`-only needed the user to press a key at
+the wrong moment.
 
 Not repeated here, for the same reason as the section below: one table, one
 place to change it. Read the trigger before building any of them; several look
