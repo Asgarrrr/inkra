@@ -114,7 +114,7 @@ area, not on every task:
     the cached layout, which `edit_buffer` has no reason to do.
 - `NoteStore::current` names the note `⌘S` writes, and it must always be the
   note the editor is displaying. It has exactly two writers. `set_current` is
-  the one the UI uses, and `Sidebar::activate` calls it immediately after
+  the one the UI uses, and `AppShell::open_note` calls it immediately after
   `EditorView::open_buffer`, with no `await` between the two, so nothing can
   observe one without the other. `adopt` is the exception, and keeps the rule by
   being synchronous: it runs before the window opens, for the file named on the
@@ -124,6 +124,14 @@ area, not on every task:
   file: it saves **nothing**. The note it picks is clean, so `save_current`
   returns early at the version comparison and the dirty note stays dirty,
   silently.
+- A widget that can open a note **emits `sidebar::NoteActivated`**; it never
+  holds an `Entity<EditorView>`. `AppShell` subscribes and routes, so a tab bar
+  or a backlinks panel plugs into the same seam with no change to the sidebar.
+  The emit is deliberately indirect on top of that: a direct synchronous
+  callback would re-enter the `Sidebar` while `activate` still holds its lease,
+  and a second lease of one entity panics. The event is delivered when the
+  *outermost* update flushes — the window's event dispatch, or a test's own
+  top-level `update` — not when the nested `activate` call returns.
 - A window-wide action binds at the `AppShell` key context, not `EditorView`'s
   — `cmd-s` (`app/src/keymap.rs`) is the precedent. `EditorView`'s context only
   fires while the editor has focus, and the sidebar can hold focus once it
@@ -182,6 +190,12 @@ area, not on every task:
   is an *editing-semantics* test, which belongs in `text` or `editor`. A plain
   `#[test]` over pixel geometry is fine and preferable: pixels cannot move down
   a layer, and `scroll.rs` is the precedent.
+- A test of where an activated note *goes* roots at `AppShell`, in `shell.rs`,
+  for the same reason `cmd-s` does: the subscription that routes
+  `NoteActivated` is set up in `AppShell::new`, so a window rooted at `Sidebar`
+  cannot reach it. `sidebar.rs` keeps only the click→emit half, which it
+  asserts by subscribing to the `Sidebar` itself — and which therefore proves
+  nothing about `AppShell`'s wiring.
 - `app` tests use `MemFs`, never the real filesystem. `MemFs::block_load` holds
   one load open while another finishes — the only way to reach the state where
   the editor and `NoteStore::current` disagree.
@@ -250,9 +264,12 @@ change that introduces something reusable.
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
 | Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_modified` | `app/src/vault.rs` |
 | The vault tree, with expansion and the modified dot | `Sidebar` | `app/src/sidebar.rs` |
+| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
+| Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
 | A headless window rooted at `AppShell`, with a store | `open_shell` | `app/src/vault.rs` |
 | A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
-| The same for the sidebar | `parts` / `open` / `open_with_store` / `two_notes` | `app/src/sidebar.rs` |
+| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
+| A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |

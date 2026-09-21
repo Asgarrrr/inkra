@@ -6,27 +6,29 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use gpui::{
-    App, Context, Div, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    Styled, Task, Window, div, px, rgb, uniform_list,
+    App, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Render, Styled, Window, div, px, rgb, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
 
-use crate::editor::EditorView;
 use crate::vault::NoteStore;
+
+/// Where the note goes is `AppShell`'s to decide, so any widget that can open
+/// one — a tab bar, a backlinks panel — plugs in by emitting this, with no
+/// change here. A struct, not a one-variant enum: `EventEmitter<E>` is generic
+/// over the event type (`gpui/src/gpui.rs:296`), so a second signal is a
+/// second type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoteActivated(pub(crate) EntryId);
+
+impl EventEmitter<NoteActivated> for Sidebar {}
 
 pub(crate) struct Sidebar {
     notes: Entity<NoteStore>,
-    /// Held for `EditorView::open_buffer`, the only path that may rebind.
-    editor: Entity<EditorView>,
     /// Expansion is UI state, never vault state.
     expanded: HashSet<EntryId>,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
-    /// Held, never detached: dropping a `Task` cancels it
-    /// (`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`), so a
-    /// superseded load cannot rebind the editor behind a later click. The
-    /// opposite of `AppShell::save`, deliberately.
-    activation: Option<Task<()>>,
 }
 
 #[derive(Clone)]
@@ -38,17 +40,11 @@ struct Row {
 }
 
 impl Sidebar {
-    pub(crate) fn new(
-        notes: Entity<NoteStore>,
-        editor: Entity<EditorView>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(notes: Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
         let mut sidebar = Self {
             notes,
-            editor,
             expanded: HashSet::new(),
             visible: Vec::new(),
-            activation: None,
         };
         sidebar.rebuild(cx);
         sidebar
@@ -92,24 +88,14 @@ impl Sidebar {
         self.rebuild(cx);
     }
 
-    /// Bind and `set_current` run with no `await` between them, so nothing can
-    /// observe one without the other.
+    /// Expansion is the sidebar's own state; where a note opens is not. The
+    /// sidebar does not know an editor exists.
     fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
         if row.kind == Kind::Dir {
             self.toggle(row.id, cx);
             return;
         }
-        let editor = self.editor.clone();
-        let notes = self.notes.clone();
-        let id = row.id;
-        let opened = self
-            .notes
-            .update(cx, |notes, cx| notes.open_note(row.id, cx));
-        self.activation = Some(cx.spawn(async move |_, cx| {
-            let Some(buffer) = opened.await else { return };
-            editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx));
-            notes.update(cx, |notes, cx| notes.set_current(id, cx));
-        }));
+        cx.emit(NoteActivated(row.id));
     }
 
     /// Split out only so a test can read the dot: nothing gets text back out
@@ -184,43 +170,65 @@ impl Render for Sidebar {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::cell::RefCell;
     use std::path::Path;
+    use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Instant;
 
-    use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, point, prelude::*, px};
-    use inkra_text::{Buffer, ByteOffset};
+    use gpui::{
+        Entity, Modifiers, Subscription, TestAppContext, VisualTestContext, point, prelude::*, px,
+    };
+    use inkra_text::ByteOffset;
     use inkra_vault::mem_fs::MemFs;
     use inkra_vault::{Fs, Vault};
 
-    use super::{Kind, Row, Sidebar};
-    use crate::editor::EditorView;
+    use super::{Kind, NoteActivated, Row, Sidebar};
     use crate::vault::NoteStore;
 
     /// Stops short of the sidebar: `add_window` constructs the view itself.
-    fn parts(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<NoteStore>, Entity<EditorView>) {
+    fn parts(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entity<NoteStore> {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
             .expect("scan the test vault");
         let vault = cx.update(|cx| cx.new(|_| scanned));
-        let notes = cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))));
-        let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
-        let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer, cx)));
-        (notes, editor)
+        cx.update(|cx| cx.new(|_| NoteStore::new(fs, Some(vault))))
     }
 
     /// The same, with a sidebar that is never drawn.
-    fn open(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, Entity<EditorView>) {
-        let (sidebar, _notes, editor) = open_with_store(cx, fs);
-        (sidebar, editor)
+    fn open(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entity<Sidebar> {
+        open_with_store(cx, fs).0
     }
 
     fn open_with_store(
         cx: &mut TestAppContext,
         fs: Arc<dyn Fs>,
-    ) -> (Entity<Sidebar>, Entity<NoteStore>, Entity<EditorView>) {
-        let (notes, editor) = parts(cx, fs);
-        let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes.clone(), editor.clone(), cx)));
-        (sidebar, notes, editor)
+    ) -> (Entity<Sidebar>, Entity<NoteStore>) {
+        let notes = parts(cx, fs);
+        let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes.clone(), cx)));
+        (sidebar, notes)
+    }
+
+    /// A sidebar that *is* drawn, so a click has a layout to land in.
+    fn drawn(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, VisualTestContext) {
+        let notes = parts(cx, fs);
+        let window = cx.add_window(move |_, cx| Sidebar::new(notes, cx));
+        let sidebar = window.root(cx).expect("root view");
+        (sidebar, VisualTestContext::from_window(window.into(), cx))
+    }
+
+    /// Every `NoteActivated` the sidebar emits, in order.
+    fn watch(
+        sidebar: &Entity<Sidebar>,
+        cx: &mut TestAppContext,
+    ) -> (Rc<RefCell<Vec<NoteActivated>>>, Subscription) {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let guard = cx.update(|cx| {
+            let seen = Rc::clone(&seen);
+            cx.subscribe(sidebar, move |_, event: &NoteActivated, _| {
+                seen.borrow_mut().push(*event);
+            })
+        });
+        (seen, guard)
     }
 
     /// Trailing `/` on directories: the display name is the file stem, so
@@ -263,7 +271,7 @@ mod tests {
         fs.insert_file("/vault/Projects.md", "n");
         fs.insert_file("/vault/a.md", "a");
 
-        let (sidebar, _editor) = open(cx, fs as Arc<dyn Fs>);
+        let sidebar = open(cx, fs as Arc<dyn Fs>);
 
         // Folders start collapsed.
         assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
@@ -283,7 +291,7 @@ mod tests {
         fs.insert_file("/vault/Projects/deep/x.md", "x");
         fs.insert_file("/vault/Projects/plan.md", "p");
 
-        let (sidebar, _editor) = open(cx, fs as Arc<dyn Fs>);
+        let sidebar = open(cx, fs as Arc<dyn Fs>);
         assert_eq!(labels(&sidebar, cx), ["Projects/"]);
 
         let projects = row(&sidebar, cx, "Projects/");
@@ -297,7 +305,8 @@ mod tests {
     }
 
     /// Nothing in the type system stops every row's `on_mouse_down` seeing the
-    /// same press (`elements/uniform_list.rs:508-510`).
+    /// same press (`elements/uniform_list.rs:508-510`). The toggle side of
+    /// that; the note side is `a_click_reports_the_row_it_landed_on`.
     #[gpui::test]
     fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
@@ -305,23 +314,12 @@ mod tests {
         fs.insert_file("/vault/Projects.md", "folder note");
         fs.insert_file("/vault/a.md", "alpha");
 
-        let (notes, editor) = parts(cx, fs as Arc<dyn Fs>);
-        let for_window = editor.clone();
-        let window = cx.add_window(move |_, cx| Sidebar::new(notes, for_window, cx));
-        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
 
         // The first row is the folder `Projects`, at rows of `h(px(22.))`.
         visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
         visual.run_until_parked();
 
-        editor.update(cx, |editor, cx| {
-            assert_eq!(
-                editor.buffer().read(cx).text(),
-                "",
-                "pressing a folder must open no note at all"
-            );
-        });
-        let sidebar = window.root(cx).expect("root view");
         assert_eq!(
             labels(&sidebar, cx),
             ["Projects/", "plan", "Projects", "a"],
@@ -329,175 +327,63 @@ mod tests {
         );
     }
 
+    /// Subscribes to the `Sidebar` itself, so it proves nothing about
+    /// `AppShell`'s wiring — that is `shell.rs`'s job.
+    ///
     /// A real mouse event, not a call to `activate`: only the layout decides
     /// whether a click lands. Discriminates `.w_full()` — headless text is
     /// measured at 0.6 × `font_size` per glyph
     /// (`vendor/zed-reference/crates/gpui/src/platform.rs:1288-1296`), so an
     /// `auto` row around the stem `a` ends at 17.6px and x=20 misses.
     ///
-    /// Does *not* cover `.size_full()`: a root's `auto` size is stretched to
-    /// fill (`window.rs:3542-3545`), unlike the real parent in `shell.rs`.
+    /// Does *not* cover `.size_full()`: a window root resolves its percentage
+    /// against the test display's definite bounds, never the real 180px parent
+    /// in `shell.rs`. The folder keeps a sibling note so that clicking it
+    /// proves no *other* row reported either.
     #[gpui::test]
-    fn clicking_a_row_hands_its_buffer_to_the_editor(cx: &mut TestAppContext) {
+    fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/Projects/plan.md", "plan");
         fs.insert_file("/vault/a.md", "alpha");
 
-        let (notes, editor) = parts(cx, fs as Arc<dyn Fs>);
-        let for_window = editor.clone();
-        let window = cx.add_window(move |_, cx| Sidebar::new(notes, for_window, cx));
-        let mut visual = VisualTestContext::from_window(window.into(), cx);
-        // Vertical middle of the first row, past its `pl`.
+        let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+        let (seen, _guard) = watch(&sidebar, cx);
+
+        // Row 0 is the folder `Projects`, at rows of `h(px(22.))`.
         visual.simulate_click(point(px(20.), px(11.)), Modifiers::none());
         visual.run_until_parked();
+        assert!(
+            seen.borrow().is_empty(),
+            "a folder reports no note, its own or a sibling's"
+        );
 
-        editor.update(cx, |editor, cx| {
-            assert_eq!(editor.buffer().read(cx).text(), "alpha");
-        });
-    }
-
-    fn two_notes(
-        cx: &mut TestAppContext,
-        fs: &Arc<MemFs>,
-    ) -> (
-        Entity<Sidebar>,
-        Entity<NoteStore>,
-        Entity<EditorView>,
-        Row,
-        Row,
-    ) {
-        fs.insert_file("/vault/a.md", "alpha");
-        fs.insert_file("/vault/b.md", "beta");
-        let (sidebar, notes, editor) = open_with_store(cx, Arc::clone(fs) as Arc<dyn Fs>);
+        // Expanded, so `a` is now row 2: `Projects/`, `plan`, `a`.
         let a = row(&sidebar, cx, "a");
-        let b = row(&sidebar, cx, "b");
-        (sidebar, notes, editor, a, b)
-    }
-
-    /// A `current` the editor disagrees with saves *nothing*: the note it picks
-    /// is clean, so `⌘S` returns early and the dirty note stays dirty, silently.
-    /// Deterministic under the randomizing test scheduler
-    /// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:641-643`)
-    /// because only one load is in flight and the gate decides when it lands.
-    #[gpui::test]
-    fn an_abandoned_load_does_not_supersede_a_later_click(cx: &mut TestAppContext) {
-        let fs = Arc::new(MemFs::new());
-        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
-
-        // Opened up front so the click below takes the already-open path.
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
-        cx.run_until_parked();
-
-        let gate = fs.block_load("/vault/b.md");
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
-        cx.run_until_parked();
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
-        cx.run_until_parked();
-
-        gate.release();
-        cx.run_until_parked();
-
-        editor.update(cx, |editor, cx| {
-            assert_eq!(
-                editor.buffer().read(cx).text(),
-                "alpha",
-                "the last note clicked is the note the editor ends on"
-            );
-        });
-        notes.update(cx, |notes, _| {
-            assert_eq!(
-                notes.current(),
-                Some(a.id),
-                "`save_current` reads this; pointing it at the abandoned note \
-                 makes `cmd-s` a silent no-op"
-            );
-        });
-    }
-
-    /// The gates release in the opposite order to the clicks: against the
-    /// unfixed code both loads land and the last wins. Against the fixed code
-    /// clicking `b` tears `a`'s whole chain down, so the order stops mattering.
-    #[gpui::test]
-    fn the_current_note_is_the_one_in_the_editor(cx: &mut TestAppContext) {
-        let fs = Arc::new(MemFs::new());
-        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
-
-        let gate_a = fs.block_load("/vault/a.md");
-        let gate_b = fs.block_load("/vault/b.md");
-
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
-        cx.run_until_parked();
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
-        cx.run_until_parked();
-
-        gate_b.release();
-        cx.run_until_parked();
-        gate_a.release();
-        cx.run_until_parked();
-
-        let current = notes
-            .update(cx, |notes, _| notes.current())
-            .expect("a note is current");
-        assert_eq!(current, b.id, "the last click wins");
-
-        let in_store = notes.update(cx, |notes, _| {
-            notes.buffer_for(current).map(Entity::entity_id)
-        });
-        let in_editor = editor.update(cx, |editor, _| editor.buffer().entity_id());
-        assert_eq!(
-            in_store,
-            Some(in_editor),
-            "the current note and the editor's buffer are the same entity"
-        );
-    }
-
-    /// Even with no load to cancel, the rebind is one turn late; `⌘S` in that
-    /// turn silently writes nothing. Hence `set_current` after the bind.
-    #[gpui::test]
-    fn a_click_records_the_note_only_once_the_editor_holds_it(cx: &mut TestAppContext) {
-        let fs = Arc::new(MemFs::new());
-        let (sidebar, notes, editor, a, b) = two_notes(cx, &fs);
-
-        // Both opened, so the third click takes the already-open path.
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
-        cx.run_until_parked();
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
-        cx.run_until_parked();
-
-        // Deliberately not parked: this is the turn `⌘S` can land in.
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&a, cx));
-
-        assert_eq!(
-            notes.update(cx, |notes, _| notes.current()),
-            Some(b.id),
-            "the editor still holds `b`, so `b` is still the note a save writes"
-        );
-        editor.update(cx, |editor, cx| {
-            assert_eq!(editor.buffer().read(cx).text(), "beta");
-        });
-
-        cx.run_until_parked();
-        assert_eq!(notes.update(cx, |notes, _| notes.current()), Some(a.id));
-        editor.update(cx, |editor, cx| {
-            assert_eq!(editor.buffer().read(cx).text(), "alpha");
-        });
+        visual.simulate_click(point(px(20.), px(22. * 2. + 11.)), Modifiers::none());
+        visual.run_until_parked();
+        assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
     }
 
     /// Asserts the label, not `is_modified`: the predicate passes with the dot
     /// deleted. One note edited, so a marker on every row also fails.
     #[gpui::test]
-    fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {
+    async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
-        let (sidebar, notes, editor, _a, b) = two_notes(cx, &fs);
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
 
-        sidebar.update(cx, |sidebar, cx| sidebar.activate(&b, cx));
-        cx.run_until_parked();
+        let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let b = row(&sidebar, cx, "b");
+
+        let opened = notes.update(cx, |notes, cx| notes.open_note(b.id, cx));
+        let buffer = opened.await.expect("`b` opens");
+        notes.update(cx, |notes, cx| notes.set_current(b.id, cx));
         assert_eq!(
             row_labels(&sidebar, cx),
             ["a", "b"],
             "opening a note changes nothing about it"
         );
 
-        let buffer = editor.update(cx, |editor, _| editor.buffer().clone());
         buffer.update(cx, |buffer, _| {
             buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
         });
