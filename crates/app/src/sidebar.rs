@@ -150,11 +150,19 @@ impl Sidebar {
                     // Load-bearing: an `auto` width is clickable only where the
                     // text reaches (`elements/uniform_list.rs:508-510`).
                     .w_full()
-                    // A row is exactly one line box tall, which is what stops it
-                    // clipping its own text. The pair has to be stated: gpui's
-                    // default line box is `phi()` — 25.89 px — and the row used
-                    // to be 22, so `overflow_hidden` below ate the difference.
-                    .h(theme::UI_LINE_HEIGHT)
+                    // No explicit height: the row *is* its line box, so it
+                    // cannot clip its own text however the type is set.
+                    //
+                    // That identity is also the only way the type statement
+                    // below is under test. A fixed height would hold the row
+                    // pitch at 22 px whatever the text did inside it, and a
+                    // deleted `text_size`/`line_height` pair would silently
+                    // restore the clipping this file used to have — gpui's
+                    // default line box is `phi()` on a 16 px default, 25.89 px.
+                    // Tied to the pitch, that deletion moves every row, and
+                    // `a_click_far_down_the_list_lands_on_the_row_it_names`
+                    // fails. Pixels the eye would catch become pixels the suite
+                    // catches.
                     .text_size(theme::UI_TEXT_SIZE)
                     .line_height(theme::UI_LINE_HEIGHT)
                     .pl(INDENT_BASE + INDENT_STEP * depth)
@@ -190,6 +198,10 @@ impl Render for Sidebar {
 }
 
 /// The vertical centre of row `ix`, for a test that clicks one.
+///
+/// Derived from the line height because the row has no height of its own: see
+/// `render_rows`. A click computed here and landing elsewhere means the rendered
+/// pitch has drifted from the stated one.
 ///
 /// Lives beside the row height rather than in a test module, so `shell.rs` uses
 /// the same definition: two suites clicking the sidebar must not each hard-code
@@ -428,6 +440,56 @@ mod tests {
         visual.simulate_click(point(px(20.), row_center(2.)), Modifiers::none());
         visual.run_until_parked();
         assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
+    }
+
+    /// The row pitch, asserted where a drift has somewhere to show.
+    ///
+    /// `render_rows` states the sidebar's type and lets each row take its line
+    /// box as its height. Nothing but that identity holds the two together, so
+    /// this is the test the type statement lives or dies by: a click computed
+    /// from `UI_LINE_HEIGHT` has to land on the row that constant names.
+    ///
+    /// Thirty rows is what makes it bite, and the depth is the whole design.
+    /// The two pitches below are **measured**, not derived — deleting the pair
+    /// and probing where row 1 begins gives 26.0 px, and deleting `line_height`
+    /// alone gives 22.5 px. (The second is not `phi()` times 14, which would be
+    /// 22.65; gpui does not render the fraction it computes.) Against the stated
+    /// 22 px, 26.0 first misplaces a click at row 3, and 22.5 — half a pixel of
+    /// drift per row — not until row 23. Clicking row 29 catches both with six
+    /// rows in hand. Twenty rows caught only the first.
+    ///
+    /// What it pins is `line_height`, which is the row's height and therefore
+    /// the only thing that can make a line box outgrow its row. Deleting
+    /// `text_size` alone leaves this green, and should: 16 px inside a stated
+    /// 22 px box still fits, so that is a typographic regression and not the
+    /// clipping defect. Nothing here catches it, and nothing here claims to.
+    ///
+    /// The alternative was a fixed `.h()` on the row, which is what this file
+    /// used to have. It holds the pitch at 22 px whatever the text does inside
+    /// it — so the clipping the type statement exists to prevent comes back
+    /// silently, and every test here still passes. That is the state this test
+    /// exists to leave behind.
+    #[gpui::test]
+    fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        // Two digits, so the comparator's lexical order is the numeric one:
+        // `note-9` would sort between `note-19` and `note-2`.
+        for ix in 0..30 {
+            fs.insert_file(format!("/vault/note-{ix:02}.md"), "text");
+        }
+
+        let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+        let (seen, _guard) = watch(&sidebar, cx);
+
+        let last = row(&sidebar, cx, "note-29");
+        visual.simulate_click(point(px(20.), row_center(29.)), Modifiers::none());
+        visual.run_until_parked();
+
+        assert_eq!(
+            *seen.borrow(),
+            [NoteActivated(last.id)],
+            "the rendered pitch has drifted from the stated line height"
+        );
     }
 
     /// Asserts the label, not `is_dirty`: the predicate passes with the dot

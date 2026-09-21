@@ -237,6 +237,17 @@ area, not on every task:
   `NoteStore::current` disagree — and `block_save` holds a write open past the
   turn that issued it, which is the only way one note gets two writers.
   `make_unwritable` is the only way a write fails at all.
+- A purely visual constant is guarded only where a behaviour reads it. The
+  editor's line height kills six tests when deleted, because scroll and
+  hit-testing resolve through it; the sidebar's type killed none, because the
+  row pitch was fixed independently with `.h()`. So a chrome row states its
+  `line_height` and takes **no** height of its own — the row *is* its line box,
+  which both stops it clipping its text and ties the pitch to the statement, so
+  deleting the statement moves every row and a click test fails. Pin such a test
+  far enough down the list for the drift to pass one whole row, and take the
+  pitches by measurement rather than arithmetic: gpui renders 22.5 px where
+  `phi()` on 14 px computes 22.65, and a test sized from the computed figure
+  passes against the real one.
 - A test of the write **ordering** does not belong in a `#[gpui::test]`.
   `TestScheduler` runs every runnable on the one thread driving the block
   (`scheduler/src/test_scheduler.rs:308-417`), so it can model "queued and not
