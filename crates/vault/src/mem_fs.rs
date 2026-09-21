@@ -1,12 +1,9 @@
-//! An in-memory `Fs` for tests.
-//!
-//! A `BTreeMap`, an injectable error and one load gate, not a simulated
-//! kernel. Zed's `FakeFs` is 2207 lines
+//! An in-memory `Fs` for tests: a `BTreeMap`, an injectable error and one load
+//! gate, not a simulated kernel. Zed's `FakeFs` is 2207 lines
 //! (`vendor/zed-reference/crates/fs/src/fs.rs:1440-3646`) because it amortizes
 //! over hundreds of scanner tests; ours does not.
 //!
-//! Compiled under clippy's `--all-features`, so it is held to
-//! `unwrap_used = "deny"` like everything else.
+//! Compiled under `--all-features`, so `unwrap_used = "deny"` applies here too.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -54,9 +51,9 @@ impl MemFs {
         }
     }
 
-    /// Recovers the guard from a poisoned lock rather than panicking. The lock
+    /// Recovers the guard from a poisoned lock rather than panicking: the lock
     /// is only poisoned when another test thread already panicked, and its
-    /// failure is the one worth reading; `unwrap` is denied anyway.
+    /// failure is the one worth reading.
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         match self.state.lock() {
             Ok(guard) => guard,
@@ -133,15 +130,12 @@ impl MemFs {
     }
 
     /// Parks the next `load` of `path` until the returned gate is released or
-    /// dropped.
+    /// dropped. One gate parks one load.
     ///
-    /// The one piece of latency this fake models, and it earns its place: a
-    /// `BTreeMap` resolves instantly, so without it no test can hold one note's
-    /// load open while another note's completes — which is the only shape in
-    /// which the editor and `NoteStore::current` can disagree.
-    ///
-    /// One gate parks one load. A second load of the same path runs unimpeded
-    /// unless it is gated again.
+    /// The one piece of latency this fake models: a `BTreeMap` resolves
+    /// instantly, so without it no test can hold one note's load open while
+    /// another completes — the only shape in which the editor and
+    /// `NoteStore::current` can disagree.
     // No `#[must_use]`: `LoadGate` carries its own, and dropping the returned
     // gate on the spot would release the load immediately.
     pub fn block_load(&self, path: impl Into<PathBuf>) -> LoadGate {

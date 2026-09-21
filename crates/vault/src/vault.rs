@@ -7,18 +7,15 @@ use std::path::{Path, PathBuf};
 use crate::RelPath;
 use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
 
-/// No real vault approaches this. It exists so a pathological tree cannot
-/// exhaust the walk.
+/// Guards against a pathological tree; no real vault approaches it.
 const MAX_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntryId(u32);
 
 impl EntryId {
-    /// Reserved: the scan mints ids from 1, so this one names a note no scan
-    /// can produce — a file opened by path with no vault behind it, which is
-    /// what `app` launches with when it is given a filename on the command
-    /// line. A test below holds the reservation.
+    /// The scan mints ids from 1, so this names a note no scan can produce: a
+    /// file opened by path. A test holds the reservation.
     pub const DETACHED: Self = Self(0);
 }
 
@@ -27,10 +24,8 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
-    /// Nothing reads this yet. Kept because conflict detection is the side of
-    /// the comparison the scan owns: `saved_mtime` seeds from `Fs::load`, and
-    /// what it is compared *against* is the file's mtime as of the last walk.
-    /// See the Conflict detection row under Deferred in
+    /// Unread. Kept because conflict detection compares `saved_mtime` against
+    /// the mtime as of the last walk — Deferred in
     /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
     pub mtime: Mtime,
 }
@@ -43,8 +38,7 @@ pub struct Vault {
 }
 
 impl Vault {
-    /// Never returns the `Vec`. Swapping the container for a `SumTree` the day
-    /// a profile asks for one must stay internal.
+    /// Never returns the `Vec`: swapping it for a `SumTree` must stay internal.
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter()
     }
@@ -54,30 +48,22 @@ impl Vault {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
-    /// The absolute path to an entry, for handing to `Fs`.
     #[must_use]
     pub fn absolute(&self, id: EntryId) -> Option<PathBuf> {
         self.entry(id)
             .map(|entry| self.root.join(entry.path.as_path()))
     }
 
-    /// Walks the tree from `root`, keeping whatever `Fs::read_dir` yields.
-    ///
-    /// The walk owns the depth limit and nothing else. Which entries exist at
-    /// all — `*.md` only, no dotfiles, no symlinks — is the `Fs`
-    /// implementation's obligation, not this one's: see `RealFs::read_dir`.
-    /// The distinction matters for a second backend, which must reimplement
-    /// those filters rather than inherit them from here.
-    ///
-    /// Iterative rather than recursive: an async recursive function needs
-    /// boxing at every level, and an explicit worklist gives the depth limit
-    /// for free.
+    /// The walk owns the depth limit and nothing else. Which entries exist —
+    /// `*.md` only, no dotfiles, no symlinks — is `Fs`'s obligation (see
+    /// `RealFs::read_dir`), so a second backend must reimplement those filters.
+    /// Iterative because an async recursive function needs boxing per level.
     ///
     /// # Errors
     ///
-    /// Never, today: a directory that cannot be read is skipped rather than
-    /// reported, so that one unreadable folder does not lose the vault. The
-    /// `Result` is the seam a second `Fs` backend will need.
+    /// Never, today: an unreadable directory is skipped rather than reported,
+    /// so one folder cannot lose the vault. The `Result` is the seam a second
+    /// `Fs` backend will need.
     pub async fn scan(fs: &dyn Fs, root: &Path) -> Result<Self> {
         let mut vault = Self {
             root: root.to_path_buf(),
@@ -89,9 +75,8 @@ impl Vault {
         Ok(vault)
     }
 
-    /// Re-walks the tree, preserving the id of every file whose identity is
-    /// unchanged. Ids are keyed by `(device, inode)`, so a rename keeps its id
-    /// and a recreated file takes a new one.
+    /// Ids are keyed by `(device, inode)`, so a rename keeps its id and a
+    /// recreated file takes a new one.
     ///
     /// # Errors
     ///
@@ -117,11 +102,9 @@ impl Vault {
                     continue;
                 };
 
-                // Hard links collapse: the first path wins, the second is
-                // dropped. A note vault does not use them. Checked before an
-                // id is minted, so the duplicate neither burns an id nor
-                // overwrites the survivor's entry in the map — that would hand
-                // the survivor a different id on the next rescan.
+                // Hard links collapse, first path wins. Before minting, so the
+                // duplicate neither burns an id nor overwrites the survivor's
+                // map entry — either shifts the survivor's id next rescan.
                 if next_by_identity.contains_key(&child.identity) {
                     continue;
                 }
@@ -154,26 +137,17 @@ impl Vault {
     }
 }
 
-/// Orders entries so that a directory is immediately followed by its whole
-/// subtree, and so that directories precede files at each level.
+/// Directories precede files at each level; a directory is followed by its
+/// whole subtree. Only the first half is this function's doing — contiguity
+/// comes from `RelPath`'s component-wise `Ord` and survives `path.cmp`.
+/// Sibling order prefers whichever entry is a directory *at the first differing
+/// component*, which is not the same as the entry being a directory.
 ///
-/// Only the second half is this function's doing. `RelPath` derives `Ord` from
-/// `Arc<Path>`, and `Path: Ord` compares component by component, so an ancestor
-/// is a strict component prefix of its descendants and nothing sorts between
-/// them. Contiguity is a theorem of that ordering. The sidebar's collapse-skip
-/// rests on it, and it survives replacing this function with `a.path.cmp`.
-///
-/// What this adds is sibling order: at the first differing component, prefer
-/// the one that is a directory *at that position*, which is not the same as the
-/// entry being a directory. Without it `b.md` sorts above `c`, and a top-level
-/// file renders between two directories. That is cosmetic, not load-bearing.
-///
-/// Two encodings were rejected and must not come back as simplifications,
-/// because both lose contiguity. Raw path *bytes* put `Projects.md` between
-/// `Projects` and `Projects/plan.md`, since `.` (0x2E) sorts below `/` (0x2F);
-/// the Obsidian folder-note pattern reaches that on the first vault. Sorting by
-/// `(kind, path)` hoists every directory above every file, so an unrelated
-/// top-level directory lands inside another directory's run.
+/// Two encodings were rejected and must not return as simplifications; both
+/// lose contiguity. Raw path *bytes* wedge `Projects.md` between `Projects` and
+/// `Projects/plan.md`, since `.` (0x2E) sorts below `/` (0x2F). `(kind, path)`
+/// hoists every directory above every file, landing an unrelated top-level
+/// directory inside another directory's run.
 fn compare(a: &Entry, b: &Entry) -> Ordering {
     let a_components: Vec<_> = a.path.as_path().components().collect();
     let b_components: Vec<_> = b.path.as_path().components().collect();
@@ -280,9 +254,8 @@ mod tests {
         assert_ne!(old, new, "a different file must not inherit the id");
     }
 
-    /// Two names for one file collapse to one entry, and the walk that drops
-    /// the duplicate must not leave the identity map pointing at an id no
-    /// entry carries — the next rescan would hand the survivor that id.
+    /// Dropping the duplicate must not leave the identity map pointing at an id
+    /// no entry carries: the next rescan would hand it to the survivor.
     #[test]
     fn a_hard_link_does_not_shift_the_surviving_id() {
         let fs = MemFs::new();
@@ -301,8 +274,7 @@ mod tests {
         );
     }
 
-    /// `EntryId::DETACHED` is only safe to hand to a note outside the vault for
-    /// as long as no scan can mint it.
+    /// `EntryId::DETACHED` is safe only while no scan can mint it.
     #[test]
     fn the_scan_never_mints_the_detached_id() {
         let fs = MemFs::new();
@@ -312,15 +284,9 @@ mod tests {
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
     }
 
-    /// Pins component-wise ordering, not `compare`. The assertion holds
-    /// unchanged under a plain `path.cmp`, and no data would change that: a
-    /// folder note is always `<dir>.md`, so the directory is always a byte
-    /// prefix of it and sorts first either way. Dirs-first never gets a chance
-    /// to speak here; that property belongs to the sibling test below.
-    ///
-    /// Kept because byte ordering does break it — `.` (0x2E) below `/` (0x2F)
-    /// wedges `Projects.md` between `Projects` and its children — and the
-    /// Obsidian folder-note pattern reaches that on the first real vault.
+    /// Pins component-wise ordering, not `compare`: holds under a plain
+    /// `path.cmp`, but byte ordering breaks it, and the Obsidian folder-note
+    /// pattern reaches that on the first real vault.
     #[test]
     fn a_folder_note_does_not_split_its_folder_from_its_children() {
         let fs = MemFs::new();
@@ -333,8 +299,7 @@ mod tests {
         );
     }
 
-    /// Sorting by `(kind, path)` puts every directory before every file, so
-    /// `a/z.md` would render indented under `c`.
+    /// Under `(kind, path)`, `a/z.md` would render indented under `c`.
     #[test]
     fn a_directorys_children_follow_it_rather_than_all_other_directories() {
         let fs = MemFs::new();
@@ -348,20 +313,10 @@ mod tests {
         );
     }
 
-    /// The invariant the sidebar's collapse-skip rests on, asserted directly.
-    ///
-    /// It cannot discriminate `compare` from a plain `path.cmp`, and no data
-    /// would help: under component-wise ordering contiguity is a theorem.
-    /// Anything sorting between a path and its extensions shares the ancestor's
-    /// components, so it *is* a descendant. Read that the reassuring way round:
-    /// simplifying `compare` to `path.cmp` would cost sibling order, which the
-    /// test above pins, and not this.
-    ///
-    /// Kept because it is the only direct guard on the property the sidebar
-    /// walks, and the two rejected encodings do break it — byte order wedges
-    /// `Projects.md` at index 1, `(kind, path)` wedges `zz` at index 2. The
-    /// second top-level directory is what gives the `(kind, path)` case teeth:
-    /// with only one, there is nothing to hoist above the files.
+    /// The invariant the sidebar's collapse-skip rests on. Cannot discriminate
+    /// `compare` from `path.cmp`, but both rejected encodings break it: byte
+    /// order wedges `Projects.md` at index 1, `(kind, path)` wedges `zz` at
+    /// index 2. The second top-level directory is what gives that case teeth.
     #[test]
     fn every_directorys_descendants_are_contiguous() {
         let fs = MemFs::new();
