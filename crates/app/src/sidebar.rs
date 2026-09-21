@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use gpui::{
     App, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, Styled, Window, div, px, rgb, uniform_list,
+    ParentElement, Render, Styled, Subscription, Window, div, px, rgb, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
 
@@ -29,6 +29,14 @@ pub(crate) struct Sidebar {
     expanded: HashSet<EntryId>,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
+    /// Rebuilds `visible` when the vault's contents change. Never read; holding
+    /// it is the point, because dropping a `Subscription` cancels it.
+    ///
+    /// Without this the cache is rebuilt only by `new` and `toggle`, so a file
+    /// that appears in the vault while the window is open — the conflict file a
+    /// clobbered write preserves is the only one today — never reaches a row.
+    /// The vault's own `notify` had no subscriber at all.
+    _vault_changed: Option<Subscription>,
 }
 
 #[derive(Clone)]
@@ -41,10 +49,13 @@ struct Row {
 
 impl Sidebar {
     pub(crate) fn new(notes: Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
+        let vault = notes.read(cx).vault().cloned();
+        let watched = vault.map(|vault| cx.observe(&vault, |this, _, cx| this.rebuild(cx)));
         let mut sidebar = Self {
             notes,
             expanded: HashSet::new(),
             visible: Vec::new(),
+            _vault_changed: watched,
         };
         sidebar.rebuild(cx);
         sidebar
@@ -214,6 +225,40 @@ mod tests {
         let window = cx.add_window(move |_, cx| Sidebar::new(notes, cx));
         let sidebar = window.root(cx).expect("root view");
         (sidebar, VisualTestContext::from_window(window.into(), cx))
+    }
+
+    /// The conflict file's only route to the user, asserted where the user
+    /// would see it: `visible`, not `Vault::entries`.
+    ///
+    /// `visible` is a cache rebuilt by `new` and `toggle` alone. A test that
+    /// counts vault entries instead passes while the sidebar paints a stale
+    /// row list, which is exactly what happened: the vault's `notify` had no
+    /// subscriber, and the file this whole feature exists to surface was
+    /// invisible until the next launch.
+    #[gpui::test]
+    fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.visible.len()), 1);
+
+        // What a conflict leaves behind, and then the rescan that follows it.
+        fs.insert_file("/vault/a (conflict 1970-01-01 00-00-01Z).md", "theirs");
+        let vault = notes
+            .read_with(cx, |notes, _| notes.vault().cloned())
+            .expect("a vault");
+        let children = futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault")))
+            .expect("collect");
+        vault.update(cx, |vault, cx| {
+            vault.apply(children);
+            cx.notify();
+        });
+
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.visible.len()),
+            2,
+            "the sidebar must observe the vault, not only its own toggles"
+        );
     }
 
     /// Every `NoteActivated` the sidebar emits, in order.

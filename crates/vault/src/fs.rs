@@ -53,7 +53,8 @@ pub struct DirEntry {
     pub identity: FileIdentity,
 }
 
-/// `stamp` is the expectation the next write of this note carries.
+/// `stamp` is the expectation the next write of this note carries. `identity`
+/// has no reader: only `Saved::identity` does, because only a write moves it.
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub text: String,
@@ -139,6 +140,39 @@ pub fn normalize_line_endings(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::normalize_line_endings;
+
+    /// The size term. Two writes inside one mtime granule differ only here, and
+    /// dropping it leaves the whole workspace green — which is what this test
+    /// is for.
+    #[test]
+    fn a_stamp_differs_when_only_the_size_does() {
+        use super::{Mtime, Stamp};
+        use std::time::{Duration, SystemTime};
+
+        let at = Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+        assert_ne!(Stamp { mtime: at, size: 1 }, Stamp { mtime: at, size: 2 });
+    }
+
+    /// Inequality, not ordering. A sync client preserving an original modified
+    /// date hands back a file *older* than the one we wrote; `>` calls that
+    /// unchanged and overwrites it. Every other conflict test in the workspace
+    /// moves the mtime forward, so this is the only one that fails when the
+    /// comparison is relaxed to an ordering.
+    #[test]
+    fn a_stamp_differs_when_the_mtime_moves_backwards() {
+        use super::{Mtime, Stamp};
+        use std::time::{Duration, SystemTime};
+
+        let newer = Stamp {
+            mtime: Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(20)),
+            size: 4,
+        };
+        let older = Stamp {
+            mtime: Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(10)),
+            size: 4,
+        };
+        assert_ne!(newer, older);
+    }
 
     #[test]
     fn crlf_becomes_lf() {

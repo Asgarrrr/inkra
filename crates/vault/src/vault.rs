@@ -24,9 +24,10 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
-    /// Unread. Kept because conflict detection compares `saved_mtime` against
-    /// the mtime as of the last walk — Deferred in
-    /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`.
+    /// Unread, and now without the reason it was kept for: conflict detection
+    /// shipped on 2026-09-21 and compares a `Stamp` inside `Fs::save`, never
+    /// this. Left in place because a listing that cannot report an mtime is a
+    /// poorer seam for a second `Fs` backend, not because anything wants it.
     pub mtime: Mtime,
 }
 
@@ -124,9 +125,14 @@ impl Vault {
     ///
     /// # Errors
     ///
-    /// Never, today: an unreadable directory is skipped rather than reported,
-    /// so one folder cannot lose the vault. The `Result` is the seam a second
-    /// `Fs` backend will need.
+    /// When the **root** cannot be read. A subdirectory that cannot be read is
+    /// skipped instead, so one folder cannot lose the vault — but the root is
+    /// not one folder among many. Reporting it as an empty listing would make
+    /// `apply` clear every entry, and a caller that rescans a live vault would
+    /// then leave every open note unable to resolve its path: still on screen,
+    /// still typable, never written again, not even by the quit flush. The
+    /// startup path already treats an unreadable root as fatal
+    /// (`app/src/main.rs`), and this is the same fact arriving later.
     pub async fn collect(fs: &dyn Fs, root: &Path) -> Result<Vec<DirEntry>> {
         let mut found = Vec::new();
         let mut worklist = vec![(root.to_path_buf(), 0usize)];
@@ -135,8 +141,10 @@ impl Vault {
             if depth > MAX_DEPTH {
                 continue;
             }
-            let Ok(children) = fs.read_dir(&dir).await else {
-                continue;
+            let children = match fs.read_dir(&dir).await {
+                Ok(children) => children,
+                Err(error) if dir == root => return Err(error),
+                Err(_) => continue,
             };
 
             for child in children {

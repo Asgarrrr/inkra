@@ -492,7 +492,14 @@ impl NoteStore {
         let fs = Arc::clone(&self.fs);
         cx.spawn(async move |_, cx| {
             let root = vault.read_with(cx, |vault, _| vault.root().to_path_buf());
-            let Ok(children) = Vault::collect(&*fs, &root).await else {
+            // `cx.spawn` is the *foreground* executor
+            // (`gpui/src/app.rs:2036-2045`), and `RealFs::read_dir` blocks
+            // inside its future by design — every other `Fs` call in this file
+            // is wrapped the same way. A directory walk on the main thread
+            // freezes the window, and a vault on a network mount is exactly
+            // where both conflicts and slow walks come from.
+            let walk = cx.background_spawn(async move { Vault::collect(&*fs, &root).await });
+            let Ok(children) = walk.await else {
                 return;
             };
             // The entity is held strongly by this closure, so neither this nor

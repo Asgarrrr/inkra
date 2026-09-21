@@ -181,8 +181,8 @@ area, not on every task:
   no crash point loses them. A second `Fs` backend owes the same ordering.
 - Only `app` reads a clock. `text` and `editor` take the `Instant` from the
   caller; `vault` takes every `Mtime` from the filesystem, never from
-  `SystemTime::now`. Conflict detection (deferred) will compare a freshly
-  stated `Mtime` against the one `Loaded`/`DirEntry` returned at open time — a
+  `SystemTime::now`. Conflict detection compares a freshly stated
+  `Stamp` against the one `Loaded`/`Saved` returned, inside `Fs::save` — a
   process-clock stamp would not agree with a later stat of the same file.
 - Move and delete by grapheme, never by char.
 - Infallible buffer operations panic on caller bugs — no `Result`. Reserve
@@ -315,7 +315,7 @@ change that introduces something reusable.
 | Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
-| What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread today; see `Fs::load`'s doc comment) | `vault/src/vault.rs` |
+| What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
 | A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
 | Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault.rs` |
