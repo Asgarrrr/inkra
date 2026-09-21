@@ -205,8 +205,10 @@ impl Render for Sidebar {
 ///
 /// Lives beside the row height rather than in a test module, so `shell.rs` uses
 /// the same definition: two suites clicking the sidebar must not each hard-code
-/// the pitch and drift from it.
-#[cfg(test)]
+/// the pitch and drift from it. The shot runner is the third caller, and the
+/// reason the gate is not `#[cfg(test)]` alone — it clicks rows from a normal
+/// build.
+#[cfg(any(test, feature = "shot"))]
 pub(crate) fn row_center(ix: f32) -> Pixels {
     theme::UI_LINE_HEIGHT * (ix + 0.5)
 }

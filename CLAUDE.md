@@ -39,6 +39,12 @@ area, not on every task:
   flush is ordered against the periodic chain instead of serialised with it.
   Read it with the autosave spec above; it extends that write path rather than
   replacing it.
+- [docs/superpowers/specs/2026-09-21-offscreen-shots-design.md](./docs/superpowers/specs/2026-09-21-offscreen-shots-design.md)
+  — why `inkra-app` is a library with two entry points, why the capture needs
+  `gpui_platform/test-support` rather than `gpui/test-support`, and why the
+  example carries `required-features`. Read it before touching `shot/`, the
+  crate's target layout, or `bootstrap::root`. Its "What is shared, and what is
+  only mirrored" section is where a first draft's claim was demonstrated wrong.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
@@ -52,6 +58,10 @@ area, not on every task:
 - lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -- --check`
 - run: `cargo run -p inkra-app`
+- look: `cargo run -p inkra-app --features shot --example shot` — renders every
+  scene off-screen into `target/shots/*.png`. Add a scene name for one, or
+  `--list` for the catalogue. This is how the eyeball pass below gets done
+  without a human at the screen.
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
 
 ## GPUI (hard rule)
@@ -86,6 +96,16 @@ area, not on every task:
 
 - `inkra-text` → `inkra-editor` → `inkra-app`, one way. Never add a dependency
   that inverts it.
+- `inkra-app` is a **library with two entry points**, not a bare binary:
+  `main.rs` and `examples/shot.rs` are both trampolines. That is what lets the
+  off-screen runner reach the views without any of them becoming `pub` — an
+  example links the package's `[lib]`, and there was none before. Keep views
+  `pub(crate)`; the crate's public surface is `run` and `shot::run`, and a third
+  entry point is not a reason to grow it.
+- A new example target needs `required-features` in the same change if it
+  touches a feature-gated module. `cargo test` compiles example targets without
+  running them, so a trampoline naming a gated module breaks `cargo test
+  --workspace` — and therefore `check.sh` — for the whole workspace.
 - `inkra-vault` sits beside that chain, not in it: `app` depends on it, it
   depends on no other crate in the workspace. Keep it that way — it is the
   seam a second `Fs` backend plugs into, and a dependency on `text` or
@@ -289,9 +309,18 @@ area, not on every task:
   binding, the `actions!` mapping, or the repaint gate — and a wrong binding
   passes `check.sh`. Use the `dispatching` helper.
 - No snapshot or visual testing while the UI is still unstable.
-- `check.sh` renders nothing. After touching the gpui dependency, its features,
-  or `TextElement`, run the app and look at it. A missing `font-kit` feature
-  silently renders no text while every test still passes.
+- `check.sh` renders nothing — `TestWindow::draw` only calls a renderer when one
+  was installed (`gpui/src/platform/test/window.rs:527`), and a `#[gpui::test]`
+  installs none. After touching the gpui dependency, its features, or
+  `TextElement`, **look at the app**: a missing `font-kit` feature silently
+  renders no text while every test still passes. The shot runner (`look`, under
+  Commands) is that pass, and it is the cheaper one — `cargo run -p inkra-app`
+  on a real window still tells you things the off-screen path cannot, such as
+  whether the window opens at all.
+- A scene is not a test and proves nothing on its own. Shots are looked at, not
+  asserted: there are no baselines and `check.sh` never runs the runner. Adding
+  one does not discharge the obligation to write a `#[gpui::test]` for the
+  behaviour.
 
 ## Don't recreate — it already exists
 
@@ -373,6 +402,11 @@ change that introduces something reusable.
 | A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
 | The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
 | A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
+| Build the window's root view, from either entry point | `bootstrap::root` — takes the `Fs`, so the runner passes `MemFs` and gets the composition the real window gets | `app/src/bootstrap.rs` |
+| The real window's size | `bootstrap::WINDOW_SIZE` — never a literal beside it | `app/src/bootstrap.rs` |
+| Render a state of the app to a PNG | `shot::run`, via `examples/shot.rs` | `app/src/shot/mod.rs` |
+| Open an off-screen window, focus, type, click, capture | `Stage` — the one door, so every scene gets `WINDOW_SIZE` and the same action handlers | `app/src/shot/stage.rs` |
+| The list of states worth looking at | `catalogue()` returning `&[Scene]` | `app/src/shot/scenes.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |

@@ -3,12 +3,36 @@ name = "inkra-app"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# The off-screen shot runner. Off by default, so `cargo build --release` never
+# compiles `shot.rs` and never links gpui's `test-support`. Clippy runs
+# `--all-features`, so the module is still linted.
+#
+# `gpui_platform/test-support` is the load-bearing one: the capture is
+# `MacWindow::render_to_image` (`gpui_macos/src/window.rs:2342`), gated on *that*
+# crate's feature, and without it the window falls through to `PlatformWindow`'s
+# default and dies at capture time. `gpui/test-support` is forwarded by it, and
+# stated anyway because the runner calls `capture_screenshot` directly.
+shot = [
+    "dep:image",
+    "gpui/test-support",
+    "gpui_platform/test-support",
+    "inkra-vault/test-support",
+]
+
+# Required: `cargo test` compiles example targets without running them, so
+# without this the trampoline names a gated module and breaks `check.sh`.
+[[example]]
+name = "shot"
+required-features = ["shot"]
+
 [dependencies]
 inkra-text = { workspace = true }
 inkra-editor = { workspace = true }
 inkra-vault = { workspace = true }
-# For `block_on` only: the one load that happens before the window exists, so
-# there is no gpui executor to spawn onto yet.
+# For `block_on` only: the loads that happen before a window exists, so there is
+# no gpui executor to spawn onto yet. The binary's launch, and the vault a shot
+# scene builds.
 futures = "0.3"
 # Path, not git: the source we compile and the source CLAUDE.md tells us to read
 # are then provably the same files. Restore the checkout with
@@ -19,6 +43,11 @@ gpui = { path = "../../vendor/zed-reference/crates/gpui" }
 gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", features = [
     "font-kit",
 ] }
+# Writing the captured frame out. `^0.25` is gpui's own requirement, so cargo
+# resolves both to one version and `RgbaImage` is the same type on either side.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+], optional = true }
 
 [dev-dependencies]
 gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
