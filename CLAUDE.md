@@ -112,8 +112,11 @@ area, not on every task:
     screen records that replacement on the *previous* note's undo stack, so `⌘Z`
     restores one file into another. `open_buffer` also resubscribes and clears
     the cached layout, which `edit_buffer` has no reason to do.
-- `NoteStore::current` names the note `⌘S` writes, and it must always be the
-  note the editor is displaying. It has exactly two writers. `set_current` is
+- `NoteStore::current` names the note `⌘S` writes — and only that. It does not
+  gate writing in general: the periodic writer writes every dirty note whatever
+  is current, and so does the quit flush. What `current` decides is which note
+  `⌘S` targets and which note a switch writes on the way out. It must always be
+  the note the editor is displaying. It has exactly two writers. `set_current` is
   the one the UI uses, and `AppShell::open_note` calls it immediately after
   `EditorView::open_buffer`, with no `await` between the two, so nothing can
   observe one without the other. `adopt` is the exception, and keeps the rule by
@@ -122,8 +125,10 @@ area, not on every task:
   load's schedule, so it would record whichever load landed last rather than the
   note on screen. A `current` the editor disagrees with does not save the wrong
   file: it saves **nothing**. The note it picks is clean, so `save_current`
-  returns early at the version comparison and the dirty note stays dirty,
-  silently.
+  returns early at the version comparison and `⌘S` is a silent no-op. Since
+  autosave landed this no longer loses the edit — the periodic writer picks the
+  dirty note up at its deadline — but it still breaks the promise `⌘S` makes,
+  which is that the write happens *now*.
 - A widget that can open a note **emits `sidebar::NoteActivated`**; it never
   holds an `Entity<EditorView>`. `AppShell` subscribes and routes, so a tab bar
   or a backlinks panel plugs into the same seam with no change to the sidebar.
@@ -196,9 +201,25 @@ area, not on every task:
   cannot reach it. `sidebar.rs` keeps only the click→emit half, which it
   asserts by subscribing to the `Sidebar` itself — and which therefore proves
   nothing about `AppShell`'s wiring.
-- `app` tests use `MemFs`, never the real filesystem. `MemFs::block_load` holds
-  one load open while another finishes — the only way to reach the state where
-  the editor and `NoteStore::current` disagree.
+- `app` tests use `MemFs`, never the real filesystem. Its two gates are what
+  make a race reproducible: `block_load` holds one load open while another
+  finishes — the only way to reach the state where the editor and
+  `NoteStore::current` disagree — and `block_save` holds a write open past the
+  turn that issued it, which is the only way one note gets two writers.
+  `make_unwritable` is the only way a write fails at all.
+- A test of the write **ordering** does not belong in a `#[gpui::test]`.
+  `TestScheduler` runs every runnable on the one thread driving the block
+  (`scheduler/src/test_scheduler.rs:308-417`), so it can model "queued and not
+  yet polled" but never the real hazard, which is a background thread already
+  inside `rename()`. And a test that let the scheduler choose the order would
+  assert whatever seed 0 happens to produce. Drive `write_through` directly
+  instead and force each order — a plain `#[test]`, the `scroll.rs` precedent.
+- Quit through `TestAppContext::quit`, which calls `App::shutdown`
+  (`gpui/src/app/test_context.rs:233`). `cx.quit()` inside an `update` is
+  `App::quit` — `self.platform.quit()` — and `TestPlatform::quit` has an empty
+  body, so it fires no quit observer and proves nothing. Do not assert the
+  200 ms `SHUTDOWN_TIMEOUT`: the block's bound under the test scheduler is a
+  random tick count (`test_scheduler.rs:110-118`).
 - What the binary does before a window exists is tested in `app/tests/cli.rs`,
   which spawns the real binary: argument handling belongs to the process, and
   an in-process test would have to fake `std::env::args_os` and prove nothing.
@@ -254,6 +275,9 @@ change that introduces something reusable.
 | Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
 | How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
 | Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
+| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
+| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
+| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
@@ -261,7 +285,9 @@ change that introduces something reusable.
 | CRLF and lone CR to LF | `fs::normalize_line_endings` | `vault/src/fs.rs` |
 | Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
-| Hold one load open while another finishes | `MemFs::block_load` → `LoadGate` | `vault/src/mem_fs.rs` |
+| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
+| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
+| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread today; see `Fs::load`'s doc comment) | `vault/src/vault.rs` |
@@ -272,7 +298,7 @@ change that introduces something reusable.
 | Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
-| A headless window rooted at `AppShell`, with a store | `open_shell` | `app/src/vault.rs` |
+| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault.rs` |
 | A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
 | The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
 | A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |

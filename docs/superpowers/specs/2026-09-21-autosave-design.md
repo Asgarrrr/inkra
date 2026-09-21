@@ -1,6 +1,10 @@
 # Autosave, atomic writes, and flushing on quit
 
-Status: designed (2026-09-21), not implemented.
+Status: **implemented, and corrected in four places by what implementing it
+found.** Slices 1-3 shipped on 2026-09-21; the empty state (slice 4) was split
+into `docs/superpowers/plans/2026-09-21-autosave-quit-flush.md`. Each
+correction below is marked **Corrected** inline rather than edited away, so the
+reasoning that turned out wrong stays legible.
 
 Every `file:line` below was read in `vendor/zed-reference` or in this repo.
 
@@ -126,11 +130,28 @@ Symmetric with `Loaded`, which already carries both.
 A failure at any step removes the temp file and leaves the original untouched.
 That is the whole point: there is no window in which `path` holds a partial note.
 
+> **Corrected.** As written this was prose, not a mechanism — nothing in the
+> sequence removed anything, and an early `?` would have leaked the temp file.
+> It is an RAII guard in the implementation: a value whose `Drop` unlinks the
+> temp file unless the rename disarmed it. Steps 3 and 5 are also less than
+> they claim. `sync_all` flushes the temp file's *contents*; it does not make
+> the rename durable, which needs the parent directory fsynced. Neither we nor
+> Zed does that, so a power cut can still lose the rename itself.
+
 Two costs this buys, stated rather than discovered later:
 
 - **Hard links break.** The other name keeps the old inode and the old content.
   `Vault::rescan` already collapses hard links to one entry
   (`vault.rs:108-110`), so the vault never showed both names anyway.
+
+  > **Corrected — this had the consequence backwards.** Collapsing to one entry
+  > is exactly what makes replacing the file *worse*, not harmless: splitting
+  > the pair gives the second name its own identity, so it surfaces as a new
+  > row holding stale text — a duplicate note appearing because of a write
+  > nobody asked for. `RealFs::save` therefore detects `nlink > 1` and writes
+  > **in place**, keeping the inode. A symlink is written through for the same
+  > reason, and needs its own `symlink_metadata` check because `fs::metadata`
+  > follows the link and reports the target's link count.
 - **Extended attributes are lost** — on macOS that includes Finder tags. The
   temp file has none, and the rename replaces the original wholesale. Preserving
   them needs `renamex_np(RENAME_SWAP)` or a copy of the xattr set, and neither
@@ -199,6 +220,12 @@ buffer with `update` (never `as_mut` — a save changes no text and must not
 notify), `finalize_transaction`, capture `(text, version)`, return early if
 `version == saved_version`, write, then on success record `saved_version`, the
 new identity, and call `Vault::reidentify`.
+
+> **Corrected.** Routing `⌘S` through the same queue is necessary but not
+> sufficient: a chain that treats a *dropped* cancel sender the same as a
+> deliberate one makes `⌘S` write nothing when the next keystroke replaces the
+> sender. The arm must return only on `Ok`. See
+> `a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for`.
 
 **`⌘S`** becomes `schedule_save(current, Duration::ZERO)`. It keeps its meaning
 — write now — and goes through the one queue, so it cannot race a pending
@@ -335,14 +362,36 @@ Each touches the filesystem layer, the behaviour above it, and its own tests.
 3. **Flush on quit.** `flush_all`, `on_app_quit`, the `main.rs` hoist. End to
    end: type, quit, the file is written.
 
-## Documentation to update in the same change
+   > **Corrected — this slice was a third of the size it looked.** The flush
+   > cannot route through the per-note chain: `App::shutdown` blocks the
+   > foreground session while it polls the quit futures
+   > (`gpui/src/app.rs:1073`, `scheduler/src/test_scheduler.rs:100`, `:362`),
+   > so the chain's `cx.spawn` half can never resume during the block. It
+   > issues its own write, which means one note briefly has two writers whose
+   > `rename()`s race — and the loser can be the *older* text. Ordering them
+   > needs a monotonic sequence, because `Buffer::version` goes **down** on an
+   > undo (`text/src/buffer.rs:114-119`) and `futures::lock::Mutex` guarantees
+   > no acquisition order at all. See `Writer` in `app/src/vault.rs`. There was
+   > no `main.rs` hoist in the end: the subscription lives in
+   > `NoteStore::new`, which is where the state it captures already is.
 
-- `CLAUDE.md`: the save path is no longer `⌘S` alone; `Fs::save` returns
-  `Saved`; the don't-recreate table gains `Saved`, `Vault::reidentify`,
-  `NoteStore::schedule_save` and `flush_all`.
-- `docs/roadmap.md`: the Vault section's prose still says the vault ships "open,
-  list and save" with atomic save and quit-flush deferred.
-- `2026-09-20-inkra-vault-design.md`: three Deferred rows close here — atomic
-  save, flush dirty notes on quit, and the per-note half of serialized writes.
-  Its "Saving is not atomic, matching Zed" note becomes wrong and needs a
-  pointer to this document.
+4. **An empty state when no note is open.** Split out after review found it
+   needs a focus design of its own — with `AppShell.editor` optional, nothing
+   in the current shape can move window focus to the editor built on the first
+   activation. Planned in
+   `docs/superpowers/plans/2026-09-21-autosave-quit-flush.md`.
+
+## Documentation updated with the change — all done
+
+- `CLAUDE.md`: the `NoteStore::current` paragraph no longer reads as though
+  `current` gates every write; the don't-recreate table carries `Saved`,
+  `Vault::reidentify`, `NoteStore::schedule_save`, `SaveFailed`,
+  `AUTOSAVE_DELAY`, `write_through`, `Writer`, `flush_all`, `Gate`,
+  `block_save` and `make_unwritable`; the testing section records how to quit
+  in a test and why write ordering is not a `#[gpui::test]`.
+- `docs/roadmap.md`: the Vault section says what actually ships, and names
+  conflict detection as the largest remaining hole.
+- `2026-09-20-inkra-vault-design.md`: atomic save and flush-on-quit are closed;
+  serialized writes is narrowed to the cross-note case; conflict detection, the
+  unnamed launch buffer and buffer eviction have current triggers; the "Saving
+  is not atomic" note is marked superseded and points here.

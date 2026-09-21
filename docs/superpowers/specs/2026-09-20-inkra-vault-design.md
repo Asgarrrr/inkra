@@ -352,9 +352,14 @@ Two consequences the first draft missed:
   linted under `unwrap_used = "deny"`. It must be written to that bar, not as
   throwaway test code.
 
-Saving is not atomic, matching Zed: `save` truncates and writes
-(`crates/fs/src/fs.rs:1019-1035`). Zed's `atomic_write` (`:974`) is reserved
-for its own config files. Atomic save is under Deferred with its trigger.
+**Superseded.** This section originally said saving was not atomic, matching
+Zed: `save` truncates and writes (`crates/fs/src/fs.rs:1019-1035`), and Zed's
+`atomic_write` (`:974`) is reserved for its own config files. `RealFs::save`
+now writes a temp file and renames over the destination. Zed can afford to
+truncate because its autosave defaults to off and the user picks the moment;
+ours writes unprompted, so a crash mid-write would corrupt a note nobody chose
+to save. The rename changes the file's `(device, inode)`, which is why `save`
+returns a `Saved` and `Vault::reidentify` exists.
 
 ## `inkra-text` gains `Buffer::version()`
 
@@ -643,16 +648,14 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | Item | Trigger | Notes |
 |---|---|---|
 | File watcher + diff reload | A second process edits a note — a sync client, another editor. | Needs anchored selections; `apply_diff`, `crates/language/src/buffer.rs:2459` |
-| Conflict detection | Lands with the watcher. | Needs `saved_mtime` per open note, which `NoteStore` deliberately does not carry today — `Fs::load` and `Fs::save` both already return the `Mtime` to seed it from. `has_conflict`, `crates/language/src/buffer.rs:2531` |
+| Conflict detection | Lands with the watcher. Sharper since autosave: a write every `AUTOSAVE_DELAY` over a file a sync client or `git checkout` just changed is a silent clobber, where `⌘S`-only needed the user to press a key at the wrong moment. | Needs `saved_mtime` per open note, which `OpenNote` still does not carry — `Fs::load` and `Fs::save` both already return the `Mtime` to seed it from. Blocked by `-D warnings` until its first reader lands, which is the check itself. `has_conflict`, `crates/language/src/buffer.rs:2531` |
 | Create / rename / delete | The vault stops being read-only in practice. | Adds a command layer and collision errors |
 | CRLF round-trip | A user reports that saving rewrote their line endings. | Requires storing the file's original ending per note |
-| Atomic save | A crash or a full disk truncates a note. | `atomic_write`, `crates/fs/src/fs.rs:974` |
-| Flush dirty notes on quit | The app grows a close action, or a user loses work to `⌘Q`. | Nothing writes on quit today, so any dirty buffer is discarded silently. The narrow case — `⌘S` then `⌘Q` before the detached write lands — rides on the same fix: `App::shutdown` only awaits handlers registered through `on_app_quit` (`vendor/zed-reference/crates/gpui/src/app.rs:1057-1069`), and nothing registers one. Needs the auto-save-vs-prompt decision first |
-| Serialized writes per note | A vault on a network or FUSE mount, where one write outlives the next `⌘S`. | Two overlapping saves each capture their own `(text, version)` and race; if the older write lands last, the file holds stale text. Self-heals on the next save, since `saved_version` is then behind `version()`. Needs a delay hook in `MemFs` to test deterministically. `MemFs::block_load` is that hook for loads; the save path needs the same gate |
-| Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first |
+| Serialized writes across notes | A vault on a network or FUSE mount, where writes to *different* notes contend. | The per-note case is closed: `Writer` (`app/src/vault.rs`) orders one note's writes by a monotonic sequence and serialises them with an async lock, and `MemFs::block_save` is the hook that tests it. Nothing coordinates across notes, and nothing yet shows it needs to |
+| Buffer eviction | A vault large enough that holding every opened buffer costs memory. | Needs a close action first. Evicting a note now also means cancelling its pending write chain, dropping its observer `Subscription`, and dropping its `Arc<Writer>` — a note re-opened afterwards starts a fresh sequence, which is sound only because its old writes are gone too |
 | Report a failed open | A user clicks a note that was deleted, renamed or made unreadable since the scan. | Nothing happens at all today: `NoteStore::open_note` discards the `VaultError` with `.await.ok()?` and `AppShell::open_note` bails on the `None`. Asymmetric with `save_current`, which at least reaches stderr. Rides on the same surfacing decision as the row below — a GUI app has nowhere to put an error yet |
 | A home for user-visible errors | The first of these that a user rather than a developer hits. | Both failure paths above end in `eprintln!` or silence, and a released binary has no terminal attached. Needs a status line or a transient banner; `AppShell` is where it would live |
-| Save the unnamed launch buffer | A user types into the window before clicking any row and expects `⌘S` to work. | Launching on a vault builds a real empty `Buffer` but calls no `adopt`, so `current` is `None`: the text is editable, carries no dot anywhere, and `save_current` returns at the `None` guard. Either seed the launch with a note, or refuse edits until one is open — a product decision, not a repair |
+| Save the unnamed launch buffer | A user types into the window before clicking any row and loses it. Autosave made this worse, not better: every *other* note now saves itself, so the one buffer that silently does not is the one the user was never taught to press `⌘S` in. | Launching on a vault builds a real empty `Buffer` but calls no `adopt`, so it gets no observer, no sidebar row and no quit flush, and `save_current` returns at the `None` guard. Decided with the user: render an empty state instead, so there is no buffer to lose. Planned in `docs/superpowers/plans/2026-09-21-autosave-quit-flush.md`, step 3, split out for its own review |
 | Focusable sidebar | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` still delegates to the editor unconditionally. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
 | Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
