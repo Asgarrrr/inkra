@@ -13,7 +13,7 @@ use inkra_vault::EntryId;
 
 use crate::editor::EditorView;
 use crate::sidebar::{NoteActivated, Sidebar};
-use crate::vault::{NoteStore, Save};
+use crate::vault::{NoteStore, Save, SaveFailed};
 
 pub(crate) struct AppShell {
     editor: Entity<EditorView>,
@@ -50,6 +50,15 @@ impl AppShell {
             shell.open_note(event.0, cx);
         })
         .detach();
+        // The one place a failed write surfaces. It reaches stderr and no
+        // further, which a released binary has nowhere to show — the status
+        // line that fixes that is deferred, with its trigger in the vault spec.
+        // What this buys today is that the fix has one body to replace rather
+        // than two call sites that grew apart.
+        cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
+            eprintln!("save failed for {:?}", event.0);
+        })
+        .detach();
         Self {
             editor,
             notes,
@@ -72,10 +81,11 @@ impl AppShell {
         }));
     }
 
-    /// Detached rather than held: the shell outlives every save, and a `Task`
-    /// dropped on the spot would cancel the write it just started.
+    /// Nothing to hold: the write chain lives on the note, in the store, which
+    /// outlives every save. `⌘S` only preempts the timer that chain is already
+    /// waiting on.
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
-        self.notes.update(cx, NoteStore::save_current).detach();
+        self.notes.update(cx, NoteStore::save_current);
     }
 }
 
