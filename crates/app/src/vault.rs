@@ -238,9 +238,13 @@ impl NoteStore {
                 previous.await;
             }
             futures::select_biased! {
-                // `Err` when the sender was dropped, which happens when the
-                // note closed. Either way there is nothing left to write.
-                _cancelled = cancelled.fuse() => return,
+                // Only a deliberate send cancels. `Err` means the sender was
+                // dropped because a later `schedule_save` replaced it, and
+                // treating that as a cancel is how the gesture that promises
+                // "write now" ends up writing nothing: `⌘S` installs a chain,
+                // the next keystroke replaces the sender, and the chain returns
+                // before reaching its ready timer.
+                cancelled = cancelled.fuse() => if cancelled.is_ok() { return },
                 () = timer.fuse() => {}
             }
             // Reopened before the write, not after: an edit landing while this
@@ -291,13 +295,14 @@ impl NoteStore {
             }
             // Resolved against the vault rather than read from `OpenNote.path`:
             // a rename moves the entry and nothing refreshes that field, so the
-            // cached path would recreate the note where it used to be. Only
-            // `DETACHED` has no entry to resolve against.
-            let path = this
-                .vault
-                .as_ref()
-                .and_then(|vault| vault.read(cx).absolute(id))
-                .unwrap_or_else(|| note.path.clone());
+            // cached path would recreate the note where it used to be. A
+            // vaulted note whose entry is gone writes nothing rather than
+            // falling back and recreating a file the vault no longer lists.
+            let path = if id == EntryId::DETACHED {
+                note.path.clone()
+            } else {
+                this.vault.as_ref()?.read(cx).absolute(id)?
+            };
             Some((Arc::clone(&this.fs), path, text, version))
         }) else {
             return;
@@ -626,6 +631,54 @@ mod tests {
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
             Some("EDITED alpha"),
             "the outgoing note is written, with no clock advance"
+        );
+    }
+
+    /// The wiring that makes an atomic save survivable, pinned at the level it
+    /// actually runs. The `vault` crate proves `reidentify` works when called;
+    /// only this proves the write path calls it. Nothing else in the `app`
+    /// suite rescans, so without this the call can be deleted and the whole
+    /// workspace stays green — until the first post-startup `rescan` caller
+    /// lands and orphans the open buffer.
+    #[gpui::test]
+    fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store.update(cx, |store, cx| store.open_note(a, cx).detach());
+        cx.run_until_parked();
+        let opened = store.update(cx, |store, _| store.buffer_for(a).map(Entity::entity_id));
+
+        store.update(cx, |store, cx| {
+            let buffer = store.buffer_for(a).cloned().expect("a is open");
+            buffer.update(cx, |buffer, _| {
+                buffer.transact_at(Instant::now(), |buffer| {
+                    buffer.insert(ByteOffset(0), "X");
+                });
+            });
+        });
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        // What create/rename/delete will do on every mutation, next slice.
+        let vault = store.update(cx, |store, _| store.vault().cloned().expect("a vault"));
+        vault.update(cx, |vault, _| {
+            futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
+        });
+
+        vault.update(cx, |vault, _| {
+            assert!(
+                vault.entry(a).is_some(),
+                "the save moved the inode; without the re-key this id names nothing"
+            );
+        });
+        let reopened = store.update(cx, |store, cx| store.open_note(a, cx));
+        assert_eq!(
+            futures::executor::block_on(reopened).map(|buffer| buffer.entity_id()),
+            opened,
+            "the row still opens the buffer that holds the edit"
         );
     }
 
