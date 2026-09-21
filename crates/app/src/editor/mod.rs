@@ -102,7 +102,7 @@ impl EditorView {
     }
 
     /// The single path that mutates the buffer. `as_mut`, not `update`: it
-    /// notifies on drop (`gpui/app.rs:3280-3286`), and `Buffer` is gpui-free by
+    /// notifies on drop (`gpui/src/app.rs:3280-3286`), and `Buffer` is gpui-free by
     /// rule, so nothing else can.
     fn edit_buffer<R>(
         &mut self,
@@ -113,7 +113,7 @@ impl EditorView {
         let result = f(&mut self.state, &mut buffer);
         let line = buffer.line_for_offset(self.state.cursor());
         // Load-bearing: the lease would outlive `reveal_line`, and a second
-        // lease panics at runtime (`gpui/app/entity_map.rs:231`).
+        // lease panics at runtime (`gpui/src/app/entity_map.rs:231`).
         drop(buffer);
         self.reveal_line(line);
         result

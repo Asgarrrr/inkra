@@ -101,7 +101,7 @@ impl Sidebar {
     /// Split out only so a test can read the dot: nothing gets text back out
     /// of the `Div`s `render_rows` returns.
     fn row_label(&self, row: &Row, cx: &App) -> String {
-        let dot = if self.notes.read(cx).is_modified(row.id, cx) {
+        let dot = if self.notes.read(cx).is_dirty(row.id, cx) {
             " •"
         } else {
             ""
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
     }
 
-    /// Asserts the label, not `is_modified`: the predicate passes with the dot
+    /// Asserts the label, not `is_dirty`: the predicate passes with the dot
     /// deleted. One note edited, so a marker on every row also fails.
     #[gpui::test]
     async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {

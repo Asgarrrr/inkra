@@ -1,3 +1,11 @@
+//! The two offset coordinates, as distinct types.
+//!
+//! Bytes are how the text is stored; UTF-16 units are what the platform's input
+//! protocol speaks. Keeping them apart in the type system is what stops one
+//! being passed where the other is meant — a mistake that produces a panic or a
+//! split character, never a compiler error, when both are `usize`.
+//! `docs/buffer-model.md` records why there is no char offset.
+
 use std::fmt;
 
 /// Offset into the buffer's UTF-8 bytes — the storage coordinate, and the one

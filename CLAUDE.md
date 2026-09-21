@@ -27,6 +27,12 @@ area, not on every task:
   — the `Fs` seam, why entry identity is `(device, inode)`, the launch-state
   table, and what saving deliberately leaves out (atomic writes, conflict
   detection, file watching) with the trigger for each.
+- [docs/superpowers/specs/2026-09-21-autosave-design.md](./docs/superpowers/specs/2026-09-21-autosave-design.md)
+  — why the cadence is periodic rather than an idle debounce, why the write is
+  atomic when Zed's is not, and why the quit flush cannot reuse the write
+  chain. Its four **Corrected** notes are where implementing it disagreed with
+  designing it. Read this before touching the save path; the vault spec above
+  describes the pre-autosave picture.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
@@ -150,7 +156,7 @@ area, not on every task:
   real one; everything else states `Goal::None`.
 - No observer callback on an `Entity<Buffer>` may call `.update()` or
   `.as_mut()` on that same buffer — a second lease of one entity panics
-  (`gpui/app/entity_map.rs:231`).
+  (`gpui/src/app/entity_map.rs:231`).
 - Two panes on one note is **not** supported. `Buffer` has anchors now, but
   nothing uses them: `Selection` still holds raw offsets, so a second pane
   needs anchored selections wired through `editor`. File watching needs that
@@ -293,8 +299,8 @@ change that introduces something reusable.
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread today; see `Fs::load`'s doc comment) | `vault/src/vault.rs` |
 | A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
-| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_modified` | `app/src/vault.rs` |
-| The vault tree, with expansion and the modified dot | `Sidebar` | `app/src/sidebar.rs` |
+| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault.rs` |
+| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar.rs` |
 | Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
