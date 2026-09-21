@@ -328,3 +328,147 @@ fn read_dir_skips_other_extensions_and_symlinks() {
     let paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
     assert_eq!(paths, vec![dir.0.join("a.md")]);
 }
+
+/// The identity is what `Vault::apply` keys every `EntryId` on, so a rename
+/// that minted a new inode would silently detach the note from its open buffer.
+#[test]
+fn rename_moves_the_note_and_keeps_its_identity() {
+    let dir = TempDir::new("rename-identity");
+    let from = dir.0.join("before.md");
+    let to = dir.0.join("after.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("rename");
+
+    assert_eq!(names(&dir.0), vec!["after.md".to_owned()]);
+    assert_eq!(fs::read_to_string(&to).expect("read"), "text");
+    assert_eq!(
+        fs::metadata(&to).expect("stat").ino(),
+        before,
+        "a rename must not change the inode"
+    );
+}
+
+/// The one cell of the collision table `rename(2)` does not refuse for us:
+/// "if new exists, it is first removed". Nothing else in the suite would
+/// notice the `hard_link` guard being replaced by a bare `fs::rename`.
+#[test]
+fn rename_refuses_to_destroy_a_different_note() {
+    let dir = TempDir::new("rename-collision");
+    let from = dir.0.join("a.md");
+    let to = dir.0.join("b.md");
+    fs::write(&from, "mine").expect("write");
+    fs::write(&to, "theirs").expect("write");
+
+    let result = block_on(RealFs.rename(&from, &to));
+
+    assert!(result.is_err(), "the destination is a different note");
+    assert_eq!(fs::read_to_string(&to).expect("read"), "theirs");
+    assert_eq!(fs::read_to_string(&from).expect("read"), "mine");
+}
+
+/// APFS is case-insensitive-but-preserving by default, so `hard_link` reports
+/// `EEXIST` here even though both names are one file. Without the
+/// same-identity branch a user cannot fix the capitalisation of their own note.
+///
+/// Cannot run against `MemFs`, which keys a case-sensitive `BTreeMap` and so
+/// reports success whatever the branch does.
+#[test]
+fn rename_can_change_only_the_case_of_a_name() {
+    let dir = TempDir::new("rename-case");
+    let from = dir.0.join("notes.md");
+    let to = dir.0.join("Notes.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("a case-only rename is a rename");
+
+    assert_eq!(names(&dir.0), vec!["Notes.md".to_owned()]);
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+}
+
+/// The same trap through a second door: macOS compares names
+/// normalization-insensitively, so the NFC and NFD spellings of `Réunion` are
+/// one file. A French vault reaches this on its first accented note.
+#[test]
+fn rename_can_change_only_the_unicode_normalization_of_a_name() {
+    let dir = TempDir::new("rename-normalization");
+    // Composed: U+00E9. Decomposed: U+0065 U+0301. Written out rather than
+    // normalized at runtime, so the test states which bytes it means.
+    let from = dir.0.join("R\u{e9}union.md");
+    let to = dir.0.join("Re\u{301}union.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("a normalization-only rename is a rename");
+
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+    assert_eq!(names(&dir.0).len(), 1, "one file, not two spellings of it");
+}
+
+/// POSIX forbids a hard link to a directory, so a folder takes the fallback
+/// branch. It must still move, and still refuse a destination it would destroy.
+#[test]
+fn rename_moves_a_folder_with_its_subtree() {
+    let dir = TempDir::new("rename-folder");
+    let from = dir.0.join("projects");
+    let to = dir.0.join("archive");
+    fs::create_dir(&from).expect("create dir");
+    fs::write(from.join("plan.md"), "p").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("rename the folder");
+
+    assert_eq!(names(&dir.0), vec!["archive".to_owned()]);
+    assert_eq!(fs::read_to_string(to.join("plan.md")).expect("read"), "p");
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+}
+
+/// `read_dir` keeps symlinks out of a vault, but a file named on the command
+/// line never passed that filter. `hard_link` resolves the link and would
+/// leave a plain file where the link was, stranding its target.
+#[test]
+fn rename_of_a_symlink_moves_the_link_not_its_target() {
+    let dir = TempDir::new("rename-symlink");
+    let target = dir.0.join("target.md");
+    let link = dir.0.join("link.md");
+    let moved = dir.0.join("moved.md");
+    fs::write(&target, "text").expect("write");
+    std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+    block_on(RealFs.rename(&link, &moved)).expect("rename the link");
+
+    assert!(
+        fs::symlink_metadata(&moved).expect("stat").is_symlink(),
+        "the link must survive as a link"
+    );
+    assert!(target.exists(), "its target must be untouched");
+}
+
+#[test]
+fn create_makes_an_empty_note_and_refuses_an_occupied_name() {
+    let dir = TempDir::new("create");
+    let path = dir.0.join("new.md");
+
+    let identity = block_on(RealFs.create(&path, Kind::Note)).expect("create");
+
+    assert_eq!(fs::read_to_string(&path).expect("read"), "");
+    assert_eq!(identity.inode, fs::metadata(&path).expect("stat").ino());
+    assert!(
+        block_on(RealFs.create(&path, Kind::Note)).is_err(),
+        "a create must never take over an existing note"
+    );
+}
+
+#[test]
+fn create_makes_a_folder_the_scan_lists() {
+    let dir = TempDir::new("create-folder");
+    let path = dir.0.join("projects");
+
+    block_on(RealFs.create(&path, Kind::Dir)).expect("create");
+
+    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, Kind::Dir);
+}
