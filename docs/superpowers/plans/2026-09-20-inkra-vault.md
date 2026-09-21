@@ -1,5 +1,9 @@
 # inkra-vault Implementation Plan
 
+**Status: implemented.** Kept as a historical record of how the work was
+decomposed, not as a live specification. The current behaviour is described in
+`CLAUDE.md` and the specs it links.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Open a folder of markdown notes, show them as a tree, click one to load it into the editor, and `⌘S` to write it back.

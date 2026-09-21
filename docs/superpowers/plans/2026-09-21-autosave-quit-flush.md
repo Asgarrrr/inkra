@@ -143,7 +143,7 @@ no new visibility, no widened field.
    `beforeX`.
 2. `a_failed_write_reports_it_and_leaves_the_note_dirty` — `make_unwritable`,
    subscribe to `SaveFailed` on the `NoteStore`, type, advance the clock.
-   Assert one event, the file unchanged, and `is_modified` still true.
+   Assert one event, the file unchanged, and `is_dirty` still true.
 
 **Review must confirm** each test fails against the pre-fix code. A test that
 passes either way is decoration, which is why the original was deleted.

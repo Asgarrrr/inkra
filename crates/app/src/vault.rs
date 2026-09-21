@@ -190,7 +190,7 @@ impl NoteStore {
     }
 
     /// A note that is not open has no buffer to differ from the file.
-    pub(crate) fn is_modified(&self, id: EntryId, cx: &App) -> bool {
+    pub(crate) fn is_dirty(&self, id: EntryId, cx: &App) -> bool {
         self.open
             .get(&id)
             .is_some_and(|note| note.buffer.read(cx).version() != note.saved_version)
@@ -268,7 +268,7 @@ impl NoteStore {
     /// whole autosave trigger: it fires on every edit and asks for a write.
     ///
     /// It must not lease the buffer it observes — a second lease of one entity
-    /// panics (`gpui/app/entity_map.rs:231`) — which is why it only schedules.
+    /// panics (`gpui/src/app/entity_map.rs:231`) — which is why it only schedules.
     fn track(
         &mut self,
         id: EntryId,
@@ -413,6 +413,12 @@ impl NoteStore {
         let writes: Vec<_> = dirty
             .into_iter()
             .map(|(writer, path, text)| {
+                // Always the highest sequence that note will ever see, which is
+                // what makes the flush the winner rather than merely a
+                // contender. Every sequence is minted under `&mut App`; a chain
+                // write that already minted one did so before this call, and
+                // one that has not cannot mint during the block, because the
+                // foreground session is where it would have to run.
                 let seq = self.next_seq();
                 cx.background_spawn(write_through(writer, Arc::clone(&fs), path, text, seq))
             })
@@ -592,7 +598,7 @@ mod tests {
     /// `with_editor` and `dispatching` (`editor/tests.rs`) root the window at
     /// `EditorView`, so neither can prove an `AppShell`-scoped binding fires.
     /// Returns the store as well as the window: it is built here, so a test
-    /// that needs to subscribe to it or read `is_modified` takes it from the
+    /// that needs to subscribe to it or read `is_dirty` takes it from the
     /// helper rather than reaching through `AppShell`, whose fields are private
     /// to `shell.rs`.
     fn open_shell(
@@ -753,9 +759,10 @@ mod tests {
         }
     }
 
-    /// The defect the review found in the design: `⌘S` routed through the same
-    /// queue was absorbed by the pending-chain guard and wrote nothing until
-    /// the periodic deadline arrived. The clock never advances here, so only a
+    /// `⌘S` routed through the same queue is absorbed by the pending-chain
+    /// guard unless it preempts: without the preemption it writes nothing until
+    /// the periodic deadline arrives, which breaks the one promise the gesture
+    /// makes. The clock never advances here, so only a
     /// preempting `⌘S` can produce the write.
     #[gpui::test]
     fn cmd_s_preempts_a_pending_autosave(cx: &mut TestAppContext) {
@@ -936,7 +943,7 @@ mod tests {
         );
         notes.update(cx, |notes, cx| {
             assert!(
-                notes.is_modified(EntryId::DETACHED, cx),
+                notes.is_dirty(EntryId::DETACHED, cx),
                 "a note whose write failed stays dirty, so the next edit retries"
             );
         });
@@ -1002,7 +1009,8 @@ mod tests {
         cx.executor().advance_clock(AUTOSAVE_DELAY);
         cx.run_until_parked();
 
-        // What create/rename/delete will do on every mutation, next slice.
+        // A rescan is what create/rename/delete will trigger on every mutation
+        // once they exist — deferred, with its trigger in the vault spec.
         let vault = store.update(cx, |store, _| store.vault().cloned().expect("a vault"));
         vault.update(cx, |vault, _| {
             futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");

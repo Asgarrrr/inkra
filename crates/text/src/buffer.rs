@@ -1,3 +1,10 @@
+//! The text and its history: edits, transactions, undo, and the anchors that
+//! survive them.
+//!
+//! No layout, no filesystem, no clock — the caller supplies the `Instant` that
+//! decides whether two edits group. `docs/buffer-model.md` records the model
+//! and the alternatives already rejected.
+
 use std::ops::Range;
 use std::time::{Duration, Instant};
 

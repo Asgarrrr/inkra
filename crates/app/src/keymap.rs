@@ -1,3 +1,10 @@
+//! Every key binding in one place, so the set can be read without hunting
+//! through the views that handle them.
+//!
+//! A binding's key context decides where it fires. Window-wide actions bind at
+//! `AppShell`, not `EditorView`: the editor's context only fires while the
+//! editor has focus. `⌘S` is the precedent.
+
 use gpui::KeyBinding;
 
 use crate::Quit;
