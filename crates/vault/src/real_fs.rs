@@ -114,10 +114,18 @@ impl Fs for RealFs {
         // entry (`vault.rs:108-110`), so the pair would stop sharing and the
         // second name would surface as a new row carrying stale text — a
         // duplicate appearing because of a write nobody asked for.
-        let linked = existing
+        //
+        // A symlink is written through for the same reason: the rename would
+        // replace the link with a regular file and strand its target holding
+        // stale text. `read_dir` keeps symlinks out of a vault, but a file
+        // named on the command line — `EntryId::DETACHED` — never passed that
+        // filter. `fs::metadata` follows the link, so the `nlink` above is the
+        // target's and cannot stand in for this check.
+        let in_place = existing
             .as_ref()
-            .is_some_and(|metadata| metadata.nlink() > 1);
-        if linked {
+            .is_some_and(|metadata| metadata.nlink() > 1)
+            || fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
+        if in_place {
             fs::write(path, text).map_err(|source| io_error(path, source))?;
         } else {
             replace(path, text, existing.as_ref())?;

@@ -131,6 +131,26 @@ fn save_of_a_hard_linked_note_keeps_one_inode() {
     );
 }
 
+/// A note reached through a symlink — which only a file named on the command
+/// line can be — is written through the link. Renaming over it would leave the
+/// user with a regular file where their link was, and the real note untouched.
+#[test]
+fn save_writes_through_a_symlink_rather_than_replacing_it() {
+    let dir = TempDir::new("symlink");
+    let target = dir.0.join("real.md");
+    let link = dir.0.join("link.md");
+    fs::write(&target, "before").expect("write");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+    block_on(RealFs.save(&link, "after")).expect("save");
+
+    assert!(
+        fs::symlink_metadata(&link).expect("stat").is_symlink(),
+        "the link must survive its own save"
+    );
+    assert_eq!(fs::read_to_string(&target).expect("read"), "after");
+}
+
 #[test]
 fn read_dir_separates_directories_from_notes_and_skips_dotfiles() {
     let dir = TempDir::new("read-dir");
