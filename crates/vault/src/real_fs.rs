@@ -15,8 +15,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
+use crate::conflict::conflict_path;
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, VaultError,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
     normalize_line_endings,
 };
 
@@ -41,6 +42,13 @@ fn mtime_of(path: &Path, metadata: &fs::Metadata) -> Result<Mtime> {
         .modified()
         .map(Mtime)
         .map_err(|source| io_error(path, source))
+}
+
+fn stamp_of(path: &Path, metadata: &fs::Metadata) -> Result<Stamp> {
+    Ok(Stamp {
+        mtime: mtime_of(path, metadata)?,
+        size: metadata.len(),
+    })
 }
 
 #[async_trait]
@@ -100,13 +108,26 @@ impl Fs for RealFs {
 
         Ok(Loaded {
             text: normalize_line_endings(&text),
-            mtime: mtime_of(path, &metadata)?,
+            stamp: stamp_of(path, &metadata)?,
             identity: identity_of(&metadata),
         })
     }
 
-    async fn save(&self, path: &Path, text: &str) -> Result<Saved> {
+    async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
         let existing = fs::metadata(path).ok();
+
+        // Preserved *before* the replace, never after: between the two steps
+        // the bytes exist twice, so no crash point loses them. The reverse
+        // order makes a crash destroy the version this exists to protect.
+        //
+        // A missing file is not a conflict. There are no bytes to preserve, and
+        // recreating the note loses nothing.
+        let preserved = match existing.as_ref() {
+            Some(metadata) if stamp_of(path, metadata)? != expected => {
+                Some(preserve(path, metadata)?)
+            }
+            _ => None,
+        };
 
         // A note with a second hard link is written in place. Replacing it
         // would give this path a new inode and leave the other link on the old
@@ -133,10 +154,43 @@ impl Fs for RealFs {
 
         let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
         Ok(Saved {
-            mtime: mtime_of(path, &metadata)?,
+            stamp: stamp_of(path, &metadata)?,
             identity: identity_of(&metadata),
+            preserved,
         })
     }
+}
+
+/// Copies the bytes currently at `path` to a sibling conflict file, and returns
+/// where they went.
+///
+/// Read and write rather than `fs::copy`, for the `sync_all`: the whole point
+/// is that these bytes survive a crash a moment later, during the replace.
+///
+/// The bytes are copied raw, never through `normalize_line_endings`. A conflict
+/// file is an exact record of what was on disk; rewriting its line endings
+/// would make it disagree with the version it exists to preserve.
+fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
+    let destination = conflict_path(path, mtime_of(path, metadata)?, |candidate| {
+        candidate.exists()
+    });
+
+    let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
+    let mut file =
+        fs::File::create(&destination).map_err(|source| io_error(&destination, source))?;
+    file.write_all(&bytes)
+        .map_err(|source| io_error(&destination, source))?;
+    file.sync_all()
+        .map_err(|source| io_error(&destination, source))?;
+    drop(file);
+
+    // The same reason `replace` restores the mode onto its temp file: a fresh
+    // file carries the process umask, not the note's. Skipping it re-exposes a
+    // deliberately narrow note's content at whatever default the umask gives.
+    fs::set_permissions(&destination, metadata.permissions())
+        .map_err(|source| io_error(&destination, source))?;
+
+    Ok(destination)
 }
 
 /// Write `text` to a sibling temp file, then rename it over `path`. The rename

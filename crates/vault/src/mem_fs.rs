@@ -14,7 +14,9 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
-use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, VaultError};
+use crate::fs::{
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
+};
 
 #[derive(Default)]
 struct State {
@@ -28,6 +30,10 @@ struct State {
     /// Every `save` of these paths fails. Models a read-only file, a full disk,
     /// or a directory the process cannot write into. See `make_unwritable`.
     unwritable: BTreeSet<PathBuf>,
+    /// Seconds past the base, advanced by every mutation. A constant here made
+    /// every write share one mtime, which made a stale stamp unreachable and
+    /// conflict detection untestable.
+    clock: u64,
     /// The next `load` of each of these paths parks until its `Gate` is
     /// released or dropped. See `MemFs::block_load`.
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
@@ -72,8 +78,13 @@ impl MemFs {
         FileIdentity { device: 1, inode }
     }
 
-    fn now() -> Mtime {
-        Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000))
+    /// Advances one second and returns the new time. Takes `&mut State` rather
+    /// than nothing, because a clock that does not move is not a clock — and a
+    /// fixed one made every write of a path compare equal to every other,
+    /// which put conflict detection out of reach of every test.
+    fn tick(state: &mut State) -> Mtime {
+        state.clock += 1;
+        Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 + state.clock))
     }
 
     /// Inserts a file, creating every parent directory. Reuses the identity if
@@ -88,23 +99,22 @@ impl MemFs {
                 break;
             }
             let identity = Self::fresh_identity(&mut state);
-            state
-                .dirs
-                .insert(dir.to_path_buf(), (Self::now(), identity));
+            let mtime = Self::tick(&mut state);
+            state.dirs.insert(dir.to_path_buf(), (mtime, identity));
             parent = dir.parent();
         }
         let existing = state.files.get(&path).map(|(_, _, id)| *id);
         let identity = existing.unwrap_or_else(|| Self::fresh_identity(&mut state));
-        state
-            .files
-            .insert(path, (text.into(), Self::now(), identity));
+        let mtime = Self::tick(&mut state);
+        state.files.insert(path, (text.into(), mtime, identity));
     }
 
     pub fn insert_dir(&self, path: impl Into<PathBuf>) {
         let path = path.into();
         let mut state = self.state();
         let identity = Self::fresh_identity(&mut state);
-        state.dirs.insert(path, (Self::now(), identity));
+        let mtime = Self::tick(&mut state);
+        state.dirs.insert(path, (mtime, identity));
     }
 
     pub fn remove(&self, path: &Path) {
@@ -254,7 +264,7 @@ impl Fs for MemFs {
         };
         Ok(Loaded {
             text: crate::fs::normalize_line_endings(text),
-            mtime: *mtime,
+            stamp: stamp_of(text, *mtime),
             identity: *identity,
         })
     }
@@ -268,7 +278,7 @@ impl Fs for MemFs {
     ///
     /// No link count is modelled, so this always takes the replacing path —
     /// `RealFs::save` falls back to writing in place when `nlink > 1`.
-    async fn save(&self, path: &Path, text: &str) -> Result<Saved> {
+    async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
         // Parked before the insert, and the guard dropped before the await for
         // the same `Send` reason as `load`. A gated write must not have landed
         // while it is still held: a test that releases the gate is asserting
@@ -286,16 +296,57 @@ impl Fs for MemFs {
             });
         }
 
+        // Preserved before the replace, in the order `RealFs` uses and for the
+        // same reason. A fake that reversed it would stay green while the real
+        // one lost data.
+        //
+        // The guard is scoped to this block and dropped before `insert_file`,
+        // which takes the same lock: `state()` is a `std::sync::Mutex` and is
+        // not reentrant.
+        let preserved = {
+            let state = self.state();
+            match state.files.get(path) {
+                Some((existing, mtime, _)) if stamp_of(existing, *mtime) != expected => {
+                    let destination = crate::conflict::conflict_path(path, *mtime, |candidate| {
+                        state.files.contains_key(candidate)
+                    });
+                    Some((destination, existing.clone()))
+                }
+                _ => None,
+            }
+        };
+        if let Some((destination, bytes)) = preserved.clone() {
+            self.insert_file(destination, bytes);
+        }
+
         self.insert_file(path.to_path_buf(), text);
 
         let mut state = self.state();
         let identity = Self::fresh_identity(&mut state);
-        let mtime = Self::now();
-        if let Some((_, stored_mtime, stored_identity)) = state.files.get_mut(path) {
-            *stored_mtime = mtime;
-            *stored_identity = identity;
-        }
-        Ok(Saved { mtime, identity })
+        let mtime = Self::tick(&mut state);
+        let Some((stored_text, stored_mtime, stored_identity)) = state.files.get_mut(path) else {
+            return Err(VaultError::Io {
+                path: path.to_path_buf(),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            });
+        };
+        *stored_mtime = mtime;
+        *stored_identity = identity;
+        let stamp = stamp_of(stored_text, mtime);
+        Ok(Saved {
+            stamp,
+            identity,
+            preserved: preserved.map(|(destination, _)| destination),
+        })
+    }
+}
+
+/// The stamp a stored file would report. `size` is the byte length of the text
+/// as stored, which is what `RealFs` reports for the same content.
+fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
+    Stamp {
+        mtime,
+        size: text.len() as u64,
     }
 }
 
@@ -305,8 +356,9 @@ mod tests {
     use futures::executor::block_on;
 
     use super::MemFs;
-    use crate::fs::{Fs, Kind, VaultError};
+    use crate::fs::{Fs, Kind, Mtime, Stamp, VaultError};
     use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
 
     /// The scan walks with `read_dir` alone, so every directory on the way to
     /// a note has to exist without being inserted by hand.
@@ -393,7 +445,10 @@ mod tests {
         fs.insert_file("/vault/a.md", "before");
         fs.make_unwritable("/vault/a.md");
 
-        let result = block_on(fs.save(Path::new("/vault/a.md"), "after"));
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        let result = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp));
 
         assert!(matches!(result, Err(VaultError::Io { .. })));
         assert_eq!(
@@ -411,7 +466,10 @@ mod tests {
         fs.insert_file("/vault/a.md", "before");
 
         let gate = fs.block_save("/vault/a.md");
-        let mut write = Box::pin(fs.save(Path::new("/vault/a.md"), "after"));
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        let mut write = Box::pin(fs.save(Path::new("/vault/a.md"), "after", stamp));
         // Polled once so the future reaches the gate and parks there.
         assert!(write.as_mut().now_or_never().is_none());
         assert_eq!(
@@ -428,11 +486,73 @@ mod tests {
         );
     }
 
+    /// `now` used to be a constant, which made every stamp of a path equal to
+    /// every other and every conflict undetectable. This is what pins the
+    /// clock: delete `tick` and this is the test that says so.
+    #[test]
+    fn two_writes_of_one_path_get_different_stamps() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "one");
+        let first = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        fs.insert_file("/vault/a.md", "two");
+        let second = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+
+        assert_ne!(first, second);
+    }
+
+    /// The fake must preserve in the same order the real one does. Reversed, it
+    /// would stay green while `RealFs` lost data.
+    #[test]
+    fn a_stale_stamp_preserves_the_external_text() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+
+        // `insert_file` keeps the path's identity, exactly as a second process
+        // rewriting a file in place would.
+        fs.insert_file("/vault/a.md", "theirs");
+
+        let saved = block_on(fs.save(Path::new("/vault/a.md"), "ours", stamp)).expect("save");
+
+        let preserved = saved.preserved.expect("a conflict file");
+        assert_eq!(fs.read_to_string(&preserved).as_deref(), Some("theirs"));
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("ours")
+        );
+    }
+
+    #[test]
+    fn the_stamp_a_save_returns_is_accepted_by_the_next_save() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "before");
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+
+        let first = block_on(fs.save(Path::new("/vault/a.md"), "one", stamp)).expect("save");
+        let second = block_on(fs.save(Path::new("/vault/a.md"), "two", first.stamp)).expect("save");
+
+        assert!(second.preserved.is_none());
+    }
+
     #[test]
     fn save_round_trips_and_load_normalizes_line_endings() {
         let fs = MemFs::new();
 
-        let Ok(_) = block_on(fs.save(Path::new("/vault/a.md"), "one\r\ntwo")) else {
+        // The path does not exist yet, so the expectation is never compared:
+        // `save` stats nothing when there is no file to stat.
+        let absent = Stamp {
+            mtime: Mtime(SystemTime::UNIX_EPOCH),
+            size: 0,
+        };
+        let Ok(_) = block_on(fs.save(Path::new("/vault/a.md"), "one\r\ntwo", absent)) else {
             panic!("save must succeed");
         };
         let Ok(loaded) = block_on(fs.load(Path::new("/vault/a.md"))) else {

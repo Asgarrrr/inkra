@@ -19,6 +19,25 @@ pub struct FileIdentity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mtime(pub SystemTime);
 
+/// What a note looked like on disk, as cheaply as a `stat` can tell us.
+///
+/// Compared with `!=`, never with an ordering. A sync client that preserves a
+/// file's original modified date hands back an mtime *older* than the one we
+/// wrote, and `>` calls that unchanged and overwrites it. Zed compares with
+/// ordering, through a method it named `bad_is_greater_than`
+/// (`vendor/zed-reference/crates/fs/src/fs.rs:422-425`), on a type that refuses
+/// to derive `Ord` precisely because the comparison is unsound.
+///
+/// `size` is the second term because mtime granularity is one second on HFS+
+/// and coarser on some network mounts, so two writes can share a timestamp. It
+/// does not close the gap — same granule and same length still compares equal —
+/// and the design spec records why a content hash is not worth its cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    pub mtime: Mtime,
+    pub size: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Dir,
@@ -34,13 +53,11 @@ pub struct DirEntry {
     pub identity: FileIdentity,
 }
 
-/// Only `text` has a caller today. `mtime` is what conflict detection will seed
-/// `saved_mtime` from (Deferred in
-/// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`).
+/// `stamp` is the expectation the next write of this note carries.
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub text: String,
-    pub mtime: Mtime,
+    pub stamp: Stamp,
     pub identity: FileIdentity,
 }
 
@@ -48,10 +65,14 @@ pub struct Loaded {
 /// `RealFs::save` renames a temp file over the destination, so the file's
 /// `(device, inode)` after a save is not the one before it. A caller that keys
 /// anything by identity — `Vault` keys every `EntryId` — has to be told.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Saved {
-    pub mtime: Mtime,
+    pub stamp: Stamp,
     pub identity: FileIdentity,
+    /// Where the bytes this write replaced were preserved, when the file had
+    /// moved out from under the caller's expectation. `None` is the ordinary
+    /// case: the file was exactly what the caller thought it was.
+    pub preserved: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,9 +103,15 @@ pub trait Fs: Send + Sync {
     /// afford to, because its autosave defaults to off and the user picks the
     /// moment. Ours writes unprompted.
     ///
+    /// `expected` is what the caller believes is on disk. When the file says
+    /// otherwise, its current bytes are preserved beside it before this write
+    /// lands, and the path they went to comes back in `Saved::preserved`.
+    /// Required rather than optional: an `Option` would read as "write anyway",
+    /// which is the clobber this parameter exists to remove.
+    ///
     /// Returns the identity the file carries **afterwards**, which a rename
     /// changes. See `Saved`.
-    async fn save(&self, path: &Path, text: &str) -> Result<Saved>;
+    async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved>;
 }
 
 /// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
