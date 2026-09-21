@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Vault};
+use inkra_vault::{EntryId, Fs, Vault};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -28,6 +28,11 @@ enum Op {
     /// for it to take. It reproduces the shape the spec's "Identity" section
     /// names, not a distinct code path.
     RecaseName(usize),
+    /// Writing a note replaces it: `RealFs::save` renames a temp file over the
+    /// destination, so the inode moves and `Vault::reidentify` has to carry the
+    /// id across. The only mutation here that changes a file's identity without
+    /// changing its path.
+    Save(usize),
 }
 
 fn name() -> impl Strategy<Value = String> {
@@ -45,6 +50,7 @@ fn op() -> impl Strategy<Value = Op> {
         (0usize..8).prop_map(Op::Remove),
         (0usize..8, name()).prop_map(|(i, n)| Op::Rename(i, n)),
         (0usize..8).prop_map(Op::RecaseName),
+        (0usize..8).prop_map(Op::Save),
     ]
 }
 
@@ -106,6 +112,17 @@ proptest! {
                         if fs.read_to_string(&from).is_some() && fs.read_to_string(&to).is_none() {
                             fs.rename(&from, to);
                             expected[i] = (id, PathBuf::from(lowered));
+                        }
+                    }
+                }
+                Op::Save(i) => {
+                    if let Some((id, path)) = expected.get(i).cloned() {
+                        let absolute = PathBuf::from("/vault").join(&path);
+                        if fs.read_to_string(&absolute).is_some() {
+                            let saved = block_on(fs.save(&absolute, "written")).expect("save");
+                            // The path is unchanged, so `expected` keeps its
+                            // entry; only the identity behind it moved.
+                            vault.reidentify(id, saved.identity);
                         }
                     }
                 }

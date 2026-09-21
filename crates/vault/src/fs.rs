@@ -44,6 +44,16 @@ pub struct Loaded {
     pub identity: FileIdentity,
 }
 
+/// What a write produced. Symmetric with `Loaded`, and for one reason:
+/// `RealFs::save` renames a temp file over the destination, so the file's
+/// `(device, inode)` after a save is not the one before it. A caller that keys
+/// anything by identity — `Vault` keys every `EntryId` — has to be told.
+#[derive(Debug, Clone, Copy)]
+pub struct Saved {
+    pub mtime: Mtime,
+    pub identity: FileIdentity,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
     #[error("{path}: {source}")]
@@ -65,9 +75,16 @@ pub trait Fs: Send + Sync {
     /// Normalizes line endings: `Buffer` assumes no `\r` anywhere.
     async fn load(&self, path: &Path) -> Result<Loaded>;
 
-    /// Truncating, not atomic — same as Zed (`crates/fs/src/fs.rs:1019-1035`);
-    /// atomic save is deferred with its trigger in the spec.
-    async fn save(&self, path: &Path, text: &str) -> Result<Mtime>;
+    /// Replaces the file rather than truncating it, so a crash mid-write cannot
+    /// leave a half-written note. Zed does the opposite for buffer saves
+    /// (`vendor/zed-reference/crates/fs/src/fs.rs:1019-1033` is `File::create`)
+    /// and reserves `atomic_write` (`:974`) for its own config files; it can
+    /// afford to, because its autosave defaults to off and the user picks the
+    /// moment. Ours writes unprompted.
+    ///
+    /// Returns the identity the file carries **afterwards**, which a rename
+    /// changes. See `Saved`.
+    async fn save(&self, path: &Path, text: &str) -> Result<Saved>;
 }
 
 /// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
