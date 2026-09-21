@@ -1,7 +1,5 @@
-//! The editor view: the gpui half of editing.
-//!
-//! Everything here needs a `Window`, font metrics, or an entity handle.
-//! Anything that does not belongs in `inkra-editor`.
+//! The editor view: the gpui half of editing. Everything here needs a `Window`,
+//! font metrics, or an entity handle; anything else belongs in `inkra-editor`.
 
 pub(crate) mod actions;
 mod element;
@@ -14,15 +12,14 @@ use gpui::{
     App, Bounds, Context, CursorStyle, Entity, FocusHandle, Focusable, InteractiveElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, point, px,
-    rgb,
 };
 use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
 use inkra_text::{Buffer, ByteOffset};
 
+use crate::theme;
 use element::{DocumentLayout, TextElement};
 
-/// Which way a vertical movement goes. Local to this file: `inkra-editor` has
-/// no notion of up and down, because neither is resolvable without metrics.
+/// Local: up and down are not resolvable without font metrics.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Vertical {
     Up,
@@ -34,37 +31,22 @@ pub(crate) struct EditorView {
     state: EditorState,
     focus_handle: FocusHandle,
     is_selecting: bool,
-    /// Written in `paint`, read by hit-testing, `bounds_for_range` and vertical
-    /// movement. Between an edit and the next paint it describes the previous
-    /// text — including, now, the previous *number of lines*. Every index into
-    /// it is clamped for exactly that reason; see `DocumentLayout`.
+    /// Written in `paint`, so between an edit and the next paint it describes
+    /// the previous text. Every index into it clamps; see `DocumentLayout`.
     last_layout: Option<DocumentLayout>,
     last_bounds: Option<Bounds<Pixels>>,
-    /// Where the text would start at zero scroll, as of the last paint.
-    ///
-    /// Deliberately stored rather than derived as `last_bounds.origin.y -
-    /// scroll_handle.offset().y` on demand: `last_bounds` already has the
-    /// offset of the frame that produced it baked in, while `offset()` is a
-    /// live cell. Two cursor moves inside one update — or a wheel scroll — put
-    /// the two out of step, and subtracting a newer offset from an older
-    /// bounds counts the scroll twice.
+    /// Text top at zero scroll, as of the last paint. Never re-derive it from
+    /// `last_bounds` and a live `offset()`: that counts the scroll twice.
     last_text_top: Option<Pixels>,
-    /// gpui applies the scroll offset to this element's children in `prepaint`
-    /// (`gpui/elements/div.rs:2027`), so `last_bounds` already arrives scrolled
-    /// and every hit-test downstream stays correct without subtracting it.
-    /// `last_text_top` is the one place that does subtract it, to undo exactly
-    /// this — see its own comment.
+    /// `last_bounds` arrives already scrolled (`gpui/elements/div.rs:2027`), so
+    /// no hit-test subtracts the offset.
     scroll_handle: ScrollHandle,
-    /// Held deliberately. `Subscription` unsubscribes on `Drop`, so letting
-    /// this field go silently stops the view repainting when the buffer
-    /// changes — with no compiler warning and no test failure short of an
-    /// explicit two-view test.
+    /// Held for its `Drop`: losing it stops the view repainting on buffer
+    /// changes, with no warning and no test failure short of a two-view test.
     _buffer_changed: Subscription,
 }
 
 impl EditorView {
-    /// Takes a buffer rather than a `&str`: where the text came from — a
-    /// literal today, a file tomorrow — is not this view's business.
     pub(crate) fn new(buffer: Entity<Buffer>, cx: &mut Context<Self>) -> Self {
         let end = buffer.read(cx).len();
         let buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
@@ -82,12 +64,46 @@ impl EditorView {
         }
     }
 
-    /// The single path that mutates the buffer.
-    ///
-    /// Uses `as_mut` rather than `update`: the `GpuiBorrow` guard notifies the
-    /// buffer's observers when it drops (`gpui/app.rs:3280-3286`), so a repaint
-    /// cannot be lost by forgetting `cx.notify()` at a call site. `Buffer` is
-    /// gpui-free by rule, so it can never notify for itself.
+    /// The only gate that may rebind the buffer. Through `edit_buffer` instead,
+    /// the new note's text lands on the *previous* note's undo stack and `⌘Z`
+    /// restores one file into another. Resets every mutable field but
+    /// `focus_handle`; only `state` and `_buffer_changed` carry a regression
+    /// test (`a_swap_resets_the_caret_and_any_ime_composition`,
+    /// `editing_after_a_swap_still_notifies`).
+    // Renaming `_buffer_changed` trades this lint for "never read": rustc
+    // exempts `_`-prefixed fields from the latter.
+    #[expect(
+        clippy::used_underscore_binding,
+        reason = "resubscribing is the point of the gate"
+    )]
+    pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
+        // Rebuilt: the old `Subscription` would observe the closed note.
+        self._buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
+        self.buffer = buffer;
+
+        // Offset 0, unlike `new`, which seats the caret at `end`.
+        self.state = EditorState::new(Selection::at(ByteOffset(0)));
+        self.is_selecting = false;
+
+        // Cleared, not kept: `reveal_line` would scroll the new note by the
+        // old note's geometry.
+        self.last_layout = None;
+        self.last_bounds = None;
+        self.last_text_top = None;
+        self.scroll_handle = ScrollHandle::new();
+
+        cx.notify();
+    }
+
+    /// `#[cfg(test)]`: no production caller reads the buffer back out.
+    #[cfg(test)]
+    pub(crate) fn buffer(&self) -> &Entity<Buffer> {
+        &self.buffer
+    }
+
+    /// The single path that mutates the buffer. `as_mut`, not `update`: it
+    /// notifies on drop (`gpui/src/app.rs:3280-3286`), and `Buffer` is gpui-free by
+    /// rule, so nothing else can.
     fn edit_buffer<R>(
         &mut self,
         cx: &mut Context<Self>,
@@ -96,58 +112,41 @@ impl EditorView {
         let mut buffer = self.buffer.as_mut(cx);
         let result = f(&mut self.state, &mut buffer);
         let line = buffer.line_for_offset(self.state.cursor());
-        // Explicit, though the borrow checker does not need it: otherwise the
-        // lease outlives `reveal_line`, and a second lease panics at runtime
-        // rather than failing to compile (`gpui/app/entity_map.rs:231`).
+        // Load-bearing: the lease would outlive `reveal_line`, and a second
+        // lease panics at runtime (`gpui/src/app/entity_map.rs:231`).
         drop(buffer);
         self.reveal_line(line);
         result
     }
 
-    /// The single path that changes view-local state without touching the text.
-    ///
-    /// The buffer's observers must not fire for these: marking the buffer
-    /// changed when only this view's caret moved would lie to anything that
-    /// subscribes to real edits — an autosave, a vault reload.
+    /// The buffer's observers must not fire for these: an autosave or a vault
+    /// reload subscribes to real edits, not caret moves.
     fn update_state(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState)) {
         f(&mut self.state);
         cx.notify();
     }
 
-    /// [`Self::update_state`] for the movements that need the buffer to
-    /// resolve.
+    /// [`Self::update_state`] for movements that need the buffer to resolve.
     fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
         let buffer = self.buffer.read(cx);
         f(&mut self.state, buffer);
-        // Before `cx.notify()`, not after: `Entity::read` ties the borrow to
-        // `cx` rather than to the entity, so a last use of `buffer` past the
-        // notify holds an immutable borrow of `cx` across a mutable one.
+        // Before `cx.notify()`: `Entity::read` borrows `cx`, not the entity.
         let line = buffer.line_for_offset(self.state.cursor());
         cx.notify();
         self.reveal_line(line);
     }
 
-    /// Scrolls `line` into view, if it is not there already.
-    ///
-    /// Called from both gates rather than from the action handlers, for the
-    /// reason the gates exist at all: a reveal added by hand at each call site
-    /// is one the next action forgets. Clicks and drags come through here too
-    /// and cost nothing — they resolve a point the user just pointed at, so the
-    /// line is on screen by construction.
-    ///
-    /// Applied now rather than deferred to prepaint, because the containing
-    /// `div` reads and clamps the offset *before* it prepaints its children
-    /// (`gpui/elements/div.rs:2390-2392`, then `:2027`). Writing it here lands
-    /// in this frame; writing it from `TextElement::prepaint` would land in the
-    /// next one. The unclamped write is deliberate — see [`scroll::reveal`].
+    /// Called from both gates, not the action handlers, which would forget it.
+    /// Must be written here: from `TextElement::prepaint` it lands a frame late
+    /// (`gpui/elements/div.rs:2390-2392`, then `:2027`). The unclamped write is
+    /// deliberate — see [`scroll::reveal`].
     fn reveal_line(&mut self, line: usize) {
         let (Some(text_top), Some(layout)) = (self.last_text_top, self.last_layout.as_ref()) else {
             return;
         };
         let viewport = self.scroll_handle.bounds();
-        // Nothing has been prepainted yet, so there is no viewport to reveal
-        // into: `ScrollHandle::bounds` is `Bounds::default()` until the first
-        // `clamp_scroll_position` writes it (`gpui/elements/div.rs:2484`).
+        // Nothing prepainted yet: bounds stay `default()` until the first
+        // `clamp_scroll_position` (`gpui/elements/div.rs:2484`).
         if viewport.size.height <= px(0.) {
             return;
         }
@@ -162,16 +161,8 @@ impl EditorView {
         }
     }
 
-    /// Up and down, the only movements that need font metrics.
-    ///
-    /// The column to return to is resolved here and rides in the `Selection`,
-    /// so every *other* movement drops it by being made to name a [`Goal`] —
-    /// including the edit path, which would otherwise leave a column describing
-    /// text that has since moved.
-    ///
-    /// Reads `last_layout`, which describes the document as of the last paint.
-    /// Its indices are clamped, so a vertical move in the window between an
-    /// edit and the next frame is at worst one line off, never a panic.
+    /// The only movements needing font metrics, and the only ones that set a
+    /// [`Goal`] — everything else names `Goal::None`.
     fn move_vertically(&mut self, cx: &mut Context<Self>, direction: Vertical, extend: bool) {
         let Some(layout) = self.last_layout.as_ref() else {
             return;
@@ -179,9 +170,7 @@ impl EditorView {
         let cursor = self.cursor();
         let line = layout.line_for_offset(cursor);
 
-        // Captured lazily on the first vertical move and reused verbatim after
-        // that: it is what brings a run of downs back out to the column it
-        // started in once a short line has passed underneath.
+        // Reused verbatim: it re-widens a run of downs after a short line.
         let goal_x = match self.state.selection().goal() {
             Goal::Column(x) => px(x),
             Goal::None => layout.x_for_offset(cursor),
@@ -201,9 +190,8 @@ impl EditorView {
             return;
         }
 
-        // No line that way, so this runs to the document edge instead — and lets
-        // the goal go, because the next vertical move should start from the
-        // column it actually landed in.
+        // Drops the goal on purpose: the next vertical move should start from
+        // the column this landed in, not the one it was aiming for.
         let movement = match direction {
             Vertical::Up => LogicalMovement::DocStart,
             Vertical::Down => LogicalMovement::DocEnd,
@@ -215,9 +203,7 @@ impl EditorView {
         self.state.cursor()
     }
 
-    /// Unclipped, and derived from `last_layout`, which describes the text as
-    /// of the last paint. Both callers hand the result to
-    /// `EditorState::move_to`, which clips it.
+    /// Unclipped; both callers pass the result to `move_to`, which clips.
     fn position_for_point(&self, position: Point<Pixels>) -> Option<ByteOffset> {
         let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
         Some(layout.offset_for_position(position - bounds.origin))
@@ -260,9 +246,6 @@ impl Focusable for EditorView {
 }
 
 impl Render for EditorView {
-    // RRGGBB hex literals are the idiomatic gpui color form; clippy's suggested
-    // underscore grouping (e.g. 0x001e_1e1e) obscures the RGB byte boundaries.
-    #[allow(clippy::unreadable_literal)]
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         div()
             .id("editor")
@@ -298,10 +281,10 @@ impl Render for EditorView {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll_handle)
-            .bg(rgb(0x1e1e1e))
-            .text_color(rgb(0xffffff))
-            .text_size(px(18.))
-            .line_height(px(28.))
+            .bg(theme::editor_background())
+            .text_color(theme::editor_text())
+            .text_size(theme::BODY_TEXT_SIZE)
+            .line_height(theme::BODY_LINE_HEIGHT)
             .p_4()
             .child(TextElement {
                 editor: cx.entity(),

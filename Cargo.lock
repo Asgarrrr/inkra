@@ -2566,10 +2566,12 @@ dependencies = [
 name = "inkra-app"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "gpui_platform",
  "inkra-editor",
  "inkra-text",
+ "inkra-vault",
  "proptest 1.11.0",
 ]
 
@@ -2587,6 +2589,17 @@ version = "0.1.0"
 dependencies = [
  "proptest 1.11.0",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "inkra-vault"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "inkra-vault",
+ "proptest 1.11.0",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

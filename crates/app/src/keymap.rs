@@ -1,3 +1,10 @@
+//! Every key binding in one place, so the set can be read without hunting
+//! through the views that handle them.
+//!
+//! A binding's key context decides where it fires. Window-wide actions bind at
+//! `AppShell`, not `EditorView`: the editor's context only fires while the
+//! editor has focus. `⌘S` is the precedent.
+
 use gpui::KeyBinding;
 
 use crate::Quit;
@@ -5,6 +12,7 @@ use crate::editor::actions::{
     Backspace, Delete, DocEnd, DocStart, Down, End, Home, Left, Newline, Redo, Right, SelectAll,
     SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
 };
+use crate::vault::Save;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
     vec![
@@ -29,5 +37,6 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-z", Undo, None),
         KeyBinding::new("cmd-shift-z", Redo, None),
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]
 }

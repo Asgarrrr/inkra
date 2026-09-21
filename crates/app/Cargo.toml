@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 inkra-text = { workspace = true }
 inkra-editor = { workspace = true }
+inkra-vault = { workspace = true }
+# For `block_on` only: the one load that happens before the window exists, so
+# there is no gpui executor to spawn onto yet.
+futures = "0.3"
 # Path, not git: the source we compile and the source CLAUDE.md tells us to read
 # are then provably the same files. Restore the checkout with
 # `./scripts/vendor-gpui.sh`; `vendor/` is gitignored.
@@ -20,6 +24,8 @@ gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", feat
 gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
     "test-support",
 ] }
+# `MemFs` — tests must never reach the real filesystem.
+inkra-vault = { workspace = true, features = ["test-support"] }
 # For the scroll geometry only, which is pixel arithmetic and needs no window.
 proptest = "1"
 

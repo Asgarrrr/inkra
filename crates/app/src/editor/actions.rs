@@ -1,7 +1,7 @@
 //! Action declarations and their handlers.
 //!
 //! Each handler is a thin delegation to `inkra-editor` through one of
-//! `EditorView`'s two gates. Keeping them thin is the point: the logic they
+//! `EditorView`'s gates. Keeping them thin is the point: the logic they
 //! call is tested without a window, and they are covered end to end by the
 //! dispatch tests, which drive real keystrokes rather than calling these
 //! functions directly.
