@@ -108,11 +108,17 @@ We take the last one.
 One rule: **no write may destroy bytes it did not put there.**
 
 `Fs::save` gains an expectation. The caller passes the `Stamp` it believes the
-file carries. The implementation stats the destination immediately before
-replacing it:
+file carries — required, not optional. An `Option` would read as "no
+expectation, write anyway", which is the clobber this design exists to remove,
+and nothing needs it: the vault cannot create a note yet, so every write is a
+write of a file we loaded. The implementation stats the destination immediately
+before replacing it:
 
-- The stamp matches, or the caller had none, or the file does not exist —
-  replace it, as today.
+- The stamp matches, or the file does not exist — replace it, as today. A note
+  deleted underneath us is recreated rather than resurrected into a conflict
+  file: there are no bytes to preserve. Zed prompts separately for that case
+  (`vendor/zed-reference/crates/workspace/src/pane.rs:2255`); we have no prompt,
+  and recreating loses nothing.
 - The stamp differs — copy the bytes currently on disk to a sibling conflict
   file, fsync it, *then* replace. The note keeps its path; the other writer's
   version keeps its content under a new name.
@@ -168,6 +174,30 @@ it back on the next write. That keeps the whole comparison inside one `Fs` call,
 which is also what keeps the window between the stat and the rename as narrow as
 the implementation can make it.
 
+### The stamp lives in the `Writer`, not in `OpenNote`
+
+The obvious home is a field beside `saved_version` on `OpenNote`
+(`crates/app/src/vault.rs:102-128`). It produces a false conflict on ordinary
+typing, and the reason is the one `Writer` already exists for.
+
+Two writes of one note can be in flight at once: the periodic chain's, and the
+quit flush's, which cannot chain behind it. Write B captures its expectation
+under `&mut App`, then waits on the writer's lock while write A lands. A changed
+the file, so B's captured stamp is now stale — and B would preserve *our own*
+newly written text to a conflict file and report a conflict to the user. Typing
+would mint junk files.
+
+So the expectation is not "what the note looked like when this write was
+issued". It is **"what the file looked like after our own last write, or what we
+loaded if we have not written it yet"**. That value already has exactly one home
+with exactly the right lifetime: the `Writer`, which holds the sequence of the
+newest write that reached the filesystem (`crates/app/src/vault.rs:59-67`). It
+holds the stamp beside it, under the same lock, updated in the same place. A
+write reads its expectation after acquiring the lock, never before.
+
+`OpenNote` therefore gains no field. `track` seeds the `Writer` with the stamp
+the load returned.
+
 ## What `app` does with the answer
 
 `Saved` reports whether a conflict file was written. `NoteStore::write` already
@@ -175,31 +205,50 @@ re-keys the vault entry and advances `saved_version` on success
 (`crates/app/src/vault.rs:483-500`); it additionally stores the new stamp, and
 emits an event when a conflict file was created.
 
-The event is the surfacing. There is no status bar and no banner — "a home for
-user-visible errors" is Deferred in
-`docs/superpowers/specs/2026-09-20-inkra-vault-design.md`, and this design does
-not build one. What the user sees instead is the conflict file itself: it is a
-`.md` file in the vault, so the next scan lists it and the sidebar shows it as a
-row. `SaveFailed` already exists for the failure case
-(`crates/app/src/vault.rs:32-35`) and is the precedent for emitting rather than
-printing.
+There is no status bar and no banner — "a home for user-visible errors" is
+Deferred in `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`, and this
+design does not build one. What the user sees instead is the conflict file
+itself: it is a `.md` file in the vault, so a scan lists it and the sidebar
+shows it as a row.
+
+**That requires a rescan, and nothing in the running application performs one.**
+`Vault::rescan` has no caller outside the test suite today — the point
+`crates/app/src/vault.rs:987-991` already records. So the write that creates a
+conflict file also asks for a rescan, and this becomes that method's first
+production caller. Without it the file would sit on disk unmentioned until the
+next launch, and the only signal this design has would not fire.
+
+The rescan runs on conflict alone, never on an ordinary write. A conflict is
+rare; a full directory walk every two seconds would not be.
+
+`SaveFailed` already exists for the failure case (`crates/app/src/vault.rs:32-35`)
+and is the precedent for emitting an event rather than printing. The conflict
+event follows it, so that the deferred status line has one seam to subscribe to
+rather than two that grew apart.
 
 ### The conflict file's name
 
-`Note (conflict 2026-09-21 14-32-05).md`.
+`Note (conflict 2026-09-21 14-32-05Z).md`.
 
 Human-readable, in Dropbox's and Obsidian's shape rather than Syncthing's
 machine-parseable one. The `.md` extension is deliberate and load-bearing: a
 name `read_dir` filters out (`crates/vault/src/real_fs.rs:74`) would hide the
 only signal this design has.
 
-The timestamp is seconds-resolution local time, taken from the clock. `vault`
-takes every `Mtime` from the filesystem and never from `SystemTime::now`
-(CLAUDE.md), and this is not an `Mtime` — it is a display string in a filename.
-It is the first clock read in `vault`, and the reason is that no filesystem
-value is a suitable name here.
+**The timestamp is the preserved file's own mtime, not the current time.** It
+names the version being set aside, which is the more useful of the two, and it
+keeps CLAUDE.md's rule intact: `vault` takes every time value from the
+filesystem and never from `SystemTime::now`. It also makes the name
+deterministic, so a test can assert it rather than glob for it.
 
-A collision within one second appends ` 2`, ` 3`, and so on.
+UTC, with the `Z` stated. Rendering local time needs the zone database, which
+means `libc::localtime_r` and a new direct dependency, to save the reader an
+offset they can apply themselves. The conversion from a Unix timestamp to a
+civil date is the standard days-from-civil algorithm, about twenty lines, which
+`dependencies.md` puts firmly on the write-it-yourself side.
+
+A collision — two conflicts preserving versions that share one second — appends
+` 2`, ` 3`, and so on.
 
 ## Testing
 
