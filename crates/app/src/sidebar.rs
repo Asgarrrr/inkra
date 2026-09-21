@@ -1,6 +1,6 @@
 //! The vault tree: a linear walk over path-ordered entries, never a per-frame
-//! tree rebuild. `inkra_vault::compare` keeps a directory's descendants
-//! contiguous after it, so collapsing one is a forward skip.
+//! tree rebuild. `Vault::entries` yields a directory's descendants in a
+//! contiguous run after it, so collapsing one is a forward skip.
 
 use std::collections::HashSet;
 use std::ops::Range;
