@@ -9,10 +9,11 @@
 
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use futures::executor::block_on;
-use inkra_vault::{Fs, Kind, RealFs};
+use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp};
 
 /// A temp directory that removes itself. `tempfile` is not a dependency, and
 /// this is the only place that would want it.
@@ -33,6 +34,36 @@ impl Drop for TempDir {
     }
 }
 
+/// What the file currently says, for a save that expects to find it unchanged.
+fn stamp_of(path: &Path) -> Stamp {
+    block_on(RealFs.load(path)).expect("load").stamp
+}
+
+/// For a save of a path that does not exist yet. Never compared: `save` stats
+/// nothing when there is no file to stat, so any value does.
+fn absent() -> Stamp {
+    Stamp {
+        mtime: Mtime(SystemTime::UNIX_EPOCH),
+        size: 0,
+    }
+}
+
+/// Every `.md` file in the directory, by name.
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .expect("read_dir")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
 #[test]
 fn load_normalizes_crlf_and_reports_identity() {
     let dir = TempDir::new("load");
@@ -50,7 +81,7 @@ fn save_writes_lf_and_round_trips() {
     let dir = TempDir::new("save");
     let note = dir.0.join("note.md");
 
-    block_on(RealFs.save(&note, "hello\nworld\n")).expect("save");
+    block_on(RealFs.save(&note, "hello\nworld\n", absent())).expect("save");
 
     assert_eq!(fs::read_to_string(&note).expect("read"), "hello\nworld\n");
 }
@@ -65,7 +96,7 @@ fn save_replaces_the_file_and_reports_the_new_identity() {
     fs::write(&note, "before").expect("write");
     let before = fs::metadata(&note).expect("stat").ino();
 
-    let saved = block_on(RealFs.save(&note, "after")).expect("save");
+    let saved = block_on(RealFs.save(&note, "after", stamp_of(&note))).expect("save");
 
     assert_ne!(saved.identity.inode, before, "a rename gives a new inode");
     assert_eq!(
@@ -86,7 +117,7 @@ fn save_preserves_the_file_mode() {
     fs::write(&note, "before").expect("write");
     fs::set_permissions(&note, fs::Permissions::from_mode(0o640)).expect("chmod");
 
-    block_on(RealFs.save(&note, "after")).expect("save");
+    block_on(RealFs.save(&note, "after", stamp_of(&note))).expect("save");
 
     let mode = fs::metadata(&note).expect("stat").permissions().mode();
     assert_eq!(mode & 0o777, 0o640);
@@ -100,7 +131,7 @@ fn save_leaves_no_temp_file_behind() {
     let dir = TempDir::new("temp");
     let note = dir.0.join("note.md");
 
-    block_on(RealFs.save(&note, "text")).expect("save");
+    block_on(RealFs.save(&note, "text", absent())).expect("save");
 
     let names: Vec<_> = fs::read_dir(&dir.0)
         .expect("read_dir")
@@ -121,7 +152,7 @@ fn save_of_a_hard_linked_note_keeps_one_inode() {
     fs::hard_link(&note, &other).expect("link");
     let before = fs::metadata(&note).expect("stat").ino();
 
-    let saved = block_on(RealFs.save(&note, "after")).expect("save");
+    let saved = block_on(RealFs.save(&note, "after", stamp_of(&note))).expect("save");
 
     assert_eq!(saved.identity.inode, before, "the inode must not move");
     assert_eq!(
@@ -142,13 +173,124 @@ fn save_writes_through_a_symlink_rather_than_replacing_it() {
     fs::write(&target, "before").expect("write");
     std::os::unix::fs::symlink(&target, &link).expect("symlink");
 
-    block_on(RealFs.save(&link, "after")).expect("save");
+    block_on(RealFs.save(&link, "after", stamp_of(&link))).expect("save");
 
     assert!(
         fs::symlink_metadata(&link).expect("stat").is_symlink(),
         "the link must survive its own save"
     );
     assert_eq!(fs::read_to_string(&target).expect("read"), "after");
+}
+
+/// An external write between the load and the save. Its bytes survive under a
+/// new name, and the note itself holds ours.
+#[test]
+fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
+    let dir = TempDir::new("conflict");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    let stamp = stamp_of(&note);
+
+    // The other writer. The differing length is what this test relies on; the
+    // sleep is there so the mtime differs too, on a filesystem coarse enough
+    // that two writes in one second share a timestamp.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(&note, "someone else's much longer text").expect("write");
+
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+
+    let preserved = saved.preserved.expect("a conflict file");
+    assert_eq!(
+        fs::read_to_string(&preserved).expect("read"),
+        "someone else's much longer text"
+    );
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+    assert_eq!(
+        preserved.extension().and_then(|ext| ext.to_str()),
+        Some("md"),
+        "an extension read_dir filters out would hide the only signal there is"
+    );
+}
+
+/// The self-healing property: the stamp a save returns is the expectation the
+/// next save of that note passes with. Without it every second keystroke would
+/// mint a conflict file holding the note's own text.
+#[test]
+fn save_reports_a_stamp_the_next_save_accepts() {
+    let dir = TempDir::new("chain");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+
+    let first = block_on(RealFs.save(&note, "one", stamp_of(&note))).expect("save");
+    let second = block_on(RealFs.save(&note, "two", first.stamp)).expect("save");
+
+    assert!(second.preserved.is_none());
+    assert_eq!(fs::read_to_string(&note).expect("read"), "two");
+    assert_eq!(names(&dir.0), vec!["note.md"]);
+}
+
+/// A note deleted underneath us is recreated rather than resurrected into a
+/// conflict file: there are no bytes to preserve.
+#[test]
+fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
+    let dir = TempDir::new("missing");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    let stamp = stamp_of(&note);
+    fs::remove_file(&note).expect("remove");
+
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+
+    assert!(saved.preserved.is_none());
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+}
+
+/// The ordering that makes the whole design safe. If the preserve fails, the
+/// replace must not happen: the file keeps the other writer's bytes.
+#[test]
+fn a_failed_preserve_leaves_the_file_untouched() {
+    let dir = TempDir::new("preserve-fails");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    let stamp = stamp_of(&note);
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(&note, "theirs").expect("write");
+    // A conflict file cannot be created in a directory with no write
+    // permission, while the note itself stays writable in place. Only the
+    // preserve step can fail, which is what this isolates.
+    fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o500)).expect("chmod");
+
+    let result = block_on(RealFs.save(&note, "ours", stamp));
+
+    fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o700)).expect("chmod");
+    assert!(result.is_err(), "the save must refuse");
+    assert_eq!(
+        fs::read_to_string(&note).expect("read"),
+        "theirs",
+        "the bytes the save could not preserve are still there"
+    );
+}
+
+/// `replace` restores the note's mode onto its temp file, and
+/// `save_preserves_the_file_mode` pins that. The conflict file is a second
+/// fresh file holding the same note's content and owes the same.
+#[test]
+fn a_preserved_file_keeps_the_note_mode() {
+    let dir = TempDir::new("conflict-mode");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    fs::set_permissions(&note, fs::Permissions::from_mode(0o600)).expect("chmod");
+    let stamp = stamp_of(&note);
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(&note, "theirs and longer").expect("write");
+
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+
+    let preserved = saved.preserved.expect("a conflict file");
+    let mode = fs::metadata(&preserved).expect("stat").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
 }
 
 #[test]

@@ -119,7 +119,9 @@ proptest! {
                     if let Some((id, path)) = expected.get(i).cloned() {
                         let absolute = PathBuf::from("/vault").join(&path);
                         if fs.read_to_string(&absolute).is_some() {
-                            let saved = block_on(fs.save(&absolute, "written")).expect("save");
+                            let stamp = block_on(fs.load(&absolute)).expect("load").stamp;
+                            let saved =
+                                block_on(fs.save(&absolute, "written", stamp)).expect("save");
                             // The path is unchanged, so `expected` keeps its
                             // entry; only the identity behind it moved.
                             vault.reidentify(id, saved.identity);

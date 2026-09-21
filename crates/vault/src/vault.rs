@@ -304,7 +304,10 @@ mod tests {
         let mut vault = scan(&fs);
         let id = vault.entries().next().expect("one entry").id;
 
-        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
         vault.reidentify(id, saved.identity);
         block_on(vault.rescan(&fs)).expect("rescan");
 
@@ -323,7 +326,10 @@ mod tests {
         let mut vault = scan(&fs);
         let id = vault.entries().next().expect("one entry").id;
 
-        block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
         block_on(vault.rescan(&fs)).expect("rescan");
 
         assert!(vault.entry(id).is_none(), "the old id names nothing");
@@ -339,7 +345,10 @@ mod tests {
         let mut vault = scan(&fs);
         let stale = vault.entries().next().expect("one entry").id;
 
-        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after")).expect("save");
+        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .stamp;
+        let saved = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
         block_on(vault.rescan(&fs)).expect("rescan");
         let minted = vault.entries().next().expect("one entry").id;
         vault.reidentify(stale, saved.identity);
