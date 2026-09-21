@@ -41,7 +41,7 @@ impl Stage {
         Self { cx }
     }
 
-    /// The launch-with-no-argument state: an empty buffer and no vault.
+    /// The launch-with-no-argument state: no note, no vault, no editor.
     pub(crate) fn open_nothing(&mut self) -> WindowHandle<AppShell> {
         self.open(Arc::new(MemFs::new()), Launch::Nothing)
     }
@@ -61,8 +61,8 @@ impl Stage {
 
     /// A scanned vault of the given `(relative path, contents)` pairs.
     ///
-    /// No note is open: a vault launch shows the tree and an empty editor until
-    /// a row is clicked.
+    /// No note is open: a vault launch shows the tree beside the empty state
+    /// until a row is clicked.
     pub(crate) fn open_vault(&mut self, files: &[(&str, &str)]) -> WindowHandle<AppShell> {
         let fs = Arc::new(MemFs::new());
         for (path, text) in files {

@@ -159,7 +159,7 @@ one file.
 
 | Scene | What it shows |
 |---|---|
-| `editor-empty` | Launch with no argument: empty buffer, empty sidebar |
+| `empty-no-vault` | Launch with no argument: the empty state, and no editor at all. Renamed from `editor-empty` on 2026-09-21, when the buffer it showed stopped existing |
 | `editor-text` | Per-line layout, a blank line, real font metrics, unfocused |
 | `editor-caret` | The caret mid-document, in a focused window |
 | `editor-selection` | A selection over four lines: both ends, and a blank line's stub |

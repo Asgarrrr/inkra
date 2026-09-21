@@ -155,6 +155,32 @@ area, not on every task:
     of the four, and must not: `copy` reads with `buffer.read`, because
     `edit_buffer`'s `as_mut` notifies unconditionally and would schedule an
     autosave for a `⌘C` that changed nothing. It is the only such action today.
+- `AppShell.editor` is an **`Option`**, and the window opens with `None` for
+  every launch but a named file. The editor used to exist unconditionally, which
+  meant a launch with no argument — or a vault with nothing clicked — put a real
+  editable `Buffer` on screen that `NoteStore` never tracked: no observer, no
+  autosave, no sidebar row, no quit flush, and `save_current` returning at its
+  `None` guard. Everything typed into it was lost. `AppShell::render_empty` fills
+  that slot instead, so there is nothing to type into. It paints
+  `theme::editor_background` itself: it stands in the editor's slot, and the
+  editor is what used to paint that surface.
+- `AppShell` holds **its own `FocusHandle`**, and the root div `track_focus`es
+  it. That is load-bearing, not hygiene: with no editor the window's focus is on
+  that handle, and an untracked handle puts dispatch on the anonymous view
+  boundary *above* the div carrying `.on_action` (`gpui/src/window.rs:6244-6251`,
+  `key_dispatch.rs:611-614`, `view.rs:462-476`), so `cmd-s` would silently stop
+  reaching its handler. `Focusable::focus_handle` returns the editor's when there
+  is one and this one otherwise.
+- `AppShell::open_note` reaches a `Window` through `update_in` with **none passed
+  in**, and that is deliberate. Every entity built by `cx.new` inside a window
+  update is registered against that window at construction (`gpui/src/app.rs:2975`,
+  `:1934-1946`), and `open_window` pushes that stack around `build_root_view`
+  (`:1356-1359`) — which is where `bootstrap::root` builds the shell. Do not
+  thread a `&mut Window` through `root` to "fix" this: `spawn_in` resolves
+  through the very same lookup (`app/async_context.rs:80-86`), so it buys
+  nothing, and `root` is the seam both entry points share. The focus move lives
+  in that same `update_in`, with no `await` splitting it from the bind and the
+  `set_current`.
 - `NoteStore::current` names the note `⌘S` writes — and only that. It does not
   gate writing in general: the periodic writer writes every dirty note whatever
   is current, and so does the quit flush. What `current` decides is which note
@@ -409,5 +435,8 @@ change that introduces something reusable.
 | The list of states worth looking at | `catalogue()` returning `&[Scene]` | `app/src/shot/scenes.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
+| What fills the editor's slot when no note is open | `AppShell::render_empty` (private) — a method, not a view: no state, no events, no focus of its own | `app/src/shell.rs` |
+| The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
+| The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
 | The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |

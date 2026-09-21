@@ -715,7 +715,7 @@ mod tests {
         });
         let window = cx.add_window({
             let notes = notes.clone();
-            move |_, cx| AppShell::new(editor, notes, cx)
+            move |_, cx| AppShell::new(Some(editor), notes, cx)
         });
         window
             .update(cx, |shell, window, cx| {
