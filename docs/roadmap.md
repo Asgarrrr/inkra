@@ -14,7 +14,7 @@ the uncertainty, for reasons given below.
 
 | Item | Trigger | Estimate | Blocked by |
 |---|---|---|---|
-| Horizontal scroll and reveal | A note with lines long enough to push the caret off the right edge. | 1–2 d | — |
+| Horizontal scroll and reveal | A note with lines long enough to push the caret off the right edge. **Fired** on 2026-09-21: one `⌘V` of a URL creates that line in a single keystroke. | 1–2 d | — |
 | Soft wrap | A real note measured to need it. | 3–5 d | — |
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | Soft wrap |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
@@ -31,6 +31,12 @@ Long lines are already clipped rather than overflowing: with `overflow.y` set to
 `Scroll` and `overflow.x` left `Visible`, `Style::overflow_mask` masks to the
 element's bounds on **both** axes (`gpui/style.rs:668-672`). So the caret can be
 lost off the right edge today, silently.
+
+The trigger has fired. Clipboard landed on 2026-09-21, and a paste puts an
+arbitrarily long line in the buffer in one keystroke where typing one takes
+sustained effort. Nothing is broken that was not broken before — the caret was
+already losable off the right edge — but the way to reach it is now ordinary
+use rather than deliberate effort.
 
 Three costs the vertical half did not pay:
 
