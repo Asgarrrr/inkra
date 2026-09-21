@@ -360,6 +360,15 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::SystemTime;
 
+    /// `expect` is denied in this file, so the load goes through the `let Ok`
+    /// shape the rest of the module uses.
+    fn stamp_of(fs: &MemFs, path: &str) -> Stamp {
+        let Ok(loaded) = block_on(fs.load(Path::new(path))) else {
+            panic!("load must succeed");
+        };
+        loaded.stamp
+    }
+
     /// The scan walks with `read_dir` alone, so every directory on the way to
     /// a note has to exist without being inserted by hand.
     #[test]
@@ -445,9 +454,7 @@ mod tests {
         fs.insert_file("/vault/a.md", "before");
         fs.make_unwritable("/vault/a.md");
 
-        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let stamp = stamp_of(&fs, "/vault/a.md");
         let result = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp));
 
         assert!(matches!(result, Err(VaultError::Io { .. })));
@@ -466,9 +473,7 @@ mod tests {
         fs.insert_file("/vault/a.md", "before");
 
         let gate = fs.block_save("/vault/a.md");
-        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let stamp = stamp_of(&fs, "/vault/a.md");
         let mut write = Box::pin(fs.save(Path::new("/vault/a.md"), "after", stamp));
         // Polled once so the future reaches the gate and parks there.
         assert!(write.as_mut().now_or_never().is_none());
@@ -493,13 +498,9 @@ mod tests {
     fn two_writes_of_one_path_get_different_stamps() {
         let fs = MemFs::new();
         fs.insert_file("/vault/a.md", "one");
-        let first = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let first = stamp_of(&fs, "/vault/a.md");
         fs.insert_file("/vault/a.md", "two");
-        let second = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let second = stamp_of(&fs, "/vault/a.md");
 
         assert_ne!(first, second);
     }
@@ -510,17 +511,19 @@ mod tests {
     fn a_stale_stamp_preserves_the_external_text() {
         let fs = MemFs::new();
         fs.insert_file("/vault/a.md", "before");
-        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let stamp = stamp_of(&fs, "/vault/a.md");
 
         // `insert_file` keeps the path's identity, exactly as a second process
         // rewriting a file in place would.
         fs.insert_file("/vault/a.md", "theirs");
 
-        let saved = block_on(fs.save(Path::new("/vault/a.md"), "ours", stamp)).expect("save");
+        let Ok(saved) = block_on(fs.save(Path::new("/vault/a.md"), "ours", stamp)) else {
+            panic!("save must succeed");
+        };
 
-        let preserved = saved.preserved.expect("a conflict file");
+        let Some(preserved) = saved.preserved else {
+            panic!("a stale stamp must preserve");
+        };
         assert_eq!(fs.read_to_string(&preserved).as_deref(), Some("theirs"));
         assert_eq!(
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
@@ -532,12 +535,14 @@ mod tests {
     fn the_stamp_a_save_returns_is_accepted_by_the_next_save() {
         let fs = MemFs::new();
         fs.insert_file("/vault/a.md", "before");
-        let stamp = block_on(fs.load(Path::new("/vault/a.md")))
-            .expect("load")
-            .stamp;
+        let stamp = stamp_of(&fs, "/vault/a.md");
 
-        let first = block_on(fs.save(Path::new("/vault/a.md"), "one", stamp)).expect("save");
-        let second = block_on(fs.save(Path::new("/vault/a.md"), "two", first.stamp)).expect("save");
+        let Ok(first) = block_on(fs.save(Path::new("/vault/a.md"), "one", stamp)) else {
+            panic!("the first save must succeed");
+        };
+        let Ok(second) = block_on(fs.save(Path::new("/vault/a.md"), "two", first.stamp)) else {
+            panic!("the second save must succeed");
+        };
 
         assert!(second.preserved.is_none());
     }

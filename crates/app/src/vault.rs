@@ -495,7 +495,9 @@ impl NoteStore {
             let Ok(children) = Vault::collect(&*fs, &root).await else {
                 return;
             };
-            let _ = vault.update(cx, |vault, cx| {
+            // The entity is held strongly by this closure, so neither this nor
+            // the `read_with` above can fail on a released entity.
+            vault.update(cx, |vault, cx| {
                 vault.apply(children);
                 cx.notify();
             });

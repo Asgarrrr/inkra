@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use gpui::{App, Bounds, Focusable, WindowBounds, WindowOptions, actions, prelude::*, px, size};
 use inkra_text::Buffer;
-use inkra_vault::{Fs, RealFs, Vault, Stamp};
+use inkra_vault::{Fs, RealFs, Stamp, Vault};
 
 use editor::EditorView;
 use keymap::key_bindings;
