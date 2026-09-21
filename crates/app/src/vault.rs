@@ -918,10 +918,16 @@ mod tests {
         );
     }
 
-    /// The same, with the two writes genuinely overlapping rather than
-    /// sequential: `block_save` holds the first open past the turn that issued
-    /// it, which is the only way a second write is issued while the first is
-    /// still in flight.
+    /// The same, with the second write *issued* while the first is in flight:
+    /// `block_save` holds the periodic chain's write open past the turn that
+    /// started it, so the `⌘S` below is decided against a file our own write has
+    /// not finished changing.
+    ///
+    /// The two writes do not overlap at the filesystem, and cannot: the `⌘S`
+    /// chain awaits the one it replaced (`schedule_save` takes `previous` rather
+    /// than dropping it), so the second `write_through` starts after the first
+    /// returned. Only the quit flush escapes that chaining — see
+    /// `a_quit_flush_overtakes_the_write_it_overlaps`.
     #[gpui::test]
     fn an_overlapping_write_does_not_conflict_with_the_one_in_flight(cx: &mut TestAppContext) {
         let fs = Arc::new(MemFs::new());
@@ -945,6 +951,66 @@ mod tests {
             entries.len(),
             1,
             "neither write may conflict with the other"
+        );
+    }
+
+    /// The two writers of one note, genuinely concurrent — the interleaving
+    /// `Writer` exists for, and the one the test above cannot reach.
+    ///
+    /// Every write issued through `schedule_save` queues behind the previous
+    /// one, so no two of them are ever in flight together. The quit flush is the
+    /// single exception, and cannot be made to chain: `App::shutdown` blocks the
+    /// foreground session while it polls the quit futures, so a flush that
+    /// awaited the chain would wait on a task that can never resume. It issues
+    /// its own write instead, and for that moment the note has two.
+    ///
+    /// Driven through `flush_all` rather than `cx.quit()`, because the gate has
+    /// to be released from outside and `quit` does not return until the flush it
+    /// is waiting for has finished. What quit adds on top of this — that the
+    /// observer is registered at all, and that every dirty note is collected —
+    /// is `quitting_writes_every_dirty_note`'s claim, not this one's.
+    ///
+    /// Both assertions bite, and on different defects. A flush that carried its
+    /// own `Writer`, or the note's load stamp rather than what the chain's write
+    /// had just produced, meets a file it does not recognise and preserves our
+    /// own text into a conflict file. A flush whose sequence did not exceed the
+    /// chain's is discarded as overtaken, and the file keeps text the user had
+    /// already typed past.
+    #[gpui::test]
+    async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "before");
+
+        let (mut visual, notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let gate = fs.block_save("/vault/a.md");
+
+        // Parks the periodic chain inside `fs.save`, holding the note's lock:
+        // `write_through` takes it before the write and keeps it across.
+        visual.simulate_input("X");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        // Text the parked write cannot be carrying, so which write landed last
+        // is readable from the file alone.
+        visual.simulate_input("Y");
+        // Held, never dropped: the flush's writes are `Task`s moved into this
+        // future, and dropping a `Task` cancels it.
+        let flush = notes.update(cx, NoteStore::flush_all);
+
+        gate.release();
+        flush.await;
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("beforeXY"),
+            "the flush carries the highest sequence, so it is the write that stands"
+        );
+        let entries =
+            futures::executor::block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+        assert_eq!(
+            entries.len(),
+            1,
+            "the flush expects what the chain's write produced, not what the load returned"
         );
     }
 

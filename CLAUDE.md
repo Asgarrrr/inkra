@@ -231,6 +231,13 @@ area, not on every task:
   inside `rename()`. And a test that let the scheduler choose the order would
   assert whatever seed 0 happens to produce. Drive `write_through` directly
   instead and force each order — a plain `#[test]`, the `scroll.rs` precedent.
+  What *does* belong in a `#[gpui::test]` is the **wiring** that feeds the
+  ordering: that the quit flush shares the note's `Writer` and mints a higher
+  sequence than the chain write it overlaps. Reach it by calling `flush_all`
+  directly, not through `cx.quit()` — the gate holding the chain's write open
+  has to be released from outside, and `quit` does not return until the flush
+  completes. Hold the returned future: its writes are `Task`s moved into it, and
+  a dropped `Task` is cancelled.
 - Quit through `TestAppContext::quit`, which calls `App::shutdown`
   (`gpui/src/app/test_context.rs:233`). `cx.quit()` inside an `update` is
   `App::quit` — `self.platform.quit()` — and `TestPlatform::quit` has an empty
