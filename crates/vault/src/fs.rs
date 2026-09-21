@@ -117,8 +117,15 @@ pub trait Fs: Send + Sync {
 
 /// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
 /// I/O or a paste action, whichever lands first".
+///
+/// Public because both of those landed, and `Buffer` assumes LF: `Fs::load` is
+/// one door into a buffer and a paste is the other, so `app` calls this on
+/// clipboard text too. It belongs to text arriving from outside rather than to
+/// the filesystem, but it cannot move to `inkra-text` — this crate depends on
+/// nothing in the workspace, by design — and a second copy would mean the same
+/// four tests below maintained twice.
 #[must_use]
-pub(crate) fn normalize_line_endings(text: &str) -> String {
+pub fn normalize_line_endings(text: &str) -> String {
     if !text.contains('\r') {
         return text.to_owned();
     }

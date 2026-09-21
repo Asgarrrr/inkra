@@ -104,6 +104,10 @@ impl EditorView {
     /// The single path that mutates the buffer. `as_mut`, not `update`: it
     /// notifies on drop (`gpui/src/app.rs:3280-3286`), and `Buffer` is gpui-free by
     /// rule, so nothing else can.
+    ///
+    /// An action that mutates neither the buffer nor `EditorState` needs none
+    /// of the gates and must not take one: `copy` reads with `buffer.read` so
+    /// that `⌘C` cannot notify, and so cannot mark a clean note dirty.
     fn edit_buffer<R>(
         &mut self,
         cx: &mut Context<Self>,
@@ -255,6 +259,9 @@ impl Render for EditorView {
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
