@@ -58,7 +58,7 @@ pub(crate) struct NoteStore {
     /// Stamps every write with its issue order. Minted where the text is
     /// captured, under `&mut App`, so the order is the order the writes were
     /// decided — which `Buffer::version` cannot give: an undo *lowers* the
-    /// version (`text/src/buffer.rs:114-119`), so a flush after an undo would
+    /// version (`Buffer::version`), so a flush after an undo would
     /// carry a lower number than the write it has to beat.
     next_write: u64,
     /// The pending vault walk. One for the whole store, not one per note: a

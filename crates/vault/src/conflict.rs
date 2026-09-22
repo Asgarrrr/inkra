@@ -14,7 +14,7 @@ use crate::fs::Mtime;
 ///
 /// Human-readable, in Dropbox's and Obsidian's shape rather than Syncthing's
 /// machine-parseable one. Always `.md`, because `read_dir` lists nothing else
-/// (`real_fs.rs:74`) and an unlisted conflict file is an invisible one.
+/// (`RealFs::read_dir`) and an unlisted conflict file is an invisible one.
 ///
 /// `taken` decides whether a candidate already exists. A function rather than a
 /// direct filesystem call, so this stays testable without one; `RealFs` passes
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn it_sits_beside_the_note_and_keeps_the_md_extension() {
         // `read_dir` yields a file only when its extension is `md`
-        // (`real_fs.rs:74`). A conflict file the scan filters out would be the
+        // (`RealFs::read_dir`). A conflict file the scan filters out would be the
         // only signal this feature has, invisible.
         let path = conflict_path(Path::new("/vault/sub/Note.md"), at(1_790_001_125), |_| {
             false
