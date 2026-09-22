@@ -35,6 +35,10 @@ pub struct Vault {
     root: PathBuf,
     entries: Vec<Entry>,
     by_identity: HashMap<FileIdentity, EntryId>,
+    /// Position of each id's row in `entries`. Rebuilt in `apply`, from the
+    /// final vector — the only place `entries` is replaced. Built before the
+    /// `sort_by(compare)` there, it would point every id at its pre-sort row.
+    by_id: HashMap<EntryId, usize>,
     next_id: u32,
 }
 
@@ -46,7 +50,7 @@ impl Vault {
 
     #[must_use]
     pub fn entry(&self, id: EntryId) -> Option<&Entry> {
-        self.entries.iter().find(|entry| entry.id == id)
+        self.by_id.get(&id).map(|&index| &self.entries[index])
     }
 
     /// The id the last scan gave the file with this identity.
@@ -106,6 +110,7 @@ impl Vault {
             root: root.to_path_buf(),
             entries: Vec::new(),
             by_identity: HashMap::new(),
+            by_id: HashMap::new(),
             next_id: 1,
         };
         vault.rescan(fs).await?;
@@ -212,6 +217,13 @@ impl Vault {
 
         found.sort_by(compare);
 
+        // From the final, sorted vector: `entries` and `by_id` must agree on
+        // each id's row, and the sort is what decides the row.
+        self.by_id = found
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (entry.id, index))
+            .collect();
         self.by_identity = next_by_identity;
         self.entries = found;
     }
@@ -434,6 +446,37 @@ mod tests {
         fs.insert_file("/vault/sub/b.md", "b");
 
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
+    }
+
+    /// `Vault::apply` mints ids while it walks `collect`'s discovery order,
+    /// then reorders the whole vector with `found.sort_by(compare)`. An id
+    /// minted early can end up at a late row, and vice versa: `id1` is minted
+    /// for the top-level directory `a`, `id2` for the top-level file `b.md`,
+    /// `id3` for `a/c.md` — discovered after `b.md` since `a` is descended
+    /// only once the worklist reaches it — but `compare` sorts a directory's
+    /// children directly after it, so the final order is `a`, `a/c.md`,
+    /// `b.md`. A lookup index built from pre-sort positions would map `id2`
+    /// to row 1, which `entries[1]` after the sort is `a/c.md` (`id3`) — a
+    /// mismatched id and path. Building the index from the sorted vector is
+    /// what this test pins.
+    #[test]
+    fn entry_resolves_every_id_after_a_rescan_reorders_the_list() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a/c.md", "c");
+        fs.insert_file("/vault/b.md", "b");
+
+        let vault = scan(&fs);
+
+        for entry in vault.entries() {
+            let found = vault
+                .entry(entry.id)
+                .expect("every id the scan minted must resolve");
+            assert_eq!(found.id, entry.id, "entry() returned the wrong row");
+            assert_eq!(
+                found.path, entry.path,
+                "entry() returned a row for a different path"
+            );
+        }
     }
 
     /// Pins component-wise ordering, not `compare`: holds under a plain
