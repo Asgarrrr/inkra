@@ -486,13 +486,14 @@ impl NoteStore {
         if id == EntryId::DETACHED {
             return Task::ready(false);
         }
-        let Some(vault) = self.vault.clone() else {
+        if self
+            .vault
+            .as_ref()
+            .and_then(|v| v.read(cx).entry(id))
+            .is_none()
+        {
             return Task::ready(false);
-        };
-        let Some(path) = vault.read(cx).absolute(id) else {
-            return Task::ready(false);
-        };
-
+        }
         if self.ops.get(&id).is_some_and(|ops| ops.trashing) {
             return Task::ready(false);
         }
@@ -517,6 +518,23 @@ impl NoteStore {
             if let Some(previous) = previous {
                 previous.await;
             }
+            // Resolved here rather than at issue time, for the reason `rename`
+            // gives: a delete queued behind a rename would otherwise carry the
+            // path from before the move, find nothing there, and report a
+            // failure for a note the user confirmed deleting.
+            let Ok(Some(path)) =
+                this.update(cx, |this, cx| this.vault.as_ref()?.read(cx).absolute(id))
+            else {
+                if let Ok(()) = this.update(cx, |this, cx| {
+                    if let Some(ops) = this.ops.get_mut(&id) {
+                        ops.trashing = false;
+                    }
+                    cx.emit(TrashFailed(id));
+                }) {
+                    let _ = done.send(false);
+                }
+                return;
+            };
             let removed = cx
                 .background_spawn(async move { fs.trash(&path).await })
                 .await;
@@ -658,23 +676,16 @@ impl NoteStore {
         if inkra_vault::check_name(name).is_some() {
             return Task::ready(false);
         }
-        let Some(vault) = self.vault.clone() else {
+        if self.vault.is_none() {
             return Task::ready(false);
-        };
-        let (Some(from), Some(entry)) = (
-            vault.read(cx).absolute(id),
-            vault.read(cx).entry(id).cloned(),
-        ) else {
-            return Task::ready(false);
-        };
-        let file_name = match entry.kind {
-            Kind::Note => inkra_vault::note_file_name(name),
-            Kind::Dir => name.trim().to_owned(),
-        };
-        let Some(to) = from.parent().map(|parent| parent.join(&file_name)) else {
-            return Task::ready(false);
-        };
+        }
+        // Preempted, exactly as `trash` is and for the same reason: chained
+        // behind an un-preempted timer the row would keep its old name for up
+        // to `AUTOSAVE_DELAY`, looking broken. Resolving the timer writes now
+        // and leaves the bookkeeping consistent.
+        self.schedule_save(id, Duration::ZERO, cx);
 
+        let name = name.to_owned();
         let fs = Arc::clone(&self.fs);
         let previous = self.ops.entry(id).or_default().chain.take();
         let (done, wait) = oneshot::channel();
@@ -682,6 +693,27 @@ impl NoteStore {
             if let Some(previous) = previous {
                 previous.await;
             }
+            // Resolved **here**, not at issue time, and for the reason
+            // `Self::write` gives: an operation queued behind a rename would
+            // otherwise carry the path from before it and act on a name that
+            // has moved. Two renames of one note in a turn is the ordinary way
+            // to reach it — the second would report `NotFound` — and a delete
+            // behind a rename is the dangerous one, because a confirmed delete
+            // would silently not happen.
+            let Ok(Some((from, to))) = this.update(cx, |this, cx| {
+                let vault = this.vault.as_ref()?.read(cx);
+                let from = vault.absolute(id)?;
+                let file_name = match vault.entry(id)?.kind {
+                    Kind::Note => inkra_vault::note_file_name(&name),
+                    Kind::Dir => name.trim().to_owned(),
+                };
+                let to = from.parent()?.join(&file_name);
+                Some((from, to))
+            }) else {
+                let _ = done.send(false);
+                return;
+            };
+
             let moved = cx
                 .background_spawn(async move { fs.rename(&from, &to).await })
                 .await;
