@@ -65,6 +65,12 @@ pub(crate) struct TrashFailed(pub(crate) EntryId);
 
 impl EventEmitter<TrashFailed> for NoteStore {}
 
+/// A rename failed. The entry is where it was, under the name it had.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RenameFailed(pub(crate) EntryId);
+
+impl EventEmitter<RenameFailed> for NoteStore {}
+
 /// Serialises one note's writes, and drops one that a newer write overtook.
 ///
 /// One note normally has exactly one writer: `schedule_save` chains every write
@@ -617,6 +623,85 @@ impl NoteStore {
             })
             .ok()?
         })
+    }
+
+    /// Renames one note or folder in place, keeping its `EntryId`.
+    ///
+    /// Ordered on the note's chain, like `trash` and for the same reason: a
+    /// write decided before the rename must reach the old path first, or it
+    /// lands afterwards and recreates the note under the name the user just
+    /// moved away from.
+    ///
+    /// The rescan is awaited **inside** the chain link, before the next
+    /// operation is let through. `Self::write` resolves its path through
+    /// `Vault::absolute` at write time, so a write released while the listing
+    /// still held the old path would write there — the very recreation the
+    /// ordering exists to prevent, arriving one link later.
+    ///
+    /// That await is **not under test**, and stated rather than left to be
+    /// discovered: removing it leaves the whole suite green. Reaching it needs
+    /// a write issued between the rename landing and its rescan applying, and
+    /// `run_until_parked` drains both. It is the same limit the write-ordering
+    /// tests already record — `TestScheduler` can model "queued and not yet
+    /// polled" but not a background thread already inside the call.
+    ///
+    /// Resolves to whether the entry moved. `false` covers a missing entry, a
+    /// refused name, and a failed rename, the last of which emits
+    /// `RenameFailed`.
+    pub(crate) fn rename(&mut self, id: EntryId, name: &str, cx: &mut Context<Self>) -> Task<bool> {
+        // A note named on the command line has no entry to move. Nothing in the
+        // UI can reach this — every row comes from the vault — but `current`
+        // can be `DETACHED`, and a future caller might read it as the target.
+        if id == EntryId::DETACHED {
+            return Task::ready(false);
+        }
+        if inkra_vault::check_name(name).is_some() {
+            return Task::ready(false);
+        }
+        let Some(vault) = self.vault.clone() else {
+            return Task::ready(false);
+        };
+        let (Some(from), Some(entry)) = (
+            vault.read(cx).absolute(id),
+            vault.read(cx).entry(id).cloned(),
+        ) else {
+            return Task::ready(false);
+        };
+        let file_name = match entry.kind {
+            Kind::Note => inkra_vault::note_file_name(name),
+            Kind::Dir => name.trim().to_owned(),
+        };
+        let Some(to) = from.parent().map(|parent| parent.join(&file_name)) else {
+            return Task::ready(false);
+        };
+
+        let fs = Arc::clone(&self.fs);
+        let previous = self.ops.entry(id).or_default().chain.take();
+        let (done, wait) = oneshot::channel();
+        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let moved = cx
+                .background_spawn(async move { fs.rename(&from, &to).await })
+                .await;
+
+            if moved.is_err() {
+                let _ = this.update(cx, |_, cx| cx.emit(RenameFailed(id)));
+                let _ = done.send(false);
+                return;
+            }
+            // Awaited here, inside the link: see the note above.
+            let Ok(applied) = this.update(cx, Self::rescan) else {
+                return;
+            };
+            let _ = applied.await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+            let _ = done.send(true);
+        }));
+
+        cx.foreground_executor()
+            .spawn(async move { wait.await == Ok(true) })
     }
 
     /// `⌘S`. Preempts whatever the periodic chain had queued, so the write

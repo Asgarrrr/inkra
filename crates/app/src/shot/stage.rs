@@ -99,6 +99,22 @@ impl Stage {
         self.settle();
     }
 
+    /// Gives the vault tree keyboard focus.
+    ///
+    /// Separate from `focus`, which lands wherever the window puts it — the
+    /// editor, once a note is open. The tree's own bindings resolve only while
+    /// it holds focus, and clicking a note row hands focus to the editor, so a
+    /// scene showing a tree gesture has to ask for this after the click.
+    pub(crate) fn focus_tree(&mut self, window: WindowHandle<AppShell>) {
+        window
+            .update(&mut self.cx, |view, window, cx| {
+                let handle = view.tree_focus_handle(cx);
+                window.focus(&handle, cx);
+            })
+            .unwrap_or_else(|error| panic!("focus the tree: {error}"));
+        self.settle();
+    }
+
     /// Dispatches keystrokes, space-separated, in gpui's notation: `"cmd-a"`,
     /// `"shift-down shift-down"`.
     pub(crate) fn keys(&mut self, window: WindowHandle<AppShell>, keystrokes: &str) {
