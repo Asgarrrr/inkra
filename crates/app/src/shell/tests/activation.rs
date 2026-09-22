@@ -208,20 +208,15 @@ fn typing_reaches_a_note_opened_after_launch(cx: &mut TestAppContext) {
     });
 }
 
-/// `cmd-s` is bound at the `AppShell` context, and with no note open the
-/// window's focus is on `AppShell`'s own handle. Without `track_focus` on
-/// the root div that handle is in no dispatch node, so dispatch falls back
-/// to the view boundary *above* the div carrying `.on_action`
-/// (`window.rs:6244-6251`, `key_dispatch.rs:611-614`, `view.rs:462-476`)
-/// and the action never arrives.
+/// Guards `AppShell`'s `track_focus` — see `shell.rs`'s `render` for why
+/// its absence would swallow `cmd-s` with no note open.
 ///
-/// Asserting reachability rather than an effect is deliberate. "No panic and
-/// no write" is true either way: `save_current` returns at its `None` guard
-/// whether or not it was ever called, so the two arms are indistinguishable
-/// by outcome. `is_action_available` (`window.rs:3187-3193`) asks the
-/// dispatch tree directly instead. It reads the *rendered* frame, which
-/// exists here because `open_window` draws once before returning
-/// (`app.rs:1363-1368`) for exactly this reason.
+/// Asserts reachability, not an effect, deliberately: `save_current`
+/// returns at its `None` guard whether or not it was called, so "no panic
+/// and no write" is true either way. `is_action_available`
+/// (`window.rs:3187-3193`) asks the dispatch tree directly, reading the
+/// *rendered* frame — which exists here because `open_window` draws once
+/// before returning (`app.rs:1363-1368`).
 #[gpui::test]
 fn the_save_action_reaches_the_shell_with_no_note_open(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
@@ -271,15 +266,10 @@ fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     });
 }
 
-/// The hole this change closes, and the only test that guards it.
-///
-/// A launch with no argument, or on a vault, used to build a real editable
-/// `Buffer` that `NoteStore` never tracked: unreachable by `⌘S`, by the
-/// autosave timer and by the quit flush alike, so everything typed into it
-/// was lost. Restoring that unconditional build is the regression that
-/// undoes the change, and every other test in this file builds `AppShell`
-/// by hand — passing its own `None`, which no production decision can flip.
-/// Only this test calls `root`, so only this test would notice.
+/// The hole this change closes — see CLAUDE.md on `AppShell.editor` — and
+/// the only test that guards it: every other test here builds `AppShell` by
+/// hand with its own `None`, so only this test, which calls `root`, would
+/// notice a regression to an unconditional editor.
 ///
 /// It asserts the absence of an editor rather than the presence of the
 /// empty state: `check.sh` renders nothing, so "the text was drawn" is not

@@ -28,15 +28,12 @@ actions!(
     sidebar,
     [
         /// Moves the selected note to the platform trash, after confirming.
-        ///
         /// Reads `Sidebar::selected`, so it has a target only while the tree
-        /// drives it. A command palette invoking this with nothing selected
-        /// would need the action to carry an `Option<EntryId>` instead.
+        /// drives it.
         Trash,
         SelectPrev,
         SelectNext,
         /// Opens a field over the selected row, seeded with its current name.
-        ///
         /// Reads `Sidebar::selected`, like `Trash`.
         Rename,
     ]
@@ -45,10 +42,9 @@ actions!(
 actions!(
     vault_tree,
     [
-        /// Opens a field for a new note beside the tree's selection.
-        ///
-        /// Bound at the `AppShell` context and handled there, so it fires with
-        /// the editor focused. `Sidebar::start_creating` is what it calls.
+        /// Opens a field for a new note beside the tree's selection. Bound at
+        /// the `AppShell` context so it fires with the editor focused;
+        /// handled there, calling `Sidebar::start_creating`.
         NewNote,
         /// The same, for a folder.
         NewFolder,
@@ -61,10 +57,9 @@ const INDENT_BASE: Pixels = px(8.);
 const INDENT_STEP: Pixels = px(12.);
 
 /// Where the note goes is `AppShell`'s to decide, so any widget that can open
-/// one — a tab bar, a backlinks panel — plugs in by emitting this, with no
-/// change here. A struct, not a one-variant enum: `EventEmitter<E>` is generic
-/// over the event type (`gpui/src/gpui.rs:296`), so a second signal is a
-/// second type.
+/// one plugs in by emitting this. A struct, not a one-variant enum:
+/// `EventEmitter<E>` is generic over the event type (`gpui/src/gpui.rs:296`),
+/// so a second signal needs a second type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NoteActivated(pub(crate) EntryId);
 
@@ -74,33 +69,24 @@ pub(crate) struct Sidebar {
     notes: Entity<NoteStore>,
     /// Expansion is UI state, never vault state.
     expanded: HashSet<EntryId>,
-    /// What a command acts on. UI state like `expanded`, and not the same thing
-    /// as `NoteStore::current`: that one names the note the editor is showing,
-    /// and a user can select a row without opening it.
+    /// What a command acts on. Not the same as `NoteStore::current`: that
+    /// names the note the editor shows, and a row can be selected unopened.
     selected: Option<EntryId>,
-    /// Focused so the tree's own bindings resolve. Without a tracked handle the
-    /// `Sidebar` key context is in no dispatch node, and every binding scoped
-    /// to it would be excluded from matching.
+    /// Tracked so the `Sidebar` key context has a dispatch node; see `render`.
     focus_handle: FocusHandle,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
     /// A name being typed, and where its row sits. `None` the rest of the time.
     editing: Option<EditState>,
-    /// Scrolls the field's row into view when one opens.
-    ///
-    /// Load-bearing, not polish. `uniform_list` renders only the visible range
+    /// Scrolls the field's row into view when one opens. Load-bearing:
+    /// `uniform_list` renders only the visible range
     /// (`elements/uniform_list.rs:479-489`), and gpui does not blur a focused
-    /// handle whose element stopped being drawn: dispatch falls back to the
-    /// root node (`window.rs:6244-6251`), so every keystroke — the characters,
-    /// Confirm, Cancel — would vanish with no panic and no feedback.
+    /// handle whose element stopped being drawn — dispatch falls back to the
+    /// root node (`window.rs:6244-6251`), silently swallowing every keystroke.
     scroll: UniformListScrollHandle,
-    /// Rebuilds `visible` when the vault's contents change. Never read; holding
-    /// it is the point, because dropping a `Subscription` cancels it.
-    ///
-    /// Without this the cache is rebuilt only by `new` and `toggle`, so a file
-    /// that appears in the vault while the window is open — the conflict file a
-    /// clobbered write preserves is the only one today — never reaches a row.
-    /// The vault's own `notify` had no subscriber at all.
+    /// Rebuilds `visible` when the vault's contents change. Never read;
+    /// holding it is the point, since dropping a `Subscription` cancels it —
+    /// without it, a file added to the vault while open never reaches a row.
     _vault_changed: Option<Subscription>,
 }
 
@@ -140,9 +126,8 @@ impl Focusable for Sidebar {
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            // The context every binding below names. It has to sit on a node
-            // that tracks a focus handle, or it is in no dispatch path and the
-            // bindings are excluded from matching rather than merely outranked.
+            // Must sit on a node tracking a focus handle, or it's in no
+            // dispatch path and the bindings below are excluded from matching.
             .key_context("Sidebar")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::trash))
@@ -151,9 +136,7 @@ impl Render for Sidebar {
             .on_action(cx.listener(Self::rename))
             // A column, so the rejection message below has a line of its own.
             // Without it the list's `size_full` claims the whole height and
-            // pushes the message off the bottom — which every test still
-            // passes, because they read the state rather than the pixels. Only
-            // the `sidebar-rejected` shot showed it.
+            // pushes the message off the bottom.
             .flex()
             .flex_col()
             .size_full()
@@ -163,11 +146,10 @@ impl Render for Sidebar {
                     self.row_count(),
                     cx.processor(Self::render_rows),
                 )
-                // `flex_1` for the height, so the list takes what the message
-                // leaves rather than all of it. `w_full` because
-                // `ListSizingBehavior::Auto` otherwise resolves to nothing and
-                // paints nothing (`elements/list.rs:192-193`) — the width half
-                // of the `size_full` this replaces.
+                // `flex_1` so the list takes what the message leaves, not all
+                // of it. `w_full` because `ListSizingBehavior::Auto` otherwise
+                // resolves to nothing and paints nothing
+                // (`elements/list.rs:192-193`).
                 .flex_1()
                 .w_full()
                 .track_scroll(&self.scroll),
@@ -178,8 +160,7 @@ impl Render for Sidebar {
                     .and_then(|edit| edit.rejected)
                     .map(|rejected| {
                         // Under the list rather than over the row: an overlay
-                        // needs a deferred absolute layer, and the message is
-                        // worth more than its placement is.
+                        // would need a deferred absolute layer.
                         div()
                             .w_full()
                             .text_size(theme::UI_TEXT_SIZE)

@@ -23,11 +23,9 @@ impl Sidebar {
     }
 
     /// The field's row: the same box as any other, so the pitch does not move.
-    ///
     /// `uniform_list` measures every row from item 0
     /// (`elements/uniform_list.rs:658-680`), so a field even a pixel taller
-    /// would misplace every row below it — and the click tests that pin the
-    /// pitch would start failing for a reason that has nothing to do with them.
+    /// would misplace every row below it.
     fn render_field(edit: &EditState) -> Div {
         let depth = f32::from(u8::try_from(edit.depth).unwrap_or(u8::MAX));
         div()
@@ -85,18 +83,10 @@ impl Sidebar {
                 // text reaches (`elements/uniform_list.rs:508-510`).
                 .w_full()
                 // No explicit height: the row *is* its line box, so it
-                // cannot clip its own text however the type is set.
-                //
-                // That identity is also the only way the type statement
-                // below is under test. A fixed height would hold the row
-                // pitch at 22 px whatever the text did inside it, and a
-                // deleted `text_size`/`line_height` pair would silently
-                // restore the clipping this row used to have — gpui's
-                // default line box is `phi()` on a 16 px default, 25.89 px.
-                // Tied to the pitch, that deletion moves every row, and
-                // `a_click_far_down_the_list_lands_on_the_row_it_names`
-                // fails. Pixels the eye would catch become pixels the suite
-                // catches.
+                // cannot clip its own text however the type is set (see
+                // CLAUDE.md on the chrome scale). That identity also ties the
+                // row pitch to this statement — delete it and
+                // `a_click_far_down_the_list_lands_on_the_row_it_names` fails.
                 .text_size(theme::UI_TEXT_SIZE)
                 .line_height(theme::UI_LINE_HEIGHT)
                 .pl(INDENT_BASE + INDENT_STEP * depth)
@@ -110,10 +100,9 @@ impl Sidebar {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |sidebar, _event, window, cx| {
-                        // Focus first, so the tree's own bindings resolve
-                        // from the very next keystroke. Straight to the
-                        // handle rather than through `Focusable`, which is
-                        // what `EditorView::on_mouse_down` already does.
+                        // Focus first, so the tree's bindings resolve from
+                        // the next keystroke — straight to the handle, as
+                        // `EditorView::on_mouse_down` does.
                         window.focus(&sidebar.focus_handle, cx);
                         sidebar.activate(&row, cx);
                     }),
@@ -123,17 +112,11 @@ impl Sidebar {
     }
 }
 
-/// The vertical centre of row `ix`, for a test that clicks one.
-///
-/// Derived from the line height because the row has no height of its own: see
-/// `render_rows`. A click computed here and landing elsewhere means the rendered
-/// pitch has drifted from the stated one.
-///
-/// Lives beside the row height rather than in a test module, so `shell.rs` uses
-/// the same definition: two suites clicking the sidebar must not each hard-code
-/// the pitch and drift from it. The shot runner is the third caller, and the
-/// reason the gate is not `#[cfg(test)]` alone — it clicks rows from a normal
-/// build.
+/// The vertical centre of row `ix`, for a test that clicks one. Derived from
+/// the line height, since the row has no height of its own (see
+/// `render_rows`). Shared with `shell.rs` and the shot runner so neither
+/// hard-codes the pitch; not `#[cfg(test)]`-gated because the shot runner
+/// needs it in a normal build.
 #[cfg(any(test, feature = "shot"))]
 pub(crate) fn row_center(ix: f32) -> Pixels {
     theme::UI_LINE_HEIGHT * (ix + 0.5)

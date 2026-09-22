@@ -34,8 +34,8 @@ impl Sidebar {
         }
         // A field open across this walk has to end up on a row the list still
         // draws: an unrendered row is in no dispatch node, so gpui falls back
-        // to the root (`window.rs:6244-6251`) and every keystroke, `escape`
-        // included, vanishes with no panic and no feedback.
+        // to the root (`window.rs:6244-6251`), silently swallowing every
+        // keystroke, `escape` included.
         //
         // A rename follows its row by identity, so a walk that reordered the
         // tree keeps the field over the entry it names, and a target deleted
@@ -67,8 +67,8 @@ impl Sidebar {
         self.rebuild(cx);
     }
 
-    /// Expansion is the sidebar's own state; where a note opens is not. The
-    /// sidebar does not know an editor exists.
+    /// Expansion is the sidebar's own state; where a note opens is
+    /// `AppShell`'s (see `NoteActivated`).
     pub(super) fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
         self.selected = Some(row.id);
         if row.kind == Kind::Dir {
