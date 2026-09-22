@@ -46,6 +46,25 @@ pub(crate) struct ConflictPreserved {
 
 impl EventEmitter<ConflictPreserved> for NoteStore {}
 
+/// The note is gone from the vault, and whatever was showing it must stop.
+///
+/// Fired by `trash` alone. Buffer eviction, when it lands, is a different
+/// signal on the same axis and must not reuse this one: an evicted note is not
+/// necessarily the note on screen, so a subscriber that blanks the editor would
+/// be wrong for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoteClosed(pub(crate) EntryId);
+
+impl EventEmitter<NoteClosed> for NoteStore {}
+
+/// A delete failed, and the note is still there. The counterpart to
+/// `SaveFailed`, and emitted for the same reason: one seam for the deferred
+/// status line rather than two call sites that grow apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TrashFailed(pub(crate) EntryId);
+
+impl EventEmitter<TrashFailed> for NoteStore {}
+
 /// Serialises one note's writes, and drops one that a newer write overtook.
 ///
 /// One note normally has exactly one writer: `schedule_save` chains every write
@@ -136,24 +155,53 @@ struct OpenNote {
     path: PathBuf,
     /// `Buffer::version` as of the last successful write.
     saved_version: u64,
-    /// The pending write chain. Held, and never replaced by dropping it: a
-    /// dropped `Task` never runs, so a queued write would vanish
+    /// Shared with every write of this note, and with the quit flush. See
+    /// `Writer`.
+    writer: Arc<Writer>,
+}
+
+/// Orders every filesystem operation on one note, one after another.
+///
+/// Separate from `OpenNote`, and keyed in `NoteStore` instead, because the note
+/// a user renames or deletes is usually one nobody has opened — and because a
+/// rename issued while the note is still loading has to be ordered against that
+/// load rather than race it. An `Ops` therefore outlives the note being open,
+/// and exists for notes that never are.
+///
+/// The chain is the ordering mechanism, and the only one that works for a move.
+/// `Writer`'s sequence orders two *writes* by the moment each was decided,
+/// which is right when they are competing versions of one text and a category
+/// error for a rename: a write pending when a rename is issued is decided
+/// *later* and so carries the higher sequence, which either lets it recreate
+/// the note under its old name or drops the rename as stale. Neither is
+/// reachable here, because `Self::write` does not return until its write has
+/// landed, so anything appended behind it runs strictly afterwards.
+#[derive(Default)]
+struct Ops {
+    /// The pending chain. Held, and never replaced by dropping it: a dropped
+    /// `Task` never runs, so a queued operation would vanish
     /// (`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`). Each
-    /// new chain awaits this one instead, which is also what makes a note have
-    /// exactly one writer.
-    save: Option<Task<()>>,
-    /// A chain is queued and has not reached its timer yet. Edits check this
+    /// new link awaits this one instead.
+    chain: Option<Task<()>>,
+    /// A write is queued and has not reached its timer yet. Edits check this
     /// and return, so a run of typing keeps the first deadline rather than
     /// pushing it forward for as long as the user keeps going.
     scheduled: bool,
-    /// Resolves the pending chain's timer early. `⌘S`, a note switch and the
+    /// Resolves the pending write's timer early. `⌘S`, a note switch and the
     /// quit flush use it; an edit never does. Without it an explicit `⌘S`
     /// during a pending window would be absorbed by `scheduled` and write
     /// nothing, up to `AUTOSAVE_DELAY` late.
     cancel: Option<oneshot::Sender<()>>,
-    /// Shared with every write of this note, and with the quit flush. See
-    /// `Writer`.
-    writer: Arc<Writer>,
+    /// A trash is queued and has not run yet.
+    ///
+    /// Read by `flush_all`, which skips the note. The flush is the one writer
+    /// that cannot join this chain — `App::shutdown` polls it while the
+    /// foreground session is blocked — so it mints the highest sequence a note
+    /// will ever see, and a trash queued behind it would be dropped as stale.
+    /// A confirmed delete would then silently not happen. Set synchronously
+    /// when the command is issued, so no lock is involved and the rule that no
+    /// foreground code holds the `Writer` guard still stands.
+    trashing: bool,
 }
 
 pub(crate) struct NoteStore {
@@ -161,6 +209,11 @@ pub(crate) struct NoteStore {
     /// `None` when launched on a single file, or on nothing.
     vault: Option<Entity<Vault>>,
     open: HashMap<EntryId, OpenNote>,
+    /// One per note that has ever had an operation queued on it, kept
+    /// afterwards. Not pruned when a note closes: the chain is what orders a
+    /// rename against a load, and a closed note can still be renamed. The map
+    /// is bounded by the vault's size and holds no buffer.
+    ops: HashMap<EntryId, Ops>,
     current: Option<EntryId>,
     /// One per open note, for as long as it is open. A buffer with no observer
     /// never schedules a write, so a note edited and then switched away from
@@ -172,6 +225,10 @@ pub(crate) struct NoteStore {
     /// version (`text/src/buffer.rs:114-119`), so a flush after an undo would
     /// carry a lower number than the write it has to beat.
     next_write: u64,
+    /// The pending vault walk. One for the whole store, not one per note: a
+    /// walk rebuilds the entire listing, so two of them collide whatever caused
+    /// them. See `rescan`.
+    rescan: Option<Task<()>>,
     /// Unsubscribes the quit flush when the store goes. Never read; holding it
     /// is the whole point, because dropping a `Subscription` cancels it.
     _quit: Subscription,
@@ -187,9 +244,11 @@ impl NoteStore {
             fs,
             vault,
             open: HashMap::new(),
+            ops: HashMap::new(),
             current: None,
             observers: HashMap::new(),
             next_write: 0,
+            rescan: None,
             _quit: cx.on_app_quit(Self::flush_all),
         }
     }
@@ -324,9 +383,6 @@ impl NoteStore {
                 path,
                 // `Buffer::version` starts at zero: a fresh note is clean.
                 saved_version: 0,
-                save: None,
-                scheduled: false,
-                cancel: None,
                 writer: Arc::new(Writer {
                     state: futures::lock::Mutex::new(WriterState {
                         // Zero is below every minted sequence, which starts at
@@ -348,27 +404,28 @@ impl NoteStore {
     /// periodic — a run of typing keeps the deadline it first set instead of
     /// pushing it forward until the user stops.
     fn schedule_save(&mut self, id: EntryId, delay: Duration, cx: &mut Context<Self>) {
-        let Some(note) = self.open.get_mut(&id) else {
+        if !self.open.contains_key(&id) {
             return;
-        };
+        }
+        let ops = self.ops.entry(id).or_default();
         if delay.is_zero() {
             // Errs when the chain is already past its timer, which is exactly
             // the case where there is nothing left to preempt.
-            if let Some(cancel) = note.cancel.take() {
+            if let Some(cancel) = ops.cancel.take() {
                 let _ = cancel.send(());
             }
-        } else if note.scheduled {
+        } else if ops.scheduled {
             return;
         }
 
         let (cancel, cancelled) = oneshot::channel();
-        note.cancel = Some(cancel);
-        note.scheduled = !delay.is_zero();
-        // Taken, not dropped: the new chain awaits it below. Replacing the slot
-        // outright would cancel a write that has already been queued.
-        let previous = note.save.take();
+        ops.cancel = Some(cancel);
+        ops.scheduled = !delay.is_zero();
+        // Taken, not dropped: the new link awaits it below. Replacing the slot
+        // outright would cancel an operation that has already been queued.
+        let previous = ops.chain.take();
 
-        note.save = Some(cx.spawn(async move |this, cx| {
+        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
             let timer = cx.background_executor().timer(delay).fuse();
             if let Some(previous) = previous {
                 previous.await;
@@ -387,8 +444,8 @@ impl NoteStore {
             // one is in flight must be able to queue the next write rather than
             // be swallowed and lost until the following keystroke.
             let reopened = this.update(cx, |this, _| {
-                if let Some(note) = this.open.get_mut(&id) {
-                    note.scheduled = false;
+                if let Some(ops) = this.ops.get_mut(&id) {
+                    ops.scheduled = false;
                 }
             });
             if reopened.is_err() {
@@ -396,6 +453,87 @@ impl NoteStore {
             }
             Self::write(id, this, cx).await;
         }));
+    }
+
+    /// Moves one note to the platform trash, and closes it if it was open.
+    ///
+    /// Ordered on the note's chain rather than issued straight away, which is
+    /// the whole reason the chain exists. A pending write that landed *after*
+    /// the delete would recreate the file the user just removed; queued behind
+    /// it instead, the write goes to disk first and the trash then takes the
+    /// latest text with it, which is also the better thing to recover.
+    ///
+    /// Resolves to whether the note is gone. `false` covers a note with no
+    /// vault entry, a note already being trashed, and a failed delete — the
+    /// last of which also emits `TrashFailed`.
+    pub(crate) fn trash(&mut self, id: EntryId, cx: &mut Context<Self>) -> Task<bool> {
+        // A note named on the command line has no entry to remove and no row to
+        // remove it from. Nothing in the UI can reach this, because only the
+        // sidebar issues the command and its rows all come from the vault —
+        // asserted rather than assumed, because `current` *can* be `DETACHED`
+        // and a future caller might read it as the target.
+        if id == EntryId::DETACHED {
+            return Task::ready(false);
+        }
+        let Some(vault) = self.vault.clone() else {
+            return Task::ready(false);
+        };
+        let Some(path) = vault.read(cx).absolute(id) else {
+            return Task::ready(false);
+        };
+
+        let ops = self.ops.entry(id).or_default();
+        if ops.trashing {
+            return Task::ready(false);
+        }
+        // Resolves a pending write's timer so the chain drains now. Without it
+        // the delete waits out `AUTOSAVE_DELAY` behind a write nobody is
+        // waiting for, and the row sits there looking broken. Sent before
+        // `trashing` is set, because `schedule_save` refuses to touch a note
+        // that is on its way out.
+        if let Some(cancel) = ops.cancel.take() {
+            let _ = cancel.send(());
+        }
+        ops.trashing = true;
+        let previous = ops.chain.take();
+
+        let fs = Arc::clone(&self.fs);
+        let (done, wait) = oneshot::channel();
+        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let removed = cx
+                .background_spawn(async move { fs.trash(&path).await })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if removed.is_err() {
+                    if let Some(ops) = this.ops.get_mut(&id) {
+                        ops.trashing = false;
+                    }
+                    cx.emit(TrashFailed(id));
+                    let _ = done.send(false);
+                    return;
+                }
+                // Dropped only once the file is actually gone. An optimistic
+                // close would leave the editor blank and the buffer unreachable
+                // when the delete failed — worse than `SaveFailed`, where the
+                // note at least stays visibly dirty.
+                this.open.remove(&id);
+                this.observers.remove(&id);
+                if this.current == Some(id) {
+                    this.current = None;
+                }
+                cx.emit(NoteClosed(id));
+                drop(this.rescan(cx));
+                cx.notify();
+                let _ = done.send(true);
+            });
+        }));
+
+        cx.foreground_executor()
+            .spawn(async move { wait.await == Ok(true) })
     }
 
     /// `⌘S`. Preempts whatever the periodic chain had queued, so the write
@@ -439,6 +577,14 @@ impl NoteStore {
                 if buffer.version() == note.saved_version {
                     return None;
                 }
+                // A note the user has sent to the trash is not written on the
+                // way out. This flush cannot join the note's chain, so it mints
+                // the highest sequence that note will ever see — which would
+                // drop the queued trash as stale and leave a confirmed delete
+                // silently undone. Writing it would also recreate the file.
+                if self.ops.get(id).is_some_and(|ops| ops.trashing) {
+                    return None;
+                }
                 // Resolved exactly as `write` does, and for the same reason: a
                 // rename moves the entry and never refreshes `OpenNote.path`.
                 let path = if *id == EntryId::DETACHED {
@@ -473,24 +619,41 @@ impl NoteStore {
     /// Lists the vault again, so a file this process did not create through
     /// the editor reaches the tree.
     ///
-    /// The only caller is the conflict path, and deliberately so: a full
-    /// directory walk every `AUTOSAVE_DELAY` would not be free, and a conflict
-    /// is rare. It is also the first production caller of the scan at all —
-    /// nothing rescans after startup, so without this the preserved file would
-    /// sit on disk unmentioned until the next launch, and the only signal this
-    /// feature has would not fire.
+    /// Not free, and not run on a timer: the conflict path and the three
+    /// mutation commands are the only callers, and both act on a user gesture.
+    /// Nothing else rescans after startup.
+    ///
+    /// **Serialised**, and that is load-bearing rather than tidy. `Vault::apply`
+    /// replaces `entries` and `by_identity` outright (`vault.rs:200-201`) with
+    /// no staleness check, so two walks in flight at once mean whichever
+    /// finishes last wins — and a walk taken *before* another mutation landed
+    /// can re-admit a note that was trashed, or mint a fresh `EntryId` for a
+    /// file whose buffer is still tracked under the old one. Clicking that row
+    /// would then miss the `open` map and reload from disk, discarding unsaved
+    /// text: the very defect this module's header says was fixed. Chaining
+    /// makes the last walk applied the last walk taken.
+    ///
+    /// The chain is global rather than per-note because the walk is: it
+    /// rebuilds the whole vault, so two of them collide whichever notes caused
+    /// them.
     ///
     /// Two halves because `Vault::apply` needs `&mut Vault` and the walk
     /// awaits: an entity hands out `&mut` only inside a synchronous closure.
-    /// Takes `&self` rather than reading the entity back: the only caller runs
-    /// inside an `update`, which already holds the lease, and a second read of
-    /// one entity panics (`gpui/src/app/entity_map.rs:156`).
-    fn rescan(&self, cx: &mut Context<Self>) {
+    fn rescan(&mut self, cx: &mut Context<Self>) -> Task<()> {
         let Some(vault) = self.vault.clone() else {
-            return;
+            return Task::ready(());
         };
         let fs = Arc::clone(&self.fs);
-        cx.spawn(async move |_, cx| {
+        let previous = self.rescan.take();
+        // The walk is held by the store and the caller is handed a separate
+        // wait, rather than the `Task` itself: the next rescan has to await
+        // this one, and a `Task` cannot be in two places. A caller that drops
+        // its wait therefore does not cancel the walk.
+        let (done, wait) = oneshot::channel();
+        self.rescan = Some(cx.spawn(async move |_, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
             let root = vault.read_with(cx, |vault, _| vault.root().to_path_buf());
             // `cx.spawn` is the *foreground* executor
             // (`gpui/src/app.rs:2036-2045`), and `RealFs::read_dir` blocks
@@ -508,8 +671,14 @@ impl NoteStore {
                 vault.apply(children);
                 cx.notify();
             });
+            // After `apply`, so a caller that awaits this and then reads the
+            // vault sees its own mutation rather than the listing before it.
+            let _ = done.send(());
+        }));
+
+        cx.foreground_executor().spawn(async move {
+            let _ = wait.await;
         })
-        .detach();
     }
 
     /// Writes one note, once. A no-op when nothing changed.
@@ -543,7 +712,18 @@ impl NoteStore {
             let path = if id == EntryId::DETACHED {
                 note.path.clone()
             } else {
-                this.vault.as_ref()?.read(cx).absolute(id)?
+                // The entry being gone means something outside this process
+                // moved or removed the file. Reported rather than swallowed,
+                // which is what this used to do — every autosave from then on
+                // did nothing at all, forever, with no signal. Rescans now
+                // happen on every mutation, so an entry disappearing
+                // mid-session is reachable far sooner than it was.
+                let resolved = this.vault.as_ref().and_then(|v| v.read(cx).absolute(id));
+                let Some(path) = resolved else {
+                    cx.emit(SaveFailed(id));
+                    return None;
+                };
+                path
             };
             let writer = Arc::clone(&note.writer);
             let fs = Arc::clone(&this.fs);
@@ -584,7 +764,9 @@ impl NoteStore {
                     id,
                     path: preserved,
                 });
-                this.rescan(cx);
+                // Dropped rather than awaited: the store holds the walk, and
+                // nothing here needs to see its result.
+                drop(this.rescan(cx));
             }
             cx.notify();
         });
@@ -594,7 +776,9 @@ impl NoteStore {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::cell::RefCell;
     use std::path::{Path, PathBuf};
+    use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -606,7 +790,9 @@ mod tests {
 
     use inkra_vault::{Mtime, Stamp};
 
-    use super::{AUTOSAVE_DELAY, ConflictPreserved, Fs, NoteStore, SaveFailed};
+    use super::{
+        AUTOSAVE_DELAY, ConflictPreserved, Fs, NoteClosed, NoteStore, SaveFailed, TrashFailed,
+    };
     use crate::editor::EditorView;
     use crate::keymap::key_bindings;
     use crate::shell::AppShell;
@@ -685,6 +871,263 @@ mod tests {
                 "the undo history survived too"
             );
         });
+    }
+
+    /// The hazard the operation chain exists for. A write pending when the
+    /// delete is issued would otherwise land *after* it and recreate the note
+    /// the user just removed — and it is the ordinary case, not an exotic one:
+    /// deleting a note you have just been typing in is how deleting happens.
+    ///
+    /// `block_save` is what makes it reproducible. It holds the write open past
+    /// the turn that issued it, which is the only way the trash can be decided
+    /// while a write is genuinely in flight.
+    #[gpui::test]
+    async fn a_trash_is_not_undone_by_a_write_already_in_flight(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+            // The autosave trigger is the observer on the buffer, and only a
+            // notify fires it. `EditorView::edit_buffer` leases with `as_mut`,
+            // which notifies on drop; reaching the buffer directly, as here,
+            // has to say so. Without this there is no write in flight and the
+            // test asserts nothing.
+            cx.notify();
+        });
+
+        // The write starts and parks inside `fs.save`.
+        let gate = fs.block_save("/vault/a.md");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        let trashed = store.update(cx, |store, cx| store.trash(a, cx));
+        // Everything runnable runs, with the write still parked. The chain is
+        // what stops the delete happening here — and this line is what makes
+        // that observable: without it both become runnable at once when the
+        // gate releases, and which one wins is the scheduler's choice rather
+        // than the code's.
+        cx.run_until_parked();
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("alpha"),
+            "the delete must wait for the write it is queued behind"
+        );
+
+        gate.release();
+        cx.run_until_parked();
+
+        assert!(trashed.await, "the delete must complete");
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")),
+            None,
+            "the in-flight write must not put the note back"
+        );
+        assert_eq!(
+            fs.trashed(Path::new("/vault/a.md")).as_deref(),
+            Some("Xalpha"),
+            "the trash takes the text the write had just landed"
+        );
+    }
+
+    /// The quit flush is the one writer that cannot join the chain, so it mints
+    /// the highest sequence a note will ever see. Without the `trashing` flag it
+    /// writes a note whose delete is still queued — the delete is then dropped
+    /// as stale and a confirmed deletion silently does not happen.
+    ///
+    /// `flush_all` is called directly rather than through `cx.quit()`: the gate
+    /// holding the chain open has to be released from outside, and quitting does
+    /// not return until the flush completes.
+    #[gpui::test]
+    async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+            cx.notify();
+        });
+
+        // Held open so the trash is still queued when the flush runs.
+        let gate = fs.block_save("/vault/a.md");
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+        let trashed = store.update(cx, |store, cx| store.trash(a, cx));
+
+        // Issued while the chain's write still holds the `Writer` lock, so the
+        // flush's own write parks behind it rather than running now.
+        let flush = store.update(cx, NoteStore::flush_all);
+        // The second gate is what forces the losing order. Releasing the first
+        // lets the chain's write finish and the trash run; the flush's write
+        // then takes the lock and parks here, so when it finally lands the file
+        // is already gone — and `MemFs::save` recreates a missing path.
+        let after = fs.block_save("/vault/a.md");
+        gate.release();
+        cx.run_until_parked();
+        after.release();
+        flush.await;
+        cx.run_until_parked();
+
+        assert!(trashed.await, "the delete must still happen");
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")),
+            None,
+            "the flush must not write a note whose delete is already queued: \
+             its write is not on the chain, so it lands after the trash and \
+             recreates the file"
+        );
+    }
+
+    /// The note stays open and typable until the delete lands, so a keystroke
+    /// in that window schedules a write that queues *behind* the trash — and a
+    /// write running after a delete recreates the file.
+    ///
+    /// What stops it is `trash` dropping the note from `open` before that write
+    /// reaches its deadline: `Self::write` starts at `open.get(&id)?` and
+    /// returns. Stated because it is not obvious, and because the guard that
+    /// looks like it does this job — refusing to schedule at all once a trash
+    /// is queued — was tried here and removed: it changed nothing this test
+    /// could see, and a guard with no observable effect is a guess.
+    #[gpui::test]
+    async fn typing_after_a_delete_does_not_bring_the_note_back(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+
+        // Gated so the delete is still in flight while the keystroke lands.
+        let gate = fs.block_save("/vault/a.md");
+        let trashed = store.update(cx, |store, cx| store.trash(a, cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+            cx.notify();
+        });
+        gate.release();
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert!(trashed.await);
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")),
+            None,
+            "an edit landing during the delete must not schedule a write"
+        );
+    }
+
+    #[gpui::test]
+    async fn trashing_the_current_note_closes_it_and_says_so(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+
+        let closed = Rc::new(RefCell::new(Vec::new()));
+        let _guard = cx.update(|cx| {
+            let closed = Rc::clone(&closed);
+            cx.subscribe(&store, move |_, event: &NoteClosed, _| {
+                closed.borrow_mut().push(*event);
+            })
+        });
+
+        assert!(store.update(cx, |store, cx| store.trash(a, cx)).await);
+        cx.run_until_parked();
+
+        store.update(cx, |store, _| {
+            assert!(store.buffer_for(a).is_none(), "the buffer is released");
+            assert_eq!(store.current(), None, "nothing is current any more");
+        });
+        assert_eq!(*closed.borrow(), [NoteClosed(a)]);
+    }
+
+    /// A failed delete leaves the note exactly as it was, and says so. The
+    /// alternative — closing optimistically and then failing — would blank the
+    /// editor and strand the buffer, which is worse than a failed write, where
+    /// the note at least stays visibly dirty.
+    #[gpui::test]
+    async fn a_failed_trash_keeps_the_note_and_reports_it(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+
+        let failed = Rc::new(RefCell::new(Vec::new()));
+        let _guard = cx.update(|cx| {
+            let failed = Rc::clone(&failed);
+            cx.subscribe(&store, move |_, event: &TrashFailed, _| {
+                failed.borrow_mut().push(*event);
+            })
+        });
+
+        // Removed behind the store's back, so the delete finds nothing.
+        fs.remove(Path::new("/vault/a.md"));
+        assert!(!store.update(cx, |store, cx| store.trash(a, cx)).await);
+        cx.run_until_parked();
+
+        assert_eq!(*failed.borrow(), [TrashFailed(a)]);
+        store.update(cx, |store, _| {
+            assert!(store.buffer_for(a).is_some(), "the buffer is kept");
+            assert_eq!(store.current(), Some(a));
+        });
+    }
+
+    /// `DETACHED` names the file given on the command line. It has no vault
+    /// entry, so there is nothing to remove and no row to remove it from — and
+    /// `current` *can* hold it, which is how a future caller might reach here.
+    #[gpui::test]
+    async fn trashing_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md"))).expect("load");
+        let store = cx.update(|cx| {
+            cx.new(|cx| {
+                let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx);
+                let buffer = cx.new(|_| Buffer::new(loaded.text.clone()));
+                store.adopt(buffer, PathBuf::from("/vault/a.md"), loaded.stamp, cx);
+                store
+            })
+        });
+
+        assert!(
+            !store
+                .update(cx, |store, cx| store.trash(EntryId::DETACHED, cx))
+                .await
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("alpha")
+        );
     }
 
     /// `with_editor` and `dispatching` (`editor/tests.rs`) root the window at

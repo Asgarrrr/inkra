@@ -5,19 +5,23 @@
 //! `AppShell`, not `EditorView`: the editor's context only fires while the
 //! editor has focus. `⌘S` is the precedent.
 //!
-//! An editing binding names `EditorView` rather than leaving the context open,
-//! and that is load-bearing now that a second view edits text. A binding with
-//! no predicate scores `contexts.len()` (`gpui/src/keymap.rs:246-252`), and a
-//! predicate naming the *focused* frame scores the same
-//! (`keymap/context.rs:260-268`), so the two **tie** and the winner is whichever
-//! was pushed later into the `Vec` below (`keymap.rs:188-190`). Naming the
-//! context removes the tie instead of betting on it: with `EditorView` absent
-//! from the focused stack, the predicate fails and the binding is excluded from
-//! matching rather than merely outranked.
+//! Every editing binding names `EditorView`. That changes no behaviour today,
+//! and the honest reason is narrower than it looks: a binding with no predicate
+//! scores `contexts.len()` (`gpui/src/keymap.rs:246-252`), and a predicate
+//! naming the *focused* frame scores the same (`keymap/context.rs:260-268`), so
+//! the two **tie** — and the tie breaks on position in the `Vec` below, later
+//! winning (`keymap.rs:188-190`). The tree's `down` already beat the editor's
+//! only because it is pushed further down this list.
 //!
-//! The consequence is that a view wanting a key must claim it at its own
-//! context. `NameField` therefore repeats the movement and deletion set below
-//! rather than inheriting it — see its own bindings.
+//! Naming the context removes that dependency. With `EditorView` absent from
+//! the focused stack the predicate fails and the binding is excluded from
+//! matching, so reordering this list — an edit with no other consequence —
+//! cannot silently move a key from one view to another. It would not fail
+//! loudly either: the losing action has no handler in the tree's dispatch path,
+//! so the key would simply stop doing anything.
+//!
+//! The cost is that a view wanting a key now has to claim it at its own
+//! context, inheriting nothing.
 
 use gpui::KeyBinding;
 
@@ -26,6 +30,7 @@ use crate::editor::actions::{
     Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, Home, Left, Newline, Paste, Redo,
     Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
 };
+use crate::sidebar::{SelectNext, SelectPrev, Trash};
 use crate::vault::Save;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
@@ -54,6 +59,12 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-v", Paste, editor),
         KeyBinding::new("cmd-z", Undo, editor),
         KeyBinding::new("cmd-shift-z", Redo, editor),
+        // The vault tree. `cmd-backspace` is the Finder gesture for the same
+        // act, and the arrows move the selection rather than a caret because
+        // the editor's own bindings are excluded here — see the note above.
+        KeyBinding::new("cmd-backspace", Trash, Some("Sidebar")),
+        KeyBinding::new("up", SelectPrev, Some("Sidebar")),
+        KeyBinding::new("down", SelectNext, Some("Sidebar")),
         // The application's, not a view's: it must fire wherever focus is.
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
