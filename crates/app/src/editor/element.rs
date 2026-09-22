@@ -28,29 +28,32 @@ struct LineLayout {
     range: Range<ByteOffset>,
 }
 
-/// Every pixel↔offset conversion in the editor, in one place.
+/// Every pixel↔offset conversion, in one place — shared by the editor and
+/// `NameField`, which shapes its one-line buffer through the same
+/// [`shape_document`] rather than a second shaper of its own.
 ///
-/// Six call sites need it — the cursor quad, the selection quads,
-/// `bounds_for_range`, `character_index_for_point`, mouse hit-testing and
-/// vertical movement. Resolving a line four different ways is how they drift.
+/// Within the editor alone, six call sites need it — the cursor quad, the
+/// selection quads, `bounds_for_range`, `character_index_for_point`, mouse
+/// hit-testing and vertical movement. Resolving a line four different ways is
+/// how they drift.
 ///
 /// All coordinates are relative to the element's origin. The caller adds it.
-pub(super) struct DocumentLayout {
+pub(crate) struct DocumentLayout {
     /// Never empty: an empty buffer is one empty line.
     lines: Vec<LineLayout>,
     line_height: Pixels,
 }
 
 impl DocumentLayout {
-    pub(super) fn line_count(&self) -> usize {
+    pub(crate) fn line_count(&self) -> usize {
         self.lines.len()
     }
 
-    pub(super) fn line_height(&self) -> Pixels {
+    pub(crate) fn line_height(&self) -> Pixels {
         self.line_height
     }
 
-    pub(super) fn top_for_line(&self, line: usize) -> Pixels {
+    pub(crate) fn top_for_line(&self, line: usize) -> Pixels {
         #[allow(clippy::cast_precision_loss)]
         let line = line as f32;
         self.line_height * line
@@ -80,13 +83,13 @@ impl DocumentLayout {
         line.min(self.lines.len() - 1)
     }
 
-    pub(super) fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
+    pub(crate) fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
         let line = &self.lines[self.line_for_offset(offset)];
         let index = offset.0.clamp(line.range.start.0, line.range.end.0) - line.range.start.0;
         line.shaped.x_for_index(index)
     }
 
-    pub(super) fn position_for_offset(&self, offset: ByteOffset) -> Point<Pixels> {
+    pub(crate) fn position_for_offset(&self, offset: ByteOffset) -> Point<Pixels> {
         point(
             self.x_for_offset(offset),
             self.top_for_line(self.line_for_offset(offset)),
@@ -96,11 +99,11 @@ impl DocumentLayout {
     /// Unclipped in the byte sense: the result addresses the text as of the last
     /// paint. Every caller hands it to `EditorState`, which clips it against the
     /// live buffer.
-    pub(super) fn offset_for_position(&self, position: Point<Pixels>) -> ByteOffset {
+    pub(crate) fn offset_for_position(&self, position: Point<Pixels>) -> ByteOffset {
         self.offset_for_x_on_line(self.line_for_y(position.y), position.x)
     }
 
-    pub(super) fn offset_for_x_on_line(&self, line: usize, x: Pixels) -> ByteOffset {
+    pub(crate) fn offset_for_x_on_line(&self, line: usize, x: Pixels) -> ByteOffset {
         let line = &self.lines[line.min(self.lines.len() - 1)];
         ByteOffset(line.range.start.0 + line.shaped.closest_index_for_x(x))
     }
@@ -151,6 +154,29 @@ impl DocumentLayout {
             })
             .collect()
     }
+
+    /// One `ShapedLine::paint` call per line, at `origin` translated down by
+    /// [`Self::top_for_line`]. Shared by `TextElement` and `FieldElement` so
+    /// the two painters cannot drift on how a line is placed.
+    ///
+    /// A failed line is reported and skipped rather than aborting the rest of
+    /// the document — one glyph run the platform shaper rejects should not
+    /// blank the page.
+    pub(crate) fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        for (index, line) in self.lines.iter().enumerate() {
+            let line_origin = origin + point(px(0.), self.top_for_line(index));
+            if let Err(err) = line.shaped.paint(
+                line_origin,
+                self.line_height,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            ) {
+                eprintln!("failed to paint line {index}: {err}");
+            }
+        }
+    }
 }
 
 pub(super) struct TextElement {
@@ -195,7 +221,7 @@ fn line_runs(
     .collect()
 }
 
-fn shape_document(
+pub(crate) fn shape_document(
     buffer: &Buffer,
     marked: Option<&Range<ByteOffset>>,
     window: &mut Window,
@@ -335,19 +361,7 @@ impl Element for TextElement {
         let Some(layout) = prepaint.layout.take() else {
             return;
         };
-        for (index, line) in layout.lines.iter().enumerate() {
-            let origin = bounds.origin + point(px(0.), layout.top_for_line(index));
-            if let Err(err) = line.shaped.paint(
-                origin,
-                layout.line_height,
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            ) {
-                eprintln!("failed to paint line {index}: {err}");
-            }
-        }
+        layout.paint(bounds.origin, window, cx);
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()

@@ -2,10 +2,12 @@
 //!
 //! Built on `inkra-text` and `inkra-editor` exactly as the editor is — the
 //! buffer counts graphemes and UTF-16 units, `EditorState` moves the caret and
-//! applies the edits. What is new here is the gpui half, and it is genuinely
-//! new rather than shareable: `TextElement` is built around `DocumentLayout`,
-//! scroll, and selection quads spanning several lines, none of which a field
-//! one line tall has.
+//! applies the edits. `FieldElement` shapes and hit-tests through the same
+//! `DocumentLayout` the editor uses, via `shape_document` — a field's text
+//! never holds a newline, so it always gets a `DocumentLayout` of one line
+//! back. What is genuinely new here is the rest of the gpui half: `TextElement`
+//! carries scroll and selection quads spanning several lines, neither of which
+//! a field one line tall has.
 //!
 //! It speaks the platform input protocol through `EntityInputHandler` rather
 //! than reading key events, because that protocol *is* how macOS delivers a
@@ -18,14 +20,14 @@ use std::time::Instant;
 
 use gpui::{
     App, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, HighlightStyle,
-    InteractiveElement, IntoElement, LayoutId, Pixels, Render, ShapedLine, SharedString, Style,
-    Styled, TextAlign, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions, fill,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InteractiveElement,
+    IntoElement, LayoutId, Pixels, Render, Style, Styled, UTF16Selection, Window, actions, fill,
     point, prelude::*, px, relative, size,
 };
 use inkra_editor::{EditorState, LogicalMovement, Selection};
 use inkra_text::{Buffer, ByteOffset};
 
+use crate::editor::element::{DocumentLayout, shape_document};
 use crate::theme;
 
 actions!(field, [Confirm, Cancel]);
@@ -48,8 +50,9 @@ pub(crate) struct NameField {
     focus_handle: FocusHandle,
     /// Written in `paint`, so between an edit and the next paint it describes
     /// the previous text. Every index into it clamps, for the reason
-    /// `DocumentLayout` gives.
-    last_layout: Option<LineLayout>,
+    /// `DocumentLayout`'s own doc comment gives — the field shapes through the
+    /// same `shape_document` and gets a one-line `DocumentLayout` back.
+    last_layout: Option<DocumentLayout>,
     last_bounds: Option<Bounds<Pixels>>,
 }
 
@@ -311,8 +314,8 @@ impl EntityInputHandler for NameField {
         let layout = self.last_layout.as_ref()?;
         let range = self.buffer.read(cx).from_utf16_range(&range_utf16);
         Some(Bounds::from_corners(
-            element_bounds.origin + point(layout.x_for(range.start), px(0.)),
-            element_bounds.origin + point(layout.x_for(range.end), layout.line_height),
+            element_bounds.origin + layout.position_for_offset(range.start),
+            element_bounds.origin + point(layout.x_for_offset(range.end), layout.line_height()),
         ))
     }
 
@@ -324,31 +327,9 @@ impl EntityInputHandler for NameField {
     ) -> Option<usize> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        let offset = layout.offset_for_x(position.x - bounds.origin.x);
+        let offset = layout.offset_for_x_on_line(0, position.x - bounds.origin.x);
         let buffer = self.buffer.read(cx);
         Some(buffer.to_utf16(buffer.clip(offset)).0)
-    }
-}
-
-/// One shaped line, and the arithmetic over it.
-///
-/// The single-line counterpart of `DocumentLayout`, and small enough to be its
-/// own thing rather than a special case of it: there is no line to look up, so
-/// every conversion is a column.
-struct LineLayout {
-    shaped: ShapedLine,
-    line_height: Pixels,
-}
-
-impl LineLayout {
-    fn x_for(&self, offset: ByteOffset) -> Pixels {
-        self.shaped.x_for_index(offset.0)
-    }
-
-    /// Unclipped in the byte sense: the result addresses the text as of the
-    /// last paint, and the caller clips it against the live buffer.
-    fn offset_for_x(&self, x: Pixels) -> ByteOffset {
-        ByteOffset(self.shaped.closest_index_for_x(x))
     }
 }
 
@@ -357,7 +338,7 @@ struct FieldElement {
 }
 
 struct FieldPrepaint {
-    layout: Option<LineLayout>,
+    layout: Option<DocumentLayout>,
     selection: Option<gpui::PaintQuad>,
     cursor: Option<gpui::PaintQuad>,
 }
@@ -413,11 +394,11 @@ impl Element for FieldElement {
         let range = field.state.selection().range();
         let marked = field.state.marked_range();
 
-        let layout = shape_field(buffer.text(), marked.as_ref(), window);
-        let line_height = layout.line_height;
+        let layout = shape_document(buffer, marked.as_ref(), window);
+        let line_height = layout.line_height();
 
         let (selection, cursor) = if range.is_empty() {
-            let at = point(layout.x_for(range.start), px(0.));
+            let at = layout.position_for_offset(range.start);
             let quad = fill(
                 Bounds::new(bounds.origin + at, size(px(2.), line_height)),
                 theme::cursor(),
@@ -426,8 +407,8 @@ impl Element for FieldElement {
         } else {
             let quad = fill(
                 Bounds::from_corners(
-                    bounds.origin + point(layout.x_for(range.start), px(0.)),
-                    bounds.origin + point(layout.x_for(range.end), line_height),
+                    bounds.origin + point(layout.x_for_offset(range.start), px(0.)),
+                    bounds.origin + point(layout.x_for_offset(range.end), line_height),
                 ),
                 theme::selection(),
             );
@@ -465,16 +446,7 @@ impl Element for FieldElement {
         let Some(layout) = prepaint.layout.take() else {
             return;
         };
-        if let Err(err) = layout.shaped.paint(
-            bounds.origin,
-            layout.line_height,
-            TextAlign::Left,
-            None,
-            window,
-            cx,
-        ) {
-            eprintln!("failed to paint the name field: {err}");
-        }
+        layout.paint(bounds.origin, window, cx);
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()
@@ -489,61 +461,18 @@ impl Element for FieldElement {
     }
 }
 
-fn shape_field(text: &str, marked: Option<&Range<ByteOffset>>, window: &mut Window) -> LineLayout {
-    let style = window.text_style();
-    let font_size = style.font_size.to_pixels(window.rem_size());
-    let runs = field_runs(&style, text.len(), marked);
-    let shaped = window.text_system().shape_line(
-        SharedString::from(text.to_string()),
-        font_size,
-        &runs,
-        None,
-    );
-    LineLayout {
-        shaped,
-        line_height: window.line_height(),
-    }
-}
-
-/// Underlines the composing region, so a dead key or an IME reading is visible
-/// as provisional rather than as text already committed.
-fn field_runs(
-    style: &TextStyle,
-    length: usize,
-    marked: Option<&Range<ByteOffset>>,
-) -> Vec<TextRun> {
-    let Some(marked) = marked.filter(|marked| marked.start < marked.end) else {
-        return vec![style.to_run(length)];
-    };
-    let composing = style.clone().highlight(HighlightStyle {
-        underline: Some(UnderlineStyle {
-            color: Some(style.color),
-            thickness: px(1.0),
-            wavy: false,
-        }),
-        ..HighlightStyle::default()
-    });
-    let lead = marked.start.0.min(length);
-    let composed = marked.end.0.min(length) - lead;
-    [
-        style.to_run(lead),
-        composing.to_run(composed),
-        style.to_run(length - lead - composed),
-    ]
-    .into_iter()
-    .filter(|run| run.len > 0)
-    .collect()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gpui::{Entity, EntityInputHandler, Subscription, TestAppContext, VisualTestContext};
+    use gpui::{
+        Entity, EntityInputHandler, Subscription, TestAppContext, VisualTestContext, point, px,
+    };
+    use inkra_text::ByteOffset;
 
-    use super::{Cancelled, Confirmed, NameField};
+    use super::{Cancelled, Confirmed, NameField, shape_document};
     use crate::keymap::key_bindings;
 
     /// A focused field with the real bindings installed. Every test drives real
@@ -698,5 +627,30 @@ mod tests {
         });
 
         assert_eq!(text(&view, cx), "one two");
+    }
+
+    /// The field shapes through the same `shape_document` the editor does, so
+    /// the `DocumentLayout` it gets back must hit-test the way the editor's
+    /// does: one line, that line's top at zero, and `x_for_offset` /
+    /// `offset_for_position` inverse to each other at a boundary in the
+    /// middle of the text — not just at the ends, where an off-by-one in
+    /// either direction could cancel out.
+    #[gpui::test]
+    fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "hello world");
+
+        visual.update(|window, cx| {
+            view.update(cx, |field, cx| {
+                let marked = field.state.marked_range();
+                let layout = shape_document(field.buffer.read(cx), marked.as_ref(), window);
+
+                assert_eq!(layout.line_count(), 1);
+                assert_eq!(layout.top_for_line(0), px(0.));
+
+                let mid = ByteOffset(5); // the boundary between "hello" and " world"
+                let x = layout.x_for_offset(mid);
+                assert_eq!(layout.offset_for_position(point(x, px(0.))), mid);
+            });
+        });
     }
 }
