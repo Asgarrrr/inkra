@@ -12,6 +12,19 @@ test-support = ["dep:futures"]
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
+# Moving a note to the platform trash. The one job in this crate where getting
+# it wrong loses a user's note for good, and the one the OS already does
+# correctly: a hand-rolled move to `~/.Trash` picks the wrong trash for a vault
+# on any volume but the boot one, and produces no recovery metadata.
+#
+# The published crate, not Zed's fork — that fork exists to support undo of a
+# delete (zed-industries/zed#5039), which we do not build, and it sits 26
+# commits behind upstream.
+#
+# Its macOS default is `DeleteMethod::Finder`, an `osascript` round-trip that
+# raises an Automation permission prompt and cannot run headless. `RealFs`
+# overrides it in exactly one place; see `trash_method`.
+trash = "5"
 # `MemFs::block_load` only, so it rides the `test-support` gate: a test that
 # needs two loads in flight at once needs one of them to park, and parking
 # needs a real waker. Same version the dev-dependency below already pulls in.

@@ -5,6 +5,8 @@
 //!
 //! Compiled under `--all-features`, so `unwrap_used = "deny"` applies here too.
 
+mod faults;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,6 +20,8 @@ use crate::fs::{
     DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
 };
 
+pub use faults::Gate;
+
 #[derive(Default)]
 struct State {
     files: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
@@ -30,15 +34,27 @@ struct State {
     /// Every `save` of these paths fails. Models a read-only file, a full disk,
     /// or a directory the process cannot write into. See `make_unwritable`.
     unwritable: BTreeSet<PathBuf>,
-    /// Seconds past the base, advanced by every mutation. A constant here made
-    /// every write share one mtime, which made a stale stamp unreachable and
-    /// conflict detection untestable.
+    /// Seconds past the base, advanced by every mutation. See `MemFs::tick`.
     clock: u64,
+    /// Every `create` or `rename` **into** one of these paths fails. Models a
+    /// directory the process cannot write into, which `unwritable` cannot:
+    /// that one fails a write to a file that already exists, and neither a
+    /// create nor a rename has a file at the destination yet.
+    uncreatable: BTreeSet<PathBuf>,
     /// The next `load` of each of these paths parks until its `Gate` is
     /// released or dropped. See `MemFs::block_load`.
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// The same, for the next `save` of each path. See `MemFs::block_save`.
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    /// Every `trash` of these paths fails. Models a Trash the platform refuses
+    /// — no trash on the volume, or a permission the process does not have.
+    /// Separate from `unwritable`: a note can be perfectly writable and still
+    /// not removable.
+    untrashable: BTreeSet<PathBuf>,
+    /// What `trash` took, by the path it was taken from. A move, never a drop:
+    /// the whole promise of a trash is that the bytes survive, and a fake that
+    /// forgot them would let a test assert a recovery that cannot happen.
+    trashed: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
 }
 
 pub struct MemFs {
@@ -132,58 +148,14 @@ impl MemFs {
         }
     }
 
-    /// Moves a file, keeping its identity — which is what a real rename does.
-    pub fn rename(&self, from: &Path, to: impl Into<PathBuf>) {
-        let mut state = self.state();
-        if let Some(entry) = state.files.remove(from) {
-            state.files.insert(to.into(), entry);
-        }
-    }
-
-    pub fn make_unreadable(&self, path: impl Into<PathBuf>) {
-        self.state().unreadable = Some(path.into());
-    }
-
-    /// Every `save` of `path` fails from now on. Sticky rather than one-shot:
-    /// the conditions it models — a read-only file, a full disk — do not clear
-    /// themselves, and a note whose write failed stays dirty, so a one-shot
-    /// injector would be repaired by the very next autosave.
-    ///
-    /// Without it nothing can fail a write, and `SaveFailed` can be deleted
-    /// from the write path with the whole suite still green.
-    pub fn make_unwritable(&self, path: impl Into<PathBuf>) {
-        self.state().unwritable.insert(path.into());
-    }
-
-    /// Parks the next `load` of `path` until the returned gate is released or
-    /// dropped. One gate parks one load.
-    ///
-    /// The one piece of latency this fake models: a `BTreeMap` resolves
-    /// instantly, so without it no test can hold one note's load open while
-    /// another completes — the only shape in which the editor and
-    /// `NoteStore::current` can disagree.
-    // No `#[must_use]`: `Gate` carries its own, and dropping the returned gate
-    // on the spot would release the operation immediately.
-    pub fn block_load(&self, path: impl Into<PathBuf>) -> Gate {
-        let (release, wait) = oneshot::channel();
-        self.state().blocked_loads.insert(path.into(), wait);
-        Gate(release)
-    }
-
-    /// The same, for the next `save` of `path`.
-    ///
-    /// A write that outlives the turn that issued it is the only way to reach
-    /// two writers of one note: the periodic chain's write still in flight when
-    /// a second one is issued from outside the chain — `⌘S` queued behind it,
-    /// or the quit flush, which cannot await the chain at all. Without this
-    /// gate every `MemFs` write completes inside the call that started it, so
-    /// that interleaving never occurs and neither the ordering guard nor the
-    /// cancel path can be put under test.
-    // No `#[must_use]`: see `block_load`.
-    pub fn block_save(&self, path: impl Into<PathBuf>) -> Gate {
-        let (release, wait) = oneshot::channel();
-        self.state().blocked_saves.insert(path.into(), wait);
-        Gate(release)
+    /// What `trash` took from `path`, if anything. The only way a test can
+    /// assert a trashed note is recoverable rather than destroyed.
+    #[must_use]
+    pub fn trashed(&self, path: &Path) -> Option<String> {
+        self.state()
+            .trashed
+            .get(path)
+            .map(|(text, _, _)| text.clone())
     }
 
     #[must_use]
@@ -192,21 +164,6 @@ impl MemFs {
             .files
             .get(path)
             .map(|(text, _, _)| text.clone())
-    }
-}
-
-/// Holds one `MemFs::load` or `MemFs::save` parked. Releasing or dropping it
-/// lets that operation finish.
-#[must_use]
-pub struct Gate(oneshot::Sender<()>);
-
-impl Gate {
-    /// Lets the parked operation finish. Dropping the gate does the same; use
-    /// this name when the moment it lands is the point of the test.
-    pub fn release(self) {
-        // Errs when the operation was cancelled before it ever parked — which
-        // is exactly what a superseded click is supposed to do to a load.
-        let _ = self.0.send(());
     }
 }
 
@@ -339,6 +296,129 @@ impl Fs for MemFs {
             preserved: preserved.map(|(destination, _)| destination),
         })
     }
+
+    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
+        let mut state = self.state();
+        if state.uncreatable.contains(path) {
+            return Err(permission_denied(path));
+        }
+        if state.files.contains_key(path) || state.dirs.contains_key(path) {
+            return Err(already_exists(path));
+        }
+
+        let identity = Self::fresh_identity(&mut state);
+        let mtime = Self::tick(&mut state);
+        match kind {
+            Kind::Note => {
+                state
+                    .files
+                    .insert(path.to_path_buf(), (String::new(), mtime, identity));
+            }
+            Kind::Dir => {
+                state.dirs.insert(path.to_path_buf(), (mtime, identity));
+            }
+        }
+        Ok(identity)
+    }
+
+    /// Moves the stored entry rather than rebuilding it, so the identity travels
+    /// with the file exactly as an inode does under `rename(2)`. A fake that
+    /// minted a fresh one here would hide every `EntryId`-survives-a-rename bug
+    /// from every `app` test, since they all run on this.
+    ///
+    /// The subtree moves with a directory, for the same reason: `rename(2)` is
+    /// one call on the directory entry and never touches the children's inodes.
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
+        let mut state = self.state();
+        if state.uncreatable.contains(to) {
+            return Err(permission_denied(to));
+        }
+        // Byte equality, which on this fake is the *only* way two paths name one
+        // file: the maps are keyed by raw `PathBuf`. A real volume also folds
+        // case and Unicode normalization, and `RealFs::rename` answers that by
+        // inode. Recorded rather than modelled — see the design's note on the
+        // deferred case-insensitive `MemFs`.
+        if from == to {
+            return Ok(());
+        }
+        if state.files.contains_key(to) || state.dirs.contains_key(to) {
+            return Err(already_exists(to));
+        }
+
+        if let Some(entry) = state.files.remove(from) {
+            state.files.insert(to.to_path_buf(), entry);
+            return Ok(());
+        }
+        let Some(entry) = state.dirs.remove(from) else {
+            return Err(not_found(from));
+        };
+        state.dirs.insert(to.to_path_buf(), entry);
+
+        let moved: Vec<_> = state
+            .files
+            .keys()
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        for path in moved {
+            let Ok(relative) = path.strip_prefix(from) else {
+                continue;
+            };
+            let destination = to.join(relative);
+            if let Some(entry) = state.files.remove(&path) {
+                state.files.insert(destination, entry);
+            }
+        }
+        let moved: Vec<_> = state
+            .dirs
+            .keys()
+            .filter(|path| path.as_path() != to && path.starts_with(from))
+            .cloned()
+            .collect();
+        for path in moved {
+            let Ok(relative) = path.strip_prefix(from) else {
+                continue;
+            };
+            let destination = to.join(relative);
+            if let Some(entry) = state.dirs.remove(&path) {
+                state.dirs.insert(destination, entry);
+            }
+        }
+        Ok(())
+    }
+
+    async fn trash(&self, path: &Path) -> Result<()> {
+        let mut state = self.state();
+        if state.untrashable.contains(path) {
+            return Err(permission_denied(path));
+        }
+        let Some(entry) = state.files.remove(path) else {
+            return Err(not_found(path));
+        };
+        state.trashed.insert(path.to_path_buf(), entry);
+        Ok(())
+    }
+}
+
+fn not_found(path: &Path) -> VaultError {
+    VaultError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::from(io::ErrorKind::NotFound),
+    }
+}
+
+fn already_exists(path: &Path) -> VaultError {
+    VaultError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::from(io::ErrorKind::AlreadyExists),
+    }
+}
+
+fn permission_denied(path: &Path) -> VaultError {
+    VaultError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    }
 }
 
 /// The stamp a stored file would report. `size` is the byte length of the text
@@ -351,6 +431,7 @@ fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use futures::FutureExt;
     use futures::executor::block_on;
@@ -432,7 +513,7 @@ mod tests {
             panic!("load must succeed");
         };
 
-        fs.rename(Path::new("/vault/a.md"), "/vault/b.md");
+        block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).expect("rename");
         let Ok(renamed) = block_on(fs.load(Path::new("/vault/b.md"))) else {
             panic!("load must succeed after the rename");
         };
@@ -491,9 +572,8 @@ mod tests {
         );
     }
 
-    /// `now` used to be a constant, which made every stamp of a path equal to
-    /// every other and every conflict undetectable. This is what pins the
-    /// clock: delete `tick` and this is the test that says so.
+    /// Pins `tick`: delete it and every stamp of a path compares equal, and
+    /// this is the test that catches it.
     #[test]
     fn two_writes_of_one_path_get_different_stamps() {
         let fs = MemFs::new();
@@ -505,8 +585,7 @@ mod tests {
         assert_ne!(first, second);
     }
 
-    /// The fake must preserve in the same order the real one does. Reversed, it
-    /// would stay green while `RealFs` lost data.
+    /// Must preserve in `RealFs`'s order — see `Fs::save`.
     #[test]
     fn a_stale_stamp_preserves_the_external_text() {
         let fs = MemFs::new();
@@ -531,12 +610,8 @@ mod tests {
         );
     }
 
-    /// The comparison site, not the derived `PartialEq`. Every other conflict
-    /// test moves the file's mtime *forward*, so all of them stay green if
-    /// `!=` is relaxed to `>`. This one has the file older than the
-    /// expectation — the shape a sync client produces when it preserves an
-    /// original modified date — and is the only test that fails under that
-    /// relaxation.
+    /// The only conflict test with an mtime moving *backwards*; every other
+    /// one stays green if `!=` is relaxed to `>`. See `Stamp`.
     #[test]
     fn a_file_older_than_the_expectation_still_conflicts() {
         let fs = MemFs::new();
@@ -574,11 +649,125 @@ mod tests {
     }
 
     #[test]
+    fn create_refuses_a_name_that_is_taken() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "alpha");
+
+        assert!(block_on(fs.create(Path::new("/vault/a.md"), Kind::Note)).is_err());
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("alpha")
+        );
+    }
+
+    #[test]
+    fn create_mints_an_identity_the_scan_reports() {
+        let fs = MemFs::new();
+        fs.insert_dir("/vault");
+
+        let identity = block_on(fs.create(Path::new("/vault/new.md"), Kind::Note)).expect("create");
+
+        let entries = block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].identity, identity);
+    }
+
+    /// Byte-for-byte, so `Vault::apply` keeps the `EntryId` across the move.
+    #[test]
+    fn rename_carries_the_identity_to_the_new_path() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "alpha");
+        let before = block_on(fs.load(Path::new("/vault/a.md")))
+            .expect("load")
+            .identity;
+
+        block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).expect("rename");
+
+        let after = block_on(fs.load(Path::new("/vault/b.md"))).expect("load");
+        assert_eq!(after.identity, before);
+        assert_eq!(after.text, "alpha");
+    }
+
+    #[test]
+    fn rename_refuses_an_occupied_destination_and_keeps_both_files() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "mine");
+        fs.insert_file("/vault/b.md", "theirs");
+
+        assert!(block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).is_err());
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("mine")
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/b.md")).as_deref(),
+            Some("theirs")
+        );
+    }
+
+    /// A fake that dropped the subtree would make every folder rename look
+    /// like a mass delete — see `MemFs::rename`.
+    #[test]
+    fn renaming_a_folder_moves_its_subtree() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/projects/plan.md", "p");
+        fs.insert_file("/vault/projects/deep/x.md", "x");
+
+        block_on(fs.rename(Path::new("/vault/projects"), Path::new("/vault/archive")))
+            .expect("rename");
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/archive/plan.md"))
+                .as_deref(),
+            Some("p")
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/archive/deep/x.md"))
+                .as_deref(),
+            Some("x")
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/projects/plan.md")),
+            None
+        );
+    }
+
+    /// A trash the user can recover from. A fake that dropped the bytes would
+    /// let a test claim a recovery the real platform makes and this one does not.
+    #[test]
+    fn trash_takes_the_note_out_of_the_vault_and_keeps_its_bytes() {
+        let fs = MemFs::new();
+        fs.insert_file("/vault/a.md", "alpha");
+
+        block_on(fs.trash(Path::new("/vault/a.md"))).expect("trash");
+
+        assert_eq!(fs.read_to_string(Path::new("/vault/a.md")), None);
+        assert!(
+            block_on(fs.read_dir(Path::new("/vault")))
+                .expect("read_dir")
+                .is_empty()
+        );
+        assert_eq!(
+            fs.trashed(Path::new("/vault/a.md")).as_deref(),
+            Some("alpha")
+        );
+    }
+
+    #[test]
+    fn trash_of_a_missing_note_reports_an_error() {
+        let fs = MemFs::new();
+        fs.insert_dir("/vault");
+
+        assert!(block_on(fs.trash(Path::new("/vault/gone.md"))).is_err());
+    }
+
+    #[test]
     fn save_round_trips_and_load_normalizes_line_endings() {
         let fs = MemFs::new();
 
-        // The path does not exist yet, so the expectation is never compared:
-        // `save` stats nothing when there is no file to stat.
+        // Not compared: no file exists yet to stat. See `real_fs.rs`'s
+        // `absent()`.
         let absent = Stamp {
             mtime: Mtime(SystemTime::UNIX_EPOCH),
             size: 0,

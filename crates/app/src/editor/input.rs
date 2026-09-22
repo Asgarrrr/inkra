@@ -1,46 +1,18 @@
 //! The platform text-input edge.
 //!
 //! `EntityInputHandler` speaks UTF-16 offsets throughout, so every method here
-//! is a conversion around a call into `inkra-editor`. The conversion itself
-//! lives in `inkra-text`; what lives here is the protocol's precedence rules
-//! and its caret arithmetic.
+//! is a conversion around a call into `inkra-editor`. Both the conversion and
+//! the protocol's precedence rules live below this layer — in `Buffer` and
+//! `EditorState` — because `NameField` speaks the same protocol and a second
+//! copy of either is a second thing to get wrong. What is left here is the two
+//! methods that need pixels, and the leases the rest go through.
 
 use std::ops::Range;
 use std::time::Instant;
 
 use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window};
-use inkra_editor::EditorState;
-use inkra_text::{Buffer, ByteOffset, Utf16Offset};
 
 use super::EditorView;
-
-impl EditorView {
-    fn range_to_utf16(buffer: &Buffer, range: &Range<ByteOffset>) -> Range<usize> {
-        buffer.to_utf16(range.start).0..buffer.to_utf16(range.end).0
-    }
-
-    fn range_from_utf16(buffer: &Buffer, range: &Range<usize>) -> Range<ByteOffset> {
-        let start = buffer.from_utf16(Utf16Offset(range.start));
-        let end = buffer.from_utf16(Utf16Offset(range.end));
-        start.min(end)..start.max(end)
-    }
-
-    /// The range an input-method edit applies to, following GPUI's precedence:
-    /// explicit range, else the composing range, else the selection.
-    ///
-    /// Takes the state rather than `&self` so it can be called from inside the
-    /// `edit_buffer` closure, which already holds both under one lease.
-    fn target_range(
-        state: &EditorState,
-        buffer: &Buffer,
-        range_utf16: Option<&Range<usize>>,
-    ) -> Range<ByteOffset> {
-        range_utf16
-            .map(|range| Self::range_from_utf16(buffer, range))
-            .or_else(|| state.marked_range())
-            .unwrap_or_else(|| state.selection().range())
-    }
-}
 
 impl EntityInputHandler for EditorView {
     fn text_for_range(
@@ -51,8 +23,8 @@ impl EntityInputHandler for EditorView {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let buffer = self.buffer.read(cx);
-        let range = Self::range_from_utf16(buffer, &range_utf16);
-        actual_range.replace(Self::range_to_utf16(buffer, &range));
+        let range = buffer.from_utf16_range(&range_utf16);
+        actual_range.replace(buffer.to_utf16_range(&range));
         Some(buffer.text()[range.start.0..range.end.0].to_string())
     }
 
@@ -65,14 +37,14 @@ impl EntityInputHandler for EditorView {
         let buffer = self.buffer.read(cx);
         let selection = self.state.selection();
         Some(UTF16Selection {
-            range: Self::range_to_utf16(buffer, &selection.range()),
+            range: buffer.to_utf16_range(&selection.range()),
             reversed: selection.reversed(),
         })
     }
 
     fn marked_text_range(&self, _: &mut Window, cx: &mut Context<Self>) -> Option<Range<usize>> {
         let range = self.state.marked_range()?;
-        Some(Self::range_to_utf16(self.buffer.read(cx), &range))
+        Some(self.buffer.read(cx).to_utf16_range(&range))
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -90,8 +62,7 @@ impl EntityInputHandler for EditorView {
     ) {
         let now = Instant::now();
         self.edit_buffer(cx, |state, buffer| {
-            let range = Self::target_range(state, buffer, range_utf16.as_ref());
-            state.edit(buffer, now, range, new_text);
+            state.replace_in_range(buffer, now, range_utf16.as_ref(), new_text);
         });
     }
 
@@ -104,26 +75,14 @@ impl EntityInputHandler for EditorView {
         cx: &mut Context<Self>,
     ) {
         let now = Instant::now();
-
         self.edit_buffer(cx, |state, buffer| {
-            let range = Self::target_range(state, buffer, range_utf16.as_ref());
-            let start = range.start;
-            state.edit(buffer, now, range, new_text);
-
-            state.set_marked_range(
-                (!new_text.is_empty()).then(|| start..ByteOffset(start.0 + new_text.len())),
+            state.mark_and_replace_in_range(
+                buffer,
+                now,
+                range_utf16.as_ref(),
+                new_text,
+                new_selected_range_utf16,
             );
-
-            // The input method reports the caret in UTF-16 units relative to
-            // the text it just inserted. Rebase it while still in UTF-16 and
-            // convert once: converting first would resolve it against the whole
-            // buffer, and adding `start` on top would then count the offset
-            // twice.
-            if let Some(selected) = new_selected_range_utf16 {
-                let inserted_at = buffer.to_utf16(start).0;
-                let cursor = buffer.from_utf16(Utf16Offset(inserted_at + selected.end));
-                state.move_to(buffer, cursor, false);
-            }
         });
     }
 
@@ -135,7 +94,7 @@ impl EntityInputHandler for EditorView {
         cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
-        let range = Self::range_from_utf16(self.buffer.read(cx), &range_utf16);
+        let range = self.buffer.read(cx).from_utf16_range(&range_utf16);
         // `range_bounds` is element-relative and already clamped to the line
         // holding `range.start`; the platform wants window coordinates.
         let local = layout.range_bounds(&range);

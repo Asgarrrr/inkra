@@ -41,7 +41,7 @@ impl Stage {
         Self { cx }
     }
 
-    /// The launch-with-no-argument state: an empty buffer and no vault.
+    /// The launch-with-no-argument state: no note, no vault, no editor.
     pub(crate) fn open_nothing(&mut self) -> WindowHandle<AppShell> {
         self.open(Arc::new(MemFs::new()), Launch::Nothing)
     }
@@ -61,8 +61,8 @@ impl Stage {
 
     /// A scanned vault of the given `(relative path, contents)` pairs.
     ///
-    /// No note is open: a vault launch shows the tree and an empty editor until
-    /// a row is clicked.
+    /// No note is open: a vault launch shows the tree beside the empty state
+    /// until a row is clicked.
     pub(crate) fn open_vault(&mut self, files: &[(&str, &str)]) -> WindowHandle<AppShell> {
         let fs = Arc::new(MemFs::new());
         for (path, text) in files {
@@ -96,6 +96,22 @@ impl Stage {
                 window.focus(&view.focus_handle(cx), cx);
             })
             .unwrap_or_else(|error| panic!("focus the window: {error}"));
+        self.settle();
+    }
+
+    /// Gives the vault tree keyboard focus.
+    ///
+    /// Separate from `focus`, which lands wherever the window puts it — the
+    /// editor, once a note is open. The tree's own bindings resolve only while
+    /// it holds focus, and clicking a note row hands focus to the editor, so a
+    /// scene showing a tree gesture has to ask for this after the click.
+    pub(crate) fn focus_tree(&mut self, window: WindowHandle<AppShell>) {
+        window
+            .update(&mut self.cx, |view, window, cx| {
+                let handle = view.tree_focus_handle(cx);
+                window.focus(&handle, cx);
+            })
+            .unwrap_or_else(|error| panic!("focus the tree: {error}"));
         self.settle();
     }
 

@@ -53,9 +53,9 @@ pub struct Copied {
 /// One view's editing state over a buffer it does not own.
 ///
 /// The buffer arrives per operation rather than being held, because a note
-/// open in two panes is one buffer and two of these. Note that two panes are
-/// not yet *correct* — see the design document: a second view's offsets rot
-/// when the first one edits, and fixing that needs anchors.
+/// open in two panes is one buffer and two of these. Two panes are not yet
+/// correct (see CLAUDE.md): a second view's offsets rot when the first
+/// edits.
 ///
 /// Nothing here reads a clock. The caller supplies `now`, for the same reason
 /// [`Buffer::transact_at`] does.
@@ -123,6 +123,70 @@ impl EditorState {
         self.edit(buffer, now, range, text);
     }
 
+    /// The range a platform input-method edit applies to, in the protocol's own
+    /// order of precedence: an explicit range, else the composing region, else
+    /// the selection.
+    ///
+    /// Here rather than at the gpui edge because it reads only a `Buffer` and a
+    /// selection. Two views speak this protocol, and a second copy of the
+    /// precedence rule is a second thing to get wrong.
+    #[must_use]
+    pub fn target_range(
+        &self,
+        buffer: &Buffer,
+        range_utf16: Option<&Range<usize>>,
+    ) -> Range<ByteOffset> {
+        range_utf16
+            .map(|range| buffer.from_utf16_range(range))
+            .or_else(|| self.marked_range())
+            .unwrap_or_else(|| self.selection.range())
+    }
+
+    /// Applies an input-method edit that carries no composing region — a
+    /// committed character, or a paste from the platform.
+    pub fn replace_in_range(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        range_utf16: Option<&Range<usize>>,
+        text: &str,
+    ) {
+        let range = self.target_range(buffer, range_utf16);
+        self.edit(buffer, now, range, text);
+    }
+
+    /// The same, for text still being composed: a dead key waiting for its base
+    /// letter, or an IME's provisional reading.
+    ///
+    /// `selected_utf16` is where the input method wants the caret, **relative to
+    /// the text it just inserted**. It is rebased while still in UTF-16 and
+    /// converted once: converting first would resolve it against the whole
+    /// buffer, and adding the insertion point afterwards would count the offset
+    /// twice.
+    pub fn mark_and_replace_in_range(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        range_utf16: Option<&Range<usize>>,
+        text: &str,
+        selected_utf16: Option<Range<usize>>,
+    ) {
+        let range = self.target_range(buffer, range_utf16);
+        let start = range.start;
+        self.edit(buffer, now, range, text);
+
+        // `edit` clears the composing region, so this reinstates it over what
+        // was just inserted. Empty text ends the composition rather than
+        // marking a zero-width region.
+        self.set_marked_range((!text.is_empty()).then(|| start..ByteOffset(start.0 + text.len())));
+
+        if let Some(selected) = selected_utf16 {
+            let inserted_at = buffer.to_utf16(start).0;
+            let cursor = buffer.from_utf16(inkra_text::Utf16Offset(inserted_at + selected.end));
+            self.move_to(buffer, cursor, false);
+        }
+    }
+
     /// What `⌘C` takes. Reads only: a copy owes no repaint and must not mark
     /// the note dirty.
     #[must_use]
@@ -181,11 +245,9 @@ impl EditorState {
     ///
     /// The two differ only on a last line with no terminator: the range stops
     /// at the end of the text, while the text gains the `\n` the line does not
-    /// have. That asymmetry is deliberate and is where we part company with
-    /// Zed, whose cut copies exactly the bytes it removes. Ours guarantees that
-    /// a whole-line item is a whole line wherever it lands — which is what
-    /// cutting a line is for — and pays for it by giving an unterminated last
-    /// line its terminator when the cut is pasted straight back.
+    /// have — unlike Zed, whose cut copies exactly the removed bytes. This
+    /// guarantees a whole-line item is a whole line wherever it lands, at the
+    /// cost of adding a terminator when the cut is pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
         if !self.selection.is_empty() {
             let range = self.selection.range();
@@ -339,444 +401,4 @@ impl EditorState {
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::unwrap_used))]
-mod tests {
-    use super::*;
-
-    fn at(offset: usize) -> ByteOffset {
-        ByteOffset(offset)
-    }
-
-    fn editor(text: &str) -> (Buffer, EditorState) {
-        let buffer = Buffer::new(text);
-        let state = EditorState::new(Selection::at(buffer.len()));
-        (buffer, state)
-    }
-
-    #[test]
-    fn backspace_deletes_a_grapheme_not_a_char() {
-        // "e" plus a combining acute is two chars but one grapheme.
-        let (mut buffer, mut state) = editor("xe\u{301}");
-        state.backspace(&mut buffer, Instant::now());
-        assert_eq!(buffer.text(), "x");
-    }
-
-    #[test]
-    fn arrows_step_over_a_zwj_emoji_as_one_unit() {
-        let (buffer, mut state) = editor("👨\u{200d}👩\u{200d}👧");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        state.move_(&buffer, LogicalMovement::Right, false);
-        assert_eq!(state.cursor(), buffer.len());
-        state.move_(&buffer, LogicalMovement::Left, false);
-        assert_eq!(state.cursor(), at(0));
-    }
-
-    #[test]
-    fn shift_arrows_extend_and_typing_replaces_the_selection() {
-        let (mut buffer, mut state) = editor("abc");
-        state.move_(&buffer, LogicalMovement::Left, true);
-        state.move_(&buffer, LogicalMovement::Left, true);
-        assert_eq!(state.selection().range(), at(1)..at(3));
-        assert!(state.selection().reversed());
-
-        let range = state.selection().range();
-        state.edit(&mut buffer, Instant::now(), range, "X");
-        assert_eq!(buffer.text(), "aX");
-    }
-
-    #[test]
-    fn a_reversed_selection_collapses_to_its_near_end() {
-        let (buffer, mut state) = editor("abc");
-        state.move_(&buffer, LogicalMovement::Left, true);
-        state.move_(&buffer, LogicalMovement::Left, false);
-        assert_eq!(state.cursor(), at(2));
-    }
-
-    #[test]
-    fn a_forward_selection_collapses_to_its_far_end() {
-        let (buffer, mut state) = editor("abc");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        state.move_(&buffer, LogicalMovement::Right, true);
-        state.move_(&buffer, LogicalMovement::Right, false);
-        assert_eq!(state.cursor(), at(1));
-    }
-
-    #[test]
-    fn replacing_a_selection_is_a_single_undo_step() {
-        let (mut buffer, mut state) = editor("abc");
-        state.select_all(&buffer);
-        let range = state.selection().range();
-        state.edit(&mut buffer, Instant::now(), range, "Z");
-        assert_eq!(buffer.text(), "Z");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "abc");
-        assert_eq!(state.cursor(), at(3));
-    }
-
-    #[test]
-    fn undo_places_the_cursor_on_the_restored_text() {
-        let (mut buffer, mut state) = editor("abc");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        state.delete(&mut buffer, Instant::now());
-        assert_eq!(buffer.text(), "bc");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "abc");
-        assert_eq!(state.cursor(), at(1));
-
-        assert!(state.redo(&mut buffer));
-        assert_eq!(buffer.text(), "bc");
-    }
-
-    #[test]
-    fn undo_with_nothing_to_undo_reports_no_change() {
-        let (mut buffer, mut state) = editor("abc");
-        assert!(!state.undo(&mut buffer));
-        assert!(!state.redo(&mut buffer));
-    }
-
-    #[test]
-    fn a_typing_run_undoes_in_one_step() {
-        let (mut buffer, mut state) = editor("");
-        let start = Instant::now();
-        for (index, ch) in "hello".chars().enumerate() {
-            let now = start + inkra_text::GROUP_INTERVAL / 2 * u32::try_from(index).unwrap();
-            let range = state.selection().range();
-            state.edit(&mut buffer, now, range, &ch.to_string());
-        }
-        assert_eq!(buffer.text(), "hello");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "");
-    }
-
-    #[test]
-    fn deleting_at_the_end_of_the_buffer_does_nothing() {
-        let (mut buffer, mut state) = editor("ab");
-        state.delete(&mut buffer, Instant::now());
-        assert_eq!(buffer.text(), "ab");
-        assert!(!state.undo(&mut buffer));
-    }
-
-    #[test]
-    fn backspace_at_the_start_of_the_buffer_does_nothing() {
-        let (mut buffer, mut state) = editor("ab");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        state.backspace(&mut buffer, Instant::now());
-        assert_eq!(buffer.text(), "ab");
-        assert!(!state.undo(&mut buffer));
-    }
-
-    #[test]
-    fn an_edit_drops_the_composing_region() {
-        let (mut buffer, mut state) = editor("ab");
-        state.set_marked_range(Some(at(0)..at(1)));
-        state.edit(&mut buffer, Instant::now(), at(0)..at(0), "X");
-        assert_eq!(state.marked_range(), None);
-    }
-
-    #[test]
-    fn undo_drops_the_composing_region() {
-        let (mut buffer, mut state) = editor("ab");
-        state.edit(&mut buffer, Instant::now(), at(2)..at(2), "c");
-        state.set_marked_range(Some(at(0)..at(1)));
-        assert!(state.undo(&mut buffer));
-        assert_eq!(state.marked_range(), None);
-    }
-
-    #[test]
-    fn moving_past_either_end_saturates() {
-        let (buffer, mut state) = editor("ab");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        state.move_(&buffer, LogicalMovement::Left, false);
-        assert_eq!(state.cursor(), at(0));
-
-        state.move_(&buffer, LogicalMovement::DocEnd, false);
-        state.move_(&buffer, LogicalMovement::Right, false);
-        assert_eq!(state.cursor(), buffer.len());
-    }
-
-    #[test]
-    fn home_and_end_go_to_the_line_ends_not_the_document_ends() {
-        let (buffer, mut state) = editor("aaa\nbbb\nccc");
-        state.move_to(&buffer, at(5), false);
-
-        state.move_(&buffer, LogicalMovement::LineStart, false);
-        assert_eq!(state.cursor(), at(4));
-        state.move_(&buffer, LogicalMovement::LineEnd, false);
-        assert_eq!(state.cursor(), at(7));
-    }
-
-    #[test]
-    fn the_document_ends_are_still_reachable() {
-        let (buffer, mut state) = editor("aaa\nbbb");
-        state.move_(&buffer, LogicalMovement::DocStart, false);
-        assert_eq!(state.cursor(), at(0));
-        state.move_(&buffer, LogicalMovement::DocEnd, false);
-        assert_eq!(state.cursor(), buffer.len());
-    }
-
-    #[test]
-    fn home_on_an_already_home_cursor_stays_put() {
-        let (buffer, mut state) = editor("aaa\nbbb");
-        state.move_to(&buffer, at(4), false);
-        state.move_(&buffer, LogicalMovement::LineStart, false);
-        assert_eq!(state.cursor(), at(4));
-        state.move_(&buffer, LogicalMovement::LineStart, false);
-        assert_eq!(state.cursor(), at(4));
-    }
-
-    #[test]
-    fn both_line_ends_of_an_empty_line_are_the_same_offset() {
-        let (buffer, mut state) = editor("a\n\nb");
-        state.move_to(&buffer, at(2), false);
-        state.move_(&buffer, LogicalMovement::LineEnd, false);
-        assert_eq!(state.cursor(), at(2));
-        state.move_(&buffer, LogicalMovement::LineStart, false);
-        assert_eq!(state.cursor(), at(2));
-    }
-
-    #[test]
-    fn end_then_right_crosses_to_the_next_line() {
-        // The newline separates the lines rather than belonging to either, so
-        // the end of one and the start of the next are one grapheme apart.
-        let (buffer, mut state) = editor("aa\nbb");
-        state.move_to(&buffer, at(0), false);
-        state.move_(&buffer, LogicalMovement::LineEnd, false);
-        assert_eq!(state.cursor(), at(2));
-        state.move_(&buffer, LogicalMovement::Right, false);
-        assert_eq!(state.cursor(), at(3));
-    }
-
-    #[test]
-    fn home_from_a_selection_uses_the_line_the_caret_is_on() {
-        let (buffer, mut state) = editor("aaa\nbbb");
-        state.move_to(&buffer, at(7), false);
-        state.move_(&buffer, LogicalMovement::Left, true);
-        state.move_(&buffer, LogicalMovement::LineStart, false);
-        assert_eq!(state.cursor(), at(4));
-    }
-
-    #[test]
-    fn insert_splits_the_line_at_the_caret() {
-        let (mut buffer, mut state) = editor("abcd");
-        state.move_to(&buffer, at(2), false);
-        state.insert(&mut buffer, Instant::now(), "\n");
-        assert_eq!(buffer.text(), "ab\ncd");
-        assert_eq!(state.cursor(), at(3));
-        assert_eq!(buffer.line_count(), 2);
-    }
-
-    #[test]
-    fn insert_replaces_the_selection_in_one_undo_step() {
-        let (mut buffer, mut state) = editor("abc");
-        state.select_all(&buffer);
-        state.insert(&mut buffer, Instant::now(), "\n");
-        assert_eq!(buffer.text(), "\n");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "abc");
-    }
-
-    fn line(text: &str) -> Copied {
-        Copied {
-            text: text.to_string(),
-            whole_line: true,
-        }
-    }
-
-    fn span(text: &str) -> Copied {
-        Copied {
-            text: text.to_string(),
-            whole_line: false,
-        }
-    }
-
-    #[test]
-    fn copy_takes_exactly_the_selection() {
-        let (buffer, mut state) = editor("abc");
-        state.move_to(&buffer, at(0), false);
-        state.move_to(&buffer, at(2), true);
-        assert_eq!(state.copy(&buffer), span("ab"));
-    }
-
-    #[test]
-    fn copy_with_no_selection_takes_the_whole_line_and_its_newline() {
-        let (buffer, mut state) = editor("x\ny\n");
-        state.move_to(&buffer, at(0), false);
-        assert_eq!(state.copy(&buffer), line("x\n"));
-    }
-
-    #[test]
-    fn copy_on_an_unterminated_last_line_still_ends_in_a_newline() {
-        // The synthesized newline is what makes the item a whole line wherever
-        // it is pasted, rather than one that welds itself onto another.
-        let (buffer, mut state) = editor("x\ny");
-        state.move_to(&buffer, at(3), false);
-        assert_eq!(state.copy(&buffer), line("y\n"));
-    }
-
-    #[test]
-    fn cut_removes_what_it_put_on_the_clipboard_in_one_undo_step() {
-        let (mut buffer, mut state) = editor("abc");
-        state.move_to(&buffer, at(0), false);
-        state.move_to(&buffer, at(2), true);
-
-        assert_eq!(state.cut(&mut buffer, Instant::now()), span("ab"));
-        assert_eq!(buffer.text(), "c");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "abc");
-    }
-
-    #[test]
-    fn cut_with_no_selection_removes_the_newline_too() {
-        let (mut buffer, mut state) = editor("x\ny");
-        state.move_to(&buffer, at(0), false);
-
-        assert_eq!(state.cut(&mut buffer, Instant::now()), line("x\n"));
-        assert_eq!(buffer.text(), "y");
-    }
-
-    #[test]
-    fn cut_on_an_empty_last_line_copies_a_newline_and_removes_nothing() {
-        let (mut buffer, mut state) = editor("x\n");
-        state.move_to(&buffer, at(2), false);
-
-        assert_eq!(state.cut(&mut buffer, Instant::now()), line("\n"));
-        assert_eq!(buffer.text(), "x\n");
-        assert!(!state.undo(&mut buffer), "an empty removal is not an edit");
-    }
-
-    #[test]
-    fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
-        // The seal is skipped along with the edit. Left set by a transaction
-        // that never lands, `grouping_blocked` would break the next run apart.
-        let (mut buffer, mut state) = editor("x\n");
-        let start = Instant::now();
-
-        state.move_to(&buffer, at(0), false);
-        state.insert(&mut buffer, start, "a");
-        state.move_to(&buffer, buffer.len(), false);
-        state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
-        state.move_to(&buffer, at(1), false);
-        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
-        assert_eq!(buffer.text(), "abx\n");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "x\n", "both keystrokes were one run");
-    }
-
-    #[test]
-    fn pasting_a_span_replaces_the_selection() {
-        let (mut buffer, mut state) = editor("abc");
-        state.select_all(&buffer);
-        state.paste(&mut buffer, Instant::now(), &span("Z"));
-        assert_eq!(buffer.text(), "Z");
-    }
-
-    #[test]
-    fn pasting_a_line_over_a_selection_replaces_it_like_any_other_text() {
-        let (mut buffer, mut state) = editor("abc");
-        state.select_all(&buffer);
-        state.paste(&mut buffer, Instant::now(), &line("Z\n"));
-        assert_eq!(buffer.text(), "Z\n");
-    }
-
-    #[test]
-    fn pasting_a_line_at_a_bare_caret_inserts_above_and_keeps_the_column() {
-        let (mut buffer, mut state) = editor("abc\ndef");
-        // Line 1, column 1: between 'd' and 'e'.
-        state.move_to(&buffer, at(5), false);
-
-        state.paste(&mut buffer, Instant::now(), &line("XY\n"));
-        assert_eq!(buffer.text(), "abc\nXY\ndef");
-        // Still between 'd' and 'e', now one line further down. Left to `edit`,
-        // the caret would have landed at offset 7, the start of "def".
-        assert_eq!(state.cursor(), at(8));
-    }
-
-    #[test]
-    fn a_paste_merges_with_the_typing_on_neither_side() {
-        let (mut buffer, mut state) = editor("");
-        let start = Instant::now();
-
-        state.insert(&mut buffer, start, "a");
-        state.paste(
-            &mut buffer,
-            start + inkra_text::GROUP_INTERVAL / 2,
-            &span("Z"),
-        );
-        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
-        assert_eq!(buffer.text(), "aZb");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "aZ", "the typing after it is its own step");
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "a", "and so is the paste");
-    }
-
-    #[test]
-    fn a_cut_merges_with_the_typing_on_neither_side() {
-        let (mut buffer, mut state) = editor("xy");
-        let start = Instant::now();
-
-        state.insert(&mut buffer, start, "a");
-        state.move_(&buffer, LogicalMovement::Left, true);
-        state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
-        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
-        assert_eq!(buffer.text(), "xyb");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "xy", "the typing after it is its own step");
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "xya", "and so is the cut");
-    }
-
-    #[test]
-    fn a_paste_of_nothing_changes_nothing_and_splits_no_run() {
-        let (mut buffer, mut state) = editor("");
-        let start = Instant::now();
-
-        state.insert(&mut buffer, start, "a");
-        state.paste(
-            &mut buffer,
-            start + inkra_text::GROUP_INTERVAL / 2,
-            &span(""),
-        );
-        state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
-        assert_eq!(buffer.text(), "ab");
-
-        assert!(state.undo(&mut buffer));
-        assert_eq!(buffer.text(), "", "both keystrokes were one run");
-    }
-
-    #[test]
-    fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
-        // The stated price of synthesizing the newline in `cut` as well as in
-        // `copy`. Pinned so it cannot change without someone deciding to.
-        let (mut buffer, mut state) = editor("a");
-        state.move_to(&buffer, at(0), false);
-
-        let copied = state.cut(&mut buffer, Instant::now());
-        assert_eq!(buffer.text(), "");
-        state.paste(&mut buffer, Instant::now(), &copied);
-        assert_eq!(buffer.text(), "a\n");
-    }
-
-    #[test]
-    fn move_to_snaps_an_offset_off_a_char_boundary() {
-        // "héllo": 'é' spans bytes 1..3, so offset 2 splits it.
-        let (buffer, mut state) = editor("héllo");
-        state.move_to(&buffer, at(2), false);
-        assert_eq!(state.cursor(), at(1));
-    }
-
-    #[test]
-    fn move_to_clamps_an_offset_past_the_end() {
-        let (buffer, mut state) = editor("ab");
-        state.move_to(&buffer, at(99), false);
-        assert_eq!(state.cursor(), buffer.len());
-    }
-}
+mod tests;

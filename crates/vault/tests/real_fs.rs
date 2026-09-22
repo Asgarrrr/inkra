@@ -1,10 +1,9 @@
 //! `RealFs` against a real temporary directory. Separate from the unit tests
 //! because it touches the disk.
 
-// `[lints] workspace = true` in Cargo.toml applies to every target of the
-// crate, integration tests included, so `expect_used` is denied here too. A
-// failed setup call in a test must abort with a message naming what broke, not
-// be threaded through a `Result` that hides it.
+// `[lints] workspace = true` applies to every target of the crate, including
+// integration tests, so `expect_used` is denied here too. A failed setup call
+// must abort with a message naming what broke, not hide behind a `Result`.
 #![allow(clippy::expect_used)]
 
 use std::fs;
@@ -86,9 +85,7 @@ fn save_writes_lf_and_round_trips() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "hello\nworld\n");
 }
 
-/// The write replaces the file rather than truncating it, which is what makes
-/// a crash mid-save unable to leave a partial note — and what forces
-/// `Fs::save` to report the identity afterwards.
+/// Pins that a replace changes the inode — see `Fs::save`.
 #[test]
 fn save_replaces_the_file_and_reports_the_new_identity() {
     let dir = TempDir::new("replace");
@@ -107,9 +104,8 @@ fn save_replaces_the_file_and_reports_the_new_identity() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "after");
 }
 
-/// A fresh temp file carries the process umask. Without the restore step the
-/// save silently narrows the note — invisible, because the default mode
-/// usually matches by accident, hence the explicit `chmod` here.
+/// Pins the umask restore in `replace`. The default mode usually matches by
+/// accident, hence the explicit `chmod` here.
 #[test]
 fn save_preserves_the_file_mode() {
     let dir = TempDir::new("mode");
@@ -123,9 +119,8 @@ fn save_preserves_the_file_mode() {
     assert_eq!(mode & 0o777, 0o640);
 }
 
-/// `?` unlinks nothing on its way out, so the temp file needs an explicit
-/// owner. A leaked one is invisible in the vault — `read_dir` filters it on
-/// extension — which is exactly why a test has to look for it directly.
+/// Invisible in the vault (`read_dir` filters `.tmp`), so the test has to look
+/// at the raw directory listing. See `TempFile`.
 #[test]
 fn save_leaves_no_temp_file_behind() {
     let dir = TempDir::new("temp");
@@ -140,9 +135,7 @@ fn save_leaves_no_temp_file_behind() {
     assert_eq!(names, vec!["note.md"]);
 }
 
-/// Replacing a hard-linked note would split a pair that `Vault::rescan`
-/// collapses into one entry, surfacing the second name as a new row holding
-/// stale text. So a linked note is written in place instead.
+/// Pins the in-place write for a hard-linked note — see `RealFs::save`.
 #[test]
 fn save_of_a_hard_linked_note_keeps_one_inode() {
     let dir = TempDir::new("links");
@@ -162,9 +155,7 @@ fn save_of_a_hard_linked_note_keeps_one_inode() {
     );
 }
 
-/// A note reached through a symlink — which only a file named on the command
-/// line can be — is written through the link. Renaming over it would leave the
-/// user with a regular file where their link was, and the real note untouched.
+/// Pins write-through for a symlink — see `RealFs::save`.
 #[test]
 fn save_writes_through_a_symlink_rather_than_replacing_it() {
     let dir = TempDir::new("symlink");
@@ -229,8 +220,7 @@ fn save_reports_a_stamp_the_next_save_accepts() {
     assert_eq!(names(&dir.0), vec!["note.md"]);
 }
 
-/// A note deleted underneath us is recreated rather than resurrected into a
-/// conflict file: there are no bytes to preserve.
+/// Pins the missing-file case — see `RealFs::save`.
 #[test]
 fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
     let dir = TempDir::new("missing");
@@ -245,8 +235,8 @@ fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
 }
 
-/// The ordering that makes the whole design safe. If the preserve fails, the
-/// replace must not happen: the file keeps the other writer's bytes.
+/// If the preserve fails, the replace must not happen: the file must keep the
+/// other writer's bytes. See `Fs::save`.
 #[test]
 fn a_failed_preserve_leaves_the_file_untouched() {
     let dir = TempDir::new("preserve-fails");
@@ -327,4 +317,146 @@ fn read_dir_skips_other_extensions_and_symlinks() {
 
     let paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
     assert_eq!(paths, vec![dir.0.join("a.md")]);
+}
+
+/// The identity is what `Vault::apply` keys every `EntryId` on, so a rename
+/// that minted a new inode would silently detach the note from its open buffer.
+#[test]
+fn rename_moves_the_note_and_keeps_its_identity() {
+    let dir = TempDir::new("rename-identity");
+    let from = dir.0.join("before.md");
+    let to = dir.0.join("after.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("rename");
+
+    assert_eq!(names(&dir.0), vec!["after.md".to_owned()]);
+    assert_eq!(fs::read_to_string(&to).expect("read"), "text");
+    assert_eq!(
+        fs::metadata(&to).expect("stat").ino(),
+        before,
+        "a rename must not change the inode"
+    );
+}
+
+/// Pins the one cell `rename(2)` does not refuse for us — see `RealFs::rename`.
+/// Nothing else in the suite would notice the `hard_link` guard being
+/// replaced by a bare `fs::rename`.
+#[test]
+fn rename_refuses_to_destroy_a_different_note() {
+    let dir = TempDir::new("rename-collision");
+    let from = dir.0.join("a.md");
+    let to = dir.0.join("b.md");
+    fs::write(&from, "mine").expect("write");
+    fs::write(&to, "theirs").expect("write");
+
+    let result = block_on(RealFs.rename(&from, &to));
+
+    assert!(result.is_err(), "the destination is a different note");
+    assert_eq!(fs::read_to_string(&to).expect("read"), "theirs");
+    assert_eq!(fs::read_to_string(&from).expect("read"), "mine");
+}
+
+/// APFS is case-insensitive-but-preserving by default, so `hard_link` reports
+/// `EEXIST` here even though both names are one file. Without the
+/// same-identity branch a user cannot fix the capitalisation of their own note.
+///
+/// Cannot run against `MemFs`, which keys a case-sensitive `BTreeMap` and so
+/// reports success whatever the branch does.
+#[test]
+fn rename_can_change_only_the_case_of_a_name() {
+    let dir = TempDir::new("rename-case");
+    let from = dir.0.join("notes.md");
+    let to = dir.0.join("Notes.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("a case-only rename is a rename");
+
+    assert_eq!(names(&dir.0), vec!["Notes.md".to_owned()]);
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+}
+
+/// The same trap through a second door: macOS compares names
+/// normalization-insensitively, so the NFC and NFD spellings of `Réunion` are
+/// one file. A French vault reaches this on its first accented note.
+#[test]
+fn rename_can_change_only_the_unicode_normalization_of_a_name() {
+    let dir = TempDir::new("rename-normalization");
+    // Composed: U+00E9. Decomposed: U+0065 U+0301. Written out rather than
+    // normalized at runtime, so the test states which bytes it means.
+    let from = dir.0.join("R\u{e9}union.md");
+    let to = dir.0.join("Re\u{301}union.md");
+    fs::write(&from, "text").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("a normalization-only rename is a rename");
+
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+    assert_eq!(names(&dir.0).len(), 1, "one file, not two spellings of it");
+}
+
+/// The fallback branch for a directory — see `RealFs::rename`. Must still
+/// move, and still refuse a destination it would destroy.
+#[test]
+fn rename_moves_a_folder_with_its_subtree() {
+    let dir = TempDir::new("rename-folder");
+    let from = dir.0.join("projects");
+    let to = dir.0.join("archive");
+    fs::create_dir(&from).expect("create dir");
+    fs::write(from.join("plan.md"), "p").expect("write");
+    let before = fs::metadata(&from).expect("stat").ino();
+
+    block_on(RealFs.rename(&from, &to)).expect("rename the folder");
+
+    assert_eq!(names(&dir.0), vec!["archive".to_owned()]);
+    assert_eq!(fs::read_to_string(to.join("plan.md")).expect("read"), "p");
+    assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
+}
+
+/// Pins symlink-safe rename — see `RealFs::rename`.
+#[test]
+fn rename_of_a_symlink_moves_the_link_not_its_target() {
+    let dir = TempDir::new("rename-symlink");
+    let target = dir.0.join("target.md");
+    let link = dir.0.join("link.md");
+    let moved = dir.0.join("moved.md");
+    fs::write(&target, "text").expect("write");
+    std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+    block_on(RealFs.rename(&link, &moved)).expect("rename the link");
+
+    assert!(
+        fs::symlink_metadata(&moved).expect("stat").is_symlink(),
+        "the link must survive as a link"
+    );
+    assert!(target.exists(), "its target must be untouched");
+}
+
+#[test]
+fn create_makes_an_empty_note_and_refuses_an_occupied_name() {
+    let dir = TempDir::new("create");
+    let path = dir.0.join("new.md");
+
+    let identity = block_on(RealFs.create(&path, Kind::Note)).expect("create");
+
+    assert_eq!(fs::read_to_string(&path).expect("read"), "");
+    assert_eq!(identity.inode, fs::metadata(&path).expect("stat").ino());
+    assert!(
+        block_on(RealFs.create(&path, Kind::Note)).is_err(),
+        "a create must never take over an existing note"
+    );
+}
+
+#[test]
+fn create_makes_a_folder_the_scan_lists() {
+    let dir = TempDir::new("create-folder");
+    let path = dir.0.join("projects");
+
+    block_on(RealFs.create(&path, Kind::Dir)).expect("create");
+
+    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, Kind::Dir);
 }
