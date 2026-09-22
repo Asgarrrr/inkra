@@ -94,19 +94,24 @@ and as the application quits, not only on `⌘S`. A write that finds the file
 changed underneath it preserves those bytes beside the note before replacing
 them, so no write destroys what it did not put there.
 
-What it deliberately leaves out — the file watcher, diff-based reload,
-create/rename/delete, serializing writes *across* notes, buffer eviction,
-reporting a failed open, and the native folder picker — is recorded with a
-trigger each in the Deferred table of
-`superpowers/specs/2026-09-20-inkra-vault-design.md`.
+Create, rename and delete landed on 2026-09-22. The vault is no longer
+read-only: a note or a folder can be made from the tree, renamed in place, and
+a note moved to the platform Trash. Every filesystem operation on one note is
+ordered on that note's chain, so a rename cannot be overtaken by a write
+decided before it. Deleting a *folder* is the one part left out, with its own
+trigger.
+
+What the vault still leaves out — the file watcher, diff-based reload,
+serializing writes *across* notes, buffer eviction, reporting a failed open,
+and the native folder picker — is recorded with a trigger each in the Deferred
+table of `superpowers/specs/2026-09-20-inkra-vault-design.md`.
 
 The unnamed launch buffer has left that table. It is closed, by removal rather
 than by saving: a launch with no note builds no editor at all, and `AppShell`
-renders an empty state, so there is no untracked buffer left to lose. That empty
-state names no action, because both it would want — the folder picker and
-creating a note — are still deferred. Which is the strongest argument for doing
-create/rename/delete next. See
-`superpowers/plans/2026-09-21-empty-state.md`.
+renders an empty state, so there is no untracked buffer left to lose. See
+`superpowers/plans/2026-09-21-empty-state.md`. Half of what that empty state
+could not name is now real — `⌘N` makes a note from anywhere in the window —
+and the other half, the folder picker, is still deferred.
 
 What conflict detection did **not** close is the clean note. A buffer with no
 unsaved edits never reaches a write, so it never reaches the check, and a note

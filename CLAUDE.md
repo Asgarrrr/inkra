@@ -219,7 +219,20 @@ area, not on every task:
   context removes is that dependency — reordering the list would otherwise move
   a key from one view to another, and the loser has no handler in the winner's
   dispatch path, so the key would go quiet rather than fail. The cost is that a
-  new focusable view inherits nothing and must claim every key it wants.
+  new focusable view inherits nothing and must claim every key it wants — and
+  that cost is now paid rather than hypothetical: `NameField` repeats the
+  editor's whole movement and deletion set at its own context. A field holding
+  only `enter` and `escape` could be typed into and never corrected, because
+  with `EditorView` absent from the focused stack those bindings are excluded
+  from matching rather than merely outranked.
+- **A binding fires where its handler can be reached**, which is not always
+  where the state lives. Dispatch walks from the focused leaf up *its own*
+  ancestors (`gpui/src/window.rs:6270`), so with the editor focused the sidebar
+  is a sibling subtree: `cmd-n` is scoped to `AppShell` and **handled** there,
+  forwarding into `Sidebar::start_creating`. A handler registered on the tree
+  would never be reached, and the key would go quiet. `Trash` and `Rename` are
+  the opposite case and stay on the tree, because they read its selection and
+  only make sense while it has focus.
 - Every filesystem operation on one note is **ordered on that note's chain**,
   `Ops` in `NoteStore`, keyed by `EntryId` and outliving the note being open.
   A rename or a delete appended there runs after every write decided before it.
@@ -359,6 +372,13 @@ area, not on every task:
   binding, the `actions!` mapping, or the repaint gate — and a wrong binding
   passes `check.sh`. Use the `dispatching` helper.
 - No snapshot or visual testing while the UI is still unstable.
+- A test asserts **state**, so a defect that lives only in the layout is
+  invisible to the whole suite. Two shipped that way and both were found by
+  looking: the sidebar's rejection message was pushed off the bottom of the
+  pane by the list's `size_full`, and a rename opened no field at all because
+  clicking a note row hands focus to the editor, so `enter` inserted a newline
+  into the note. Every test passed in both cases. After a change that adds a
+  row, a message, or a gesture to a pane, render the scene and **look at it**.
 - `check.sh` renders nothing — `TestWindow::draw` only calls a renderer when one
   was installed (`gpui/src/platform/test/window.rs:527`), and a `#[gpui::test]`
   installs none. After touching the gpui dependency, its features, or
@@ -427,8 +447,11 @@ change that introduces something reusable.
 | Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
 | Order every filesystem operation on one note | `Ops`, keyed by `EntryId` in `NoteStore` | `app/src/vault.rs` |
 | Delete a note | `NoteStore::trash` | `app/src/vault.rs` |
+| Make a note or a folder, and learn the id the scan gave it | `NoteStore::create` | `app/src/vault.rs` |
+| Rename one in place, keeping its `EntryId` | `NoteStore::rename` | `app/src/vault.rs` |
 | Tell anyone the note on screen was closed under it | `NoteClosed` — trash only; buffer eviction is a different signal | `app/src/vault.rs` |
 | Tell anyone a delete failed | `TrashFailed` | `app/src/vault.rs` |
+| Tell anyone a rename failed | `RenameFailed` | `app/src/vault.rs` |
 | Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
 | Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
@@ -474,6 +497,22 @@ change that introduces something reusable.
 | Which note the editor is showing, for a subscriber | `AppShell::showing` — `current` is cleared before `NoteClosed` is delivered | `app/src/shell.rs` |
 | Ask before something destructive | `Window::prompt`, answered in tests with `cx.simulate_prompt_answer` | gpui `window.rs:6448` |
 | A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell.rs` |
+| Whether a typed name can become a note | `check_name`, returning `NameProblem` — the rule; `app` owns the English | `vault/src/path.rs` |
+| The file name a typed name gets — always a lowercase `.md` | `note_file_name` | `vault/src/path.rs` |
+| Create a file or a folder | `Fs::create`, taking a `Kind` | `vault/src/fs.rs` |
+| Move one, never replacing a *different* file | `Fs::rename` — asks the destination's inode on `EEXIST`, so a case-only rename is a rename | `vault/src/fs.rs` |
+| Move a note to the platform trash | `Fs::trash` | `vault/src/fs.rs` |
+| The `EntryId` a scan gave a known identity | `Vault::id_for` — never look a fresh file up by path | `vault/src/vault.rs` |
+| Make a create or a rename fail | `MemFs::make_uncreatable` | `vault/src/mem_fs.rs` |
+| What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
+| One line of editable text, IME and dead keys included | `NameField`, emitting `Confirmed` / `Cancelled` | `app/src/field.rs` |
+| The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar.rs` |
+| Why a typed name was refused, as a sentence | `Rejection::message` | `app/src/sidebar.rs` |
+| A UTF-16 range, at the protocol edge | `Buffer::to_utf16_range` / `from_utf16_range` | `text/src/buffer.rs` |
+| The range an IME edit applies to, and applying one | `EditorState::target_range` / `replace_in_range` / `mark_and_replace_in_range` | `editor/src/state.rs` |
+| Give the vault tree focus, in a test or a scene | `AppShell::tree_focus_handle` — `Focusable` returns the editor's once a note is open | `app/src/shell.rs` |
+| Focus the tree from the shot runner | `Stage::focus_tree` | `app/src/shot/stage.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
+| A refused name's colour | `theme::rejected_text` | `app/src/theme.rs` |
 | The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
 | The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |
