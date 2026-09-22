@@ -462,10 +462,10 @@ change that introduces something reusable.
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
 | Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
 | Model an external writer in a test | `MemFs::insert_file` — it keeps the path's identity, as a second process rewriting in place does | `vault/src/mem_fs.rs` |
-| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
-| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
-| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
-| Make a delete fail | `MemFs::make_untrashable` — removing the file does not: the write a delete preempts recreates it | `vault/src/mem_fs.rs` |
+| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs/faults.rs` |
+| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs/faults.rs` |
+| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs/faults.rs` |
+| Make a delete fail | `MemFs::make_untrashable` — removing the file does not: the write a delete preempts recreates it | `vault/src/mem_fs/faults.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
@@ -499,7 +499,7 @@ change that introduces something reusable.
 | Move one, never replacing a *different* file | `Fs::rename` — asks the destination's inode on `EEXIST`, so a case-only rename is a rename | `vault/src/fs.rs` |
 | Move a note to the platform trash | `Fs::trash` | `vault/src/fs.rs` |
 | The `EntryId` a scan gave a known identity | `Vault::id_for` — never look a fresh file up by path | `vault/src/vault.rs` |
-| Make a create or a rename fail | `MemFs::make_uncreatable` | `vault/src/mem_fs.rs` |
+| Make a create or a rename fail | `MemFs::make_uncreatable` | `vault/src/mem_fs/faults.rs` |
 | What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
 | One line of editable text, IME and dead keys included | `NameField`, emitting `Confirmed` / `Cancelled` | `app/src/field.rs` |
 | The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar.rs` |
