@@ -2,7 +2,7 @@
 //! font metrics, or an entity handle; anything else belongs in `inkra-editor`.
 
 pub(crate) mod actions;
-mod element;
+pub(crate) mod element;
 mod input;
 mod scroll;
 #[cfg(test)]

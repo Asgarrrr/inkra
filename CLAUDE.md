@@ -418,7 +418,8 @@ change that introduces something reusable.
 | Whether a clipboard item is a whole line, and so inserts above the caret's | `Copied::whole_line` — carried, never inferred from a trailing newline | `editor/src/state.rs` |
 | CRLF and lone CR to LF, on every door into a buffer — a load, and a paste | `inkra_vault::normalize_line_endings` | `vault/src/fs.rs` |
 | Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
-| Any pixel ↔ offset conversion | `DocumentLayout` | `app/src/editor/element.rs` |
+| Any pixel ↔ offset conversion — shared by the editor and `NameField`, which shapes through the same `shape_document` | `DocumentLayout` | `app/src/editor/element.rs` |
+| Paint a shaped layout | `DocumentLayout::paint` | `app/src/editor/element.rs` |
 | Scroll a line into view | `EditorView::reveal_line` | `app/src/editor/mod.rs` |
 | The geometry behind it, window-free | `scroll::reveal` | `app/src/editor/scroll.rs` |
 | Resolve up/down against metrics | `EditorView::move_vertically` | `app/src/editor/mod.rs` |
