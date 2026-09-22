@@ -21,8 +21,8 @@ pub(super) struct EditState {
     pub(super) target: Option<EntryId>,
     /// The folder the new entry goes in, or the vault root. Also the folder a
     /// rename's collision check looks in, which is the one it moves within.
-    pub(super) parent: Option<EntryId>,
-    pub(super) kind: Kind,
+    parent: Option<EntryId>,
+    kind: Kind,
     /// Index in `visible` where the field's row is drawn, and the indent it
     /// takes. `rebuild` moves `at` to follow the tree; `depth` is fixed at the
     /// gesture, because a new entry's indent is decided by where it will land
@@ -39,7 +39,7 @@ pub(super) struct EditState {
     /// — it returns without a word when the name is taken.
     pub(super) rejected: Option<Rejection>,
     /// Confirm and cancel. Held, because dropping a `Subscription` cancels it.
-    pub(super) _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 2],
 }
 
 /// Why a typed name was refused.
@@ -152,17 +152,36 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (parent, at, depth) = self.insertion_point(cx);
-
-        let (field, subscriptions) = Self::open_field("", cx);
+        let field = self.open_create(kind, cx);
         window.focus(&field.focus_handle(cx), cx);
+    }
+
+    /// `start_creating` without the focus move, which is the only part that
+    /// needs a `Window`.
+    pub(super) fn open_create(&mut self, kind: Kind, cx: &mut Context<Self>) -> Entity<NameField> {
+        let placement = self.insertion_point(cx);
+        self.open_edit(None, placement, kind, "", cx)
+    }
+
+    /// Installs the field both gestures type into, and scrolls it into view.
+    /// `placement` is `(parent, row index, indent)`, as `insertion_point`
+    /// returns it.
+    fn open_edit(
+        &mut self,
+        target: Option<EntryId>,
+        (parent, at, depth): (Option<EntryId>, usize, usize),
+        kind: Kind,
+        initial: &str,
+        cx: &mut Context<Self>,
+    ) -> Entity<NameField> {
+        let (field, subscriptions) = Self::open_field(initial, cx);
         self.editing = Some(EditState {
-            target: None,
+            target,
             parent,
             kind,
             at,
             depth,
-            field,
+            field: field.clone(),
             rejected: None,
             _subscriptions: subscriptions,
         });
@@ -170,6 +189,7 @@ impl Sidebar {
         // dispatch node, so the field would take no keystrokes at all.
         self.scroll.scroll_to_item(at, ScrollStrategy::Center);
         cx.notify();
+        field
     }
 
     /// The field both gestures use, and the two subscriptions that end it.
@@ -198,32 +218,22 @@ impl Sidebar {
     /// The whole name is selected, so typing replaces it and an arrow key still
     /// reaches the old one — which is what a user correcting a typo wants.
     pub(super) fn rename(&mut self, _: &Rename, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing.is_some() {
-            return;
+        if let Some(field) = self.open_rename(cx) {
+            window.focus(&field.focus_handle(cx), cx);
         }
-        let Some(id) = self.selected else {
-            return;
-        };
-        let Some(at) = self.index_of(id) else {
-            return;
-        };
-        let row = self.visible[at].clone();
+    }
 
+    /// `rename` without the focus move. `None` when there is nothing to rename
+    /// or a name is already being typed.
+    pub(super) fn open_rename(&mut self, cx: &mut Context<Self>) -> Option<Entity<NameField>> {
+        if self.editing.is_some() {
+            return None;
+        }
+        let id = self.selected?;
+        let at = self.index_of(id)?;
+        let row = self.visible[at].clone();
         let parent = self.parent_of(&row);
-        let (field, subscriptions) = Self::open_field(&row.name, cx);
-        window.focus(&field.focus_handle(cx), cx);
-        self.editing = Some(EditState {
-            target: Some(id),
-            parent,
-            kind: row.kind,
-            at,
-            depth: row.depth,
-            field,
-            rejected: None,
-            _subscriptions: subscriptions,
-        });
-        self.scroll.scroll_to_item(at, ScrollStrategy::Center);
-        cx.notify();
+        Some(self.open_edit(Some(id), (parent, at, row.depth), row.kind, &row.name, cx))
     }
 
     /// Where a new entry goes, as `(parent, row index, indent)`.
