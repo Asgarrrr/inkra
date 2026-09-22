@@ -167,9 +167,7 @@ fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
 fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
-    // The click opened the note and handed focus to the editor, so the tree's
-    // own bindings no longer resolve. A scene showing one has to ask for the
-    // tree back.
+    // The click handed focus to the editor; see `Stage::focus_tree`.
     stage.focus_tree(window);
     stage.keys(window, "cmd-n");
     stage.keys(window, "d r a f t");
@@ -181,9 +179,7 @@ fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
 fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
-    // The click opened the note and handed focus to the editor, so the tree's
-    // own bindings no longer resolve. A scene showing one has to ask for the
-    // tree back.
+    // The click handed focus to the editor; see `Stage::focus_tree`.
     stage.focus_tree(window);
     stage.keys(window, "cmd-n");
     stage.keys(window, "i n d e x enter");
@@ -196,9 +192,7 @@ fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
 fn sidebar_renaming(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
-    // The click opened the note and handed focus to the editor, so the tree's
-    // own bindings no longer resolve. A scene showing one has to ask for the
-    // tree back.
+    // The click handed focus to the editor; see `Stage::focus_tree`.
     stage.focus_tree(window);
     stage.keys(window, "enter");
     window
