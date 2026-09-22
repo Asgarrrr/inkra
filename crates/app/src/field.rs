@@ -218,6 +218,16 @@ impl Render for NameField {
     }
 }
 
+/// A newline can reach either input-handler method rather than arriving as a
+/// key press — pasted, or committed (plain or still composing) by an input
+/// method. The field is one line, so it takes the text without it rather than
+/// growing a second row nothing can show. Replacing `'\n'` with `' '` is one
+/// UTF-16 unit for one, so a `new_selected_range_utf16` computed against
+/// `new_text` stays valid against the flattened text.
+fn flatten_newlines(text: &str) -> String {
+    text.replace('\n', " ")
+}
+
 impl EntityInputHandler for NameField {
     fn text_for_range(
         &mut self,
@@ -263,10 +273,7 @@ impl EntityInputHandler for NameField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A newline can arrive here rather than as a key press — pasted, or
-        // committed by an input method. The field is one line, so it takes the
-        // text without it rather than growing a second row nothing can show.
-        let flattened = new_text.replace('\n', " ");
+        let flattened = flatten_newlines(new_text);
         let now = Instant::now();
         self.edit_buffer(cx, |state, buffer| {
             state.replace_in_range(buffer, now, range_utf16.as_ref(), &flattened);
@@ -281,13 +288,14 @@ impl EntityInputHandler for NameField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let flattened = flatten_newlines(new_text);
         let now = Instant::now();
         self.edit_buffer(cx, |state, buffer| {
             state.mark_and_replace_in_range(
                 buffer,
                 now,
                 range_utf16.as_ref(),
-                new_text,
+                &flattened,
                 new_selected_range_utf16,
             );
         });
@@ -669,6 +677,23 @@ mod tests {
         visual.update(|window, cx| {
             view.update(cx, |field, cx| {
                 field.replace_text_in_range(None, "one\ntwo", window, cx);
+            });
+        });
+
+        assert_eq!(text(&view, cx), "one two");
+    }
+
+    /// A newline can also arrive as marked (composing) text — an input method
+    /// commits a multi-line reading before the field sees a key press. The
+    /// field is one line, so the fix that flattens a paste must flatten this
+    /// path too.
+    #[gpui::test]
+    fn a_marked_newline_does_not_give_the_field_a_second_line(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "");
+
+        visual.update(|window, cx| {
+            view.update(cx, |field, cx| {
+                field.replace_and_mark_text_in_range(None, "one\ntwo", None, window, cx);
             });
         });
 
