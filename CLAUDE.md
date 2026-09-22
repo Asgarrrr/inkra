@@ -458,9 +458,6 @@ change that introduces something reusable.
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
 | A failed read or write | `VaultError`, `inkra_vault::Result` | `vault/src/fs.rs` |
-| Create a note or a folder | `Fs::create`, taking a `Kind` | `vault/src/fs.rs` |
-| Move one, never replacing a different file | `Fs::rename` | `vault/src/fs.rs` |
-| Move a note to the platform trash | `Fs::trash` | `vault/src/fs.rs` |
 | Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
 | Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
@@ -469,7 +466,6 @@ change that introduces something reusable.
 | Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
 | Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
 | Make a delete fail | `MemFs::make_untrashable` — removing the file does not: the write a delete preempts recreates it | `vault/src/mem_fs.rs` |
-| What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |

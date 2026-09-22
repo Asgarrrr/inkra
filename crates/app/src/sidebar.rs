@@ -217,6 +217,34 @@ impl Sidebar {
                 }
             }
         }
+        // A walk that landed while a name is being typed can leave the field's
+        // row past the end of the tree — an external delete is the way there.
+        // An unrendered row has no dispatch node, so gpui falls back to the
+        // root (`window.rs:6244-6251`) and every keystroke, `escape` included,
+        // vanishes with no panic and no feedback. Clamped and scrolled back
+        // rather than closed: the user is mid-gesture, and losing what they
+        // typed is worse than moving the row.
+        if let Some(target) = self.editing.as_ref().map(|edit| edit.target) {
+            // A rename follows its row by identity, so a walk that reordered
+            // the tree keeps the field over the entry it names. A target that
+            // is gone ends the gesture: it was deleted from outside, and there
+            // is nothing left to rename. A create has no target and only needs
+            // its index to stay one the list draws.
+            let at = match target {
+                Some(id) => self.index_of(id),
+                None => self
+                    .editing
+                    .as_ref()
+                    .map(|edit| edit.at.min(self.visible.len())),
+            };
+            match (at, self.editing.as_mut()) {
+                (Some(at), Some(edit)) => {
+                    edit.at = at;
+                    self.scroll.scroll_to_item(at, ScrollStrategy::Center);
+                }
+                _ => self.editing = None,
+            }
+        }
         cx.notify();
     }
 
@@ -241,8 +269,15 @@ impl Sidebar {
     /// Moves the selection by one visible row, clamped at both ends rather than
     /// wrapping: a tree that jumps from the last note back to the first loses
     /// the user's place.
+    ///
+    /// Does nothing while a name is being typed. The field is a child of this
+    /// view's dispatch node and claims neither arrow, so without the guard the
+    /// key bubbles up here and moves the selection out from under the gesture
+    /// in flight. `trash` and `rename` carry the same guard, and `cmd-backspace`
+    /// is the one that bites: it is the macOS delete-to-line-start gesture, so
+    /// a user correcting a name would be asked whether to delete the row.
     fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if self.visible.is_empty() {
+        if self.editing.is_some() || self.visible.is_empty() {
             return;
         }
         let last = self.visible.len() - 1;
@@ -254,6 +289,58 @@ impl Sidebar {
         };
         self.selected = self.visible.get(next).map(|row| row.id);
         cx.notify();
+    }
+
+    /// Selects a row without a window, for a test that has none.
+    #[cfg(test)]
+    pub(crate) fn select_for_test(&mut self, id: EntryId, cx: &mut Context<Self>) {
+        self.selected = Some(id);
+        cx.notify();
+    }
+
+    /// Opens a rename field without focusing it. `#[cfg(test)]`: the real entry
+    /// point needs a `Window`, and these tests exercise the rebuild rather than
+    /// the gesture.
+    #[cfg(test)]
+    pub(crate) fn rename_for_test(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected else { return };
+        let Some(at) = self.index_of(id) else { return };
+        let row = self.visible[at].clone();
+        let parent = self.parent_of(&row);
+        let (field, subscriptions) = Self::open_field(&row.name, cx);
+        self.editing = Some(EditState {
+            target: Some(id),
+            parent,
+            kind: row.kind,
+            at,
+            depth: row.depth,
+            field,
+            rejected: None,
+            _subscriptions: subscriptions,
+        });
+    }
+
+    /// The same, for a create.
+    #[cfg(test)]
+    pub(crate) fn create_for_test(&mut self, cx: &mut Context<Self>) {
+        let (parent, at, depth) = self.insertion_point(cx);
+        let (field, subscriptions) = Self::open_field("", cx);
+        self.editing = Some(EditState {
+            target: None,
+            parent,
+            kind: Kind::Note,
+            at,
+            depth,
+            field,
+            rejected: None,
+            _subscriptions: subscriptions,
+        });
+    }
+
+    /// Where the field's row sits, for the shrink tests.
+    #[cfg(test)]
+    pub(crate) fn field_row(&self) -> usize {
+        self.editing.as_ref().map_or(0, |edit| edit.at)
     }
 
     /// Whether a name is being typed. `#[cfg(test)]` for the same reason as
@@ -295,6 +382,9 @@ impl Sidebar {
     /// because trashing takes the file as it is on disk and the editor's newer
     /// text is not recoverable from the Trash.
     fn trash(&mut self, _: &Trash, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
         let Some(id) = self.selected else {
             return;
         };
@@ -418,6 +508,9 @@ impl Sidebar {
     /// The whole name is selected, so typing replaces it and an arrow key still
     /// reaches the old one — which is what a user correcting a typo wants.
     fn rename(&mut self, _: &Rename, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
         let Some(id) = self.selected else {
             return;
         };
@@ -843,6 +936,72 @@ mod tests {
         let window = cx.add_window(move |_, cx| Sidebar::new(notes, cx));
         let sidebar = window.root(cx).expect("root view");
         (sidebar, VisualTestContext::from_window(window.into(), cx))
+    }
+
+    /// A walk landing while a name is typed can leave the field's row past the
+    /// end of the tree. An unrendered row has no dispatch node, so the field
+    /// would take no keystrokes at all — not even `escape`.
+    #[gpui::test]
+    fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        fs.insert_file("/vault/c.md", "gamma");
+        let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let last = row(&sidebar, cx, "c");
+        sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last.id, cx));
+        sidebar.update(cx, Sidebar::rename_for_test);
+        assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+
+        // Two notes vanish from outside, so the field's row is past the end.
+        fs.remove(Path::new("/vault/b.md"));
+        fs.remove(Path::new("/vault/c.md"));
+        let vault = notes
+            .read_with(cx, |notes, _| notes.vault().cloned())
+            .expect("a vault");
+        let children = futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault")))
+            .expect("collect");
+        vault.update(cx, |vault, cx| {
+            vault.apply(children);
+            cx.notify();
+        });
+
+        assert!(
+            !sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
+            "the renamed entry is gone, so the gesture has no target left"
+        );
+    }
+
+    /// The same shrink, with a create: the field has no target to lose, so it
+    /// stays open — and its row has to be one the list still draws.
+    #[gpui::test]
+    fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let last = row(&sidebar, cx, "b");
+        sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last.id, cx));
+        sidebar.update(cx, Sidebar::create_for_test);
+
+        fs.remove(Path::new("/vault/b.md"));
+        let vault = notes
+            .read_with(cx, |notes, _| notes.vault().cloned())
+            .expect("a vault");
+        let children = futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault")))
+            .expect("collect");
+        vault.update(cx, |vault, cx| {
+            vault.apply(children);
+            cx.notify();
+        });
+
+        assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+        assert!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.field_row() < sidebar.row_count()),
+            "the field's row has to be one the list draws"
+        );
     }
 
     /// The conflict file's only route to the user, asserted where the user

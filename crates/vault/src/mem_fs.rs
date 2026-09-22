@@ -34,6 +34,11 @@ struct State {
     /// every write share one mtime, which made a stale stamp unreachable and
     /// conflict detection untestable.
     clock: u64,
+    /// Every `create` or `rename` **into** one of these paths fails. Models a
+    /// directory the process cannot write into, which `unwritable` cannot:
+    /// that one fails a write to a file that already exists, and neither a
+    /// create nor a rename has a file at the destination yet.
+    uncreatable: BTreeSet<PathBuf>,
     /// The next `load` of each of these paths parks until its `Gate` is
     /// released or dropped. See `MemFs::block_load`.
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
@@ -174,6 +179,14 @@ impl MemFs {
             .trashed
             .get(path)
             .map(|(text, _, _)| text.clone())
+    }
+
+    /// Every `create` or `rename` landing on `path` fails from now on.
+    ///
+    /// Without it nothing can fail either one, and `RenameFailed` can be
+    /// deleted from the rename path with the whole suite still green.
+    pub fn make_uncreatable(&self, path: impl Into<PathBuf>) {
+        self.state().uncreatable.insert(path.into());
     }
 
     /// Parks the next `load` of `path` until the returned gate is released or
@@ -363,6 +376,9 @@ impl Fs for MemFs {
 
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         let mut state = self.state();
+        if state.uncreatable.contains(path) {
+            return Err(permission_denied(path));
+        }
         if state.files.contains_key(path) || state.dirs.contains_key(path) {
             return Err(already_exists(path));
         }
@@ -391,6 +407,9 @@ impl Fs for MemFs {
     /// one call on the directory entry and never touches the children's inodes.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let mut state = self.state();
+        if state.uncreatable.contains(to) {
+            return Err(permission_denied(to));
+        }
         // Byte equality, which on this fake is the *only* way two paths name one
         // file: the maps are keyed by raw `PathBuf`. A real volume also folds
         // case and Unicode normalization, and `RealFs::rename` answers that by

@@ -485,6 +485,184 @@ mod tests {
         );
     }
 
+    /// A delete queued behind a rename must still find the note.
+    ///
+    /// Both resolve their path inside the chain link rather than at issue time.
+    /// Capturing it up front makes the delete look for a name that has already
+    /// moved: it reports `TrashFailed` and the note survives a deletion the
+    /// user confirmed — the quiet half of the failure the chain exists for.
+    #[gpui::test]
+    async fn a_delete_queued_behind_a_rename_still_finds_the_note(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+
+        // Issued in one turn, so the delete is appended behind the rename.
+        let (renamed, trashed) = notes.update(cx, |notes, cx| {
+            (notes.rename(a, "plan", cx), notes.trash(a, cx))
+        });
+        visual.run_until_parked();
+
+        assert!(renamed.await, "the rename lands first");
+        assert!(
+            trashed.await,
+            "and the delete finds the note under its new name"
+        );
+        assert_eq!(vault_names(&notes, cx), ["b.md"]);
+        assert_eq!(
+            fs.trashed(Path::new("/vault/plan.md")).as_deref(),
+            Some("alpha")
+        );
+    }
+
+    /// The same shape, twice over: the second rename must act on where the
+    /// first one put the note.
+    #[gpui::test]
+    async fn two_renames_in_one_turn_both_land(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+
+        let (first, second) = notes.update(cx, |notes, cx| {
+            (notes.rename(a, "plan", cx), notes.rename(a, "final", cx))
+        });
+        visual.run_until_parked();
+
+        assert!(first.await);
+        assert!(
+            second.await,
+            "the second rename resolves the path the first produced"
+        );
+        assert_eq!(vault_names(&notes, cx), ["b.md", "final.md"]);
+    }
+
+    /// A failed rename says so. Without the emit this passes with `RenameFailed`
+    /// deleted from the write path, which is what the event exists to prevent.
+    #[gpui::test]
+    async fn a_failed_rename_is_reported(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+        fs.make_uncreatable("/vault/plan.md");
+
+        let failed = Rc::new(RefCell::new(Vec::new()));
+        let _guard = cx.update(|cx| {
+            let failed = Rc::clone(&failed);
+            cx.subscribe(&notes, move |_, event: &RenameFailed, _| {
+                failed.borrow_mut().push(*event);
+            })
+        });
+
+        assert!(
+            !notes
+                .update(cx, |notes, cx| notes.rename(a, "plan", cx))
+                .await
+        );
+        visual.run_until_parked();
+
+        assert_eq!(*failed.borrow(), [RenameFailed(a)]);
+        assert_eq!(
+            vault_names(&notes, cx),
+            ["a.md", "b.md"],
+            "the note did not move"
+        );
+    }
+
+    /// Nothing in the UI can reach this — every row comes from the vault — but
+    /// `current` can be `DETACHED`, and a caller reading it as the target must
+    /// not move a file the vault does not list. `trash` has the same guard.
+    #[gpui::test]
+    async fn renaming_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+
+        assert!(
+            !notes
+                .update(cx, |notes, cx| notes.rename(EntryId::DETACHED, "plan", cx))
+                .await
+        );
+        visual.run_until_parked();
+
+        assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+    }
+
+    /// While a name is being typed the tree's own keys must reach no handler.
+    ///
+    /// `cmd-backspace` is the macOS delete-to-line-start gesture, so a user
+    /// correcting a typed name would otherwise be asked whether to move the row
+    /// under the field to the Trash. The arrows are the same defect, quieter:
+    /// they move the selection out from under the gesture in flight.
+    #[gpui::test]
+    fn the_trees_keys_do_nothing_while_a_name_is_typed(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        visual.simulate_keystrokes("down enter");
+        visual.run_until_parked();
+        let selected = sidebar.read_with(cx, |sidebar, _| sidebar.selected());
+
+        visual.simulate_keystrokes("down");
+        visual.run_until_parked();
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+            selected,
+            "an arrow must not move the selection out from under the field"
+        );
+
+        visual.simulate_keystrokes("cmd-backspace");
+        visual.run_until_parked();
+        assert!(
+            !cx.has_pending_prompt(),
+            "cmd-backspace edits the name; it must not offer to delete the row"
+        );
+        assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    }
+
+    /// `up` and the field's own movement and deletion keys, each dispatched
+    /// rather than called: a handler is a thin delegation, so only a real
+    /// keystroke proves the binding, its context and the `actions!` mapping.
+    #[gpui::test]
+    fn the_remaining_bindings_fire(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        // `up` from nothing selected lands on the last row, then steps back.
+        visual.simulate_keystrokes("up");
+        visual.run_until_parked();
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+            Some(entry_id(&notes, cx, "b"))
+        );
+        visual.simulate_keystrokes("up");
+        visual.run_until_parked();
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+            Some(entry_id(&notes, cx, "a")),
+            "up moves the selection towards the top"
+        );
+
+        // In the field: `home`, `delete`, `end`, and a shifted selection.
+        visual.simulate_keystrokes("enter");
+        visual.run_until_parked();
+        visual.simulate_keystrokes("home delete");
+        visual.run_until_parked();
+        visual.simulate_keystrokes("end shift-left X");
+        visual.run_until_parked();
+        // `a` → home+delete removes nothing visible on a one-char name, so type
+        // a longer one first would obscure which key acted. Confirm instead.
+        visual.simulate_keystrokes("enter");
+        visual.run_until_parked();
+
+        assert!(
+            vault_names(&notes, cx).contains(&"X.md".to_owned()),
+            "home, delete, end and shift-left all reached the field: got {:?}",
+            vault_names(&notes, cx)
+        );
+    }
+
     /// Names the vault holds now, in tree order.
     fn vault_names(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Vec<String> {
         notes.update(cx, |notes, cx| {
@@ -694,6 +872,9 @@ mod tests {
     use crate::bootstrap::{Launch, root};
     use crate::keymap::key_bindings;
     use crate::sidebar::row_center;
+    use crate::vault::RenameFailed;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     /// Rooted at `AppShell`, not at the `Sidebar`: that puts the sidebar under
     /// its real `SIDEBAR_WIDTH` parent, and it is the only way to reach the subscription
