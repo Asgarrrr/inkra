@@ -62,6 +62,13 @@ pub(crate) fn placeholder_text() -> Rgba {
     rgb(0x6a6a6a)
 }
 
+/// A refused name's reason, under the field that produced it. Warm rather than
+/// dim, unlike every other chrome colour here: it is the one line in the window
+/// that has to be read before the user types again.
+pub(crate) fn rejected_text() -> Rgba {
+    rgb(0xe08a7a)
+}
+
 /// Translucent: it paints over the text rather than under it.
 pub(crate) fn selection() -> Rgba {
     rgba(0x3311ff55)

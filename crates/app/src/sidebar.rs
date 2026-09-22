@@ -6,12 +6,14 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use gpui::{
-    App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, PromptLevel, Render, Styled, Subscription,
-    Window, actions, div, px, uniform_list,
+    App, AppContext as _, Context, Div, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, PromptLevel, Render,
+    ScrollStrategy, Styled, Subscription, UniformListScrollHandle, Window, actions, div, px,
+    uniform_list,
 };
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::{EntryId, Kind, NameProblem};
 
+use crate::field::{Cancelled, Confirmed, NameField};
 use crate::theme;
 use crate::vault::NoteStore;
 
@@ -26,6 +28,19 @@ actions!(
         Trash,
         SelectPrev,
         SelectNext,
+    ]
+);
+
+actions!(
+    vault_tree,
+    [
+        /// Opens a field for a new note beside the tree's selection.
+        ///
+        /// Bound at the `AppShell` context and handled there, so it fires with
+        /// the editor focused. `Sidebar::start_creating` is what it calls.
+        NewNote,
+        /// The same, for a folder.
+        NewFolder,
     ]
 );
 
@@ -58,6 +73,16 @@ pub(crate) struct Sidebar {
     focus_handle: FocusHandle,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
+    /// A name being typed, and where its row sits. `None` the rest of the time.
+    editing: Option<EditState>,
+    /// Scrolls the field's row into view when one opens.
+    ///
+    /// Load-bearing, not polish. `uniform_list` renders only the visible range
+    /// (`elements/uniform_list.rs:479-489`), and gpui does not blur a focused
+    /// handle whose element stopped being drawn: dispatch falls back to the
+    /// root node (`window.rs:6244-6251`), so every keystroke — the characters,
+    /// Confirm, Cancel — would vanish with no panic and no feedback.
+    scroll: UniformListScrollHandle,
     /// Rebuilds `visible` when the vault's contents change. Never read; holding
     /// it is the point, because dropping a `Subscription` cancels it.
     ///
@@ -76,6 +101,66 @@ struct Row {
     name: String,
 }
 
+/// A name being typed into the tree.
+///
+/// One struct for one gesture, as Zed's `EditState` is
+/// (`project_panel/src/project_panel.rs:239-256`). It holds only what the
+/// confirm needs, because the text itself lives in the field.
+struct EditState {
+    /// The folder the new entry goes in, or the vault root.
+    parent: Option<EntryId>,
+    kind: Kind,
+    /// Index in `visible` where the field's row is drawn, and the indent it
+    /// takes. Fixed when the gesture starts: a rescan landing mid-typing would
+    /// otherwise move the field out from under the caret.
+    at: usize,
+    depth: usize,
+    field: Entity<NameField>,
+    /// Why the last `Confirm` was refused. Cleared by the next one.
+    ///
+    /// Set at confirm rather than recomputed per keystroke. Zed validates live
+    /// (`project_panel.rs:2012-2080`), which amortises over a much larger
+    /// surface than one gesture ended by one keystroke. What the message must
+    /// not do is disappear silently, which is the failure Zed's own confirm has
+    /// — it returns without a word when the name is taken.
+    rejected: Option<Rejection>,
+    /// Confirm and cancel. Held, because dropping a `Subscription` cancels it.
+    _subscriptions: [Subscription; 2],
+}
+
+/// Why a typed name was refused.
+///
+/// `NameProblem` plus the one question `vault` cannot answer: whether the name
+/// is taken. That needs the live listing, not a property of a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rejection {
+    Name(NameProblem),
+    Duplicate,
+}
+
+impl Rejection {
+    /// The English. `vault` states the rule; this layer owns the wording.
+    fn message(self) -> &'static str {
+        match self {
+            Self::Name(NameProblem::Empty) => "A name is required.",
+            Self::Name(NameProblem::Separator) => "A name cannot contain / or :.",
+            Self::Name(NameProblem::LeadingDot) => "A name cannot start with a dot.",
+            Self::Name(NameProblem::Reserved) => "That name is reserved.",
+            Self::Name(NameProblem::TooLong) => "That name is too long.",
+            Self::Duplicate => "That name is already taken.",
+        }
+    }
+}
+
+/// The last component of a vault-relative path, as text.
+///
+/// Compared against what `note_file_name` produces, so the collision check sees
+/// `plan` and `plan.md` as one name rather than two.
+fn file_name_of(path: &std::path::Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
 impl Sidebar {
     pub(crate) fn new(notes: Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
         let vault = notes.read(cx).vault().cloned();
@@ -86,6 +171,8 @@ impl Sidebar {
             selected: None,
             focus_handle: cx.focus_handle(),
             visible: Vec::new(),
+            editing: None,
+            scroll: UniformListScrollHandle::default(),
             _vault_changed: watched,
         };
         sidebar.rebuild(cx);
@@ -157,6 +244,25 @@ impl Sidebar {
         };
         self.selected = self.visible.get(next).map(|row| row.id);
         cx.notify();
+    }
+
+    /// Whether a name is being typed. `#[cfg(test)]` for the same reason as
+    /// `selected`: nothing in the UI asks, and an unread method fails
+    /// `-D warnings`.
+    #[cfg(test)]
+    pub(crate) fn is_editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
+    /// Why the last confirm was refused, as the user would read it. Asserting
+    /// the sentence rather than the variant is what stops a rejection being
+    /// reported with the wrong reason.
+    #[cfg(test)]
+    pub(crate) fn rejection_message(&self) -> Option<&'static str> {
+        self.editing
+            .as_ref()
+            .and_then(|edit| edit.rejected)
+            .map(Rejection::message)
     }
 
     /// The row a command would act on. `#[cfg(test)]` and an accessor rather
@@ -240,6 +346,152 @@ impl Sidebar {
             .map(|row| row.id)
     }
 
+    /// Opens an empty field where the new entry will appear.
+    ///
+    /// Called by `AppShell`, never registered as an action here: `NewNote` and
+    /// `NewFolder` bind at the `AppShell` context so they fire with the editor
+    /// focused, and dispatch runs from the focused leaf up its own ancestors
+    /// (`gpui/src/window.rs:6270`). With the editor focused this view is a
+    /// sibling subtree, not an ancestor, so a handler registered here would
+    /// never be reached.
+    ///
+    /// The field goes inside the selection when it is a folder, beside it when
+    /// it is a note, and at the root when nothing is selected. A selected
+    /// folder is expanded first, or the field would be drawn into a subtree
+    /// nobody can see.
+    pub(crate) fn start_creating(
+        &mut self,
+        kind: Kind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (parent, at, depth) = self.insertion_point(cx);
+
+        let field = cx.new(|cx| NameField::new("", cx));
+        let confirmed = cx.subscribe(&field, |sidebar, _, event: &Confirmed, cx| {
+            sidebar.confirm(&event.0, cx);
+        });
+        let cancelled = cx.subscribe(&field, |sidebar, _, _: &Cancelled, cx| {
+            sidebar.editing = None;
+            cx.notify();
+        });
+
+        window.focus(&field.focus_handle(cx), cx);
+        self.editing = Some(EditState {
+            parent,
+            kind,
+            at,
+            depth,
+            field,
+            rejected: None,
+            _subscriptions: [confirmed, cancelled],
+        });
+        // See the field on `Sidebar`: a row outside the rendered range has no
+        // dispatch node, so the field would take no keystrokes at all.
+        self.scroll.scroll_to_item(at, ScrollStrategy::Center);
+        cx.notify();
+    }
+
+    /// Where a new entry goes, as `(parent, row index, indent)`.
+    fn insertion_point(&mut self, cx: &mut Context<Self>) -> (Option<EntryId>, usize, usize) {
+        let Some(selected) = self.selected.and_then(|id| self.index_of(id)) else {
+            return (None, self.visible.len(), 0);
+        };
+        let row = self.visible[selected].clone();
+        if row.kind == Kind::Dir {
+            if !self.expanded.contains(&row.id) {
+                self.toggle(row.id, cx);
+            }
+            // First child of the folder, which is where the tree order puts a
+            // new entry under it.
+            return (Some(row.id), selected + 1, row.depth + 1);
+        }
+        (self.parent_of(&row), selected + 1, row.depth)
+    }
+
+    /// The folder a row lives in: the nearest entry above it one level shallower.
+    /// `None` for a top-level row, which is the vault root.
+    fn parent_of(&self, row: &Row) -> Option<EntryId> {
+        if row.depth == 0 {
+            return None;
+        }
+        self.visible[..self.index_of(row.id)?]
+            .iter()
+            .rev()
+            .find(|above| above.depth == row.depth - 1 && above.kind == Kind::Dir)
+            .map(|above| above.id)
+    }
+
+    /// Validates, then creates. A refused name leaves the field open with the
+    /// reason under it, rather than closing and doing nothing.
+    fn confirm(&mut self, name: &str, cx: &mut Context<Self>) {
+        let Some(edit) = self.editing.as_ref() else {
+            return;
+        };
+        let (parent, kind) = (edit.parent, edit.kind);
+
+        let rejected = inkra_vault::check_name(name)
+            .map(Rejection::Name)
+            .or_else(|| {
+                self.taken(parent, kind, name, cx)
+                    .then_some(Rejection::Duplicate)
+            });
+        if let Some(rejected) = rejected {
+            if let Some(edit) = self.editing.as_mut() {
+                edit.rejected = Some(rejected);
+            }
+            cx.notify();
+            return;
+        }
+
+        self.editing = None;
+        let name = name.to_owned();
+        let created = self
+            .notes
+            .update(cx, |notes, cx| notes.create(parent, kind, &name, cx));
+        cx.spawn(async move |sidebar, cx| {
+            let Some(id) = created.await else { return };
+            let _ = sidebar.update(cx, |sidebar, cx| {
+                // The rescan the create awaited has already rebuilt `visible`,
+                // so the row exists to be selected.
+                sidebar.selected = Some(id);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Whether `parent` already holds an entry by this name.
+    ///
+    /// Answered here rather than in `vault`: it is a question about the live
+    /// listing, not a property of a path. Compared on the file name a note
+    /// would actually get, so `plan` and `plan.md` are one collision.
+    fn taken(&self, parent: Option<EntryId>, kind: Kind, name: &str, cx: &App) -> bool {
+        let wanted = match kind {
+            Kind::Note => inkra_vault::note_file_name(name),
+            Kind::Dir => name.trim().to_owned(),
+        };
+        let Some(vault) = self.notes.read(cx).vault() else {
+            return false;
+        };
+        let vault = vault.read(cx);
+        let Some(parent_path) = parent
+            .and_then(|id| vault.entry(id))
+            .map(|e| e.path.clone())
+        else {
+            // The root: a top-level entry is one with no parent component.
+            return vault.entries().any(|entry| {
+                entry.path.depth() == 0 && file_name_of(entry.path.as_path()) == wanted
+            });
+        };
+        vault.entries().any(|entry| {
+            entry.path.depth() == parent_path.depth() + 1
+                && entry.path.starts_with(&parent_path)
+                && file_name_of(entry.path.as_path()) == wanted
+        })
+    }
+
     fn select_prev(&mut self, _: &SelectPrev, _window: &mut Window, cx: &mut Context<Self>) {
         self.step(-1, cx);
     }
@@ -259,9 +511,45 @@ impl Sidebar {
         format!("{}{dot}", row.name)
     }
 
-    /// `cx.processor` re-enters the sidebar entity here
-    /// (`gpui/src/app/context.rs:260-267`); that is the only reason
-    /// `cx.listener` is reachable from `uniform_list`'s `&mut App` closure.
+    /// The field's row: the same box as any other, so the pitch does not move.
+    ///
+    /// `uniform_list` measures every row from item 0
+    /// (`elements/uniform_list.rs:658-680`), so a field even a pixel taller
+    /// would misplace every row below it — and the click tests that pin the
+    /// pitch would start failing for a reason that has nothing to do with them.
+    fn render_field(edit: &EditState) -> Div {
+        let depth = f32::from(u8::try_from(edit.depth).unwrap_or(u8::MAX));
+        div()
+            .flex()
+            .flex_row()
+            .w_full()
+            .text_size(theme::UI_TEXT_SIZE)
+            .line_height(theme::UI_LINE_HEIGHT)
+            .pl(INDENT_BASE + INDENT_STEP * depth)
+            .bg(theme::selected_row_background())
+            .child(edit.field.clone())
+    }
+
+    /// One row per visible entry, plus the field's when a name is being typed.
+    ///
+    /// The field occupies an index of its own rather than replacing a row, so
+    /// creating never hides the entry it was started from.
+    fn row_at(&self, ix: usize) -> Option<Row> {
+        let Some(edit) = self.editing.as_ref() else {
+            return self.visible.get(ix).cloned();
+        };
+        match ix.cmp(&edit.at) {
+            std::cmp::Ordering::Less => self.visible.get(ix).cloned(),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => self.visible.get(ix - 1).cloned(),
+        }
+    }
+
+    /// How many rows the list draws: the tree, plus the field's own.
+    fn row_count(&self) -> usize {
+        self.visible.len() + usize::from(self.editing.is_some())
+    }
+
     fn render_rows(
         &mut self,
         range: Range<usize>,
@@ -269,64 +557,78 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Vec<Div> {
         range
-            .filter_map(|ix| self.visible.get(ix).cloned())
-            .map(|row| {
-                // Reading inside the draw is what repaints the dot; no
-                // `cx.observe` needed and `Entity::cached` would break it
-                // (`app.rs:2789-2823`, `view.rs:488`).
-                let label = self.row_label(&row, cx);
-                // `Vault::scan` stops at depth 64, so nothing saturates.
-                let depth = f32::from(u8::try_from(row.depth).unwrap_or(u8::MAX));
-                // `FluentBuilder::when` would read better, but gpui keeps that
-                // trait private in this build (`gpui.rs:61`, `:163`).
-                let background = if self.selected == Some(row.id) {
-                    theme::selected_row_background()
-                } else {
-                    theme::sidebar_background()
+            .map(|ix| {
+                let Some(row) = self.row_at(ix) else {
+                    // Only the field's index yields `None`, and only while one
+                    // is open, so this cannot be reached without an `EditState`.
+                    return self.editing.as_ref().map_or_else(div, Self::render_field);
                 };
-                div()
-                    .flex()
-                    .flex_row()
-                    // Load-bearing: an `auto` width is clickable only where the
-                    // text reaches (`elements/uniform_list.rs:508-510`).
-                    .w_full()
-                    // No explicit height: the row *is* its line box, so it
-                    // cannot clip its own text however the type is set.
-                    //
-                    // That identity is also the only way the type statement
-                    // below is under test. A fixed height would hold the row
-                    // pitch at 22 px whatever the text did inside it, and a
-                    // deleted `text_size`/`line_height` pair would silently
-                    // restore the clipping this file used to have — gpui's
-                    // default line box is `phi()` on a 16 px default, 25.89 px.
-                    // Tied to the pitch, that deletion moves every row, and
-                    // `a_click_far_down_the_list_lands_on_the_row_it_names`
-                    // fails. Pixels the eye would catch become pixels the suite
-                    // catches.
-                    .text_size(theme::UI_TEXT_SIZE)
-                    .line_height(theme::UI_LINE_HEIGHT)
-                    .pl(INDENT_BASE + INDENT_STEP * depth)
-                    // Load-bearing: row height is measured from item 0 alone
-                    // (`elements/uniform_list.rs:658-680`), so a wrapping
-                    // filename overflows its row.
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_color(theme::sidebar_text())
-                    .bg(background)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |sidebar, _event, window, cx| {
-                            // Focus first, so the tree's own bindings resolve
-                            // from the very next keystroke. Straight to the
-                            // handle rather than through `Focusable`, which is
-                            // what `EditorView::on_mouse_down` already does.
-                            window.focus(&sidebar.focus_handle, cx);
-                            sidebar.activate(&row, cx);
-                        }),
-                    )
-                    .child(label)
+                self.render_row(&row, cx)
             })
             .collect()
+    }
+
+    /// `cx.processor` re-enters the sidebar entity in `render_rows`
+    /// (`gpui/src/app/context.rs:260-267`); that is the only reason
+    /// `cx.listener` is reachable from `uniform_list`'s `&mut App` closure.
+    fn render_row(&self, row: &Row, cx: &mut Context<Self>) -> Div {
+        let row = row.clone();
+        {
+            // Reading inside the draw is what repaints the dot; no
+            // `cx.observe` needed and `Entity::cached` would break it
+            // (`app.rs:2789-2823`, `view.rs:488`).
+            let label = self.row_label(&row, cx);
+            // `Vault::scan` stops at depth 64, so nothing saturates.
+            let depth = f32::from(u8::try_from(row.depth).unwrap_or(u8::MAX));
+            // `FluentBuilder::when` would read better, but gpui keeps that
+            // trait private in this build (`gpui.rs:61`, `:163`).
+            let background = if self.selected == Some(row.id) {
+                theme::selected_row_background()
+            } else {
+                theme::sidebar_background()
+            };
+            div()
+                .flex()
+                .flex_row()
+                // Load-bearing: an `auto` width is clickable only where the
+                // text reaches (`elements/uniform_list.rs:508-510`).
+                .w_full()
+                // No explicit height: the row *is* its line box, so it
+                // cannot clip its own text however the type is set.
+                //
+                // That identity is also the only way the type statement
+                // below is under test. A fixed height would hold the row
+                // pitch at 22 px whatever the text did inside it, and a
+                // deleted `text_size`/`line_height` pair would silently
+                // restore the clipping this file used to have — gpui's
+                // default line box is `phi()` on a 16 px default, 25.89 px.
+                // Tied to the pitch, that deletion moves every row, and
+                // `a_click_far_down_the_list_lands_on_the_row_it_names`
+                // fails. Pixels the eye would catch become pixels the suite
+                // catches.
+                .text_size(theme::UI_TEXT_SIZE)
+                .line_height(theme::UI_LINE_HEIGHT)
+                .pl(INDENT_BASE + INDENT_STEP * depth)
+                // Load-bearing: row height is measured from item 0 alone
+                // (`elements/uniform_list.rs:658-680`), so a wrapping
+                // filename overflows its row.
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_color(theme::sidebar_text())
+                .bg(background)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |sidebar, _event, window, cx| {
+                        // Focus first, so the tree's own bindings resolve
+                        // from the very next keystroke. Straight to the
+                        // handle rather than through `Focusable`, which is
+                        // what `EditorView::on_mouse_down` already does.
+                        window.focus(&sidebar.focus_handle, cx);
+                        sidebar.activate(&row, cx);
+                    }),
+                )
+                .child(label)
+        }
     }
 }
 
@@ -347,16 +649,45 @@ impl Render for Sidebar {
             .on_action(cx.listener(Self::trash))
             .on_action(cx.listener(Self::select_prev))
             .on_action(cx.listener(Self::select_next))
+            // A column, so the rejection message below has a line of its own.
+            // Without it the list's `size_full` claims the whole height and
+            // pushes the message off the bottom — which every test still
+            // passes, because they read the state rather than the pixels. Only
+            // the `sidebar-rejected` shot showed it.
+            .flex()
+            .flex_col()
             .size_full()
             .child(
                 uniform_list(
                     "vault-tree",
-                    self.visible.len(),
+                    self.row_count(),
                     cx.processor(Self::render_rows),
                 )
-                // Load-bearing: the default `ListSizingBehavior::Auto` resolves
-                // to zero height and paints nothing (`elements/list.rs:192-193`).
-                .size_full(),
+                // `flex_1` for the height, so the list takes what the message
+                // leaves rather than all of it. `w_full` because
+                // `ListSizingBehavior::Auto` otherwise resolves to nothing and
+                // paints nothing (`elements/list.rs:192-193`) — the width half
+                // of the `size_full` this replaces.
+                .flex_1()
+                .w_full()
+                .track_scroll(&self.scroll),
+            )
+            .children(
+                self.editing
+                    .as_ref()
+                    .and_then(|edit| edit.rejected)
+                    .map(|rejected| {
+                        // Under the list rather than over the row: an overlay
+                        // needs a deferred absolute layer, and the message is
+                        // worth more than its placement is.
+                        div()
+                            .w_full()
+                            .text_size(theme::UI_TEXT_SIZE)
+                            .line_height(theme::UI_LINE_HEIGHT)
+                            .pl(INDENT_BASE)
+                            .text_color(theme::rejected_text())
+                            .child(rejected.message())
+                    }),
             )
     }
 }
