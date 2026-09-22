@@ -1,7 +1,9 @@
 [package]
 name = "inkra-app"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [features]
 # The off-screen shot runner. Off by default, so `cargo build --release` never
@@ -33,7 +35,7 @@ inkra-vault = { workspace = true }
 # For `block_on` only: the loads that happen before a window exists, so there is
 # no gpui executor to spawn onto yet. The binary's launch, and the vault a shot
 # scene builds.
-futures = "0.3"
+futures = { workspace = true }
 # Path, not git: the source we compile and the source CLAUDE.md tells us to read
 # are then provably the same files. Restore the checkout with
 # `./scripts/vendor-gpui.sh`; `vendor/` is gitignored.
@@ -56,7 +58,7 @@ gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
 # `MemFs` — tests must never reach the real filesystem.
 inkra-vault = { workspace = true, features = ["test-support"] }
 # For the scroll geometry only, which is pixel arithmetic and needs no window.
-proptest = "1"
+proptest = { workspace = true }
 
 [lints]
 workspace = true

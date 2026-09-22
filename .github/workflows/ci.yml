@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # gpui needs the Apple platform crates (gpui_macos); it does not build on Linux.
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      # Toolchain comes from rust-toolchain.toml; rustup resolves and installs
+      # the pinned channel on the first cargo/rustup call below. No separate
+      # toolchain action, so nothing can pick a different version.
+      - name: Show toolchain
+        run: rustup show
+
+      - name: Cache vendored gpui
+        uses: actions/cache@v6
+        with:
+          path: vendor/zed-reference
+          key: vendor-gpui-${{ hashFiles('scripts/vendor-gpui.sh') }}
+
+      # Always runs, cache hit or miss: the script fetches and checks out REV
+      # on an existing checkout, so a stale or partial cache still ends up correct.
+      - name: Restore vendored gpui
+        run: ./scripts/vendor-gpui.sh
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # Caches registry dependencies only. rust-cache prunes every package whose
+      # manifest sits under the repo root, and vendor/ does, so the gpui path
+      # crates recompile on each run. Caching all of target/ instead does not
+      # fit the 10 GB cache quota.
+      - uses: Swatinem/rust-cache@v2
+
+      # check.sh is the definition of done; run it, not a reimplementation of
+      # its steps, so CI and the local gate cannot drift apart.
+      - name: Run check.sh
+        run: ./scripts/check.sh

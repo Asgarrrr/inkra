@@ -1,0 +1,54 @@
+[graph]
+# Only what we build. A crate that exists for another platform is not ours to vet.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+# Checks the `shot` and `test-support` graphs too, not only the default build.
+all-features = true
+
+[advisories]
+# Unmaintained notices, not vulnerabilities. Each reaches us only through the
+# vendored gpui graph, whose versions are fixed by the pinned Zed commit.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste, via metal/pulp in gpui's macOS backend" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz, via usvg/resvg in gpui's font stack" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser, via usvg/fontdb in gpui's font stack" },
+]
+
+[licenses]
+# The licences present in the graph, and no others. MPL-2.0 is file-level
+# copyleft and reaches us through two gpui dependencies only: cbindgen, a
+# build-time dependency of gpui_apple, and option-ext, via dirs and
+# zed-font-kit.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "bzip2-1.0.6",
+    "MPL-2.0",
+]
+
+[licenses.private]
+# Our crates are `publish = false` and carry no licence field.
+ignore = true
+
+[bans]
+# gpui's graph carries duplicates we cannot resolve from here.
+multiple-versions = "warn"
+# `warn`, not `deny`: allow-wildcard-paths only exempts path dependencies of a
+# private crate, and gpui's manifest is not marked `publish = false`, so its
+# `workspace = true` dependencies would fail the gate from a file we cannot edit.
+wildcards = "warn"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    # gpui pins a proptest fork, and that fork's macro crate.
+    "https://github.com/proptest-rs/proptest",
+    # gpui pins Zed's fork of font-kit.
+    "https://github.com/zed-industries/font-kit",
+]

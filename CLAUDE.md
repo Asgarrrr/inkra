@@ -66,6 +66,8 @@ area, not on every task:
 - tests moved: `./scripts/test-names.sh` — every test by leaf name, sorted,
   duplicates kept. Diff it before and after a file split: a forgotten `mod`
   line drops a whole file's tests and still compiles green.
+- deny: `cargo deny check` — licenses, advisories, banned crates, sources.
+  `check.sh` runs it too.
 
 ## GPUI (hard rule)
 
@@ -267,6 +269,10 @@ area, not on every task:
 
 ## Code
 
+- The toolchain is pinned in `rust-toolchain.toml`. A new workspace member
+  inherits `[workspace.package]` from the root `Cargo.toml`; an external
+  dependency used by more than one crate is declared once in
+  `[workspace.dependencies]` there, not repeated per crate.
 - Offsets are `ByteOffset` and `Utf16Offset`. Never mix them. Never add a char
   offset.
 - Mutate the buffer only through `Buffer::transact_at`. Never call

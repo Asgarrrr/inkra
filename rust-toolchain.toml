@@ -1,0 +1,6 @@
+[toolchain]
+# 1.96.1, not zed-reference's 1.98.1: this is the version check.sh is verified
+# green on locally. Bumping it means re-running check.sh, not copying zed's pin.
+channel = "1.96.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

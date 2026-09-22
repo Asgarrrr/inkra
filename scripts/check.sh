@@ -38,6 +38,16 @@ for crate in inkra-text inkra-editor inkra-vault; do
   fi
 done
 
+echo "==> cargo deny check"
+# Licenses, advisories, banned crates, and git/registry sources across the
+# whole graph, including gpui's. Not installed by default, so fail with a
+# pointer rather than a cryptic "command not found".
+if ! command -v cargo-deny >/dev/null 2>&1; then
+  echo "ERROR: cargo-deny is not installed — run: cargo install --locked cargo-deny" >&2
+  exit 1
+fi
+cargo deny check
+
 echo "==> cargo test"
 cargo test --workspace
 

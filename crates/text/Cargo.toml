@@ -1,7 +1,9 @@
 [package]
 name = "inkra-text"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
 unicode-segmentation = "1.13"
@@ -10,4 +12,4 @@ unicode-segmentation = "1.13"
 workspace = true
 
 [dev-dependencies]
-proptest = "1"
+proptest = { workspace = true }
