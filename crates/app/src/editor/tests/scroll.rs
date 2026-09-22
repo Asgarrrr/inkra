@@ -164,9 +164,6 @@ fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext)
         .unwrap();
 }
 
-/// The defect the roadmap named: typing past the bottom edge used to lose the
-/// caret.
-///
 /// The assertion is the exact offset, not just "visible", because the margin is
 /// wide enough to hide an off-by-one from a bare visibility check. A reveal
 /// taking the line index from `DocumentLayout` rather than the buffer would be
@@ -425,8 +422,8 @@ fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
 
     // Row 5 of a two-line document, and far to the right of any glyph. Kept
     // inside the test window (1920x1080, `gpui/platform/test/display.rs:16`):
-    // a click outside
-    // it never hits the div's hitbox, and the handler would not run at all.
+    // a click outside it never hits the div's hitbox, so the handler would
+    // not run at all.
     cx.simulate_click(
         gpui::point(gpui::px(400.), middle_of_line(5.)),
         gpui::Modifiers::none(),

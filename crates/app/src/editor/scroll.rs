@@ -11,25 +11,25 @@ use gpui::{Pixels, px};
 /// Lines of context kept above and below the revealed line, when the viewport
 /// can spare them.
 ///
-/// A constant rather than a setting: Zed's equivalent is configurable
-/// (`editor/src/editor_settings.rs:36`) because Zed has a settings system, and
-/// inventing one here to hold a single number would be the larger change.
+/// A constant, not a setting: Zed's equivalent is configurable
+/// (`editor/src/editor_settings.rs:36`) because Zed has a settings system;
+/// inventing one here for a single number would be the larger change.
 const MARGIN_LINES: f32 = 3.;
 
 /// The scroll offset that brings `line` into `viewport`, or `None` when it is
 /// already there.
 ///
-/// Both ranges are in window coordinates, unscrolled: `line` is where the line
-/// would sit at offset zero, and `viewport` is the scroll container, which the
-/// offset never moves. `offset` is gpui's, so it is zero at the top and
-/// negative further down (`gpui/elements/div.rs:4391-4393`).
+/// Both ranges are window coordinates, unscrolled: `line` is where it would
+/// sit at offset zero, `viewport` is the scroll container. `offset` is
+/// gpui's — zero at the top, negative further down
+/// (`gpui/elements/div.rs:4391-4393`).
 ///
-/// Minimal, like Zed's `Fit` (`editor/src/scroll/autoscroll.rs:252-263`): a line
-/// that is already visible does not move, and one that is not moves just far
-/// enough. Only the upper bound is clamped here. The lower one belongs to
-/// gpui's `clamp_scroll_position` (`gpui/elements/div.rs:2479`), which runs
-/// after the frame's new content size is known — clamping against
-/// `max_offset()` here would stop a line short every time an edit added one.
+/// Minimal, like Zed's `Fit` (`editor/src/scroll/autoscroll.rs:252-263`): an
+/// already-visible line does not move. Only the upper bound is clamped here
+/// — the lower belongs to gpui's
+/// `clamp_scroll_position` (`gpui/elements/div.rs:2479`), which runs after
+/// the frame's new content size is known; clamping against `max_offset()`
+/// here would stop a line short after every edit that added one.
 pub(super) fn reveal(
     line: Range<Pixels>,
     viewport: Range<Pixels>,
@@ -37,12 +37,10 @@ pub(super) fn reveal(
 ) -> Option<Pixels> {
     let (line_height, viewport_height) = (line.end - line.start, viewport.end - viewport.start);
 
-    // Clamped against the room there is, not used raw: three lines above and
-    // below do not fit in a five-line viewport. Zed clamps the same way and
-    // tests it (`editor/src/editor_tests.rs:3778-3796`), but in whole lines,
-    // because its scroll position is a display row plus a fraction
-    // (`editor/src/scroll.rs:35-38`). Ours is raw pixels, so flooring buys
-    // nothing.
+    // Clamped against the room there is: three lines above and below don't
+    // fit a five-line viewport. Zed clamps the same way, in whole lines
+    // (`editor/src/scroll.rs:35-38`, tested at `editor/src/editor_tests.rs:3778-3796`);
+    // ours is raw pixels, so flooring buys nothing.
     let margin =
         (line_height * MARGIN_LINES).min(((viewport_height - line_height) / 2.).max(px(0.)));
 
@@ -53,17 +51,11 @@ pub(super) fn reveal(
     let bottom = viewport.end - margin - line.end;
 
     let target = if top >= bottom {
-        // An empty range: "above" and "below" are both true, and alternating
-        // between them never settles, so the document would jitter on every
-        // keystroke. Two ways in, both wanting the top.
-        //
-        // A line taller than the viewport cannot be shown whole, and the top is
-        // the half to show, because the caret paints at the line's top
-        // (`position_for_offset`).
-        //
-        // The other is one f32 rounding error wide: a margin clamp that binds
-        // exactly makes the two ends one number in real arithmetic, but they
-        // are computed by different routes and can land an ulp apart.
+        // Empty range, two causes: a line taller than the viewport (top is the
+        // half shown, since the caret paints there — see `position_for_offset`),
+        // or a margin clamp that binds exactly, landing the two ends an ulp
+        // apart. Either way "above" and "below" are both true; alternating
+        // between them would jitter every keystroke, so both resolve to top.
         top
     } else if offset < top {
         top

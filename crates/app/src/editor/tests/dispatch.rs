@@ -122,13 +122,11 @@ fn the_delete_and_redo_bindings_dispatch(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// A ragged buffer: line 1 is too short to hold the column lines 0 and 2 can.
-/// Offsets — 0..4, 5..7, 8..12.
-///
-/// One repeated letter on purpose. These assertions are about a *pixel*
-/// column resolving back to a byte offset, and the default font is
-/// proportional, so two different letters at the same column sit at two
-/// different x positions.
+/// A ragged buffer: line 1 is too short for the column lines 0 and 2 hold
+/// (offsets 0..4, 5..7, 8..12). One repeated letter on purpose: these
+/// assertions are about a *pixel* column resolving to a byte offset, and the
+/// default font is proportional, so different letters at the same column
+/// would sit at different x positions.
 const RAGGED: &str = "aaaa\naa\naaaa";
 
 /// The goal column's whole reason to exist: passing over a short line must not
@@ -251,17 +249,12 @@ fn shift_up_and_shift_down_extend_across_lines(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// One press, one newline.
-///
-/// `enter` is the only binding whose `Keystroke::key_char` is `Some` on macOS
-/// (`gpui_macos/events.rs:369`), so unlike the arrows it is not routed
-/// through `doCommandBySelector:`. The platform calls the action first and
-/// returns as soon as it reports the key handled (`gpui_macos/window.rs:2728`),
-/// which is what stops the input handler also inserting the `\n`.
-///
-/// This test cannot see that: `dispatch_keystroke` never enters the macOS
-/// layer. It proves the keymap and `actions!` wiring, and the platform half is
-/// closed by pressing — and holding — Enter in the running app.
+/// `enter`'s `key_char` is `Some` on macOS (`gpui_macos/events.rs:369`), so
+/// unlike the arrows it isn't routed through `doCommandBySelector:`; the
+/// platform calls the action first, which is what stops the input handler
+/// also inserting `\n` (`gpui_macos/window.rs:2728`). `dispatch_keystroke`
+/// never reaches that layer, so this only proves the keymap wiring — the
+/// platform half needs pressing Enter in the running app.
 #[gpui::test]
 fn enter_inserts_exactly_one_newline(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "");

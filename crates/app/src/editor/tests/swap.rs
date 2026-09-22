@@ -11,14 +11,10 @@ use inkra_text::Buffer;
 use super::{at, window_on};
 use crate::editor::EditorView;
 
-/// The buffer lives in its own entity, so a view repaints on someone else's
-/// edit only through the subscription `EditorView::new` installs. That
-/// subscription unsubscribes on `Drop`, so losing it is silent.
-///
-/// This observes the *second view*, not the buffer: observing the buffer would
-/// pass even with the subscription deleted, since the edit notifies the buffer
-/// either way. Delete `_buffer_changed` or the `cx.observe` call in
-/// `EditorView::new` and this test must fail.
+/// A view repaints on another view's edit only through the subscription
+/// `EditorView::new` installs; that `Subscription` unsubscribes silently on
+/// drop. Observes the *second view*, not the buffer — the buffer would notify
+/// either way, so that would pass even with the subscription deleted.
 #[gpui::test]
 fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("abc")));
@@ -48,13 +44,10 @@ fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The defect: `_buffer_changed` is a `Subscription` that unsubscribes on drop.
-/// Swapping the buffer without re-observing leaves the view watching the closed
-/// note — edits to the new one repaint nothing, with no compiler warning.
-///
-/// This observes the *view*, not the buffer: observing the buffer would pass
-/// with the re-subscription deleted, since the edit notifies the buffer either
-/// way. Delete the `cx.observe` line in `open_buffer` and this must fail.
+/// Swapping the buffer without re-observing would leave the view watching the
+/// closed note, silently — the dropped `Subscription` gives no compiler
+/// warning. Observes the *view*, not the buffer, which would notify either
+/// way.
 #[gpui::test]
 fn editing_after_a_swap_still_notifies(cx: &mut TestAppContext) {
     let first = cx.update(|cx| cx.new(|_| Buffer::new("first")));

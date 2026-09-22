@@ -32,12 +32,10 @@ struct LineLayout {
 /// `NameField`, which shapes its one-line buffer through the same
 /// [`shape_document`] rather than a second shaper of its own.
 ///
-/// Within the editor alone, six call sites need it — the cursor quad, the
-/// selection quads, `bounds_for_range`, `character_index_for_point`, mouse
-/// hit-testing and vertical movement. Resolving a line four different ways is
-/// how they drift.
-///
-/// All coordinates are relative to the element's origin. The caller adds it.
+/// Six call sites in the editor alone need it, from the cursor quad to
+/// vertical movement; resolving a line four different ways is how they'd
+/// drift. Coordinates are relative to the element's origin — the caller adds
+/// it.
 pub(crate) struct DocumentLayout {
     /// Never empty: an empty buffer is one empty line.
     lines: Vec<LineLayout>,
