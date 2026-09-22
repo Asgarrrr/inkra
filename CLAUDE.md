@@ -70,6 +70,11 @@ area, not on every task:
   line drops a whole file's tests and still compiles green.
 - deny: `cargo deny check` — licenses, advisories, banned crates, sources.
   `check.sh` runs it too.
+- mutants: `cargo mutants` — mutation-tests `inkra-text` and `inkra-editor`
+  (configured in `.cargo/mutants.toml`). Not in `check.sh`: it takes about two
+  minutes. It exits 3 on one expected timeout: `-=` → `/=` in `Buffer::clip`
+  never terminates, which the existing test catches as a hang. Zero *missed*
+  is the bar.
 
 ## GPUI (hard rule)
 
@@ -402,6 +407,8 @@ area, not on every task:
   asserted: there are no baselines and `check.sh` never runs the runner. Adding
   one does not discharge the obligation to write a `#[gpui::test]` for the
   behaviour.
+- Run `cargo mutants` after changing `text` or `editor` logic; a new exclusion
+  in `.cargo/mutants.toml` needs a stated equivalence reason, not just a glob.
 
 - `crates/text/benches/buffer.rs` times `Buffer`'s size-dependent operations
   across 1k/10k/100k-line documents. It is a before/after comparison for a

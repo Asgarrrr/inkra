@@ -203,4 +203,12 @@ mod tests {
     fn an_inverted_range_is_refused() {
         let _ = Selection::new(at(4)..at(1), false);
     }
+
+    #[test]
+    fn setting_the_head_exactly_on_the_tail_is_not_reversed() {
+        let mut selection = Selection::at(at(2));
+        selection.set_head(at(2), Goal::None);
+        assert!(selection.is_empty());
+        assert!(!selection.reversed());
+    }
 }

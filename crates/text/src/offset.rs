@@ -46,4 +46,10 @@ mod tests {
         assert!(ByteOffset(1) < ByteOffset(2));
         assert!(Utf16Offset(5) > Utf16Offset(4));
     }
+
+    #[test]
+    fn offsets_display_as_their_value() {
+        assert_eq!(ByteOffset(7).to_string(), "7");
+        assert_eq!(Utf16Offset(7).to_string(), "7");
+    }
 }
