@@ -123,6 +123,70 @@ impl EditorState {
         self.edit(buffer, now, range, text);
     }
 
+    /// The range a platform input-method edit applies to, in the protocol's own
+    /// order of precedence: an explicit range, else the composing region, else
+    /// the selection.
+    ///
+    /// Here rather than at the gpui edge because it reads only a `Buffer` and a
+    /// selection. Two views speak this protocol, and a second copy of the
+    /// precedence rule is a second thing to get wrong.
+    #[must_use]
+    pub fn target_range(
+        &self,
+        buffer: &Buffer,
+        range_utf16: Option<&Range<usize>>,
+    ) -> Range<ByteOffset> {
+        range_utf16
+            .map(|range| buffer.from_utf16_range(range))
+            .or_else(|| self.marked_range())
+            .unwrap_or_else(|| self.selection.range())
+    }
+
+    /// Applies an input-method edit that carries no composing region — a
+    /// committed character, or a paste from the platform.
+    pub fn replace_in_range(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        range_utf16: Option<&Range<usize>>,
+        text: &str,
+    ) {
+        let range = self.target_range(buffer, range_utf16);
+        self.edit(buffer, now, range, text);
+    }
+
+    /// The same, for text still being composed: a dead key waiting for its base
+    /// letter, or an IME's provisional reading.
+    ///
+    /// `selected_utf16` is where the input method wants the caret, **relative to
+    /// the text it just inserted**. It is rebased while still in UTF-16 and
+    /// converted once: converting first would resolve it against the whole
+    /// buffer, and adding the insertion point afterwards would count the offset
+    /// twice.
+    pub fn mark_and_replace_in_range(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        range_utf16: Option<&Range<usize>>,
+        text: &str,
+        selected_utf16: Option<Range<usize>>,
+    ) {
+        let range = self.target_range(buffer, range_utf16);
+        let start = range.start;
+        self.edit(buffer, now, range, text);
+
+        // `edit` clears the composing region, so this reinstates it over what
+        // was just inserted. Empty text ends the composition rather than
+        // marking a zero-width region.
+        self.set_marked_range((!text.is_empty()).then(|| start..ByteOffset(start.0 + text.len())));
+
+        if let Some(selected) = selected_utf16 {
+            let inserted_at = buffer.to_utf16(start).0;
+            let cursor = buffer.from_utf16(inkra_text::Utf16Offset(inserted_at + selected.end));
+            self.move_to(buffer, cursor, false);
+        }
+    }
+
     /// What `⌘C` takes. Reads only: a copy owes no repaint and must not mark
     /// the note dirty.
     #[must_use]
@@ -778,5 +842,95 @@ mod tests {
         let (buffer, mut state) = editor("ab");
         state.move_to(&buffer, at(99), false);
         assert_eq!(state.cursor(), buffer.len());
+    }
+
+    /// The protocol's precedence, which used to live at the gpui edge and so
+    /// needed a window to reach. Three cases, in the order the rule states
+    /// them.
+    #[test]
+    fn an_explicit_range_outranks_the_composing_region_and_the_selection() {
+        let (mut buffer, mut state) = editor("hello");
+        state.edit(&mut buffer, Instant::now(), at(0)..at(0), "");
+        state.set_marked_range(Some(at(1)..at(3)));
+
+        assert_eq!(state.target_range(&buffer, Some(&(0..2))), at(0)..at(2));
+    }
+
+    #[test]
+    fn the_composing_region_outranks_the_selection() {
+        let (buffer, mut state) = editor("hello");
+        state.move_to(&buffer, at(4), false);
+        state.set_marked_range(Some(at(1)..at(3)));
+
+        assert_eq!(state.target_range(&buffer, None), at(1)..at(3));
+    }
+
+    #[test]
+    fn the_selection_is_the_fallback() {
+        let (buffer, mut state) = editor("hello");
+        state.move_to(&buffer, at(1), false);
+        state.move_to(&buffer, at(4), true);
+
+        assert_eq!(state.target_range(&buffer, None), at(1)..at(4));
+    }
+
+    /// The protocol counts UTF-16 units, so a range spanning a surrogate pair
+    /// must resolve onto whole characters.
+    #[test]
+    fn a_utf16_range_spanning_a_surrogate_pair_resolves_onto_the_whole_char() {
+        // 'a'@0, the emoji @1..5 as two UTF-16 units, 'b'@5.
+        let (mut buffer, mut state) = editor("a😀b");
+        state.replace_in_range(&mut buffer, Instant::now(), Some(&(1..3)), "");
+
+        assert_eq!(buffer.text(), "ab");
+        assert_eq!(state.cursor(), at(1));
+    }
+
+    /// A dead key: `^` arrives as composing text, then its base letter replaces
+    /// it. The region has to be reinstated after the edit, because `edit`
+    /// clears it.
+    #[test]
+    fn composing_text_marks_what_it_inserted() {
+        let (mut buffer, mut state) = editor("");
+        state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "^", None);
+
+        assert_eq!(buffer.text(), "^");
+        assert_eq!(state.marked_range(), Some(at(0)..at(1)));
+
+        state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "ê", None);
+
+        assert_eq!(buffer.text(), "ê", "the base letter replaces the accent");
+        assert_eq!(state.marked_range(), Some(at(0)..at(2)));
+    }
+
+    /// Committing ends the composition rather than marking a zero-width region.
+    #[test]
+    fn composing_with_empty_text_ends_the_composition() {
+        let (mut buffer, mut state) = editor("");
+        state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "^", None);
+        state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "", None);
+
+        assert_eq!(state.marked_range(), None);
+    }
+
+    /// The input method reports the caret relative to what it just inserted.
+    /// Converting before rebasing would resolve it against the whole buffer and
+    /// count the insertion point twice — which only shows up when the text does
+    /// not start at zero, and when a character is more than one UTF-16 unit.
+    #[test]
+    fn the_composing_caret_is_rebased_before_it_is_converted() {
+        let (mut buffer, mut state) = editor("😀");
+        state.move_to(&buffer, buffer.len(), false);
+
+        // Insert at offset 4 (two UTF-16 units in), with the caret one unit
+        // into the inserted text.
+        state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "ab", Some(0..1));
+
+        assert_eq!(buffer.text(), "😀ab");
+        assert_eq!(
+            state.cursor(),
+            at(5),
+            "one char into `ab`, not one unit into the buffer"
+        );
     }
 }

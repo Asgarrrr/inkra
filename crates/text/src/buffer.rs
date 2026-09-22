@@ -317,6 +317,25 @@ impl Buffer {
         self.len()
     }
 
+    /// A whole range, in the units the platform input protocol speaks.
+    #[must_use]
+    pub fn to_utf16_range(&self, range: &Range<ByteOffset>) -> Range<usize> {
+        self.to_utf16(range.start).0..self.to_utf16(range.end).0
+    }
+
+    /// The inverse, normalized so the result is never inverted.
+    ///
+    /// An input method may hand back a range whose ends arrive in either order,
+    /// and `from_utf16` snaps each into a char boundary independently — so two
+    /// ends one surrogate apart can cross. Every caller wants a range it can
+    /// slice with.
+    #[must_use]
+    pub fn from_utf16_range(&self, range: &Range<usize>) -> Range<ByteOffset> {
+        let start = self.from_utf16(Utf16Offset(range.start));
+        let end = self.from_utf16(Utf16Offset(range.end));
+        start.min(end)..start.max(end)
+    }
+
     /// Start of the grapheme cluster before `offset` — one cursor step left.
     /// Graphemes, not chars: "é" as e+combining-accent is one step, and so is a
     /// multi-codepoint emoji.
