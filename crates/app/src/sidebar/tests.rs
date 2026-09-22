@@ -14,7 +14,7 @@ use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
 
-use super::edit::{EditState, Rejection};
+use super::edit::Rejection;
 use super::{Kind, NoteActivated, Row, Sidebar, row_center};
 use crate::vault::NoteStore;
 
@@ -24,45 +24,6 @@ impl Sidebar {
     pub(crate) fn select_for_test(&mut self, id: EntryId, cx: &mut Context<Self>) {
         self.selected = Some(id);
         cx.notify();
-    }
-
-    /// Opens a rename field without focusing it. `#[cfg(test)]`: the real entry
-    /// point needs a `Window`, and these tests exercise the rebuild rather than
-    /// the gesture.
-    #[cfg(test)]
-    pub(crate) fn rename_for_test(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else { return };
-        let Some(at) = self.index_of(id) else { return };
-        let row = self.visible[at].clone();
-        let parent = self.parent_of(&row);
-        let (field, subscriptions) = Self::open_field(&row.name, cx);
-        self.editing = Some(EditState {
-            target: Some(id),
-            parent,
-            kind: row.kind,
-            at,
-            depth: row.depth,
-            field,
-            rejected: None,
-            _subscriptions: subscriptions,
-        });
-    }
-
-    /// The same, for a create.
-    #[cfg(test)]
-    pub(crate) fn create_for_test(&mut self, cx: &mut Context<Self>) {
-        let (parent, at, depth) = self.insertion_point(cx);
-        let (field, subscriptions) = Self::open_field("", cx);
-        self.editing = Some(EditState {
-            target: None,
-            parent,
-            kind: Kind::Note,
-            at,
-            depth,
-            field,
-            rejected: None,
-            _subscriptions: subscriptions,
-        });
     }
 
     /// Where the field's row sits, for the shrink tests.
@@ -139,7 +100,9 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
 
     let last = row(&sidebar, cx, "c");
     sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last.id, cx));
-    sidebar.update(cx, Sidebar::rename_for_test);
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.open_rename(cx);
+    });
     assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 
     // Two notes vanish from outside, so the field's row is past the end.
@@ -172,7 +135,9 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
 
     let last = row(&sidebar, cx, "b");
     sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last.id, cx));
-    sidebar.update(cx, Sidebar::create_for_test);
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.open_create(Kind::Note, cx);
+    });
 
     fs.remove(Path::new("/vault/b.md"));
     let vault = notes
