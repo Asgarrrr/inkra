@@ -63,6 +63,9 @@ area, not on every task:
   `--list` for the catalogue. This is how the eyeball pass below gets done
   without a human at the screen.
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
+- tests moved: `./scripts/test-names.sh` — every test by leaf name, sorted,
+  duplicates kept. Diff it before and after a file split: a forgotten `mod`
+  line drops a whole file's tests and still compiles green.
 
 ## GPUI (hard rule)
 
@@ -504,6 +507,7 @@ change that introduces something reusable.
 | What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
 | One line of editable text, IME and dead keys included | `NameField`, emitting `Confirmed` / `Cancelled` | `app/src/field.rs` |
 | The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar/edit.rs` |
+| Open that row without a `Window` — the gesture minus its focus move, and what tests call | `Sidebar::open_create` / `open_rename` | `app/src/sidebar/edit.rs` |
 | Why a typed name was refused, as a sentence | `Rejection::message` | `app/src/sidebar/edit.rs` |
 | A UTF-16 range, at the protocol edge | `Buffer::to_utf16_range` / `from_utf16_range` | `text/src/buffer.rs` |
 | The range an IME edit applies to, and applying one | `EditorState::target_range` / `replace_in_range` / `mark_and_replace_in_range` | `editor/src/state.rs` |
