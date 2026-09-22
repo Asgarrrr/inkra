@@ -112,10 +112,8 @@ impl Buffer {
     /// for one buffer: has the text moved since a version I previously held.
     /// `app` stores the version it last wrote to disk and compares.
     ///
-    /// Zed reaches the same property with a `clock::Global` version vector and
-    /// a memoized `has_unsaved_edits`
-    /// (`vendor/zed-reference/crates/language/src/buffer.rs:139`, `:2493`). It
-    /// counts operations, which is the granularity adopted here. Ours is a
+    /// Zed tracks the same property with a `clock::Global` version vector
+    /// (`vendor/zed-reference/crates/text/src/text.rs:829`); ours is a
     /// single `u64` because we have one writer.
     #[must_use]
     pub fn version(&self) -> u64 {

@@ -255,12 +255,10 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
     assert_ne!(buffer.version(), 0);
 }
 
-/// The defect that motivated per-edit ids.
-///
-/// `close` merges an edit that lands within `GROUP_INTERVAL` by extending
-/// the previous transaction in place, so a transaction's identity does not
-/// move even though the text changed. With the id on the transaction, this
-/// reports "saved" over unsaved text and the edit is lost on quit.
+/// Regression pin: `close` merges an edit within `GROUP_INTERVAL` by
+/// extending the previous transaction in place, so its identity does not
+/// move. An id on the transaction instead of the edit would report "saved"
+/// over unsaved text, losing the edit on quit.
 #[test]
 fn version_moves_when_an_edit_merges_into_the_previous_transaction() {
     let mut buffer = Buffer::new("abc");
