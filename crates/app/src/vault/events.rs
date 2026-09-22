@@ -14,9 +14,7 @@ pub(crate) struct SaveFailed(pub(crate) EntryId);
 impl EventEmitter<SaveFailed> for NoteStore {}
 
 /// A write found the file changed underneath it and preserved the other
-/// version beside the note. Emitted for the same reason as `SaveFailed`: the
-/// deferred status line gets one seam to subscribe to rather than two that grew
-/// apart.
+/// version beside the note. See `SaveFailed` for why this is an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConflictPreserved {
     pub(crate) id: EntryId,
@@ -36,9 +34,8 @@ pub(crate) struct NoteClosed(pub(crate) EntryId);
 
 impl EventEmitter<NoteClosed> for NoteStore {}
 
-/// A delete failed, and the note is still there. The counterpart to
-/// `SaveFailed`, and emitted for the same reason: one seam for the deferred
-/// status line rather than two call sites that grow apart.
+/// A delete failed, and the note is still there. See `SaveFailed` for why
+/// this is an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TrashFailed(pub(crate) EntryId);
 

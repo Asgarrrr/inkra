@@ -67,27 +67,18 @@ async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut Tes
 }
 
 /// The two writers of one note, genuinely concurrent — the interleaving
-/// `Writer` exists for, and the one the test above cannot reach.
+/// `Writer` exists for. The quit flush can't join the chain (`App::shutdown`
+/// blocks while polling quit futures), so it issues its own write while the
+/// chain's is still parked.
 ///
-/// Every write issued through `schedule_save` queues behind the previous
-/// one, so no two of them are ever in flight together. The quit flush is the
-/// single exception, and cannot be made to chain: `App::shutdown` blocks the
-/// foreground session while it polls the quit futures, so a flush that
-/// awaited the chain would wait on a task that can never resume. It issues
-/// its own write instead, and for that moment the note has two.
+/// Driven through `flush_all`, not `cx.quit()`: the gate must release from
+/// outside, and `quit` doesn't return until the flush finishes. (Wiring
+/// through the real quit observer is `quitting_writes_every_dirty_note`'s
+/// claim.)
 ///
-/// Driven through `flush_all` rather than `cx.quit()`, because the gate has
-/// to be released from outside and `quit` does not return until the flush it
-/// is waiting for has finished. What quit adds on top of this — that the
-/// observer is registered at all, and that every dirty note is collected —
-/// is `quitting_writes_every_dirty_note`'s claim, not this one's.
-///
-/// Both assertions bite, and on different defects. A flush that carried its
-/// own `Writer`, or the note's load stamp rather than what the chain's write
-/// had just produced, meets a file it does not recognise and preserves our
-/// own text into a conflict file. A flush whose sequence did not exceed the
-/// chain's is discarded as overtaken, and the file keeps text the user had
-/// already typed past.
+/// Both assertions matter: a flush with its own `Writer`/stamp would
+/// preserve our own text into a conflict file; a flush whose sequence didn't
+/// exceed the chain's would be discarded, losing the newer edit.
 #[gpui::test]
 async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -202,12 +193,11 @@ async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
     assert_eq!(entries, 2, "no rescan ran, so the tree is intact");
 }
 
-/// The wiring that makes an atomic save survivable, pinned at the level it
-/// actually runs. The `vault` crate proves `reidentify` works when called;
-/// only this proves the write path calls it. Nothing else in the `app`
-/// suite rescans, so without this the call can be deleted and the whole
-/// workspace stays green — until the first post-startup `rescan` caller
-/// lands and orphans the open buffer.
+/// The wiring that makes an atomic save survivable. `vault` proves
+/// `reidentify` works when called; only this proves the write path calls
+/// it. Nothing else in the `app` suite rescans, so without this the call
+/// could be deleted and the workspace would stay green until the first
+/// post-startup `rescan` caller orphans the open buffer.
 #[gpui::test]
 fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -249,19 +239,15 @@ fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     );
 }
 
-/// The gap `⌘Q` used to leave: every dirty note reaches disk, not just the
-/// one `⌘S` would have picked.
+/// Every dirty note reaches disk on quit, not just the one `⌘S` would have
+/// picked.
 ///
-/// Quit through `TestAppContext::quit`, which calls `App::shutdown`
-/// directly (`gpui/src/app/test_context.rs:233`). `cx.quit()` inside an
-/// `update` would be `App::quit` — `self.platform.quit()`, whose test
-/// implementation is an empty body — and would prove nothing.
-///
-/// Claims only that the flush is wired up and completes. It does **not**
-/// claim the 200 ms `SHUTDOWN_TIMEOUT` is met: under `TestScheduler` the
-/// block's bound is a random tick count and the clock jumps to the next
-/// timer without consulting any deadline
-/// (`scheduler/src/test_scheduler.rs:110-118`, `:441-448`).
+/// Quits via `TestAppContext::quit` → `App::shutdown`, not `cx.quit()` — see
+/// CLAUDE.md, "Quit through `TestAppContext::quit`". Claims only that the
+/// flush completes, not the 200 ms `SHUTDOWN_TIMEOUT`: under `TestScheduler`
+/// the block's bound is a random tick count (`test_scheduler.rs:110-118`)
+/// and the clock jumps to the next timer without consulting any deadline
+/// (`:441-448`).
 #[gpui::test]
 fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

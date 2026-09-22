@@ -4,9 +4,7 @@
 //! are not `const` (`vendor/zed-reference/crates/gpui/src/color.rs:14`, `:20`).
 //! Functions are the better shape regardless: a bare `u32` does not say whether
 //! its low byte is blue or alpha, and the two constructors read the same hex
-//! differently. Naming each colour takes that choice away from the call site,
-//! and with it the three separate `unreadable_literal` allows the inline
-//! literals used to need.
+//! differently. Naming each colour takes that choice away from the call site.
 //!
 //! Sizes are `const`: `px` is (`geometry.rs:3748`).
 #![allow(clippy::unreadable_literal)]
@@ -24,11 +22,9 @@ pub(crate) const BODY_LINE_HEIGHT: Pixels = px(28.);
 
 /// Chrome: the sidebar today, a status line or a tab bar when they land.
 ///
-/// Stated rather than inherited, which is the defect this pair closes. gpui's
-/// default is `rems(1.)` on a `rem_size` of 16 px, with a line box of `phi()` —
-/// 25.89 px (`window.rs:2032`, `style.rs`, `geometry.rs:3722`). The sidebar drew
-/// that inside a 22 px row under `overflow_hidden`, so every row clipped a line
-/// box taller than itself.
+/// Stated, not inherited (see CLAUDE.md, chrome scale). gpui's default line
+/// box is `phi()` on a 16 px `rem_size` — 25.89 px (`window.rs:2032`,
+/// `style.rs`, `geometry.rs:3722`) — taller than a 22 px row.
 pub(crate) const UI_TEXT_SIZE: Pixels = px(14.);
 /// One line of chrome text, and therefore exactly one sidebar row: a row that is
 /// its own line box cannot clip it. See [`UI_TEXT_SIZE`].

@@ -13,14 +13,12 @@ use super::ops::Ops;
 use super::writer::{Writer, write_through};
 use super::{ConflictPreserved, SaveFailed};
 
-/// How long a note may stay dirty before it is written. Obsidian's cadence: the
-/// write lands this long after typing *starts*, not this long after it stops.
-/// An idle debounce — Zed's `AutosaveSetting::AfterDelay` — bounds nothing,
-/// because a long uninterrupted writing session never reaches idle, and that is
-/// the session whose loss hurts most.
+/// How long a note may stay dirty before it is written: from when typing
+/// *starts*, not from when it stops. Periodic, not an idle debounce (Zed's
+/// `AutosaveSetting::AfterDelay`) — a debounce never fires during one long
+/// uninterrupted session, the session whose loss hurts most.
 ///
-/// A constant rather than a setting: this repo has no settings system, and
-/// adding one to hold a single number is the wrong order.
+/// A constant, not a setting: there is no settings system yet.
 pub(super) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
 
 pub(super) struct OpenNote {
@@ -58,8 +56,8 @@ pub(crate) struct NoteStore {
     /// Stamps every write with its issue order. Minted where the text is
     /// captured, under `&mut App`, so the order is the order the writes were
     /// decided — which `Buffer::version` cannot give: an undo *lowers* the
-    /// version (`Buffer::version`), so a flush after an undo would
-    /// carry a lower number than the write it has to beat.
+    /// version, so a flush after an undo would carry a lower number than the
+    /// write it has to beat.
     next_write: u64,
     /// The pending vault walk. One for the whole store, not one per note: a
     /// walk rebuilds the entire listing, so two of them collide whatever caused
@@ -120,10 +118,9 @@ impl NoteStore {
             .is_some_and(|note| note.buffer.read(cx).version() != note.saved_version)
     }
 
-    /// Buffers live for the session; eviction is deferred, with its trigger in
-    /// the spec. Deliberately does **not** set `current`: this resolves on the
-    /// load's schedule, so it would record whichever load landed last rather
-    /// than the note on screen.
+    /// Buffers live for the session; eviction is deferred (see spec). Does
+    /// **not** set `current`: it resolves on the load's schedule, not on
+    /// screen order (see CLAUDE.md, `NoteStore::current`).
     pub(crate) fn open_note(
         &mut self,
         id: EntryId,
@@ -163,13 +160,12 @@ impl NoteStore {
         })
     }
 
-    /// Records which note `⌘S` writes, and runs after the bind, never when a
-    /// load happens to land. `adopt` is the only other writer and keeps the
-    /// rule by being synchronous. Ignores a note that is not open — `⌘S` would
-    /// silently pick nothing.
+    /// Records which note `⌘S` writes; runs after the bind, not on load
+    /// landing. `adopt` is the only other writer (see CLAUDE.md,
+    /// `NoteStore::current`). Ignores a note that isn't open.
     ///
-    /// Writes the note being left before recording the new one. Being the sole
-    /// writer of `current` makes this the only place that can tell a switch
+    /// Schedules a save of the note being left before recording the new one:
+    /// being the sole writer of `current` is what lets this tell a switch
     /// happened at all.
     pub(crate) fn set_current(&mut self, id: EntryId, cx: &mut Context<Self>) {
         if !self.open.contains_key(&id) {
@@ -259,12 +255,11 @@ impl NoteStore {
                 previous.await;
             }
             futures::select_biased! {
-                // Only a deliberate send cancels. `Err` means the sender was
-                // dropped because a later `schedule_save` replaced it, and
-                // treating that as a cancel is how the gesture that promises
-                // "write now" ends up writing nothing: `⌘S` installs a chain,
-                // the next keystroke replaces the sender, and the chain returns
-                // before reaching its ready timer.
+                // Only a deliberate send cancels; `Err` means the sender was
+                // dropped by a later `schedule_save`. Treating that as cancel
+                // too is why `⌘S` immediately followed by a keystroke can
+                // write nothing — the keystroke replaces the sender before
+                // the chain reaches its timer.
                 cancelled = cancelled.fuse() => if cancelled.is_ok() { return },
                 () = timer.fuse() => {}
             }
@@ -293,26 +288,23 @@ impl NoteStore {
 
     /// Writes every dirty note, once, as the application quits.
     ///
-    /// Split deliberately. The synchronous half runs while the store is still
-    /// alive: `App::shutdown` invokes the quit observers (`gpui/src/app.rs:1060`)
-    /// *before* `windows.clear()` (`:1064`), so the buffers, the vault and the
-    /// paths are all still reachable here. Everything the write needs is copied
-    /// out now.
+    /// Split deliberately: the sync half runs while the store is still alive,
+    /// so everything the write needs (buffers, vault, paths) is copied out
+    /// now. `App::shutdown` invokes quit observers (`gpui/src/app.rs:1060`)
+    /// *before* `windows.clear()` (`:1064`).
     ///
-    /// The returned future touches no `App` at all, and must not: shutdown
-    /// holds the `AppCell` borrowed across the whole poll loop
-    /// (`gpui/src/app.rs:1004-1013`), and `AsyncApp::update` would panic on the
-    /// second borrow. It also does no bookkeeping — nothing reads
-    /// `saved_version` after the process exits.
+    /// The returned future touches no `App`: shutdown holds the `AppCell`
+    /// borrowed across the whole poll loop (`gpui/src/app.rs:1004-1013`), and
+    /// a second borrow via `AsyncApp::update` would panic. It also skips
+    /// bookkeeping — nothing reads `saved_version` after the process exits.
     ///
-    /// Each write is spawned onto the **background** executor. A foreground
-    /// task cannot advance during the block (`test_scheduler.rs:362`), so a
-    /// flush that awaited one would wait out the timeout and write nothing. The
-    /// `Task`s are moved into the future rather than detached, because a
-    /// dropped `Task` is cancelled.
+    /// Each write spawns on the **background** executor, since a foreground
+    /// task cannot advance during the block (`test_scheduler.rs:362`). `Task`s
+    /// are moved into the future, not detached — a dropped `Task` is
+    /// cancelled.
     ///
-    /// Does not preempt or cancel the pending chain: it cannot: see `Writer`
-    /// for why the two writers are ordered instead of serialised.
+    /// Cannot preempt the pending chain; see `Writer` for why the two writers
+    /// are ordered instead of serialised.
     pub(super) fn flush_all(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
         // Collected before any sequence is minted, so the `self.open` borrow
         // ends before `next_seq` needs `&mut self`.
@@ -324,11 +316,10 @@ impl NoteStore {
                 if buffer.version() == note.saved_version {
                     return None;
                 }
-                // A note the user has sent to the trash is not written on the
-                // way out. This flush cannot join the note's chain, so it mints
-                // the highest sequence that note will ever see — which would
-                // drop the queued trash as stale and leave a confirmed delete
-                // silently undone. Writing it would also recreate the file.
+                // A note sent to trash isn't written on the way out: this
+                // flush can't join the note's chain, so it mints the highest
+                // sequence the note will ever see — writing would outrank and
+                // silently undo the queued trash, and recreate the file.
                 if self.ops.get(id).is_some_and(|ops| ops.trashing) {
                     return None;
                 }
@@ -347,12 +338,11 @@ impl NoteStore {
         let writes: Vec<_> = dirty
             .into_iter()
             .map(|(writer, path, text)| {
-                // Always the highest sequence that note will ever see, which is
-                // what makes the flush the winner rather than merely a
-                // contender. Every sequence is minted under `&mut App`; a chain
-                // write that already minted one did so before this call, and
-                // one that has not cannot mint during the block, because the
-                // foreground session is where it would have to run.
+                // Always the highest sequence the note will ever see, making
+                // the flush the winner rather than a contender. Every
+                // sequence mints under `&mut App`; a chain write not yet
+                // minted can't mint during this block, since the foreground
+                // session is where it would run.
                 let seq = self.next_seq();
                 cx.background_spawn(write_through(writer, Arc::clone(&fs), path, text, seq))
             })
@@ -386,20 +376,19 @@ impl NoteStore {
             if version == note.saved_version {
                 return None;
             }
-            // Resolved against the vault rather than read from `OpenNote.path`:
-            // a rename moves the entry and nothing refreshes that field, so the
-            // cached path would recreate the note where it used to be. A
-            // vaulted note whose entry is gone writes nothing rather than
-            // falling back and recreating a file the vault no longer lists.
+            // Resolved against the vault, not `OpenNote.path`: a rename moves
+            // the entry but never refreshes that field, so the cached path
+            // would recreate the note where it used to be. A vaulted note
+            // whose entry is gone writes nothing rather than recreating a
+            // file the vault no longer lists.
             let path = if id == EntryId::DETACHED {
                 note.path.clone()
             } else {
                 // The entry being gone means something outside this process
                 // moved or removed the file. Reported rather than swallowed,
-                // which is what this used to do — every autosave from then on
-                // did nothing at all, forever, with no signal. Rescans now
-                // happen on every mutation, so an entry disappearing
-                // mid-session is reachable far sooner than it was.
+                // so an autosave that hits this doesn't just go silent
+                // forever. Rescans happen on every mutation, so this is
+                // reachable soon after the file disappears.
                 let resolved = this.vault.as_ref().and_then(|v| v.read(cx).absolute(id));
                 let Some(path) = resolved else {
                     cx.emit(SaveFailed(id));

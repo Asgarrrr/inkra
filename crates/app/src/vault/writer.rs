@@ -3,28 +3,25 @@ use std::sync::Arc;
 
 use inkra_vault::{Fs, Saved, Stamp};
 
-/// Serialises one note's writes, and drops one that a newer write overtook.
+/// Serialises one note's writes, dropping one that a newer write overtook.
 ///
-/// One note normally has exactly one writer: `schedule_save` chains every write
-/// behind the previous one. The quit flush is the exception, and cannot be
-/// chained — `App::shutdown` blocks the foreground session while it polls the
-/// quit futures (`gpui/src/app.rs:1073`,
-/// `scheduler/src/test_scheduler.rs:100`, `:362`), so a quit write that awaited
-/// the `cx.spawn` chain would wait for a task that can never resume. It
-/// therefore issues its own write, and for a moment a note has two.
+/// One note normally has exactly one writer: `schedule_save` chains writes
+/// behind the previous one. The quit flush can't join that chain —
+/// `App::shutdown` blocks the foreground session while polling the quit
+/// futures (`gpui/src/app.rs:1073`, `scheduler/src/test_scheduler.rs:100,362`)
+/// — so it issues its own write, and for a moment a note has two.
 ///
-/// Dropping `NoteStore` does not settle this. `windows.clear()` releases the
-/// store before the quit futures are polled, which cancels the chain's `Task`
-/// — but cancelling a `Task` only stops it being polled *again*
-/// (`async-task/src/task.rs:440-445`), and `RealFs::save` has no `.await` in
-/// it, so a write a background thread already began runs to its `rename()`
-/// regardless. The loser of that race is whichever `rename()` lands last, and
-/// without ordering that can be the *older* text.
+/// Dropping `NoteStore` doesn't settle this: `windows.clear()` cancels the
+/// chain's `Task` before the quit futures are polled, but cancelling only
+/// stops it being polled *again* (`async-task/src/task.rs:440-445`); a
+/// `RealFs::save` a background thread already began has no `.await` left and
+/// runs its `rename()` regardless. Without ordering, whichever `rename()`
+/// lands last wins — possibly the *older* text.
 ///
-/// The lock alone cannot order them: `futures::lock::Mutex` documents no
-/// fairness at all (`futures-util-0.3.34/src/lock/mutex.rs:14-21`), so
-/// acquisition order is not issue order. The sequence is what decides; the lock
-/// only stops the two `rename()`s interleaving.
+/// The lock alone can't order them: `futures::lock::Mutex` has no fairness
+/// guarantee (`futures-util-0.3.34/src/lock/mutex.rs:14-21`), so acquisition
+/// order isn't issue order. The sequence decides; the lock only stops the two
+/// `rename()`s interleaving.
 pub(super) struct Writer {
     /// The newest write that reached the filesystem, and what it left behind.
     ///
@@ -51,15 +48,15 @@ impl Writer {
     }
 }
 
-/// The expectation lives here, and not beside `saved_version` on `OpenNote`,
-/// because a write captures its text under `&mut App` and only *then* waits for
-/// the lock. A second write issued while the first is in flight would therefore
-/// carry a stamp the first is about to invalidate, find a file it did not
-/// recognise — one it had just written itself — and preserve our own new text
-/// into a conflict file. Ordinary typing would mint junk beside every note.
+/// The expectation lives here, not beside `saved_version` on `OpenNote`: a
+/// write captures its text under `&mut App` and only *then* waits for the
+/// lock. A second write issued meanwhile would carry a stamp the first is
+/// about to invalidate, find a file it doesn't recognise (one it just wrote
+/// itself), and preserve our own new text into a conflict file — ordinary
+/// typing minting junk beside every note.
 ///
-/// Read after the lock, the expectation is always what our own last write
-/// actually produced, or what the load returned before there was one.
+/// Read after the lock, so the expectation is always what our own last write
+/// produced, or what the load returned before there was one.
 struct WriterState {
     /// The sequence of the newest write that reached the filesystem.
     written: u64,
@@ -88,12 +85,11 @@ pub(super) async fn write_through(
         return None;
     }
     let result = fs.save(&path, &text, state.stamp).await;
-    // Only a write that landed advances the mark, so the field keeps meaning
-    // what it says. Not covered by a test, and deliberately so: sequences are
-    // minted monotonically and used once, so a retry always carries a higher
-    // number than the failure before it, and no reachable interleaving can tell
-    // the two versions apart. The guard is here to keep the invariant true for
-    // the next reader of `written`, not because a test demands it.
+    // Only a landed write advances the mark, keeping the field's meaning
+    // true. Not covered by a test, deliberately: sequences mint
+    // monotonically and are used once, so a retry always carries a higher
+    // number than the failure before it — no reachable interleaving can tell
+    // the two versions apart.
     if let Ok(saved) = &result {
         state.written = seq;
         state.stamp = saved.stamp;
@@ -114,10 +110,10 @@ mod tests {
             state: futures::lock::Mutex::new(super::WriterState {
                 written: 0,
                 // These tests drive `write_through` directly against a file
-                // they wrote themselves, so the seed is never what the note
-                // carries — which is the point: the first write of each is
-                // expected to find a mismatch and preserve, and they assert on
-                // the note's final text, which is unaffected either way.
+                // they wrote themselves, so the seed never matches what the
+                // note carries. That's the point: the first write of each is
+                // expected to find a mismatch and preserve, and both assert
+                // on the note's final text either way.
                 stamp: Stamp {
                     mtime: Mtime(std::time::SystemTime::UNIX_EPOCH),
                     size: 0,
@@ -126,20 +122,11 @@ mod tests {
         })
     }
 
-    /// The ordering guard, driven directly rather than raced.
-    ///
-    /// A `#[gpui::test]` cannot put this under test honestly. `TestScheduler`
-    /// runs every runnable on the one thread driving the block
-    /// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:308-417`),
-    /// so it can model "queued and not yet polled" but never the production
-    /// hazard, which is a background thread already inside `rename()`. And a
-    /// test that let the scheduler pick the order would assert whatever seed 0
-    /// happens to produce, for as long as gpui's scheduling weights stay put.
-    ///
-    /// Driving `write_through` by hand fixes both: it needs no window, no
-    /// scheduler and no clock, so each interleaving is chosen rather than
-    /// hoped for. The `scroll.rs` precedent — a plain `#[test]` in `app` for
-    /// something that cannot move down a layer.
+    /// The ordering guard, driven directly rather than raced — a
+    /// `#[gpui::test]` can't model the production hazard here, a background
+    /// thread already inside `rename()`
+    /// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:308-417`).
+    /// See CLAUDE.md, "A test of the write ordering...".
     #[test]
     fn a_later_write_wins_when_it_lands_second() {
         let fs = Arc::new(MemFs::new());
@@ -170,10 +157,9 @@ mod tests {
         );
     }
 
-    /// The R2 revert, forced. Without the sequence the older write lands last
-    /// and the file holds text the user had already replaced — the loss this
-    /// whole feature exists to prevent, arriving through the quit flush that is
-    /// supposed to be the safety net.
+    /// Forces the order where the sequence matters: without it, the older
+    /// write could land last and leave the file with text the user already
+    /// replaced.
     #[test]
     fn a_later_write_wins_when_it_lands_first() {
         let fs = Arc::new(MemFs::new());

@@ -1,26 +1,20 @@
 use futures::channel::oneshot;
 use gpui::Task;
 
-/// Orders every filesystem operation on one note, one after another.
+/// Orders every filesystem operation on one note, one after another. Keyed in
+/// `NoteStore`, not `OpenNote`: the note being renamed or deleted is usually
+/// not open, so an `Ops` outlives the note being open, or is never one.
 ///
-/// Separate from `OpenNote`, and keyed in `NoteStore` instead, because the note
-/// a user renames or deletes is usually one nobody has opened. An `Ops`
-/// therefore outlives the note being open, and exists for notes that never are.
+/// `open_note`'s load does **not** join this chain: a rename racing a load
+/// can leave a click opening nothing (no data lost, one background-read
+/// window). Closing it means routing the load through here too.
 ///
-/// `open_note`'s load does **not** join this chain, so a rename issued while a
-/// note is loading still races it: the load captured its path before the move,
-/// finds nothing, and the click silently opens nothing. No data is at risk —
-/// the rename itself is ordered — and the window is one background read wide.
-/// Closing it means routing the load through here too.
-///
-/// The chain is the ordering mechanism, and the only one that works for a move.
-/// `Writer`'s sequence orders two *writes* by the moment each was decided,
-/// which is right when they are competing versions of one text and a category
-/// error for a rename: a write pending when a rename is issued is decided
-/// *later* and so carries the higher sequence, which either lets it recreate
-/// the note under its old name or drops the rename as stale. Neither is
-/// reachable here, because `NoteStore::write` does not return until its write
-/// has landed, so anything appended behind it runs strictly afterwards.
+/// Why the chain, not `Writer`'s sequence: a write pending when a rename is
+/// issued is decided later and carries a higher sequence — ordering by it
+/// would recreate the note under its old name or drop the rename as stale.
+/// Safe here because a chain link awaits `NoteStore::write` to completion,
+/// so anything appended behind it runs strictly afterwards. Full reasoning:
+/// CLAUDE.md, "Every filesystem operation on one note...".
 #[derive(Default)]
 pub(super) struct Ops {
     /// The pending chain. Held, and never replaced by dropping it: a dropped
@@ -39,12 +33,10 @@ pub(super) struct Ops {
     pub(super) cancel: Option<oneshot::Sender<()>>,
     /// A trash is queued and has not run yet.
     ///
-    /// Read by `flush_all`, which skips the note. The flush is the one writer
-    /// that cannot join this chain — `App::shutdown` polls it while the
-    /// foreground session is blocked — so it mints the highest sequence a note
-    /// will ever see, and a trash queued behind it would be dropped as stale.
-    /// A confirmed delete would then silently not happen. Set synchronously
-    /// when the command is issued, so no lock is involved and the rule that no
-    /// foreground code holds the `Writer` guard still stands.
+    /// Read by `flush_all`, which skips the note: the flush can't join this
+    /// chain, so it mints the highest sequence the note will ever see, and a
+    /// trash queued behind it would be dropped as stale — silently undoing a
+    /// confirmed delete. Set synchronously, so no foreground code ever holds
+    /// the `Writer` guard.
     pub(super) trashing: bool,
 }

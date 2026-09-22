@@ -20,10 +20,8 @@ use crate::keymap::key_bindings;
 use crate::shell::AppShell;
 use crate::vault::NoteStore;
 
-/// The window a first launch gets. The previous 600x320 predates the sidebar:
-/// it left 420 px of editor beside it, about eleven lines of body text. Not
-/// persisted — restoring the last size and position is deferred, with the rest
-/// of the window state.
+/// The window a first launch gets. Not persisted — restoring size and
+/// position is deferred, with the rest of window state.
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
 
 /// What the command-line argument named, already read.
@@ -50,10 +48,9 @@ pub(crate) enum Launch {
 /// gets the same composition the real window gets, rather than a second one
 /// that could drift from it.
 pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<AppShell> {
-    // Only a named file gets a buffer and an editor here. The other two states
-    // used to get one too, untracked by `NoteStore` and therefore unsaveable by
-    // any route; `AppShell` renders an empty state for them instead, so there
-    // is nothing to type into and nothing to lose.
+    // Only a named file gets a buffer and an editor; the other two launch
+    // states render `AppShell`'s empty state instead (see CLAUDE.md,
+    // `AppShell.editor`).
     let (note, scanned) = match launched {
         Launch::Nothing => (None, None),
         Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),

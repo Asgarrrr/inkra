@@ -122,10 +122,9 @@ fn typing_does_not_write_before_the_delay_elapses(cx: &mut TestAppContext) {
     );
 }
 
-/// The property an idle debounce does not have. Each round types again
-/// *before* the previous deadline, which under Zed's `AfterDelay` would
-/// push the write forward forever; here the first deadline stands, so the
-/// file keeps up with the buffer one interval at a time.
+/// The property an idle debounce does not have (see `AUTOSAVE_DELAY`). Each
+/// round types again *before* the previous deadline; the first deadline
+/// stands, so the file keeps up with the buffer one interval at a time.
 #[gpui::test]
 fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -152,11 +151,10 @@ fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     }
 }
 
-/// `⌘S` routed through the same queue is absorbed by the pending-chain
-/// guard unless it preempts: without the preemption it writes nothing until
-/// the periodic deadline arrives, which breaks the one promise the gesture
-/// makes. The clock never advances here, so only a
-/// preempting `⌘S` can produce the write.
+/// `⌘S` routed through the same queue would be absorbed by the
+/// pending-chain guard without preemption, writing nothing until the
+/// periodic deadline — breaking the promise the gesture makes. The clock
+/// never advances here, so only a preempting `⌘S` produces the write.
 #[gpui::test]
 fn cmd_s_preempts_a_pending_autosave(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -205,16 +203,15 @@ fn a_second_write_does_not_conflict_with_the_first(cx: &mut TestAppContext) {
     );
 }
 
-/// The same, with the second write *issued* while the first is in flight:
-/// `block_save` holds the periodic chain's write open past the turn that
-/// started it, so the `⌘S` below is decided against a file our own write has
-/// not finished changing.
+/// Same as above, but the second write is *issued* while the first is still
+/// in flight: `block_save` holds the periodic write open, so the `⌘S` below
+/// is decided against a file our own write hasn't finished changing.
 ///
-/// The two writes do not overlap at the filesystem, and cannot: the `⌘S`
-/// chain awaits the one it replaced (`schedule_save` takes `previous` rather
-/// than dropping it), so the second `write_through` starts after the first
-/// returned. Only the quit flush escapes that chaining — see
-/// `a_quit_flush_overtakes_the_write_it_overlaps`.
+/// The two writes cannot overlap at the filesystem: the `⌘S` chain awaits
+/// the one it replaced (`schedule_save` takes `previous` rather than
+/// dropping it), so the second `write_through` starts after the first
+/// returned. Only the quit flush escapes that chaining (see
+/// `a_quit_flush_overtakes_the_write_it_overlaps`).
 #[gpui::test]
 fn an_overlapping_write_does_not_conflict_with_the_one_in_flight(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -281,16 +278,12 @@ fn an_external_change_is_preserved_beside_the_note(cx: &mut TestAppContext) {
     assert_eq!(announced.load(Ordering::SeqCst), 1);
 }
 
-/// The defect the cancel channel introduced, reachable only with a write
-/// slow enough to outlive the turn that issued it.
-///
-/// `⌘S` installs a chain whose timer is already ready, then the next
-/// keystroke replaces `note.cancel` and drops that chain's sender. The
-/// receiver resolves `Err(Canceled)`, and treating that as a cancel makes
-/// the gesture that promises "write now" write nothing until the periodic
-/// deadline. The clock never advances past the release here, so only a
-/// chain that distinguishes a dropped sender from a deliberate send can
-/// produce the assertion below.
+/// The defect the cancel channel introduced: `⌘S` installs a chain whose
+/// timer is already ready, then a keystroke replaces `note.cancel`, dropping
+/// that chain's sender. Treating the resulting `Err(Canceled)` as a cancel
+/// would make "write now" write nothing until the next periodic deadline —
+/// the clock here never advances past the release, so only a chain that
+/// tells a dropped sender from a deliberate one can pass.
 #[gpui::test]
 fn a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

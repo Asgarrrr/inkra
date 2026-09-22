@@ -80,12 +80,9 @@ async fn a_trash_is_not_undone_by_a_write_already_in_flight(cx: &mut TestAppCont
 /// in that window schedules a write that queues *behind* the trash — and a
 /// write running after a delete recreates the file.
 ///
-/// What stops it is `trash` dropping the note from `open` before that write
-/// reaches its deadline: `NoteStore::write` starts at `open.get(&id)?` and
-/// returns. Stated because it is not obvious, and because the guard that
-/// looks like it does this job — refusing to schedule at all once a trash
-/// is queued — was tried here and removed: it changed nothing this test
-/// could see, and a guard with no observable effect is a guess.
+/// What stops it: `trash` drops the note from `open` before that write
+/// reaches its deadline, and `NoteStore::write` starts at `open.get(&id)?`
+/// and returns.
 #[gpui::test]
 async fn typing_after_a_delete_does_not_bring_the_note_back(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -180,9 +177,7 @@ async fn a_failed_trash_keeps_the_note_and_reports_it(cx: &mut TestAppContext) {
     });
 }
 
-/// `DETACHED` names the file given on the command line. It has no vault
-/// entry, so there is nothing to remove and no row to remove it from — and
-/// `current` *can* hold it, which is how a future caller might reach here.
+/// Proves the DETACHED guard in `trash` (see `tree_ops.rs`).
 #[gpui::test]
 async fn trashing_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -208,13 +203,11 @@ async fn trashing_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
     );
 }
 
-/// Preempting rather than cancelling, stated as an outcome: the delete is
-/// issued while the write is still counting down, and the copy that reaches
-/// the Trash is the one the user last typed.
+/// Preempting, not cancelling, as an outcome: the delete is issued while the
+/// write is still counting down, and the Trash gets the text last typed.
 ///
-/// Cancelling the pending write instead leaves the previous save's text in
-/// the Trash — which is the only copy there is, so the edits are gone for
-/// good. This test is the difference between the two.
+/// Cancelling instead would leave the previous save's text in the Trash —
+/// the only copy there is — losing the edits for good.
 #[gpui::test]
 async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -242,10 +235,9 @@ async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut Te
 
 /// A failed delete has to leave the note working, not merely present.
 ///
-/// Sending on `Ops::cancel` makes the write chain return at its select,
-/// before the line that clears `scheduled` — so the flag stays set, every
-/// later edit is absorbed by it, and the note is never written again. The
-/// note looks fine and silently stops saving.
+/// `Ops::cancel` returning the chain before the line that clears
+/// `scheduled` would leave that flag stuck — every later edit absorbed, the
+/// note silently never written again.
 #[gpui::test]
 async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
