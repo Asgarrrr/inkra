@@ -56,10 +56,10 @@ pub(crate) struct NameField {
 impl NameField {
     /// Seeded with `initial`, all of it selected.
     ///
-    /// Selected rather than placed at the end because both gestures that open a
-    /// field want it: a rename starts from the current name and typing should
-    /// replace it, and a create starts from a suggestion. The name is still
-    /// there to edit for anyone who presses an arrow first.
+    /// Selected rather than placed at the end, for the one caller that passes
+    /// a name: a rename starts from the current one and typing should replace
+    /// it, while an arrow key still reaches it for anyone correcting a typo. A
+    /// create passes `""`, where the distinction does not arise.
     pub(crate) fn new(initial: &str, cx: &mut Context<Self>) -> Self {
         let buffer = cx.new(|_| Buffer::new(initial));
         let end = buffer.read(cx).len();

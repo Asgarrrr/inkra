@@ -121,8 +121,9 @@ struct EditState {
     parent: Option<EntryId>,
     kind: Kind,
     /// Index in `visible` where the field's row is drawn, and the indent it
-    /// takes. Fixed when the gesture starts: a rescan landing mid-typing would
-    /// otherwise move the field out from under the caret.
+    /// takes. `rebuild` moves `at` to follow the tree; `depth` is fixed at the
+    /// gesture, because a new entry's indent is decided by where it will land
+    /// rather than by what the listing currently holds.
     at: usize,
     depth: usize,
     field: Entity<NameField>,
@@ -217,19 +218,16 @@ impl Sidebar {
                 }
             }
         }
-        // A walk that landed while a name is being typed can leave the field's
-        // row past the end of the tree — an external delete is the way there.
-        // An unrendered row has no dispatch node, so gpui falls back to the
-        // root (`window.rs:6244-6251`) and every keystroke, `escape` included,
-        // vanishes with no panic and no feedback. Clamped and scrolled back
-        // rather than closed: the user is mid-gesture, and losing what they
-        // typed is worse than moving the row.
+        // A field open across this walk has to end up on a row the list still
+        // draws: an unrendered row is in no dispatch node, so gpui falls back
+        // to the root (`window.rs:6244-6251`) and every keystroke, `escape`
+        // included, vanishes with no panic and no feedback.
+        //
+        // A rename follows its row by identity, so a walk that reordered the
+        // tree keeps the field over the entry it names, and a target deleted
+        // from outside ends the gesture. A create has no target and only needs
+        // its index to stay in range.
         if let Some(target) = self.editing.as_ref().map(|edit| edit.target) {
-            // A rename follows its row by identity, so a walk that reordered
-            // the tree keeps the field over the entry it names. A target that
-            // is gone ends the gesture: it was deleted from outside, and there
-            // is nothing left to rename. A create has no target and only needs
-            // its index to stay one the list draws.
             let at = match target {
                 Some(id) => self.index_of(id),
                 None => self

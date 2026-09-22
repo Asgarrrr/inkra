@@ -169,10 +169,14 @@ struct OpenNote {
 /// Orders every filesystem operation on one note, one after another.
 ///
 /// Separate from `OpenNote`, and keyed in `NoteStore` instead, because the note
-/// a user renames or deletes is usually one nobody has opened — and because a
-/// rename issued while the note is still loading has to be ordered against that
-/// load rather than race it. An `Ops` therefore outlives the note being open,
-/// and exists for notes that never are.
+/// a user renames or deletes is usually one nobody has opened. An `Ops`
+/// therefore outlives the note being open, and exists for notes that never are.
+///
+/// `open_note`'s load does **not** join this chain, so a rename issued while a
+/// note is loading still races it: the load captured its path before the move,
+/// finds nothing, and the click silently opens nothing. No data is at risk —
+/// the rename itself is ordered — and the window is one background read wide.
+/// Closing it means routing the load through here too.
 ///
 /// The chain is the ordering mechanism, and the only one that works for a move.
 /// `Writer`'s sequence orders two *writes* by the moment each was decided,
