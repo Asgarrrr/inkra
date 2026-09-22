@@ -101,10 +101,7 @@ impl Sidebar {
 
 /// Stops short of the sidebar: `add_window` constructs the view itself.
 fn parts(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entity<NoteStore> {
-    let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
-        .expect("scan the test vault");
-    let vault = cx.update(|cx| cx.new(|_| scanned));
-    cx.update(|cx| cx.new(|cx| NoteStore::new(fs, Some(vault), cx)))
+    crate::test_support::scan_notes(cx, fs)
 }
 
 /// The same, with a sidebar that is never drawn.

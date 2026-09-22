@@ -4,20 +4,17 @@ use std::time::Instant;
 
 use gpui::{Entity, TestAppContext};
 use inkra_text::ByteOffset;
-use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::open_two_notes;
+use crate::test_support::two_notes;
 
 /// Neither load takes the already-open early return, so the second would
 /// overwrite the first's entry and the store would forget a live buffer.
 #[gpui::test]
 async fn two_loads_of_one_note_settle_on_one_buffer(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
 
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let first = store.update(cx, |store, cx| store.open_note(a, cx));
     let second = store.update(cx, |store, cx| store.open_note(a, cx));
@@ -34,10 +31,8 @@ async fn two_loads_of_one_note_settle_on_one_buffer(cx: &mut TestAppContext) {
 #[gpui::test]
 fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
 
-    let (store, a, b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, b) = two_notes(cx, &fs);
 
     store.update(cx, |store, cx| store.open_note(a, cx).detach());
     cx.run_until_parked();
@@ -70,9 +65,7 @@ fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
 #[gpui::test]
 fn switching_notes_writes_the_one_being_left(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, b) = two_notes(cx, &fs);
 
     store.update(cx, |store, cx| store.open_note(a, cx).detach());
     store.update(cx, |store, cx| store.open_note(b, cx).detach());

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::Fs;
 
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
@@ -16,27 +16,7 @@ mod lifecycle;
 mod quit;
 mod trash;
 
-pub(super) fn open_two_notes(
-    cx: &mut TestAppContext,
-    fs: Arc<dyn Fs>,
-) -> (Entity<NoteStore>, EntryId, EntryId) {
-    let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new("/vault")))
-        .expect("scan the test vault");
-    // By name, never by index: the comparator decides the order.
-    let id_of = |name: &str| {
-        scanned
-            .entries()
-            .find(|entry| entry.path.display_name() == name)
-            .map(|entry| entry.id)
-            .expect("entry exists")
-    };
-    let (a, b) = (id_of("a"), id_of("b"));
-    let vault = cx.update(|cx| cx.new(|_| scanned));
-    let store = cx.update(|cx| cx.new(|cx| NoteStore::new(fs, Some(vault), cx)));
-    (store, a, b)
-}
-
-/// `with_editor` and `dispatching` (`editor/tests.rs`) root the window at
+/// `with_editor` and `dispatching` (`editor/tests/mod.rs`) root the window at
 /// `EditorView`, so neither can prove an `AppShell`-scoped binding fires.
 /// Returns the store as well as the window: it is built here, so a test
 /// that needs to subscribe to it or read `is_dirty` takes it from the

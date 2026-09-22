@@ -12,7 +12,7 @@ use inkra_vault::{EntryId, Fs};
 use crate::vault::store::AUTOSAVE_DELAY;
 use crate::vault::{NoteClosed, NoteStore, TrashFailed};
 
-use super::open_two_notes;
+use crate::test_support::two_notes;
 
 /// The hazard the operation chain exists for. A write pending when the
 /// delete is issued would otherwise land *after* it and recreate the note
@@ -25,9 +25,7 @@ use super::open_two_notes;
 #[gpui::test]
 async fn a_trash_is_not_undone_by_a_write_already_in_flight(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -91,9 +89,7 @@ async fn a_trash_is_not_undone_by_a_write_already_in_flight(cx: &mut TestAppCont
 #[gpui::test]
 async fn typing_after_a_delete_does_not_bring_the_note_back(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -123,9 +119,7 @@ async fn typing_after_a_delete_does_not_bring_the_note_back(cx: &mut TestAppCont
 #[gpui::test]
 async fn trashing_the_current_note_closes_it_and_says_so(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -158,9 +152,7 @@ async fn trashing_the_current_note_closes_it_and_says_so(cx: &mut TestAppContext
 #[gpui::test]
 async fn a_failed_trash_keeps_the_note_and_reports_it(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -226,9 +218,7 @@ async fn trashing_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -259,9 +249,7 @@ async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut Te
 #[gpui::test]
 async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))

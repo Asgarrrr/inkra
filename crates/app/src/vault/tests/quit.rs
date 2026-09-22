@@ -7,10 +7,11 @@ use inkra_text::ByteOffset;
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
+use crate::test_support::{entry_id, scan_notes, two_notes};
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
 
-use super::{open_shell, open_two_notes};
+use super::open_shell;
 
 /// The quit flush is the one writer that cannot join the chain, so it mints
 /// the highest sequence a note will ever see. Without the `trashing` flag it
@@ -23,9 +24,7 @@ use super::{open_shell, open_two_notes};
 #[gpui::test]
 async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -130,16 +129,14 @@ async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
 /// application rescans, so without this the file sits on disk unmentioned
 /// until the next launch.
 ///
-/// `open_two_notes`, not `open_shell`: the latter is the DETACHED path —
+/// `two_notes`, not `open_shell`: the latter is the DETACHED path —
 /// `NoteStore::new(fs, None, cx)` — and has no vault at all, so the rescan
 /// branch is unreachable under it. This test needs no window; it asserts on
 /// the vault's contents, not on a frame.
 #[gpui::test]
 async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -174,9 +171,7 @@ async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     let buffer = store
         .update(cx, |store, cx| store.open_note(a, cx))
@@ -216,9 +211,7 @@ async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, _b) = two_notes(cx, &fs);
 
     store.update(cx, |store, cx| store.open_note(a, cx).detach());
     cx.run_until_parked();
@@ -272,9 +265,7 @@ fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
 #[gpui::test]
 fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_file("/vault/b.md", "beta");
-    let (store, a, b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let (store, a, b) = two_notes(cx, &fs);
 
     store.update(cx, |store, cx| store.open_note(a, cx).detach());
     store.update(cx, |store, cx| store.open_note(b, cx).detach());
@@ -315,7 +306,10 @@ fn quitting_leaves_a_clean_note_alone(cx: &mut TestAppContext) {
     // Text the buffer never held, so any write at all shows.
     fs.insert_file("/vault/a.md", "on disk, not in the buffer");
     fs.insert_file("/vault/b.md", "beta");
-    let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    // Not `two_notes`: it hardcodes "alpha" for `a.md`, and this test needs
+    // text the buffer never held.
+    let store = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let a = entry_id(&store, cx, "a");
 
     store.update(cx, |store, cx| store.open_note(a, cx).detach());
     cx.run_until_parked();
