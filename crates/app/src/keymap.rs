@@ -30,11 +30,13 @@ use crate::editor::actions::{
     Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, Home, Left, Newline, Paste, Redo,
     Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
 };
-use crate::sidebar::{SelectNext, SelectPrev, Trash};
+use crate::field::{Cancel, Confirm};
+use crate::sidebar::{NewFolder, NewNote, SelectNext, SelectPrev, Trash};
 use crate::vault::Save;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
     let editor = Some("EditorView");
+    let field = Some("NameField");
     vec![
         KeyBinding::new("backspace", Backspace, editor),
         KeyBinding::new("delete", Delete, editor),
@@ -65,6 +67,30 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-backspace", Trash, Some("Sidebar")),
         KeyBinding::new("up", SelectPrev, Some("Sidebar")),
         KeyBinding::new("down", SelectNext, Some("Sidebar")),
+        // The name field repeats the editor's movement and deletion set rather
+        // than inheriting it, which the paragraph above forces: with
+        // `EditorView` absent from the focused stack those bindings are
+        // excluded from matching, not merely outranked. A field with only
+        // `enter` and `escape` could be typed into and never corrected.
+        //
+        // `enter` confirms here and inserts a newline there, on one keystroke
+        // and two disjoint contexts, so the two never compete.
+        KeyBinding::new("enter", Confirm, field),
+        KeyBinding::new("escape", Cancel, field),
+        KeyBinding::new("backspace", Backspace, field),
+        KeyBinding::new("delete", Delete, field),
+        KeyBinding::new("left", Left, field),
+        KeyBinding::new("right", Right, field),
+        KeyBinding::new("shift-left", SelectLeft, field),
+        KeyBinding::new("shift-right", SelectRight, field),
+        KeyBinding::new("home", Home, field),
+        KeyBinding::new("end", End, field),
+        KeyBinding::new("cmd-a", SelectAll, field),
+        // Scoped to `AppShell` rather than `Sidebar`, so they fire with the
+        // editor focused: making a note is a window-wide gesture, not a tree
+        // one. `cmd-s` is the precedent.
+        KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
+        KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
         // The application's, not a view's: it must fire wherever focus is.
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),

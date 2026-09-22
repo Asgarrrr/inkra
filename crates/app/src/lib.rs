@@ -12,6 +12,7 @@
 
 mod bootstrap;
 mod editor;
+mod field;
 mod keymap;
 mod shell;
 mod sidebar;

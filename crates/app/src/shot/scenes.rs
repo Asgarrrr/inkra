@@ -71,6 +71,21 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             open: sidebar_vault,
         },
         Scene {
+            name: "sidebar-selected",
+            shows: "the selected row, which is what a tree command acts on",
+            open: sidebar_selected,
+        },
+        Scene {
+            name: "sidebar-naming",
+            shows: "a name being typed into the tree: the field's row, caret and indent",
+            open: sidebar_naming,
+        },
+        Scene {
+            name: "sidebar-rejected",
+            shows: "a refused name, with the reason under the field",
+            open: sidebar_rejected,
+        },
+        Scene {
             name: "sidebar-dirty",
             shows: "the dirty dot on a note edited but not written",
             open: sidebar_dirty,
@@ -131,6 +146,34 @@ fn sidebar_dirty(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
     stage.focus(window);
     stage.keys(window, "e d i t e d");
+    window
+}
+
+fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(VAULT);
+    // Row 1 is the first note, `projects` being collapsed above it.
+    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    window
+}
+
+/// The field mid-gesture. The one state where a row is not a label, so the
+/// thing to look at is that its box matches every other row's — a field even a
+/// pixel taller moves every row below it.
+fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(VAULT);
+    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    stage.keys(window, "cmd-n");
+    stage.keys(window, "d r a f t");
+    window
+}
+
+/// The same, refused. `index` is already taken, so confirming reports it and
+/// leaves the field open rather than closing and doing nothing.
+fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(VAULT);
+    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    stage.keys(window, "cmd-n");
+    stage.keys(window, "i n d e x enter");
     window
 }
 

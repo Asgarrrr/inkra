@@ -12,7 +12,7 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 use gpui::{App, Context, Entity, EventEmitter, Subscription, Task, actions, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs, Saved, Stamp, Vault};
+use inkra_vault::{EntryId, Fs, Kind, Saved, Stamp, Vault};
 
 actions!(vault, [Save]);
 
@@ -534,7 +534,9 @@ impl NoteStore {
                     this.current = None;
                 }
                 cx.emit(NoteClosed(id));
-                this.rescan(cx);
+                // Dropped: this caller has no id to resolve afterwards. Only
+                // `create` needs the walk to have landed.
+                drop(this.rescan(cx));
                 cx.notify();
                 let _ = done.send(true);
             });
@@ -542,6 +544,79 @@ impl NoteStore {
 
         cx.foreground_executor()
             .spawn(async move { wait.await == Ok(true) })
+    }
+
+    /// Makes an empty note or a folder, and resolves to the id the vault gives
+    /// it.
+    ///
+    /// `parent` is a folder to put it in, or `None` for the vault root. A
+    /// `parent` that names a note rather than a folder is the caller's mistake
+    /// and resolves to `None`.
+    ///
+    /// On no chain, unlike `trash`: the file does not exist yet, so there is no
+    /// note whose writes it could overtake. What it does have to order against
+    /// is the vault listing, which is why it awaits its own rescan before
+    /// answering — and why `rescan` hands back a receiver.
+    ///
+    /// The id comes from the identity `Fs::create` returned, never from the
+    /// path: a walk landing between the create and the lookup would answer a
+    /// path query with whatever holds that name *now*, and after an external
+    /// move that is a different file.
+    pub(crate) fn create(
+        &mut self,
+        parent: Option<EntryId>,
+        kind: Kind,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<EntryId>> {
+        let Some(vault) = self.vault.clone() else {
+            return Task::ready(None);
+        };
+        // The name rules live in `vault` because they are properties of a vault
+        // path. Re-checked here rather than trusted: `create` is a public entry
+        // point, and a future caller — a command palette, a `[[link]]` making a
+        // missing note — has no field to have validated for it.
+        if inkra_vault::check_name(name).is_some() {
+            return Task::ready(None);
+        }
+        let file_name = match kind {
+            Kind::Note => inkra_vault::note_file_name(name),
+            Kind::Dir => name.trim().to_owned(),
+        };
+
+        let root = {
+            let vault = vault.read(cx);
+            match parent {
+                None => vault.root().to_path_buf(),
+                Some(parent) => match vault.entry(parent) {
+                    Some(entry) if entry.kind == Kind::Dir => {
+                        vault.absolute(parent).unwrap_or_default()
+                    }
+                    _ => return Task::ready(None),
+                },
+            }
+        };
+        let path = root.join(&file_name);
+        let fs = Arc::clone(&self.fs);
+
+        cx.spawn(async move |this, cx| {
+            let made = cx
+                .background_spawn(async move { fs.create(&path, kind).await })
+                .await
+                .ok()?;
+
+            let applied = this.update(cx, Self::rescan).ok()?;
+            // An `Err` means the store was dropped mid-walk, which takes the
+            // vault with it — there is no id left to report.
+            applied.await.ok()?;
+
+            this.update(cx, |this, cx| {
+                let id = this.vault.as_ref()?.read(cx).id_for(made);
+                cx.notify();
+                id
+            })
+            .ok()?
+        })
     }
 
     /// `⌘S`. Preempts whatever the periodic chain had queued, so the write
@@ -645,18 +720,19 @@ impl NoteStore {
     /// rebuilds the whole vault, so two of them collide whichever notes caused
     /// them.
     ///
-    /// Not under test, and stated rather than left to be discovered: this slice
-    /// has one caller, so no test can put two walks in flight. The second
-    /// caller arrives with create, and the test with it.
-    ///
     /// Two halves because `Vault::apply` needs `&mut Vault` and the walk
     /// awaits: an entity hands out `&mut` only inside a synchronous closure.
     ///
-    /// Returns nothing: a caller that needs to read the vault afterwards needs
-    /// the walk to resolve, and none does yet.
-    fn rescan(&mut self, cx: &mut Context<Self>) {
+    /// Returns a receiver that fires once *this* walk has been applied, for a
+    /// caller that has to read the vault afterwards — `create`, which resolves
+    /// the id the walk minted for the file it just made. A receiver rather than
+    /// the `Task`, because the `Task` is the chain and has to stay here: it is
+    /// what the next walk awaits. Dropping the receiver is how every other
+    /// caller says it does not care.
+    fn rescan(&mut self, cx: &mut Context<Self>) -> oneshot::Receiver<()> {
+        let (applied, wait) = oneshot::channel();
         let Some(vault) = self.vault.clone() else {
-            return;
+            return wait;
         };
         let fs = Arc::clone(&self.fs);
         let previous = self.rescan.take();
@@ -681,7 +757,11 @@ impl NoteStore {
                 vault.apply(children);
                 cx.notify();
             });
+            // After the apply, so a caller woken by this can read what the walk
+            // found. An `Err` means the caller stopped caring and dropped it.
+            let _ = applied.send(());
         }));
+        wait
     }
 
     /// Writes one note, once. A no-op when nothing changed.
@@ -767,7 +847,7 @@ impl NoteStore {
                     id,
                     path: preserved,
                 });
-                this.rescan(cx);
+                drop(this.rescan(cx));
             }
             cx.notify();
         });
