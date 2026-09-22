@@ -313,8 +313,8 @@ area, not on every task:
   save destroys what it found. It is conditional on the expectation, and has to
   be — a save that finds what it expected is replacing its own bytes and may.
 - `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
-  exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault/tests/`. A test
-  reaches only what its own file roots the window at: `with_editor` and
+  exercises — `editor/tests.rs`, `shell.rs`, `sidebar/tests.rs`, `vault/tests/`.
+  A test reaches only what its own file roots the window at: `with_editor` and
   `dispatching` root at `EditorView`, so neither can prove an `AppShell`-scoped
   binding such as `cmd-s` fires. Reach `EntityInputHandler` through
   `with_editor` — its methods all need a `Window`. What must not live in `app`
@@ -324,7 +324,7 @@ area, not on every task:
 - A test of where an activated note *goes* roots at `AppShell`, in `shell.rs`,
   for the same reason `cmd-s` does: the subscription that routes
   `NoteActivated` is set up in `AppShell::new`, so a window rooted at `Sidebar`
-  cannot reach it. `sidebar.rs` keeps only the click→emit half, which it
+  cannot reach it. `sidebar/tests.rs` keeps only the click→emit half, which it
   asserts by subscribing to the `Sidebar` itself — and which therefore proves
   nothing about `AppShell`'s wiring.
 - `app` tests use `MemFs`, never the real filesystem. Its two gates are what
@@ -473,13 +473,13 @@ change that introduces something reusable.
 | A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
 | Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault/store.rs` |
-| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar.rs` |
-| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
+| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar/mod.rs` |
+| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar/mod.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
 | A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault/tests/mod.rs` |
 | A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault/tests/mod.rs` |
-| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
+| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar/tests.rs` |
 | A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
 | Build the window's root view, from either entry point | `bootstrap::root` — takes the `Fs`, so the runner passes `MemFs` and gets the composition the real window gets | `app/src/bootstrap.rs` |
 | The real window's size | `bootstrap::WINDOW_SIZE` — never a literal beside it | `app/src/bootstrap.rs` |
@@ -490,7 +490,7 @@ change that introduces something reusable.
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
 | What fills the editor's slot when no note is open | `AppShell::render_empty` (private) — a method, not a view: no state, no events, no focus of its own | `app/src/shell.rs` |
 | The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell.rs` |
-| Which row a tree command acts on | `Sidebar::selected` — not `NoteStore::current`, which names what the editor shows | `app/src/sidebar.rs` |
+| Which row a tree command acts on | `Sidebar::selected` — not `NoteStore::current`, which names what the editor shows | `app/src/sidebar/mod.rs` |
 | Which note the editor is showing, for a subscriber | `AppShell::showing` — `current` is cleared before `NoteClosed` is delivered | `app/src/shell.rs` |
 | Ask before something destructive | `Window::prompt`, answered in tests with `cx.simulate_prompt_answer` | gpui `window.rs:6448` |
 | A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell.rs` |
@@ -503,8 +503,8 @@ change that introduces something reusable.
 | Make a create or a rename fail | `MemFs::make_uncreatable` | `vault/src/mem_fs/faults.rs` |
 | What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
 | One line of editable text, IME and dead keys included | `NameField`, emitting `Confirmed` / `Cancelled` | `app/src/field.rs` |
-| The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar.rs` |
-| Why a typed name was refused, as a sentence | `Rejection::message` | `app/src/sidebar.rs` |
+| The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar/edit.rs` |
+| Why a typed name was refused, as a sentence | `Rejection::message` | `app/src/sidebar/edit.rs` |
 | A UTF-16 range, at the protocol edge | `Buffer::to_utf16_range` / `from_utf16_range` | `text/src/buffer.rs` |
 | The range an IME edit applies to, and applying one | `EditorState::target_range` / `replace_in_range` / `mark_and_replace_in_range` | `editor/src/state.rs` |
 | Give the vault tree focus, in a test or a scene | `AppShell::tree_focus_handle` — `Focusable` returns the editor's once a note is open | `app/src/shell.rs` |
@@ -512,4 +512,4 @@ change that introduces something reusable.
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
 | A refused name's colour | `theme::rejected_text` | `app/src/theme.rs` |
 | The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
-| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |
+| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar/render.rs` |
