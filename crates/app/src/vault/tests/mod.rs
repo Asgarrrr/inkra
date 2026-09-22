@@ -16,12 +16,10 @@ mod lifecycle;
 mod quit;
 mod trash;
 
-/// `with_editor` and `dispatching` (`editor/tests/mod.rs`) root the window at
-/// `EditorView`, so neither can prove an `AppShell`-scoped binding fires.
-/// Returns the store as well as the window: it is built here, so a test
-/// that needs to subscribe to it or read `is_dirty` takes it from the
-/// helper rather than reaching through `AppShell`, whose fields are private
-/// to `shell.rs`.
+/// `with_editor`/`dispatching` (`editor/tests/mod.rs`) root at `EditorView`,
+/// so neither can prove an `AppShell`-scoped binding fires. Returns the store
+/// too — built here, so a caller needing it (or `is_dirty`) doesn't reach
+/// through `AppShell`'s private fields.
 pub(super) fn open_shell(
     cx: &mut TestAppContext,
     fs: Arc<dyn Fs>,

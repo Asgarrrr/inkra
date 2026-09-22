@@ -1,7 +1,6 @@
-//! The binding between files and buffers. Handles are **strong**: weak ones
-//! dropped an unsaved buffer the moment the editor switched away, losing the
-//! text and the undo history with no prompt (critical defect 2 in
-//! `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`).
+//! The binding between files and buffers. Handles are **strong**: a weak one
+//! drops an unsaved buffer, losing the text and undo history, the moment the
+//! editor switches away.
 
 use gpui::actions;
 

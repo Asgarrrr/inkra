@@ -22,10 +22,10 @@ impl NoteStore {
     /// vault entry, a note already being trashed, and a failed delete — the
     /// last of which also emits `TrashFailed`.
     pub(crate) fn trash(&mut self, id: EntryId, cx: &mut Context<Self>) -> Task<bool> {
-        // A note named on the command line has no entry to remove and no row to
-        // remove it from. Nothing in the UI can reach this, because only the
-        // sidebar issues the command and its rows all come from the vault —
-        // asserted rather than assumed, because `current` *can* be `DETACHED`
+        // A note named on the command line has no entry to remove and no row
+        // to remove it from. Nothing in the UI can reach this — only the
+        // sidebar issues the command, and its rows all come from the vault —
+        // asserted rather than assumed, since `current` *can* be `DETACHED`
         // and a future caller might read it as the target.
         if id == EntryId::DETACHED {
             return Task::ready(false);
@@ -41,15 +41,14 @@ impl NoteStore {
         if self.ops.get(&id).is_some_and(|ops| ops.trashing) {
             return Task::ready(false);
         }
-        // Preempted rather than cancelled. The delete queues behind whatever is
-        // already on the chain, so a write still waiting out `AUTOSAVE_DELAY`
-        // would hold the row on screen for two seconds looking broken — but
-        // cancelling that write instead would trash the note with the *previous*
-        // save's text, and the Trash is the only copy the user gets back.
-        // `schedule_save` with no delay resolves the timer, writes now, and
-        // leaves the bookkeeping consistent; sending on `Ops::cancel` directly
-        // does not — the chain returns before the line that clears `scheduled`,
-        // and every later edit is then absorbed by that flag.
+        // Preempted rather than cancelled: a write still waiting out
+        // `AUTOSAVE_DELAY` would otherwise hold the row on screen looking
+        // broken, but cancelling it instead would trash the note with the
+        // *previous* save's text — the only copy the user gets back.
+        // `schedule_save` with no delay resolves the timer and leaves the
+        // bookkeeping consistent; sending on `Ops::cancel` directly does not
+        // — the chain returns before the line that clears `scheduled`, and
+        // every later edit is absorbed by that flag.
         self.schedule_save(id, Duration::ZERO, cx);
 
         let ops = self.ops.entry(id).or_default();
@@ -92,10 +91,10 @@ impl NoteStore {
                     let _ = done.send(false);
                     return;
                 }
-                // Dropped only once the file is actually gone. An optimistic
-                // close would leave the editor blank and the buffer unreachable
-                // when the delete failed — worse than `SaveFailed`, where the
-                // note at least stays visibly dirty.
+                // Dropped only once the file is actually gone: an optimistic
+                // close would leave the editor blank and the buffer
+                // unreachable if the delete failed — worse than
+                // `SaveFailed`, where the note at least stays visibly dirty.
                 this.open.remove(&id);
                 this.observers.remove(&id);
                 if this.current == Some(id) {
@@ -140,10 +139,10 @@ impl NoteStore {
         let Some(vault) = self.vault.clone() else {
             return Task::ready(None);
         };
-        // The name rules live in `vault` because they are properties of a vault
-        // path. Re-checked here rather than trusted: `create` is a public entry
-        // point, and a future caller — a command palette, a `[[link]]` making a
-        // missing note — has no field to have validated for it.
+        // The name rules live in `vault`, a property of a vault path.
+        // Re-checked here rather than trusted: `create` is a public entry
+        // point, and a future caller (a command palette, a missing-note
+        // `[[link]]`) has no field to have validated for it.
         if inkra_vault::check_name(name).is_some() {
             return Task::ready(None);
         }
@@ -195,25 +194,22 @@ impl NoteStore {
     /// moved away from.
     ///
     /// The rescan is awaited **inside** the chain link, before the next
-    /// operation is let through. `Self::write` resolves its path through
+    /// operation is let through: `Self::write` resolves its path through
     /// `Vault::absolute` at write time, so a write released while the listing
-    /// still held the old path would write there — the very recreation the
+    /// still held the old path would write there — the recreation the
     /// ordering exists to prevent, arriving one link later.
     ///
-    /// That await is **not under test**, and stated rather than left to be
-    /// discovered: removing it leaves the whole suite green. Reaching it needs
-    /// a write issued between the rename landing and its rescan applying, and
-    /// `run_until_parked` drains both. It is the same limit the write-ordering
-    /// tests already record — `TestScheduler` can model "queued and not yet
-    /// polled" but not a background thread already inside the call.
+    /// That await is **not under test**: reaching it needs a write issued
+    /// between the rename landing and its rescan applying, and
+    /// `run_until_parked` drains both. Same limit as the write-ordering tests
+    /// — `TestScheduler` can model "queued and not yet polled" but not a
+    /// background thread already inside the call.
     ///
     /// Resolves to whether the entry moved. `false` covers a missing entry, a
     /// refused name, and a failed rename, the last of which emits
     /// `RenameFailed`.
     pub(crate) fn rename(&mut self, id: EntryId, name: &str, cx: &mut Context<Self>) -> Task<bool> {
-        // A note named on the command line has no entry to move. Nothing in the
-        // UI can reach this — every row comes from the vault — but `current`
-        // can be `DETACHED`, and a future caller might read it as the target.
+        // Same DETACHED guard as `trash`, for the same reason.
         if id == EntryId::DETACHED {
             return Task::ready(false);
         }
@@ -223,10 +219,9 @@ impl NoteStore {
         if self.vault.is_none() {
             return Task::ready(false);
         }
-        // Preempted, exactly as `trash` is and for the same reason: chained
-        // behind an un-preempted timer the row would keep its old name for up
-        // to `AUTOSAVE_DELAY`, looking broken. Resolving the timer writes now
-        // and leaves the bookkeeping consistent.
+        // Preempted like `trash` (same reason: un-preempted, the row would
+        // show its old name for up to `AUTOSAVE_DELAY`). See `trash` for why
+        // preempt and not cancel.
         self.schedule_save(id, Duration::ZERO, cx);
 
         let name = name.to_owned();
@@ -284,32 +279,25 @@ impl NoteStore {
     /// the editor reaches the tree.
     ///
     /// Not free, and not run on a timer: the conflict path and the three
-    /// mutation commands are the only callers, and both act on a user gesture.
-    /// Nothing else rescans after startup.
+    /// mutation commands are the only callers, on a user gesture.
     ///
-    /// **Serialised**, and that is load-bearing rather than tidy. `Vault::apply`
-    /// replaces `entries` and `by_identity` outright, with no staleness check,
-    /// so two walks in flight at once mean whichever finishes last wins — and a
-    /// walk taken *before* another mutation landed can re-admit a note that was
-    /// trashed, or mint a fresh `EntryId` for a file whose buffer is still
-    /// tracked under the old one. Clicking that row would then miss the `open`
-    /// map and reload from disk, discarding unsaved text: the very defect this
-    /// module's header says was fixed. Chaining makes the last walk applied the
-    /// last walk taken.
+    /// **Serialised** — load-bearing, not tidy. `Vault::apply` replaces
+    /// `entries`/`by_identity` outright with no staleness check, so two walks
+    /// in flight let whichever finishes last win: a walk taken before another
+    /// mutation landed can re-admit a trashed note, or mint a fresh `EntryId`
+    /// for a file whose buffer is tracked under the old one — clicking that
+    /// row would then reload from disk and discard unsaved text. Chaining
+    /// makes the last walk applied the last walk taken.
     ///
-    /// The chain is global rather than per-note because the walk is: it
-    /// rebuilds the whole vault, so two of them collide whichever notes caused
-    /// them.
+    /// Global, not per-note: the walk rebuilds the whole vault, so two in
+    /// flight collide regardless of which notes caused them.
     ///
     /// Two halves because `Vault::apply` needs `&mut Vault` and the walk
-    /// awaits: an entity hands out `&mut` only inside a synchronous closure.
+    /// awaits; an entity hands out `&mut` only inside a synchronous closure.
     ///
-    /// Returns a receiver that fires once *this* walk has been applied, for a
-    /// caller that has to read the vault afterwards — `create`, which resolves
-    /// the id the walk minted for the file it just made. A receiver rather than
-    /// the `Task`, because the `Task` is the chain and has to stay here: it is
-    /// what the next walk awaits. Dropping the receiver is how every other
-    /// caller says it does not care.
+    /// Returns a receiver, not the `Task`: the `Task` is the chain and stays
+    /// here for the next walk to await. `create` is the one caller that needs
+    /// the id its walk minted; every other caller drops the receiver.
     pub(super) fn rescan(&mut self, cx: &mut Context<Self>) -> oneshot::Receiver<()> {
         let (applied, wait) = oneshot::channel();
         let Some(vault) = self.vault.clone() else {

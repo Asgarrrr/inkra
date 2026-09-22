@@ -1,27 +1,11 @@
 //! Every key binding in one place, so the set can be read without hunting
 //! through the views that handle them.
 //!
-//! A binding's key context decides where it fires. Window-wide actions bind at
-//! `AppShell`, not `EditorView`: the editor's context only fires while the
-//! editor has focus. `⌘S` is the precedent.
-//!
-//! Every editing binding names `EditorView`. That changes no behaviour today,
-//! and the honest reason is narrower than it looks: a binding with no predicate
-//! scores `contexts.len()` (`gpui/src/keymap.rs:246-252`), and a predicate
-//! naming the *focused* frame scores the same (`keymap/context.rs:260-268`), so
-//! the two **tie** — and the tie breaks on position in the `Vec` below, later
-//! winning (`keymap.rs:188-190`). The tree's `down` already beat the editor's
-//! only because it is pushed further down this list.
-//!
-//! Naming the context removes that dependency. With `EditorView` absent from
-//! the focused stack the predicate fails and the binding is excluded from
-//! matching, so reordering this list — an edit with no other consequence —
-//! cannot silently move a key from one view to another. It would not fail
-//! loudly either: the losing action has no handler in the tree's dispatch path,
-//! so the key would simply stop doing anything.
-//!
-//! The cost is that a view wanting a key now has to claim it at its own
-//! context, inheriting nothing.
+//! Every binding names a context except `cmd-q` (see CLAUDE.md, "Every
+//! binding names a context" and "A binding fires where its handler can be
+//! reached"). A predicate-less binding and one naming the focused frame tie
+//! in score (`gpui/src/keymap.rs:246-252`, `keymap/context.rs:260-268`); ties
+//! break on position in the `Vec` below (`keymap.rs:188-190`).
 
 use gpui::KeyBinding;
 
@@ -70,14 +54,12 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // The Finder gesture. `enter` also inserts a newline in the editor and
         // confirms in a field; all three name a context, so none competes.
         KeyBinding::new("enter", Rename, Some("Sidebar")),
-        // The name field repeats the editor's movement and deletion set rather
-        // than inheriting it, which the paragraph above forces: with
-        // `EditorView` absent from the focused stack those bindings are
-        // excluded from matching, not merely outranked. A field with only
-        // `enter` and `escape` could be typed into and never corrected.
+        // NameField repeats the editor's movement/deletion bindings since it
+        // can't inherit them (see module doc); otherwise it could be typed
+        // into and never corrected.
         //
-        // `enter` confirms here and inserts a newline there, on one keystroke
-        // and two disjoint contexts, so the two never compete.
+        // `enter` confirms here, inserts a newline in the editor: disjoint
+        // contexts, no competition.
         KeyBinding::new("enter", Confirm, field),
         KeyBinding::new("escape", Cancel, field),
         KeyBinding::new("backspace", Backspace, field),
