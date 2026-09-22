@@ -313,7 +313,7 @@ area, not on every task:
   save destroys what it found. It is conditional on the expectation, and has to
   be — a save that finds what it expected is replacing its own bytes and may.
 - `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
-  exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault.rs`. A test
+  exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault/tests/`. A test
   reaches only what its own file roots the window at: `with_editor` and
   `dispatching` root at `EditorView`, so neither can prove an `AppShell`-scoped
   binding such as `cmd-s` fires. Reach `EntityInputHandler` through
@@ -437,23 +437,23 @@ change that introduces something reusable.
 | Where a conflicting write puts the bytes it must not destroy | `Saved::preserved` | `vault/src/fs.rs` |
 | Name that file | `conflict_path` (private) | `vault/src/conflict.rs` |
 | Render a Unix timestamp without a date crate | `format_utc` (private) | `vault/src/civil.rs` |
-| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault.rs` |
+| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault/events.rs` |
 | List the vault again from a running window | `Vault::collect` then `Vault::apply` — `rescan` holds `&mut self` across an await, so an entity cannot call it | `vault/src/vault.rs` |
 | What a write produced — a save renames, so the identity moves | `Saved` | `vault/src/fs.rs` |
 | Carry an `EntryId` across the inode change a save causes | `Vault::reidentify` | `vault/src/vault.rs` |
-| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
-| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
-| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
-| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
-| Order every filesystem operation on one note | `Ops`, keyed by `EntryId` in `NoteStore` | `app/src/vault.rs` |
-| Delete a note | `NoteStore::trash` | `app/src/vault.rs` |
-| Make a note or a folder, and learn the id the scan gave it | `NoteStore::create` | `app/src/vault.rs` |
-| Rename one in place, keeping its `EntryId` | `NoteStore::rename` | `app/src/vault.rs` |
-| Tell anyone the note on screen was closed under it | `NoteClosed` — trash only; buffer eviction is a different signal | `app/src/vault.rs` |
-| Tell anyone a delete failed | `TrashFailed` | `app/src/vault.rs` |
-| Tell anyone a rename failed | `RenameFailed` | `app/src/vault.rs` |
-| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
-| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
+| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault/store.rs` |
+| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault/store.rs` |
+| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault/events.rs` |
+| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault/writer.rs` |
+| Order every filesystem operation on one note | `Ops`, keyed by `EntryId` in `NoteStore` | `app/src/vault/ops.rs` |
+| Delete a note | `NoteStore::trash` | `app/src/vault/tree_ops.rs` |
+| Make a note or a folder, and learn the id the scan gave it | `NoteStore::create` | `app/src/vault/tree_ops.rs` |
+| Rename one in place, keeping its `EntryId` | `NoteStore::rename` | `app/src/vault/tree_ops.rs` |
+| Tell anyone the note on screen was closed under it | `NoteClosed` — trash only; buffer eviction is a different signal | `app/src/vault/events.rs` |
+| Tell anyone a delete failed | `TrashFailed` | `app/src/vault/events.rs` |
+| Tell anyone a rename failed | `RenameFailed` | `app/src/vault/events.rs` |
+| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault/writer.rs` |
+| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault/store.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
@@ -471,13 +471,13 @@ change that introduces something reusable.
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
 | A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
-| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault.rs` |
+| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault/store.rs` |
 | The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar.rs` |
 | Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
 | A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
-| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault.rs` |
-| A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
+| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault/tests/mod.rs` |
+| A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault/tests/mod.rs` |
 | The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
 | A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
 | Build the window's root view, from either entry point | `bootstrap::root` — takes the `Fs`, so the runner passes `MemFs` and gets the composition the real window gets | `app/src/bootstrap.rs` |
