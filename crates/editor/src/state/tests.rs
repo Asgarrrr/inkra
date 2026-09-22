@@ -433,6 +433,14 @@ fn move_to_snaps_an_offset_off_a_char_boundary() {
 }
 
 #[test]
+fn move_vertically_moves_the_cursor_and_carries_the_goal() {
+    let (buffer, mut state) = editor("ab");
+    state.move_vertically(&buffer, at(1), false, Goal::Column(12.0));
+    assert_eq!(state.cursor(), at(1));
+    assert_eq!(state.selection().goal(), Goal::Column(12.0));
+}
+
+#[test]
 fn move_to_clamps_an_offset_past_the_end() {
     let (buffer, mut state) = editor("ab");
     state.move_to(&buffer, at(99), false);

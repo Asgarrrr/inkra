@@ -12,6 +12,12 @@ fn new_buffer_holds_initial_text() {
 }
 
 #[test]
+fn is_empty_tracks_whether_the_text_is_empty() {
+    assert!(Buffer::new("").is_empty());
+    assert!(!Buffer::new("x").is_empty());
+}
+
+#[test]
 fn insert_places_text_at_byte_offset() {
     // "héllo": h@0 é@1..3 l@3 l@4 o@5 — 'é' is 2 bytes.
     let mut buf = Buffer::new("héllo");
@@ -196,6 +202,18 @@ fn edits_further_apart_than_the_group_interval_stay_separate() {
     assert_eq!(buf.text(), "a");
     buf.undo();
     assert_eq!(buf.text(), "");
+}
+
+#[test]
+fn an_edit_exactly_one_group_interval_later_stays_separate() {
+    // The merge window is exclusive: `< GROUP_INTERVAL`, not `<=`.
+    let mut buf = Buffer::new("");
+    let start = Instant::now();
+    buf.transact_at(start, |buf| buf.insert(at(0), "a"));
+    buf.transact_at(start + GROUP_INTERVAL, |buf| buf.insert(at(1), "b"));
+
+    buf.undo();
+    assert_eq!(buf.text(), "a");
 }
 
 #[test]
