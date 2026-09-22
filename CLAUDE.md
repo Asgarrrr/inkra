@@ -208,9 +208,33 @@ area, not on every task:
   top-level `update` — not when the nested `activate` call returns.
 - A window-wide action binds at the `AppShell` key context, not `EditorView`'s
   — `cmd-s` (`app/src/keymap.rs`) is the precedent. `EditorView`'s context only
-  fires while the editor has focus, and the sidebar can hold focus once it
-  becomes focusable, so an action meant to fire regardless of which pane is
-  focused goes on `AppShell`.
+  fires while the editor has focus, and the sidebar **does** hold focus now, so
+  an action meant to fire regardless of which pane is focused goes on
+  `AppShell`.
+- **Every binding names a context**, and only `cmd-q` does not. This buys no
+  behaviour today and the comment in `keymap.rs` says so: a predicate-less
+  binding and one naming the focused frame score the same depth
+  (`gpui/src/keymap.rs:246-252`, `keymap/context.rs:260-268`), so they tie and
+  the tie breaks on position in the `Vec` (`keymap.rs:188-190`). What naming the
+  context removes is that dependency — reordering the list would otherwise move
+  a key from one view to another, and the loser has no handler in the winner's
+  dispatch path, so the key would go quiet rather than fail. The cost is that a
+  new focusable view inherits nothing and must claim every key it wants.
+- Every filesystem operation on one note is **ordered on that note's chain**,
+  `Ops` in `NoteStore`, keyed by `EntryId` and outliving the note being open.
+  A rename or a delete appended there runs after every write decided before it.
+  Do not reach for `Writer`'s sequence instead: it orders by the moment an
+  operation was decided, which is right for two versions of one text and a
+  category error for a move — a write pending when a delete is issued is decided
+  *later*, carries the higher sequence, and so either recreates the note or
+  drops the delete as stale. The quit flush is the one writer that cannot chain,
+  which is why `Ops::trashing` exists for it to skip.
+- A note being deleted is **preempted, never cancelled**: `trash` calls
+  `schedule_save(id, Duration::ZERO)` so the pending write lands first. Sending
+  on `Ops::cancel` directly returns the chain before the line that clears
+  `scheduled`, which kills autosave for that note for the rest of the session —
+  and it trashes the note with the *previous* save's text, which is the only
+  copy the user gets back.
 - Every pixel ↔ offset conversion goes through `DocumentLayout`. It is built in
   `prepaint` and describes the *previous* frame's text, so all its line lookups
   clamp: a stale read is a caret one frame late, never an index out of bounds.
@@ -401,12 +425,19 @@ change that introduces something reusable.
 | How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
 | Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
 | Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
+| Order every filesystem operation on one note | `Ops`, keyed by `EntryId` in `NoteStore` | `app/src/vault.rs` |
+| Delete a note | `NoteStore::trash` | `app/src/vault.rs` |
+| Tell anyone the note on screen was closed under it | `NoteClosed` — trash only; buffer eviction is a different signal | `app/src/vault.rs` |
+| Tell anyone a delete failed | `TrashFailed` | `app/src/vault.rs` |
 | Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
 | Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
 | A failed read or write | `VaultError`, `inkra_vault::Result` | `vault/src/fs.rs` |
+| Create a note or a folder | `Fs::create`, taking a `Kind` | `vault/src/fs.rs` |
+| Move one, never replacing a different file | `Fs::rename` | `vault/src/fs.rs` |
+| Move a note to the platform trash | `Fs::trash` | `vault/src/fs.rs` |
 | Real disk — and the `.md` / dotfile / symlink filter, which is `Fs`'s job and not the scan's | `RealFs` | `vault/src/real_fs.rs` |
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
 | Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
@@ -414,6 +445,8 @@ change that introduces something reusable.
 | Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
 | Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
 | Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
+| Make a delete fail | `MemFs::make_untrashable` — removing the file does not: the write a delete preempts recreates it | `vault/src/mem_fs.rs` |
+| What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
@@ -437,6 +470,10 @@ change that introduces something reusable.
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
 | What fills the editor's slot when no note is open | `AppShell::render_empty` (private) — a method, not a view: no state, no events, no focus of its own | `app/src/shell.rs` |
 | The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell.rs` |
+| Which row a tree command acts on | `Sidebar::selected` — not `NoteStore::current`, which names what the editor shows | `app/src/sidebar.rs` |
+| Which note the editor is showing, for a subscriber | `AppShell::showing` — `current` is cleared before `NoteClosed` is delivered | `app/src/shell.rs` |
+| Ask before something destructive | `Window::prompt`, answered in tests with `cx.simulate_prompt_answer` | gpui `window.rs:6448` |
+| A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
 | The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
 | The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |

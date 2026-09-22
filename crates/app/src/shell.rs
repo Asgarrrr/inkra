@@ -37,6 +37,12 @@ pub(crate) struct AppShell {
     /// (`gpui/src/window.rs:6244-6251`, `key_dispatch.rs:611-614`,
     /// `view.rs:462-476`), so `cmd-s` would never reach its handler.
     focus_handle: FocusHandle,
+    /// Which note the editor is showing. `NoteStore::current` is the same fact,
+    /// but a subscriber cannot ask it: `trash` clears `current` before the
+    /// event it emits is delivered, and delivery waits for the outermost update
+    /// to flush. Held here so a delete of some *other* note cannot blank an
+    /// editor that was never showing it.
+    showing: Option<EntryId>,
     /// Held, never detached: dropping a `Task` cancels it
     /// (`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`), so a
     /// superseded load cannot rebind the editor behind a later activation.
@@ -85,8 +91,12 @@ impl AppShell {
         // gone is still typable, and every keystroke into it would be lost —
         // the same defect the unnamed launch buffer had. `render_empty` takes
         // the slot back.
-        cx.subscribe(&notes, |shell, _notes, _event: &NoteClosed, cx| {
+        cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
+            if shell.showing != Some(event.0) {
+                return;
+            }
             shell.editor = None;
+            shell.showing = None;
             cx.notify();
         })
         .detach();
@@ -95,6 +105,7 @@ impl AppShell {
             notes,
             sidebar,
             focus_handle: cx.focus_handle(),
+            showing: None,
             activation: None,
         }
     }
@@ -131,6 +142,11 @@ impl AppShell {
                 // what puts the `Focusable` branch below under test.
                 let focus = shell.focus_handle(cx);
                 window.focus(&focus, cx);
+                // Recorded beside `set_current` and never apart from it: the
+                // two answer the same question, and a `NoteClosed` subscriber
+                // reads this one because the store has already cleared the
+                // other by the time the event arrives.
+                shell.showing = Some(id);
                 notes.update(cx, |notes, cx| notes.set_current(id, cx));
             });
         }));
@@ -481,6 +497,56 @@ mod tests {
             "the editor must go with the note"
         );
         let _ = sidebar;
+    }
+
+    /// Deleting a note that is *not* on screen must leave the editor alone.
+    ///
+    /// Reachable with only this slice's keys: click `a` to open it, press
+    /// `down` to select `b` without opening it, then delete. `NoteClosed(b)`
+    /// fires while the editor is showing `a`.
+    #[gpui::test]
+    fn trashing_a_note_that_is_not_on_screen_leaves_the_editor(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, b) = two_notes(cx, &fs);
+        activate(&sidebar, cx, a);
+        cx.run_until_parked();
+
+        notes.update(cx, |notes, cx| notes.trash(b, cx)).detach();
+        cx.run_until_parked();
+
+        assert!(
+            window
+                .update(cx, |shell, _, _| shell.editor.is_some())
+                .expect("the shell is open"),
+            "the editor was showing a different note"
+        );
+        assert_eq!(fs.read_to_string(Path::new("/vault/b.md")), None);
+    }
+
+    /// After a delete the selection lands on a real row, so the next
+    /// `cmd-backspace` has a target and does not act on a note that is gone.
+    #[gpui::test]
+    fn the_selection_moves_off_a_deleted_row(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, _notes, a, b) = two_notes(cx, &fs);
+
+        let mut visual = tree_focused(cx, window, &sidebar);
+        visual.simulate_keystrokes("down");
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+            Some(a)
+        );
+
+        visual.simulate_keystrokes("cmd-backspace");
+        visual.run_until_parked();
+        cx.simulate_prompt_answer("Move to Trash");
+        visual.run_until_parked();
+
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+            Some(b),
+            "the selection follows to the next row"
+        );
     }
 
     /// The one regression this file exists to guard: the existing

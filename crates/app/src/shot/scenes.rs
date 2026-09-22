@@ -4,6 +4,13 @@
 //! `MemFs`, a `Launch` and a gesture with the same vocabulary the test helpers
 //! use. A scene that needs something new grows `Stage`, which keeps the
 //! runner's reach readable in one place.
+//!
+//! **No scene may reach a `Window::prompt`.** `Stage` runs the real macOS
+//! platform (`stage.rs`), where a prompt is an `NSAlert` shown with
+//! `beginSheetModalForWindow` and answered only by a person clicking it;
+//! `simulate_prompt_answer` exists on `TestPlatform` alone. A scene that drove
+//! the delete confirmation would park for ever, and `capture` would freeze on
+//! the frame before it. That is why nothing here deletes a note.
 
 use gpui::{WindowHandle, point, px};
 
