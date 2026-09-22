@@ -16,7 +16,7 @@ jobs:
   check:
     # gpui needs the Apple platform crates (gpui_macos); it does not build on Linux.
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
