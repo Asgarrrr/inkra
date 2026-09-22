@@ -211,8 +211,12 @@ pub(crate) struct NoteStore {
     open: HashMap<EntryId, OpenNote>,
     /// One per note that has ever had an operation queued on it, kept
     /// afterwards. Not pruned when a note closes: the chain is what orders a
-    /// rename against a load, and a closed note can still be renamed. The map
-    /// is bounded by the vault's size and holds no buffer.
+    /// rename against a load, and a closed note can still be renamed.
+    ///
+    /// Grows monotonically, including for notes since deleted — an entry holds
+    /// no buffer and no text, so a session's worth is nothing, but it is not
+    /// bounded by the vault's size. Pruning waits for the same trigger as
+    /// buffer eviction.
     ops: HashMap<EntryId, Ops>,
     current: Option<EntryId>,
     /// One per open note, for as long as it is open. A buffer with no observer
@@ -461,7 +465,8 @@ impl NoteStore {
     /// the whole reason the chain exists. A pending write that landed *after*
     /// the delete would recreate the file the user just removed; queued behind
     /// it instead, the write goes to disk first and the trash then takes the
-    /// latest text with it, which is also the better thing to recover.
+    /// latest text with it — which is also the better thing to recover, since
+    /// the Trash holds the only copy.
     ///
     /// Resolves to whether the note is gone. `false` covers a note with no
     /// vault entry, a note already being trashed, and a failed delete — the
@@ -482,18 +487,21 @@ impl NoteStore {
             return Task::ready(false);
         };
 
-        let ops = self.ops.entry(id).or_default();
-        if ops.trashing {
+        if self.ops.get(&id).is_some_and(|ops| ops.trashing) {
             return Task::ready(false);
         }
-        // Resolves a pending write's timer so the chain drains now. Without it
-        // the delete waits out `AUTOSAVE_DELAY` behind a write nobody is
-        // waiting for, and the row sits there looking broken. Sent before
-        // `trashing` is set, because `schedule_save` refuses to touch a note
-        // that is on its way out.
-        if let Some(cancel) = ops.cancel.take() {
-            let _ = cancel.send(());
-        }
+        // Preempted rather than cancelled. The delete queues behind whatever is
+        // already on the chain, so a write still waiting out `AUTOSAVE_DELAY`
+        // would hold the row on screen for two seconds looking broken — but
+        // cancelling that write instead would trash the note with the *previous*
+        // save's text, and the Trash is the only copy the user gets back.
+        // `schedule_save` with no delay resolves the timer, writes now, and
+        // leaves the bookkeeping consistent; sending on `Ops::cancel` directly
+        // does not — the chain returns before the line that clears `scheduled`,
+        // and every later edit is then absorbed by that flag.
+        self.schedule_save(id, Duration::ZERO, cx);
+
+        let ops = self.ops.entry(id).or_default();
         ops.trashing = true;
         let previous = ops.chain.take();
 
@@ -526,7 +534,7 @@ impl NoteStore {
                     this.current = None;
                 }
                 cx.emit(NoteClosed(id));
-                drop(this.rescan(cx));
+                this.rescan(cx);
                 cx.notify();
                 let _ = done.send(true);
             });
@@ -637,19 +645,21 @@ impl NoteStore {
     /// rebuilds the whole vault, so two of them collide whichever notes caused
     /// them.
     ///
+    /// Not under test, and stated rather than left to be discovered: this slice
+    /// has one caller, so no test can put two walks in flight. The second
+    /// caller arrives with create, and the test with it.
+    ///
     /// Two halves because `Vault::apply` needs `&mut Vault` and the walk
     /// awaits: an entity hands out `&mut` only inside a synchronous closure.
-    fn rescan(&mut self, cx: &mut Context<Self>) -> Task<()> {
+    ///
+    /// Returns nothing: a caller that needs to read the vault afterwards needs
+    /// the walk to resolve, and none does yet.
+    fn rescan(&mut self, cx: &mut Context<Self>) {
         let Some(vault) = self.vault.clone() else {
-            return Task::ready(());
+            return;
         };
         let fs = Arc::clone(&self.fs);
         let previous = self.rescan.take();
-        // The walk is held by the store and the caller is handed a separate
-        // wait, rather than the `Task` itself: the next rescan has to await
-        // this one, and a `Task` cannot be in two places. A caller that drops
-        // its wait therefore does not cancel the walk.
-        let (done, wait) = oneshot::channel();
         self.rescan = Some(cx.spawn(async move |_, cx| {
             if let Some(previous) = previous {
                 previous.await;
@@ -671,14 +681,7 @@ impl NoteStore {
                 vault.apply(children);
                 cx.notify();
             });
-            // After `apply`, so a caller that awaits this and then reads the
-            // vault sees its own mutation rather than the listing before it.
-            let _ = done.send(());
         }));
-
-        cx.foreground_executor().spawn(async move {
-            let _ = wait.await;
-        })
     }
 
     /// Writes one note, once. A no-op when nothing changed.
@@ -764,9 +767,7 @@ impl NoteStore {
                     id,
                     path: preserved,
                 });
-                // Dropped rather than awaited: the store holds the walk, and
-                // nothing here needs to see its result.
-                drop(this.rescan(cx));
+                this.rescan(cx);
             }
             cx.notify();
         });
@@ -1127,6 +1128,84 @@ mod tests {
         assert_eq!(
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
             Some("alpha")
+        );
+    }
+
+    /// Preempting rather than cancelling, stated as an outcome: the delete is
+    /// issued while the write is still counting down, and the copy that reaches
+    /// the Trash is the one the user last typed.
+    ///
+    /// Cancelling the pending write instead leaves the previous save's text in
+    /// the Trash — which is the only copy there is, so the edits are gone for
+    /// good. This test is the difference between the two.
+    #[gpui::test]
+    async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+            cx.notify();
+        });
+
+        // No `advance_clock`: the write is still waiting out its delay.
+        assert!(store.update(cx, |store, cx| store.trash(a, cx)).await);
+
+        assert_eq!(
+            fs.trashed(Path::new("/vault/a.md")).as_deref(),
+            Some("Xalpha"),
+            "the pending write must land before the delete takes the file"
+        );
+    }
+
+    /// A failed delete has to leave the note working, not merely present.
+    ///
+    /// Sending on `Ops::cancel` makes the write chain return at its select,
+    /// before the line that clears `scheduled` — so the flag stays set, every
+    /// later edit is absorbed by it, and the note is never written again. The
+    /// note looks fine and silently stops saving.
+    #[gpui::test]
+    async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/a.md", "alpha");
+        fs.insert_file("/vault/b.md", "beta");
+        let (store, a, _b) = open_two_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+        let buffer = store
+            .update(cx, |store, cx| store.open_note(a, cx))
+            .await
+            .expect("a opens");
+        store.update(cx, |store, cx| store.set_current(a, cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+            cx.notify();
+        });
+
+        // Refused by the platform, so the delete fails and the note stays. Not
+        // `fs.remove`: the write this delete preempts would recreate the file
+        // and the delete would then succeed.
+        fs.make_untrashable("/vault/a.md");
+        assert!(!store.update(cx, |store, cx| store.trash(a, cx)).await);
+        cx.run_until_parked();
+
+        buffer.update(cx, |buffer, cx| {
+            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "Y"));
+            cx.notify();
+        });
+        cx.executor().advance_clock(AUTOSAVE_DELAY);
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+            Some("YXalpha"),
+            "autosave must survive a delete that did not happen"
         );
     }
 

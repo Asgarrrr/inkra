@@ -39,10 +39,11 @@ struct State {
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// The same, for the next `save` of each path. See `MemFs::block_save`.
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
-    /// Every `create` or `rename` **into** one of these paths fails. Models a
-    /// directory the process cannot write into. Separate from `unwritable`,
-    /// which is about replacing a file's contents rather than making its name.
-    uncreatable: BTreeSet<PathBuf>,
+    /// Every `trash` of these paths fails. Models a Trash the platform refuses
+    /// — no trash on the volume, or a permission the process does not have.
+    /// Separate from `unwritable`: a note can be perfectly writable and still
+    /// not removable.
+    untrashable: BTreeSet<PathBuf>,
     /// What `trash` took, by the path it was taken from. A move, never a drop:
     /// the whole promise of a trash is that the bytes survive, and a fake that
     /// forgot them would let a test assert a recovery that cannot happen.
@@ -155,12 +156,14 @@ impl MemFs {
         self.state().unwritable.insert(path.into());
     }
 
-    /// Every `create` or `rename` landing on `path` fails from now on. Models a
-    /// directory the process cannot write into, which `make_unwritable` cannot:
-    /// that one fails a write to a file that already exists, and a create has
-    /// no file yet.
-    pub fn make_uncreatable(&self, path: impl Into<PathBuf>) {
-        self.state().uncreatable.insert(path.into());
+    /// Every `trash` of `path` fails from now on.
+    ///
+    /// Without it nothing can fail a delete: removing the file behind the
+    /// store's back does not, because the write the delete preempts recreates
+    /// it first. `TrashFailed` and the whole keep-the-note-on-failure branch
+    /// would be unreachable from any test.
+    pub fn make_untrashable(&self, path: impl Into<PathBuf>) {
+        self.state().untrashable.insert(path.into());
     }
 
     /// What `trash` took from `path`, if anything. The only way a test can
@@ -360,9 +363,6 @@ impl Fs for MemFs {
 
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         let mut state = self.state();
-        if state.uncreatable.contains(path) {
-            return Err(permission_denied(path));
-        }
         if state.files.contains_key(path) || state.dirs.contains_key(path) {
             return Err(already_exists(path));
         }
@@ -391,9 +391,6 @@ impl Fs for MemFs {
     /// one call on the directory entry and never touches the children's inodes.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let mut state = self.state();
-        if state.uncreatable.contains(to) {
-            return Err(permission_denied(to));
-        }
         // Byte equality, which on this fake is the *only* way two paths name one
         // file: the maps are keyed by raw `PathBuf`. A real volume also folds
         // case and Unicode normalization, and `RealFs::rename` answers that by
@@ -450,6 +447,9 @@ impl Fs for MemFs {
 
     async fn trash(&self, path: &Path) -> Result<()> {
         let mut state = self.state();
+        if state.untrashable.contains(path) {
+            return Err(permission_denied(path));
+        }
         let Some(entry) = state.files.remove(path) else {
             return Err(not_found(path));
         };
@@ -489,7 +489,7 @@ fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod tests {
     use futures::FutureExt;
     use futures::executor::block_on;

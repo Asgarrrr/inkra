@@ -592,9 +592,26 @@ Precedent: the existing ordering tests in `app/src/vault.rs`.
 
 ## What this leaves open
 
+Extended after S1 shipped and an independent review read the diff.
+
 - A crash between `hard_link` and `remove_file`: the note may reappear under
   its old name, non-deterministically.
 - Trashing a note with `nlink > 1` does not destroy its bytes.
+- **Renaming one twin of a hard-linked pair is a silent no-op.** `rename(2)`
+  "returns successfully and performs no other action" when both names resolve to
+  one file, so `Fs::rename` reports `Ok(())` while `from` still exists and
+  nothing moved. The state is produced by the crash window above, and the user's
+  natural cleanup — renaming one twin away — is exactly what does not work. A
+  fix exists: in the same-identity branch, finish the interrupted rename with a
+  `remove_file(from)` when `nlink > 1`. Not taken, because a case-only rename
+  has `nlink == 1` and would be unaffected either way, and the crash that
+  creates the state has never been observed.
+- **A delete still queued when the app quits never happens.** The `trashing`
+  flag stops the quit flush recreating the file, but the delete itself lives on
+  a foreground `Task` that shutdown does not poll. The note survives the quit,
+  which is the safe direction to fail in, and the delete needs repeating.
+- The rescan chaining is **not under test**: this slice has one caller, so no
+  test can put two walks in flight. The second caller arrives with create.
 - A vault spanning a mount point: `EXDEV`, no fallback.
 - `MemFs` stays case-sensitive; the trigger has fired but is paid in
   `real_fs.rs` instead.

@@ -292,6 +292,13 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// and the design records; it is reached only where `hard_link` cannot go — a
 /// directory, a symlink, or a volume without links.
 fn guarded_rename(from: &Path, to: &Path) -> Result<()> {
+    // Asked first, so a missing source is reported as missing at `from` rather
+    // than as a collision at `to`. The fallback is reached for every error
+    // `hard_link` can give, `ENOENT` among them, so without this the message
+    // names the wrong path and the wrong problem.
+    if let Err(source) = fs::symlink_metadata(from) {
+        return Err(io_error(from, source));
+    }
     if fs::symlink_metadata(to).is_ok() && !same_file(from, to) {
         return Err(io_error(to, io::Error::from(io::ErrorKind::AlreadyExists)));
     }

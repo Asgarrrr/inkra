@@ -49,20 +49,6 @@ impl Vault {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
-    /// The id a scan gave the file with this identity.
-    ///
-    /// How a caller that just created a file finds the row for it: by inode,
-    /// never by the path it asked for. A scan landing between the create and
-    /// this lookup would answer a path query with whatever file holds that name
-    /// now, which after an external move is a different file.
-    ///
-    /// Distinct from the deferred `by_path`, which answers the opposite
-    /// question — what id a path has, for a `[[link]]` with no identity in hand.
-    #[must_use]
-    pub fn id_for(&self, identity: FileIdentity) -> Option<EntryId> {
-        self.by_identity.get(&identity).copied()
-    }
-
     #[must_use]
     pub fn absolute(&self, id: EntryId) -> Option<PathBuf> {
         self.entry(id)
