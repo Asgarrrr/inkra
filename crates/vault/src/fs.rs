@@ -21,17 +21,17 @@ pub struct Mtime(pub SystemTime);
 
 /// What a note looked like on disk, as cheaply as a `stat` can tell us.
 ///
-/// Compared with `!=`, never with an ordering. A sync client that preserves a
+/// Compared with `!=`, never with an ordering: a sync client that preserves a
 /// file's original modified date hands back an mtime *older* than the one we
-/// wrote, and `>` calls that unchanged and overwrites it. Zed compares with
-/// ordering, through a method it named `bad_is_greater_than`
-/// (`vendor/zed-reference/crates/fs/src/fs.rs:422-425`), on a type that refuses
-/// to derive `Ord` precisely because the comparison is unsound.
+/// wrote, and `>` would call that unchanged and overwrite it. Zed compares
+/// with ordering via `bad_is_greater_than`
+/// (`vendor/zed-reference/crates/fs/src/fs.rs:423-424`) on a type whose own
+/// doc says not to derive `Ord` (`:334`).
 ///
 /// `size` is the second term because mtime granularity is one second on HFS+
-/// and coarser on some network mounts, so two writes can share a timestamp. It
-/// does not close the gap — same granule and same length still compares equal —
-/// and the design spec records why a content hash is not worth its cost.
+/// and coarser on some network mounts, so two writes can share a timestamp —
+/// it does not close the gap (same granule, same length still compares equal);
+/// see the design spec on why a content hash is not worth it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stamp {
     pub mtime: Mtime,
@@ -99,16 +99,17 @@ pub trait Fs: Send + Sync {
 
     /// Replaces the file rather than truncating it, so a crash mid-write cannot
     /// leave a half-written note. Zed does the opposite for buffer saves
-    /// (`vendor/zed-reference/crates/fs/src/fs.rs:1019-1033` is `File::create`)
-    /// and reserves `atomic_write` (`:974`) for its own config files; it can
-    /// afford to, because its autosave defaults to off and the user picks the
-    /// moment. Ours writes unprompted.
+    /// (`vendor/zed-reference/crates/fs/src/fs.rs:1019-1033`), reserving
+    /// `atomic_write` (`:974`) for its own config files since its autosave
+    /// defaults to off and the user picks the moment; ours writes unprompted.
     ///
-    /// `expected` is what the caller believes is on disk. When the file says
-    /// otherwise, its current bytes are preserved beside it before this write
-    /// lands, and the path they went to comes back in `Saved::preserved`.
-    /// Required rather than optional: an `Option` would read as "write anyway",
-    /// which is the clobber this parameter exists to remove.
+    /// No write may destroy bytes it did not put there. `expected` is what the
+    /// caller believes is on disk; when the file disagrees, its current bytes
+    /// are preserved beside it **before** this write lands, so both copies
+    /// exist together and no crash point loses either. The path they went to
+    /// comes back in `Saved::preserved`. `expected` is required, not optional:
+    /// an `Option` would read as "write anyway", the clobber this exists to
+    /// prevent. A second `Fs` backend owes the same ordering.
     ///
     /// Returns the identity the file carries **afterwards**, which a rename
     /// changes. See `Saved`.
@@ -145,15 +146,13 @@ pub trait Fs: Send + Sync {
     async fn trash(&self, path: &Path) -> Result<()>;
 }
 
-/// CRLF and lone CR to LF. `docs/roadmap.md:18` gave this the trigger "file
-/// I/O or a paste action, whichever lands first".
+/// CRLF and lone CR to LF. `Buffer` assumes LF.
 ///
-/// Public because both of those landed, and `Buffer` assumes LF: `Fs::load` is
-/// one door into a buffer and a paste is the other, so `app` calls this on
-/// clipboard text too. It belongs to text arriving from outside rather than to
-/// the filesystem, but it cannot move to `inkra-text` — this crate depends on
-/// nothing in the workspace, by design — and a second copy would mean the same
-/// four tests below maintained twice.
+/// Public because both file I/O and a paste need it: `Fs::load` is one door
+/// into a buffer and a paste is the other, so `app` calls this on clipboard
+/// text too. It belongs to text arriving from outside rather than to the
+/// filesystem, but cannot move to `inkra-text` — this crate depends on nothing
+/// in the workspace, by design — without duplicating the four tests below.
 #[must_use]
 pub fn normalize_line_endings(text: &str) -> String {
     if !text.contains('\r') {
@@ -178,9 +177,8 @@ pub fn normalize_line_endings(text: &str) -> String {
 mod tests {
     use super::normalize_line_endings;
 
-    /// The size term. Two writes inside one mtime granule differ only here, and
-    /// dropping it leaves the whole workspace green — which is what this test
-    /// is for.
+    /// Two writes inside one mtime granule differ only here; dropping it would
+    /// leave the whole workspace green.
     #[test]
     fn a_stamp_differs_when_only_the_size_does() {
         use super::{Mtime, Stamp};
@@ -190,11 +188,8 @@ mod tests {
         assert_ne!(Stamp { mtime: at, size: 1 }, Stamp { mtime: at, size: 2 });
     }
 
-    /// Inequality, not ordering. A sync client preserving an original modified
-    /// date hands back a file *older* than the one we wrote; `>` calls that
-    /// unchanged and overwrites it. Every other conflict test in the workspace
-    /// moves the mtime forward, so this is the only one that fails when the
-    /// comparison is relaxed to an ordering.
+    /// The only test in the suite with an mtime moving backwards; every other
+    /// conflict test would still pass if `!=` were relaxed to `>`. See `Stamp`.
     #[test]
     fn a_stamp_differs_when_the_mtime_moves_backwards() {
         use super::{Mtime, Stamp};

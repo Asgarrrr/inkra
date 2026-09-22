@@ -3,10 +3,8 @@
 //! Path-keyed ids fail this: a rename is a delete plus an insert, so the id
 //! changes exactly when it must not. See the design spec's "Identity" section.
 
-// `[lints] workspace = true` applies to every target of the crate, integration
-// tests included, so `expect_used` is denied here too. Same reasoning as
-// `tests/real_fs.rs`: a broken setup call must name itself, not be threaded
-// through a `Result`.
+// `expect_used` is denied here too (`[lints] workspace = true`) — see
+// `tests/real_fs.rs`.
 #![allow(clippy::expect_used)]
 
 use std::collections::HashSet;
@@ -147,7 +145,6 @@ proptest! {
                 }
             }
 
-            // Every file still on disk keeps the id it had.
             for (id, path) in &expected {
                 let absolute = PathBuf::from("/vault").join(path);
                 if fs.read_to_string(&absolute).is_some() {
@@ -161,7 +158,6 @@ proptest! {
                     }
                 }
             }
-            // No live entry carries an id whose file is gone.
             for entry in vault.entries() {
                 prop_assert!(
                     !retired.contains(&entry.id),
@@ -171,8 +167,7 @@ proptest! {
                 );
             }
 
-            // `Vault::entry`'s lookup index must agree with `entries` on every
-            // row, across whatever reordering this round's mutation caused.
+            // Must agree across whatever reordering this round's mutation caused.
             for entry in vault.entries() {
                 let looked_up = vault.entry(entry.id);
                 prop_assert!(
