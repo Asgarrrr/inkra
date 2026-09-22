@@ -22,6 +22,6 @@ pub use fs::{
     DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
     normalize_line_endings,
 };
-pub use path::RelPath;
+pub use path::{NameProblem, RelPath, check_name, note_file_name};
 pub use real_fs::RealFs;
 pub use vault::{Entry, EntryId, Vault};

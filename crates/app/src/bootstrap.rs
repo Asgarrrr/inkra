@@ -20,19 +20,17 @@ use crate::keymap::key_bindings;
 use crate::shell::AppShell;
 use crate::vault::NoteStore;
 
-/// The window a first launch gets. The previous 600x320 predates the sidebar:
-/// it left 420 px of editor beside it, about eleven lines of body text. Not
-/// persisted — restoring the last size and position is deferred, with the rest
-/// of the window state.
+/// The window a first launch gets. Not persisted — restoring size and
+/// position is deferred, with the rest of window state.
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
 
 /// What the command-line argument named, already read.
 pub(crate) enum Launch {
-    /// No argument: an empty buffer and no vault, per the launch-state table in
-    /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. It exercises
-    /// neither per-line layout nor the scroll container, so a bare `cargo run`
-    /// is the weakest way to look at the app; the `shot` runner covers this
-    /// state as `editor-empty` and the richer ones beside it.
+    /// No argument: no note and no vault, per the launch-state table in
+    /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. There is no
+    /// editor at all in this state — `AppShell` renders its empty state — so a
+    /// bare `cargo run` is the weakest way to look at the app; the `shot` runner
+    /// covers it as `empty-no-vault` and the richer states beside it.
     Nothing,
     /// One file, with no vault behind it. The path travels with the text
     /// because `⌘S` needs somewhere to write back to, and the `Stamp` because
@@ -50,17 +48,24 @@ pub(crate) enum Launch {
 /// gets the same composition the real window gets, rather than a second one
 /// that could drift from it.
 pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<AppShell> {
-    let (text, note, scanned) = match launched {
-        Launch::Nothing => (String::new(), None, None),
-        Launch::Note(path, text, stamp) => (text, Some((path, stamp)), None),
-        Launch::Vault(vault) => (String::new(), None, Some(vault)),
+    // Only a named file gets a buffer and an editor; the other two launch
+    // states render `AppShell`'s empty state instead (see CLAUDE.md,
+    // `AppShell.editor`).
+    let (note, scanned) = match launched {
+        Launch::Nothing => (None, None),
+        Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),
+        Launch::Vault(vault) => (None, Some(vault)),
     };
-    let buffer = cx.new(|_| Buffer::new(text));
-    let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
+    let opened = note.map(|(path, text, stamp)| {
+        let buffer = cx.new(|_| Buffer::new(text));
+        let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
+        (buffer, editor, path, stamp)
+    });
     let vault = scanned.map(|vault| cx.new(|_| vault));
+    let editor = opened.as_ref().map(|(_, editor, _, _)| editor.clone());
     let notes = cx.new(|cx| {
         let mut store = NoteStore::new(fs, vault, cx);
-        if let Some((path, stamp)) = note {
+        if let Some((buffer, _, path, stamp)) = opened {
             store.adopt(buffer, path, stamp, cx);
         }
         store

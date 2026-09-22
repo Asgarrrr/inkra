@@ -63,6 +63,9 @@ area, not on every task:
   `--list` for the catalogue. This is how the eyeball pass below gets done
   without a human at the screen.
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
+- tests moved: `./scripts/test-names.sh` — every test by leaf name, sorted,
+  duplicates kept. Diff it before and after a file split: a forgotten `mod`
+  line drops a whole file's tests and still compiles green.
 
 ## GPUI (hard rule)
 
@@ -155,6 +158,32 @@ area, not on every task:
     of the four, and must not: `copy` reads with `buffer.read`, because
     `edit_buffer`'s `as_mut` notifies unconditionally and would schedule an
     autosave for a `⌘C` that changed nothing. It is the only such action today.
+- `AppShell.editor` is an **`Option`**, and the window opens with `None` for
+  every launch but a named file. The editor used to exist unconditionally, which
+  meant a launch with no argument — or a vault with nothing clicked — put a real
+  editable `Buffer` on screen that `NoteStore` never tracked: no observer, no
+  autosave, no sidebar row, no quit flush, and `save_current` returning at its
+  `None` guard. Everything typed into it was lost. `AppShell::render_empty` fills
+  that slot instead, so there is nothing to type into. It paints
+  `theme::editor_background` itself: it stands in the editor's slot, and the
+  editor is what used to paint that surface.
+- `AppShell` holds **its own `FocusHandle`**, and the root div `track_focus`es
+  it. That is load-bearing, not hygiene: with no editor the window's focus is on
+  that handle, and an untracked handle puts dispatch on the anonymous view
+  boundary *above* the div carrying `.on_action` (`gpui/src/window.rs:6244-6251`,
+  `key_dispatch.rs:611-614`, `view.rs:462-476`), so `cmd-s` would silently stop
+  reaching its handler. `Focusable::focus_handle` returns the editor's when there
+  is one and this one otherwise.
+- `AppShell::open_note` reaches a `Window` through `update_in` with **none passed
+  in**, and that is deliberate. Every entity built by `cx.new` inside a window
+  update is registered against that window at construction (`gpui/src/app.rs:2975`,
+  `:1934-1946`), and `open_window` pushes that stack around `build_root_view`
+  (`:1356-1359`) — which is where `bootstrap::root` builds the shell. Do not
+  thread a `&mut Window` through `root` to "fix" this: `spawn_in` resolves
+  through the very same lookup (`app/async_context.rs:80-86`), so it buys
+  nothing, and `root` is the seam both entry points share. The focus move lives
+  in that same `update_in`, with no `await` splitting it from the bind and the
+  `set_current`.
 - `NoteStore::current` names the note `⌘S` writes — and only that. It does not
   gate writing in general: the periodic writer writes every dirty note whatever
   is current, and so does the quit flush. What `current` decides is which note
@@ -182,9 +211,46 @@ area, not on every task:
   top-level `update` — not when the nested `activate` call returns.
 - A window-wide action binds at the `AppShell` key context, not `EditorView`'s
   — `cmd-s` (`app/src/keymap.rs`) is the precedent. `EditorView`'s context only
-  fires while the editor has focus, and the sidebar can hold focus once it
-  becomes focusable, so an action meant to fire regardless of which pane is
-  focused goes on `AppShell`.
+  fires while the editor has focus, and the sidebar **does** hold focus now, so
+  an action meant to fire regardless of which pane is focused goes on
+  `AppShell`.
+- **Every binding names a context**, and only `cmd-q` does not. This buys no
+  behaviour today and the comment in `keymap.rs` says so: a predicate-less
+  binding and one naming the focused frame score the same depth
+  (`gpui/src/keymap.rs:246-252`, `keymap/context.rs:260-268`), so they tie and
+  the tie breaks on position in the `Vec` (`keymap.rs:188-190`). What naming the
+  context removes is that dependency — reordering the list would otherwise move
+  a key from one view to another, and the loser has no handler in the winner's
+  dispatch path, so the key would go quiet rather than fail. The cost is that a
+  new focusable view inherits nothing and must claim every key it wants — and
+  that cost is now paid rather than hypothetical: `NameField` repeats the
+  editor's whole movement and deletion set at its own context. A field holding
+  only `enter` and `escape` could be typed into and never corrected, because
+  with `EditorView` absent from the focused stack those bindings are excluded
+  from matching rather than merely outranked.
+- **A binding fires where its handler can be reached**, which is not always
+  where the state lives. Dispatch walks from the focused leaf up *its own*
+  ancestors (`gpui/src/window.rs:6270`), so with the editor focused the sidebar
+  is a sibling subtree: `cmd-n` is scoped to `AppShell` and **handled** there,
+  forwarding into `Sidebar::start_creating`. A handler registered on the tree
+  would never be reached, and the key would go quiet. `Trash` and `Rename` are
+  the opposite case and stay on the tree, because they read its selection and
+  only make sense while it has focus.
+- Every filesystem operation on one note is **ordered on that note's chain**,
+  `Ops` in `NoteStore`, keyed by `EntryId` and outliving the note being open.
+  A rename or a delete appended there runs after every write decided before it.
+  Do not reach for `Writer`'s sequence instead: it orders by the moment an
+  operation was decided, which is right for two versions of one text and a
+  category error for a move — a write pending when a delete is issued is decided
+  *later*, carries the higher sequence, and so either recreates the note or
+  drops the delete as stale. The quit flush is the one writer that cannot chain,
+  which is why `Ops::trashing` exists for it to skip.
+- A note being deleted is **preempted, never cancelled**: `trash` calls
+  `schedule_save(id, Duration::ZERO)` so the pending write lands first. Sending
+  on `Ops::cancel` directly returns the chain before the line that clears
+  `scheduled`, which kills autosave for that note for the rest of the session —
+  and it trashes the note with the *previous* save's text, which is the only
+  copy the user gets back.
 - Every pixel ↔ offset conversion goes through `DocumentLayout`. It is built in
   `prepaint` and describes the *previous* frame's text, so all its line lookups
   clamp: a stale read is a caret one frame late, never an index out of bounds.
@@ -250,18 +316,18 @@ area, not on every task:
   save destroys what it found. It is conditional on the expectation, and has to
   be — a save that finds what it expected is replacing its own bytes and may.
 - `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
-  exercises — `editor/tests.rs`, `shell.rs`, `sidebar.rs`, `vault.rs`. A test
-  reaches only what its own file roots the window at: `with_editor` and
+  exercises — `editor/tests/`, `shell/tests/`, `sidebar/tests.rs`, `vault/tests/`.
+  A test reaches only what its own file roots the window at: `with_editor` and
   `dispatching` root at `EditorView`, so neither can prove an `AppShell`-scoped
   binding such as `cmd-s` fires. Reach `EntityInputHandler` through
   `with_editor` — its methods all need a `Window`. What must not live in `app`
   is an *editing-semantics* test, which belongs in `text` or `editor`. A plain
   `#[test]` over pixel geometry is fine and preferable: pixels cannot move down
   a layer, and `scroll.rs` is the precedent.
-- A test of where an activated note *goes* roots at `AppShell`, in `shell.rs`,
-  for the same reason `cmd-s` does: the subscription that routes
+- A test of where an activated note *goes* roots at `AppShell`, in
+  `shell/tests/`, for the same reason `cmd-s` does: the subscription that routes
   `NoteActivated` is set up in `AppShell::new`, so a window rooted at `Sidebar`
-  cannot reach it. `sidebar.rs` keeps only the click→emit half, which it
+  cannot reach it. `sidebar/tests.rs` keeps only the click→emit half, which it
   asserts by subscribing to the `Sidebar` itself — and which therefore proves
   nothing about `AppShell`'s wiring.
 - `app` tests use `MemFs`, never the real filesystem. Its two gates are what
@@ -309,6 +375,13 @@ area, not on every task:
   binding, the `actions!` mapping, or the repaint gate — and a wrong binding
   passes `check.sh`. Use the `dispatching` helper.
 - No snapshot or visual testing while the UI is still unstable.
+- A test asserts **state**, so a defect that lives only in the layout is
+  invisible to the whole suite. Two shipped that way and both were found by
+  looking: the sidebar's rejection message was pushed off the bottom of the
+  pane by the list's `size_full`, and a rename opened no field at all because
+  clicking a note row hands focus to the editor, so `enter` inserted a newline
+  into the note. Every test passed in both cases. After a change that adds a
+  row, a message, or a gesture to a pane, render the scene and **look at it**.
 - `check.sh` renders nothing — `TestWindow::draw` only calls a renderer when one
   was installed (`gpui/src/platform/test/window.rs:527`), and a `#[gpui::test]`
   installs none. After touching the gpui dependency, its features, or
@@ -348,7 +421,8 @@ change that introduces something reusable.
 | Whether a clipboard item is a whole line, and so inserts above the caret's | `Copied::whole_line` — carried, never inferred from a trailing newline | `editor/src/state.rs` |
 | CRLF and lone CR to LF, on every door into a buffer — a load, and a paste | `inkra_vault::normalize_line_endings` | `vault/src/fs.rs` |
 | Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
-| Any pixel ↔ offset conversion | `DocumentLayout` | `app/src/editor/element.rs` |
+| Any pixel ↔ offset conversion — shared by the editor and `NameField`, which shapes through the same `shape_document` | `DocumentLayout` | `app/src/editor/element.rs` |
+| Paint a shaped layout | `DocumentLayout::paint` | `app/src/editor/element.rs` |
 | Scroll a line into view | `EditorView::reveal_line` | `app/src/editor/mod.rs` |
 | The geometry behind it, window-free | `scroll::reveal` | `app/src/editor/scroll.rs` |
 | Resolve up/down against metrics | `EditorView::move_vertically` | `app/src/editor/mod.rs` |
@@ -367,16 +441,23 @@ change that introduces something reusable.
 | Where a conflicting write puts the bytes it must not destroy | `Saved::preserved` | `vault/src/fs.rs` |
 | Name that file | `conflict_path` (private) | `vault/src/conflict.rs` |
 | Render a Unix timestamp without a date crate | `format_utc` (private) | `vault/src/civil.rs` |
-| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault.rs` |
+| Tell anyone a conflict was preserved | `ConflictPreserved`, emitted by `NoteStore` | `app/src/vault/events.rs` |
 | List the vault again from a running window | `Vault::collect` then `Vault::apply` — `rescan` holds `&mut self` across an await, so an entity cannot call it | `vault/src/vault.rs` |
 | What a write produced — a save renames, so the identity moves | `Saved` | `vault/src/fs.rs` |
 | Carry an `EntryId` across the inode change a save causes | `Vault::reidentify` | `vault/src/vault.rs` |
-| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault.rs` |
-| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault.rs` |
-| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault.rs` |
-| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault.rs` |
-| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault.rs` |
-| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault.rs` |
+| Queue a write of one note (`Duration::ZERO` preempts the pending one) | `NoteStore::schedule_save` | `app/src/vault/store.rs` |
+| How long a note may stay dirty | `AUTOSAVE_DELAY` | `app/src/vault/store.rs` |
+| Tell anyone a write failed | `SaveFailed`, emitted by `NoteStore` | `app/src/vault/events.rs` |
+| Write one note, discarding it if a newer write already landed | `write_through` | `app/src/vault/writer.rs` |
+| Order every filesystem operation on one note | `Ops`, keyed by `EntryId` in `NoteStore` | `app/src/vault/ops.rs` |
+| Delete a note | `NoteStore::trash` | `app/src/vault/tree_ops.rs` |
+| Make a note or a folder, and learn the id the scan gave it | `NoteStore::create` | `app/src/vault/tree_ops.rs` |
+| Rename one in place, keeping its `EntryId` | `NoteStore::rename` | `app/src/vault/tree_ops.rs` |
+| Tell anyone the note on screen was closed under it | `NoteClosed` — trash only; buffer eviction is a different signal | `app/src/vault/events.rs` |
+| Tell anyone a delete failed | `TrashFailed` | `app/src/vault/events.rs` |
+| Tell anyone a rename failed | `RenameFailed` | `app/src/vault/events.rs` |
+| Order and serialise the writes of one note | `Writer` — one per `OpenNote`, shared with the quit flush | `app/src/vault/writer.rs` |
+| Write every dirty note as the app quits | `NoteStore::flush_all`, registered with `on_app_quit` | `app/src/vault/store.rs` |
 | What a listing yields, what a load yields | `DirEntry` / `Loaded` | `vault/src/fs.rs` |
 | A file's identity, a file's mtime | `FileIdentity` / `Mtime` | `vault/src/fs.rs` |
 | Directory or note | `Kind` | `vault/src/fs.rs` |
@@ -385,23 +466,24 @@ change that introduces something reusable.
 | An `Fs` for tests | `MemFs`, feature `test-support` | `vault/src/mem_fs.rs` |
 | Make two writes of one path differ | `MemFs::tick` — the clock; a constant made every stamp equal and every conflict unreachable | `vault/src/mem_fs.rs` |
 | Model an external writer in a test | `MemFs::insert_file` — it keeps the path's identity, as a second process rewriting in place does | `vault/src/mem_fs.rs` |
-| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs.rs` |
-| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs.rs` |
-| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs.rs` |
+| Hold one load open while another finishes | `MemFs::block_load` → `Gate` | `vault/src/mem_fs/faults.rs` |
+| Hold one *write* open past the turn that issued it | `MemFs::block_save` → `Gate` | `vault/src/mem_fs/faults.rs` |
+| Make a write fail | `MemFs::make_unwritable` | `vault/src/mem_fs/faults.rs` |
+| Make a delete fail | `MemFs::make_untrashable` — removing the file does not: the write a delete preempts recreates it | `vault/src/mem_fs/faults.rs` |
 | A path that cannot escape the vault root | `RelPath` | `vault/src/path.rs` |
 | What notes exist, and where one lives | `Vault::scan` / `rescan` / `entries` / `entry` / `absolute` | `vault/src/vault.rs` |
 | What a vault listing yields | `Entry` — `id` / `path` / `kind` / `mtime` (`mtime` unread; see the field's own doc comment) | `vault/src/vault.rs` |
 | A note's identity across renames | `EntryId`; `EntryId::DETACHED` for a file opened by path | `vault/src/vault.rs` |
 | Tree order — directories first, a directory's subtree contiguous after it | `compare` (private; `Vault::entries` is already sorted by it) | `vault/src/vault.rs` |
-| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault.rs` |
-| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar.rs` |
-| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar.rs` |
+| Bind files to buffers | `NoteStore` — `open_note` / `set_current` / `adopt` / `save_current` / `is_dirty` | `app/src/vault/store.rs` |
+| The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar/mod.rs` |
+| Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar/mod.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
-| A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
-| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault.rs` |
-| A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault.rs` |
-| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar.rs` |
-| A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
+| A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests/mod.rs` |
+| A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault/tests/mod.rs` |
+| A scanned `MemFs` store, an `EntryId` by name, the two-note fixture — window-free | `scan_notes` / `entry_id` / `two_notes` | `app/src/test_support.rs` |
+| The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar/tests.rs` |
+| A vault of two notes under a real `AppShell` window | `open_vault` / `two_notes` / `activate` | `app/src/shell/tests/mod.rs` |
 | Build the window's root view, from either entry point | `bootstrap::root` — takes the `Fs`, so the runner passes `MemFs` and gets the composition the real window gets | `app/src/bootstrap.rs` |
 | The real window's size | `bootstrap::WINDOW_SIZE` — never a literal beside it | `app/src/bootstrap.rs` |
 | Render a state of the app to a PNG | `shot::run`, via `examples/shot.rs` | `app/src/shot/mod.rs` |
@@ -409,5 +491,29 @@ change that introduces something reusable.
 | The list of states worth looking at | `catalogue()` returning `&[Scene]` | `app/src/shot/scenes.rs` |
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
+| What fills the editor's slot when no note is open | `AppShell::render_empty` (private) — a method, not a view: no state, no events, no focus of its own | `app/src/shell.rs` |
+| The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell/tests/mod.rs` |
+| Which row a tree command acts on | `Sidebar::selected` — not `NoteStore::current`, which names what the editor shows | `app/src/sidebar/mod.rs` |
+| Which note the editor is showing, for a subscriber | `AppShell::showing` — `current` is cleared before `NoteClosed` is delivered | `app/src/shell.rs` |
+| Ask before something destructive | `Window::prompt`, answered in tests with `cx.simulate_prompt_answer` | gpui `window.rs:6448` |
+| A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell/tests/mod.rs` |
+| Whether a typed name can become a note | `check_name`, returning `NameProblem` — the rule; `app` owns the English | `vault/src/path.rs` |
+| The file name a typed name gets — always a lowercase `.md` | `note_file_name` | `vault/src/path.rs` |
+| Create a file or a folder | `Fs::create`, taking a `Kind` | `vault/src/fs.rs` |
+| Move one, never replacing a *different* file | `Fs::rename` — asks the destination's inode on `EEXIST`, so a case-only rename is a rename | `vault/src/fs.rs` |
+| Move a note to the platform trash | `Fs::trash` | `vault/src/fs.rs` |
+| The `EntryId` a scan gave a known identity | `Vault::id_for` — never look a fresh file up by path | `vault/src/vault.rs` |
+| Make a create or a rename fail | `MemFs::make_uncreatable` | `vault/src/mem_fs/faults.rs` |
+| What a delete took, so a test can prove it is recoverable | `MemFs::trashed` | `vault/src/mem_fs.rs` |
+| One line of editable text, IME and dead keys included | `NameField`, emitting `Confirmed` / `Cancelled` | `app/src/field.rs` |
+| The tree's in-place create/rename row | `EditState` — `target: Option<EntryId>` is what tells the two gestures apart | `app/src/sidebar/edit.rs` |
+| Open that row without a `Window` — the gesture minus its focus move, and what tests call | `Sidebar::open_create` / `open_rename` | `app/src/sidebar/edit.rs` |
+| Why a typed name was refused, as a sentence | `Rejection::message` | `app/src/sidebar/edit.rs` |
+| A UTF-16 range, at the protocol edge | `Buffer::to_utf16_range` / `from_utf16_range` | `text/src/buffer.rs` |
+| The range an IME edit applies to, and applying one | `EditorState::target_range` / `replace_in_range` / `mark_and_replace_in_range` | `editor/src/state.rs` |
+| Give the vault tree focus, in a test or a scene | `AppShell::tree_focus_handle` — `Focusable` returns the editor's once a note is open | `app/src/shell.rs` |
+| Focus the tree from the shot runner | `Stage::focus_tree` | `app/src/shot/stage.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
-| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar.rs` |
+| A refused name's colour | `theme::rejected_text` | `app/src/theme.rs` |
+| The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
+| The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar/render.rs` |

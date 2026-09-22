@@ -47,12 +47,11 @@ fn a_missing_note_exits_one_and_names_the_path() {
     );
 }
 
-/// `std::env::args` unwraps every argument into a `String`, so a filename that
-/// is not valid UTF-8 panicked — and the panic crossed the macOS FFI boundary
-/// as a non-unwinding abort, so the process died on SIGABRT with a backtrace
-/// instead of naming the path.
-/// A Unix path is bytes, and `RelPath::display_name` (`crates/vault/src/path.rs`)
-/// already treats a non-UTF-8 name as renderable rather than fatal.
+/// `std::env::args` unwraps every argument into a `String`, so a non-UTF-8
+/// filename panicked — crossing the macOS FFI boundary as a non-unwinding
+/// abort, killing the process with SIGABRT instead of naming the path. A
+/// Unix path is bytes; `RelPath::display_name` (`crates/vault/src/path.rs`)
+/// already treats a non-UTF-8 name as renderable, not fatal.
 #[test]
 fn a_non_utf8_argument_is_reported_not_aborted() {
     let path = absent_path(b"\xffinkra-absent-note.md");

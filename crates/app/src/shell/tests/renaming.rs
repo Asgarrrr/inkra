@@ -1,0 +1,381 @@
+//! Renaming a note or a folder, through the sidebar's field.
+
+use std::cell::RefCell;
+use std::path::Path;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{Modifiers, TestAppContext, point, px};
+use inkra_vault::mem_fs::MemFs;
+use inkra_vault::{EntryId, Fs};
+
+use crate::sidebar::row_center;
+use crate::test_support::entry_id;
+use crate::vault::{NoteStore, RenameFailed};
+
+use super::{activate, open_vault, tree_focused, two_notes, vault_names};
+
+/// A rename keeps the row's `EntryId`, which is what keeps whatever buffer
+/// is open under it. Asserted by id, not by name: the name is what moved.
+#[gpui::test]
+fn renaming_a_note_moves_it_and_keeps_its_id(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("down");
+    visual.run_until_parked();
+    let before = sidebar
+        .read_with(cx, |sidebar, _| sidebar.selected())
+        .unwrap();
+
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("p l a n enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["b.md", "plan.md"]);
+    assert_eq!(
+        entry_id(&notes, cx, "plan"),
+        before,
+        "the inode did not move, so neither did the id"
+    );
+}
+
+/// The one hazard the chain exists for. A write is held open past the turn
+/// that issued it, the rename is issued behind it, and the gate is released:
+/// the write must land on the old path first and the rename must move that
+/// file, rather than the write recreating the note under its old name.
+///
+/// Without the chain the rename races the write. `MemFs::block_save` is the
+/// only way to reach the interleaving at all.
+#[gpui::test]
+async fn a_rename_issued_during_a_write_moves_the_written_text(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+
+    activate(&sidebar, cx, a);
+    visual.run_until_parked();
+    let buffer = notes
+        .read_with(cx, |notes, _| notes.buffer_for(a).cloned())
+        .expect("the note is open");
+
+    // Hold the write open, then dirty the note so one is issued.
+    let gate = fs.block_save("/vault/a.md");
+    buffer.update(cx, |buffer, _| {
+        buffer.transact_at(std::time::Instant::now(), |buffer| {
+            buffer.insert(inkra_text::ByteOffset(0), "EDITED ");
+        });
+    });
+    notes.update(cx, NoteStore::save_current);
+    visual.run_until_parked();
+
+    // Issued while that write is still in flight.
+    let renamed = notes.update(cx, |notes, cx| notes.rename(a, "plan", cx));
+    visual.run_until_parked();
+    gate.release();
+    assert!(renamed.await, "the rename lands once the write has");
+    visual.run_until_parked();
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/plan.md")).as_deref(),
+        Some("EDITED alpha"),
+        "the write reached disk, and the rename moved what it wrote"
+    );
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")),
+        None,
+        "nothing was recreated under the old name"
+    );
+}
+
+/// The note stays writable afterwards, at its new path, under the same id.
+///
+/// Does **not** pin the rescan-inside-the-link: removing that await leaves
+/// this green, because `run_until_parked` drains the walk before the edit.
+/// What it does pin is that the buffer survives the move and its next write
+/// follows the file — which is the user-visible half.
+#[gpui::test]
+async fn a_note_edited_after_a_rename_is_written_to_its_new_path(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+
+    activate(&sidebar, cx, a);
+    visual.run_until_parked();
+    assert!(
+        notes
+            .update(cx, |notes, cx| notes.rename(a, "plan", cx))
+            .await
+    );
+    visual.run_until_parked();
+
+    let buffer = notes
+        .read_with(cx, |notes, _| notes.buffer_for(a).cloned())
+        .expect("the note is still open under the same id");
+    buffer.update(cx, |buffer, _| {
+        buffer.transact_at(std::time::Instant::now(), |buffer| {
+            buffer.insert(inkra_text::ByteOffset(0), "AFTER ");
+        });
+    });
+    notes.update(cx, NoteStore::save_current);
+    visual.run_until_parked();
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/plan.md")).as_deref(),
+        Some("AFTER alpha")
+    );
+    assert_eq!(fs.read_to_string(Path::new("/vault/a.md")), None);
+}
+
+#[gpui::test]
+fn renaming_onto_a_sibling_name_is_refused(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("down enter");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("b enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"], "neither moved");
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("That name is already taken.")
+    );
+}
+
+/// Confirming a rename without changing anything is a no-op, not a
+/// collision with itself.
+#[gpui::test]
+fn renaming_a_note_to_its_own_name_is_accepted(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("down enter enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+    assert!(
+        !sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
+        "the field closed rather than reporting a duplicate"
+    );
+}
+
+/// The field replaces the row rather than being inserted beside it, so a
+/// rename never shows the old name and the field for one entry at once.
+#[gpui::test]
+fn renaming_replaces_the_row_rather_than_adding_one(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    let before = sidebar.read_with(cx, |sidebar, _| sidebar.row_count());
+    visual.simulate_keystrokes("down enter");
+    visual.run_until_parked();
+
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.row_count()),
+        before
+    );
+}
+
+#[gpui::test]
+fn renaming_a_folder_moves_its_subtree(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/projects/plan.md", "p");
+    fs.insert_file("/vault/a.md", "alpha");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    // Row 0 is the `projects` folder.
+    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
+    visual.run_until_parked();
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("a r c h i v e enter");
+    visual.run_until_parked();
+
+    assert_eq!(
+        vault_names(&notes, cx),
+        ["archive", "archive/plan.md", "a.md"]
+    );
+}
+
+/// A delete queued behind a rename must still find the note.
+///
+/// Both resolve their path inside the chain link rather than at issue time.
+/// Capturing it up front makes the delete look for a name that has already
+/// moved: it reports `TrashFailed` and the note survives a deletion the
+/// user confirmed — the quiet half of the failure the chain exists for.
+#[gpui::test]
+async fn a_delete_queued_behind_a_rename_still_finds_the_note(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+
+    // Issued in one turn, so the delete is appended behind the rename.
+    let (renamed, trashed) = notes.update(cx, |notes, cx| {
+        (notes.rename(a, "plan", cx), notes.trash(a, cx))
+    });
+    visual.run_until_parked();
+
+    assert!(renamed.await, "the rename lands first");
+    assert!(
+        trashed.await,
+        "and the delete finds the note under its new name"
+    );
+    assert_eq!(vault_names(&notes, cx), ["b.md"]);
+    assert_eq!(
+        fs.trashed(Path::new("/vault/plan.md")).as_deref(),
+        Some("alpha")
+    );
+}
+
+/// The same shape, twice over: the second rename must act on where the
+/// first one put the note.
+#[gpui::test]
+async fn two_renames_in_one_turn_both_land(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+
+    let (first, second) = notes.update(cx, |notes, cx| {
+        (notes.rename(a, "plan", cx), notes.rename(a, "final", cx))
+    });
+    visual.run_until_parked();
+
+    assert!(first.await);
+    assert!(
+        second.await,
+        "the second rename resolves the path the first produced"
+    );
+    assert_eq!(vault_names(&notes, cx), ["b.md", "final.md"]);
+}
+
+/// A failed rename says so. Without the emit this passes with `RenameFailed`
+/// deleted from the write path, which is what the event exists to prevent.
+#[gpui::test]
+async fn a_failed_rename_is_reported(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+    fs.make_uncreatable("/vault/plan.md");
+
+    let failed = Rc::new(RefCell::new(Vec::new()));
+    let _guard = cx.update(|cx| {
+        let failed = Rc::clone(&failed);
+        cx.subscribe(&notes, move |_, event: &RenameFailed, _| {
+            failed.borrow_mut().push(*event);
+        })
+    });
+
+    assert!(
+        !notes
+            .update(cx, |notes, cx| notes.rename(a, "plan", cx))
+            .await
+    );
+    visual.run_until_parked();
+
+    assert_eq!(*failed.borrow(), [RenameFailed(a)]);
+    assert_eq!(
+        vault_names(&notes, cx),
+        ["a.md", "b.md"],
+        "the note did not move"
+    );
+}
+
+/// Nothing in the UI can reach this — every row comes from the vault — but
+/// `current` can be `DETACHED`, and a caller reading it as the target must
+/// not move a file the vault does not list. `trash` has the same guard.
+#[gpui::test]
+async fn renaming_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let visual = tree_focused(cx, window, &sidebar);
+
+    assert!(
+        !notes
+            .update(cx, |notes, cx| notes.rename(EntryId::DETACHED, "plan", cx))
+            .await
+    );
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+}
+
+/// While a name is being typed, the tree's own keys must reach no handler
+/// — see `Sidebar::step` on why `cmd-backspace` bites hardest. The arrows
+/// are the same defect, quieter: they would move the selection out from
+/// under the gesture.
+#[gpui::test]
+fn the_trees_keys_do_nothing_while_a_name_is_typed(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("down enter");
+    visual.run_until_parked();
+    let selected = sidebar.read_with(cx, |sidebar, _| sidebar.selected());
+
+    visual.simulate_keystrokes("down");
+    visual.run_until_parked();
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+        selected,
+        "an arrow must not move the selection out from under the field"
+    );
+
+    visual.simulate_keystrokes("cmd-backspace");
+    visual.run_until_parked();
+    assert!(
+        !cx.has_pending_prompt(),
+        "cmd-backspace edits the name; it must not offer to delete the row"
+    );
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+}
+
+/// `up` and the field's own movement/deletion keys, each dispatched, not
+/// called — per CLAUDE.md's binding-test rule.
+#[gpui::test]
+fn the_remaining_bindings_fire(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    // `up` from nothing selected lands on the last row, then steps back.
+    visual.simulate_keystrokes("up");
+    visual.run_until_parked();
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+        Some(entry_id(&notes, cx, "b"))
+    );
+    visual.simulate_keystrokes("up");
+    visual.run_until_parked();
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+        Some(entry_id(&notes, cx, "a")),
+        "up moves the selection towards the top"
+    );
+
+    // In the field: `home`, `delete`, `end`, and a shifted selection.
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("home delete");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("end shift-left X");
+    visual.run_until_parked();
+    // `a` → home+delete removes nothing visible on a one-char name, so type
+    // a longer one first would obscure which key acted. Confirm instead.
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+
+    assert!(
+        vault_names(&notes, cx).contains(&"X.md".to_owned()),
+        "home, delete, end and shift-left all reached the field: got {:?}",
+        vault_names(&notes, cx)
+    );
+}

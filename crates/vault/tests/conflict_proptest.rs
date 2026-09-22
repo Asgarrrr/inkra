@@ -1,18 +1,13 @@
 //! No save destroys bytes it did not write.
 //!
-//! The property needed one correction the first run forced. "Whatever was at
-//! the path before a save is still readable after it" is false, and rightly so:
-//! a save whose expectation matches the file is replacing bytes *it* wrote, and
-//! is allowed to. Two external writes in a row lose the first for the same
-//! reason — that is the external writer's doing, not ours.
-//!
-//! What must hold is conditional on the expectation. When it matches the file,
-//! nothing is preserved. When it does not, the file belongs to someone else and
-//! every one of its bytes must survive under a new name.
+//! The property is conditional on the expectation, not unconditional: a save
+//! that finds what it expected is replacing bytes it wrote itself, and may.
+//! Two external writes in a row lose the first for the same reason — that is
+//! the external writer's doing, not ours. Only a save that finds something it
+//! did not expect must preserve every byte, under a new name.
 
-// `[lints] workspace = true` applies to every target of the crate, integration
-// tests included, so `expect_used` is denied here too. Same reasoning as
-// `tests/real_fs.rs`: a broken setup call must name itself.
+// `expect_used` is denied here too (`[lints] workspace = true`) — see
+// `tests/real_fs.rs`.
 #![allow(clippy::expect_used)]
 
 use std::path::{Path, PathBuf};

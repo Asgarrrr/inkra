@@ -2,7 +2,7 @@
 //! font metrics, or an entity handle; anything else belongs in `inkra-editor`.
 
 pub(crate) mod actions;
-mod element;
+pub(crate) mod element;
 mod input;
 mod scroll;
 #[cfg(test)]
@@ -203,7 +203,10 @@ impl EditorView {
         self.move_cursor(cx, |state, buffer| state.move_(buffer, movement, extend));
     }
 
-    fn cursor(&self) -> ByteOffset {
+    /// `pub(crate)` for `shell.rs`'s tests, which assert the caret did *not*
+    /// move when a key was claimed elsewhere. Used inside this module too, so
+    /// it is not dead in a release build.
+    pub(crate) fn cursor(&self) -> ByteOffset {
         self.state.cursor()
     }
 

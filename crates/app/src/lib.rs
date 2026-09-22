@@ -12,9 +12,12 @@
 
 mod bootstrap;
 mod editor;
+mod field;
 mod keymap;
 mod shell;
 mod sidebar;
+#[cfg(test)]
+mod test_support;
 mod theme;
 mod vault;
 
