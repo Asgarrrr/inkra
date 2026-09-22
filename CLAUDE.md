@@ -313,7 +313,7 @@ area, not on every task:
   save destroys what it found. It is conditional on the expectation, and has to
   be — a save that finds what it expected is replacing its own bytes and may.
 - `app`: `#[gpui::test]`, headless, in a `mod tests` beside the view it
-  exercises — `editor/tests.rs`, `shell.rs`, `sidebar/tests.rs`, `vault/tests/`.
+  exercises — `editor/tests/`, `shell/tests/`, `sidebar/tests.rs`, `vault/tests/`.
   A test reaches only what its own file roots the window at: `with_editor` and
   `dispatching` root at `EditorView`, so neither can prove an `AppShell`-scoped
   binding such as `cmd-s` fires. Reach `EntityInputHandler` through
@@ -321,8 +321,8 @@ area, not on every task:
   is an *editing-semantics* test, which belongs in `text` or `editor`. A plain
   `#[test]` over pixel geometry is fine and preferable: pixels cannot move down
   a layer, and `scroll.rs` is the precedent.
-- A test of where an activated note *goes* roots at `AppShell`, in `shell.rs`,
-  for the same reason `cmd-s` does: the subscription that routes
+- A test of where an activated note *goes* roots at `AppShell`, in
+  `shell/tests/`, for the same reason `cmd-s` does: the subscription that routes
   `NoteActivated` is set up in `AppShell::new`, so a window rooted at `Sidebar`
   cannot reach it. `sidebar/tests.rs` keeps only the click→emit half, which it
   asserts by subscribing to the `Sidebar` itself — and which therefore proves
@@ -476,11 +476,11 @@ change that introduces something reusable.
 | The vault tree, with expansion and the dirty dot | `Sidebar` | `app/src/sidebar/mod.rs` |
 | Ask for a note to be opened, from any widget | `NoteActivated` | `app/src/sidebar/mod.rs` |
 | Route an activated note into the editor and record it as current | `AppShell::open_note` | `app/src/shell.rs` |
-| A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests.rs` |
+| A headless window in a test | `with_editor` / `dispatching` | `app/src/editor/tests/mod.rs` |
 | A headless window rooted at `AppShell`, returning its store | `open_shell` | `app/src/vault/tests/mod.rs` |
-| A scanned `MemFs` vault, a store and an editor in a test | `open_two_notes` | `app/src/vault/tests/mod.rs` |
+| A scanned `MemFs` store, an `EntryId` by name, the two-note fixture — window-free | `scan_notes` / `entry_id` / `two_notes` | `app/src/test_support.rs` |
 | The same for the sidebar, undrawn or drawn | `parts` / `open` / `open_with_store` / `drawn` / `watch` | `app/src/sidebar/tests.rs` |
-| A vault of two notes under a real `AppShell` window | `open_vault` / `entry_id` / `two_notes` / `activate` | `app/src/shell.rs` |
+| A vault of two notes under a real `AppShell` window | `open_vault` / `two_notes` / `activate` | `app/src/shell/tests/mod.rs` |
 | Build the window's root view, from either entry point | `bootstrap::root` — takes the `Fs`, so the runner passes `MemFs` and gets the composition the real window gets | `app/src/bootstrap.rs` |
 | The real window's size | `bootstrap::WINDOW_SIZE` — never a literal beside it | `app/src/bootstrap.rs` |
 | Render a state of the app to a PNG | `shot::run`, via `examples/shot.rs` | `app/src/shot/mod.rs` |
@@ -489,11 +489,11 @@ change that introduces something reusable.
 | Restore the gpui source we build | `./scripts/vendor-gpui.sh` | `scripts/` |
 | The window's root view (sidebar slot + editor) | `AppShell` | `app/src/shell.rs` |
 | What fills the editor's slot when no note is open | `AppShell::render_empty` (private) — a method, not a view: no state, no events, no focus of its own | `app/src/shell.rs` |
-| The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell.rs` |
+| The editor, in a test, once a note has been activated | `shell::tests::editor` — there is none before that | `app/src/shell/tests/mod.rs` |
 | Which row a tree command acts on | `Sidebar::selected` — not `NoteStore::current`, which names what the editor shows | `app/src/sidebar/mod.rs` |
 | Which note the editor is showing, for a subscriber | `AppShell::showing` — `current` is cleared before `NoteClosed` is delivered | `app/src/shell.rs` |
 | Ask before something destructive | `Window::prompt`, answered in tests with `cx.simulate_prompt_answer` | gpui `window.rs:6448` |
-| A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell.rs` |
+| A focused vault tree in a test | `shell::tests::tree_focused` | `app/src/shell/tests/mod.rs` |
 | Whether a typed name can become a note | `check_name`, returning `NameProblem` — the rule; `app` owns the English | `vault/src/path.rs` |
 | The file name a typed name gets — always a lowercase `.md` | `note_file_name` | `vault/src/path.rs` |
 | Create a file or a folder | `Fs::create`, taking a `Kind` | `vault/src/fs.rs` |
