@@ -34,9 +34,7 @@ struct State {
     /// Every `save` of these paths fails. Models a read-only file, a full disk,
     /// or a directory the process cannot write into. See `make_unwritable`.
     unwritable: BTreeSet<PathBuf>,
-    /// Seconds past the base, advanced by every mutation. A constant here made
-    /// every write share one mtime, which made a stale stamp unreachable and
-    /// conflict detection untestable.
+    /// Seconds past the base, advanced by every mutation. See `MemFs::tick`.
     clock: u64,
     /// Every `create` or `rename` **into** one of these paths fails. Models a
     /// directory the process cannot write into, which `unwritable` cannot:
@@ -574,9 +572,8 @@ mod tests {
         );
     }
 
-    /// `now` used to be a constant, which made every stamp of a path equal to
-    /// every other and every conflict undetectable. This is what pins the
-    /// clock: delete `tick` and this is the test that says so.
+    /// Pins `tick`: delete it and every stamp of a path compares equal, and
+    /// this is the test that catches it.
     #[test]
     fn two_writes_of_one_path_get_different_stamps() {
         let fs = MemFs::new();
@@ -588,8 +585,7 @@ mod tests {
         assert_ne!(first, second);
     }
 
-    /// The fake must preserve in the same order the real one does. Reversed, it
-    /// would stay green while `RealFs` lost data.
+    /// Must preserve in `RealFs`'s order — see `Fs::save`.
     #[test]
     fn a_stale_stamp_preserves_the_external_text() {
         let fs = MemFs::new();
@@ -614,12 +610,8 @@ mod tests {
         );
     }
 
-    /// The comparison site, not the derived `PartialEq`. Every other conflict
-    /// test moves the file's mtime *forward*, so all of them stay green if
-    /// `!=` is relaxed to `>`. This one has the file older than the
-    /// expectation — the shape a sync client produces when it preserves an
-    /// original modified date — and is the only test that fails under that
-    /// relaxation.
+    /// The only conflict test with an mtime moving *backwards*; every other
+    /// one stays green if `!=` is relaxed to `>`. See `Stamp`.
     #[test]
     fn a_file_older_than_the_expectation_still_conflicts() {
         let fs = MemFs::new();
@@ -714,9 +706,8 @@ mod tests {
         );
     }
 
-    /// `rename(2)` is one call on the directory entry and never touches the
-    /// children's inodes, so a fake that dropped the subtree would make every
-    /// folder rename look like a mass delete.
+    /// A fake that dropped the subtree would make every folder rename look
+    /// like a mass delete — see `MemFs::rename`.
     #[test]
     fn renaming_a_folder_moves_its_subtree() {
         let fs = MemFs::new();
@@ -775,8 +766,8 @@ mod tests {
     fn save_round_trips_and_load_normalizes_line_endings() {
         let fs = MemFs::new();
 
-        // The path does not exist yet, so the expectation is never compared:
-        // `save` stats nothing when there is no file to stat.
+        // Not compared: no file exists yet to stat. See `real_fs.rs`'s
+        // `absent()`.
         let absent = Stamp {
             mtime: Mtime(SystemTime::UNIX_EPOCH),
             size: 0,

@@ -126,12 +126,9 @@ impl Fs for RealFs {
             Err(error) => return Err(io_error(path, error)),
         };
 
-        // Preserved *before* the replace, never after: between the two steps
-        // the bytes exist twice, so no crash point loses them. The reverse
-        // order makes a crash destroy the version this exists to protect.
-        //
-        // A missing file is not a conflict. There are no bytes to preserve, and
-        // recreating the note loses nothing.
+        // Preserve before replace, so the bytes exist twice across the two
+        // steps — see `Fs::save`. A missing file is not a conflict: there are
+        // no bytes to preserve, and recreating the note loses nothing.
         let preserved = match existing.as_ref() {
             Some(metadata) if stamp_of(path, metadata)? != expected => {
                 Some(preserve(path, metadata)?)
@@ -353,10 +350,10 @@ fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
 /// devices fails with `EXDEV`, and nothing says the vault shares a filesystem
 /// with `/tmp`.
 ///
-/// This needs write and execute permission on the **parent directory**, which
-/// the truncating write it replaces did not: `fs::write` to an existing file
-/// touches no directory entry. A vault whose notes are writable inside a
-/// directory that is not is the one layout this regresses.
+/// This needs write and execute permission on the **parent directory**:
+/// `fs::write` to an existing file touches no directory entry, but a rename
+/// does. A vault whose notes are writable inside a directory that is not
+/// cannot be saved this way.
 fn replace(path: &Path, text: &str, existing: Option<&fs::Metadata>) -> Result<()> {
     let temp = temp_path(path);
     // `?` unlinks nothing on its way out, and every step below leaves a file on

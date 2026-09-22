@@ -9,16 +9,15 @@ use crate::fs::Mtime;
 /// `Note (conflict 2026-09-21 14-32-05Z).md`, beside the note.
 ///
 /// Named for the *preserved* file's mtime rather than the current time: it
-/// names the version inside the file, it keeps `vault` free of a clock read,
-/// and it makes the name deterministic enough for a test to assert.
+/// names the version inside the file, keeps `vault` free of a clock read, and
+/// makes the name deterministic enough for a test to assert. Human-readable,
+/// in Dropbox's and Obsidian's shape rather than Syncthing's machine-parseable
+/// one. Always `.md`, since `read_dir` lists nothing else — an unlisted
+/// conflict file is an invisible one.
 ///
-/// Human-readable, in Dropbox's and Obsidian's shape rather than Syncthing's
-/// machine-parseable one. Always `.md`, because `read_dir` lists nothing else
-/// (`RealFs::read_dir`) and an unlisted conflict file is an invisible one.
-///
-/// `taken` decides whether a candidate already exists. A function rather than a
-/// direct filesystem call, so this stays testable without one; `RealFs` passes
-/// `Path::exists`.
+/// `taken` decides whether a candidate already exists, as a function rather
+/// than a direct filesystem call so this stays testable without one; `RealFs`
+/// passes `Path::exists`.
 pub(crate) fn conflict_path(
     note: &Path,
     preserved: Mtime,
@@ -59,9 +58,6 @@ mod tests {
 
     #[test]
     fn it_sits_beside_the_note_and_keeps_the_md_extension() {
-        // `read_dir` yields a file only when its extension is `md`
-        // (`RealFs::read_dir`). A conflict file the scan filters out would be the
-        // only signal this feature has, invisible.
         let path = conflict_path(Path::new("/vault/sub/Note.md"), at(1_790_001_125), |_| {
             false
         });
@@ -84,7 +80,7 @@ mod tests {
 
     #[test]
     fn a_note_without_an_extension_still_gets_one() {
-        // `EntryId::DETACHED` — a file named on the command line — never passed
+        // A file named on the command line (`EntryId::DETACHED`) never passed
         // the `*.md` filter and may have any name at all.
         let path = conflict_path(Path::new("/tmp/notes"), at(10), |_| false);
         assert_eq!(

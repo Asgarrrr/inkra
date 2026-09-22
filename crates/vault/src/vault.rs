@@ -24,10 +24,9 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
-    /// Unread, and now without the reason it was kept for: conflict detection
-    /// shipped on 2026-09-21 and compares a `Stamp` inside `Fs::save`, never
-    /// this. Left in place because a listing that cannot report an mtime is a
-    /// poorer seam for a second `Fs` backend, not because anything wants it.
+    /// Unread: conflict detection compares a `Stamp` inside `Fs::save`, never
+    /// this. Kept because a listing that cannot report an mtime is a poorer
+    /// seam for a second `Fs` backend, not because anything currently reads it.
     pub mtime: Mtime,
 }
 
@@ -76,15 +75,15 @@ impl Vault {
 
     /// Re-key an entry after a write replaced the file. `RealFs::save` renames a
     /// temp file over the destination, so a saved note's `(device, inode)` is
-    /// not the one it was scanned with. Without this the next `rescan` finds an
-    /// identity it has never seen, mints a fresh `EntryId` for it, and leaves
-    /// every caller keyed by the old one holding a note that no longer exists.
+    /// not the one it was scanned with. Without this the next `rescan` mints a
+    /// fresh `EntryId`, and every caller keyed by the old one holds a note that
+    /// no longer exists.
     ///
-    /// A no-op when `id` names no live entry. A `rescan` landing between the
-    /// write and this call has already minted that fresh id and committed it to
-    /// `entries`; re-keying on top would leave `by_identity` and `entries`
-    /// disagreeing about which id the path carries, and a click on the row would
-    /// open a second buffer on the same file.
+    /// A no-op when `id` names no live entry: a `rescan` landing between the
+    /// write and this call has already minted that fresh id and committed it,
+    /// so re-keying on top would leave `by_identity` and `entries` disagreeing
+    /// about which id the path carries, and a click on the row would open a
+    /// second buffer on the same file.
     pub fn reidentify(&mut self, id: EntryId, identity: FileIdentity) {
         if !self.entries.iter().any(|entry| entry.id == id) {
             return;
@@ -136,12 +135,10 @@ impl Vault {
     /// synchronous closure, so a caller holding the entity runs this half
     /// first and gives the result to the other.
     ///
-    /// One divergence from the walk this replaced, stated rather than hidden:
-    /// a directory is descended into before the filters in `apply` have run on
-    /// it, where the old walk descended only after they passed. Unreachable in
-    /// both directions — POSIX forbids a hard link to a directory, so the
-    /// collapse never fires on one, and `strip_prefix` cannot fail for a child
-    /// of the root the walk descended from.
+    /// A directory is descended into before `apply`'s filters have run on it.
+    /// Unreachable in practice: POSIX forbids a hard link to a directory, so
+    /// the collapse never fires on one, and `strip_prefix` cannot fail for a
+    /// child of the root the walk descended from.
     ///
     /// # Errors
     ///
@@ -372,8 +369,8 @@ mod tests {
         );
     }
 
-    /// A save replaces the file, so the entry's identity moves. Re-keying is
-    /// what keeps the id — and with it whatever buffer a caller holds under it.
+    /// `reidentify` is what keeps the id across a save, and with it whatever
+    /// buffer a caller holds under it.
     #[test]
     fn a_save_keeps_the_entry_id_across_a_rescan() {
         let fs = MemFs::new();
@@ -412,9 +409,7 @@ mod tests {
         assert!(vault.entry(id).is_none(), "the old id names nothing");
     }
 
-    /// A rescan between the write and the re-key has already minted a new id
-    /// for the path. Re-keying on top of it would leave `by_identity` and
-    /// `entries` naming different ids for one file.
+    /// The race `reidentify`'s no-op guard exists for — see `Vault::reidentify`.
     #[test]
     fn reidentify_ignores_an_entry_a_rescan_already_replaced() {
         let fs = MemFs::new();
@@ -448,17 +443,11 @@ mod tests {
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
     }
 
-    /// `Vault::apply` mints ids while it walks `collect`'s discovery order,
-    /// then reorders the whole vector with `found.sort_by(compare)`. An id
-    /// minted early can end up at a late row, and vice versa: `id1` is minted
-    /// for the top-level directory `a`, `id2` for the top-level file `b.md`,
-    /// `id3` for `a/c.md` — discovered after `b.md` since `a` is descended
-    /// only once the worklist reaches it — but `compare` sorts a directory's
-    /// children directly after it, so the final order is `a`, `a/c.md`,
-    /// `b.md`. A lookup index built from pre-sort positions would map `id2`
-    /// to row 1, which `entries[1]` after the sort is `a/c.md` (`id3`) — a
-    /// mismatched id and path. Building the index from the sorted vector is
-    /// what this test pins.
+    /// `apply` mints ids while walking `collect`'s discovery order, then
+    /// reorders the whole vector with `sort_by(compare)` — an id minted early
+    /// can land at a late row. Pins that the lookup index is built from the
+    /// sorted vector, not pre-sort positions, which would otherwise map an id
+    /// to the wrong row.
     #[test]
     fn entry_resolves_every_id_after_a_rescan_reorders_the_list() {
         let fs = MemFs::new();

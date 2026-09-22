@@ -79,9 +79,6 @@ mod tests {
 
     #[test]
     fn a_time_before_the_epoch_clamps() {
-        // `SystemTime` before the epoch cannot be expressed as a duration since
-        // it. Nothing in a vault should carry one; clamping keeps the name
-        // total rather than making the caller handle an error it cannot act on.
         assert_eq!(
             format_utc(SystemTime::UNIX_EPOCH - Duration::from_secs(1)),
             "1970-01-01 00-00-00"
