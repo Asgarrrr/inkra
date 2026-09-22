@@ -439,9 +439,7 @@ fn move_to_clamps_an_offset_past_the_end() {
     assert_eq!(state.cursor(), buffer.len());
 }
 
-/// The protocol's precedence, which used to live at the gpui edge and so
-/// needed a window to reach. Three cases, in the order the rule states
-/// them.
+/// Three cases, in the order `target_range`'s precedence states them.
 #[test]
 fn an_explicit_range_outranks_the_composing_region_and_the_selection() {
     let (mut buffer, mut state) = editor("hello");
@@ -481,9 +479,8 @@ fn a_utf16_range_spanning_a_surrogate_pair_resolves_onto_the_whole_char() {
     assert_eq!(state.cursor(), at(1));
 }
 
-/// A dead key: `^` arrives as composing text, then its base letter replaces
-/// it. The region has to be reinstated after the edit, because `edit`
-/// clears it.
+/// A dead key: `^` composes, then its base letter replaces it. The marked
+/// region must survive the edit.
 #[test]
 fn composing_text_marks_what_it_inserted() {
     let (mut buffer, mut state) = editor("");
@@ -508,10 +505,10 @@ fn composing_with_empty_text_ends_the_composition() {
     assert_eq!(state.marked_range(), None);
 }
 
-/// The input method reports the caret relative to what it just inserted.
-/// Converting before rebasing would resolve it against the whole buffer and
-/// count the insertion point twice — which only shows up when the text does
-/// not start at zero, and when a character is more than one UTF-16 unit.
+/// Rebasing before conversion, not after: converting first would resolve the
+/// caret against the whole buffer and double-count the insertion point. Only
+/// visible when the text does not start at zero and a char spans multiple
+/// UTF-16 units.
 #[test]
 fn the_composing_caret_is_rebased_before_it_is_converted() {
     let (mut buffer, mut state) = editor("😀");

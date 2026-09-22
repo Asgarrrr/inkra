@@ -196,11 +196,11 @@ proptest! {
     /// Cut then paste puts the text back. The one exception is stated rather
     /// than excluded: a whole-line cut of a last line with no terminator gives
     /// it one, because `cut` synthesizes the newline so that a cut line stays a
-    /// line wherever it is pasted. See the clipboard design document.
+    /// line wherever it is pasted. See `docs/superpowers/specs/2026-09-21-clipboard-design.md`.
     ///
     /// The caret round-trips only for a selection. After a line cut it lands at
-    /// the start of the line *below* the restored one, as it does in Zed, since
-    /// the cut left it at the line start the paste then pushed down.
+    /// the start of the line *below* the restored one, since the cut left it at
+    /// the line start the paste then pushed down.
     #[test]
     fn cut_then_paste_restores_the_text(
         parts in prop::collection::vec(text_strategy(), 1..6),

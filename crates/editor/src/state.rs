@@ -53,9 +53,9 @@ pub struct Copied {
 /// One view's editing state over a buffer it does not own.
 ///
 /// The buffer arrives per operation rather than being held, because a note
-/// open in two panes is one buffer and two of these. Note that two panes are
-/// not yet *correct* — see the design document: a second view's offsets rot
-/// when the first one edits, and fixing that needs anchors.
+/// open in two panes is one buffer and two of these. Two panes are not yet
+/// correct (see CLAUDE.md): a second view's offsets rot when the first
+/// edits.
 ///
 /// Nothing here reads a clock. The caller supplies `now`, for the same reason
 /// [`Buffer::transact_at`] does.
@@ -245,11 +245,9 @@ impl EditorState {
     ///
     /// The two differ only on a last line with no terminator: the range stops
     /// at the end of the text, while the text gains the `\n` the line does not
-    /// have. That asymmetry is deliberate and is where we part company with
-    /// Zed, whose cut copies exactly the bytes it removes. Ours guarantees that
-    /// a whole-line item is a whole line wherever it lands — which is what
-    /// cutting a line is for — and pays for it by giving an unterminated last
-    /// line its terminator when the cut is pasted straight back.
+    /// have — unlike Zed, whose cut copies exactly the removed bytes. This
+    /// guarantees a whole-line item is a whole line wherever it lands, at the
+    /// cost of adding a terminator when the cut is pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
         if !self.selection.is_empty() {
             let range = self.selection.range();
