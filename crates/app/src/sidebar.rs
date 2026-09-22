@@ -6,13 +6,28 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use gpui::{
-    App, Context, Div, Entity, EventEmitter, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Render, Styled, Subscription, Window, div, px, uniform_list,
+    App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, PromptLevel, Render, Styled, Subscription,
+    Window, actions, div, px, uniform_list,
 };
 use inkra_vault::{EntryId, Kind};
 
 use crate::theme;
 use crate::vault::NoteStore;
+
+actions!(
+    sidebar,
+    [
+        /// Moves the selected note to the platform trash, after confirming.
+        ///
+        /// Reads `Sidebar::selected`, so it has a target only while the tree
+        /// drives it. A command palette invoking this with nothing selected
+        /// would need the action to carry an `Option<EntryId>` instead.
+        Trash,
+        SelectPrev,
+        SelectNext,
+    ]
+);
 
 /// The left gutter every row starts from, and what each level of nesting adds.
 const INDENT_BASE: Pixels = px(8.);
@@ -33,6 +48,14 @@ pub(crate) struct Sidebar {
     notes: Entity<NoteStore>,
     /// Expansion is UI state, never vault state.
     expanded: HashSet<EntryId>,
+    /// What a command acts on. UI state like `expanded`, and not the same thing
+    /// as `NoteStore::current`: that one names the note the editor is showing,
+    /// and a user can select a row without opening it.
+    selected: Option<EntryId>,
+    /// Focused so the tree's own bindings resolve. Without a tracked handle the
+    /// `Sidebar` key context is in no dispatch node, and every binding scoped
+    /// to it would be excluded from matching.
+    focus_handle: FocusHandle,
     /// Derived when the vault or `expanded` changes, never per frame.
     visible: Vec<Row>,
     /// Rebuilds `visible` when the vault's contents change. Never read; holding
@@ -60,6 +83,8 @@ impl Sidebar {
         let mut sidebar = Self {
             notes,
             expanded: HashSet::new(),
+            selected: None,
+            focus_handle: cx.focus_handle(),
             visible: Vec::new(),
             _vault_changed: watched,
         };
@@ -108,11 +133,119 @@ impl Sidebar {
     /// Expansion is the sidebar's own state; where a note opens is not. The
     /// sidebar does not know an editor exists.
     fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
+        self.selected = Some(row.id);
         if row.kind == Kind::Dir {
             self.toggle(row.id, cx);
             return;
         }
         cx.emit(NoteActivated(row.id));
+    }
+
+    /// Moves the selection by one visible row, clamped at both ends rather than
+    /// wrapping: a tree that jumps from the last note back to the first loses
+    /// the user's place.
+    fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let last = self.visible.len() - 1;
+        let next = match self.selected.and_then(|id| self.index_of(id)) {
+            Some(index) => index.saturating_add_signed(delta).min(last),
+            // Nothing selected: down starts at the top, up at the bottom.
+            None if delta > 0 => 0,
+            None => last,
+        };
+        self.selected = self.visible.get(next).map(|row| row.id);
+        cx.notify();
+    }
+
+    /// The row a command would act on. `#[cfg(test)]` and an accessor rather
+    /// than a public field, following `NoteStore::current`: nothing in the UI
+    /// asks, and an unread method fails `-D warnings`.
+    #[cfg(test)]
+    pub(crate) fn selected(&self) -> Option<EntryId> {
+        self.selected
+    }
+
+    fn index_of(&self, id: EntryId) -> Option<usize> {
+        self.visible.iter().position(|row| row.id == id)
+    }
+
+    /// Asks before deleting, then deletes.
+    ///
+    /// A native prompt rather than an in-window one: gpui has no confirmation
+    /// widget, and the platform dialog is both free and the thing a macOS user
+    /// expects. The wording names the unsaved changes that are about to go,
+    /// because trashing takes the file as it is on disk and the editor's newer
+    /// text is not recoverable from the Trash.
+    fn trash(&mut self, _: &Trash, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        let Some(row) = self.visible.iter().find(|row| row.id == id) else {
+            return;
+        };
+        // Folders are not deletable yet: one gesture would take every note
+        // inside, which needs a prompt that counts them and the closing of
+        // every buffer in the subtree.
+        if row.kind == Kind::Dir {
+            return;
+        }
+
+        let message = format!("Move \u{201c}{}\u{201d} to the Trash?", row.name);
+        let detail = self
+            .notes
+            .read(cx)
+            .is_dirty(id, cx)
+            .then_some("It has unsaved changes, which will be lost.");
+        let answer = window.prompt(
+            PromptLevel::Info,
+            &message,
+            detail,
+            &["Move to Trash", "Cancel"],
+            cx,
+        );
+
+        let next = self.after_deleting(id);
+        cx.spawn(async move |sidebar, cx| {
+            if answer.await != Ok(0) {
+                return;
+            }
+            let _ = sidebar.update(cx, |sidebar, cx| {
+                // Moved before the delete resolves, so the tree never shows a
+                // selection on a row that is on its way out. The rescan the
+                // delete triggers rebuilds `visible` under it.
+                sidebar.selected = next;
+                sidebar
+                    .notes
+                    .update(cx, |notes, cx| notes.trash(id, cx))
+                    .detach();
+            });
+        })
+        .detach();
+    }
+
+    /// Where the selection lands once `id` is gone: the next row, else the one
+    /// before it, else nothing. Computed before the delete, because afterwards
+    /// the row it is relative to no longer exists.
+    fn after_deleting(&self, id: EntryId) -> Option<EntryId> {
+        let index = self.index_of(id)?;
+        self.visible
+            .get(index + 1)
+            .or_else(|| {
+                index
+                    .checked_sub(1)
+                    .and_then(|before| self.visible.get(before))
+            })
+            .map(|row| row.id)
+    }
+
+    fn select_prev(&mut self, _: &SelectPrev, _window: &mut Window, cx: &mut Context<Self>) {
+        self.step(-1, cx);
+    }
+
+    fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
+        self.step(1, cx);
     }
 
     /// Split out only so a test can read the dot: nothing gets text back out
@@ -144,6 +277,13 @@ impl Sidebar {
                 let label = self.row_label(&row, cx);
                 // `Vault::scan` stops at depth 64, so nothing saturates.
                 let depth = f32::from(u8::try_from(row.depth).unwrap_or(u8::MAX));
+                // `FluentBuilder::when` would read better, but gpui keeps that
+                // trait private in this build (`gpui.rs:61`, `:163`).
+                let background = if self.selected == Some(row.id) {
+                    theme::selected_row_background()
+                } else {
+                    theme::sidebar_background()
+                };
                 div()
                     .flex()
                     .flex_row()
@@ -172,9 +312,15 @@ impl Sidebar {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_color(theme::sidebar_text())
+                    .bg(background)
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |sidebar, _event, _window, cx| {
+                        cx.listener(move |sidebar, _event, window, cx| {
+                            // Focus first, so the tree's own bindings resolve
+                            // from the very next keystroke. Straight to the
+                            // handle rather than through `Focusable`, which is
+                            // what `EditorView::on_mouse_down` already does.
+                            window.focus(&sidebar.focus_handle, cx);
                             sidebar.activate(&row, cx);
                         }),
                     )
@@ -184,16 +330,34 @@ impl Sidebar {
     }
 }
 
+impl Focusable for Sidebar {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        uniform_list(
-            "vault-tree",
-            self.visible.len(),
-            cx.processor(Self::render_rows),
-        )
-        // Load-bearing: the default `ListSizingBehavior::Auto` resolves to zero
-        // height and paints nothing (`elements/list.rs:192-193`).
-        .size_full()
+        div()
+            // The context every binding below names. It has to sit on a node
+            // that tracks a focus handle, or it is in no dispatch path and the
+            // bindings are excluded from matching rather than merely outranked.
+            .key_context("Sidebar")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::trash))
+            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_next))
+            .size_full()
+            .child(
+                uniform_list(
+                    "vault-tree",
+                    self.visible.len(),
+                    cx.processor(Self::render_rows),
+                )
+                // Load-bearing: the default `ListSizingBehavior::Auto` resolves
+                // to zero height and paints nothing (`elements/list.rs:192-193`).
+                .size_full(),
+            )
     }
 }
 

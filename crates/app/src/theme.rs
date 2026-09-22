@@ -70,3 +70,12 @@ pub(crate) fn selection() -> Rgba {
 pub(crate) fn cursor() -> Rgba {
     rgba(0x4ea1ffff)
 }
+
+/// Behind the sidebar row a command would act on.
+///
+/// Lighter than `sidebar_background` rather than an accent colour: the tree's
+/// selection says where you are, not what is happening, and a saturated bar
+/// would outrank the editor's own caret for attention.
+pub(crate) fn selected_row_background() -> Rgba {
+    rgb(0x2d2d2d)
+}
