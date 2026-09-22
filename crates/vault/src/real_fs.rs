@@ -142,7 +142,7 @@ impl Fs for RealFs {
         // A note with a second hard link is written in place. Replacing it
         // would give this path a new inode and leave the other link on the old
         // one: `Vault::rescan` collapses two names sharing an identity into one
-        // entry (`vault.rs:108-110`), so the pair would stop sharing and the
+        // entry (`Vault::apply`), so the pair would stop sharing and the
         // second name would surface as a new row carrying stale text — a
         // duplicate appearing because of a write nobody asked for.
         //
