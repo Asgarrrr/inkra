@@ -62,6 +62,8 @@ area, not on every task:
   scene off-screen into `target/shots/*.png`. Add a scene name for one, or
   `--list` for the catalogue. This is how the eyeball pass below gets done
   without a human at the screen.
+- bench: `cargo bench -p inkra-text -- --quick` — criterion benchmarks over
+  `Buffer`. Not part of `check.sh` and no baseline is committed; see Testing.
 - verify: `./scripts/check.sh` — all of the above. Green is the definition of done.
 - tests moved: `./scripts/test-names.sh` — every test by leaf name, sorted,
   duplicates kept. Diff it before and after a file split: a forgotten `mod`
@@ -400,6 +402,12 @@ area, not on every task:
   asserted: there are no baselines and `check.sh` never runs the runner. Adding
   one does not discharge the obligation to write a `#[gpui::test]` for the
   behaviour.
+
+- `crates/text/benches/buffer.rs` times `Buffer`'s size-dependent operations
+  across 1k/10k/100k-line documents. It is a before/after comparison for a
+  change that touches one of `Buffer`'s hot paths — insert, undo, the UTF-16
+  and grapheme conversions, the line index — not a gate: nothing runs it in
+  `check.sh` and no baseline is committed.
 
 ## Don't recreate — it already exists
 

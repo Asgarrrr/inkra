@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[lib]
+# Without this, `cargo bench` treats the lib target itself as an implicit
+# bench harness (there being no `#[bench]` functions notwithstanding) and
+# forwards criterion-only flags like `--quick` to it, which it does not
+# understand and refuses to run.
+bench = false
+
 [dependencies]
 unicode-segmentation = "1.13"
 
@@ -13,3 +20,8 @@ workspace = true
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "buffer"
+harness = false
