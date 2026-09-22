@@ -31,7 +31,7 @@ use crate::editor::actions::{
     Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
-use crate::sidebar::{NewFolder, NewNote, SelectNext, SelectPrev, Trash};
+use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::vault::Save;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
@@ -67,6 +67,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-backspace", Trash, Some("Sidebar")),
         KeyBinding::new("up", SelectPrev, Some("Sidebar")),
         KeyBinding::new("down", SelectNext, Some("Sidebar")),
+        // The Finder gesture. `enter` also inserts a newline in the editor and
+        // confirms in a field; all three name a context, so none competes.
+        KeyBinding::new("enter", Rename, Some("Sidebar")),
         // The name field repeats the editor's movement and deletion set rather
         // than inheriting it, which the paragraph above forces: with
         // `EditorView` absent from the focused stack those bindings are

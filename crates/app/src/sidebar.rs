@@ -28,6 +28,10 @@ actions!(
         Trash,
         SelectPrev,
         SelectNext,
+        /// Opens a field over the selected row, seeded with its current name.
+        ///
+        /// Reads `Sidebar::selected`, like `Trash`.
+        Rename,
     ]
 );
 
@@ -107,7 +111,13 @@ struct Row {
 /// (`project_panel/src/project_panel.rs:239-256`). It holds only what the
 /// confirm needs, because the text itself lives in the field.
 struct EditState {
-    /// The folder the new entry goes in, or the vault root.
+    /// The entry being renamed. `None` while creating — nothing exists yet, and
+    /// this one `Option` is what tells the two gestures apart, as Zed's
+    /// `leaf_entry_id` does (`project_panel.rs:252-256`). Everything below is
+    /// shared by both.
+    target: Option<EntryId>,
+    /// The folder the new entry goes in, or the vault root. Also the folder a
+    /// rename's collision check looks in, which is the one it moves within.
     parent: Option<EntryId>,
     kind: Kind,
     /// Index in `visible` where the field's row is drawn, and the indent it
@@ -367,7 +377,32 @@ impl Sidebar {
     ) {
         let (parent, at, depth) = self.insertion_point(cx);
 
-        let field = cx.new(|cx| NameField::new("", cx));
+        let (field, subscriptions) = Self::open_field("", cx);
+        window.focus(&field.focus_handle(cx), cx);
+        self.editing = Some(EditState {
+            target: None,
+            parent,
+            kind,
+            at,
+            depth,
+            field,
+            rejected: None,
+            _subscriptions: subscriptions,
+        });
+        // See the field on `Sidebar`: a row outside the rendered range has no
+        // dispatch node, so the field would take no keystrokes at all.
+        self.scroll.scroll_to_item(at, ScrollStrategy::Center);
+        cx.notify();
+    }
+
+    /// The field both gestures use, and the two subscriptions that end it.
+    ///
+    /// Shared because nothing about confirming or cancelling differs between
+    /// creating and renaming — `EditState::target` is what tells them apart,
+    /// and `confirm` reads it.
+    fn open_field(initial: &str, cx: &mut Context<Self>) -> (Entity<NameField>, [Subscription; 2]) {
+        let initial = initial.to_owned();
+        let field = cx.new(|cx| NameField::new(&initial, cx));
         let confirmed = cx.subscribe(&field, |sidebar, _, event: &Confirmed, cx| {
             sidebar.confirm(&event.0, cx);
         });
@@ -375,19 +410,35 @@ impl Sidebar {
             sidebar.editing = None;
             cx.notify();
         });
+        (field, [confirmed, cancelled])
+    }
 
+    /// Opens a field over the selected row, holding its current name.
+    ///
+    /// The whole name is selected, so typing replaces it and an arrow key still
+    /// reaches the old one — which is what a user correcting a typo wants.
+    fn rename(&mut self, _: &Rename, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        let Some(at) = self.index_of(id) else {
+            return;
+        };
+        let row = self.visible[at].clone();
+
+        let parent = self.parent_of(&row);
+        let (field, subscriptions) = Self::open_field(&row.name, cx);
         window.focus(&field.focus_handle(cx), cx);
         self.editing = Some(EditState {
+            target: Some(id),
             parent,
-            kind,
+            kind: row.kind,
             at,
-            depth,
+            depth: row.depth,
             field,
             rejected: None,
-            _subscriptions: [confirmed, cancelled],
+            _subscriptions: subscriptions,
         });
-        // See the field on `Sidebar`: a row outside the rendered range has no
-        // dispatch node, so the field would take no keystrokes at all.
         self.scroll.scroll_to_item(at, ScrollStrategy::Center);
         cx.notify();
     }
@@ -428,12 +479,12 @@ impl Sidebar {
         let Some(edit) = self.editing.as_ref() else {
             return;
         };
-        let (parent, kind) = (edit.parent, edit.kind);
+        let (target, parent, kind) = (edit.target, edit.parent, edit.kind);
 
         let rejected = inkra_vault::check_name(name)
             .map(Rejection::Name)
             .or_else(|| {
-                self.taken(parent, kind, name, cx)
+                self.taken(target, parent, kind, name, cx)
                     .then_some(Rejection::Duplicate)
             });
         if let Some(rejected) = rejected {
@@ -446,19 +497,27 @@ impl Sidebar {
 
         self.editing = None;
         let name = name.to_owned();
-        let created = self
-            .notes
-            .update(cx, |notes, cx| notes.create(parent, kind, &name, cx));
-        cx.spawn(async move |sidebar, cx| {
-            let Some(id) = created.await else { return };
-            let _ = sidebar.update(cx, |sidebar, cx| {
-                // The rescan the create awaited has already rebuilt `visible`,
-                // so the row exists to be selected.
-                sidebar.selected = Some(id);
-                cx.notify();
-            });
-        })
-        .detach();
+        // The one place the two gestures diverge, which is what makes the
+        // `Option` worth more than a mode enum: everything above is shared.
+        if let Some(id) = target {
+            self.notes
+                .update(cx, |notes, cx| notes.rename(id, &name, cx))
+                .detach();
+        } else {
+            let created = self
+                .notes
+                .update(cx, |notes, cx| notes.create(parent, kind, &name, cx));
+            cx.spawn(async move |sidebar, cx| {
+                let Some(id) = created.await else { return };
+                let _ = sidebar.update(cx, |sidebar, cx| {
+                    // The rescan the create awaited has already rebuilt
+                    // `visible`, so the row exists to be selected.
+                    sidebar.selected = Some(id);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         cx.notify();
     }
 
@@ -467,7 +526,18 @@ impl Sidebar {
     /// Answered here rather than in `vault`: it is a question about the live
     /// listing, not a property of a path. Compared on the file name a note
     /// would actually get, so `plan` and `plan.md` are one collision.
-    fn taken(&self, parent: Option<EntryId>, kind: Kind, name: &str, cx: &App) -> bool {
+    /// `target` is the entry being renamed, which must not collide with
+    /// itself: confirming a rename without changing the name is a no-op, not a
+    /// duplicate. It also covers a case-only rename, where the old and new
+    /// names differ but name one file.
+    fn taken(
+        &self,
+        target: Option<EntryId>,
+        parent: Option<EntryId>,
+        kind: Kind,
+        name: &str,
+        cx: &App,
+    ) -> bool {
         let wanted = match kind {
             Kind::Note => inkra_vault::note_file_name(name),
             Kind::Dir => name.trim().to_owned(),
@@ -482,11 +552,14 @@ impl Sidebar {
         else {
             // The root: a top-level entry is one with no parent component.
             return vault.entries().any(|entry| {
-                entry.path.depth() == 0 && file_name_of(entry.path.as_path()) == wanted
+                Some(entry.id) != target
+                    && entry.path.depth() == 0
+                    && file_name_of(entry.path.as_path()) == wanted
             });
         };
         vault.entries().any(|entry| {
-            entry.path.depth() == parent_path.depth() + 1
+            Some(entry.id) != target
+                && entry.path.depth() == parent_path.depth() + 1
                 && entry.path.starts_with(&parent_path)
                 && file_name_of(entry.path.as_path()) == wanted
         })
@@ -538,6 +611,13 @@ impl Sidebar {
         let Some(edit) = self.editing.as_ref() else {
             return self.visible.get(ix).cloned();
         };
+        // A rename replaces its row; a create inserts one. Otherwise renaming
+        // would show the old name and the field for one entry at once.
+        if edit.target.is_some() {
+            return (ix != edit.at)
+                .then(|| self.visible.get(ix).cloned())
+                .flatten();
+        }
         match ix.cmp(&edit.at) {
             std::cmp::Ordering::Less => self.visible.get(ix).cloned(),
             std::cmp::Ordering::Equal => None,
@@ -545,9 +625,16 @@ impl Sidebar {
         }
     }
 
-    /// How many rows the list draws: the tree, plus the field's own.
-    fn row_count(&self) -> usize {
-        self.visible.len() + usize::from(self.editing.is_some())
+    /// How many rows the list draws: the tree, plus one for a field that is
+    /// inserting rather than replacing.
+    /// `pub(crate)` for the rename test in `shell.rs`, which asserts the count
+    /// does not move: a rename replaces its row rather than adding one.
+    pub(crate) fn row_count(&self) -> usize {
+        let inserting = self
+            .editing
+            .as_ref()
+            .is_some_and(|edit| edit.target.is_none());
+        self.visible.len() + usize::from(inserting)
     }
 
     fn render_rows(
@@ -649,6 +736,7 @@ impl Render for Sidebar {
             .on_action(cx.listener(Self::trash))
             .on_action(cx.listener(Self::select_prev))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::rename))
             // A column, so the rejection message below has a line of its own.
             // Without it the list's `size_full` claims the whole height and
             // pushes the message off the bottom — which every test still

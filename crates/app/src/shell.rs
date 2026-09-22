@@ -179,6 +179,20 @@ impl AppShell {
     }
 }
 
+#[cfg(any(test, feature = "shot"))]
+impl AppShell {
+    /// The vault tree's focus handle.
+    ///
+    /// Not what `Focusable::focus_handle` returns — that one answers "where does
+    /// the window put focus", which is the editor once a note is open. Reaching
+    /// the tree is something a test or a scene asks for deliberately, because
+    /// clicking a note row hands focus to the editor and the tree's own
+    /// bindings stop resolving until something gives it back.
+    pub(crate) fn tree_focus_handle(&self, cx: &App) -> FocusHandle {
+        self.sidebar.read(cx).focus_handle(cx)
+    }
+}
+
 impl Focusable for AppShell {
     /// The editor's when there is one, so `bootstrap::run`'s launch-time focus
     /// call lands on the note a named file opened. Its own otherwise, so that
@@ -281,6 +295,196 @@ impl Render for AppShell {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    /// A rename keeps the row's `EntryId`, which is what keeps whatever buffer
+    /// is open under it. Asserted by id, not by name: the name is what moved.
+    #[gpui::test]
+    fn renaming_a_note_moves_it_and_keeps_its_id(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        visual.simulate_keystrokes("down");
+        visual.run_until_parked();
+        let before = sidebar
+            .read_with(cx, |sidebar, _| sidebar.selected())
+            .unwrap();
+
+        visual.simulate_keystrokes("enter");
+        visual.run_until_parked();
+        visual.simulate_keystrokes("p l a n enter");
+        visual.run_until_parked();
+
+        assert_eq!(vault_names(&notes, cx), ["b.md", "plan.md"]);
+        assert_eq!(
+            entry_id(&notes, cx, "plan"),
+            before,
+            "the inode did not move, so neither did the id"
+        );
+    }
+
+    /// The one hazard the chain exists for. A write is held open past the turn
+    /// that issued it, the rename is issued behind it, and the gate is released:
+    /// the write must land on the old path first and the rename must move that
+    /// file, rather than the write recreating the note under its old name.
+    ///
+    /// Without the chain the rename races the write. `MemFs::block_save` is the
+    /// only way to reach the interleaving at all.
+    #[gpui::test]
+    async fn a_rename_issued_during_a_write_moves_the_written_text(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+
+        activate(&sidebar, cx, a);
+        visual.run_until_parked();
+        let buffer = notes
+            .read_with(cx, |notes, _| notes.buffer_for(a).cloned())
+            .expect("the note is open");
+
+        // Hold the write open, then dirty the note so one is issued.
+        let gate = fs.block_save("/vault/a.md");
+        buffer.update(cx, |buffer, _| {
+            buffer.transact_at(std::time::Instant::now(), |buffer| {
+                buffer.insert(inkra_text::ByteOffset(0), "EDITED ");
+            });
+        });
+        notes.update(cx, NoteStore::save_current);
+        visual.run_until_parked();
+
+        // Issued while that write is still in flight.
+        let renamed = notes.update(cx, |notes, cx| notes.rename(a, "plan", cx));
+        visual.run_until_parked();
+        gate.release();
+        assert!(renamed.await, "the rename lands once the write has");
+        visual.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/plan.md")).as_deref(),
+            Some("EDITED alpha"),
+            "the write reached disk, and the rename moved what it wrote"
+        );
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/a.md")),
+            None,
+            "nothing was recreated under the old name"
+        );
+    }
+
+    /// The note stays writable afterwards, at its new path, under the same id.
+    ///
+    /// Does **not** pin the rescan-inside-the-link: removing that await leaves
+    /// this green, because `run_until_parked` drains the walk before the edit.
+    /// What it does pin is that the buffer survives the move and its next write
+    /// follows the file — which is the user-visible half.
+    #[gpui::test]
+    async fn a_note_edited_after_a_rename_is_written_to_its_new_path(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, a, _b) = two_notes(cx, &fs);
+        let visual = tree_focused(cx, window, &sidebar);
+
+        activate(&sidebar, cx, a);
+        visual.run_until_parked();
+        assert!(
+            notes
+                .update(cx, |notes, cx| notes.rename(a, "plan", cx))
+                .await
+        );
+        visual.run_until_parked();
+
+        let buffer = notes
+            .read_with(cx, |notes, _| notes.buffer_for(a).cloned())
+            .expect("the note is still open under the same id");
+        buffer.update(cx, |buffer, _| {
+            buffer.transact_at(std::time::Instant::now(), |buffer| {
+                buffer.insert(inkra_text::ByteOffset(0), "AFTER ");
+            });
+        });
+        notes.update(cx, NoteStore::save_current);
+        visual.run_until_parked();
+
+        assert_eq!(
+            fs.read_to_string(Path::new("/vault/plan.md")).as_deref(),
+            Some("AFTER alpha")
+        );
+        assert_eq!(fs.read_to_string(Path::new("/vault/a.md")), None);
+    }
+
+    #[gpui::test]
+    fn renaming_onto_a_sibling_name_is_refused(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        visual.simulate_keystrokes("down enter");
+        visual.run_until_parked();
+        visual.simulate_keystrokes("b enter");
+        visual.run_until_parked();
+
+        assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"], "neither moved");
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+            Some("That name is already taken.")
+        );
+    }
+
+    /// Confirming a rename without changing anything is a no-op, not a
+    /// collision with itself.
+    #[gpui::test]
+    fn renaming_a_note_to_its_own_name_is_accepted(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        visual.simulate_keystrokes("down enter enter");
+        visual.run_until_parked();
+
+        assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+        assert!(
+            !sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
+            "the field closed rather than reporting a duplicate"
+        );
+    }
+
+    /// The field replaces the row rather than being inserted beside it, so a
+    /// rename never shows the old name and the field for one entry at once.
+    #[gpui::test]
+    fn renaming_replaces_the_row_rather_than_adding_one(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        let before = sidebar.read_with(cx, |sidebar, _| sidebar.row_count());
+        visual.simulate_keystrokes("down enter");
+        visual.run_until_parked();
+
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.row_count()),
+            before
+        );
+    }
+
+    #[gpui::test]
+    fn renaming_a_folder_moves_its_subtree(cx: &mut TestAppContext) {
+        let fs = Arc::new(MemFs::new());
+        fs.insert_file("/vault/projects/plan.md", "p");
+        fs.insert_file("/vault/a.md", "alpha");
+        let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+        let mut visual = tree_focused(cx, window, &sidebar);
+
+        // Row 0 is the `projects` folder.
+        visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
+        visual.run_until_parked();
+        visual.simulate_keystrokes("enter");
+        visual.run_until_parked();
+        visual.simulate_keystrokes("a r c h i v e enter");
+        visual.run_until_parked();
+
+        assert_eq!(
+            vault_names(&notes, cx),
+            ["archive", "archive/plan.md", "a.md"]
+        );
+    }
+
     /// Names the vault holds now, in tree order.
     fn vault_names(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Vec<String> {
         notes.update(cx, |notes, cx| {

@@ -86,6 +86,11 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             open: sidebar_rejected,
         },
         Scene {
+            name: "sidebar-renaming",
+            shows: "a rename in progress: the field replaces the row, holding the old name",
+            open: sidebar_renaming,
+        },
+        Scene {
             name: "sidebar-dirty",
             shows: "the dirty dot on a note edited but not written",
             open: sidebar_dirty,
@@ -162,6 +167,10 @@ fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
 fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    // The click opened the note and handed focus to the editor, so the tree's
+    // own bindings no longer resolve. A scene showing one has to ask for the
+    // tree back.
+    stage.focus_tree(window);
     stage.keys(window, "cmd-n");
     stage.keys(window, "d r a f t");
     window
@@ -172,8 +181,26 @@ fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
 fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    // The click opened the note and handed focus to the editor, so the tree's
+    // own bindings no longer resolve. A scene showing one has to ask for the
+    // tree back.
+    stage.focus_tree(window);
     stage.keys(window, "cmd-n");
     stage.keys(window, "i n d e x enter");
+    window
+}
+
+/// The field over a row rather than beside one, holding the name it starts
+/// from. The thing to look at is that no row was added: the tree below has not
+/// moved, and `index` appears once rather than twice.
+fn sidebar_renaming(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(VAULT);
+    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    // The click opened the note and handed focus to the editor, so the tree's
+    // own bindings no longer resolve. A scene showing one has to ask for the
+    // tree back.
+    stage.focus_tree(window);
+    stage.keys(window, "enter");
     window
 }
 
