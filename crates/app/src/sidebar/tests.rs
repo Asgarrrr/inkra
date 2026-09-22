@@ -158,13 +158,9 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
 }
 
 /// The conflict file's only route to the user, asserted where the user
-/// would see it: `visible`, not `Vault::entries`.
-///
-/// `visible` is a cache rebuilt by `new` and `toggle` alone. A test that
-/// counts vault entries instead passes while the sidebar paints a stale
-/// row list, which is exactly what happened: the vault's `notify` had no
-/// subscriber, and the file this whole feature exists to surface was
-/// invisible until the next launch.
+/// would see it: `visible`, not `Vault::entries` — a cache rebuilt only by
+/// `new` and `toggle`, so this pins the vault subscription that keeps it
+/// live.
 #[gpui::test]
 fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -302,8 +298,8 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
     );
 }
 
-/// Subscribes to the `Sidebar` itself, so it proves nothing about
-/// `AppShell`'s wiring — that is `shell.rs`'s job.
+/// Subscribes to `Sidebar` itself; proving `AppShell`'s wiring is
+/// `shell.rs`'s job.
 ///
 /// A real mouse event, not a call to `activate`: only the layout decides
 /// whether a click lands. Discriminates `.w_full()` — headless text is
@@ -312,9 +308,9 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
 /// `auto` row around the stem `a` ends at 17.6px and x=20 misses.
 ///
 /// Does *not* cover `.size_full()`: a window root resolves its percentage
-/// against the test display's definite bounds, never the real `SIDEBAR_WIDTH` parent
-/// in `shell.rs`. The folder keeps a sibling note so that clicking it
-/// proves no *other* row reported either.
+/// against the test display's bounds, not the real `SIDEBAR_WIDTH` parent in
+/// `shell.rs`. The folder keeps a sibling note, so clicking it proves no
+/// *other* row reported.
 #[gpui::test]
 fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -339,33 +335,15 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
 }
 
-/// The row pitch, asserted where a drift has somewhere to show.
+/// The row pitch, pinned far enough down the list (row 29 of 30) for drift to
+/// pass a whole row. Measured, not derived: deleting the type pair gives
+/// 26.0 px and `line_height` alone gives 22.5 px (not `phi()` × 14 = 22.65 —
+/// gpui does not render the fraction). Against the stated 22 px, those first
+/// misplace a click at row 3 and row 23; row 29 catches both.
 ///
-/// `render_rows` states the sidebar's type and lets each row take its line
-/// box as its height. Nothing but that identity holds the two together, so
-/// this is the test the type statement lives or dies by: a click computed
-/// from `UI_LINE_HEIGHT` has to land on the row that constant names.
-///
-/// Thirty rows is what makes it bite, and the depth is the whole design.
-/// The two pitches below are **measured**, not derived — deleting the pair
-/// and probing where row 1 begins gives 26.0 px, and deleting `line_height`
-/// alone gives 22.5 px. (The second is not `phi()` times 14, which would be
-/// 22.65; gpui does not render the fraction it computes.) Against the stated
-/// 22 px, 26.0 first misplaces a click at row 3, and 22.5 — half a pixel of
-/// drift per row — not until row 23. Clicking row 29 catches both with six
-/// rows in hand. Twenty rows caught only the first.
-///
-/// What it pins is `line_height`, which is the row's height and therefore
-/// the only thing that can make a line box outgrow its row. Deleting
-/// `text_size` alone leaves this green, and should: 16 px inside a stated
-/// 22 px box still fits, so that is a typographic regression and not the
-/// clipping defect. Nothing here catches it, and nothing here claims to.
-///
-/// The alternative was a fixed `.h()` on the row, which is what the row
-/// used to have. It holds the pitch at 22 px whatever the text does inside
-/// it — so the clipping the type statement exists to prevent comes back
-/// silently, and every test here still passes. That is the state this test
-/// exists to leave behind.
+/// Deleting `text_size` alone stays green, correctly: 16 px still fits a
+/// 22 px box, so that is a typographic regression, not this test's clipping
+/// defect.
 #[gpui::test]
 fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

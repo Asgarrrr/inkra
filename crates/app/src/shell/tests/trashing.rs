@@ -10,17 +10,14 @@ use super::{activate, editor, tree_focused, two_notes};
 
 /// `down` reaches the tree, and only the tree.
 ///
-/// Does **not** discriminate the `Some("EditorView")` scoping in
-/// `keymap.rs`, and says so rather than implying otherwise: with those
-/// bindings context-less the two entries tie and the tree's still wins, by
-/// sitting later in the `Vec` (`gpui/src/keymap.rs:188-190`). What this
-/// pins is the binding, the `Sidebar` key context reaching a dispatch node
-/// at all, and the focus the tree takes — delete any of the three and it
-/// fails.
+/// Does **not** discriminate `EditorView`'s `keymap.rs` scoping: with both
+/// bindings context-less they would tie and the tree still wins on `Vec`
+/// position (`gpui/src/keymap.rs:188-190`). What this pins is the binding,
+/// the `Sidebar` context reaching a dispatch node at all, and the focus the
+/// tree takes.
 ///
 /// The caret assertion is belt and braces: the editor is not an ancestor of
-/// the sidebar, so an editor action dispatched from here could not reach it
-/// anyway. It costs one line and states the intent.
+/// the sidebar, so it could not receive the action anyway.
 #[gpui::test]
 fn an_arrow_moves_the_tree_and_not_the_caret_while_the_tree_has_focus(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -105,9 +102,9 @@ fn declining_the_prompt_keeps_the_note(cx: &mut TestAppContext) {
     );
 }
 
-/// Deleting the note on screen has to take the editor with it. A buffer
-/// whose file is gone is still typable, and every keystroke into it would
-/// be lost — the defect the unnamed launch buffer had.
+/// Deleting the note on screen has to take the editor with it: a buffer
+/// with no file is still typable, and every keystroke would be lost — see
+/// `AppShell::editor`.
 #[gpui::test]
 fn trashing_the_open_note_empties_the_editor(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

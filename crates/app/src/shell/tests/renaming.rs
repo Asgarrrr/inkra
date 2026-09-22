@@ -307,12 +307,10 @@ async fn renaming_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
     assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
 }
 
-/// While a name is being typed the tree's own keys must reach no handler.
-///
-/// `cmd-backspace` is the macOS delete-to-line-start gesture, so a user
-/// correcting a typed name would otherwise be asked whether to move the row
-/// under the field to the Trash. The arrows are the same defect, quieter:
-/// they move the selection out from under the gesture in flight.
+/// While a name is being typed, the tree's own keys must reach no handler
+/// — see `Sidebar::step` on why `cmd-backspace` bites hardest. The arrows
+/// are the same defect, quieter: they would move the selection out from
+/// under the gesture.
 #[gpui::test]
 fn the_trees_keys_do_nothing_while_a_name_is_typed(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -340,9 +338,8 @@ fn the_trees_keys_do_nothing_while_a_name_is_typed(cx: &mut TestAppContext) {
     assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 }
 
-/// `up` and the field's own movement and deletion keys, each dispatched
-/// rather than called: a handler is a thin delegation, so only a real
-/// keystroke proves the binding, its context and the `actions!` mapping.
+/// `up` and the field's own movement/deletion keys, each dispatched, not
+/// called — per CLAUDE.md's binding-test rule.
 #[gpui::test]
 fn the_remaining_bindings_fire(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

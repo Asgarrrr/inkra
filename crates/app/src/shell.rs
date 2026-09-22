@@ -22,26 +22,18 @@ use crate::vault::{NoteClosed, NoteStore, Save, SaveFailed};
 const SIDEBAR_WIDTH: Pixels = px(220.);
 
 pub(crate) struct AppShell {
-    /// `None` until a note is opened. A launch with no argument, or on a vault
-    /// with nothing clicked yet, used to get a real editable `Buffer` that
-    /// `NoteStore` never tracked: no observer, no autosave, no sidebar row, no
-    /// quit flush, and `save_current` returning at its `None` guard. Everything
-    /// typed into it was lost. There is now nothing to type into.
+    /// `None` until a note is opened — see CLAUDE.md on why this must not
+    /// default to a real, untracked `Buffer`.
     editor: Option<Entity<EditorView>>,
     notes: Entity<NoteStore>,
     sidebar: Entity<Sidebar>,
-    /// Focused while no editor exists, and the root of the dispatch tree either
-    /// way. The `track_focus` in `render` is load-bearing: without it this
-    /// handle is in no dispatch node, and dispatch falls back to the anonymous
-    /// view boundary *above* the div carrying `.on_action`
-    /// (`gpui/src/window.rs:6244-6251`, `key_dispatch.rs:611-614`,
-    /// `view.rs:462-476`), so `cmd-s` would never reach its handler.
+    /// Focused while no editor exists; the root of the dispatch tree either
+    /// way. Load-bearing — see `render`'s `track_focus`.
     focus_handle: FocusHandle,
-    /// Which note the editor is showing. `NoteStore::current` is the same fact,
-    /// but a subscriber cannot ask it: `trash` clears `current` before the
-    /// event it emits is delivered, and delivery waits for the outermost update
-    /// to flush. Held here so a delete of some *other* note cannot blank an
-    /// editor that was never showing it.
+    /// Which note the editor is showing. Not the same as `NoteStore::current`,
+    /// which a subscriber cannot ask: `trash` clears it before the
+    /// `NoteClosed` it emits is delivered. Held here so deleting some
+    /// *other* note cannot blank an editor that never showed it.
     showing: Option<EntryId>,
     /// Held, never detached: dropping a `Task` cancels it
     /// (`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`), so a
@@ -77,20 +69,16 @@ impl AppShell {
             shell.open_note(event.0, cx);
         })
         .detach();
-        // The one place a failed write surfaces. It reaches stderr and no
-        // further, which a released binary has nowhere to show — the status
+        // The one place a failed write surfaces, to stderr only — the status
         // line that fixes that is deferred, with its trigger in the vault spec.
-        // What this buys today is that the fix has one body to replace rather
-        // than two call sites that grew apart.
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
             eprintln!("save failed for {:?}", event.0);
         })
         .detach();
         // The note on screen was deleted out from under the editor. Dropping
-        // the view rather than leaving it is the point: a buffer whose file is
-        // gone is still typable, and every keystroke into it would be lost —
-        // the same defect the unnamed launch buffer had. `render_empty` takes
-        // the slot back.
+        // the view, not leaving it, is the point: a buffer with no file is
+        // still typable, and every keystroke would be lost. `render_empty`
+        // takes the slot back.
         cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
             if shell.showing != Some(event.0) {
                 return;
@@ -114,15 +102,9 @@ impl AppShell {
     /// nothing can observe one without the others. A failed load is swallowed:
     /// the spec's deferred status line would surface it here.
     ///
-    /// `update_in` resolves a `Window` here with none passed in, and that is
-    /// not an accident to be tidied away: every entity built by `cx.new` inside
-    /// a window update is registered against that window at construction
-    /// (`gpui/src/app.rs:2975`, `:1934-1946`), and `open_window` pushes that
-    /// stack around `build_root_view` (`:1356-1359`) — which is where
-    /// `bootstrap::root` builds this view. Threading a `&mut Window` through
-    /// `root` would buy nothing: `spawn_in` resolves through the very same
-    /// lookup (`app/async_context.rs:80-86`). What it would cost is a signature
-    /// change to the seam both entry points share.
+    /// `update_in` resolves a `Window` with none passed in — deliberate, not
+    /// an accident to fix. See CLAUDE.md on why threading one through `root`
+    /// would buy nothing.
     fn open_note(&mut self, id: EntryId, cx: &mut Context<Self>) {
         let notes = self.notes.clone();
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
@@ -159,11 +141,10 @@ impl AppShell {
         self.notes.update(cx, NoteStore::save_current);
     }
 
-    /// Both create gestures land here rather than in the tree, because the
-    /// binding is scoped to this context so it fires with the editor focused —
-    /// and dispatch walks from the focused leaf up *its* ancestors
-    /// (`gpui/src/window.rs:6270`). With the editor focused the sidebar is a
-    /// sibling subtree, so a handler registered there would never be reached.
+    /// Both create gestures land here, not in the tree — the binding is
+    /// scoped to this context so it fires with the editor focused. See
+    /// CLAUDE.md on dispatch walking from the focused leaf up its own
+    /// ancestors.
     fn new_note(&mut self, _: &NewNote, window: &mut Window, cx: &mut Context<Self>) {
         self.create(Kind::Note, window, cx);
     }
@@ -234,13 +215,11 @@ impl AppShell {
             .size_full()
             .items_center()
             .justify_center()
-            // It stands in the editor's slot, so it paints the editor's
-            // surface. `EditorView` paints its own; without this the window
-            // default shows through and the slot goes black beside a sidebar
-            // that is not. `check.sh` renders nothing, so only a shot catches it.
+            // Paints the editor's background itself, since it stands in the
+            // editor's slot. Without this the window default shows through;
+            // `check.sh` renders nothing, so only a shot catches it.
             .bg(theme::editor_background())
-            // Stated, never inherited: gpui's default line box is `phi()` on a
-            // 16 px default, which is neither of this window's two scales.
+            // Stated, never inherited — see CLAUDE.md on the chrome scale.
             .text_size(theme::UI_TEXT_SIZE)
             .line_height(theme::UI_LINE_HEIGHT)
             .text_color(theme::placeholder_text())
@@ -259,8 +238,9 @@ impl Render for AppShell {
             .key_context("AppShell")
             // Load-bearing, not hygiene: with no editor the window's focus is
             // on `self.focus_handle`, and an untracked handle puts dispatch on
-            // the view boundary above this div, where the action below is not
-            // reachable. `cmd-s` would silently stop working with no note open.
+            // the anonymous view boundary above this div
+            // (`gpui/src/window.rs:6244-6251`, `key_dispatch.rs:611-614`,
+            // `view.rs:462-476`), where `cmd-s` is not reachable.
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::new_note))

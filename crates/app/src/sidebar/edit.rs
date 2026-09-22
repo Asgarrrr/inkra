@@ -8,16 +8,13 @@ use crate::field::{Cancelled, Confirmed, NameField};
 
 use super::{Rename, Sidebar, Trash};
 
-/// A name being typed into the tree.
-///
-/// One struct for one gesture, as Zed's `EditState` is
-/// (`project_panel/src/project_panel.rs:239-256`). It holds only what the
-/// confirm needs, because the text itself lives in the field.
+/// A name being typed into the tree, holding only what confirm needs — one
+/// struct for one gesture, as Zed's `EditState` is
+/// (`project_panel/src/project_panel.rs:239-256`).
 pub(super) struct EditState {
-    /// The entry being renamed. `None` while creating — nothing exists yet, and
-    /// this one `Option` is what tells the two gestures apart, as Zed's
-    /// `leaf_entry_id` does (`project_panel.rs:252-256`). Everything below is
-    /// shared by both.
+    /// The entry being renamed. `None` while creating — nothing exists yet,
+    /// and this one `Option` is what tells the two gestures apart. Everything
+    /// below is shared by both.
     pub(super) target: Option<EntryId>,
     /// The folder the new entry goes in, or the vault root. Also the folder a
     /// rename's collision check looks in, which is the one it moves within.
@@ -32,11 +29,10 @@ pub(super) struct EditState {
     pub(super) field: Entity<NameField>,
     /// Why the last `Confirm` was refused. Cleared by the next one.
     ///
-    /// Set at confirm rather than recomputed per keystroke. Zed validates live
-    /// (`project_panel.rs:2012-2080`), which amortises over a much larger
-    /// surface than one gesture ended by one keystroke. What the message must
-    /// not do is disappear silently, which is the failure Zed's own confirm has
-    /// — it returns without a word when the name is taken.
+    /// Set at confirm, not recomputed per keystroke, since Zed's live
+    /// validation (`project_panel.rs:2012-2080`) amortises over a much larger
+    /// surface. Must not disappear silently — the failure in Zed's own
+    /// confirm, which returns wordlessly when the name is taken.
     pub(super) rejected: Option<Rejection>,
     /// Confirm and cancel. Held, because dropping a `Subscription` cancels it.
     _subscriptions: [Subscription; 2],
@@ -78,11 +74,10 @@ fn file_name_of(path: &std::path::Path) -> String {
 impl Sidebar {
     /// Asks before deleting, then deletes.
     ///
-    /// A native prompt rather than an in-window one: gpui has no confirmation
-    /// widget, and the platform dialog is both free and the thing a macOS user
-    /// expects. The wording names the unsaved changes that are about to go,
-    /// because trashing takes the file as it is on disk and the editor's newer
-    /// text is not recoverable from the Trash.
+    /// A native prompt, not an in-window one: gpui has no confirmation
+    /// widget. The wording names unsaved changes specifically, because
+    /// trashing takes the file as it is on disk and the editor's newer text
+    /// is not recoverable from the Trash.
     pub(super) fn trash(&mut self, _: &Trash, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing.is_some() {
             return;
@@ -135,12 +130,8 @@ impl Sidebar {
 
     /// Opens an empty field where the new entry will appear.
     ///
-    /// Called by `AppShell`, never registered as an action here: `NewNote` and
-    /// `NewFolder` bind at the `AppShell` context so they fire with the editor
-    /// focused, and dispatch runs from the focused leaf up its own ancestors
-    /// (`gpui/src/window.rs:6270`). With the editor focused this view is a
-    /// sibling subtree, not an ancestor, so a handler registered here would
-    /// never be reached.
+    /// Called by `AppShell`, never registered as an action here — see
+    /// CLAUDE.md on where `cmd-n`'s dispatch is handled and why.
     ///
     /// The field goes inside the selection when it is a folder, beside it when
     /// it is a note, and at the root when nothing is selected. A selected
@@ -185,18 +176,15 @@ impl Sidebar {
             rejected: None,
             _subscriptions: subscriptions,
         });
-        // See the field on `Sidebar`: a row outside the rendered range has no
-        // dispatch node, so the field would take no keystrokes at all.
+        // Load-bearing, not polish — see `Sidebar::scroll`.
         self.scroll.scroll_to_item(at, ScrollStrategy::Center);
         cx.notify();
         field
     }
 
     /// The field both gestures use, and the two subscriptions that end it.
-    ///
-    /// Shared because nothing about confirming or cancelling differs between
-    /// creating and renaming — `EditState::target` is what tells them apart,
-    /// and `confirm` reads it.
+    /// Shared because confirming and cancelling do not differ between
+    /// creating and renaming — see `EditState::target`.
     pub(super) fn open_field(
         initial: &str,
         cx: &mut Context<Self>,
@@ -280,8 +268,7 @@ impl Sidebar {
 
         self.editing = None;
         let name = name.to_owned();
-        // The one place the two gestures diverge, which is what makes the
-        // `Option` worth more than a mode enum: everything above is shared.
+        // The one place the two gestures diverge — everything above is shared.
         if let Some(id) = target {
             self.notes
                 .update(cx, |notes, cx| notes.rename(id, &name, cx))
@@ -306,13 +293,11 @@ impl Sidebar {
 
     /// Whether `parent` already holds an entry by this name.
     ///
-    /// Answered here rather than in `vault`: it is a question about the live
-    /// listing, not a property of a path. Compared on the file name a note
-    /// would actually get, so `plan` and `plan.md` are one collision.
-    /// `target` is the entry being renamed, which must not collide with
-    /// itself: confirming a rename without changing the name is a no-op, not a
-    /// duplicate. It also covers a case-only rename, where the old and new
-    /// names differ but name one file.
+    /// Answered here, not in `vault`: it is a question about the live
+    /// listing, not a path property. Compared on the file name a note would
+    /// actually get, so `plan` and `plan.md` collide. `target` is excluded so
+    /// a same-name rename is a no-op, not a duplicate — this also covers a
+    /// case-only rename.
     fn taken(
         &self,
         target: Option<EntryId>,

@@ -119,14 +119,10 @@ impl NameField {
     }
 }
 
-/// The handlers, one per key the field claims.
-///
-/// They repeat the editor's set rather than inheriting it, and that is forced
-/// rather than chosen: every editing binding names `EditorView`, so with that
-/// context absent from the focused stack the predicate fails and the binding is
-/// excluded from matching altogether (`gpui/src/keymap.rs:246-252`). A field
-/// that claimed only `enter` and `escape` could be typed into but never
-/// corrected — no backspace, no arrows, no select-all.
+/// The handlers, one per key the field claims — repeating the editor's set
+/// rather than inheriting it. Forced, not chosen: every editing binding
+/// names `EditorView` (`gpui/src/keymap.rs:246-252`), excluded from matching
+/// once that context is absent from the focused stack. See CLAUDE.md.
 impl NameField {
     fn backspace(
         &mut self,
@@ -475,10 +471,8 @@ mod tests {
     use super::{Cancelled, Confirmed, NameField, shape_document};
     use crate::keymap::key_bindings;
 
-    /// A focused field with the real bindings installed. Every test drives real
-    /// keystrokes: the handlers are thin delegations, so calling one directly
-    /// proves nothing about the binding, the context, or the `actions!` mapping
-    /// — and a field whose context is wrong passes `check.sh`.
+    /// A focused field with the real bindings installed — every test drives
+    /// real keystrokes, per CLAUDE.md's binding-test rule.
     fn field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let initial = initial.to_owned();
@@ -519,9 +513,8 @@ mod tests {
         assert_eq!(text(&view, cx), "new");
     }
 
-    /// The binding this whole context exists for. `backspace` names
-    /// `EditorView`, so without the field claiming it at its own context the
-    /// key is excluded from matching and a typo cannot be corrected.
+    /// The binding this whole context exists for: without it, `backspace`
+    /// names only `EditorView` and a typo cannot be corrected.
     #[gpui::test]
     fn backspace_deletes_in_the_field(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "plan");
@@ -533,7 +526,6 @@ mod tests {
     #[gpui::test]
     fn the_arrows_move_the_caret_rather_than_leaving_the_field(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "ab");
-        // Collapse right to the end, step left once, then type between.
         visual.simulate_keystrokes("right left X");
 
         assert_eq!(text(&view, cx), "aXb");
@@ -574,8 +566,7 @@ mod tests {
     }
 
     /// A dead key arrives as marked text, never as a key press: `^` then `e`
-    /// gives `ê`. A field that read key events instead would drop both, and a
-    /// French vault could not name a note `Réunion`.
+    /// gives `ê`. A key-event reader would drop both — see the module doc.
     #[gpui::test]
     fn a_dead_key_composes_rather_than_typing_two_characters(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "");
@@ -596,9 +587,8 @@ mod tests {
         assert_eq!(text(&view, cx), "ê");
     }
 
-    /// A paste can carry a newline. The field is one line and `uniform_list`
-    /// measures every row from item 0, so a second row here would misplace the
-    /// whole tree below it.
+    /// A paste can carry a newline — see `flatten_newlines`; a second row
+    /// here would misplace the whole tree below it.
     #[gpui::test]
     fn a_pasted_newline_does_not_give_the_field_a_second_line(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "");

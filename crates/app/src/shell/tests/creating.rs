@@ -11,12 +11,8 @@ use crate::test_support::entry_id;
 
 use super::{activate, open_vault, tree_focused, two_notes, vault_names};
 
-/// `cmd-n` while the **editor** holds focus.
-///
-/// The placement test, and the reason the handler is on `AppShell` rather
-/// than on the tree: dispatch walks from the focused leaf up its own
-/// ancestors, and with the editor focused the sidebar is a sibling subtree.
-/// A handler registered there is never reached, and the key goes quiet.
+/// `cmd-n` while the **editor** holds focus — the placement test. See
+/// CLAUDE.md on why the handler is on `AppShell`, not the tree.
 #[gpui::test]
 fn cmd_n_opens_a_field_with_the_editor_focused(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -99,8 +95,8 @@ fn cmd_shift_n_creates_a_folder_rather_than_a_note(cx: &mut TestAppContext) {
     );
 }
 
-/// Refused rather than silently doing nothing, and the field stays open so
-/// the name can be fixed. Zed's own confirm returns without a word here.
+/// Refused, not silently ignored: the field stays open so the name can be
+/// fixed — see `edit::Rejection`.
 #[gpui::test]
 fn a_duplicate_name_is_refused_and_the_field_stays_open(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
