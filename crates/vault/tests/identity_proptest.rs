@@ -171,6 +171,23 @@ proptest! {
                 );
             }
 
+            // `Vault::entry`'s lookup index must agree with `entries` on every
+            // row, across whatever reordering this round's mutation caused.
+            for entry in vault.entries() {
+                let looked_up = vault.entry(entry.id);
+                prop_assert!(
+                    looked_up.is_some(),
+                    "entry({:?}) returned None for a listed id",
+                    entry.id
+                );
+                if let Some(looked_up) = looked_up {
+                    prop_assert_eq!(looked_up.id, entry.id);
+                    prop_assert_eq!(looked_up.path.as_path(), entry.path.as_path());
+                }
+            }
+            // An id no scan has ever minted must never resolve.
+            prop_assert!(vault.entry(EntryId::DETACHED).is_none());
+
             expected.retain(|(id, p)| {
                 let live = fs.read_to_string(&PathBuf::from("/vault").join(p)).is_some();
                 if !live {
