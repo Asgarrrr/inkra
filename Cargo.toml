@@ -5,10 +5,18 @@ members = ["crates/text", "crates/editor", "crates/app", "crates/vault"]
 # workspace and tries to inherit `edition` from our root instead of zed's.
 exclude = ["vendor"]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
 [workspace.dependencies]
 inkra-text = { path = "crates/text" }
 inkra-editor = { path = "crates/editor" }
 inkra-vault = { path = "crates/vault" }
+proptest = "1"
+futures = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -1,7 +1,9 @@
 [package]
 name = "inkra-vault"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [features]
 # `MemFs` is gated so it never reaches a release binary. It must still compile
@@ -28,12 +30,12 @@ trash = "5"
 # `MemFs::block_load` only, so it rides the `test-support` gate: a test that
 # needs two loads in flight at once needs one of them to park, and parking
 # needs a real waker. Same version the dev-dependency below already pulls in.
-futures = { version = "0.3", optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 inkra-vault = { path = ".", features = ["test-support"] }
-futures = "0.3"
-proptest = "1"
+futures = { workspace = true }
+proptest = { workspace = true }
 
 # Workspace lints are opt-in per crate. Without this, unwrap_used and
 # expect_used are not denied here.
