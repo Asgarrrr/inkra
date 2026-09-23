@@ -20,6 +20,12 @@ pub(crate) const BODY_TEXT_SIZE: Pixels = px(18.);
 /// See [`BODY_TEXT_SIZE`].
 pub(crate) const BODY_LINE_HEIGHT: Pixels = px(28.);
 
+/// The editor's text column, in `ch` — the advance of `0` at the body size,
+/// as in CSS. A reading width, not a character count: the body font is
+/// proportional, so a row of prose holds somewhat more. The pane wins when it
+/// is narrower.
+pub(crate) const BODY_COLUMN_CHARS: f32 = 70.;
+
 /// Chrome: the sidebar today, a status line or a tab bar when they land.
 ///
 /// Stated, not inherited (see CLAUDE.md, chrome scale). gpui's default line

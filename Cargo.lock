@@ -2686,6 +2686,7 @@ dependencies = [
  "inkra-text",
  "inkra-vault",
  "proptest 1.11.0",
+ "unicode-segmentation",
 ]
 
 [[package]]

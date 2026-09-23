@@ -35,6 +35,15 @@ const SAMPLE: &str = "The quick brown fox jumps over the lazy dog.\n\
                       \n\
                       A third paragraph, after a blank line.";
 
+/// A paragraph long enough to wrap several times at the column, then a URL,
+/// which has no space for a word wrap and breaks mid-word.
+const WRAPPED: &str = "Soft wrap keeps a paragraph inside the text column rather than letting \
+                       it run off the right edge of the pane. A line longer than seventy \
+                       characters paints on several rows, and the caret moves along them.\n\
+                       \n\
+                       https://example.com/a/very/long/path/that/has/no/spaces/in/it/at/all/so/the/wrap/has/to/break/it/in/the/middle/of/a/word\n\
+                       A short last line.";
+
 /// Nested so the sidebar's indent and its directories-first order both show.
 const VAULT: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
@@ -64,6 +73,16 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             name: "editor-selection",
             shows: "a selection over four lines: both ends, and a blank line's stub",
             open: editor_selection,
+        },
+        Scene {
+            name: "editor-wrapped",
+            shows: "soft wrap: a paragraph and a URL in the centred column, caret on a wrapped row",
+            open: editor_wrapped,
+        },
+        Scene {
+            name: "editor-wrapped-selection",
+            shows: "a selection across a wrap and a newline: one quad per row, a stub only at the newline",
+            open: editor_wrapped_selection,
         },
         Scene {
             name: "sidebar-vault",
@@ -133,6 +152,23 @@ fn editor_selection(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.keys(
         window,
         "cmd-up right right right right shift-down shift-down shift-right shift-right",
+    );
+    window
+}
+
+fn editor_wrapped(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(WRAPPED);
+    stage.focus(window);
+    stage.keys(window, "cmd-up down right right right");
+    window
+}
+
+fn editor_wrapped_selection(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(WRAPPED);
+    stage.focus(window);
+    stage.keys(
+        window,
+        "cmd-up down right right right shift-down shift-down shift-right",
     );
     window
 }

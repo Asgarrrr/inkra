@@ -12,7 +12,7 @@ use std::time::Instant;
 use gpui::{ClipboardItem, Context, Window, actions};
 use inkra_editor::{Copied, LogicalMovement};
 
-use super::{EditorView, Vertical};
+use super::{EditorView, RowEdge, Vertical};
 
 actions!(
     editor,
@@ -33,6 +33,8 @@ actions!(
         SelectAll,
         Home,
         End,
+        LineStart,
+        LineEnd,
         DocStart,
         DocEnd,
         Newline,
@@ -75,9 +77,9 @@ fn from_clipboard(item: &ClipboardItem) -> Option<Copied> {
 }
 
 impl EditorView {
-    pub(super) fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| state.backspace(buffer, now));
+        self.edit_buffer(window, cx, |state, buffer| state.backspace(buffer, now));
     }
 
     /// The one action that takes no gate. A copy changes neither the text nor
@@ -89,23 +91,25 @@ impl EditorView {
         cx.write_to_clipboard(to_clipboard(copied));
     }
 
-    pub(super) fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let copied = self.edit_buffer(cx, |state, buffer| state.cut(buffer, now));
+        let copied = self.edit_buffer(window, cx, |state, buffer| state.cut(buffer, now));
         cx.write_to_clipboard(to_clipboard(copied));
     }
 
-    pub(super) fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         let Some(copied) = cx.read_from_clipboard().as_ref().and_then(from_clipboard) else {
             return;
         };
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| state.paste(buffer, now, &copied));
+        self.edit_buffer(window, cx, |state, buffer| {
+            state.paste(buffer, now, &copied);
+        });
     }
 
-    pub(super) fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| state.delete(buffer, now));
+        self.edit_buffer(window, cx, |state, buffer| state.delete(buffer, now));
     }
 
     pub(super) fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -153,12 +157,20 @@ impl EditorView {
     }
 
     pub(super) fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to_row_edge(cx, RowEdge::Start);
+    }
+
+    pub(super) fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to_row_edge(cx, RowEdge::End);
+    }
+
+    pub(super) fn line_start(&mut self, _: &LineStart, _: &mut Window, cx: &mut Context<Self>) {
         self.move_cursor(cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::LineStart, false);
         });
     }
 
-    pub(super) fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn line_end(&mut self, _: &LineEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.move_cursor(cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::LineEnd, false);
         });
@@ -176,16 +188,16 @@ impl EditorView {
         });
     }
 
-    pub(super) fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| state.insert(buffer, now, "\n"));
+        self.edit_buffer(window, cx, |state, buffer| state.insert(buffer, now, "\n"));
     }
 
-    pub(super) fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        self.edit_buffer(cx, inkra_editor::EditorState::undo);
+    pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_buffer(window, cx, inkra_editor::EditorState::undo);
     }
 
-    pub(super) fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        self.edit_buffer(cx, inkra_editor::EditorState::redo);
+    pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_buffer(window, cx, inkra_editor::EditorState::redo);
     }
 }

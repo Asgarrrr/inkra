@@ -36,6 +36,9 @@ inkra-vault = { workspace = true }
 # no gpui executor to spawn onto yet. The binary's launch, and the vault a shot
 # scene builds.
 futures = { workspace = true }
+# Snapping a wrap onto a grapheme boundary within one line. `Buffer`'s own
+# grapheme steps scan the whole document per call, once per wrap per frame.
+unicode-segmentation = { workspace = true }
 # Path, not git: the source we compile and the source CLAUDE.md tells us to read
 # are then provably the same files. Restore the checkout with
 # `./scripts/vendor-gpui.sh`; `vendor/` is gitignored.

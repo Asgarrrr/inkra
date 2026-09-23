@@ -1,6 +1,6 @@
 //! `AppShell` end to end: renaming (`renaming.rs`), creating (`creating.rs`),
-//! trashing (`trashing.rs`), and which note the editor ends up showing
-//! (`activation.rs`).
+//! trashing (`trashing.rs`), which note the editor ends up showing
+//! (`activation.rs`), and the text column inside its real parent (`column.rs`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -16,6 +16,7 @@ use crate::test_support;
 use super::{AppShell, EditorView, NoteActivated, NoteStore, Sidebar};
 
 mod activation;
+mod column;
 mod creating;
 mod renaming;
 mod trashing;

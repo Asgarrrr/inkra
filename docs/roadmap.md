@@ -7,72 +7,35 @@ with no trigger fired is code without a reason.
 Sizes are estimates for one person at this repo's verification bar: proptest
 over edit sequences in `text`, one `simulate_keystrokes` test per binding,
 `check.sh` green, and a manual render pass because `check.sh` renders nothing.
-They are estimates, not commitments — soft wrap and multi-cursor carry most of
-the uncertainty, for reasons given below.
+They are estimates, not commitments — multi-cursor carries most of the
+uncertainty, for reasons given below.
 
 ## Editor
 
 | Item | Trigger | Estimate | Blocked by |
 |---|---|---|---|
-| Horizontal scroll and reveal | A note with lines long enough to push the caret off the right edge. **Fired** on 2026-09-21: one `⌘V` of a URL creates that line in a single keystroke. | 1–2 d | — |
-| Soft wrap | A real note measured to need it. | 3–5 d | — |
-| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | Soft wrap |
+| ~~Horizontal scroll and reveal~~ | **Closed 2026-09-23, by removal.** Soft wrap leaves no right edge to lose the caret past. | — | — |
+| ~~Soft wrap~~ | **Shipped 2026-09-23.** Its trigger was the one above: a pasted URL. | — | — |
+| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | — |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 
-Sequential total for the four sized editor items: roughly 10–16 working days.
+### Soft wrap and horizontal scroll
 
-### Horizontal scroll and reveal
-
-The vertical half shipped on 2026-09-20; see
-`superpowers/specs/2026-09-20-scroll-to-cursor-plan.md`. The horizontal half did
-not, and it is not the same size.
-
-Long lines are already clipped rather than overflowing: with `overflow.y` set to
-`Scroll` and `overflow.x` left `Visible`, `Style::overflow_mask` masks to the
-element's bounds on **both** axes (`gpui/style.rs:668-672`). So the caret can be
-lost off the right edge today, silently.
-
-The trigger has fired. Clipboard landed on 2026-09-21, and a paste puts an
-arbitrarily long line in the buffer in one keystroke where typing one takes
-sustained effort. Nothing is broken that was not broken before — the caret was
-already losable off the right edge — but the way to reach it is now ordinary
-use rather than deliberate effort.
-
-Three costs the vertical half did not pay:
-
-- `TextElement::request_layout` reports `width: relative(1.)`. Scrolling
-  horizontally needs the real width of the widest line, which means measuring
-  every line's advance rather than only the shaped ones.
-- The `div` needs `overflow_x_scroll`, which changes wheel behaviour on both
-  axes: a zero delta is remapped between them only while the other axis is not
-  `Scroll` (`gpui/elements/div.rs:3348-3365`).
-- The x position of a column is only known after shaping. Zed runs its
-  horizontal pass after line layout for exactly that reason
-  (`editor/src/element.rs:9383-9402`), which puts it in prepaint — the placement
-  the vertical half rejected, because our `div` reads the offset before our
-  element prepaints.
-
-### Soft wrap
-
-The expensive one, and the cost is not in the shaping call. It breaks the
-uniform row height that the current layout is built on:
-
-- `DocumentLayout::top_for_line(i)` stops being `line_height * i` and needs the
-  per-line `top` table that D5 deliberately cut as derivable.
-- Visual line stops equalling logical line, which propagates to `Home`/`End`,
-  up/down and the goal column, to all four selection-quad cases, and to mouse
-  hit-testing.
-
-Do **not** port Zed's `display_map`/`wrap_map` to get there. The reasoning is
-in `gpui-notes.md`.
+Soft wrap shipped on 2026-09-23 and closed the horizontal item without building
+it: a line longer than the 70 `ch` column paints on several rows, so no line
+reaches the right edge. The design, what red/blue review changed in it, and
+the edges it accepts — End stopping one character short on a mid-word wrap, a
+resize shifting the text under the viewport — are in
+`superpowers/specs/2026-09-23-soft-wrap-design.md`, with a Deferred table of
+its own.
 
 ### Virtualization
 
-Must come *after* soft wrap, not before. `uniform_list` is viable only while
-every row is one `line_height` tall, so doing it first buys roughly one day of
-code that soft wrap then throws away. After soft wrap it is a custom windowed
-element that shapes visible lines only — the same conclusion markdown live
-preview reaches independently, per the modular architecture design doc.
+Soft wrap has shipped, so rows are no longer one `line_height` per line and
+`uniform_list` is out. It is a custom windowed element that shapes visible rows
+only — the same conclusion markdown live preview reaches independently, per the
+modular architecture design doc. It removes two passes, not one: `edit_buffer`
+now shapes the whole document too, before revealing the caret.
 
 ### Multi-cursor
 
@@ -142,10 +105,8 @@ here, so the two cannot drift.
 
 ## Ordering
 
-Only one constraint is real: soft wrap before virtualization.
-
-Scroll to reveal the cursor used to be the second, as the only visible defect.
-It shipped, so the list no longer has a forced first item.
+No constraint is left. Soft wrap before virtualization was the last one, and
+soft wrap shipped.
 
 Everything else is free. Spending three weeks on this list before the vault,
 links and search exist is a choice about what the application is, not a

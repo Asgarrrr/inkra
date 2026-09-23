@@ -323,7 +323,7 @@ impl EntityInputHandler for NameField {
     ) -> Option<usize> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        let offset = layout.offset_for_x_on_line(0, position.x - bounds.origin.x);
+        let offset = layout.offset_on_row(0, position.x - bounds.origin.x);
         let buffer = self.buffer.read(cx);
         Some(buffer.to_utf16(buffer.clip(offset)).0)
     }
@@ -390,7 +390,8 @@ impl Element for FieldElement {
         let range = field.state.selection().range();
         let marked = field.state.marked_range();
 
-        let layout = shape_document(buffer, marked.as_ref(), window);
+        let style = window.text_style();
+        let layout = shape_document(buffer, marked.as_ref(), &style, None, window);
         let line_height = layout.line_height();
 
         let (selection, cursor) = if range.is_empty() {
@@ -531,6 +532,40 @@ mod tests {
         assert_eq!(text(&view, cx), "aXb");
     }
 
+    /// The field never wraps, so the visual and logical line ends agree:
+    /// `cmd-left`/`cmd-right` and `ctrl-a`/`ctrl-e` all reach the text's ends.
+    #[gpui::test]
+    fn cmd_left_reaches_the_start(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "plan");
+        visual.simulate_keystrokes("right cmd-left X");
+
+        assert_eq!(text(&view, cx), "Xplan");
+    }
+
+    #[gpui::test]
+    fn cmd_right_reaches_the_end(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "plan");
+        visual.simulate_keystrokes("left cmd-right X");
+
+        assert_eq!(text(&view, cx), "planX");
+    }
+
+    #[gpui::test]
+    fn ctrl_a_reaches_the_start(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "plan");
+        visual.simulate_keystrokes("right ctrl-a X");
+
+        assert_eq!(text(&view, cx), "Xplan");
+    }
+
+    #[gpui::test]
+    fn ctrl_e_reaches_the_end(cx: &mut TestAppContext) {
+        let (view, mut visual) = field(cx, "plan");
+        visual.simulate_keystrokes("left ctrl-e X");
+
+        assert_eq!(text(&view, cx), "planX");
+    }
+
     #[gpui::test]
     fn select_all_then_typing_replaces_everything(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "plan");
@@ -632,10 +667,12 @@ mod tests {
         visual.update(|window, cx| {
             view.update(cx, |field, cx| {
                 let marked = field.state.marked_range();
-                let layout = shape_document(field.buffer.read(cx), marked.as_ref(), window);
+                let style = window.text_style();
+                let layout =
+                    shape_document(field.buffer.read(cx), marked.as_ref(), &style, None, window);
 
-                assert_eq!(layout.line_count(), 1);
-                assert_eq!(layout.top_for_line(0), px(0.));
+                assert_eq!(layout.row_count(), 1);
+                assert_eq!(layout.top_for_row(0), px(0.));
 
                 let mid = ByteOffset(5); // the boundary between "hello" and " world"
                 let x = layout.x_for_offset(mid);

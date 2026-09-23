@@ -220,9 +220,14 @@ was never adopted, the selection quad stayed hand-rolled in four cases rather
 than moving to `background_color` on a `TextRun`, and the goal column lives in
 `editor` rather than `app`.
 
-What is still out — soft wrap, virtualization, CRLF, multi-cursor — is in
-`roadmap.md` with the trigger that brings each one back. The two gpui facts
-that decide those choices are below.
+Soft wrap shipped on 2026-09-23; see
+`superpowers/specs/2026-09-23-soft-wrap-design.md`. It shapes one logical line
+per `shape_text` call with a wrap width and computes rows from
+`WrappedLineLayout::wrap_boundaries` itself, rather than through
+`position_for_index`, which resolves an offset at a wrap to the earlier row.
+What is still out — virtualization, CRLF, multi-cursor — is in `roadmap.md`
+with the trigger that brings each one back. The two gpui facts that decide
+those choices are below.
 
 `uniform_list` is a stepping stone, not a foundation. Its whole vertical
 algorithm is `item_height = longest_item_size.height`
