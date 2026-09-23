@@ -6,15 +6,17 @@ const MARGIN_LINES: f32 = 3.;
 
 /// Offset that brings `line` into `viewport`, or `None` if already visible.
 /// Unscrolled coordinates; only the upper bound is clamped — the lower is gpui's own job.
+/// The margin counts lines of `line_height`, as Zed's `vertical_scroll_margin` does.
 pub(super) fn reveal(
     line: Range<Pixels>,
     viewport: Range<Pixels>,
     offset: Pixels,
+    line_height: Pixels,
 ) -> Option<Pixels> {
-    let (line_height, viewport_height) = (line.end - line.start, viewport.end - viewport.start);
+    let (row_height, viewport_height) = (line.end - line.start, viewport.end - viewport.start);
 
     let margin =
-        (line_height * MARGIN_LINES).min(((viewport_height - line_height) / 2.).max(px(0.)));
+        (line_height * MARGIN_LINES).min(((viewport_height - row_height) / 2.).max(px(0.)));
 
     let top = viewport.start + margin - line.start;
     let bottom = viewport.end - margin - line.end;

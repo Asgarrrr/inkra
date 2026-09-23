@@ -143,9 +143,9 @@ impl Element for TextElement {
         let selection = editor.state.selection().range();
         let cursor = editor.cursor();
         let (selection, cursor) = if selection.is_empty() {
-            let at = layout.position_for_offset(cursor);
+            let caret = layout.caret_bounds(cursor);
             let quad = fill(
-                Bounds::new(bounds.origin + at, size(px(2.), layout.line_height())),
+                Bounds::new(bounds.origin + caret.origin, caret.size),
                 theme::cursor(),
             );
             (Vec::new(), Some(quad))

@@ -9,6 +9,7 @@ use crate::keymap::key_bindings;
 mod clipboard;
 mod conceal;
 mod dispatch;
+mod headings;
 mod markdown;
 mod protocol;
 mod scroll;

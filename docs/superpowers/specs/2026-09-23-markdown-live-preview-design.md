@@ -1,7 +1,7 @@
 # Markdown live preview
 
-Status: approved (2026-09-23). Slices 1 (styled source) and 2 (concealment)
-implemented. The first draft was a source-mode design; "What the review
+Status: approved (2026-09-23). Slices 1 (styled source), 2 (concealment) and
+3 (heading sizes) implemented. The first draft was a source-mode design; "What the review
 changed" records what survives from it.
 
 The editor has one mode. A note reads as formatted text: `**strong**` shows as
@@ -408,7 +408,8 @@ the buffer's version. It is called:
 `version()` survives undo: it is the id of the last edit left on the undo
 stack (`crates/text/src/buffer.rs:84-89`). `line_runs` and `display_line`
 clip every range to their line, so a stale `Markdown` mis-renders one frame
-and cannot panic.
+and cannot panic. A stale heading range spans lines, so for that frame it
+mis-sizes every line it still covers.
 
 ### D11. Modules: each brick has one job and one direction
 
@@ -454,6 +455,7 @@ between views.
 | Windowed shaping (lay out visible lines only) | The Measure slice's profile of typing a fence at the top of a large note shows the next frame above 16 ms. This is the roadmap's Virtualization item, with a measured trigger. |
 | Table styling | A note with a table reads badly in a render pass. |
 | Highlighting inside fenced code | A user asks. |
+| Space above headings (Zed's `mt_6` on H2 and below) | A render pass shows headings cramped against the paragraph above. The slice-3 `editor-markdown` render already shows H1 and H2 nearly touching. The space fits the per-line `top` as a gap before the heading's rows, and leaves `row_height` alone. |
 
 ## Tests
 
@@ -598,3 +600,30 @@ A second adversarial review, of this live-preview version:
 - **Two UX notes, accepted as in Obsidian.** Select up to the middle of a `**`
   and type: the other delimiter stays. Backspace after a revealed element
   deletes the last character of its delimiter.
+- **`inkra-markdown` emits `Markdown::headings`.** The app cannot find a
+  heading line from spans alone. A setext underline and an empty `#` carry the
+  same styles, but only the `#` line takes the heading's size. Each range
+  covers the heading's text lines, without a setext underline.
+- **`heading_text` has no ATX branch.** An ATX heading is one line (CommonMark
+  §4.2). Cutting at the last `\n` leaves it whole and drops a setext
+  underline.
+- **Heading sizes take Zed's preview scale over our 18 px body.** H1 is 34 px
+  on a 44 px row, H2 27 on 36, H3 22 on 30, H4 20 on 28. `theme` holds them in
+  `heading_metrics`. H5 and H6 floor at the body size. Zed makes H6 smaller
+  than body text, and a note heading smaller than its paragraph reads as a
+  caption.
+- **`DocumentLayout::caret_bounds` places the caret.** The editor and
+  `NameField` both draw it from there. It is as tall as its row, so a caret on
+  a heading is as tall as the heading.
+- **The reveal margin stays in body lines.** D8's table moved it to the row's
+  height. Zed counts `vertical_scroll_margin` in rows of one `line_height`, so
+  a caret on a heading must not widen the margin. `scroll::reveal` takes the
+  body line height as its margin unit.
+- **The reveal-margin test needs lines after the heading.** At the document's
+  end, gpui's scroll limit clamps both the right and the wrong margin to the
+  same offset.
+- **Headings are the one parse output that spans lines.** A stale `Markdown`
+  mis-sizes every line a stale heading range still covers, for that frame.
+  D10's "one frame, no panic" still holds: every write reshapes, or the
+  observer refreshes the parse, before paint. A future writer outside the
+  gates must keep that: refresh the parse before the next layout.

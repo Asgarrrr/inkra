@@ -210,11 +210,17 @@ impl EditorView {
             return;
         }
 
-        let top = text_top + layout.top_for_row(layout.row_for_offset(self.cursor()));
-        let row = top..top + layout.line_height();
+        let row = layout.row_for_offset(self.cursor());
+        let top = text_top + layout.top_for_row(row);
+        let extent = top..top + layout.row_height(row);
         let viewport = viewport.top()..viewport.bottom();
 
-        if let Some(offset) = scroll::reveal(row, viewport, self.scroll_handle.offset().y) {
+        if let Some(offset) = scroll::reveal(
+            extent,
+            viewport,
+            self.scroll_handle.offset().y,
+            layout.body_row_height(),
+        ) {
             self.scroll_handle
                 .set_offset(point(self.scroll_handle.offset().x, offset));
         }

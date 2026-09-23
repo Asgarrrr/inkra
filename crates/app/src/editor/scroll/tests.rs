@@ -15,26 +15,26 @@ fn line(n: f32) -> Range<Pixels> {
 
 #[test]
 fn a_visible_line_does_not_scroll() {
-    assert_eq!(reveal(line(5.), viewport(), px(0.)), None);
+    assert_eq!(reveal(line(5.), viewport(), px(0.), px(LINE)), None);
 }
 
 #[test]
 fn a_line_above_the_viewport_comes_down_to_the_margin() {
     let offset = px(-20. * LINE);
-    let revealed = reveal(line(10.), viewport(), offset).unwrap();
+    let revealed = reveal(line(10.), viewport(), offset, px(LINE)).unwrap();
     assert_eq!(revealed, px(-(10. - 3.) * LINE));
 }
 
 #[test]
 fn a_line_below_the_viewport_comes_up_to_the_margin() {
-    let revealed = reveal(line(20.), viewport(), px(0.)).unwrap();
+    let revealed = reveal(line(20.), viewport(), px(0.), px(LINE)).unwrap();
     assert_eq!(revealed, px(VIEWPORT.end - 3. * LINE - 21. * LINE));
 }
 
 #[test]
 fn a_short_viewport_clamps_the_margin_instead_of_honouring_it() {
     let short = px(0.)..px(4. * LINE);
-    let revealed = reveal(line(20.), short.clone(), px(0.)).unwrap();
+    let revealed = reveal(line(20.), short.clone(), px(0.), px(LINE)).unwrap();
 
     // (4 - 1) / 2 = 1.5 lines of margin, not the 3 asked for.
     assert_eq!(revealed, px(4. * LINE - 1.5 * LINE - 21. * LINE));
@@ -45,21 +45,21 @@ fn a_short_viewport_clamps_the_margin_instead_of_honouring_it() {
 #[test]
 fn a_viewport_shorter_than_a_line_settles_instead_of_oscillating() {
     let cramped = px(0.)..px(10.);
-    let first = reveal(line(20.), cramped.clone(), px(0.)).unwrap();
-    assert_eq!(reveal(line(20.), cramped, first), None);
+    let first = reveal(line(20.), cramped.clone(), px(0.), px(LINE)).unwrap();
+    assert_eq!(reveal(line(20.), cramped, first, px(LINE)), None);
 }
 
 #[test]
 fn a_viewport_exactly_one_line_tall_has_one_valid_offset() {
     let exact = px(0.)..px(LINE);
-    let revealed = reveal(line(20.), exact.clone(), px(0.)).unwrap();
+    let revealed = reveal(line(20.), exact.clone(), px(0.), px(LINE)).unwrap();
     assert_eq!(revealed, px(-20. * LINE));
-    assert_eq!(reveal(line(20.), exact, revealed), None);
+    assert_eq!(reveal(line(20.), exact, revealed, px(LINE)), None);
 }
 
 #[test]
 fn revealing_near_the_start_stops_at_the_top() {
-    let revealed = reveal(line(1.), viewport(), px(-10. * LINE)).unwrap();
+    let revealed = reveal(line(1.), viewport(), px(-10. * LINE), px(LINE)).unwrap();
     assert_eq!(revealed, px(0.));
 }
 
@@ -67,18 +67,21 @@ proptest! {
     #[test]
     fn revealing_settles_and_never_scrolls_past_the_start(
         line_top in 0f32..10_000.,
-        line_height in 1f32..200.,
+        row_height in 1f32..200.,
+        margin_line_height in 1f32..200.,
         viewport_top in 0f32..2_000.,
         viewport_height in 0f32..2_000.,
         offset in -10_000f32..=0.,
     ) {
-        let line = px(line_top)..px(line_top + line_height);
+        let line = px(line_top)..px(line_top + row_height);
         let viewport = px(viewport_top)..px(viewport_top + viewport_height);
 
-        let Some(revealed) = reveal(line.clone(), viewport.clone(), px(offset)) else {
+        let margin = px(margin_line_height);
+        let revealed = reveal(line.clone(), viewport.clone(), px(offset), margin);
+        let Some(revealed) = revealed else {
             return Ok(());
         };
         prop_assert!(revealed <= px(0.), "scrolled above the document start: {revealed:?}");
-        prop_assert_eq!(reveal(line, viewport, revealed), None, "did not settle");
+        prop_assert_eq!(reveal(line, viewport, revealed, margin), None, "did not settle");
     }
 }

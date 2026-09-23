@@ -11,7 +11,7 @@ use std::ops::{Range, RangeInclusive};
 
 use gpui::{
     App, Bounds, PaintQuad, Pixels, Point, TextAlign, TextStyle, Window, WrappedLine, fill, point,
-    px,
+    px, size,
 };
 use inkra_markdown::{DisplayLine, DisplayOffset};
 use inkra_text::{Bias, ByteOffset};
@@ -19,6 +19,7 @@ use inkra_text::{Bias, ByteOffset};
 use crate::theme;
 
 const NEWLINE_STUB: f32 = 0.25;
+const CARET_WIDTH: Pixels = px(2.);
 
 struct LineLayout {
     wrapped: WrappedLine,
@@ -26,6 +27,8 @@ struct LineLayout {
     display: DisplayLine,
     first_row: usize,
     rows: Vec<Row>,
+    top: Pixels,
+    row_height: Pixels,
 }
 
 /// A wrap offset belongs to the next row, never the earlier one's `caret_end`
@@ -42,7 +45,8 @@ struct Row {
 pub(crate) struct DocumentLayout {
     lines: Vec<LineLayout>,
     row_count: usize,
-    line_height: Pixels,
+    height: Pixels,
+    body_row_height: Pixels,
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
@@ -61,8 +65,12 @@ impl DocumentLayout {
         self.row_count
     }
 
-    pub(crate) fn line_height(&self) -> Pixels {
-        self.line_height
+    pub(crate) fn row_height(&self, row: usize) -> Pixels {
+        self.locate(row).0.row_height
+    }
+
+    pub(crate) fn body_row_height(&self) -> Pixels {
+        self.body_row_height
     }
 
     /// The text line `line` was shaped from.
@@ -72,13 +80,18 @@ impl DocumentLayout {
     }
 
     pub(crate) fn height(&self) -> Pixels {
-        self.top_for_row(self.row_count)
+        self.height
     }
 
+    /// `row_count` is one past the last row: its top is the document's bottom.
     pub(crate) fn top_for_row(&self, row: usize) -> Pixels {
+        if row >= self.row_count {
+            return self.height;
+        }
+        let (line, within) = self.locate(row);
         #[allow(clippy::cast_precision_loss)]
-        let row = row as f32;
-        self.line_height * row
+        let within = within as f32;
+        line.top + line.row_height * within
     }
 
     /// Clamped: the layout can briefly describe other text than the buffer's
@@ -113,9 +126,11 @@ impl DocumentLayout {
         if y <= px(0.) {
             return 0;
         }
+        // `lines[0].top` is zero and `y` is positive, so at least one line qualifies.
+        let line = &self.lines[self.lines.partition_point(|line| line.top <= y) - 1];
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let row = (y / self.line_height) as usize;
-        row.min(self.row_count - 1)
+        let within = ((y - line.top) / line.row_height) as usize;
+        line.first_row + within.min(line.rows.len() - 1)
     }
 
     fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
@@ -143,6 +158,15 @@ impl DocumentLayout {
         point(
             self.x_for_offset(offset),
             self.top_for_row(self.row_for_offset(offset)),
+        )
+    }
+
+    /// The caret at `offset`: as tall as its row, which a heading makes taller than body text.
+    pub(crate) fn caret_bounds(&self, offset: ByteOffset) -> Bounds<Pixels> {
+        let row = self.row_for_offset(offset);
+        Bounds::new(
+            point(self.x_for_offset(offset), self.top_for_row(row)),
+            size(CARET_WIDTH, self.row_height(row)),
         )
     }
 
@@ -192,7 +216,7 @@ impl DocumentLayout {
         let top = self.top_for_row(row);
         Bounds::from_corners(
             point(Self::x_on_row(line, within, range.start), top),
-            point(Self::x_on_row(line, within, end), top + self.line_height),
+            point(Self::x_on_row(line, within, end), top + line.row_height),
         )
     }
 
@@ -213,13 +237,13 @@ impl DocumentLayout {
                 let right = if row == last {
                     Self::x_on_row(line, within, selection.end)
                 } else if within + 1 == line.rows.len() {
-                    Self::row_end_x(line, within) + self.line_height * NEWLINE_STUB
+                    Self::row_end_x(line, within) + line.row_height * NEWLINE_STUB
                 } else {
                     Self::row_end_x(line, within)
                 };
                 let top = self.top_for_row(row);
                 fill(
-                    Bounds::from_corners(point(left, top), point(right, top + self.line_height)),
+                    Bounds::from_corners(point(left, top), point(right, top + line.row_height)),
                     theme::selection(),
                 )
             })
@@ -230,10 +254,10 @@ impl DocumentLayout {
     /// failed line is skipped and logged, not fatal, so one bad glyph run doesn't blank the page.
     pub(crate) fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
         for (index, line) in self.lines.iter().enumerate() {
-            let line_origin = origin + point(px(0.), self.top_for_row(line.first_row));
+            let line_origin = origin + point(px(0.), line.top);
             if let Err(err) = line.wrapped.paint(
                 line_origin,
-                self.line_height,
+                line.row_height,
                 TextAlign::Left,
                 None,
                 window,
