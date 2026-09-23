@@ -108,4 +108,5 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
 - `docs/superpowers/specs/2026-09-20-modular-architecture-design.md` — crates
 - `docs/roadmap.md` — deferred work and the trigger for each
-- `docs/gpui-notes.md`, `docs/buffer-model.md`, `docs/gpui-accessibility.md`
+- `docs/gpui-notes.md`, `docs/buffer-model.md`, `docs/gpui-accessibility.md`,
+  `docs/tooling.md`
