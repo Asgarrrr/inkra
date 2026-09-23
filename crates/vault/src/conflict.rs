@@ -5,19 +5,9 @@ use std::path::{Path, PathBuf};
 use crate::civil::format_utc;
 use crate::fs::Mtime;
 
-/// `Note.md`, plus the mtime of the version being set aside, becomes
-/// `Note (conflict 2026-09-21 14-32-05Z).md`, beside the note.
-///
-/// Named for the *preserved* file's mtime rather than the current time: it
-/// names the version inside the file, keeps `vault` free of a clock read, and
-/// makes the name deterministic enough for a test to assert. Human-readable,
-/// in Dropbox's and Obsidian's shape rather than Syncthing's machine-parseable
-/// one. Always `.md`, since `read_dir` lists nothing else — an unlisted
-/// conflict file is an invisible one.
-///
-/// `taken` decides whether a candidate already exists, as a function rather
-/// than a direct filesystem call so this stays testable without one; `RealFs`
-/// passes `Path::exists`.
+/// `Note.md` becomes `Note (conflict 2026-09-21 14-32-05Z).md`, beside the
+/// note. Named for the preserved file's mtime, not the current time, so the
+/// name is deterministic and `vault` never reads a clock.
 pub(crate) fn conflict_path(
     note: &Path,
     preserved: Mtime,
@@ -80,8 +70,6 @@ mod tests {
 
     #[test]
     fn a_note_without_an_extension_still_gets_one() {
-        // A file named on the command line (`EntryId::DETACHED`) never passed
-        // the `*.md` filter and may have any name at all.
         let path = conflict_path(Path::new("/tmp/notes"), at(10), |_| false);
         assert_eq!(
             path,

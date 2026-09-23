@@ -1,19 +1,6 @@
-//! One line of editable text, for naming things.
-//!
-//! Built on `inkra-text` and `inkra-editor` exactly as the editor is — the
-//! buffer counts graphemes and UTF-16 units, `EditorState` moves the caret and
-//! applies the edits. `FieldElement` shapes and hit-tests through the same
-//! `DocumentLayout` the editor uses, via `shape_document` — a field's text
-//! never holds a newline, so it always gets a `DocumentLayout` of one line
-//! back. What is genuinely new here is the rest of the gpui half: `TextElement`
-//! carries scroll and selection quads spanning several lines, neither of which
-//! a field one line tall has.
-//!
-//! It speaks the platform input protocol through `EntityInputHandler` rather
-//! than reading key events, because that protocol *is* how macOS delivers a
-//! dead key or an input method: `^` then `e` arrives as marked text, and a
-//! key-down reader drops both. A vault whose notes cannot be named *Réunion* is
-//! not finished.
+//! One line of editable text, for naming things. Speaks the platform input
+//! protocol via `EntityInputHandler`, not key events — a dead key or IME
+//! delivers marked text, which a key-down reader would drop.
 
 use std::ops::Range;
 use std::time::Instant;
@@ -32,12 +19,9 @@ use crate::theme;
 
 actions!(field, [Confirm, Cancel]);
 
-/// The user accepted what they typed. The text travels with it, so a subscriber
-/// never has to reach back into a field that is about to be dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Confirmed(pub(crate) String);
 
-/// The user gave up. Carries nothing: there is nothing to act on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cancelled;
 
@@ -48,21 +32,11 @@ pub(crate) struct NameField {
     buffer: Entity<Buffer>,
     state: EditorState,
     focus_handle: FocusHandle,
-    /// Written in `paint`, so between an edit and the next paint it describes
-    /// the previous text. Every index into it clamps, for the reason
-    /// `DocumentLayout`'s own doc comment gives — the field shapes through the
-    /// same `shape_document` and gets a one-line `DocumentLayout` back.
     last_layout: Option<DocumentLayout>,
     last_bounds: Option<Bounds<Pixels>>,
 }
 
 impl NameField {
-    /// Seeded with `initial`, all of it selected.
-    ///
-    /// Selected rather than placed at the end, for the one caller that passes
-    /// a name: a rename starts from the current one and typing should replace
-    /// it, while an arrow key still reaches it for anyone correcting a typo. A
-    /// create passes `""`, where the distinction does not arise.
     pub(crate) fn new(initial: &str, cx: &mut Context<Self>) -> Self {
         let buffer = cx.new(|_| Buffer::new(initial));
         let end = buffer.read(cx).len();
@@ -81,9 +55,8 @@ impl NameField {
         self.buffer.read(cx).text().to_owned()
     }
 
-    /// The only path that mutates the text. Mirrors `EditorView::edit_buffer`:
-    /// the lease notifies on drop, so a mutation outside this is a repaint
-    /// silently lost.
+    /// The only path that mutates the text; mirrors `EditorView::edit_buffer`.
+    /// The lease notifies on drop, so a mutation outside this loses its repaint.
     fn edit_buffer(
         &mut self,
         cx: &mut Context<Self>,
@@ -97,7 +70,6 @@ impl NameField {
         cx.notify();
     }
 
-    /// Caret moves, which read the buffer and repaint this view alone.
     fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
         f(&mut self.state, self.buffer.read(cx));
         cx.notify();
@@ -113,16 +85,13 @@ impl NameField {
         cx.emit(Confirmed(self.text(cx)));
     }
 
-    /// Takes no state: the field is about to be dropped by whoever owns it.
     fn cancel(_: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(Cancelled);
     }
 }
 
-/// The handlers, one per key the field claims — repeating the editor's set
-/// rather than inheriting it. Forced, not chosen: every editing binding
-/// names `EditorView` (`gpui/src/keymap.rs:246-252`), excluded from matching
-/// once that context is absent from the focused stack. See CLAUDE.md.
+/// The handlers, one per key the field claims — repeats the editor's set
+/// since every editing binding names `EditorView`'s context (see CLAUDE.md).
 impl NameField {
     fn backspace(
         &mut self,
@@ -217,12 +186,8 @@ impl Render for NameField {
     }
 }
 
-/// A newline can reach either input-handler method rather than arriving as a
-/// key press — pasted, or committed (plain or still composing) by an input
-/// method. The field is one line, so it takes the text without it rather than
-/// growing a second row nothing can show. Replacing `'\n'` with `' '` is one
-/// UTF-16 unit for one, so a `new_selected_range_utf16` computed against
-/// `new_text` stays valid against the flattened text.
+/// A newline can arrive via paste or IME rather than a key press; flattened
+/// to a space since the field is one line, and 1:1 UTF-16 keeps ranges valid.
 fn flatten_newlines(text: &str) -> String {
     text.replace('\n', " ")
 }
@@ -368,10 +333,8 @@ impl Element for FieldElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
-        // Exactly one line box, never the text's own height: `uniform_list`
-        // measures every row from item 0 (`elements/uniform_list.rs:658-680`),
-        // so a field even a pixel taller than a label would misplace every row
-        // below it.
+        // Exactly one line box: `uniform_list` measures every row from item 0,
+        // so a field even a pixel taller than a label would misplace every row below it.
         style.size.height = window.line_height().into();
         (window.request_layout(style, [], cx), ())
     }
@@ -472,8 +435,6 @@ mod tests {
     use super::{Cancelled, Confirmed, NameField, shape_document};
     use crate::keymap::key_bindings;
 
-    /// A focused field with the real bindings installed — every test drives
-    /// real keystrokes, per CLAUDE.md's binding-test rule.
     fn field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
         cx.update(|cx| cx.bind_keys(key_bindings()));
         let initial = initial.to_owned();
@@ -491,7 +452,6 @@ mod tests {
         view.read_with(cx, NameField::text)
     }
 
-    /// Every `Confirmed` the field emits, with what it carried.
     fn watch_confirm(
         view: &Entity<NameField>,
         cx: &mut TestAppContext,
@@ -514,8 +474,6 @@ mod tests {
         assert_eq!(text(&view, cx), "new");
     }
 
-    /// The binding this whole context exists for: without it, `backspace`
-    /// names only `EditorView` and a typo cannot be corrected.
     #[gpui::test]
     fn backspace_deletes_in_the_field(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "plan");
@@ -532,8 +490,6 @@ mod tests {
         assert_eq!(text(&view, cx), "aXb");
     }
 
-    /// The field never wraps, so the visual and logical line ends agree:
-    /// `cmd-left`/`cmd-right` and `ctrl-a`/`ctrl-e` all reach the text's ends.
     #[gpui::test]
     fn cmd_left_reaches_the_start(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "plan");
@@ -600,8 +556,6 @@ mod tests {
         assert_eq!(*cancelled.borrow(), 1);
     }
 
-    /// A dead key arrives as marked text, never as a key press: `^` then `e`
-    /// gives `ê`. A key-event reader would drop both — see the module doc.
     #[gpui::test]
     fn a_dead_key_composes_rather_than_typing_two_characters(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "");
@@ -622,8 +576,6 @@ mod tests {
         assert_eq!(text(&view, cx), "ê");
     }
 
-    /// A paste can carry a newline — see `flatten_newlines`; a second row
-    /// here would misplace the whole tree below it.
     #[gpui::test]
     fn a_pasted_newline_does_not_give_the_field_a_second_line(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "");
@@ -637,10 +589,6 @@ mod tests {
         assert_eq!(text(&view, cx), "one two");
     }
 
-    /// A newline can also arrive as marked (composing) text — an input method
-    /// commits a multi-line reading before the field sees a key press. The
-    /// field is one line, so the fix that flattens a paste must flatten this
-    /// path too.
     #[gpui::test]
     fn a_marked_newline_does_not_give_the_field_a_second_line(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "");
@@ -654,12 +602,6 @@ mod tests {
         assert_eq!(text(&view, cx), "one two");
     }
 
-    /// The field shapes through the same `shape_document` the editor does, so
-    /// the `DocumentLayout` it gets back must hit-test the way the editor's
-    /// does: one line, that line's top at zero, and `x_for_offset` /
-    /// `offset_for_position` inverse to each other at a boundary in the
-    /// middle of the text — not just at the ends, where an off-by-one in
-    /// either direction could cancel out.
     #[gpui::test]
     fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext) {
         let (view, mut visual) = field(cx, "hello world");

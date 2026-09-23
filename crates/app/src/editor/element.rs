@@ -1,9 +1,5 @@
-//! Layout and painting.
-//!
-//! One `shape_text` call per logical line, wrapped at the column: shaping the
-//! document as one string would key the frame-to-frame layout cache on the
-//! whole text, so one keystroke would miss for every line
-//! (`gpui/text_system/line_layout.rs:601-665`).
+//! Layout and painting: one `shape_text` call per line, so a keystroke does not
+//! re-shape the whole document (the layout cache keys on the full text otherwise).
 
 use std::cell::RefCell;
 use std::ops::{Range, RangeInclusive};
@@ -20,54 +16,31 @@ use unicode_segmentation::GraphemeCursor;
 use super::EditorView;
 use crate::theme;
 
-/// Painted past the end of a line that is selected through its line break, so a
-/// selected newline is visible rather than stopping flush against the last
-/// glyph. A fraction of the line height, because there is no glyph to measure.
 const NEWLINE_STUB: f32 = 0.25;
 
 struct LineLayout {
     wrapped: WrappedLine,
-    /// Excludes the terminating newline, matching [`Buffer::line_range`].
     range: Range<ByteOffset>,
     first_row: usize,
-    /// One per visual row, in order; never empty.
     rows: Vec<Row>,
 }
 
-/// One visual row of a wrapped line.
-///
-/// An offset at a wrap is both the end of one row and the start of the next.
-/// It belongs to the next: `row_for_offset` says so, and nothing that targets
-/// the earlier row can produce it, because every landing there clamps to
-/// `caret_end`. That is Zed's rule (`editor/src/display_map/wrap_map.rs:969-981`),
-/// and it is what lets the caret stay a bare `ByteOffset` with no affinity.
+/// A wrap offset belongs to the next row, never the earlier one's `caret_end`
+/// (Zed's rule, `wrap_map.rs:969-981`) — this is what lets the caret skip affinity.
 struct Row {
     /// On a grapheme boundary, even where gpui broke inside a cluster.
     start: ByteOffset,
-    /// Where End and a click past the row land: one grapheme before the next
-    /// row's start, or the line's end on its last row.
     caret_end: ByteOffset,
-    /// gpui's x for the glyph it broke at, which is where it starts painting
-    /// the row (`gpui/src/text_system/line.rs:521`).
     start_x: Pixels,
 }
 
-/// Every pixel↔offset conversion, in one place — shared by the editor and
-/// `NameField`, which shapes its one-line buffer through the same
-/// [`shape_document`] rather than a second shaper of its own.
-///
-/// Rows, not lines: a line longer than the wrap width paints on several, and
-/// every caller — the cursor quad, vertical movement, hit-testing, the input
-/// method — asks about the row. Coordinates are relative to the element's
-/// origin; the caller adds it.
+/// Every pixel↔offset conversion, shared by the editor and `NameField`'s
+/// [`shape_document`]. Works in rows, not lines, since a wrapped line paints on several.
 pub(crate) struct DocumentLayout {
-    /// Never empty: an empty buffer is one empty line.
     lines: Vec<LineLayout>,
     row_count: usize,
     line_height: Pixels,
-    /// What this was shaped with, so a gate can shape the next text the same
-    /// way: outside a draw, `window.text_style()` is the default, not ours
-    /// (`gpui/src/window.rs:2363-2369`).
+    /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
 }
@@ -99,10 +72,8 @@ impl DocumentLayout {
         self.line_height * row
     }
 
-    /// Clamped, and deliberately so. The layout can describe other text than
-    /// the buffer's for a moment — `NameField` shapes in `prepaint` only — so
-    /// the buffer can hold offsets this has no row for. Clamping keeps that a
-    /// caret one frame out of date instead of an index out of bounds.
+    /// Clamped: the layout can briefly describe other text than the buffer's
+    /// (`NameField` shapes only in `prepaint`), so a stale caret beats an OOB index.
     fn line_for_offset(&self, offset: ByteOffset) -> usize {
         self.lines
             .iter()
@@ -110,8 +81,6 @@ impl DocumentLayout {
             .unwrap_or(self.lines.len() - 1)
     }
 
-    /// The last row of the offset's line that starts at or before it — so an
-    /// offset at a wrap lands on the later row.
     pub(crate) fn row_for_offset(&self, offset: ByteOffset) -> usize {
         let line = &self.lines[self.line_for_offset(offset)];
         let within = line
@@ -122,8 +91,6 @@ impl DocumentLayout {
         line.first_row + within
     }
 
-    /// The line holding `row` and the row's index within it. Clamped like
-    /// [`Self::line_for_offset`].
     fn locate(&self, row: usize) -> (&LineLayout, usize) {
         let row = row.min(self.row_count - 1);
         let line = self.lines.partition_point(|line| line.first_row <= row) - 1;
@@ -131,9 +98,8 @@ impl DocumentLayout {
         (line, row - line.first_row)
     }
 
-    /// Clamped for the same reason, plus one of its own: the mouse listeners sit
-    /// on the view's full-size `div`, not on this element, so a click in the
-    /// empty space below a short document arrives with a `y` past the last row.
+    /// Clamped: mouse listeners sit on the view's full-size `div`, so a click
+    /// below a short document arrives with `y` past the last row.
     fn row_for_y(&self, y: Pixels) -> usize {
         if y <= px(0.) {
             return 0;
@@ -143,16 +109,11 @@ impl DocumentLayout {
         row.min(self.row_count - 1)
     }
 
-    /// `offset`'s x measured from the start of row `within` of `line`, whether
-    /// or not the offset lies on that row — what a quad's right edge needs when
-    /// its end is the next row's start.
     fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
         let index = offset.0.clamp(line.range.start.0, line.range.end.0) - line.range.start.0;
         line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
     }
 
-    /// Where row `within` of `line` stops: the next row's start, or the line's
-    /// end. One past `caret_end`, and not a caret position on this row.
     fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
         line.rows
             .get(within + 1)
@@ -175,14 +136,12 @@ impl DocumentLayout {
         )
     }
 
-    /// Unclipped in the byte sense: every caller hands it to `EditorState`,
-    /// which clips it against the live buffer.
     pub(crate) fn offset_for_position(&self, position: Point<Pixels>) -> ByteOffset {
         self.offset_on_row(self.row_for_y(position.y), position.x)
     }
 
-    /// Clamped to the row's own range, so a landing past its end stops on
-    /// `caret_end` rather than on the next row's start.
+    /// Clamped to the row's own range, so landing past its end stops on
+    /// `caret_end` rather than the next row's start.
     pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
         let (line, within) = self.locate(row);
         let target = &line.rows[within];
@@ -193,29 +152,23 @@ impl DocumentLayout {
         ByteOffset(line.range.start.0 + index).clamp(target.start, target.caret_end)
     }
 
-    /// The first and last caret positions on `row`: where Home and End land.
     pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
         let (line, within) = self.locate(row);
         let row = &line.rows[within];
         row.start..=row.caret_end
     }
 
-    /// False for a row whose only position belongs to the next one: two wraps
-    /// inside one cluster snap to the same start. Vertical moves step over it,
-    /// or they would land back on the row they left.
+    /// False when this row's only position also belongs to the next: two wraps
+    /// in one cluster share a start, so vertical moves must step over it.
     pub(crate) fn holds_caret(&self, row: usize) -> bool {
         self.row_for_offset(*self.row_bounds(row).start()) == row
     }
 
-    /// The rect macOS anchors the input method's candidate window to.
-    ///
-    /// Clamped to the row holding `range.start`: a rect spanning three rows
-    /// anchors the window nowhere useful.
     pub(super) fn range_bounds(&self, range: &Range<ByteOffset>) -> Bounds<Pixels> {
         let row = self.row_for_offset(range.start);
         let (line, within) = self.locate(row);
-        // `max(range.start)` because a stale layout can put `range.start` past
-        // the clamped row's end, which would otherwise return an inverted rect.
+        // max(range.start): a stale layout can put range.start past the
+        // clamped row's end, which would otherwise return an inverted rect.
         let end = range
             .end
             .min(Self::row_limit(line, within))
@@ -227,13 +180,8 @@ impl DocumentLayout {
         )
     }
 
-    /// One quad per row the selection touches.
-    ///
-    /// Four cases, not three: a selection contained in one row is both the
-    /// first and the last, and must not pick up the first row's run-to-the-end
-    /// rule. A row that ends its line inside the selection gets [`NEWLINE_STUB`]
-    /// past its last glyph so the selected line break shows; a row that ends in
-    /// a wrap does not, because a wrap is not a character.
+    /// One quad per row touched. Four cases: a one-row selection is both first
+    /// and last, and a row ending in a wrap gets no [`NEWLINE_STUB`] gap since a wrap isn't a character.
     pub(super) fn selection_quads(&self, selection: &Range<ByteOffset>) -> Vec<PaintQuad> {
         let first = self.row_for_offset(selection.start);
         let last = self.row_for_offset(selection.end);
@@ -262,14 +210,8 @@ impl DocumentLayout {
             .collect()
     }
 
-    /// One `WrappedLine::paint` call per line, at `origin` translated down to
-    /// the line's first row; gpui steps down a row at each wrap itself. Shared
-    /// by `TextElement` and `FieldElement` so the two painters cannot drift on
-    /// how a line is placed.
-    ///
-    /// A failed line is reported and skipped rather than aborting the rest of
-    /// the document — one glyph run the platform shaper rejects should not
-    /// blank the page.
+    /// One `WrappedLine::paint` per line; gpui steps rows down at each wrap. A
+    /// failed line is skipped and logged, not fatal, so one bad glyph run doesn't blank the page.
     pub(crate) fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
         for (index, line) in self.lines.iter().enumerate() {
             let line_origin = origin + point(px(0.), self.top_for_row(line.first_row));
@@ -297,12 +239,8 @@ pub(super) struct PrepaintState {
     cursor: Option<PaintQuad>,
 }
 
-/// The runs for one line, indexed from zero *within that line*.
-///
-/// The marked range is clipped to the line and rebased. Left absolute, the run
-/// lengths stop summing to the line's length on every line after the first, and
-/// `layout_line` hands those lengths straight to the platform shaper
-/// (`gpui/text_system.rs:886`) — mis-shaped text, not a panic.
+/// Runs indexed from zero within the line: the marked range is clipped and
+/// rebased, since left absolute it would stop summing to the line's length after the first line.
 fn line_runs(
     style: &TextStyle,
     composing: &TextStyle,
@@ -329,9 +267,8 @@ fn line_runs(
     .collect()
 }
 
-/// Takes the style rather than reading `window.text_style()`, because the
-/// editor also shapes from an action handler, outside any draw. `wrap_width`
-/// `None` never wraps: one row per line.
+/// Takes `style` explicitly since the editor also shapes outside any draw,
+/// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
 pub(crate) fn shape_document(
     buffer: &Buffer,
     marked: Option<&Range<ByteOffset>>,
@@ -365,7 +302,6 @@ pub(crate) fn shape_document(
                     None,
                 )
                 .map_err(|err| eprintln!("failed to shape line at {start}: {err}"))
-                // One line in, one line out: `text` holds no newline.
                 .ok()
                 .and_then(|mut shaped| shaped.pop())
                 .unwrap_or_default();
@@ -390,17 +326,8 @@ pub(crate) fn shape_document(
     }
 }
 
-/// One row per gpui row — never fewer, or the painted rows would not line up
-/// with the height reserved for them.
-///
-/// gpui breaks at a glyph, which can fall inside a grapheme cluster. Each start
-/// is snapped forward to the cluster's end, so no caret lands between a letter
-/// and its accent; the glyphs before the snap still paint on the new row, which
-/// is gpui's call, not ours.
-///
-/// Segmented over the line's own `text`, not through `Buffer`'s grapheme steps:
-/// those scan the whole document per call, and this runs once per wrap per
-/// frame.
+/// One row per gpui row. Each wrap point snaps forward to the next grapheme
+/// boundary, so no caret lands inside a cluster (the glyphs before the snap still paint on the new row).
 fn rows(text: &str, wrapped: &WrappedLine, range: &Range<ByteOffset>) -> Vec<Row> {
     let layout = &wrapped.unwrapped_layout;
     let at = |index: usize| ByteOffset(range.start.0 + index);
@@ -409,8 +336,7 @@ fn rows(text: &str, wrapped: &WrappedLine, range: &Range<ByteOffset>) -> Vec<Row
     for boundary in wrapped.wrap_boundaries() {
         let glyph = &layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix];
         let snapped = grapheme_at_or_after(text, glyph.index);
-        // Monotonic even if two breaks snap to one cluster end: the second row
-        // then has a single caret position.
+        // Monotonic: two wraps snapping to one cluster end must not collide.
         let previous = starts.last().map_or(0, |(start, _)| *start);
         starts.push((snapped.max(previous), glyph.position.x));
     }
@@ -459,12 +385,8 @@ impl IntoElement for TextElement {
     }
 }
 
-/// Every layout the measure closure shaped this frame, one per width.
-///
-/// Keyed by width rather than holding the last one: taffy may call the closure
-/// several times per frame and answer its final pass from a cache
-/// (`taffy-0.13.0/src/compute/leaf.rs:111-141`), so the last call is not
-/// necessarily the width it settled on.
+/// Every layout shaped this frame, keyed by width: taffy may call the measure
+/// closure several times and answer its final pass from a cache, so the last call isn't necessarily final.
 type Stash = Rc<RefCell<Vec<DocumentLayout>>>;
 
 impl Element for TextElement {
@@ -479,9 +401,6 @@ impl Element for TextElement {
         None
     }
 
-    /// Measured, not sized: the height is the row count, and the row count
-    /// depends on the width taffy gives us. gpui's `Text` does the same
-    /// (`gpui/src/elements/text.rs:647`).
     fn request_layout(
         &mut self,
         _: Option<&GlobalElementId>,
@@ -489,17 +408,16 @@ impl Element for TextElement {
         window: &mut Window,
         _: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        // Read here: the closure runs in `compute_layout`, outside the `div`'s
-        // text style, where `window.text_style()` is the default.
+        // Read here: the closure runs in `compute_layout`, outside the div's
+        // text style, where `window.text_style()` would be the default instead.
         let text_style = window.text_style();
         let column = column_width(&text_style, window);
 
         let mut style = Style::default();
         style.size.width = relative(1.).into();
         style.max_size.width = column.into();
-        // The parent is a flex column, whose default `flex_shrink` of 1 would
-        // squeeze a document taller than the window back down to it — silently
-        // defeating the scroll container instead of overflowing into it.
+        // Flex column's default flex_shrink of 1 would squeeze an overtall
+        // document back down instead of overflowing into the scroll container.
         style.flex_shrink = 0.;
 
         let stash = Stash::default();
@@ -507,8 +425,8 @@ impl Element for TextElement {
         let measured = stash.clone();
         let layout_id =
             window.request_measured_layout(style, move |known, available, window, cx| {
-                // The sizing pass hands `known` unclamped by `max_size`; only
-                // the layout pass clamps. So the column is applied here too.
+                // The sizing pass hands `known` unclamped by max_size; only the
+                // layout pass clamps, so the column is reapplied here.
                 let width = known
                     .width
                     .or(match available.width {
@@ -517,9 +435,8 @@ impl Element for TextElement {
                     })
                     .map_or(column, |width| width.min(column));
 
-                // Wrapped text breaks mid-word when it must, so it has no
-                // minimum width. Reporting the column here would become the
-                // flex item's automatic minimum and push it past a narrower pane.
+                // Wrapped text has no minimum width; reporting the column here
+                // would become the flex item's automatic minimum and push it past a narrower pane.
                 let reported = match (known.width, available.width) {
                     (None, AvailableSpace::MinContent) => px(0.),
                     _ => width,
@@ -555,9 +472,8 @@ impl Element for TextElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let layout = take_measured(stash, bounds.size.width).unwrap_or_else(|| {
-            // Rows right, reserved height one frame stale: the next frame's
-            // measure corrects it. gpui's `Text` panics here
-            // (`gpui/src/elements/text.rs:782-790`); a note editor must not.
+            // One frame stale height; corrects next frame. gpui's own `Text`
+            // panics here (`elements/text.rs:782-790`) — a note editor must not.
             eprintln!("no layout measured at width {}", bounds.size.width);
             let editor = self.editor.read(cx);
             let marked = editor.state.marked_range();
@@ -632,18 +548,15 @@ impl Element for TextElement {
         self.editor.update(cx, |editor, _| {
             editor.last_layout = Some(layout);
             editor.last_bounds = Some(bounds);
-            // Read here rather than recomputed later: the offset in the handle
-            // right now is the one this frame's `bounds` was translated by
-            // (`gpui/elements/div.rs:2390-2392`, then `:2027`), so subtracting
-            // it leaves the y the text would have at zero scroll.
+            // Read now: the scroll offset here is what translated this frame's
+            // `bounds` (`elements/div.rs:2390`), so subtracting it gives the y at zero scroll.
             editor.last_text_top = Some(bounds.origin.y - editor.scroll_handle.offset().y);
         });
     }
 }
 
-/// The measured layout taffy settled on: the one nearest the element's width.
-/// Nearest rather than equal, because bounds are pixel-snapped after taffy
-/// measured them.
+/// The measured layout nearest the element's width — not equal, since bounds
+/// are pixel-snapped after taffy measured them.
 fn take_measured(stash: &Stash, width: Pixels) -> Option<DocumentLayout> {
     let mut stash = stash.borrow_mut();
     let distance = |layout: &DocumentLayout| {
@@ -656,7 +569,6 @@ fn take_measured(stash: &Stash, width: Pixels) -> Option<DocumentLayout> {
     Some(stash.swap_remove(index))
 }
 
-/// [`theme::BODY_COLUMN_CHARS`] in pixels: the CSS `ch`, the advance of `0`.
 pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
     let font_size = style.font_size.to_pixels(window.rem_size());
     let font = window.text_system().resolve_font(&style.font());

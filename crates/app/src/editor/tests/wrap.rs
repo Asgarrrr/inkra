@@ -1,29 +1,21 @@
-//! Soft wrap: rows, the column, and the caret on them.
-//!
-//! Headless glyphs all advance by the same amount (`gpui/src/platform.rs:1288-1305`),
-//! so a row holds a fixed number of chars and every break below is computable.
-//! The fixtures keep clear of a break landing exactly on the column's edge,
-//! where `f32` rounding decides which row a glyph falls on.
+//! Headless glyphs all advance by the same amount, so a row holds a fixed
+//! number of chars and every break below is computable; fixtures keep clear of a break landing exactly on the column's edge.
 
 use gpui::{ClipboardItem, EntityInputHandler, Pixels, TestAppContext, px, size};
 
 use super::{at, dispatching};
 use crate::editor::EditorView;
 
-/// The editor's `p_4()`.
 const PADDING: f32 = 16.;
 const LINE_HEIGHT: f32 = 28.;
-/// The headless display (`gpui/platform/test/display.rs:16`).
 const WINDOW_WIDTH: f32 = 1920.;
 
-/// Seventeen four-char words: 68 chars, which fits a 70 `ch` row with room to
-/// spare.
+/// Seventeen four-char words: 68 chars, fits a 70 `ch` row with room to spare.
 fn one_row() -> String {
     "aaa ".repeat(17)
 }
 
-/// Twenty-five four-char words: 100 chars, which breaks once. The last word
-/// start before char 70 is 68, so row 1 starts there.
+/// Twenty-five four-char words: 100 chars, breaks once at char 68.
 fn two_rows() -> String {
     "aaa ".repeat(25)
 }
@@ -47,8 +39,7 @@ fn a_line_longer_than_the_column_takes_two_rows(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The column is 70 `ch`, centred; the painted rows fill exactly the height
-/// taffy reserved, which is what proves `prepaint` took the layout taffy sized.
+/// Painted rows fill exactly the height taffy reserved, proving `prepaint` used the layout taffy sized.
 #[gpui::test]
 fn the_column_is_seventy_ch_and_centred(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &two_rows());
@@ -56,8 +47,6 @@ fn the_column_is_seventy_ch_and_centred(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, window, _| {
-            // The style the editor shaped with: outside a draw,
-            // `window.text_style()` is gpui's default.
             let style = view.last_layout.as_ref().unwrap().style().clone();
             let column = crate::editor::element::column_width(&style, window);
             let bounds = view.last_bounds.unwrap();
@@ -73,8 +62,6 @@ fn the_column_is_seventy_ch_and_centred(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// Narrower than the column, the pane wins, and a line that fitted one row at
-/// 70 `ch` now takes more.
 #[gpui::test]
 fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &one_row());
@@ -96,8 +83,6 @@ fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// A boundary offset is both the end of row 0 and the start of row 1. It
-/// belongs to row 1, where typing on past the edge has just moved the caret.
 #[gpui::test]
 fn a_caret_at_a_wrap_paints_at_the_start_of_the_next_row(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &two_rows());
@@ -116,8 +101,6 @@ fn a_caret_at_a_wrap_paints_at_the_start_of_the_next_row(cx: &mut TestAppContext
         .unwrap();
 }
 
-/// Down from row 0 stays in the same logical line; the next down leaves it.
-/// Up retraces both. Column 0 throughout, so every landing is a row start.
 #[gpui::test]
 fn up_and_down_move_by_row(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &format!("{}\nshort", two_rows()));
@@ -137,12 +120,9 @@ fn up_and_down_move_by_row(cx: &mut TestAppContext) {
     assert_eq!(cursor(&mut cx), at(0));
 }
 
-/// Down from the middle of a long row onto a short one clamps, and the next
-/// down lands back at the remembered column rather than the clamped one.
 #[gpui::test]
 fn the_goal_column_survives_a_short_row(cx: &mut TestAppContext) {
-    // Row 0: chars 0..68; row 1: "aaa " x 8 = 32 chars, 68..100; then a
-    // one-row line of 68.
+    // Row 0: chars 0..68; row 1: "aaa " x 8 = 32 chars, 68..100; then a one-row line of 68.
     let text = format!("{}\n{}", two_rows(), one_row());
     let (window, mut cx) = dispatching(cx, &text);
     cx.run_until_parked();
@@ -164,9 +144,8 @@ fn the_goal_column_survives_a_short_row(cx: &mut TestAppContext) {
     assert_eq!(back, at(101 + 50), "column 50 again, on the next line");
 }
 
-/// Typing the word that wraps puts the caret on a row the painted layout does
-/// not have. Asserted inside the same update as the edit, before any draw, so
-/// the only layout the reveal could have used is the one the gate shaped.
+/// Asserted inside the same update as the edit, before any draw, so the only
+/// layout the reveal could have used is the one the gate shaped.
 #[gpui::test]
 fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestAppContext) {
     // 40 one-row lines, then a 69-char line: one more word start at 68 wraps it.
@@ -184,7 +163,6 @@ fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestApp
             let layout = view.last_layout.as_ref().unwrap();
             assert_eq!(layout.row_count(), 42, "the edit wrapped the last line");
             assert_eq!(layout.row_for_offset(view.cursor()), 41);
-            // Row 41's bottom sits one three-row margin above the viewport's.
             let row_bottom = PADDING + LINE_HEIGHT * 42.;
             let expected = 1080. - 3. * LINE_HEIGHT - row_bottom;
             assert_eq!(view.scroll_handle.offset().y, px(expected));
@@ -192,8 +170,7 @@ fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestApp
         .unwrap();
 }
 
-/// A pasted URL has no spaces, so gpui breaks it mid-word; the caret lands on
-/// its last row, and that row is revealed. Pasted mid-document: at the end,
+/// A pasted URL has no spaces, so gpui breaks it mid-word. Pasted at the end,
 /// gpui clamps the offset to the content and the margin cannot be honoured.
 #[gpui::test]
 fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
@@ -223,9 +200,6 @@ fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// gpui breaks at a glyph, and here that falls inside a cluster of a letter
-/// and two combining marks. The row still starts on a grapheme boundary, so no
-/// caret move can land between a letter and its accent.
 #[gpui::test]
 fn a_row_never_starts_inside_a_grapheme(cx: &mut TestAppContext) {
     // Two chars of prefix put every cluster start on an even char index, so
@@ -257,9 +231,6 @@ fn on_boundary(buffer: &inkra_text::Buffer, offset: inkra_text::ByteOffset) -> b
     offset == at(0) || buffer.next_grapheme(buffer.previous_grapheme(offset)) == offset
 }
 
-/// Every caret position maps to a point that maps back to it — on both sides
-/// of a word wrap and of a mid-word one, where the row's `caret_end` and the
-/// next row's start are one grapheme apart.
 #[gpui::test]
 fn every_offset_round_trips_through_its_position(cx: &mut TestAppContext) {
     let text = format!("{}\nhttps://example.com/{}", two_rows(), "a".repeat(150));
@@ -284,8 +255,6 @@ fn every_offset_round_trips_through_its_position(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// A click right of a wrapped row lands on that row, one grapheme short of the
-/// wrap, not on the offset the next row starts at.
 #[gpui::test]
 fn a_click_past_a_wrapped_row_stays_on_it(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &two_rows());
@@ -304,8 +273,6 @@ fn a_click_past_a_wrapped_row_stays_on_it(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// A selection over a wrap and a newline paints one quad per row, and only the
-/// newline's row gets the stub: a wrap is not a character.
 #[gpui::test]
 fn a_selection_paints_one_quad_per_row(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &format!("{}\nbb", two_rows()));
@@ -318,8 +285,8 @@ fn a_selection_paints_one_quad_per_row(cx: &mut TestAppContext) {
             assert_eq!(quads.len(), 3);
 
             let width = |quad: &gpui::PaintQuad| quad.bounds.size.width;
-            // The wrap's x on row 0: its `caret_end`, 67, plus the trailing
-            // space. Asked of offset 68 directly, the layout answers for row 1.
+            // Row 0's wrap x is its `caret_end` (67) plus the trailing space;
+            // offset 68 directly would answer for row 1 instead.
             let one_char = layout.x_for_offset(at(1));
             let row_0 = layout.x_for_offset(at(67)) + one_char;
             assert_eq!(width(&quads[0]), row_0, "row 0 runs to the wrap, no stub");
@@ -331,8 +298,6 @@ fn a_selection_paints_one_quad_per_row(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The input method's candidate window anchors to the row the range is on,
-/// not to its line's first row.
 #[gpui::test]
 fn ime_bounds_follow_the_row(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &two_rows());
@@ -357,8 +322,7 @@ fn caret_after(cx: &mut TestAppContext, keys: &str) -> inkra_text::ByteOffset {
     window.update(&mut cx, |view, _, _| view.cursor()).unwrap()
 }
 
-/// Ten chars into row 0: End stops one grapheme short of the wrap, before the
-/// trailing space, and stays there when pressed again.
+/// Ten chars into row 0: End stops one grapheme short of the wrap, before the trailing space.
 #[gpui::test]
 fn end_stops_at_the_visual_row_and_stays(cx: &mut TestAppContext) {
     let keys = "right right right right right right right right right right end";
@@ -384,8 +348,6 @@ fn cmd_left_is_home(cx: &mut TestAppContext) {
     assert_eq!(caret_after(cx, "down right right cmd-left"), at(68));
 }
 
-/// The logical line — `NSTextView`'s paragraph moves. From row 1, both reach
-/// past the row they start on.
 #[gpui::test]
 fn ctrl_a_goes_to_the_start_of_the_logical_line(cx: &mut TestAppContext) {
     assert_eq!(caret_after(cx, "down right right ctrl-a"), at(0));
@@ -396,9 +358,8 @@ fn ctrl_e_goes_to_the_end_of_the_logical_line(cx: &mut TestAppContext) {
     assert_eq!(caret_after(cx, "right right ctrl-e"), at(100));
 }
 
-/// A cluster wider than the pane makes gpui break twice inside it, and both
-/// breaks snap to the cluster's end: a row with no caret position of its own.
-/// Up and down step over it rather than landing back where they started.
+/// Both breaks in a cluster wider than the pane snap to its end, leaving a row
+/// with no caret position of its own; up/down must step over it, not get stuck.
 #[gpui::test]
 fn up_steps_over_a_row_with_no_caret_position(cx: &mut TestAppContext) {
     // Five glyphs in one cluster, in a pane two glyphs wide.

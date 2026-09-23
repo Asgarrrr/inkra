@@ -1,5 +1,3 @@
-//! Trashing a note through the sidebar, and what it does to the editor.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -8,16 +6,6 @@ use inkra_vault::mem_fs::MemFs;
 
 use super::{activate, editor, tree_focused, two_notes};
 
-/// `down` reaches the tree, and only the tree.
-///
-/// Does **not** discriminate `EditorView`'s `keymap.rs` scoping: with both
-/// bindings context-less they would tie and the tree still wins on `Vec`
-/// position (`gpui/src/keymap.rs:188-190`). What this pins is the binding,
-/// the `Sidebar` context reaching a dispatch node at all, and the focus the
-/// tree takes.
-///
-/// The caret assertion is belt and braces: the editor is not an ancestor of
-/// the sidebar, so it could not receive the action anyway.
 #[gpui::test]
 fn an_arrow_moves_the_tree_and_not_the_caret_while_the_tree_has_focus(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -42,8 +30,6 @@ fn an_arrow_moves_the_tree_and_not_the_caret_while_the_tree_has_focus(cx: &mut T
     let _ = notes;
 }
 
-/// The binding, the prompt and the delete, end to end. A test that called
-/// `NoteStore::trash` directly would prove none of the three.
 #[gpui::test]
 fn cmd_backspace_asks_before_trashing_the_selected_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -52,9 +38,7 @@ fn cmd_backspace_asks_before_trashing_the_selected_note(cx: &mut TestAppContext)
     cx.run_until_parked();
 
     let mut visual = tree_focused(cx, window, &sidebar);
-    // Selected by the arrow rather than by `activate`, which emits the
-    // event straight from the entity and so never sets `selected`. Row 0 is
-    // `a`: the comparator puts it before `b`.
+    // `activate` never sets `selected`; select via the arrow instead.
     visual.simulate_keystrokes("down");
     assert_eq!(
         sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
@@ -80,8 +64,6 @@ fn cmd_backspace_asks_before_trashing_the_selected_note(cx: &mut TestAppContext)
     let _ = notes;
 }
 
-/// Cancelling must leave everything exactly as it was. Without this the
-/// prompt could be deleted entirely and the test above would still pass.
 #[gpui::test]
 fn declining_the_prompt_keeps_the_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -102,9 +84,7 @@ fn declining_the_prompt_keeps_the_note(cx: &mut TestAppContext) {
     );
 }
 
-/// Deleting the note on screen has to take the editor with it: a buffer
-/// with no file is still typable, and every keystroke would be lost — see
-/// `AppShell::editor`.
+/// A buffer with no file is still typable, so the editor must go with the note.
 #[gpui::test]
 fn trashing_the_open_note_empties_the_editor(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -130,11 +110,6 @@ fn trashing_the_open_note_empties_the_editor(cx: &mut TestAppContext) {
     let _ = sidebar;
 }
 
-/// Deleting a note that is *not* on screen must leave the editor alone.
-///
-/// Reachable with only this slice's keys: click `a` to open it, press
-/// `down` to select `b` without opening it, then delete. `NoteClosed(b)`
-/// fires while the editor is showing `a`.
 #[gpui::test]
 fn trashing_a_note_that_is_not_on_screen_leaves_the_editor(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -154,8 +129,6 @@ fn trashing_a_note_that_is_not_on_screen_leaves_the_editor(cx: &mut TestAppConte
     assert_eq!(fs.read_to_string(Path::new("/vault/b.md")), None);
 }
 
-/// After a delete the selection lands on a real row, so the next
-/// `cmd-backspace` has a target and does not act on a note that is gone.
 #[gpui::test]
 fn the_selection_moves_off_a_deleted_row(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

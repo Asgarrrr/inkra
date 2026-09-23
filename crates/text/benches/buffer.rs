@@ -1,15 +1,3 @@
-//! Baseline timings for `Buffer`'s size-dependent operations.
-//!
-//! `Buffer` stores the whole document as one `String` plus a derived line
-//! index (`buffer.rs`), so every operation here either rescans the text or
-//! shifts bytes in it — the costs soft wrap and virtualization will build on
-//! top of (`docs/roadmap.md`, Soft wrap and Virtualization sections). Not part
-//! of `check.sh`, and no baseline is committed: run before and after a change
-//! that touches a hot path and compare the two reports by eye.
-//!
-//! `transact_at` takes an `Instant` the buffer never reads on its own; each
-//! group reads the clock once, outside every timed closure, and reuses it.
-
 use std::fmt::Write as _;
 use std::hint::black_box;
 use std::time::Instant;
@@ -17,14 +5,8 @@ use std::time::Instant;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use inkra_text::{Buffer, ByteOffset};
 
-/// Line counts spanning the range a real vault note can reach: `1_000` is an
-/// ordinary note, `100_000` is the size a soft-wrap or virtualization profile
-/// would be run against.
 const SIZES: [usize; 3] = [1_000, 10_000, 100_000];
 
-/// How far from the end of the document the "near the end" benchmarks probe —
-/// close enough to exercise a near-full scan without landing exactly on the
-/// last byte.
 const NEAR_END_MARGIN: usize = 200;
 
 const WORDS: [&str; 20] = [
@@ -32,17 +14,12 @@ const WORDS: [&str; 20] = [
     "sit", "amet", "vault", "buffer", "editor", "undo", "anchor", "grapheme", "markdown",
 ];
 
-/// One line per call, cycling through a handful of non-ASCII scripts so the
-/// UTF-16 and grapheme paths — which only do real work on multi-byte text —
-/// are exercised somewhere in the document.
 const MULTIBYTE_LINES: [&str; 3] = [
     "Résumé café naïve façade coöperate.",
     "Emoji check: 🎉🚀✨ combined with a family cluster 👨‍👩‍👧.",
     "CJK sample: 日本語のテキストです。中文测试文本。",
 ];
 
-/// A markdown-ish document of `line_count` lines: headings every fifth line,
-/// a non-ASCII line every thirty-seventh, ordinary word-salad otherwise.
 fn build_document(line_count: usize) -> String {
     let mut text = String::with_capacity(line_count * 32);
     for line in 0..line_count {
@@ -64,21 +41,15 @@ fn build_document(line_count: usize) -> String {
     text
 }
 
-/// The byte offset `document.len() / 2`, snapped onto a char boundary.
 fn middle_offset(document: &str) -> ByteOffset {
     Buffer::new(document.to_string()).clip(ByteOffset(document.len() / 2))
 }
 
-/// A byte offset `NEAR_END_MARGIN` bytes before the end, snapped onto a char
-/// boundary.
 fn near_end_offset(document: &str) -> ByteOffset {
     let target = document.len().saturating_sub(NEAR_END_MARGIN);
     Buffer::new(document.to_string()).clip(ByteOffset(target))
 }
 
-/// `Buffer::new` moves the `String` in rather than copying it, so this
-/// measures construction itself, not the clone `iter_batched`'s setup pays
-/// for on every sample.
 fn bench_new(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_new");
     for lines in SIZES {
@@ -95,8 +66,6 @@ fn bench_new(c: &mut Criterion) {
     group.finish();
 }
 
-/// A single-char insert at the start, middle, and end of the document — the
-/// three positions `replace`'s byte-shift cost differs most between.
 fn bench_insert(c: &mut Criterion) {
     let now = Instant::now();
     let mut group = c.benchmark_group("buffer_insert_char");
@@ -129,7 +98,6 @@ fn bench_insert(c: &mut Criterion) {
     group.finish();
 }
 
-/// Reverting the transaction a single insert opened.
 fn bench_undo(c: &mut Criterion) {
     let now = Instant::now();
     let mut group = c.benchmark_group("buffer_undo");

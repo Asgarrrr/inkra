@@ -1,10 +1,3 @@
-//! The text and its history: edits, transactions, undo, and the anchors that
-//! survive them.
-//!
-//! No layout, no filesystem, no clock — the caller supplies the `Instant` that
-//! decides whether two edits group. `docs/buffer-model.md` records the model
-//! and the alternatives already rejected.
-
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
@@ -13,21 +6,12 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::anchor::{Anchor, AnchorState, Bias, transform};
 use crate::offset::{ByteOffset, Utf16Offset};
 
-/// Two transactions closer together than this merge into one undo step, so a
-/// typing run undoes as a unit. Matches Zed's default.
 pub const GROUP_INTERVAL: Duration = Duration::from_millis(300);
 
-/// One replacement applied to the text: `removed` used to sit at `at`, and
-/// `inserted` sits there now. Storing both sides keeps undo proportional to the
-/// size of the edit rather than the size of the buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Edit {
-    /// Monotonic across this buffer's whole life, assigned when the edit is
-    /// applied. [`Buffer::version`] is the id of the last applied edit.
-    ///
-    /// On the edit, not on the [`Transaction`]: [`Buffer::close`] merges by
-    /// extending `previous.edits` in place, so a transaction's identity does
-    /// not move when the text does.
+    /// Monotonic across the buffer's life; `Buffer::version` is the id of the last applied edit.
+    /// Lives on the edit, not the `Transaction`: `close` merges by extending `previous.edits` in place.
     id: u64,
     at: ByteOffset,
     removed: String,
@@ -35,10 +19,6 @@ struct Edit {
 }
 
 impl Edit {
-    /// Keeps the same id: this is one point in history, undone. Only
-    /// [`Buffer::undo`] builds an inversion, and it drops it after applying —
-    /// the version survives undo and redo because the original transaction
-    /// moves between the stacks intact.
     fn inverted(&self) -> Self {
         Self {
             id: self.id,
@@ -48,19 +28,14 @@ impl Edit {
         }
     }
 
-    /// The range the inserted text occupies once this edit is applied — where a
-    /// caller should put its cursor.
     fn range_after(&self) -> Range<ByteOffset> {
         self.at..ByteOffset(self.at.0 + self.inserted.len())
     }
 }
 
-/// A group of edits that undo and redo as one step.
 #[derive(Debug)]
 struct Transaction {
     edits: Vec<Edit>,
-    /// When this transaction last recorded an edit. `None` means it must never
-    /// absorb a later one — a bare edit, or an explicitly ungrouped `transact`.
     last_edit_at: Option<Instant>,
 }
 
@@ -72,8 +47,7 @@ pub struct Buffer {
     depth: usize,
     grouping_blocked: bool,
     next_edit_id: u64,
-    /// Every anchor ever created here, `None` once forgotten. Slots are never
-    /// reused — see [`Buffer::forget`].
+    /// Every anchor ever created, `None` once forgotten; slots are never reused.
     anchors: Vec<Option<AnchorState>>,
 }
 
@@ -106,15 +80,6 @@ impl Buffer {
         self.text.is_empty()
     }
 
-    /// Identifies the text's position in its own history.
-    ///
-    /// Two buffers are not comparable through this; it answers one question,
-    /// for one buffer: has the text moved since a version I previously held.
-    /// `app` stores the version it last wrote to disk and compares.
-    ///
-    /// Zed tracks the same property with a `clock::Global` version vector
-    /// (`vendor/zed-reference/crates/text/src/text.rs:829`); ours is a
-    /// single `u64` because we have one writer.
     #[must_use]
     pub fn version(&self) -> u64 {
         self.undo_stack
@@ -123,29 +88,14 @@ impl Buffer {
             .map_or(0, |edit| edit.id)
     }
 
-    /// Runs `f` with every edit it makes grouped into a single undo step that
-    /// stands alone. Nested calls join the outermost group.
-    ///
-    /// A panic inside `f` leaves the group open; that is a caller bug, and the
-    /// process is going down anyway.
     pub fn transact<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         self.transact_inner(None, f)
     }
 
-    /// Like [`Buffer::transact`], but merges into the previous transaction when
-    /// the two happen within [`GROUP_INTERVAL`] — so a typing run undoes as one
-    /// step rather than one step per character.
-    ///
-    /// The caller supplies `now` rather than the buffer reading a clock: time is
-    /// the application's concern, and injecting it keeps this deterministic
-    /// under test instead of needing a different code path there.
     pub fn transact_at<R>(&mut self, now: Instant, f: impl FnOnce(&mut Self) -> R) -> R {
         self.transact_inner(Some(now), f)
     }
 
-    /// Seals the most recent transaction so the next [`Buffer::transact_at`]
-    /// starts a fresh undo step. Call it around anything that should not be
-    /// swallowed by adjacent typing — a paste, a formatting pass.
     pub fn finalize_transaction(&mut self) {
         self.grouping_blocked = true;
     }
@@ -244,13 +194,8 @@ impl Buffer {
         }
     }
 
-    /// Reverts the last transaction, returning the region the restored text now
-    /// occupies so the caller can place its cursor.
-    ///
     /// # Panics
-    /// If a transaction is open. The open edits are not yet on the undo stack,
-    /// so the transaction below them no longer describes the newest change to
-    /// the text, and applying its offsets would corrupt the buffer.
+    /// If a transaction is open — its edits aren't on the undo stack yet.
     pub fn undo(&mut self) -> Option<Range<ByteOffset>> {
         assert!(self.depth == 0, "undo() inside an open transaction");
         let transaction = self.undo_stack.pop()?;
@@ -275,15 +220,7 @@ impl Buffer {
         affected
     }
 
-    /// Relies on `edit` having been captured from this exact text state: the
-    /// range it names is valid by construction, not by check.
-    ///
-    /// The range returned by the *last* call in an undo or redo pass is the
-    /// only one still valid in the resulting text — every earlier one may have
-    /// been shifted by the edits applied after it. That is why `undo` and
-    /// `redo` keep the last value rather than combining them, and why the two
-    /// directions legitimately report different positions: they produce
-    /// different texts.
+    /// Assumes `edit` was captured from this exact text state; only the *last* call's range stays valid.
     fn apply(&mut self, edit: &Edit) -> Range<ByteOffset> {
         let end = edit.at.0 + edit.removed.len();
         self.text.replace_range(edit.at.0..end, &edit.inserted);
@@ -300,9 +237,6 @@ impl Buffer {
         Utf16Offset(self.text[..offset.0].chars().map(char::len_utf16).sum())
     }
 
-    /// Converts back from UTF-16. An offset landing inside a surrogate pair
-    /// snaps forward to the next char boundary, matching what platform input
-    /// methods expect when they probe a position.
     #[must_use]
     pub fn from_utf16(&self, offset: Utf16Offset) -> ByteOffset {
         let mut utf16 = 0;
@@ -315,18 +249,12 @@ impl Buffer {
         self.len()
     }
 
-    /// A whole range, in the units the platform input protocol speaks.
     #[must_use]
     pub fn to_utf16_range(&self, range: &Range<ByteOffset>) -> Range<usize> {
         self.to_utf16(range.start).0..self.to_utf16(range.end).0
     }
 
-    /// The inverse, normalized so the result is never inverted.
-    ///
-    /// An input method may hand back a range whose ends arrive in either order,
-    /// and `from_utf16` snaps each into a char boundary independently — so two
-    /// ends one surrogate apart can cross. Every caller wants a range it can
-    /// slice with.
+    /// Normalized so the result is never inverted: independent snapping can otherwise cross the ends.
     #[must_use]
     pub fn from_utf16_range(&self, range: &Range<usize>) -> Range<ByteOffset> {
         let start = self.from_utf16(Utf16Offset(range.start));
@@ -334,9 +262,6 @@ impl Buffer {
         start.min(end)..start.max(end)
     }
 
-    /// Start of the grapheme cluster before `offset` — one cursor step left.
-    /// Graphemes, not chars: "é" as e+combining-accent is one step, and so is a
-    /// multi-codepoint emoji.
     #[must_use]
     pub fn previous_grapheme(&self, offset: ByteOffset) -> ByteOffset {
         self.text
@@ -354,28 +279,19 @@ impl Buffer {
             .unwrap_or_else(|| self.len())
     }
 
-    /// Number of logical lines. A newline separates two lines rather than
-    /// belonging to either, so an empty buffer is one line and `"a\n"` is two —
-    /// the second empty.
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.newlines_before(self.text.len()) + 1
     }
 
-    /// The line containing `offset`, counting from zero.
-    ///
-    /// An offset past the end answers for the last line rather than panicking:
-    /// callers reach this from layout, which lags the text by a frame.
+    /// Past the end, answers for the last line rather than panicking; layout lags the text by a frame.
     #[must_use]
     pub fn line_for_offset(&self, offset: ByteOffset) -> usize {
         self.newlines_before(offset.0.min(self.text.len()))
     }
 
-    /// The line's text, *excluding* its terminating newline.
-    ///
-    /// So `line_range(0).end` and `line_range(1).start` are different offsets in
-    /// `"a\nb"`, and both are places a cursor may sit. That is what makes `End`
-    /// then `Right` cross to the next line instead of standing still.
+    /// Excludes the terminating newline: `line_range(0).end` and `line_range(1).start` differ,
+    /// which is what makes `End` then `Right` cross to the next line.
     ///
     /// # Panics
     /// If `line >= line_count()`.
@@ -402,11 +318,6 @@ impl Buffer {
         ByteOffset(start)..ByteOffset(end)
     }
 
-    /// Every line with the offset it starts at, in one pass.
-    ///
-    /// The element calls this once per frame. Going through
-    /// [`Buffer::line_range`] per line instead would rescan from the top each
-    /// time, turning an O(n) frame into O(n · lines).
     pub fn lines(&self) -> impl Iterator<Item = (ByteOffset, &str)> {
         let mut start = 0;
         self.text.split('\n').map(move |line| {
@@ -416,14 +327,9 @@ impl Buffer {
         })
     }
 
-    /// Counts by byte, not by char: a `\n` byte can never appear inside a
-    /// multi-byte sequence, so this is correct at any index and needs no char
-    /// boundary from the caller.
-    // clippy suggests the `bytecount` crate. A whole dependency to count one
-    // byte value fails the project's dependency rule, and the alternative that
-    // avoids the lint — slicing to `&str` and counting `matches` — would need a
-    // char boundary from the caller, which is exactly what this is built not to
-    // need. Revisit if a profile ever shows this scan mattering.
+    /// Counts by byte, not char: a `\n` byte never appears inside a multi-byte sequence.
+    // clippy wants the `bytecount` crate; a dependency to count one byte fails the dependency rule,
+    // and the char-boundary-free scan is exactly the point, so the lint is allowed instead.
     #[allow(clippy::naive_bytecount)]
     fn newlines_before(&self, end: usize) -> usize {
         self.text.as_bytes()[..end]
@@ -432,7 +338,6 @@ impl Buffer {
             .count()
     }
 
-    /// Snaps an offset into range and back onto a char boundary.
     #[must_use]
     pub fn clip(&self, offset: ByteOffset) -> ByteOffset {
         let mut index = offset.0.min(self.text.len());
@@ -442,18 +347,8 @@ impl Buffer {
         ByteOffset(index)
     }
 
-    /// A handle to `offset` that this buffer moves with the text. `bias`
-    /// decides which side of an edit landing on exactly this offset it ends up
-    /// on.
-    ///
-    /// The handle means nothing to another buffer: resolving it there answers
-    /// for whatever sits in the same slot, or panics.
-    ///
     /// # Panics
-    /// If `offset` is past the end of the text or splits a char. A real
-    /// `assert!`, unlike [`Buffer::replace`]'s: this path only stores the
-    /// offset, so there is no stdlib slicing underneath to catch a bad one in
-    /// release, and the damage would surface later inside `resolve`.
+    /// If `offset` is past the end or splits a char — a real `assert!`, since no slicing underneath would catch it in release.
     #[must_use]
     pub fn anchor(&mut self, offset: ByteOffset, bias: Bias) -> Anchor {
         assert!(
@@ -468,8 +363,6 @@ impl Buffer {
         Anchor(self.anchors.len() - 1)
     }
 
-    /// Where `anchor` sits in the text as it stands now.
-    ///
     /// # Panics
     /// If `anchor` has been forgotten, or was created by another buffer.
     #[must_use]
@@ -481,13 +374,10 @@ impl Buffer {
             .offset
     }
 
-    /// Drops an anchor. Its slot is tombstoned, never reused: handing it to a
-    /// later anchor would turn the panic below into a silent answer about a
-    /// different position.
+    /// Drops an anchor; the slot is tombstoned, never reused, so a stale handle can't silently resolve to a new one.
     ///
     /// # Panics
-    /// If `anchor` has already been forgotten, or was created by another
-    /// buffer.
+    /// If `anchor` was already forgotten, or was created by another buffer.
     pub fn forget(&mut self, anchor: Anchor) {
         let state = self.anchors.get_mut(anchor.0).and_then(Option::take);
         assert!(
@@ -497,9 +387,6 @@ impl Buffer {
         );
     }
 
-    /// Walks every slot, tombstones included, so this is O(anchors ever
-    /// created) per edit rather than O(live anchors). Same accepted cost shape
-    /// as the grapheme scans above, and with no consumer yet to load it.
     fn shift_anchors(&mut self, at: ByteOffset, removed_len: usize, inserted_len: usize) {
         for state in self.anchors.iter_mut().flatten() {
             state.offset = transform(state.offset, state.bias, at, removed_len, inserted_len);

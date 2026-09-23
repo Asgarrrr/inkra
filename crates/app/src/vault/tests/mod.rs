@@ -16,19 +16,13 @@ mod lifecycle;
 mod quit;
 mod trash;
 
-/// `with_editor`/`dispatching` (`editor/tests/mod.rs`) root at `EditorView`,
-/// so neither can prove an `AppShell`-scoped binding fires. Returns the store
-/// too — built here, so a caller needing it (or `is_dirty`) doesn't reach
-/// through `AppShell`'s private fields.
 pub(super) fn open_shell(
     cx: &mut TestAppContext,
     fs: Arc<dyn Fs>,
 ) -> (VisualTestContext, Entity<NoteStore>) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
-    // Loaded rather than a literal that happens to agree with the file:
-    // `adopt` needs the real stamp, and a fabricated one would make the
-    // first write of every test built on this helper see a mismatch, mint
-    // a conflict file, and quietly defeat the tests that count the vault.
+    // Loaded, not fabricated: `adopt` needs the real stamp, or the first
+    // write would see a mismatch and mint an unwanted conflict file.
     let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md")))
         .expect("every caller inserts /vault/a.md first");
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new(loaded.text.clone())));

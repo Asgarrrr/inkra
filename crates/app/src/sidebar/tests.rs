@@ -19,30 +19,23 @@ use super::{Kind, NoteActivated, Row, Sidebar, row_center};
 use crate::vault::NoteStore;
 
 impl Sidebar {
-    /// Selects a row without a window, for a test that has none.
     #[cfg(test)]
     pub(crate) fn select_for_test(&mut self, id: EntryId, cx: &mut Context<Self>) {
         self.selected = Some(id);
         cx.notify();
     }
 
-    /// Where the field's row sits, for the shrink tests.
     #[cfg(test)]
     pub(crate) fn field_row(&self) -> usize {
         self.editing.as_ref().map_or(0, |edit| edit.at)
     }
 
-    /// Whether a name is being typed. `#[cfg(test)]` for the same reason as
-    /// `selected`: nothing in the UI asks, and an unread method fails
-    /// `-D warnings`.
     #[cfg(test)]
     pub(crate) fn is_editing(&self) -> bool {
         self.editing.is_some()
     }
 
-    /// Why the last confirm was refused, as the user would read it. Asserting
-    /// the sentence rather than the variant is what stops a rejection being
-    /// reported with the wrong reason.
+    /// Asserts the sentence, not the variant: that is what catches a rejection reported with the wrong reason.
     #[cfg(test)]
     pub(crate) fn rejection_message(&self) -> Option<&'static str> {
         self.editing
@@ -51,21 +44,16 @@ impl Sidebar {
             .map(Rejection::message)
     }
 
-    /// The row a command would act on. `#[cfg(test)]` and an accessor rather
-    /// than a public field, following `NoteStore::current`: nothing in the UI
-    /// asks, and an unread method fails `-D warnings`.
     #[cfg(test)]
     pub(crate) fn selected(&self) -> Option<EntryId> {
         self.selected
     }
 }
 
-/// Stops short of the sidebar: `add_window` constructs the view itself.
 fn parts(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entity<NoteStore> {
     crate::test_support::scan_notes(cx, fs)
 }
 
-/// The same, with a sidebar that is never drawn.
 fn open(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entity<Sidebar> {
     open_with_store(cx, fs).0
 }
@@ -79,7 +67,6 @@ fn open_with_store(
     (sidebar, notes)
 }
 
-/// A sidebar that *is* drawn, so a click has a layout to land in.
 fn drawn(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, VisualTestContext) {
     let notes = parts(cx, fs);
     let window = cx.add_window(move |_, cx| Sidebar::new(notes, cx));
@@ -87,9 +74,7 @@ fn drawn(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, VisualTe
     (sidebar, VisualTestContext::from_window(window.into(), cx))
 }
 
-/// A walk landing while a name is typed can leave the field's row past the
-/// end of the tree. An unrendered row has no dispatch node, so the field
-/// would take no keystrokes at all — not even `escape`.
+/// An unrendered row has no dispatch node, so the field would take no keystrokes — not even `escape`.
 #[gpui::test]
 fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -105,7 +90,6 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
     });
     assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 
-    // Two notes vanish from outside, so the field's row is past the end.
     fs.remove(Path::new("/vault/b.md"));
     fs.remove(Path::new("/vault/c.md"));
     let vault = notes
@@ -124,8 +108,7 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
     );
 }
 
-/// The same shrink, with a create: the field has no target to lose, so it
-/// stays open — and its row has to be one the list still draws.
+/// A create has no target to lose, so the field stays open on a row the list still draws.
 #[gpui::test]
 fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -157,10 +140,8 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
     );
 }
 
-/// The conflict file's only route to the user, asserted where the user
-/// would see it: `visible`, not `Vault::entries` — a cache rebuilt only by
-/// `new` and `toggle`, so this pins the vault subscription that keeps it
-/// live.
+/// Asserted on `visible`, not `Vault::entries`: `visible` is a cache rebuilt
+/// only by `new` and `toggle`, so this pins the vault subscription.
 #[gpui::test]
 fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -168,7 +149,6 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.visible.len()), 1);
 
-    // What a conflict leaves behind, and then the rescan that follows it.
     fs.insert_file("/vault/a (conflict 1970-01-01 00-00-01Z).md", "theirs");
     let vault = notes
         .read_with(cx, |notes, _| notes.vault().cloned())
@@ -187,7 +167,6 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     );
 }
 
-/// Every `NoteActivated` the sidebar emits, in order.
 fn watch(
     sidebar: &Entity<Sidebar>,
     cx: &mut TestAppContext,
@@ -202,8 +181,7 @@ fn watch(
     (seen, guard)
 }
 
-/// Trailing `/` on directories: the display name is the file stem, so
-/// `Projects` and `Projects.md` are otherwise indistinguishable.
+/// Trailing `/` on directories: `Projects` and `Projects.md` are otherwise indistinguishable.
 fn labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, _| sidebar.visible.iter().map(label).collect())
 }
@@ -215,7 +193,6 @@ fn label(row: &Row) -> String {
     }
 }
 
-/// Dot included, unlike `labels`, which rebuilds the name itself.
 fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, cx| {
         let rows = sidebar.visible.clone();
@@ -234,7 +211,6 @@ fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row 
     })
 }
 
-/// A byte-prefix skip would swallow `Projects.md` with the folder.
 #[gpui::test]
 fn collapsing_a_folder_hides_its_children_and_nothing_else(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -244,7 +220,6 @@ fn collapsing_a_folder_hides_its_children_and_nothing_else(cx: &mut TestAppConte
 
     let sidebar = open(cx, fs as Arc<dyn Fs>);
 
-    // Folders start collapsed.
     assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
 
     let projects = row(&sidebar, cx, "Projects/");
@@ -255,7 +230,6 @@ fn collapsing_a_folder_hides_its_children_and_nothing_else(cx: &mut TestAppConte
     assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
 }
 
-/// Opening `Projects` must not open `Projects/deep` with it.
 #[gpui::test]
 fn expanding_a_folder_leaves_its_nested_folders_collapsed(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -275,9 +249,7 @@ fn expanding_a_folder_leaves_its_nested_folders_collapsed(cx: &mut TestAppContex
     );
 }
 
-/// Nothing in the type system stops every row's `on_mouse_down` seeing the
-/// same press (`elements/uniform_list.rs:508-510`). The toggle side of
-/// that; the note side is `a_click_reports_the_row_it_landed_on`.
+/// The toggle side; the note side is `a_click_reports_the_row_it_landed_on`.
 #[gpui::test]
 fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -287,7 +259,6 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
 
     let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
 
-    // The first row is the folder `Projects`.
     visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
     visual.run_until_parked();
 
@@ -298,19 +269,10 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
     );
 }
 
-/// Subscribes to `Sidebar` itself; proving `AppShell`'s wiring is
-/// `shell.rs`'s job.
-///
-/// A real mouse event, not a call to `activate`: only the layout decides
-/// whether a click lands. Discriminates `.w_full()` — headless text is
-/// measured at 0.6 × `font_size` per glyph
-/// (`vendor/zed-reference/crates/gpui/src/platform.rs:1288-1296`), so an
-/// `auto` row around the stem `a` ends at 17.6px and x=20 misses.
-///
-/// Does *not* cover `.size_full()`: a window root resolves its percentage
-/// against the test display's bounds, not the real `SIDEBAR_WIDTH` parent in
-/// `shell.rs`. The folder keeps a sibling note, so clicking it proves no
-/// *other* row reported.
+/// Discriminates `.w_full()`: headless text measures at 0.6 x `font_size`
+/// per glyph, so an `auto` row around the stem `a` ends at 17.6px and x=20
+/// misses. Does not cover `.size_full()`, which needs the real `SIDEBAR_WIDTH`
+/// parent from `shell.rs` to resolve against.
 #[gpui::test]
 fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -320,7 +282,6 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
     let (seen, _guard) = watch(&sidebar, cx);
 
-    // Row 0 is the folder `Projects`.
     visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
     visual.run_until_parked();
     assert!(
@@ -328,27 +289,20 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
         "a folder reports no note, its own or a sibling's"
     );
 
-    // Expanded, so `a` is now row 2: `Projects/`, `plan`, `a`.
+    // Expanded: `a` is now row 2 (`Projects/`, `plan`, `a`).
     let a = row(&sidebar, cx, "a");
     visual.simulate_click(point(px(20.), row_center(2.)), Modifiers::none());
     visual.run_until_parked();
     assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
 }
 
-/// The row pitch, pinned far enough down the list (row 29 of 30) for drift to
-/// pass a whole row. Measured, not derived: deleting the type pair gives
-/// 26.0 px and `line_height` alone gives 22.5 px (not `phi()` × 14 = 22.65 —
-/// gpui does not render the fraction). Against the stated 22 px, those first
-/// misplace a click at row 3 and row 23; row 29 catches both.
-///
-/// Deleting `text_size` alone stays green, correctly: 16 px still fits a
-/// 22 px box, so that is a typographic regression, not this test's clipping
-/// defect.
+/// Pinned at row 29 of 30 so drift passes a whole row before this catches
+/// it: deleting `line_height` alone first misplaces a click at row 3, and
+/// deleting `text_size` alone stays green correctly (16px still fits).
 #[gpui::test]
 fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    // Two digits, so the comparator's lexical order is the numeric one:
-    // `note-9` would sort between `note-19` and `note-2`.
+    // Zero-padded so the comparator's lexical order is the numeric one.
     for ix in 0..30 {
         fs.insert_file(format!("/vault/note-{ix:02}.md"), "text");
     }
@@ -367,8 +321,7 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
     );
 }
 
-/// Asserts the label, not `is_dirty`: the predicate passes with the dot
-/// deleted. One note edited, so a marker on every row also fails.
+/// Asserts the label, not `is_dirty`: that predicate passes even with the dot deleted from render.
 #[gpui::test]
 async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

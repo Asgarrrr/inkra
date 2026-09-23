@@ -1,9 +1,3 @@
-//! What happens before the window exists, and the composition it opens.
-//!
-//! `root` is the half both entry points share, and the reason it is a function
-//! at all: the off-screen runner builds the window without going anywhere near
-//! `std::env::args_os`. `launch` and `run` are the binary's alone.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -20,37 +14,20 @@ use crate::keymap::key_bindings;
 use crate::shell::AppShell;
 use crate::vault::NoteStore;
 
-/// The window a first launch gets. Not persisted — restoring size and
-/// position is deferred, with the rest of window state.
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
 
-/// What the command-line argument named, already read.
 pub(crate) enum Launch {
-    /// No argument: no note and no vault, per the launch-state table in
-    /// `docs/superpowers/specs/2026-09-20-inkra-vault-design.md`. There is no
-    /// editor at all in this state — `AppShell` renders its empty state — so a
-    /// bare `cargo run` is the weakest way to look at the app; the `shot` runner
-    /// covers it as `empty-no-vault` and the richer states beside it.
+    /// `AppShell` renders its empty state; there is no editor in this state.
     Nothing,
-    /// One file, with no vault behind it. The path travels with the text
-    /// because `⌘S` needs somewhere to write back to, and the `Stamp` because
-    /// the first write of this note compares against it — a note adopted
-    /// without one could not tell its own file from a changed one.
+    /// The path travels for `⌘S` to write back to; the `Stamp` is what the
+    /// first write compares against.
     Note(PathBuf, String, Stamp),
-    /// A directory: the vault, scanned. No note is open until a row is clicked.
     Vault(Vault),
 }
 
-/// Builds the window's root view from an already-resolved launch state.
-///
-/// Takes the `Fs` rather than naming `RealFs` itself. That is the whole reason
-/// this is not inlined into `run`: the off-screen runner hands it a `MemFs` and
-/// gets the same composition the real window gets, rather than a second one
-/// that could drift from it.
+/// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
+/// runner gets the same composition the real window gets.
 pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<AppShell> {
-    // Only a named file gets a buffer and an editor; the other two launch
-    // states render `AppShell`'s empty state instead (see CLAUDE.md,
-    // `AppShell.editor`).
     let (note, scanned) = match launched {
         Launch::Nothing => (None, None),
         Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),
@@ -73,26 +50,16 @@ pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<Ap
     cx.new(|cx| AppShell::new(editor, notes, cx))
 }
 
-/// Reads whatever the argument names before the window opens.
-///
-/// Deliberately blocking: there is nothing to show until it succeeds, and a
-/// failure should exit rather than flash an empty window. Loads after this one
-/// go through `NoteStore::open_note`, on a background task.
+/// Deliberately blocking: a failure should exit rather than flash an empty window.
 fn launch() -> Result<Launch, String> {
-    // `args_os`, not `args`: the latter panics on an argument that is not valid
-    // UTF-8, and a path on Unix need not be. `RelPath::display_name`
-    // (`crates/vault/src/path.rs`) already treats such a name as renderable
-    // rather than fatal; aborting here would contradict it.
+    // `args_os`, not `args`: the latter panics on a non-UTF-8 path.
     let Some(argument) = std::env::args_os().nth(1) else {
         return Ok(Launch::Nothing);
     };
     let path = PathBuf::from(argument);
     if path.is_dir() {
-        // Read the root once before scanning it. `Vault::scan` skips a
-        // directory it cannot read rather than reporting it, so without this an
-        // unreadable vault opens an empty window instead of saying why — and
-        // an empty tree is a legitimate state for a vault with no notes in it,
-        // so the two are indistinguishable afterwards.
+        // `Vault::scan` skips an unreadable directory rather than
+        // reporting it; read it once here to say why instead.
         futures::executor::block_on(RealFs.read_dir(&path)).map_err(|error| format!("{error}"))?;
         return futures::executor::block_on(Vault::scan(&RealFs, &path))
             .map(Launch::Vault)
@@ -103,7 +70,6 @@ fn launch() -> Result<Launch, String> {
         .map_err(|error| format!("{error}"))
 }
 
-/// The binary's entry point. `main.rs` is a trampoline onto this.
 pub fn run() {
     gpui_platform::application().run(|cx: &mut App| {
         cx.bind_keys(key_bindings());

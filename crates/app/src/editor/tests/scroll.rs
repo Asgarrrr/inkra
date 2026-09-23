@@ -1,19 +1,10 @@
-//! Scroll geometry, reveal-on-move, and click-to-offset hit-testing.
-
 use gpui::TestAppContext;
 
 use super::{at, dispatching};
 use crate::editor::actions::Down;
 
-/// Scrolling is two builder calls on the view's `div`, and it fails silently
-/// if either comes undone — or if the flex parent shrinks `TextElement` back to
-/// the window instead of letting it overflow.
-///
-/// `max_offset` catches all three: it is written only for a tracked handle on a
-/// scrolling container, as `content_size - bounds` floored at zero
-/// (`gpui/elements/div.rs:2471-2483`). Non-zero therefore means the element
-/// really is taller than its viewport and the container really is scrolling it;
-/// the companion test below pins the zero case.
+/// `max_offset` is non-zero only for a tracked handle on a genuinely
+/// overflowing container, so it catches wiring, flex-shrink, and layout bugs alike.
 #[gpui::test]
 fn a_document_taller_than_the_window_has_room_to_scroll(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &"line\n".repeat(200));
@@ -41,36 +32,22 @@ fn a_document_that_fits_has_no_room_to_scroll(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The geometry the reveal tests assert against, spelled out once.
-///
-/// The test display is 1920x1080 (`gpui/platform/test/display.rs:16`) — not
-/// `DEFAULT_WINDOW_SIZE`, which is what a real window opens at and is 15px
-/// taller.
-///
-/// Written out rather than read back from the view: derived expectations would
-/// restate the implementation, so a change to the padding or the line height
-/// would pass quietly instead of failing here.
+/// Written out rather than read back from the view: a derived expectation
+/// would restate the implementation, so a padding or line-height regression would pass quietly.
 mod geometry {
     pub(super) const TEXT_TOP: f32 = 16.;
     pub(super) const LINE_HEIGHT: f32 = 28.;
     pub(super) const VIEWPORT: f32 = 1080.;
-    /// `MARGIN_LINES` from `scroll.rs`, in pixels. The viewport is far taller
-    /// than seven lines, so the clamp never binds in these tests.
     pub(super) const MARGIN: f32 = 3. * LINE_HEIGHT;
 
-    /// The offset at which line `n`'s bottom sits one margin above the
-    /// viewport's bottom — what revealing a line from above settles on.
     pub(super) fn offset_showing_from_below(n: f32) -> gpui::Pixels {
         gpui::px(VIEWPORT - MARGIN - (TEXT_TOP + LINE_HEIGHT * (n + 1.)))
     }
 
-    /// Line `n`'s top in window coordinates, at the given scroll offset.
     pub(super) fn top_of_line(n: f32, offset: gpui::Pixels) -> gpui::Pixels {
         gpui::px(TEXT_TOP + LINE_HEIGHT * n) + offset
     }
 
-    /// The line a click at window `y` lands on, at the given scroll offset —
-    /// the inverse of [`top_of_line`].
     pub(super) fn line_at(y: gpui::Pixels, offset: gpui::Pixels) -> usize {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let line = f32::from(y - offset - gpui::px(TEXT_TOP)) / LINE_HEIGHT;
@@ -79,22 +56,18 @@ mod geometry {
         line
     }
 
-    /// Whether line `n` is wholly inside the viewport at the given offset.
     pub(super) fn line_is_visible(n: f32, offset: gpui::Pixels) -> bool {
         let top = top_of_line(n, offset);
         top >= gpui::px(0.) && top + gpui::px(LINE_HEIGHT) <= gpui::px(VIEWPORT)
     }
 }
 
-/// Longer than the viewport by about five screens.
 const TALL: usize = 200;
 
 fn tall_document() -> String {
     "line\n".repeat(TALL)
 }
 
-/// The caret starts at the end of the buffer, so the first paint already has it
-/// off screen. Reaching the last line must bring it back.
 #[gpui::test]
 fn reaching_the_end_of_a_tall_document_scrolls_it_into_view(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -137,12 +110,8 @@ fn returning_to_the_start_scrolls_back_to_the_top(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// Nothing else here would notice the margin going missing: a reveal without
-/// one leaves the caret flush against the bottom edge and still satisfies every
-/// `line_is_visible` assertion.
-///
-/// The viewport holds lines 0 to 37 and the margin starts pushing from line 35,
-/// so line 40 is well past the edge.
+/// The exact offset is asserted, not just visibility: a reveal without a
+/// margin still satisfies `line_is_visible`, hiding the bug this catches.
 #[gpui::test]
 fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -164,10 +133,6 @@ fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext)
         .unwrap();
 }
 
-/// The assertion is the exact offset, not just "visible", because the margin is
-/// wide enough to hide an off-by-one from a bare visibility check. A reveal
-/// resolved against the layout of the previous frame would be exactly that: it
-/// has one line fewer. `edit_buffer` reshapes before revealing for this reason.
 #[gpui::test]
 fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -190,13 +155,9 @@ fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAp
         .unwrap();
 }
 
-/// Two moves inside one `update`, so only one frame is drawn — at the end.
-///
-/// This is the one test that falsifies deriving the text's unscrolled top on
-/// demand as `last_bounds.origin.y - scroll_handle.offset().y`. The second
-/// `down` runs against a `last_bounds` that predates the first one's
-/// `set_offset`, so that formula would subtract an offset those bounds never
-/// saw and scroll twice as far.
+/// Falsifies deriving the unscrolled top on demand as `last_bounds.origin.y -
+/// scroll_handle.offset().y`: the second move's `last_bounds` predates the
+/// first move's `set_offset`, so that formula would scroll twice as far.
 #[gpui::test]
 fn two_moves_before_a_repaint_scroll_once_each(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -225,9 +186,6 @@ fn two_moves_before_a_repaint_scroll_once_each(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// A real wheel event, not a `set_offset` standing in for one: the div installs
-/// its own handler whenever it scrolls (`paint_scroll_listener`), and it only
-/// fires for a position inside the hitbox, so this exercises hit-testing too.
 #[gpui::test]
 fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -249,8 +207,6 @@ fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
         })
         .unwrap();
 
-    // The caret never moved, so it is now above the viewport. Typing must
-    // bring it back, which is the reveal running upwards rather than down.
     cx.simulate_input("x");
     window
         .update(&mut cx, |view, _, _| {
@@ -259,8 +215,6 @@ fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// Extending a selection moves its head, and it is the head that has to stay on
-/// screen — the anchor is free to scroll away.
 #[gpui::test]
 fn extending_a_selection_reveals_its_head(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -282,10 +236,8 @@ fn extending_a_selection_reveals_its_head(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The shrink case gpui's own clamp cannot cover. Deleting at the very end
-/// keeps the caret pinned to the bottom by the clamp alone, whatever we do;
-/// deleting everything and undoing moves the caret's line index without the
-/// document's end moving under it, in both directions.
+/// The shrink case gpui's own clamp cannot cover: undoing moves the caret's
+/// line index without the document's end moving under it.
 #[gpui::test]
 fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -299,7 +251,6 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
         })
         .unwrap();
 
-    // Restores 200 lines above the caret, putting it far below the viewport.
     cx.simulate_keystrokes("cmd-z");
     window
         .update(&mut cx, |view, _, cx| {
@@ -316,13 +267,9 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
         .unwrap();
 }
 
-/// A click while scrolled is the one path where a coordinate-space mistake
-/// hides: `position_for_point` resolves against `last_bounds`, which is already
-/// scroll-translated, while the event's position is plain window space.
-///
-/// The offset must not move either. The clicked line is visible by definition,
-/// so a reveal that fired here would mean the geometry disagrees with the hit
-/// test about where that line is.
+/// `position_for_point` resolves against `last_bounds`, which is already
+/// scroll-translated, while the click event's position is plain window space
+/// — the one path where a coordinate-space mistake hides.
 #[gpui::test]
 fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -334,7 +281,6 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
         .unwrap();
     assert!(scrolled < gpui::px(0.));
 
-    // Mid-viewport, so the target is nowhere near either edge.
     let y = gpui::px(geometry::VIEWPORT / 2.);
     let expected = geometry::line_at(y, scrolled);
     cx.simulate_click(gpui::point(gpui::px(17.), y), gpui::Modifiers::none());
@@ -354,12 +300,8 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
         .unwrap();
 }
 
-/// Long lines wrap, so there is no horizontal scroll room and a reveal must
-/// never write an x.
-///
-/// Tall *and* wide on purpose: a wide document alone never scrolls, so the
-/// assertion would hold against an implementation that writes no offset at all.
-/// Being tall forces a real write, which is what proves it preserves x.
+/// Tall *and* wide on purpose: a wide-only document never scrolls, so the
+/// assertion would hold vacuously against an implementation that writes no offset at all.
 #[gpui::test]
 fn revealing_never_scrolls_horizontally(cx: &mut TestAppContext) {
     let wide_and_tall = format!("{}\n", "x".repeat(2000)).repeat(TALL);
@@ -383,10 +325,9 @@ fn revealing_never_scrolls_horizontally(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The editor's `p_4()` padding puts the element's origin at (16, 16), and
-/// `line_height` is 28, so line `n` occupies y in `[16 + 28n, 16 + 28(n+1))`.
-/// Aiming at the middle of a band rather than its edge keeps these from
-/// depending on which side of a boundary rounds where.
+/// `p_4()` padding puts the origin at (16, 16) with a 28px line height, so
+/// line `n` occupies y in `[16 + 28n, 16 + 28(n+1))`. Aim at the middle of the
+/// band, not its edge, so a boundary-rounding change doesn't break this.
 fn middle_of_line(line: f32) -> gpui::Pixels {
     gpui::px(16. + 28. * line + 14.)
 }
@@ -408,26 +349,20 @@ fn a_click_lands_on_the_line_it_points_at(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The mouse listeners sit on the view's `size_full()` div, not on the element,
-/// so a click in the empty space under a short document arrives with a y past
-/// the last row. Unclamped, that indexes off the end of the layout.
+/// A click below a short document arrives with a y past the last row;
+/// unclamped, that indexes off the end of the layout.
 #[gpui::test]
 fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "ab\ncd");
     cx.run_until_parked();
 
-    // Move off the target first. The caret starts at the end of the buffer,
-    // which is exactly where this click should land — without this the
-    // assertion would hold even if the click never arrived.
+    // Move off the target first, or the assertion would hold even if the click never arrived.
     cx.simulate_keystrokes("cmd-up");
     window
         .update(&mut cx, |view, _, _| assert_eq!(view.cursor(), at(0)))
         .unwrap();
 
-    // Row 5 of a two-line document, and right of the centred text column, so
-    // far to the right of any glyph. Kept inside the test window (1920x1080,
-    // `gpui/platform/test/display.rs:16`): a click outside it never hits the
-    // div's hitbox, so the handler would not run at all.
+    // Kept inside the 1920x1080 test window: a click outside it never hits the div's hitbox.
     cx.simulate_click(
         gpui::point(gpui::px(1800.), middle_of_line(5.)),
         gpui::Modifiers::none(),
@@ -441,9 +376,7 @@ fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// An edit reshapes in its gate, so geometry read before the next paint
-/// already describes the new text. Soft wrap depends on it: the row a
-/// keystroke puts the caret on is only known after shaping the new text.
+/// An edit reshapes in its gate, so geometry read before the next paint already describes the new text.
 #[gpui::test]
 fn an_edit_reshapes_before_the_next_paint(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "one");

@@ -1,5 +1,3 @@
-//! Which note the editor ends up showing, and that a keystroke reaches it.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,12 +17,6 @@ use crate::test_support::entry_id;
 
 use super::{activate, editor, open_vault, two_notes};
 
-/// The one regression this file exists to guard: the existing
-/// `simulate_keystrokes` tests in `editor/tests/` open a window with
-/// `EditorView` as the direct root, so they never exercise `AppShell` at
-/// all. Only this test opens the window the way `main.rs` actually does
-/// — through `AppShell` — and proves a keystroke still reaches the
-/// editor once it is no longer the window root.
 #[gpui::test]
 fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
@@ -48,9 +40,6 @@ fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// The one end-to-end test of the seam: a real click, through the
-/// subscription, into the editor. Nothing in `sidebar.rs` catches a
-/// subscription wired to the wrong entity, or left unbound.
 #[gpui::test]
 fn clicking_a_row_hands_its_buffer_to_the_editor(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -58,7 +47,6 @@ fn clicking_a_row_hands_its_buffer_to_the_editor(cx: &mut TestAppContext) {
 
     let (window, _sidebar, _notes) = open_vault(cx, fs as Arc<dyn Fs>);
     let mut visual = VisualTestContext::from_window(window.into(), cx);
-    // Vertical middle of the first row, past its `pl`.
     visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
     visual.run_until_parked();
 
@@ -67,17 +55,12 @@ fn clicking_a_row_hands_its_buffer_to_the_editor(cx: &mut TestAppContext) {
     });
 }
 
-/// A `current` the editor disagrees with saves *nothing*: the note it picks
-/// is clean, so `⌘S` returns early and the dirty note stays dirty, silently.
-/// Deterministic under the randomizing test scheduler
-/// (`vendor/zed-reference/crates/scheduler/src/test_scheduler.rs:641-643`)
-/// because only one load is in flight and the gate decides when it lands.
+/// A `current` the editor disagrees with saves nothing: `⌘S` returns early on the clean note.
 #[gpui::test]
 fn an_abandoned_load_does_not_supersede_a_later_activation(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (window, sidebar, notes, a, b) = two_notes(cx, &fs);
 
-    // Opened up front so the activation below takes the already-open path.
     activate(&sidebar, cx, a);
     cx.run_until_parked();
 
@@ -107,9 +90,6 @@ fn an_abandoned_load_does_not_supersede_a_later_activation(cx: &mut TestAppConte
     });
 }
 
-/// The gates release in the opposite order to the activations: against the
-/// unfixed code both loads land and the last wins. Against the fixed code
-/// activating `b` tears `a`'s whole chain down, so the order stops mattering.
 #[gpui::test]
 fn the_current_note_is_the_one_in_the_editor(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -144,23 +124,18 @@ fn the_current_note_is_the_one_in_the_editor(cx: &mut TestAppContext) {
     );
 }
 
-/// Even with no load to cancel, the rebind is one turn late; `⌘S` in that
-/// turn silently writes nothing. Hence `set_current` after the bind.
-///
-/// The emit hop costs no turn: the subscriber runs when the outermost
-/// update flushes, so `activate` returns with the task spawned but unpolled.
+/// The rebind is one turn late; `⌘S` in that turn silently writes nothing.
 #[gpui::test]
 fn an_activation_records_the_note_only_once_the_editor_holds_it(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (window, sidebar, notes, a, b) = two_notes(cx, &fs);
 
-    // Both opened, so the third activation takes the already-open path.
     activate(&sidebar, cx, a);
     cx.run_until_parked();
     activate(&sidebar, cx, b);
     cx.run_until_parked();
 
-    // Deliberately not parked: this is the turn `⌘S` can land in.
+    // Not parked: this is the turn `⌘S` can land in.
     activate(&sidebar, cx, a);
 
     assert_eq!(
@@ -179,11 +154,7 @@ fn an_activation_records_the_note_only_once_the_editor_holds_it(cx: &mut TestApp
     });
 }
 
-/// The whole reason this change is not four lines of `div`. The editor does
-/// not exist when the window opens, so something has to move focus to it
-/// when it appears. Nothing else can: `EditorView` takes keystrokes through
-/// `track_focus`, called from its own `Render::render`, so an editor that is
-/// built and rendered but never focused swallows every one of them.
+/// An editor built but never focused swallows every keystroke via `track_focus`.
 #[gpui::test]
 fn typing_reaches_a_note_opened_after_launch(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
@@ -208,15 +179,8 @@ fn typing_reaches_a_note_opened_after_launch(cx: &mut TestAppContext) {
     });
 }
 
-/// Guards `AppShell`'s `track_focus` — see `shell.rs`'s `render` for why
-/// its absence would swallow `cmd-s` with no note open.
-///
-/// Asserts reachability, not an effect, deliberately: `save_current`
-/// returns at its `None` guard whether or not it was called, so "no panic
-/// and no write" is true either way. `is_action_available`
-/// (`window.rs:3187-3193`) asks the dispatch tree directly, reading the
-/// *rendered* frame — which exists here because `open_window` draws once
-/// before returning (`app.rs:1363-1368`).
+/// Asserts reachability, not an effect: `save_current`'s `None` guard makes
+/// "no panic and no write" true whether or not it was reached at all.
 #[gpui::test]
 fn the_save_action_reaches_the_shell_with_no_note_open(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
@@ -238,14 +202,11 @@ fn the_save_action_reaches_the_shell_with_no_note_open(cx: &mut TestAppContext) 
         "`cmd-s` cannot reach `AppShell::save` from the empty state"
     );
 
-    // And it does not panic on the way through.
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.simulate_keystrokes("cmd-s");
     visual.run_until_parked();
 }
 
-/// The transition, in one test: the empty state is what an activation
-/// replaces, and it replaces it with the note that was activated.
 #[gpui::test]
 fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -266,15 +227,7 @@ fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     });
 }
 
-/// The hole this change closes — see CLAUDE.md on `AppShell.editor` — and
-/// the only test that guards it: every other test here builds `AppShell` by
-/// hand with its own `None`, so only this test, which calls `root`, would
-/// notice a regression to an unconditional editor.
-///
-/// It asserts the absence of an editor rather than the presence of the
-/// empty state: `check.sh` renders nothing, so "the text was drawn" is not
-/// a claim a `#[gpui::test]` can make. The `empty-no-vault` shot is that
-/// check.
+/// The only test using `root`, so the only one that would catch a regression to an unconditional editor.
 #[gpui::test]
 fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -296,10 +249,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
         ),
     ] {
         let fs = Arc::clone(&fs) as Arc<dyn Fs>;
-        // `App::open_window`, not `cx.add_window`: the test helpers all
-        // build the root view themselves, and `root` hands back an already
-        // built `Entity<AppShell>` — which is the shape `open_window`'s
-        // builder takes and theirs do not.
+        // `open_window`, not `add_window`: `root` hands back an already-built `Entity<AppShell>`.
         let window = cx
             .update(|cx| {
                 let bounds = Bounds::maximized(None, cx);

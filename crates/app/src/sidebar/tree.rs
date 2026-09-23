@@ -4,16 +4,14 @@ use inkra_vault::{EntryId, Kind};
 use super::{Row, SelectNext, SelectPrev, Sidebar};
 
 impl Sidebar {
-    /// `RelPath::starts_with` is component-wise, so the skip past a collapsed
+    /// `RelPath::starts_with` is component-wise, so skipping a collapsed
     /// directory never swallows the sibling `Projects.md`.
     pub(super) fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.visible.clear();
         let Some(vault) = self.notes.read(cx).vault().cloned() else {
-            // Unreachable today: the vault is fixed at construction.
             cx.notify();
             return;
         };
-        // Collected, not iterated: the walk borrows `cx`, which `notify` needs.
         let entries: Vec<_> = vault.read(cx).entries().cloned().collect();
 
         let mut i = 0;
@@ -32,15 +30,8 @@ impl Sidebar {
                 }
             }
         }
-        // A field open across this walk has to end up on a row the list still
-        // draws: an unrendered row is in no dispatch node, so gpui falls back
-        // to the root (`window.rs:6244-6251`), silently swallowing every
-        // keystroke, `escape` included.
-        //
-        // A rename follows its row by identity, so a walk that reordered the
-        // tree keeps the field over the entry it names, and a target deleted
-        // from outside ends the gesture. A create has no target and only needs
-        // its index to stay in range.
+        // The field must end up on a row the list still draws: an unrendered
+        // row is in no dispatch node, so gpui silently swallows every keystroke.
         if let Some(target) = self.editing.as_ref().map(|edit| edit.target) {
             let at = match target {
                 Some(id) => self.index_of(id),
@@ -67,8 +58,6 @@ impl Sidebar {
         self.rebuild(cx);
     }
 
-    /// Expansion is the sidebar's own state; where a note opens is
-    /// `AppShell`'s (see `NoteActivated`).
     pub(super) fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
         self.selected = Some(row.id);
         if row.kind == Kind::Dir {
@@ -78,16 +67,9 @@ impl Sidebar {
         cx.emit(super::NoteActivated(row.id));
     }
 
-    /// Moves the selection by one visible row, clamped at both ends rather than
-    /// wrapping: a tree that jumps from the last note back to the first loses
-    /// the user's place.
-    ///
-    /// Does nothing while a name is being typed. The field is a child of this
-    /// view's dispatch node and claims neither arrow, so without the guard the
-    /// key bubbles up here and moves the selection out from under the gesture
-    /// in flight. `trash` and `rename` carry the same guard, and `cmd-backspace`
-    /// is the one that bites: it is the macOS delete-to-line-start gesture, so
-    /// a user correcting a name would be asked whether to delete the row.
+    /// Guarded while a name is typed, or an arrow key bubbles up and moves
+    /// the selection out from under the field. `trash` and `rename` carry
+    /// the same guard.
     fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
         if self.editing.is_some() || self.visible.is_empty() {
             return;
@@ -95,7 +77,6 @@ impl Sidebar {
         let last = self.visible.len() - 1;
         let next = match self.selected.and_then(|id| self.index_of(id)) {
             Some(index) => index.saturating_add_signed(delta).min(last),
-            // Nothing selected: down starts at the top, up at the bottom.
             None if delta > 0 => 0,
             None => last,
         };
@@ -107,9 +88,7 @@ impl Sidebar {
         self.visible.iter().position(|row| row.id == id)
     }
 
-    /// Where the selection lands once `id` is gone: the next row, else the one
-    /// before it, else nothing. Computed before the delete, because afterwards
-    /// the row it is relative to no longer exists.
+    /// Must be computed before the delete: afterwards, `id`'s row no longer exists.
     pub(super) fn after_deleting(&self, id: EntryId) -> Option<EntryId> {
         let index = self.index_of(id)?;
         self.visible
@@ -122,8 +101,6 @@ impl Sidebar {
             .map(|row| row.id)
     }
 
-    /// The folder a row lives in: the nearest entry above it one level shallower.
-    /// `None` for a top-level row, which is the vault root.
     pub(super) fn parent_of(&self, row: &Row) -> Option<EntryId> {
         if row.depth == 0 {
             return None;
@@ -153,16 +130,12 @@ impl Sidebar {
         self.step(1, cx);
     }
 
-    /// One row per visible entry, plus the field's when a name is being typed.
-    ///
-    /// The field occupies an index of its own rather than replacing a row, so
-    /// creating never hides the entry it was started from.
+    /// A create occupies an index of its own; a rename replaces its row —
+    /// otherwise renaming would show the old name and the field at once.
     pub(super) fn row_at(&self, ix: usize) -> Option<Row> {
         let Some(edit) = self.editing.as_ref() else {
             return self.visible.get(ix).cloned();
         };
-        // A rename replaces its row; a create inserts one. Otherwise renaming
-        // would show the old name and the field for one entry at once.
         if edit.target.is_some() {
             return (ix != edit.at)
                 .then(|| self.visible.get(ix).cloned())
@@ -175,10 +148,7 @@ impl Sidebar {
         }
     }
 
-    /// How many rows the list draws: the tree, plus one for a field that is
-    /// inserting rather than replacing.
-    /// `pub(crate)` for the rename test in `shell.rs`, which asserts the count
-    /// does not move: a rename replaces its row rather than adding one.
+    /// `pub(crate)` for the rename test in `shell.rs`, which asserts the count does not move.
     pub(crate) fn row_count(&self) -> usize {
         let inserting = self
             .editing

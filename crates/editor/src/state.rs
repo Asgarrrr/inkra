@@ -1,10 +1,3 @@
-//! Editing as a gesture: what a keystroke, a movement or a delete does to the
-//! text and the caret.
-//!
-//! Everything here is resolvable without metrics. A movement that needs to know
-//! how tall a line is — up, down, a click — stops at `LogicalMovement` and is
-//! finished in `app`, which is the layer that has a font.
-
 use std::ops::Range;
 use std::time::Instant;
 
@@ -12,14 +5,6 @@ use inkra_text::{Buffer, ByteOffset};
 
 use crate::selection::{Goal, Selection};
 
-/// Movements resolvable from the text alone.
-///
-/// Up, down and click-to-offset are deliberately absent: they need font
-/// metrics, so they are resolved in the layer that has them and arrive here as
-/// [`EditorState::move_to`]. [`LogicalMovement::LineStart`] and `LineEnd` are
-/// *logical* line ends. The visible ends of a wrapped row need the layout, so
-/// Home and End resolve them in `app` and arrive as `move_to`; these remain
-/// for the paragraph moves and for a field, which never wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalMovement {
     Left,
@@ -36,30 +21,12 @@ enum Direction {
     Forward,
 }
 
-/// What a copy took, and how a paste of it should land.
-///
-/// `whole_line` is carried rather than inferred from the text. Plenty of
-/// ordinary clipboard content ends in a newline — a whole file, a command's
-/// output, a paragraph from a web page — and none of it should be inserted
-/// above the caret's line. The flag records how the text was *selected*, which
-/// no inspection of the text can recover.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Copied {
     pub text: String,
-    /// The copy was a whole line: `text` ends with `\n`, and pasting it at a
-    /// bare caret inserts a line above rather than splitting the current one.
     pub whole_line: bool,
 }
 
-/// One view's editing state over a buffer it does not own.
-///
-/// The buffer arrives per operation rather than being held, because a note
-/// open in two panes is one buffer and two of these. Two panes are not yet
-/// correct (see CLAUDE.md): a second view's offsets rot when the first
-/// edits.
-///
-/// Nothing here reads a clock. The caller supplies `now`, for the same reason
-/// [`Buffer::transact_at`] does.
 #[derive(Debug, Clone)]
 pub struct EditorState {
     selection: Selection,
@@ -85,7 +52,6 @@ impl EditorState {
         self.selection.head()
     }
 
-    /// The region the input method is composing into, if any.
     #[must_use]
     pub fn marked_range(&self) -> Option<Range<ByteOffset>> {
         self.marked_range.clone()
@@ -95,12 +61,7 @@ impl EditorState {
         self.marked_range = range;
     }
 
-    /// Every buffer mutation goes through here, so one user gesture is one undo
-    /// step even when it deletes and inserts, and a continuous typing run
-    /// collapses into a single step.
-    ///
-    /// Clears the composing region: any edit invalidates it. A caller that is
-    /// itself mid-composition sets the new region afterwards.
+    /// Every buffer mutation goes through here: one gesture is one undo step, and the composing region clears.
     pub fn edit(
         &mut self,
         buffer: &mut Buffer,
@@ -110,27 +71,17 @@ impl EditorState {
     ) {
         let start = range.start;
         buffer.transact_at(now, |buffer| buffer.replace(range, text));
-        // The goal goes with the composing region: an edit moves the text under
-        // the caret, so a column remembered before it no longer describes it.
+        // An edit moves the text under the caret, so a remembered column no longer describes it.
         self.selection
             .collapse_to(ByteOffset(start.0 + text.len()), Goal::None);
         self.marked_range = None;
     }
 
-    /// Replaces the selection with `text`, or inserts at the caret when there is
-    /// none — what typing a character does, and what pasting will do.
     pub fn insert(&mut self, buffer: &mut Buffer, now: Instant, text: &str) {
         let range = self.selection.range();
         self.edit(buffer, now, range, text);
     }
 
-    /// The range a platform input-method edit applies to, in the protocol's own
-    /// order of precedence: an explicit range, else the composing region, else
-    /// the selection.
-    ///
-    /// Here rather than at the gpui edge because it reads only a `Buffer` and a
-    /// selection. Two views speak this protocol, and a second copy of the
-    /// precedence rule is a second thing to get wrong.
     #[must_use]
     pub fn target_range(
         &self,
@@ -143,8 +94,6 @@ impl EditorState {
             .unwrap_or_else(|| self.selection.range())
     }
 
-    /// Applies an input-method edit that carries no composing region — a
-    /// committed character, or a paste from the platform.
     pub fn replace_in_range(
         &mut self,
         buffer: &mut Buffer,
@@ -156,14 +105,7 @@ impl EditorState {
         self.edit(buffer, now, range, text);
     }
 
-    /// The same, for text still being composed: a dead key waiting for its base
-    /// letter, or an IME's provisional reading.
-    ///
-    /// `selected_utf16` is where the input method wants the caret, **relative to
-    /// the text it just inserted**. It is rebased while still in UTF-16 and
-    /// converted once: converting first would resolve it against the whole
-    /// buffer, and adding the insertion point afterwards would count the offset
-    /// twice.
+    /// `selected_utf16` is rebased in UTF-16 before converting once; converting first would double-count it.
     pub fn mark_and_replace_in_range(
         &mut self,
         buffer: &mut Buffer,
@@ -176,9 +118,6 @@ impl EditorState {
         let start = range.start;
         self.edit(buffer, now, range, text);
 
-        // `edit` clears the composing region, so this reinstates it over what
-        // was just inserted. Empty text ends the composition rather than
-        // marking a zero-width region.
         self.set_marked_range((!text.is_empty()).then(|| start..ByteOffset(start.0 + text.len())));
 
         if let Some(selected) = selected_utf16 {
@@ -188,22 +127,17 @@ impl EditorState {
         }
     }
 
-    /// What `⌘C` takes. Reads only: a copy owes no repaint and must not mark
-    /// the note dirty.
+    /// What `⌘C` takes. Read-only: a copy must not repaint or mark the note dirty.
     #[must_use]
     pub fn copy(&self, buffer: &Buffer) -> Copied {
         self.target(buffer).1
     }
 
-    /// [`EditorState::copy`], then removes what it took.
-    ///
-    /// Sealed on both sides, like [`EditorState::paste`]: a cut is a gesture of
-    /// its own and must not swallow the typing around it.
+    /// `copy`, then removes what it took; sealed on both sides so it can't swallow adjacent typing.
     pub fn cut(&mut self, buffer: &mut Buffer, now: Instant) -> Copied {
         let (range, copied) = self.target(buffer);
-        // An empty range is the empty last line: there is a line to copy but no
-        // byte to remove. Editing anyway would leave `grouping_blocked` set by
-        // a transaction that never lands.
+        // An empty range is the empty last line: nothing to remove, so skip the edit — otherwise
+        // `grouping_blocked` is set by a transaction that never lands.
         if !range.is_empty() {
             buffer.finalize_transaction();
             self.edit(buffer, now, range, "");
@@ -212,16 +146,10 @@ impl EditorState {
         copied
     }
 
-    /// What `⌘V` does.
-    ///
-    /// Finalizing on *both* sides is load-bearing. [`Buffer::close`] clears the
-    /// flag the moment it pushes a transaction, so sealing only beforehand
-    /// leaves the next keystroke free to merge into the paste. Zed avoids this
-    /// by pasting through the ungrouped `Buffer::transact`; every mutation here
-    /// carries a `now` and groups.
+    /// Finalizing on *both* sides is load-bearing: `close` clears the flag on push, so sealing
+    /// only beforehand leaves the next keystroke free to merge into the paste.
     pub fn paste(&mut self, buffer: &mut Buffer, now: Instant, copied: &Copied) {
-        // Before the seal, not after: a paste of nothing must leave the
-        // surrounding typing run intact rather than splitting it in two.
+        // Before the seal: a paste of nothing must not split the surrounding typing run.
         if copied.text.is_empty() {
             return;
         }
@@ -231,9 +159,7 @@ impl EditorState {
             let caret = self.cursor();
             let start = self.line(buffer).start;
             self.edit(buffer, now, start..start, &copied.text);
-            // The insertion sits entirely before the caret, so the caret keeps
-            // its column on the line that moved down. `edit` would have left it
-            // at the start of that line instead.
+            // The insertion sits before the caret, so it keeps its column; `edit` alone would reset it to line start.
             self.selection
                 .collapse_to(ByteOffset(caret.0 + copied.text.len()), Goal::None);
         } else {
@@ -242,13 +168,8 @@ impl EditorState {
         buffer.finalize_transaction();
     }
 
-    /// The range a copy or a cut acts on, and what it puts on the clipboard.
-    ///
-    /// The two differ only on a last line with no terminator: the range stops
-    /// at the end of the text, while the text gains the `\n` the line does not
-    /// have — unlike Zed, whose cut copies exactly the removed bytes. This
-    /// guarantees a whole-line item is a whole line wherever it lands, at the
-    /// cost of adding a terminator when the cut is pasted straight back.
+    /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a
+    /// whole-line item is always a whole line, even pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
         if !self.selection.is_empty() {
             let range = self.selection.range();
@@ -263,8 +184,7 @@ impl EditorState {
         }
 
         let line = self.line(buffer);
-        // `line_range` stops before the newline, so anything left after it is
-        // one, and there is exactly one byte of it.
+        // `line_range` stops before the newline, so at most one terminator byte follows it.
         let terminated = line.end < buffer.len();
         let end = if terminated {
             ByteOffset(line.end.0 + 1)
@@ -293,8 +213,6 @@ impl EditorState {
         self.remove(buffer, now, Direction::Forward);
     }
 
-    /// Backspace and delete differ only in which way an empty selection
-    /// reaches for a grapheme.
     fn remove(&mut self, buffer: &mut Buffer, now: Instant, direction: Direction) {
         let range = if self.selection.is_empty() {
             let cursor = self.cursor();
@@ -312,16 +230,13 @@ impl EditorState {
     }
 
     pub fn move_(&mut self, buffer: &Buffer, movement: LogicalMovement, extend: bool) {
-        // Collapsing a selection with a bare arrow lands on the edge you moved
-        // towards; extending always steps from the moving end.
         let collapsing = !extend && !self.selection.is_empty();
         let target = match movement {
             LogicalMovement::Left if collapsing => self.selection.start(),
             LogicalMovement::Right if collapsing => self.selection.end(),
             LogicalMovement::Left => buffer.previous_grapheme(self.cursor()),
             LogicalMovement::Right => buffer.next_grapheme(self.cursor()),
-            // From the head, so Home after a shift-selection lands on the line
-            // the caret is on rather than the one the anchor is on.
+            // From the head, so Home after a shift-selection lands on the caret's line, not the anchor's.
             LogicalMovement::LineStart => self.line(buffer).start,
             LogicalMovement::LineEnd => self.line(buffer).end,
             LogicalMovement::DocStart => ByteOffset(0),
@@ -330,23 +245,15 @@ impl EditorState {
         self.move_to(buffer, target, extend);
     }
 
-    /// The logical line the caret is on, excluding its terminating newline.
     fn line(&self, buffer: &Buffer) -> Range<ByteOffset> {
         buffer.line_range(buffer.line_for_offset(self.cursor()))
     }
 
-    /// The entry point for movements resolved elsewhere — a mouse click, or a
-    /// wrap-aware line end once soft wrap exists.
-    ///
-    /// Clears the goal column. Anything that must keep one is a vertical move
-    /// and uses [`EditorState::move_vertically`].
+    /// Clears the goal column; a vertical move that must keep one uses `move_vertically` instead.
     pub fn move_to(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool) {
         self.place(buffer, offset, extend, Goal::None);
     }
 
-    /// Up and down. They need font metrics, so the caller resolves both the
-    /// target offset and the column to remember; this is the one entry point
-    /// that carries a goal through instead of dropping it.
     pub fn move_vertically(
         &mut self,
         buffer: &Buffer,
@@ -370,12 +277,7 @@ impl EditorState {
         self.selection = Selection::new(ByteOffset(0)..buffer.len(), false);
     }
 
-    /// Returns whether anything was undone.
-    ///
-    /// Not a repaint gate: the app's mutation path notifies unconditionally,
-    /// which costs a wasted frame on an empty history and buys a repaint that
-    /// cannot be forgotten. The bool distinguishes "nothing to undo" from a
-    /// real undo for callers that need to tell them apart.
+    /// Not a repaint gate: the app notifies unconditionally regardless; the bool only tells callers apart.
     pub fn undo(&mut self, buffer: &mut Buffer) -> bool {
         let Some(range) = buffer.undo() else {
             return false;
@@ -384,7 +286,6 @@ impl EditorState {
         true
     }
 
-    /// Returns whether anything was redone.
     pub fn redo(&mut self, buffer: &mut Buffer) -> bool {
         let Some(range) = buffer.redo() else {
             return false;
@@ -393,8 +294,7 @@ impl EditorState {
         true
     }
 
-    /// Places the cursor on text that just moved under it, and drops a
-    /// composing region that no longer describes anything.
+    /// Places the cursor on text that moved under it, and drops a composing region that no longer applies.
     fn settle_on(&mut self, buffer: &Buffer, offset: ByteOffset) {
         self.selection.collapse_to(buffer.clip(offset), Goal::None);
         self.marked_range = None;

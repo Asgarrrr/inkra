@@ -1,12 +1,3 @@
-//! Action declarations and their handlers.
-//!
-//! Each handler is a thin delegation to `inkra-editor` through one of
-//! `EditorView`'s gates — except [`EditorView::copy`], which goes through none
-//! of them because it reads. Keeping them thin is the point: the logic they
-//! call is tested without a window, and they are covered end to end by the
-//! dispatch tests, which drive real keystrokes rather than calling these
-//! functions directly.
-
 use std::time::Instant;
 
 use gpui::{ClipboardItem, Context, Window, actions};
@@ -43,13 +34,8 @@ actions!(
     ]
 );
 
-/// The metadata a whole-line copy carries beside its text.
-///
-/// gpui writes it to a macOS pasteboard type it hard-codes as `zed-metadata`
-/// (`gpui_macos/src/pasteboard.rs:48`), which Zed itself fills with JSON. So
-/// the read side matches this exact string and treats anything else — Zed's
-/// `[{"len":…}]` included — as an ordinary span. Guessing at a foreign format
-/// would be worse than ignoring it.
+/// The metadata a whole-line copy carries, matching gpui's pasteboard type
+/// (`zed-metadata`); anything else, Zed's own JSON included, reads as an ordinary span.
 const WHOLE_LINE: &str = "line";
 
 fn to_clipboard(copied: Copied) -> ClipboardItem {
@@ -60,10 +46,8 @@ fn to_clipboard(copied: Copied) -> ClipboardItem {
     }
 }
 
-/// `None` when there is nothing to paste — no string entry, or an empty one.
-/// Both must stop before the buffer is touched: `EditorState::paste` seals the
-/// transaction around its edit, and sealing around an edit that never lands
-/// would split the surrounding typing run into two undo steps.
+/// `None` when there's nothing to paste. Both must stop before the buffer is
+/// touched: sealing a transaction around an edit that never lands splits the typing run.
 fn from_clipboard(item: &ClipboardItem) -> Option<Copied> {
     let text = inkra_vault::normalize_line_endings(&item.text()?);
     if text.is_empty() {
@@ -82,10 +66,8 @@ impl EditorView {
         self.edit_buffer(window, cx, |state, buffer| state.backspace(buffer, now));
     }
 
-    /// The one action that takes no gate. A copy changes neither the text nor
-    /// the view, so it owes no repaint; `edit_buffer`'s `as_mut` notifies
-    /// unconditionally (`gpui/src/app.rs:3280-3286`), which would schedule an
-    /// autosave for a keystroke that changed nothing.
+    /// The one action taking no gate: `edit_buffer`'s `as_mut` notifies
+    /// unconditionally, which would schedule an autosave for a keystroke that changed nothing.
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         let copied = self.state.copy(self.buffer.read(cx));
         cx.write_to_clipboard(to_clipboard(copied));
