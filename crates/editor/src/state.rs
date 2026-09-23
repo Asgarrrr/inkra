@@ -17,8 +17,9 @@ use crate::selection::{Goal, Selection};
 /// Up, down and click-to-offset are deliberately absent: they need font
 /// metrics, so they are resolved in the layer that has them and arrive here as
 /// [`EditorState::move_to`]. [`LogicalMovement::LineStart`] and `LineEnd` are
-/// *logical* line ends — with soft wrap they would stop matching the visible
-/// ends of a wrapped row, and would move up here too.
+/// *logical* line ends. The visible ends of a wrapped row need the layout, so
+/// Home and End resolve them in `app` and arrive as `move_to`; these remain
+/// for the paragraph moves and for a field, which never wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalMovement {
     Left,

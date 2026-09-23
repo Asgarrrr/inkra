@@ -17,6 +17,7 @@ inkra-editor = { path = "crates/editor" }
 inkra-vault = { path = "crates/vault" }
 proptest = "1"
 futures = "0.3"
+unicode-segmentation = "1.13"
 # Default features add `rayon` (parallel bootstrap resampling) and `plotters`
 # (SVG chart rendering for HTML reports) — neither has a consumer here: no
 # baseline is committed and no report is ever opened. `cargo_bench_support` is

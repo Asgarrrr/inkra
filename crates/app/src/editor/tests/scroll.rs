@@ -166,8 +166,8 @@ fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext)
 
 /// The assertion is the exact offset, not just "visible", because the margin is
 /// wide enough to hide an off-by-one from a bare visibility check. A reveal
-/// taking the line index from `DocumentLayout` rather than the buffer would be
-/// exactly that: it describes the previous frame, which has one line fewer.
+/// resolved against the layout of the previous frame would be exactly that: it
+/// has one line fewer. `edit_buffer` reshapes before revealing for this reason.
 #[gpui::test]
 fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &tall_document());
@@ -354,9 +354,8 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
         .unwrap();
 }
 
-/// Horizontal scrolling is deliberately out of scope, and the caret going off
-/// the right edge of a long line is a known gap. This fails if a later change
-/// wires up the x axis without the width measurement it needs.
+/// Long lines wrap, so there is no horizontal scroll room and a reveal must
+/// never write an x.
 ///
 /// Tall *and* wide on purpose: a wide document alone never scrolls, so the
 /// assertion would hold against an implementation that writes no offset at all.
@@ -375,6 +374,11 @@ fn revealing_never_scrolls_horizontally(cx: &mut TestAppContext) {
                 "the document did not scroll vertically, so x was never written"
             );
             assert_eq!(view.scroll_handle.offset().x, gpui::px(0.));
+            assert_eq!(
+                view.scroll_handle.max_offset().x,
+                gpui::px(0.),
+                "a line overflowed"
+            );
         })
         .unwrap();
 }
@@ -420,12 +424,12 @@ fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
         .update(&mut cx, |view, _, _| assert_eq!(view.cursor(), at(0)))
         .unwrap();
 
-    // Row 5 of a two-line document, and far to the right of any glyph. Kept
-    // inside the test window (1920x1080, `gpui/platform/test/display.rs:16`):
-    // a click outside it never hits the div's hitbox, so the handler would
-    // not run at all.
+    // Row 5 of a two-line document, and right of the centred text column, so
+    // far to the right of any glyph. Kept inside the test window (1920x1080,
+    // `gpui/platform/test/display.rs:16`): a click outside it never hits the
+    // div's hitbox, so the handler would not run at all.
     cx.simulate_click(
-        gpui::point(gpui::px(400.), middle_of_line(5.)),
+        gpui::point(gpui::px(1800.), middle_of_line(5.)),
         gpui::Modifiers::none(),
     );
     window
@@ -433,6 +437,27 @@ fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
             let buffer = view.buffer.read(cx);
             assert_eq!(buffer.line_for_offset(view.cursor()), 1);
             assert_eq!(view.cursor(), buffer.len());
+        })
+        .unwrap();
+}
+
+/// An edit reshapes in its gate, so geometry read before the next paint
+/// already describes the new text. Soft wrap depends on it: the row a
+/// keystroke puts the caret on is only known after shaping the new text.
+#[gpui::test]
+fn an_edit_reshapes_before_the_next_paint(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "one");
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |view, window, cx| {
+            assert_eq!(view.last_layout.as_ref().unwrap().row_count(), 1);
+            view.newline(&crate::editor::actions::Newline, window, cx);
+            assert_eq!(
+                view.last_layout.as_ref().unwrap().row_count(),
+                2,
+                "the layout must describe the text the edit left, not the painted one"
+            );
         })
         .unwrap();
 }

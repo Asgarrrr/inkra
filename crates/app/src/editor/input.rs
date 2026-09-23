@@ -57,11 +57,11 @@ impl EntityInputHandler for EditorView {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| {
+        self.edit_buffer(window, cx, |state, buffer| {
             state.replace_in_range(buffer, now, range_utf16.as_ref(), new_text);
         });
     }
@@ -71,11 +71,11 @@ impl EntityInputHandler for EditorView {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range_utf16: Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let now = Instant::now();
-        self.edit_buffer(cx, |state, buffer| {
+        self.edit_buffer(window, cx, |state, buffer| {
             state.mark_and_replace_in_range(
                 buffer,
                 now,

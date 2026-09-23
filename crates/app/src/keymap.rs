@@ -11,8 +11,9 @@ use gpui::KeyBinding;
 
 use crate::Quit;
 use crate::editor::actions::{
-    Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, Home, Left, Newline, Paste, Redo,
-    Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo, Up,
+    Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, Home, Left, LineEnd, LineStart,
+    Newline, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo,
+    Up,
 };
 use crate::field::{Cancel, Confirm};
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
@@ -33,10 +34,17 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-up", SelectUp, editor),
         KeyBinding::new("shift-down", SelectDown, editor),
         KeyBinding::new("cmd-a", SelectAll, editor),
+        // The visual row's ends: macOS puts them on cmd-left/cmd-right, and
+        // most Mac keyboards have no Home or End key.
         KeyBinding::new("home", Home, editor),
         KeyBinding::new("end", End, editor),
-        // macOS text views put the document ends on cmd-up/cmd-down and leave
-        // home/end line-relative.
+        KeyBinding::new("cmd-left", Home, editor),
+        KeyBinding::new("cmd-right", End, editor),
+        // The logical line, which NSTextView calls the paragraph. The only
+        // keys that reach the end of a wrapped one.
+        KeyBinding::new("ctrl-a", LineStart, editor),
+        KeyBinding::new("ctrl-e", LineEnd, editor),
+        // macOS text views put the document ends on cmd-up/cmd-down.
         KeyBinding::new("cmd-up", DocStart, editor),
         KeyBinding::new("cmd-down", DocEnd, editor),
         KeyBinding::new("enter", Newline, editor),
@@ -70,6 +78,12 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-right", SelectRight, field),
         KeyBinding::new("home", Home, field),
         KeyBinding::new("end", End, field),
+        KeyBinding::new("cmd-left", Home, field),
+        KeyBinding::new("cmd-right", End, field),
+        // A field never wraps, so its line is its row: the paragraph moves are
+        // Home and End here.
+        KeyBinding::new("ctrl-a", Home, field),
+        KeyBinding::new("ctrl-e", End, field),
         KeyBinding::new("cmd-a", SelectAll, field),
         // Scoped to `AppShell` rather than `Sidebar`, so they fire with the
         // editor focused: making a note is a window-wide gesture, not a tree

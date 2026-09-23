@@ -19,6 +19,7 @@ mod dispatch;
 mod protocol;
 mod scroll;
 mod swap;
+mod wrap;
 
 /// Drives the entity through a headless window, the only way to reach
 /// `EntityInputHandler`, whose methods all require a `Window`.

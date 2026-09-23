@@ -18,7 +18,7 @@ area, not on every task:
   protocol traps, why `uniform_list` was not adopted.
 - [docs/roadmap.md](./docs/roadmap.md) — the work deliberately left out, the
   trigger that brings each item back, and what it is estimated to cost. Read it
-  before starting soft wrap, virtualization, CRLF or multi-cursor; each was
+  before starting virtualization, CRLF or multi-cursor; each was
   deferred for a reason recorded there.
 - [docs/gpui-accessibility.md](./docs/gpui-accessibility.md) — why we build
   Zed's in-tree gpui rather than the published crate, and the accessibility gap
@@ -45,6 +45,11 @@ area, not on every task:
   example carries `required-features`. Read it before touching `shot/`, the
   crate's target layout, or `bootstrap::root`. Its "What is shared, and what is
   only mirrored" section is where a first draft's claim was demonstrated wrong.
+- [docs/superpowers/specs/2026-09-23-soft-wrap-design.md](./docs/superpowers/specs/2026-09-23-soft-wrap-design.md)
+  — why an offset at a wrap belongs to the next row and the caret carries no
+  affinity, why the height is measured rather than counted, why only
+  `edit_buffer` reshapes, and the macOS line-end conventions it deviates from.
+  Read it before touching `DocumentLayout` or `TextElement`'s layout.
 - [docs/superpowers/specs/2026-09-20-modular-architecture-design.md](./docs/superpowers/specs/2026-09-20-modular-architecture-design.md)
   — the crate split, what multi-pane and markdown actually cost, and the
   claims red/blue review withdrew.
@@ -152,9 +157,13 @@ area, not on every task:
   rather than around:
   - `edit_buffer` — the only path that mutates the text. It leases the buffer
     with `as_mut`, which notifies on drop; `Buffer` cannot notify for itself, so
-    a mutation outside this gate is a repaint silently lost.
+    a mutation outside this gate is a repaint silently lost. It takes the
+    `Window` and reshapes the new text before revealing the caret, with the
+    style the last frame stored in `DocumentLayout`: outside a draw,
+    `window.text_style()` is gpui's default, not the editor's.
   - `move_cursor` — caret moves that need the buffer to resolve. Reads the
-    buffer, notifies the view only.
+    buffer, notifies the view only. It does not reshape: a caret move changes
+    no text, so the stored layout is already exact.
   - `update_state` — `EditorState` changes that must not touch the text.
     `unmark_text` is the only caller: dropping a composing region owes a
     repaint, but no buffer observer may see a text change that did not happen.
@@ -260,9 +269,23 @@ area, not on every task:
   `scheduled`, which kills autosave for that note for the rest of the session —
   and it trashes the note with the *previous* save's text, which is the only
   copy the user gets back.
-- Every pixel ↔ offset conversion goes through `DocumentLayout`. It is built in
-  `prepaint` and describes the *previous* frame's text, so all its line lookups
-  clamp: a stale read is a caret one frame late, never an index out of bounds.
+- Every pixel ↔ offset conversion goes through `DocumentLayout`, and it speaks
+  **rows**: a line longer than the text column wraps onto several. The editor
+  builds it in `TextElement`'s measure closure — the height is the row count,
+  which depends on the width taffy gives — and again in `edit_buffer`. All its
+  lookups clamp regardless: `NameField` still shapes in `prepaint`, so a stale
+  read is a caret one frame late, never an index out of bounds.
+- An offset at a wrap belongs to the **next** row, and nothing aimed at the
+  earlier row can produce it: End, a click past the row and an up/down landing
+  there all clamp to `Row::caret_end`, one grapheme short. That is what keeps
+  the caret a bare `ByteOffset` with no affinity bit. Row starts are snapped
+  forward to a grapheme boundary, because gpui breaks at a glyph. See
+  `docs/superpowers/specs/2026-09-23-soft-wrap-design.md`.
+- The measure closure reports **zero** width when taffy asks for min-content.
+  Reporting the column there makes it the flex item's automatic minimum, and the
+  editor then overflows any pane narrower than 70 `ch` —
+  `shell/tests/column.rs` is the test, and it has to root at `AppShell`: a window
+  rooted at the editor never asks.
 - `Selection::set_head` and `collapse_to` take a `Goal` so no caret move can
   silently inherit a stale column. Only `EditorState::move_vertically` passes a
   real one; everything else states `Goal::None`.
@@ -444,7 +467,9 @@ change that introduces something reusable.
 | Move the caret and keep the column | `EditorState::move_vertically` | `editor/src/state.rs` |
 | Any pixel ↔ offset conversion — shared by the editor and `NameField`, which shapes through the same `shape_document` | `DocumentLayout` | `app/src/editor/element.rs` |
 | Paint a shaped layout | `DocumentLayout::paint` | `app/src/editor/element.rs` |
-| Scroll a line into view | `EditorView::reveal_line` | `app/src/editor/mod.rs` |
+| Which visual row an offset is on; the offset at an x on a row | `DocumentLayout::row_for_offset` / `offset_on_row` | `app/src/editor/element.rs` |
+| One visual row of a wrapped line, and where End lands on it | `Row` (private), `caret_end` | `app/src/editor/element.rs` |
+| Scroll the caret's row into view | `EditorView::reveal_cursor` | `app/src/editor/mod.rs` |
 | The geometry behind it, window-free | `scroll::reveal` | `app/src/editor/scroll.rs` |
 | Resolve up/down against metrics | `EditorView::move_vertically` | `app/src/editor/mod.rs` |
 | Edit, delete, move, undo from a gesture | `EditorState` | `editor/src/state.rs` |
@@ -535,6 +560,7 @@ change that introduces something reusable.
 | Give the vault tree focus, in a test or a scene | `AppShell::tree_focus_handle` — `Focusable` returns the editor's once a note is open | `app/src/shell.rs` |
 | Focus the tree from the shot runner | `Stage::focus_tree` | `app/src/shot/stage.rs` |
 | A colour, a text size, a line height | `theme` — `BODY_*` for the editor, `UI_*` for chrome | `app/src/theme.rs` |
+| The text column's width | `theme::BODY_COLUMN_CHARS`, in `ch` | `app/src/theme.rs` |
 | A refused name's colour | `theme::rejected_text` | `app/src/theme.rs` |
 | The empty state's text colour | `theme::placeholder_text` — calibrated for `editor_background`, unlike `sidebar_text` | `app/src/theme.rs` |
 | The vertical centre of a sidebar row, in a test | `sidebar::row_center` | `app/src/sidebar/render.rs` |

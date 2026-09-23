@@ -2,7 +2,7 @@
 //!
 //! The arithmetic is here, alone and without a `Window`, so the awkward cases
 //! can be tested directly rather than through a keystroke. What drives it is
-//! [`super::EditorView::reveal_line`].
+//! [`super::EditorView::reveal_cursor`].
 
 use std::ops::Range;
 
