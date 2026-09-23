@@ -46,6 +46,17 @@ const MARKDOWN: &str = "---\n\
                         |---|---|\n\
                         | 1 | 2 |";
 
+const HEADINGS: &str = "# Heading one, long enough that it wraps onto a second row at this size\n\
+                        Body text under it.\n\
+                        ## Heading two\n\
+                        ### Heading three\n\
+                        #### Heading four\n\
+                        ##### Heading five\n\
+                        ###### Heading six\n\
+                        Setext heading\n\
+                        ==============\n\
+                        Last body line.";
+
 const VAULT: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
     ("reading.md", "Books to read.\n"),
@@ -104,6 +115,16 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             name: "editor-revealed-link",
             shows: "the caret inside the wikilink reveals its [[target| and ]] only",
             open: editor_revealed_link,
+        },
+        Scene {
+            name: "editor-headings",
+            shows: "heading sizes H1 to H6 and setext, caret on body text so every `#` is hidden",
+            open: editor_headings,
+        },
+        Scene {
+            name: "editor-heading-revealed",
+            shows: "the caret on the wrapped H1: `# ` shows and no row moves vertically",
+            open: editor_heading_revealed,
         },
         Scene {
             name: "sidebar-vault",
@@ -207,6 +228,21 @@ fn editor_revealed_link(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(MARKDOWN);
     stage.focus(window);
     let keys = format!("cmd-up {}ctrl-e {}", "down ".repeat(8), "left ".repeat(31));
+    stage.keys(window, keys.trim_end());
+    window
+}
+
+fn editor_headings(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(HEADINGS);
+    stage.focus(window);
+    stage.keys(window, "cmd-down");
+    window
+}
+
+fn editor_heading_revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(HEADINGS);
+    stage.focus(window);
+    let keys = format!("cmd-up {}", "right ".repeat(5));
     stage.keys(window, keys.trim_end());
     window
 }

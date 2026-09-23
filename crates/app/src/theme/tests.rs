@@ -1,7 +1,10 @@
 use gpui::{FontStyle, FontWeight, Hsla, TextStyle};
 use inkra_markdown::Styles;
 
-use super::{CODE_FONT_FAMILY, code_text, link_text, markdown_style, marker_text, quote_text};
+use super::{
+    BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, code_text, heading_metrics, link_text,
+    markdown_style, marker_text, quote_text,
+};
 
 #[test]
 fn no_tag_keeps_the_base_style() {
@@ -73,4 +76,25 @@ fn a_marker_inside_a_link_is_dimmed_not_linked() {
 fn frontmatter_is_dimmed() {
     let style = markdown_style(&TextStyle::default(), Styles::FRONTMATTER);
     assert_eq!(style.color, Hsla::from(marker_text()));
+}
+
+#[test]
+fn heading_sizes_step_down_to_the_body_and_never_below() {
+    let sizes: Vec<_> = (1..=6).map(|level| heading_metrics(level).size).collect();
+    assert!(sizes.windows(2).all(|pair| pair[0] >= pair[1]));
+    assert!(sizes[..4].windows(2).all(|pair| pair[0] > pair[1]));
+    assert!(sizes.iter().all(|&size| size >= BODY_TEXT_SIZE));
+    let h6 = heading_metrics(6);
+    assert_eq!(
+        (h6.size, h6.line_height),
+        (BODY_TEXT_SIZE, BODY_LINE_HEIGHT)
+    );
+}
+
+#[test]
+fn a_heading_line_is_never_shorter_than_body_or_its_own_text() {
+    for level in 1..=6 {
+        let metrics = heading_metrics(level);
+        assert!(metrics.line_height >= metrics.size && metrics.line_height >= BODY_LINE_HEIGHT);
+    }
 }

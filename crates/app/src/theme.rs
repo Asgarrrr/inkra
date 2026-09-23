@@ -6,6 +6,24 @@ use inkra_markdown::Styles;
 pub(crate) const BODY_TEXT_SIZE: Pixels = px(18.);
 pub(crate) const BODY_LINE_HEIGHT: Pixels = px(28.);
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HeadingMetrics {
+    pub(crate) size: Pixels,
+    pub(crate) line_height: Pixels,
+}
+
+/// Zed's preview scale over our body (`markdown.rs` `apply_heading_style`); H5 and H6 floor at the body size.
+pub(crate) fn heading_metrics(level: u8) -> HeadingMetrics {
+    let (size, line_height) = match level {
+        1 => (px(34.), px(44.)),
+        2 => (px(27.), px(36.)),
+        3 => (px(22.), px(30.)),
+        4 => (px(20.), px(28.)),
+        _ => (BODY_TEXT_SIZE, BODY_LINE_HEIGHT),
+    };
+    HeadingMetrics { size, line_height }
+}
+
 pub(crate) const BODY_COLUMN_CHARS: f32 = 70.;
 
 /// Ships with macOS, the only platform today; a second platform makes this per-platform.

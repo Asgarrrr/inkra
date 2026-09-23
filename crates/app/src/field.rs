@@ -9,7 +9,7 @@ use gpui::{
     App, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InteractiveElement,
     IntoElement, LayoutId, Pixels, Render, Style, Styled, UTF16Selection, Window, actions, fill,
-    point, prelude::*, px, relative, size,
+    point, prelude::*, px, relative,
 };
 use inkra_editor::{EditorState, LogicalMovement, Selection};
 use inkra_markdown::Markdown;
@@ -277,7 +277,7 @@ impl EntityInputHandler for NameField {
         let range = self.buffer.read(cx).from_utf16_range(&range_utf16);
         Some(Bounds::from_corners(
             element_bounds.origin + layout.position_for_offset(range.start),
-            element_bounds.origin + point(layout.x_for_offset(range.end), layout.line_height()),
+            element_bounds.origin + point(layout.x_for_offset(range.end), layout.row_height(0)),
         ))
     }
 
@@ -364,12 +364,12 @@ impl Element for FieldElement {
             None,
             window,
         );
-        let line_height = layout.line_height();
+        let row_height = layout.row_height(0);
 
         let (selection, cursor) = if range.is_empty() {
-            let at = layout.position_for_offset(range.start);
+            let caret = layout.caret_bounds(range.start);
             let quad = fill(
-                Bounds::new(bounds.origin + at, size(px(2.), line_height)),
+                Bounds::new(bounds.origin + caret.origin, caret.size),
                 theme::cursor(),
             );
             (None, Some(quad))
@@ -377,7 +377,7 @@ impl Element for FieldElement {
             let quad = fill(
                 Bounds::from_corners(
                     bounds.origin + point(layout.x_for_offset(range.start), px(0.)),
-                    bounds.origin + point(layout.x_for_offset(range.end), line_height),
+                    bounds.origin + point(layout.x_for_offset(range.end), row_height),
                 ),
                 theme::selection(),
             );

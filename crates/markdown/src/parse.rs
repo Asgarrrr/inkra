@@ -11,12 +11,20 @@ pub struct Markdown {
     pub spans: Vec<Span>,
     /// Sorted by `marker.start`; markers never overlap, never empty, never across a `\n`.
     pub conceals: Vec<Conceal>,
+    /// In document order, never empty; a setext heading's underline is not part of it.
+    pub headings: Vec<Heading>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub range: Range<ByteOffset>,
     pub styles: Styles,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Heading {
+    pub range: Range<ByteOffset>,
+    pub level: u8,
 }
 
 /// One pass over pulldown-cmark's events. A byte inside an element that no
@@ -31,6 +39,7 @@ pub fn parse(text: &str) -> Markdown {
         cursor: 0,
     };
     let mut open: Vec<Open> = Vec::new();
+    let mut headings = Vec::new();
 
     for (event, range) in Unrepeated::new(Parser::new_ext(text, options()).into_offset_iter()) {
         let current = open.last().cloned();
@@ -40,6 +49,12 @@ pub fn parse(text: &str) -> Markdown {
                 out.markers_until(range.start, current.as_ref());
                 if let Tag::Item = tag {
                     out.bullet(range.start);
+                }
+                if let Tag::Heading { level, .. } = tag {
+                    headings.push(Heading {
+                        range: to_offsets(heading_text(text, &range)),
+                        level: level as u8,
+                    });
                 }
                 open.push(Open {
                     styles: styles | tag_styles(&tag),
@@ -79,6 +94,7 @@ pub fn parse(text: &str) -> Markdown {
     Markdown {
         spans: out.spans,
         conceals: out.conceals,
+        headings,
     }
 }
 
@@ -162,6 +178,14 @@ fn concealable(text: &str, tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<
     // An ATX heading's range includes its line ending.
     let len = element.strip_suffix('\n').unwrap_or(element).len();
     concealable.then(|| range.start..range.start + len)
+}
+
+/// The heading's text lines: an ATX heading is one line, and a setext heading's last line is its underline.
+fn heading_text(text: &str, range: &Range<usize>) -> Range<usize> {
+    let element = &text[range.clone()];
+    let element = element.strip_suffix('\n').unwrap_or(element);
+    let len = element.rfind('\n').unwrap_or(element.len());
+    range.start..range.start + len
 }
 
 /// 1 to 6 `#`, then a space, a tab or the line end; pulldown-cmark starts the range after any indent.
