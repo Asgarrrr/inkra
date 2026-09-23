@@ -6,15 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [features]
-# The off-screen shot runner. Off by default, so `cargo build --release` never
-# compiles `shot.rs` and never links gpui's `test-support`. Clippy runs
-# `--all-features`, so the module is still linted.
-#
-# `gpui_platform/test-support` is the load-bearing one: the capture is
-# `MacWindow::render_to_image` (`gpui_macos/src/window.rs:2342`), gated on *that*
-# crate's feature, and without it the window falls through to `PlatformWindow`'s
-# default and dies at capture time. `gpui/test-support` is forwarded by it, and
-# stated anyway because the runner calls `capture_screenshot` directly.
+# Off-screen shots; `gpui_platform/test-support` gates the capture itself (offscreen-shots spec).
 shot = [
     "dep:image",
     "gpui/test-support",
@@ -22,8 +14,7 @@ shot = [
     "inkra-vault/test-support",
 ]
 
-# Required: `cargo test` compiles example targets without running them, so
-# without this the trampoline names a gated module and breaks `check.sh`.
+# `cargo test` compiles examples, and this one names a gated module.
 [[example]]
 name = "shot"
 required-features = ["shot"]
@@ -32,24 +23,17 @@ required-features = ["shot"]
 inkra-text = { workspace = true }
 inkra-editor = { workspace = true }
 inkra-vault = { workspace = true }
-# For `block_on` only: the loads that happen before a window exists, so there is
-# no gpui executor to spawn onto yet. The binary's launch, and the vault a shot
-# scene builds.
+# `block_on` only, for loads before a window, and so a gpui executor, exists.
 futures = { workspace = true }
-# Snapping a wrap onto a grapheme boundary within one line. `Buffer`'s own
-# grapheme steps scan the whole document per call, once per wrap per frame.
+# Wrap snapping per line; `Buffer`'s grapheme steps scan the whole document.
 unicode-segmentation = { workspace = true }
-# Path, not git: the source we compile and the source CLAUDE.md tells us to read
-# are then provably the same files. Restore the checkout with
-# `./scripts/vendor-gpui.sh`; `vendor/` is gitignored.
+# Path, not git, so the source we read is the source we compile; see vendor-gpui.sh.
 gpui = { path = "../../vendor/zed-reference/crates/gpui" }
-# font-kit is opt-in since the platform crates were split out of gpui. Without
-# it macOS renders no text at all, and only says so through a log warning.
+# Without font-kit macOS renders no text, and only logs a warning.
 gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", features = [
     "font-kit",
 ] }
-# Writing the captured frame out. `^0.25` is gpui's own requirement, so cargo
-# resolves both to one version and `RgbaImage` is the same type on either side.
+# Same `^0.25` as gpui, so `RgbaImage` is one type on both sides.
 image = { version = "0.25", default-features = false, features = [
     "png",
 ], optional = true }

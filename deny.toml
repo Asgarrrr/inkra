@@ -5,8 +5,7 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 all-features = true
 
 [advisories]
-# Unmaintained notices, not vulnerabilities. Each reaches us only through the
-# vendored gpui graph, whose versions are fixed by the pinned Zed commit.
+# Unmaintained notices, reached only through gpui's pinned graph.
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste, via metal/pulp in gpui's macOS backend" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz, via usvg/resvg in gpui's font stack" },
@@ -14,10 +13,7 @@ ignore = [
 ]
 
 [licenses]
-# The licences present in the graph, and no others. MPL-2.0 is file-level
-# copyleft and reaches us through two gpui dependencies only: cbindgen, a
-# build-time dependency of gpui_apple, and option-ext, via dirs and
-# zed-font-kit.
+# The licences present in the graph, and no others; MPL-2.0 is in docs/tooling.md.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -37,9 +33,7 @@ ignore = true
 [bans]
 # gpui's graph carries duplicates we cannot resolve from here.
 multiple-versions = "warn"
-# `warn`, not `deny`: allow-wildcard-paths only exempts path dependencies of a
-# private crate, and gpui's manifest is not marked `publish = false`, so its
-# `workspace = true` dependencies would fail the gate from a file we cannot edit.
+# `warn`: gpui's `workspace = true` dependencies would fail `deny` (docs/tooling.md).
 wildcards = "warn"
 allow-wildcard-paths = true
 

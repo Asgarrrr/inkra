@@ -6,30 +6,15 @@ rust-version.workspace = true
 publish.workspace = true
 
 [features]
-# `MemFs` is gated so it never reaches a release binary. It must still compile
-# under `cargo test --workspace`, which check.sh runs WITHOUT --all-features —
-# hence the self dev-dependency below. Same pattern app uses for gpui.
+# Keeps `MemFs` out of release; the self dev-dependency enables it for tests.
 test-support = ["dep:futures"]
 
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
-# Moving a note to the platform trash. The one job in this crate where getting
-# it wrong loses a user's note for good, and the one the OS already does
-# correctly: a hand-rolled move to `~/.Trash` picks the wrong trash for a vault
-# on any volume but the boot one, and produces no recovery metadata.
-#
-# The published crate, not Zed's fork — that fork exists to support undo of a
-# delete (zed-industries/zed#5039), which we do not build, and it sits 26
-# commits behind upstream.
-#
-# Its macOS default is `DeleteMethod::Finder`, an `osascript` round-trip that
-# raises an Automation permission prompt and cannot run headless. `RealFs`
-# overrides it in exactly one place; see `trash_method`.
+# Published crate, not Zed's fork; macOS method overridden in `trash_method` (create-rename-delete spec).
 trash = "5"
-# `MemFs::block_load` only, so it rides the `test-support` gate: a test that
-# needs two loads in flight at once needs one of them to park, and parking
-# needs a real waker. Same version the dev-dependency below already pulls in.
+# `MemFs::block_load` only: parking a load needs a real waker.
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -37,7 +22,6 @@ inkra-vault = { path = ".", features = ["test-support"] }
 futures = { workspace = true }
 proptest = { workspace = true }
 
-# Workspace lints are opt-in per crate. Without this, unwrap_used and
-# expect_used are not denied here.
+# Workspace lints are opt-in per crate.
 [lints]
 workspace = true
