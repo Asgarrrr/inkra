@@ -1,7 +1,3 @@
-//! `AppShell` end to end: renaming (`renaming.rs`), creating (`creating.rs`),
-//! trashing (`trashing.rs`), which note the editor ends up showing
-//! (`activation.rs`), and the text column inside its real parent (`column.rs`).
-
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
@@ -21,11 +17,7 @@ mod creating;
 mod renaming;
 mod trashing;
 
-/// Rooted at `AppShell`, not at the `Sidebar`: that puts the sidebar under
-/// its real `SIDEBAR_WIDTH` parent, and it is the only way to reach the subscription
-/// `AppShell::new` sets up.
-/// No editor: a vault launch has none until a row is activated, which is the
-/// state this file exists to exercise. Reach it with [`editor`] afterwards.
+/// Rooted at `AppShell`, not `Sidebar`, so `AppShell::new`'s subscription is reachable.
 pub(super) fn open_vault(
     cx: &mut TestAppContext,
     fs: Arc<dyn Fs>,
@@ -41,12 +33,7 @@ pub(super) fn open_vault(
     (window, sidebar, notes)
 }
 
-/// The editor, once a note has been activated.
-///
-/// Panics before that, and that is the contract: under an optional editor,
-/// "there is an editor" is something a test establishes rather than
-/// something it is handed. Reads the private field directly, as `open_vault`
-/// already does for the sidebar — this module is a descendant of `shell`.
+/// Panics if no note has been activated yet — that is the contract.
 pub(super) fn editor(
     window: &WindowHandle<AppShell>,
     cx: &mut TestAppContext,
@@ -57,8 +44,6 @@ pub(super) fn editor(
         .expect("a note has been activated, so the editor exists")
 }
 
-/// Returns the window rather than an editor: there is none yet, and its
-/// callers need the handle to ask [`editor`] for one after activating.
 pub(super) fn two_notes(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
@@ -77,16 +62,11 @@ pub(super) fn two_notes(
     (window, sidebar, notes, a, b)
 }
 
-/// Indistinguishable from a click to `AppShell`, and it needs no `Row`, so
-/// nothing in `sidebar.rs` widens for it.
 pub(super) fn activate(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, id: EntryId) {
     sidebar.update(cx, |_, cx| cx.emit(NoteActivated(id)));
 }
 
-/// A real window with the bindings installed and the sidebar focused.
-///
-/// The sidebar has to be *drawn* before it can be focused: `track_focus`
-/// only puts the handle in a dispatch node when the element renders.
+/// Must draw the sidebar before focusing it: `track_focus` only registers on render.
 pub(super) fn tree_focused(
     cx: &mut TestAppContext,
     window: WindowHandle<AppShell>,
@@ -105,7 +85,6 @@ pub(super) fn tree_focused(
     visual
 }
 
-/// Names the vault holds now, in tree order.
 pub(super) fn vault_names(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Vec<String> {
     notes.update(cx, |notes, cx| {
         notes

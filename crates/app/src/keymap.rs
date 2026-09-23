@@ -1,11 +1,5 @@
-//! Every key binding in one place, so the set can be read without hunting
-//! through the views that handle them.
-//!
-//! Every binding names a context except `cmd-q` (see CLAUDE.md, "Every
-//! binding names a context" and "A binding fires where its handler can be
-//! reached"). A predicate-less binding and one naming the focused frame tie
-//! in score (`gpui/src/keymap.rs:246-252`, `keymap/context.rs:260-268`); ties
-//! break on position in the `Vec` below (`keymap.rs:188-190`).
+//! Every key binding in one place, readable without hunting through views.
+//! Every binding names a context except `cmd-q` (see CLAUDE.md).
 
 use gpui::KeyBinding;
 
@@ -34,17 +28,12 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-up", SelectUp, editor),
         KeyBinding::new("shift-down", SelectDown, editor),
         KeyBinding::new("cmd-a", SelectAll, editor),
-        // The visual row's ends: macOS puts them on cmd-left/cmd-right, and
-        // most Mac keyboards have no Home or End key.
         KeyBinding::new("home", Home, editor),
         KeyBinding::new("end", End, editor),
         KeyBinding::new("cmd-left", Home, editor),
         KeyBinding::new("cmd-right", End, editor),
-        // The logical line, which NSTextView calls the paragraph. The only
-        // keys that reach the end of a wrapped one.
         KeyBinding::new("ctrl-a", LineStart, editor),
         KeyBinding::new("ctrl-e", LineEnd, editor),
-        // macOS text views put the document ends on cmd-up/cmd-down.
         KeyBinding::new("cmd-up", DocStart, editor),
         KeyBinding::new("cmd-down", DocEnd, editor),
         KeyBinding::new("enter", Newline, editor),
@@ -53,21 +42,12 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-v", Paste, editor),
         KeyBinding::new("cmd-z", Undo, editor),
         KeyBinding::new("cmd-shift-z", Redo, editor),
-        // The vault tree. `cmd-backspace` is the Finder gesture for the same
-        // act, and the arrows move the selection rather than a caret because
-        // the editor's own bindings are excluded here — see the note above.
         KeyBinding::new("cmd-backspace", Trash, Some("Sidebar")),
         KeyBinding::new("up", SelectPrev, Some("Sidebar")),
         KeyBinding::new("down", SelectNext, Some("Sidebar")),
-        // The Finder gesture. `enter` also inserts a newline in the editor and
-        // confirms in a field; all three name a context, so none competes.
         KeyBinding::new("enter", Rename, Some("Sidebar")),
         // NameField repeats the editor's movement/deletion bindings since it
-        // can't inherit them (see module doc); otherwise it could be typed
-        // into and never corrected.
-        //
-        // `enter` confirms here, inserts a newline in the editor: disjoint
-        // contexts, no competition.
+        // can't inherit them; `enter` confirms here, inserts a newline in the editor.
         KeyBinding::new("enter", Confirm, field),
         KeyBinding::new("escape", Cancel, field),
         KeyBinding::new("backspace", Backspace, field),
@@ -80,17 +60,13 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("end", End, field),
         KeyBinding::new("cmd-left", Home, field),
         KeyBinding::new("cmd-right", End, field),
-        // A field never wraps, so its line is its row: the paragraph moves are
-        // Home and End here.
         KeyBinding::new("ctrl-a", Home, field),
         KeyBinding::new("ctrl-e", End, field),
         KeyBinding::new("cmd-a", SelectAll, field),
-        // Scoped to `AppShell` rather than `Sidebar`, so they fire with the
-        // editor focused: making a note is a window-wide gesture, not a tree
-        // one. `cmd-s` is the precedent.
+        // Scoped to `AppShell`, not `Sidebar`, so it fires with the editor
+        // focused too — making a note is window-wide, like `cmd-s`.
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
-        // The application's, not a view's: it must fire wherever focus is.
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

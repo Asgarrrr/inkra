@@ -19,7 +19,6 @@ fn is_empty_tracks_whether_the_text_is_empty() {
 
 #[test]
 fn insert_places_text_at_byte_offset() {
-    // "héllo": h@0 é@1..3 l@3 l@4 o@5 — 'é' is 2 bytes.
     let mut buf = Buffer::new("héllo");
     buf.insert(at(3), "X");
     assert_eq!(buf.text(), "héXllo");
@@ -129,8 +128,7 @@ fn undo_inside_an_open_transaction_is_refused() {
     buf.insert(at(3), "1");
     buf.transact(|buf| {
         buf.insert(at(0), "X");
-        // Without the guard this pops the older transaction and applies its
-        // now-stale offsets, silently deleting 'c' and leaving "Xab1".
+        // Without the guard this pops the older transaction and applies its now-stale offsets.
         buf.undo();
     });
 }
@@ -156,8 +154,6 @@ fn a_multi_edit_transaction_reports_a_region_valid_in_the_resulting_text() {
     });
     assert_eq!(buf.text(), "<abcd>");
 
-    // The two directions produce different texts, so they report different
-    // positions — but each must be addressable in the text it produced.
     let undone = buf.undo().unwrap();
     assert_eq!(buf.text(), "abcd");
     assert!(
@@ -206,7 +202,6 @@ fn edits_further_apart_than_the_group_interval_stay_separate() {
 
 #[test]
 fn an_edit_exactly_one_group_interval_later_stays_separate() {
-    // The merge window is exclusive: `< GROUP_INTERVAL`, not `<=`.
     let mut buf = Buffer::new("");
     let start = Instant::now();
     buf.transact_at(start, |buf| buf.insert(at(0), "a"));
@@ -273,10 +268,8 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
     assert_ne!(buffer.version(), 0);
 }
 
-/// Regression pin: `close` merges an edit within `GROUP_INTERVAL` by
-/// extending the previous transaction in place, so its identity does not
-/// move. An id on the transaction instead of the edit would report "saved"
-/// over unsaved text, losing the edit on quit.
+/// Regression pin: `close` merges by extending the previous transaction, so its id must live
+/// on the edit, not the transaction — else a merged edit would report "saved" over unsaved text.
 #[test]
 fn version_moves_when_an_edit_merges_into_the_previous_transaction() {
     let mut buffer = Buffer::new("abc");
@@ -335,7 +328,6 @@ fn a_divergent_edit_after_undo_cannot_collide_with_the_history_it_replaced() {
 
 #[test]
 fn utf16_offsets_round_trip_across_a_surrogate_pair() {
-    // "a😀b": 'a'@0, '😀'@1..5 (2 UTF-16 units), 'b'@5.
     let buf = Buffer::new("a😀b");
     assert_eq!(buf.to_utf16(at(5)), Utf16Offset(3));
     assert_eq!(buf.from_utf16(Utf16Offset(3)), at(5));
@@ -356,7 +348,6 @@ fn utf16_offset_past_the_end_clamps_to_the_end() {
 
 #[test]
 fn grapheme_steps_cross_a_combining_mark_as_one_unit() {
-    // "e" + U+0301 combining acute: 3 bytes, 2 chars, 1 grapheme.
     let buf = Buffer::new("e\u{301}x");
     assert_eq!(buf.next_grapheme(at(0)), at(3));
     assert_eq!(buf.previous_grapheme(at(3)), at(0));
@@ -409,8 +400,6 @@ fn a_line_range_excludes_its_terminating_newline() {
 
 #[test]
 fn a_newline_is_a_separator_so_its_two_sides_are_different_offsets() {
-    // End of line 0 and start of line 1 are 2 and 3, not both 2. Right from
-    // the end of a line must land on the start of the next one.
     let buf = Buffer::new("ab\ncd");
     assert_eq!(buf.line_range(0).end, at(2));
     assert_eq!(buf.line_range(1).start, at(3));
@@ -422,7 +411,6 @@ fn line_for_offset_answers_at_both_edges_of_a_line() {
     let buf = Buffer::new("ab\ncd");
     assert_eq!(buf.line_for_offset(at(0)), 0);
     assert_eq!(buf.line_for_offset(at(2)), 0);
-    // Offset 3 is the newline's far side: the start of line 1.
     assert_eq!(buf.line_for_offset(at(3)), 1);
     assert_eq!(buf.line_for_offset(at(5)), 1);
 }
@@ -435,7 +423,6 @@ fn line_for_offset_past_the_end_answers_for_the_last_line() {
 
 #[test]
 fn a_multi_byte_char_does_not_split_a_line() {
-    // "é" is 2 bytes and holds no 0x0a, so counting newlines by byte is safe.
     let buf = Buffer::new("é\né");
     assert_eq!(buf.line_count(), 2);
     assert_eq!(buf.line_range(0), at(0)..at(2));
@@ -477,8 +464,7 @@ fn clip_snaps_back_onto_a_char_boundary_and_into_range() {
     assert_eq!(buf.clip(at(999)), buf.len());
 }
 
-/// The anchor table, exercised through the public API. The pure
-/// `transform` cases live next to the function, in `anchor.rs`.
+/// The anchor table, exercised through the public API; pure `transform` cases live in `anchor.rs`.
 mod anchors {
     use proptest::prelude::*;
 
@@ -493,7 +479,6 @@ mod anchors {
         assert_eq!(buf.resolve(anchor), at(6));
         buf.delete(at(0)..at(3));
         assert_eq!(buf.resolve(anchor), at(3));
-        // Still sitting on 'e', which is what the offsets have to mean.
         assert_eq!(&buf.text()[buf.resolve(anchor).0..], "e");
     }
 
@@ -520,8 +505,6 @@ mod anchors {
         assert_eq!(buf.text(), "<abcd>");
         assert_eq!(buf.resolve(anchor), at(3));
 
-        // Undo replays the inverted edits in reverse, so the anchor has to
-        // come back through both of them.
         buf.undo();
         assert_eq!(buf.text(), "abcd");
         assert_eq!(buf.resolve(anchor), at(2));
@@ -571,14 +554,11 @@ mod anchors {
         addressable(&buf);
     }
 
-    /// Two facts about deletion that look alike and are not, kept side by
-    /// side so a later "fix" to one is not quietly applied to the other.
+    /// Two facts about deletion that look alike but differ — kept side by side so a "fix"
+    /// to one isn't quietly applied to the other.
     mod a_deleted_anchor {
         use super::*;
 
-        /// Strictly inside the removed span: it collapses onto a boundary
-        /// and does not come back inside the restored text. Accepted, with
-        /// the reasoning in `docs/buffer-model.md`.
         #[test]
         fn does_not_return_inside_the_text_on_undo() {
             let mut buf = Buffer::new("abcde");
@@ -592,14 +572,10 @@ mod anchors {
 
             buf.undo();
             assert_eq!(buf.text(), "abcde");
-            // Boundary to boundary — not back onto 'c' at offset 2.
             assert_eq!(buf.resolve(left), at(1));
             assert_eq!(buf.resolve(right), at(4));
         }
 
-        /// At the exclusive end of a *pure* deletion, `Right` does
-        /// round-trip: nothing was inserted, so there is no inserted text
-        /// for it to land after.
         #[test]
         fn tracks_the_end_of_a_pure_deletion_exactly() {
             let mut buf = Buffer::new("abc");
@@ -631,10 +607,6 @@ mod anchors {
         buf.forget(anchor);
     }
 
-    /// One anchor plus what the properties judge it by: the offset
-    /// `transform` predicts without asking `Buffer`, where it was created,
-    /// and whether any edit so far cost it its claim to survive a full
-    /// undo.
     struct Tracked {
         anchor: Anchor,
         bias: Bias,
@@ -647,9 +619,6 @@ mod anchors {
     #[derive(Debug, Clone)]
     enum Op {
         Edit(usize, usize, String),
-        /// A replace and an insert in one `transact` — the shape that makes
-        /// `undo` replay several inverted edits in reverse, which a
-        /// single-edit transaction never reaches.
         Transaction(usize, usize, String, usize, String),
         Anchor(usize, Bias),
         Forget(usize),
@@ -657,8 +626,6 @@ mod anchors {
         Redo,
     }
 
-    /// Multi-byte on purpose: the char-boundary invariant is vacuous over
-    /// ASCII-only input.
     fn text_strategy() -> impl Strategy<Value = String> {
         prop_oneof![
             Just(String::new()),
@@ -675,9 +642,6 @@ mod anchors {
         prop_oneof![Just(Bias::Left), Just(Bias::Right)]
     }
 
-    /// Edits and forgets, but no anchor creation: a property that judges an
-    /// anchor against where it was created needs every anchor to predate
-    /// every edit.
     fn edit_op_strategy() -> impl Strategy<Value = Op> {
         prop_oneof![
             4 => (any::<usize>(), any::<usize>(), text_strategy())
@@ -711,8 +675,6 @@ mod anchors {
         ]
     }
 
-    /// Maps an arbitrary index onto a char boundary of `text`, so a
-    /// strategy can generate offsets without knowing the buffer contents.
     fn boundary(text: &str, index: usize) -> usize {
         let boundaries: Vec<usize> = text
             .char_indices()
@@ -727,13 +689,6 @@ mod anchors {
         a.min(b)..a.max(b)
     }
 
-    /// Whether this edit leaves `offset` able to return to where it was
-    /// once the edit is undone.
-    ///
-    /// Three boundary cases say no, and all three are the asymmetry the
-    /// tests above pin: strictly inside the removed span, `Right` at a
-    /// removal's start, and `Left` at the exclusive end of a pure
-    /// deletion. Everything else comes home exactly.
     fn survives_undo(
         offset: ByteOffset,
         bias: Bias,
@@ -754,7 +709,6 @@ mod anchors {
     fn apply_edit(buf: &mut Buffer, tracked: &mut [Tracked], range: Range<usize>, text: &str) {
         let removed_len = range.end - range.start;
         if removed_len == 0 && text.is_empty() {
-            // `replace` returns early, so nothing may move.
             return;
         }
         let at = ByteOffset(range.start);
@@ -774,8 +728,6 @@ mod anchors {
             }
             Op::Transaction(a, b, replaced, c, inserted) => {
                 let first = ordered_boundaries(buf.text(), a, b);
-                // The second position is chosen against the text the first
-                // edit leaves behind, as a caller composing two edits would.
                 let mut after = buf.text().to_string();
                 after.replace_range(first.clone(), &replaced);
                 let second = boundary(&after, c);
@@ -841,10 +793,8 @@ mod anchors {
     }
 
     proptest! {
-        /// Bounds alone would pass a build that wired `shift_anchors` into
-        /// only one of its two call sites, as long as the buffer kept
-        /// growing. So every anchor is checked against what `transform`
-        /// predicts for the exact edit that was issued.
+        /// Bounds alone would pass a build with `shift_anchors` wired into only one call site.
+        /// So every anchor is checked against what `transform` predicts for the exact edit issued.
         #[test]
         fn anchors_move_exactly_as_transform_predicts(
             ops in prop::collection::vec(op_strategy(), 0..24)
@@ -867,8 +817,6 @@ mod anchors {
             }
         }
 
-        /// Anchors are created before the first edit here, so "back where
-        /// it started" is a question with an answer after a full undo.
         #[test]
         fn undoing_every_edit_brings_undisturbed_anchors_home(
             starts in prop::collection::vec((any::<usize>(), bias_strategy()), 0..5),
@@ -898,10 +846,8 @@ mod anchors {
             }
         }
 
-        /// `transform` is monotonic for a fixed bias, so two anchors that
-        /// share one can converge but never cross. Two that differ can:
-        /// `Left` and `Right` on the same offset are built to part company,
-        /// which is why the pairs here are drawn from one bias at a time.
+        /// `transform` is monotonic for a fixed bias, so same-bias anchors can converge but never cross.
+        /// `Left`/`Right` on one offset are built to part company, so pairs here share one bias.
         #[test]
         fn anchors_of_one_bias_never_swap_places(
             ops in prop::collection::vec(history_op_strategy(), 0..24)

@@ -1,10 +1,3 @@
-//! The invariant the per-method tests only imply: whatever sequence of
-//! gestures a user performs, the selection stays addressable in the text.
-//!
-//! It holds today because every path that shortens the buffer — an edit, an
-//! undo, a redo — also collapses the selection. Anchors are what will be
-//! needed to keep it true once a second view can edit the same buffer.
-
 use std::time::{Duration, Instant};
 
 use inkra_editor::{EditorState, LogicalMovement, Selection};
@@ -17,7 +10,6 @@ enum Gesture {
     Backspace,
     Delete,
     Move(Movement, bool),
-    /// A click: an arbitrary offset, which may land mid-character.
     MoveTo(usize, bool),
     SelectAll,
     Undo,
@@ -116,8 +108,6 @@ fn assert_addressable(buffer: &Buffer, state: &EditorState) -> Result<(), TestCa
         );
     }
 
-    // Slicing is what every consumer ultimately does with these offsets; if the
-    // assertions above are right this cannot panic, which is the point.
     let _ = &buffer.text()[selection.start().0..selection.end().0];
     Ok(())
 }
@@ -135,8 +125,6 @@ proptest! {
         assert_addressable(&buffer, &state)?;
 
         for (index, gesture) in gestures.into_iter().enumerate() {
-            // Spread the gestures past GROUP_INTERVAL so undo steps stay
-            // separable rather than all coalescing into one.
             let now = start + Duration::from_millis(500) * u32::try_from(index).unwrap_or(u32::MAX);
 
             match gesture {
@@ -165,9 +153,6 @@ proptest! {
         }
     }
 
-    /// Typing into a selection replaces exactly that selection, and leaves the
-    /// cursor after the inserted text — the property every other editing
-    /// gesture is built on.
     #[test]
     fn typing_over_a_selection_replaces_exactly_it(
         parts in prop::collection::vec(text_strategy(), 1..6),
@@ -193,14 +178,6 @@ proptest! {
         prop_assert!(state.selection().is_empty());
     }
 
-    /// Cut then paste puts the text back. The one exception is stated rather
-    /// than excluded: a whole-line cut of a last line with no terminator gives
-    /// it one, because `cut` synthesizes the newline so that a cut line stays a
-    /// line wherever it is pasted. See `docs/superpowers/specs/2026-09-21-clipboard-design.md`.
-    ///
-    /// The caret round-trips only for a selection. After a line cut it lands at
-    /// the start of the line *below* the restored one, since the cut left it at
-    /// the line start the paste then pushed down.
     #[test]
     fn cut_then_paste_restores_the_text(
         parts in prop::collection::vec(text_strategy(), 1..6),
@@ -220,8 +197,7 @@ proptest! {
 
         let selection = state.selection().range();
         let line = buffer.line_range(buffer.line_for_offset(state.cursor()));
-        // The only case that gains a newline: nothing selected, and the caret's
-        // line runs to the end of the buffer with nothing terminating it.
+        // Gains a newline only when nothing is selected and the caret's line runs unterminated to the end.
         let gains_a_newline = selection.is_empty() && line.end >= buffer.len();
 
         let copied = state.cut(&mut buffer, Instant::now());

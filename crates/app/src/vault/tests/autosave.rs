@@ -13,15 +13,14 @@ use crate::vault::{ConflictPreserved, NoteStore, SaveFailed};
 
 use super::open_shell;
 
-/// Focus is in `EditorView`; the binding is scoped to `AppShell`. Proves
-/// the action dispatches up the tree rather than being swallowed.
+/// Binding is scoped to `AppShell`, not `EditorView`; proves the action
+/// dispatches up the tree.
 #[gpui::test]
 fn cmd_s_writes_the_current_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "before");
 
     let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    // The caret opens at the end of the buffer (`EditorView::new`).
     visual.simulate_input("X");
     visual.simulate_keystrokes("cmd-s");
     cx.run_until_parked();
@@ -32,9 +31,8 @@ fn cmd_s_writes_the_current_note(cx: &mut TestAppContext) {
     );
 }
 
-/// A save changes no text, so no observer may fire: only `grouping_blocked`
-/// moved. Swapping `update` back to `as_mut` reintroduces this, because
-/// `as_mut` notifies unconditionally (`gpui/src/app.rs:3280-3286`).
+/// `as_mut` instead of `update` would notify unconditionally on a save
+/// that changes no text.
 #[gpui::test]
 fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -55,12 +53,10 @@ fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
             store
         })
     });
-    // Dirty, so the save reaches the write rather than the early return.
     buffer.update(cx, |buffer, _| {
         buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
     });
 
-    // Subscribed after the edit: that notify is legitimate.
     let notified = Arc::new(AtomicUsize::new(0));
     let _guard = cx.update(|cx| {
         let notified = Arc::clone(&notified);
@@ -84,8 +80,6 @@ fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
     );
 }
 
-/// The cadence itself: typing schedules a write, and the clock delivers it
-/// with no keystroke from the user.
 #[gpui::test]
 fn typing_writes_the_note_without_cmd_s(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -102,9 +96,6 @@ fn typing_writes_the_note_without_cmd_s(cx: &mut TestAppContext) {
     );
 }
 
-/// The write is scheduled, not immediate. Without this the periodic chain
-/// could be replaced by writing on every keystroke and nothing would catch
-/// it — a vault on a synced folder would pay for that silently.
 #[gpui::test]
 fn typing_does_not_write_before_the_delay_elapses(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -122,9 +113,6 @@ fn typing_does_not_write_before_the_delay_elapses(cx: &mut TestAppContext) {
     );
 }
 
-/// The property an idle debounce does not have (see `AUTOSAVE_DELAY`). Each
-/// round types again *before* the previous deadline; the first deadline
-/// stands, so the file keeps up with the buffer one interval at a time.
 #[gpui::test]
 fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -133,9 +121,8 @@ fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let mut expected = "before".to_owned();
     for round in 1..=3 {
-        // The second keystroke lands inside the pending window. Under an
-        // idle debounce it would push the deadline past the advance below
-        // and this round would write nothing.
+        // Under an idle debounce, this keystroke would push the deadline
+        // past the advance below and the round would write nothing.
         visual.simulate_input("X");
         cx.executor().advance_clock(AUTOSAVE_DELAY / 2);
         visual.simulate_input("Y");
@@ -151,17 +138,12 @@ fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     }
 }
 
-/// `⌘S` routed through the same queue would be absorbed by the
-/// pending-chain guard without preemption, writing nothing until the
-/// periodic deadline — breaking the promise the gesture makes. The clock
-/// never advances here, so only a preempting `⌘S` produces the write.
 #[gpui::test]
 fn cmd_s_preempts_a_pending_autosave(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "before");
 
     let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    // Schedules the periodic chain; its deadline is one full delay away.
     visual.simulate_input("X");
     visual.simulate_keystrokes("cmd-s");
     cx.run_until_parked();
@@ -173,11 +155,8 @@ fn cmd_s_preempts_a_pending_autosave(cx: &mut TestAppContext) {
     );
 }
 
-/// The defect the expectation's placement exists to avoid, in its simplest
-/// reachable form. The second write's expectation cannot be the stamp the
-/// *load* returned: our own first write already invalidated it. A note
-/// taking its expectation from `OpenNote` would mint a conflict file
-/// holding its own text on the second keystroke of an ordinary session.
+/// The second write's expectation cannot be the load's stamp: the first
+/// write already invalidated it.
 #[gpui::test]
 fn a_second_write_does_not_conflict_with_the_first(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -203,15 +182,8 @@ fn a_second_write_does_not_conflict_with_the_first(cx: &mut TestAppContext) {
     );
 }
 
-/// Same as above, but the second write is *issued* while the first is still
-/// in flight: `block_save` holds the periodic write open, so the `⌘S` below
-/// is decided against a file our own write hasn't finished changing.
-///
-/// The two writes cannot overlap at the filesystem: the `⌘S` chain awaits
-/// the one it replaced (`schedule_save` takes `previous` rather than
-/// dropping it), so the second `write_through` starts after the first
-/// returned. Only the quit flush escapes that chaining (see
-/// `a_quit_flush_overtakes_the_write_it_overlaps`).
+/// The `⌘S` chain awaits the write it replaced, so the two writes cannot
+/// overlap at the filesystem even though the second is issued mid-flight.
 #[gpui::test]
 fn an_overlapping_write_does_not_conflict_with_the_one_in_flight(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -237,8 +209,6 @@ fn an_overlapping_write_does_not_conflict_with_the_one_in_flight(cx: &mut TestAp
     );
 }
 
-/// An external writer changes the note between the load and the write. Its
-/// text survives under a new name, and the note holds what is on screen.
 #[gpui::test]
 fn an_external_change_is_preserved_beside_the_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -253,8 +223,7 @@ fn an_external_change_is_preserved_beside_the_note(cx: &mut TestAppContext) {
         })
     });
 
-    // `insert_file` keeps the path's identity, exactly as a second process
-    // rewriting a file in place would.
+    // Keeps the path's identity, as a second process rewriting in place would.
     fs.insert_file("/vault/a.md", "theirs");
 
     visual.simulate_input("X");
@@ -278,12 +247,9 @@ fn an_external_change_is_preserved_beside_the_note(cx: &mut TestAppContext) {
     assert_eq!(announced.load(Ordering::SeqCst), 1);
 }
 
-/// The defect the cancel channel introduced: `⌘S` installs a chain whose
-/// timer is already ready, then a keystroke replaces `note.cancel`, dropping
-/// that chain's sender. Treating the resulting `Err(Canceled)` as a cancel
-/// would make "write now" write nothing until the next periodic deadline —
-/// the clock here never advances past the release, so only a chain that
-/// tells a dropped sender from a deliberate one can pass.
+/// `⌘S` installs a chain whose timer is already ready, then a keystroke
+/// replaces `note.cancel`, dropping that chain's sender. Treating the
+/// resulting `Err` as a cancel would make "write now" write nothing.
 #[gpui::test]
 fn a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -292,8 +258,6 @@ fn a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for(cx: &mut TestA
     let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let gate = fs.block_save("/vault/a.md");
 
-    // Parks the periodic chain inside its write, so everything below queues
-    // behind a write that is still in flight.
     visual.simulate_input("X");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
@@ -314,9 +278,8 @@ fn a_keystroke_after_cmd_s_does_not_cancel_the_write_it_asked_for(cx: &mut TestA
     );
 }
 
-/// `SaveFailed` is the only report a failed write has. Nothing else in the
-/// suite can fail one, so without this the emit — and `AppShell`'s
-/// subscription to it — can be deleted with the workspace still green.
+/// `SaveFailed` is the only report of a failed write; nothing else can
+/// fail one, so this is what keeps the emit under test.
 #[gpui::test]
 fn a_failed_write_reports_it_and_leaves_the_note_dirty(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -350,8 +313,7 @@ fn a_failed_write_reports_it_and_leaves_the_note_dirty(cx: &mut TestAppContext) 
     });
 }
 
-/// The file holds text the buffer never had, so a write of any kind shows —
-/// putting the version comparison under test, not just a matching write.
+/// The file holds text the buffer never had, so any write at all shows.
 #[gpui::test]
 fn cmd_s_on_an_untouched_note_leaves_the_file_alone(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

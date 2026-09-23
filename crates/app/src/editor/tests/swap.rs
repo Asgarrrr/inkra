@@ -1,6 +1,3 @@
-//! `open_buffer`: swapping which buffer a view shows, and a buffer shared by
-//! two views.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -11,10 +8,8 @@ use inkra_text::Buffer;
 use super::{at, window_on};
 use crate::editor::EditorView;
 
-/// A view repaints on another view's edit only through the subscription
-/// `EditorView::new` installs; that `Subscription` unsubscribes silently on
-/// drop. Observes the *second view*, not the buffer — the buffer would notify
-/// either way, so that would pass even with the subscription deleted.
+/// Observes the *second view*, not the buffer: the buffer would notify either
+/// way, so this would pass even with the repaint subscription deleted.
 #[gpui::test]
 fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("abc")));
@@ -44,10 +39,8 @@ fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// Swapping the buffer without re-observing would leave the view watching the
-/// closed note, silently — the dropped `Subscription` gives no compiler
-/// warning. Observes the *view*, not the buffer, which would notify either
-/// way.
+/// Observes the *view*, not the buffer, which would notify either way — a
+/// dropped `Subscription` gives no compiler warning if this silently regresses.
 #[gpui::test]
 fn editing_after_a_swap_still_notifies(cx: &mut TestAppContext) {
     let first = cx.update(|cx| cx.new(|_| Buffer::new("first")));

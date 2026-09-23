@@ -13,14 +13,6 @@ use crate::vault::store::AUTOSAVE_DELAY;
 
 use super::open_shell;
 
-/// The quit flush is the one writer that cannot join the chain, so it mints
-/// the highest sequence a note will ever see. Without the `trashing` flag it
-/// writes a note whose delete is still queued — the delete is then dropped
-/// as stale and a confirmed deletion silently does not happen.
-///
-/// `flush_all` is called directly rather than through `cx.quit()`: the gate
-/// holding the chain open has to be released from outside, and quitting does
-/// not return until the flush completes.
 #[gpui::test]
 async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -36,19 +28,14 @@ async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut Tes
         cx.notify();
     });
 
-    // Held open so the trash is still queued when the flush runs.
     let gate = fs.block_save("/vault/a.md");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
     let trashed = store.update(cx, |store, cx| store.trash(a, cx));
 
-    // Issued while the chain's write still holds the `Writer` lock, so the
-    // flush's own write parks behind it rather than running now.
     let flush = store.update(cx, NoteStore::flush_all);
-    // The second gate is what forces the losing order. Releasing the first
-    // lets the chain's write finish and the trash run; the flush's write
-    // then takes the lock and parks here, so when it finally lands the file
-    // is already gone — and `MemFs::save` recreates a missing path.
+    // This second gate forces the losing order: without it, the flush's
+    // write may never contend with the trash at all.
     let after = fs.block_save("/vault/a.md");
     gate.release();
     cx.run_until_parked();
@@ -66,19 +53,6 @@ async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut Tes
     );
 }
 
-/// The two writers of one note, genuinely concurrent — the interleaving
-/// `Writer` exists for. The quit flush can't join the chain (`App::shutdown`
-/// blocks while polling quit futures), so it issues its own write while the
-/// chain's is still parked.
-///
-/// Driven through `flush_all`, not `cx.quit()`: the gate must release from
-/// outside, and `quit` doesn't return until the flush finishes. (Wiring
-/// through the real quit observer is `quitting_writes_every_dirty_note`'s
-/// claim.)
-///
-/// Both assertions matter: a flush with its own `Writer`/stamp would
-/// preserve our own text into a conflict file; a flush whose sequence didn't
-/// exceed the chain's would be discarded, losing the newer edit.
 #[gpui::test]
 async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -87,17 +61,12 @@ async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
     let (mut visual, notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let gate = fs.block_save("/vault/a.md");
 
-    // Parks the periodic chain inside `fs.save`, holding the note's lock:
-    // `write_through` takes it before the write and keeps it across.
     visual.simulate_input("X");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
 
-    // Text the parked write cannot be carrying, so which write landed last
-    // is readable from the file alone.
     visual.simulate_input("Y");
-    // Held, never dropped: the flush's writes are `Task`s moved into this
-    // future, and dropping a `Task` cancels it.
+    // Held, never dropped: a dropped `Task` cancels the flush's write.
     let flush = notes.update(cx, NoteStore::flush_all);
 
     gate.release();
@@ -116,14 +85,6 @@ async fn a_quit_flush_overtakes_the_write_it_overlaps(cx: &mut TestAppContext) {
     );
 }
 
-/// The conflict file's only route to the user. Nothing else in the running
-/// application rescans, so without this the file sits on disk unmentioned
-/// until the next launch.
-///
-/// `two_notes`, not `open_shell`: the latter is the DETACHED path —
-/// `NoteStore::new(fs, None, cx)` — and has no vault at all, so the rescan
-/// branch is unreachable under it. This test needs no window; it asserts on
-/// the vault's contents, not on a frame.
 #[gpui::test]
 async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -139,9 +100,7 @@ async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
     });
 
     fs.insert_file("/vault/a.md", "theirs");
-    // `update` plus an explicit `notify`: the observer `track` installs is
-    // the autosave trigger, and `Buffer` cannot notify for itself. Without
-    // the notify nothing schedules and the write never happens.
+    // `Buffer` cannot notify for itself; without this the write never schedules.
     buffer.update(cx, |buffer, cx| {
         buffer.transact_at(Instant::now(), |buffer| {
             buffer.insert(ByteOffset(0), "X");
@@ -157,8 +116,6 @@ async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
     assert_eq!(after, before + 1, "the preserved file is listed");
 }
 
-/// An ordinary write must not walk the directory. A conflict is rare;
-/// `AUTOSAVE_DELAY` is not.
 #[gpui::test]
 async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -170,9 +127,8 @@ async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
         .expect("the note opens");
     store.update(cx, |store, cx| store.set_current(a, cx));
 
-    // A scan of an unreadable directory yields nothing, so a rescan here
-    // would empty the tree. Counting afterwards is what makes this test
-    // about scanning rather than about the file's text.
+    // An unreadable directory scans to nothing, so an unwanted rescan
+    // here would empty the tree, not just leave it stale.
     fs.make_unreadable("/vault");
     buffer.update(cx, |buffer, cx| {
         buffer.transact_at(Instant::now(), |buffer| {
@@ -193,11 +149,8 @@ async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
     assert_eq!(entries, 2, "no rescan ran, so the tree is intact");
 }
 
-/// The wiring that makes an atomic save survivable. `vault` proves
-/// `reidentify` works when called; only this proves the write path calls
-/// it. Nothing else in the `app` suite rescans, so without this the call
-/// could be deleted and the workspace would stay green until the first
-/// post-startup `rescan` caller orphans the open buffer.
+/// The only coverage of the write path calling `reidentify`; deleting it
+/// would let that call rot without a failing test.
 #[gpui::test]
 fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -218,8 +171,6 @@ fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
 
-    // A rescan is what create/rename/delete will trigger on every mutation
-    // once they exist — deferred, with its trigger in the vault spec.
     let vault = store.update(cx, |store, _| store.vault().cloned().expect("a vault"));
     vault.update(cx, |vault, _| {
         futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
@@ -239,15 +190,6 @@ fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
     );
 }
 
-/// Every dirty note reaches disk on quit, not just the one `⌘S` would have
-/// picked.
-///
-/// Quits via `TestAppContext::quit` → `App::shutdown`, not `cx.quit()` — see
-/// CLAUDE.md, "Quit through `TestAppContext::quit`". Claims only that the
-/// flush completes, not the 200 ms `SHUTDOWN_TIMEOUT`: under `TestScheduler`
-/// the block's bound is a random tick count (`test_scheduler.rs:110-118`)
-/// and the clock jumps to the next timer without consulting any deadline
-/// (`:441-448`).
 #[gpui::test]
 fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -283,17 +225,12 @@ fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
     );
 }
 
-/// The version comparison, at quit. Without it every note on screen is
-/// rewritten on every exit, which on a synced vault is a burst of
-/// no-op changes the sync client still has to carry.
 #[gpui::test]
 fn quitting_leaves_a_clean_note_alone(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     // Text the buffer never held, so any write at all shows.
     fs.insert_file("/vault/a.md", "on disk, not in the buffer");
     fs.insert_file("/vault/b.md", "beta");
-    // Not `two_notes`: it hardcodes "alpha" for `a.md`, and this test needs
-    // text the buffer never held.
     let store = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let a = entry_id(&store, cx, "a");
 

@@ -1,12 +1,3 @@
-//! The platform text-input edge.
-//!
-//! `EntityInputHandler` speaks UTF-16 offsets throughout, so every method here
-//! is a conversion around a call into `inkra-editor`. Both the conversion and
-//! the protocol's precedence rules live below this layer — in `Buffer` and
-//! `EditorState` — because `NameField` speaks the same protocol and a second
-//! copy of either is a second thing to get wrong. What is left here is the two
-//! methods that need pixels, and the leases the rest go through.
-
 use std::ops::Range;
 use std::time::Instant;
 

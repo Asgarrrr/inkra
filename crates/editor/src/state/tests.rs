@@ -14,7 +14,6 @@ fn editor(text: &str) -> (Buffer, EditorState) {
 
 #[test]
 fn backspace_deletes_a_grapheme_not_a_char() {
-    // "e" plus a combining acute is two chars but one grapheme.
     let (mut buffer, mut state) = editor("xe\u{301}");
     state.backspace(&mut buffer, Instant::now());
     assert_eq!(buffer.text(), "x");
@@ -198,8 +197,6 @@ fn both_line_ends_of_an_empty_line_are_the_same_offset() {
 
 #[test]
 fn end_then_right_crosses_to_the_next_line() {
-    // The newline separates the lines rather than belonging to either, so
-    // the end of one and the start of the next are one grapheme apart.
     let (buffer, mut state) = editor("aa\nbb");
     state.move_to(&buffer, at(0), false);
     state.move_(&buffer, LogicalMovement::LineEnd, false);
@@ -269,8 +266,6 @@ fn copy_with_no_selection_takes_the_whole_line_and_its_newline() {
 
 #[test]
 fn copy_on_an_unterminated_last_line_still_ends_in_a_newline() {
-    // The synthesized newline is what makes the item a whole line wherever
-    // it is pasted, rather than one that welds itself onto another.
     let (buffer, mut state) = editor("x\ny");
     state.move_to(&buffer, at(3), false);
     assert_eq!(state.copy(&buffer), line("y\n"));
@@ -310,8 +305,6 @@ fn cut_on_an_empty_last_line_copies_a_newline_and_removes_nothing() {
 
 #[test]
 fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
-    // The seal is skipped along with the edit. Left set by a transaction
-    // that never lands, `grouping_blocked` would break the next run apart.
     let (mut buffer, mut state) = editor("x\n");
     let start = Instant::now();
 
@@ -346,13 +339,10 @@ fn pasting_a_line_over_a_selection_replaces_it_like_any_other_text() {
 #[test]
 fn pasting_a_line_at_a_bare_caret_inserts_above_and_keeps_the_column() {
     let (mut buffer, mut state) = editor("abc\ndef");
-    // Line 1, column 1: between 'd' and 'e'.
     state.move_to(&buffer, at(5), false);
 
     state.paste(&mut buffer, Instant::now(), &line("XY\n"));
     assert_eq!(buffer.text(), "abc\nXY\ndef");
-    // Still between 'd' and 'e', now one line further down. Left to `edit`,
-    // the caret would have landed at offset 7, the start of "def".
     assert_eq!(state.cursor(), at(8));
 }
 
@@ -413,8 +403,7 @@ fn a_paste_of_nothing_changes_nothing_and_splits_no_run() {
 
 #[test]
 fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
-    // The stated price of synthesizing the newline in `cut` as well as in
-    // `copy`. Pinned so it cannot change without someone deciding to.
+    // Pinned: the stated price of synthesizing the newline in `cut` as well as in `copy`.
     let (mut buffer, mut state) = editor("a");
     state.move_to(&buffer, at(0), false);
 
@@ -426,7 +415,6 @@ fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
 
 #[test]
 fn move_to_snaps_an_offset_off_a_char_boundary() {
-    // "héllo": 'é' spans bytes 1..3, so offset 2 splits it.
     let (buffer, mut state) = editor("héllo");
     state.move_to(&buffer, at(2), false);
     assert_eq!(state.cursor(), at(1));
@@ -447,7 +435,6 @@ fn move_to_clamps_an_offset_past_the_end() {
     assert_eq!(state.cursor(), buffer.len());
 }
 
-/// Three cases, in the order `target_range`'s precedence states them.
 #[test]
 fn an_explicit_range_outranks_the_composing_region_and_the_selection() {
     let (mut buffer, mut state) = editor("hello");
@@ -475,11 +462,8 @@ fn the_selection_is_the_fallback() {
     assert_eq!(state.target_range(&buffer, None), at(1)..at(4));
 }
 
-/// The protocol counts UTF-16 units, so a range spanning a surrogate pair
-/// must resolve onto whole characters.
 #[test]
 fn a_utf16_range_spanning_a_surrogate_pair_resolves_onto_the_whole_char() {
-    // 'a'@0, the emoji @1..5 as two UTF-16 units, 'b'@5.
     let (mut buffer, mut state) = editor("a😀b");
     state.replace_in_range(&mut buffer, Instant::now(), Some(&(1..3)), "");
 
@@ -487,8 +471,6 @@ fn a_utf16_range_spanning_a_surrogate_pair_resolves_onto_the_whole_char() {
     assert_eq!(state.cursor(), at(1));
 }
 
-/// A dead key: `^` composes, then its base letter replaces it. The marked
-/// region must survive the edit.
 #[test]
 fn composing_text_marks_what_it_inserted() {
     let (mut buffer, mut state) = editor("");
@@ -503,7 +485,6 @@ fn composing_text_marks_what_it_inserted() {
     assert_eq!(state.marked_range(), Some(at(0)..at(2)));
 }
 
-/// Committing ends the composition rather than marking a zero-width region.
 #[test]
 fn composing_with_empty_text_ends_the_composition() {
     let (mut buffer, mut state) = editor("");
@@ -513,17 +494,12 @@ fn composing_with_empty_text_ends_the_composition() {
     assert_eq!(state.marked_range(), None);
 }
 
-/// Rebasing before conversion, not after: converting first would resolve the
-/// caret against the whole buffer and double-count the insertion point. Only
-/// visible when the text does not start at zero and a char spans multiple
-/// UTF-16 units.
+/// Rebasing before conversion, not after: converting first would double-count the insertion point.
 #[test]
 fn the_composing_caret_is_rebased_before_it_is_converted() {
     let (mut buffer, mut state) = editor("😀");
     state.move_to(&buffer, buffer.len(), false);
 
-    // Insert at offset 4 (two UTF-16 units in), with the caret one unit
-    // into the inserted text.
     state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "ab", Some(0..1));
 
     assert_eq!(buffer.text(), "😀ab");

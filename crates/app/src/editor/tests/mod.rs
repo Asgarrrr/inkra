@@ -1,11 +1,3 @@
-//! Tests that need the gpui edge.
-//!
-//! Editing semantics are tested in `inkra-editor` without a window. What is
-//! left here is what only a window can prove: the UTF-16 protocol conversions
-//! and input-method composition (`protocol.rs`), real keystrokes reaching the
-//! buffer (`dispatch.rs`), scroll and click geometry (`scroll.rs`), a swapped
-//! or shared buffer (`swap.rs`), and the system clipboard (`clipboard.rs`).
-
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 use gpui::{Context, Entity, TestAppContext, VisualTestContext, Window, prelude::*};
@@ -21,8 +13,6 @@ mod scroll;
 mod swap;
 mod wrap;
 
-/// Drives the entity through a headless window, the only way to reach
-/// `EntityInputHandler`, whose methods all require a `Window`.
 pub(super) fn with_editor<R>(
     cx: &mut TestAppContext,
     text: &str,
@@ -39,8 +29,6 @@ pub(super) fn window_on(
     cx.add_window(move |_, cx| EditorView::new(buffer, cx))
 }
 
-/// A focused window with the real key bindings installed, for tests that drive
-/// dispatch rather than calling handlers directly.
 pub(super) fn dispatching(
     cx: &mut TestAppContext,
     text: &str,

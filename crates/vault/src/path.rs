@@ -1,52 +1,30 @@
-//! A path known to be relative to the vault root, with no `..`. Same discipline
-//! as `ByteOffset`: the invariant lives in the type.
-//!
-//! Also the rules a *typed* name has to satisfy before it can become one. Those
-//! live here rather than in `app` because they are properties of a vault path;
-//! what `app` owns is the English they are reported in.
+//! A path relative to the vault root, with no `..`. Also the rules a *typed*
+//! name must satisfy before it can become one.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// The longest name a note may carry, in UTF-16 code units — the unit APFS and
-/// HFS+ count, which is not bytes: an accented name reaches the limit sooner
-/// measured in bytes and later measured in `char`s.
+/// UTF-16 code units, the unit APFS and HFS+ count — not bytes, not `char`s.
 const MAX_NAME_UNITS: usize = 255;
 
-/// Why a typed name cannot become a note.
-///
-/// Reported, never returned as an error: `VaultError` is for a filesystem
-/// operation that failed, and nothing here has touched the filesystem. `app`
-/// turns each of these into a sentence.
+/// Why a typed name cannot become a note. Reported, never a `VaultError`:
+/// nothing here touches the filesystem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameProblem {
     /// Nothing but whitespace.
     Empty,
-    /// A path separator, or a colon.
-    ///
-    /// `/` is refused rather than read as nesting: a name is a name. The colon
-    /// joins it because macOS renders it as `/` in every UI outside our own —
-    /// Finder, Spotlight, an open panel — so `plan:notes` would look like a
-    /// note inside a folder everywhere but here.
+    /// A path separator, or a colon — macOS renders `:` as `/` in Finder.
     Separator,
-    /// A leading `.`, which `Fs::read_dir` filters out. The note would be
-    /// created and then never listed again — invisible rather than rejected,
-    /// which is the worse failure.
+    /// A leading `.`, which `Fs::read_dir` filters out.
     LeadingDot,
-    /// `.` or `..`. `RelPath::new` normalizes a lone `.` away rather than
-    /// refusing it, so nothing downstream would catch these.
+    /// `.` or `..`.
     Reserved,
-    /// Longer than the filesystem accepts. Without this the name travels all
-    /// the way to `Fs` and fails there as `ENAMETOOLONG`, far from the field
-    /// that could still fix it.
+    /// Longer than the filesystem accepts.
     TooLong,
 }
 
-/// Whether a typed name can become a note or a folder.
-///
-/// Leading and trailing whitespace is trimmed rather than reported: a name
-/// nobody means to type does not need a second severity tier running through
-/// every caller.
+/// Whether a typed name can become a note or a folder. Whitespace is trimmed
+/// rather than reported.
 #[must_use]
 pub fn check_name(name: &str) -> Option<NameProblem> {
     let name = name.trim();
@@ -70,16 +48,9 @@ pub fn check_name(name: &str) -> Option<NameProblem> {
     None
 }
 
-/// The file name a note typed as `name` gets.
-///
-/// Always a literal lowercase `.md`, replacing any existing extension whose
-/// case-insensitive form is already `md`. Not "append unless present": that
-/// leaves `plan.MD` alone, and `Fs::read_dir`'s filter is case-sensitive, so
-/// the note would be created and never listed — the same invisibility trap
-/// `NameProblem::LeadingDot` exists to prevent, reached by another door.
-///
-/// Any other extension is kept and `.md` added after it, so `notes.2026`
-/// becomes `notes.2026.md` rather than losing the year.
+/// The file name a note typed as `name` gets: always a lowercase `.md`,
+/// replacing any existing extension whose case-insensitive form is `md`.
+/// Any other extension is kept, so `notes.2026` becomes `notes.2026.md`.
 #[must_use]
 pub fn note_file_name(name: &str) -> String {
     let name = name.trim();
@@ -94,14 +65,9 @@ pub fn note_file_name(name: &str) -> String {
 pub struct RelPath(Arc<Path>);
 
 impl RelPath {
-    /// `None` when the path is absolute, contains `..`, or has a prefix or root
-    /// component: escaping the root is a path the vault refuses to name, not an
-    /// error to report.
-    ///
-    /// A `.` component is dropped, not refused: `./a.md` and `a.md` name one
-    /// file but are unequal and differ in component count. Refusing the first
-    /// loses a real note; keeping both indents it one level too deep and lets
-    /// one file occupy two keys in a `HashMap<RelPath, _>`.
+    /// `None` when the path is absolute, contains `..`, or has a prefix or
+    /// root component. A `.` component is dropped rather than refused, so
+    /// `./a.md` and `a.md` normalize to the same `RelPath`.
     #[must_use]
     pub fn new(path: &Path) -> Option<Self> {
         let mut normalized = PathBuf::new();
@@ -120,7 +86,6 @@ impl RelPath {
         &self.0
     }
 
-    /// Indentation depth in the tree: zero for a top-level entry.
     #[must_use]
     pub fn depth(&self) -> usize {
         self.0.components().count().saturating_sub(1)
@@ -184,8 +149,6 @@ mod tests {
 
     #[test]
     fn starts_with_compares_components_not_bytes() {
-        // The Obsidian folder-note trap: `Projects.md` must NOT be treated as
-        // living inside the directory `Projects`.
         let dir = RelPath::new(Path::new("Projects")).unwrap();
         let sibling = RelPath::new(Path::new("Projects.md")).unwrap();
         let child = RelPath::new(Path::new("Projects/plan.md")).unwrap();
@@ -210,8 +173,6 @@ mod name_tests {
         assert_eq!(check_name("   "), Some(NameProblem::Empty));
     }
 
-    /// Surrounding whitespace is trimmed rather than reported, so two rows
-    /// cannot differ by a space the user cannot see.
     #[test]
     fn surrounding_whitespace_is_trimmed_not_refused() {
         assert_eq!(check_name("  plan  "), None);
@@ -223,14 +184,11 @@ mod name_tests {
         assert_eq!(check_name("a/b"), Some(NameProblem::Separator));
     }
 
-    /// macOS renders a colon as `/` everywhere outside this app, so the note
-    /// would look nested in Finder and Spotlight.
     #[test]
     fn a_colon_is_refused_because_the_finder_shows_it_as_a_separator() {
         assert_eq!(check_name("plan:notes"), Some(NameProblem::Separator));
     }
 
-    /// The note would be created and then filtered out of every listing.
     #[test]
     fn a_leading_dot_is_refused() {
         assert_eq!(check_name(".plan"), Some(NameProblem::LeadingDot));
@@ -248,12 +206,9 @@ mod name_tests {
         assert_eq!(check_name(&"a".repeat(253)), Some(NameProblem::TooLong));
     }
 
-    /// Counted in UTF-16 units, which is what the filesystem counts. Measuring
-    /// `char`s would accept a name the disk refuses.
     #[test]
     fn the_length_limit_counts_utf16_units_not_chars() {
-        // Each emoji is one `char` and two UTF-16 units. 126 of them plus
-        // `.md` is 255 units exactly; 127 overflows.
+        // Each emoji is 2 UTF-16 units; 126 of them plus `.md` is 255 exactly.
         assert_eq!(check_name(&"😀".repeat(126)), None);
         assert_eq!(check_name(&"😀".repeat(127)), Some(NameProblem::TooLong));
     }
@@ -268,29 +223,24 @@ mod name_tests {
         assert_eq!(note_file_name("plan.md"), "plan.md");
     }
 
-    /// `read_dir` matches `md` case-sensitively, so leaving `plan.MD` alone
-    /// would create a note no listing ever shows again.
+    /// `read_dir` matches `md` case-sensitively; `plan.MD` must not survive.
     #[test]
     fn an_uppercase_extension_is_normalized_rather_than_kept() {
         assert_eq!(note_file_name("plan.MD"), "plan.md");
         assert_eq!(note_file_name("plan.Md"), "plan.md");
     }
 
-    /// The extension is a real part of the name here, not a duplicate one.
     #[test]
     fn an_unrelated_extension_is_kept_and_the_note_one_added() {
         assert_eq!(note_file_name("notes.2026"), "notes.2026.md");
     }
 
-    /// `.md` typed alone has an empty stem, so stripping it would leave `.md`
-    /// — a dotfile, which `check_name` refuses and `read_dir` would hide.
+    /// An empty stem would leave `.md` — a dotfile `read_dir` would hide.
     #[test]
     fn the_extension_alone_stays_a_name_rather_than_becoming_a_dotfile() {
         assert_eq!(note_file_name(".md"), ".md.md");
     }
 
-    /// Two lists of reserved names drift. Nothing else ties them together, so
-    /// a name this accepts must be one `RelPath` also accepts.
     #[test]
     fn every_accepted_name_is_one_relpath_accepts() {
         for name in [

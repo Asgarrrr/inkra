@@ -14,8 +14,7 @@ const MAX_DEPTH: usize = 64;
 pub struct EntryId(u32);
 
 impl EntryId {
-    /// The scan mints ids from 1, so this names a note no scan can produce: a
-    /// file opened by path. A test holds the reservation.
+    /// No scan mints this: it names a file opened by path instead.
     pub const DETACHED: Self = Self(0);
 }
 
@@ -24,9 +23,7 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
-    /// Unread: conflict detection compares a `Stamp` inside `Fs::save`, never
-    /// this. Kept because a listing that cannot report an mtime is a poorer
-    /// seam for a second `Fs` backend, not because anything currently reads it.
+    /// Unread; conflict detection compares a `Stamp` inside `Fs::save` instead.
     pub mtime: Mtime,
 }
 
@@ -34,9 +31,8 @@ pub struct Vault {
     root: PathBuf,
     entries: Vec<Entry>,
     by_identity: HashMap<FileIdentity, EntryId>,
-    /// Position of each id's row in `entries`. Rebuilt in `apply`, from the
-    /// final vector — the only place `entries` is replaced. Built before the
-    /// `sort_by(compare)` there, it would point every id at its pre-sort row.
+    /// Position of each id's row in `entries`. Rebuilt in `apply` from the
+    /// final, sorted vector, never before the sort.
     by_id: HashMap<EntryId, usize>,
     next_id: u32,
 }
@@ -52,16 +48,9 @@ impl Vault {
         self.by_id.get(&id).map(|&index| &self.entries[index])
     }
 
-    /// The id the last scan gave the file with this identity.
-    ///
-    /// How a caller that has just created a file finds the row for it: by
-    /// inode, never by the path it asked for. A path lookup would answer with
-    /// whatever holds that name *now*, which after an external move is a
-    /// different file — and the caller would select a row for a note it did
-    /// not create.
-    ///
-    /// The opposite question — what id a path has, for a `[[link]]` with no
-    /// identity in hand — is `by_path`, still deferred.
+    /// The id the last scan gave the file with this identity. Looked up by
+    /// inode, never by path: a path lookup would answer with whatever holds
+    /// that name *now*, which after an external move is a different file.
     #[must_use]
     pub fn id_for(&self, identity: FileIdentity) -> Option<EntryId> {
         self.by_identity.get(&identity).copied()
@@ -73,37 +62,24 @@ impl Vault {
             .map(|entry| self.root.join(entry.path.as_path()))
     }
 
-    /// Re-key an entry after a write replaced the file. `RealFs::save` renames a
-    /// temp file over the destination, so a saved note's `(device, inode)` is
-    /// not the one it was scanned with. Without this the next `rescan` mints a
-    /// fresh `EntryId`, and every caller keyed by the old one holds a note that
-    /// no longer exists.
-    ///
-    /// A no-op when `id` names no live entry: a `rescan` landing between the
-    /// write and this call has already minted that fresh id and committed it,
-    /// so re-keying on top would leave `by_identity` and `entries` disagreeing
-    /// about which id the path carries, and a click on the row would open a
-    /// second buffer on the same file.
+    /// Re-keys an entry after a write replaced the file's inode. A no-op when
+    /// `id` names no live entry: a `rescan` racing this call may already have
+    /// minted a fresh id, and re-keying on top would leave `by_identity` and
+    /// `entries` disagreeing about which id the path carries.
     pub fn reidentify(&mut self, id: EntryId, identity: FileIdentity) {
         if !self.entries.iter().any(|entry| entry.id == id) {
             return;
         }
-        // By value, not by key: `by_identity` maps identity → id, and the
-        // identity we are replacing is precisely the one we no longer know.
         self.by_identity.retain(|_, mapped| *mapped != id);
         self.by_identity.insert(identity, id);
     }
 
-    /// The walk owns the depth limit and nothing else. Which entries exist —
-    /// `*.md` only, no dotfiles, no symlinks — is `Fs`'s obligation (see
-    /// `RealFs::read_dir`), so a second backend must reimplement those filters.
+    /// The walk owns only the depth limit; filtering entries is `Fs`'s job.
     /// Iterative because an async recursive function needs boxing per level.
     ///
     /// # Errors
     ///
-    /// Never, today: an unreadable directory is skipped rather than reported,
-    /// so one folder cannot lose the vault. The `Result` is the seam a second
-    /// `Fs` backend will need.
+    /// Never, today. The `Result` is the seam a second `Fs` backend will need.
     pub async fn scan(fs: &dyn Fs, root: &Path) -> Result<Self> {
         let mut vault = Self {
             root: root.to_path_buf(),
@@ -128,28 +104,15 @@ impl Vault {
         Ok(())
     }
 
-    /// Everything on disk under `root`, flattened, depth-limited.
-    ///
-    /// Split from `apply` because it awaits and `apply` needs `&mut self`: an
-    /// `Entity<Vault>` hands out `&mut Vault` only for the body of a
-    /// synchronous closure, so a caller holding the entity runs this half
-    /// first and gives the result to the other.
-    ///
-    /// A directory is descended into before `apply`'s filters have run on it.
-    /// Unreachable in practice: POSIX forbids a hard link to a directory, so
-    /// the collapse never fires on one, and `strip_prefix` cannot fail for a
-    /// child of the root the walk descended from.
+    /// Everything on disk under `root`, flattened, depth-limited. Split from
+    /// `apply` because it awaits and `apply` needs `&mut self`, which an
+    /// `Entity<Vault>` only hands out synchronously.
     ///
     /// # Errors
     ///
-    /// When the **root** cannot be read. A subdirectory that cannot be read is
-    /// skipped instead, so one folder cannot lose the vault — but the root is
-    /// not one folder among many. Reporting it as an empty listing would make
-    /// `apply` clear every entry, and a caller that rescans a live vault would
-    /// then leave every open note unable to resolve its path: still on screen,
-    /// still typable, never written again, not even by the quit flush. The
-    /// startup path already treats an unreadable root as fatal
-    /// (`app/src/main.rs`), and this is the same fact arriving later.
+    /// When the root cannot be read. A subdirectory that fails is skipped
+    /// instead, so one folder cannot lose the vault — but an unreadable root
+    /// would otherwise clear every entry and strand every open note.
     pub async fn collect(fs: &dyn Fs, root: &Path) -> Result<Vec<DirEntry>> {
         let mut found = Vec::new();
         let mut worklist = vec![(root.to_path_buf(), 0usize)];
@@ -174,9 +137,8 @@ impl Vault {
         Ok(found)
     }
 
-    /// Mints and reuses ids for what `collect` found. Ids are keyed by
-    /// `(device, inode)`, so a rename keeps its id and a recreated file takes a
-    /// new one.
+    /// Mints and reuses ids for what `collect` found, keyed by
+    /// `(device, inode)`.
     pub fn apply(&mut self, children: Vec<DirEntry>) {
         let mut found: Vec<Entry> = Vec::new();
         let mut next_by_identity = HashMap::new();
@@ -189,9 +151,7 @@ impl Vault {
                 continue;
             };
 
-            // Hard links collapse, first path wins. Before minting, so the
-            // duplicate neither burns an id nor overwrites the survivor's
-            // map entry — either shifts the survivor's id next rescan.
+            // Hard links collapse, first path wins.
             if next_by_identity.contains_key(&child.identity) {
                 continue;
             }
@@ -214,8 +174,6 @@ impl Vault {
 
         found.sort_by(compare);
 
-        // From the final, sorted vector: `entries` and `by_id` must agree on
-        // each id's row, and the sort is what decides the row.
         self.by_id = found
             .iter()
             .enumerate()
@@ -225,24 +183,17 @@ impl Vault {
         self.entries = found;
     }
 
-    /// Where the vault starts. `app` needs it to drive `collect` itself.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
 }
 
-/// Directories precede files at each level; a directory is followed by its
-/// whole subtree. Only the first half is this function's doing — contiguity
-/// comes from `RelPath`'s component-wise `Ord` and survives `path.cmp`.
-/// Sibling order prefers whichever entry is a directory *at the first differing
-/// component*, which is not the same as the entry being a directory.
-///
-/// Two encodings were rejected and must not return as simplifications; both
-/// lose contiguity. Raw path *bytes* wedge `Projects.md` between `Projects` and
-/// `Projects/plan.md`, since `.` (0x2E) sorts below `/` (0x2F). `(kind, path)`
-/// hoists every directory above every file, landing an unrelated top-level
-/// directory inside another directory's run.
+/// Directories precede files at each level, and a directory is followed by
+/// its whole subtree. Two simpler encodings were tried and rejected: raw path
+/// bytes wedge `Projects.md` between `Projects` and `Projects/plan.md`, and
+/// `(kind, path)` hoists every directory above every file, breaking subtree
+/// contiguity in both cases.
 fn compare(a: &Entry, b: &Entry) -> Ordering {
     let a_components: Vec<_> = a.path.as_path().components().collect();
     let b_components: Vec<_> = b.path.as_path().components().collect();
@@ -259,7 +210,7 @@ fn compare(a: &Entry, b: &Entry) -> Ordering {
             _ => x.cmp(y),
         };
     }
-    // One is an ancestor of the other: the ancestor comes first.
+    // An ancestor of the other: the ancestor comes first.
     a_components.len().cmp(&b_components.len())
 }
 
@@ -349,8 +300,6 @@ mod tests {
         assert_ne!(old, new, "a different file must not inherit the id");
     }
 
-    /// Dropping the duplicate must not leave the identity map pointing at an id
-    /// no entry carries: the next rescan would hand it to the survivor.
     #[test]
     fn a_hard_link_does_not_shift_the_surviving_id() {
         let fs = MemFs::new();
@@ -369,8 +318,6 @@ mod tests {
         );
     }
 
-    /// `reidentify` is what keeps the id across a save, and with it whatever
-    /// buffer a caller holds under it.
     #[test]
     fn a_save_keeps_the_entry_id_across_a_rescan() {
         let fs = MemFs::new();
@@ -391,8 +338,6 @@ mod tests {
         );
     }
 
-    /// The failure `reidentify` exists to prevent, pinned so removing the call
-    /// fails here rather than silently orphaning an open buffer.
     #[test]
     fn a_save_without_reidentify_loses_the_entry_id() {
         let fs = MemFs::new();
@@ -409,7 +354,6 @@ mod tests {
         assert!(vault.entry(id).is_none(), "the old id names nothing");
     }
 
-    /// The race `reidentify`'s no-op guard exists for — see `Vault::reidentify`.
     #[test]
     fn reidentify_ignores_an_entry_a_rescan_already_replaced() {
         let fs = MemFs::new();
@@ -433,7 +377,6 @@ mod tests {
         );
     }
 
-    /// `EntryId::DETACHED` is safe only while no scan can mint it.
     #[test]
     fn the_scan_never_mints_the_detached_id() {
         let fs = MemFs::new();
@@ -443,11 +386,6 @@ mod tests {
         assert!(scan(&fs).entries().all(|e| e.id != EntryId::DETACHED));
     }
 
-    /// `apply` mints ids while walking `collect`'s discovery order, then
-    /// reorders the whole vector with `sort_by(compare)` — an id minted early
-    /// can land at a late row. Pins that the lookup index is built from the
-    /// sorted vector, not pre-sort positions, which would otherwise map an id
-    /// to the wrong row.
     #[test]
     fn entry_resolves_every_id_after_a_rescan_reorders_the_list() {
         let fs = MemFs::new();
@@ -468,9 +406,6 @@ mod tests {
         }
     }
 
-    /// Pins component-wise ordering, not `compare`: holds under a plain
-    /// `path.cmp`, but byte ordering breaks it, and the Obsidian folder-note
-    /// pattern reaches that on the first real vault.
     #[test]
     fn a_folder_note_does_not_split_its_folder_from_its_children() {
         let fs = MemFs::new();
@@ -483,7 +418,6 @@ mod tests {
         );
     }
 
-    /// Under `(kind, path)`, `a/z.md` would render indented under `c`.
     #[test]
     fn a_directorys_children_follow_it_rather_than_all_other_directories() {
         let fs = MemFs::new();
@@ -497,10 +431,7 @@ mod tests {
         );
     }
 
-    /// The invariant the sidebar's collapse-skip rests on. Cannot discriminate
-    /// `compare` from `path.cmp`, but both rejected encodings break it: byte
-    /// order wedges `Projects.md` at index 1, `(kind, path)` wedges `zz` at
-    /// index 2. The second top-level directory is what gives that case teeth.
+    /// The invariant the sidebar's collapse-skip rests on.
     #[test]
     fn every_directorys_descendants_are_contiguous() {
         let fs = MemFs::new();

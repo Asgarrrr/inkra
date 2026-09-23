@@ -1,5 +1,3 @@
-//! Creating a note or a folder, through the sidebar's field.
-
 use std::sync::Arc;
 
 use gpui::{Focusable, Modifiers, TestAppContext, point, px};
@@ -11,15 +9,12 @@ use crate::test_support::entry_id;
 
 use super::{activate, open_vault, tree_focused, two_notes, vault_names};
 
-/// `cmd-n` while the **editor** holds focus — the placement test. See
-/// CLAUDE.md on why the handler is on `AppShell`, not the tree.
 #[gpui::test]
 fn cmd_n_opens_a_field_with_the_editor_focused(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
     let mut visual = tree_focused(cx, window, &sidebar);
 
-    // Put focus on the editor, which is the state the tree cannot reach.
     let a = entry_id(&notes, cx, "a");
     activate(&sidebar, cx, a);
     visual.run_until_parked();
@@ -59,8 +54,6 @@ fn typing_a_name_and_confirming_creates_the_note(cx: &mut TestAppContext) {
     assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 }
 
-/// The created row is selected, so the next gesture acts on what was just
-/// made rather than on whatever was selected before.
 #[gpui::test]
 fn the_created_note_becomes_the_selection(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -95,8 +88,6 @@ fn cmd_shift_n_creates_a_folder_rather_than_a_note(cx: &mut TestAppContext) {
     );
 }
 
-/// Refused, not silently ignored: the field stays open so the name can be
-/// fixed — see `edit::Rejection`.
 #[gpui::test]
 fn a_duplicate_name_is_refused_and_the_field_stays_open(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -121,8 +112,7 @@ fn a_duplicate_name_is_refused_and_the_field_stays_open(cx: &mut TestAppContext)
     );
 }
 
-/// `plan` and `plan.md` are one name: the check compares the file name the
-/// note would actually get, not the text typed.
+/// The check compares the file name the note would get, not the text typed.
 #[gpui::test]
 fn a_duplicate_is_caught_through_the_extension(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -165,8 +155,6 @@ fn escape_abandons_the_field_and_makes_nothing(cx: &mut TestAppContext) {
     assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 }
 
-/// A folder selected takes the new note inside it, and is expanded so the
-/// field is drawn somewhere visible.
 #[gpui::test]
 fn a_note_created_under_a_selected_folder_lands_inside_it(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -175,7 +163,6 @@ fn a_note_created_under_a_selected_folder_lands_inside_it(cx: &mut TestAppContex
     let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let mut visual = tree_focused(cx, window, &sidebar);
 
-    // Row 0 is the `projects` folder.
     visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
     visual.run_until_parked();
     visual.simulate_keystrokes("cmd-n p l a n enter");

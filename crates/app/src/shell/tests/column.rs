@@ -1,5 +1,3 @@
-//! The text column beside the sidebar, where its parent is a flex row.
-
 use std::sync::Arc;
 
 use gpui::{TestAppContext, VisualTestContext, px, size};
@@ -9,9 +7,7 @@ use inkra_vault::mem_fs::MemFs;
 use super::{activate, editor, open_vault};
 use crate::test_support;
 
-/// A pane narrower than the column must wrap at the pane. Rooted at `AppShell`
-/// because only a flex parent asks the element for its min-content width: a
-/// window rooted at the editor sizes it from the window and never asks.
+/// Rooted at `AppShell`: only a flex parent asks the element for its min-content width.
 #[gpui::test]
 fn a_narrow_pane_is_never_overflowed_by_the_column(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

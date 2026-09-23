@@ -8,40 +8,19 @@ use crate::field::{Cancelled, Confirmed, NameField};
 
 use super::{Rename, Sidebar, Trash};
 
-/// A name being typed into the tree, holding only what confirm needs — one
-/// struct for one gesture, as Zed's `EditState` is
-/// (`project_panel/src/project_panel.rs:239-256`).
 pub(super) struct EditState {
-    /// The entry being renamed. `None` while creating — nothing exists yet,
-    /// and this one `Option` is what tells the two gestures apart. Everything
-    /// below is shared by both.
+    /// `None` while creating: this is what tells the two gestures apart.
     pub(super) target: Option<EntryId>,
-    /// The folder the new entry goes in, or the vault root. Also the folder a
-    /// rename's collision check looks in, which is the one it moves within.
     parent: Option<EntryId>,
     kind: Kind,
-    /// Index in `visible` where the field's row is drawn, and the indent it
-    /// takes. `rebuild` moves `at` to follow the tree; `depth` is fixed at the
-    /// gesture, because a new entry's indent is decided by where it will land
-    /// rather than by what the listing currently holds.
     pub(super) at: usize,
     pub(super) depth: usize,
     pub(super) field: Entity<NameField>,
-    /// Why the last `Confirm` was refused. Cleared by the next one.
-    ///
-    /// Set at confirm, not recomputed per keystroke, since Zed's live
-    /// validation (`project_panel.rs:2012-2080`) amortises over a much larger
-    /// surface. Must not disappear silently — the failure in Zed's own
-    /// confirm, which returns wordlessly when the name is taken.
+    /// Must not disappear silently on a refusal — Zed's own confirm does that.
     pub(super) rejected: Option<Rejection>,
-    /// Confirm and cancel. Held, because dropping a `Subscription` cancels it.
     _subscriptions: [Subscription; 2],
 }
 
-/// Why a typed name was refused.
-///
-/// `NameProblem` plus the one question `vault` cannot answer: whether the name
-/// is taken. That needs the live listing, not a property of a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Rejection {
     Name(NameProblem),
@@ -49,7 +28,6 @@ pub(super) enum Rejection {
 }
 
 impl Rejection {
-    /// The English. `vault` states the rule; this layer owns the wording.
     pub(super) fn message(self) -> &'static str {
         match self {
             Self::Name(NameProblem::Empty) => "A name is required.",
@@ -62,22 +40,14 @@ impl Rejection {
     }
 }
 
-/// The last component of a vault-relative path, as text.
-///
-/// Compared against what `note_file_name` produces, so the collision check sees
-/// `plan` and `plan.md` as one name rather than two.
+/// Compared against `note_file_name`'s output, so `plan` and `plan.md` collide as one name.
 fn file_name_of(path: &std::path::Path) -> String {
     path.file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
 }
 
 impl Sidebar {
-    /// Asks before deleting, then deletes.
-    ///
-    /// A native prompt, not an in-window one: gpui has no confirmation
-    /// widget. The wording names unsaved changes specifically, because
-    /// trashing takes the file as it is on disk and the editor's newer text
-    /// is not recoverable from the Trash.
+    /// Trashing takes the file as it is on disk; the editor's newer text is not recoverable.
     pub(super) fn trash(&mut self, _: &Trash, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing.is_some() {
             return;
@@ -88,9 +58,7 @@ impl Sidebar {
         let Some(row) = self.visible.iter().find(|row| row.id == id) else {
             return;
         };
-        // Folders are not deletable yet: one gesture would take every note
-        // inside, which needs a prompt that counts them and the closing of
-        // every buffer in the subtree.
+        // Folders are not deletable yet: one gesture would take every note inside.
         if row.kind == Kind::Dir {
             return;
         }
@@ -115,9 +83,7 @@ impl Sidebar {
                 return;
             }
             let _ = sidebar.update(cx, |sidebar, cx| {
-                // Moved before the delete resolves, so the tree never shows a
-                // selection on a row that is on its way out. The rescan the
-                // delete triggers rebuilds `visible` under it.
+                // Moved before the delete resolves, so selection never points at a row on its way out.
                 sidebar.selected = next;
                 sidebar
                     .notes
@@ -128,15 +94,7 @@ impl Sidebar {
         .detach();
     }
 
-    /// Opens an empty field where the new entry will appear.
-    ///
-    /// Called by `AppShell`, never registered as an action here — see
-    /// CLAUDE.md on where `cmd-n`'s dispatch is handled and why.
-    ///
-    /// The field goes inside the selection when it is a folder, beside it when
-    /// it is a note, and at the root when nothing is selected. A selected
-    /// folder is expanded first, or the field would be drawn into a subtree
-    /// nobody can see.
+    /// Called by `AppShell`, never registered as an action here.
     pub(crate) fn start_creating(
         &mut self,
         kind: Kind,
@@ -147,16 +105,11 @@ impl Sidebar {
         window.focus(&field.focus_handle(cx), cx);
     }
 
-    /// `start_creating` without the focus move, which is the only part that
-    /// needs a `Window`.
     pub(super) fn open_create(&mut self, kind: Kind, cx: &mut Context<Self>) -> Entity<NameField> {
         let placement = self.insertion_point(cx);
         self.open_edit(None, placement, kind, "", cx)
     }
 
-    /// Installs the field both gestures type into, and scrolls it into view.
-    /// `placement` is `(parent, row index, indent)`, as `insertion_point`
-    /// returns it.
     fn open_edit(
         &mut self,
         target: Option<EntryId>,
@@ -176,15 +129,12 @@ impl Sidebar {
             rejected: None,
             _subscriptions: subscriptions,
         });
-        // Load-bearing, not polish — see `Sidebar::scroll`.
+        // Load-bearing, not polish — see `Sidebar::scroll`'s field doc.
         self.scroll.scroll_to_item(at, ScrollStrategy::Center);
         cx.notify();
         field
     }
 
-    /// The field both gestures use, and the two subscriptions that end it.
-    /// Shared because confirming and cancelling do not differ between
-    /// creating and renaming — see `EditState::target`.
     pub(super) fn open_field(
         initial: &str,
         cx: &mut Context<Self>,
@@ -201,18 +151,12 @@ impl Sidebar {
         (field, [confirmed, cancelled])
     }
 
-    /// Opens a field over the selected row, holding its current name.
-    ///
-    /// The whole name is selected, so typing replaces it and an arrow key still
-    /// reaches the old one — which is what a user correcting a typo wants.
     pub(super) fn rename(&mut self, _: &Rename, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(field) = self.open_rename(cx) {
             window.focus(&field.focus_handle(cx), cx);
         }
     }
 
-    /// `rename` without the focus move. `None` when there is nothing to rename
-    /// or a name is already being typed.
     pub(super) fn open_rename(&mut self, cx: &mut Context<Self>) -> Option<Entity<NameField>> {
         if self.editing.is_some() {
             return None;
@@ -224,7 +168,6 @@ impl Sidebar {
         Some(self.open_edit(Some(id), (parent, at, row.depth), row.kind, &row.name, cx))
     }
 
-    /// Where a new entry goes, as `(parent, row index, indent)`.
     pub(super) fn insertion_point(
         &mut self,
         cx: &mut Context<Self>,
@@ -237,15 +180,12 @@ impl Sidebar {
             if !self.expanded.contains(&row.id) {
                 self.toggle(row.id, cx);
             }
-            // First child of the folder, which is where the tree order puts a
-            // new entry under it.
             return (Some(row.id), selected + 1, row.depth + 1);
         }
         (self.parent_of(&row), selected + 1, row.depth)
     }
 
-    /// Validates, then creates. A refused name leaves the field open with the
-    /// reason under it, rather than closing and doing nothing.
+    /// A refused name leaves the field open with the reason under it.
     fn confirm(&mut self, name: &str, cx: &mut Context<Self>) {
         let Some(edit) = self.editing.as_ref() else {
             return;
@@ -268,7 +208,6 @@ impl Sidebar {
 
         self.editing = None;
         let name = name.to_owned();
-        // The one place the two gestures diverge — everything above is shared.
         if let Some(id) = target {
             self.notes
                 .update(cx, |notes, cx| notes.rename(id, &name, cx))
@@ -280,8 +219,6 @@ impl Sidebar {
             cx.spawn(async move |sidebar, cx| {
                 let Some(id) = created.await else { return };
                 let _ = sidebar.update(cx, |sidebar, cx| {
-                    // The rescan the create awaited has already rebuilt
-                    // `visible`, so the row exists to be selected.
                     sidebar.selected = Some(id);
                     cx.notify();
                 });
@@ -291,13 +228,7 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// Whether `parent` already holds an entry by this name.
-    ///
-    /// Answered here, not in `vault`: it is a question about the live
-    /// listing, not a path property. Compared on the file name a note would
-    /// actually get, so `plan` and `plan.md` collide. `target` is excluded so
-    /// a same-name rename is a no-op, not a duplicate — this also covers a
-    /// case-only rename.
+    /// `target` is excluded so a same-name (or case-only) rename is a no-op, not a duplicate.
     fn taken(
         &self,
         target: Option<EntryId>,
@@ -318,7 +249,6 @@ impl Sidebar {
             .and_then(|id| vault.entry(id))
             .map(|e| e.path.clone())
         else {
-            // The root: a top-level entry is one with no parent component.
             return vault.entries().any(|entry| {
                 Some(entry.id) != target
                     && entry.path.depth() == 0

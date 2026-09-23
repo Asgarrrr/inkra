@@ -1,13 +1,6 @@
-//! No save destroys bytes it did not write.
-//!
-//! The property is conditional on the expectation, not unconditional: a save
-//! that finds what it expected is replacing bytes it wrote itself, and may.
-//! Two external writes in a row lose the first for the same reason — that is
-//! the external writer's doing, not ours. Only a save that finds something it
-//! did not expect must preserve every byte, under a new name.
+//! No save destroys bytes it did not write. Conditional on the expectation:
+//! a save that finds what it expected is replacing its own bytes, and may.
 
-// `expect_used` is denied here too (`[lints] workspace = true`) — see
-// `tests/real_fs.rs`.
 #![allow(clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
@@ -19,13 +12,12 @@ use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
 enum Op {
-    /// A second process rewriting the note in place. `insert_file` keeps the
-    /// path's identity, which is what makes it that and not a save.
+    /// A second process rewriting the note in place.
     External(String),
     /// Our write, carrying the expectation our last save produced.
     Save(String),
-    /// Our write carrying a deliberately stale expectation: the one from before
-    /// the previous save. Models a write issued before an earlier one landed.
+    /// Our write, carrying the expectation from before the previous save —
+    /// models a write issued before an earlier one landed.
     SaveStale(String),
 }
 
@@ -46,8 +38,6 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-/// Every file under `/vault`, by content. A conflict file is an ordinary note,
-/// so `read_dir` lists it like any other.
 fn contents(fs: &MemFs) -> Vec<String> {
     block_on(fs.read_dir(Path::new("/vault")))
         .expect("read_dir")

@@ -1,18 +1,10 @@
-//! A Unix timestamp to a civil date, in UTC.
-//!
-//! Twenty lines rather than a dependency, per `dependencies.md`: date
-//! arithmetic is named there as the write-it-yourself case. Local time is not
-//! offered, because rendering it needs the zone database — `libc::localtime_r`
-//! and a new direct dependency — to save the reader an offset they can apply
-//! themselves.
+//! A Unix timestamp to a civil date, in UTC. Written by hand to avoid a
+//! date-arithmetic dependency; no local time, since that needs a zone database.
 
 use std::time::SystemTime;
 
-/// `YYYY-MM-DD HH-MM-SS`, UTC. Safe in a filename: no colon, no slash.
-///
-/// A time before the epoch clamps to the epoch. No file in a vault carries one,
-/// and a total function keeps the caller from handling an error it could not
-/// act on anyway.
+/// `YYYY-MM-DD HH-MM-SS`, UTC, safe in a filename. Clamps to the epoch for an
+/// earlier time, so callers never see an error they can't act on.
 pub(crate) fn format_utc(at: SystemTime) -> String {
     let seconds = at
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -30,13 +22,8 @@ pub(crate) fn format_utc(at: SystemTime) -> String {
     )
 }
 
-/// Howard Hinnant's `civil_from_days`, the inverse of the days-from-civil
-/// algorithm `std::chrono` uses. Shifts the era so March is month 1, which is
-/// what removes the leap day from the middle of the arithmetic: it then falls
-/// at the end of a year rather than inside one.
-///
-/// Correct for the Gregorian rule in full, including that 1900 is not a leap
-/// year and 2000 is.
+/// Howard Hinnant's `civil_from_days`. Correct for the full Gregorian leap
+/// rule, including 1900 (not a leap year) and 2000 (one).
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -66,14 +53,12 @@ mod tests {
 
     #[test]
     fn a_leap_day() {
-        // 2024-02-29T12:34:56Z
         assert_eq!(format_utc(at(1_709_210_096)), "2024-02-29 12-34-56");
     }
 
     #[test]
     fn a_century_boundary_that_is_a_leap_year() {
-        // 2000-02-29T00:00:00Z. Divisible by 100 and by 400, so it *is* a leap
-        // year — the case a three-line leap rule gets wrong by a day.
+        // Divisible by 100 and 400, so it is a leap year despite the century.
         assert_eq!(format_utc(at(951_782_400)), "2000-02-29 00-00-00");
     }
 
@@ -87,7 +72,6 @@ mod tests {
 
     #[test]
     fn a_recent_timestamp() {
-        // 2026-09-21T14:32:05Z
         assert_eq!(format_utc(at(1_790_001_125)), "2026-09-21 14-32-05");
     }
 }

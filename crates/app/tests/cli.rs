@@ -1,17 +1,9 @@
-//! The command-line surface: what the binary does before a window exists.
-//!
-//! Spawns the real binary instead of calling `launch` directly. The thing
-//! under test is argument handling, and the arguments belong to the process —
-//! an in-process test would have to fake them and would then prove nothing
-//! about `std::env::args_os`. Both cases exit before `open_window`, so this
-//! stays headless; `check.sh` still renders nothing.
-
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
 
-/// The exit code and stderr of one run. `expect` is avoided so the crate's
-/// `expect_used = "deny"` needs no exception here.
+/// `expect` is avoided so the crate's `expect_used = "deny"` needs no
+/// exception here.
 fn run(argument: &OsStr) -> (Option<i32>, String) {
     let output = match Command::new(env!("CARGO_BIN_EXE_inkra-app"))
         .arg(argument)
@@ -26,8 +18,6 @@ fn run(argument: &OsStr) -> (Option<i32>, String) {
     )
 }
 
-/// A path under the temp directory that nothing creates, as raw bytes so the
-/// non-UTF-8 case can splice an invalid byte into it.
 fn absent_path(suffix: &[u8]) -> OsString {
     let mut bytes = std::env::temp_dir().into_os_string().into_vec();
     bytes.push(b'/');
@@ -47,11 +37,9 @@ fn a_missing_note_exits_one_and_names_the_path() {
     );
 }
 
-/// `std::env::args` unwraps every argument into a `String`, so a non-UTF-8
-/// filename panicked — crossing the macOS FFI boundary as a non-unwinding
-/// abort, killing the process with SIGABRT instead of naming the path. A
-/// Unix path is bytes; `RelPath::display_name` (`crates/vault/src/path.rs`)
-/// already treats a non-UTF-8 name as renderable, not fatal.
+/// `std::env::args` unwraps every argument into a `String`; a non-UTF-8
+/// filename would panic across the macOS FFI boundary as a non-unwinding
+/// abort — SIGABRT instead of naming the path.
 #[test]
 fn a_non_utf8_argument_is_reported_not_aborted() {
     let path = absent_path(b"\xffinkra-absent-note.md");

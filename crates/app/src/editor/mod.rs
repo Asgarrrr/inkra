@@ -1,6 +1,3 @@
-//! The editor view: the gpui half of editing. Everything here needs a `Window`,
-//! font metrics, or an entity handle; anything else belongs in `inkra-editor`.
-
 pub(crate) mod actions;
 pub(crate) mod element;
 mod input;
@@ -19,14 +16,12 @@ use inkra_text::{Buffer, ByteOffset};
 use crate::theme;
 use element::{DocumentLayout, TextElement};
 
-/// Local: up and down are not resolvable without font metrics.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Vertical {
     Up,
     Down,
 }
 
-/// Local, like [`Vertical`]: the visual row's ends need the layout.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum RowEdge {
     Start,
@@ -38,8 +33,6 @@ pub(crate) struct EditorView {
     state: EditorState,
     focus_handle: FocusHandle,
     is_selecting: bool,
-    /// Written in `paint` and by `edit_buffer`, so it describes the current
-    /// text. Every index into it still clamps; see `DocumentLayout`.
     last_layout: Option<DocumentLayout>,
     last_bounds: Option<Bounds<Pixels>>,
     /// Text top at zero scroll, as of the last paint. Never re-derive it from
@@ -71,14 +64,8 @@ impl EditorView {
         }
     }
 
-    /// The only gate that may rebind the buffer. Through `edit_buffer` instead,
-    /// the new note's text lands on the *previous* note's undo stack and `⌘Z`
-    /// restores one file into another. Resets every mutable field but
-    /// `focus_handle`; only `state` and `_buffer_changed` carry a regression
-    /// test (`a_swap_resets_the_caret_and_any_ime_composition`,
-    /// `editing_after_a_swap_still_notifies`).
-    // Renaming `_buffer_changed` trades this lint for "never read": rustc
-    // exempts `_`-prefixed fields from the latter.
+    /// The only gate that may rebind the buffer: through `edit_buffer` instead,
+    /// the new note's text would land on the *previous* note's undo stack.
     #[expect(
         clippy::used_underscore_binding,
         reason = "resubscribing is the point of the gate"
@@ -88,12 +75,10 @@ impl EditorView {
         self._buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
         self.buffer = buffer;
 
-        // Offset 0, unlike `new`, which seats the caret at `end`.
         self.state = EditorState::new(Selection::at(ByteOffset(0)));
         self.is_selecting = false;
 
-        // Cleared, not kept: `reveal_cursor` would scroll the new note by the
-        // old note's geometry.
+        // Cleared, not kept: `reveal_cursor` would scroll by the old note's geometry.
         self.last_layout = None;
         self.last_bounds = None;
         self.last_text_top = None;
@@ -102,30 +87,18 @@ impl EditorView {
         cx.notify();
     }
 
-    /// `#[cfg(test)]`: no production caller reads the buffer back out.
     #[cfg(test)]
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
         &self.buffer
     }
 
-    /// Where the text column was painted. `#[cfg(test)]`, like `buffer`: a
-    /// shell test needs it to see the column inside its real parent.
     #[cfg(test)]
     pub(crate) fn text_bounds(&self) -> Option<Bounds<Pixels>> {
         self.last_bounds
     }
 
-    /// The single path that mutates the buffer. `as_mut`, not `update`: it
-    /// notifies on drop (`gpui/src/app.rs:3280-3286`), and `Buffer` is gpui-free by
-    /// rule, so nothing else can.
-    ///
-    /// An action that mutates neither the buffer nor `EditorState` needs none
-    /// of the gates and must not take one: `copy` reads with `buffer.read` so
-    /// that `⌘C` cannot notify, and so cannot mark a clean note dirty.
-    ///
-    /// Reshapes before revealing: the edit may have moved every line after it,
-    /// and the stored layout describes the text before the edit. A caret move
-    /// changes no text, which is why `move_cursor` does not.
+    /// The single path that mutates the buffer, via `as_mut`'s drop-notify.
+    /// `copy` reads via `buffer.read` instead, so `⌘C` cannot mark a clean note dirty.
     fn edit_buffer<R>(
         &mut self,
         window: &mut Window,
@@ -134,17 +107,14 @@ impl EditorView {
     ) -> R {
         let mut buffer = self.buffer.as_mut(cx);
         let result = f(&mut self.state, &mut buffer);
-        // Load-bearing: the lease would outlive the reshape below, which reads
-        // the buffer, and a second lease panics at runtime
-        // (`gpui/src/app/entity_map.rs:231`).
+        // Load-bearing: the lease must not outlive the reshape below, which
+        // reads the buffer — a second lease panics at runtime.
         drop(buffer);
         self.reshape(window, cx);
         self.reveal_cursor();
         result
     }
 
-    /// Shapes the current text the way the last frame did. Nothing painted
-    /// yet means nothing to copy the style from, and nothing to reveal against.
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(last) = self.last_layout.as_ref() else {
             return;
@@ -167,7 +137,6 @@ impl EditorView {
         cx.notify();
     }
 
-    /// [`Self::update_state`] for movements that need the buffer to resolve.
     fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
         f(&mut self.state, self.buffer.read(cx));
         cx.notify();
@@ -175,16 +144,13 @@ impl EditorView {
     }
 
     /// Called from both gates, not the action handlers, which would forget it.
-    /// Must be written here: from `TextElement::prepaint` it lands a frame late
-    /// (`gpui/elements/div.rs:2390-2392`, then `:2027`). The unclamped write is
-    /// deliberate — see [`scroll::reveal`].
+    /// Must run here: from `TextElement::prepaint` it would land a frame late.
     fn reveal_cursor(&mut self) {
         let (Some(text_top), Some(layout)) = (self.last_text_top, self.last_layout.as_ref()) else {
             return;
         };
         let viewport = self.scroll_handle.bounds();
-        // Nothing prepainted yet: bounds stay `default()` until the first
-        // `clamp_scroll_position` (`gpui/elements/div.rs:2484`).
+        // Nothing prepainted yet: bounds stay default() until the first clamp.
         if viewport.size.height <= px(0.) {
             return;
         }
@@ -199,8 +165,6 @@ impl EditorView {
         }
     }
 
-    /// The only movements needing font metrics, and the only ones that set a
-    /// [`Goal`] — everything else names `Goal::None`.
     fn move_vertically(&mut self, cx: &mut Context<Self>, direction: Vertical, extend: bool) {
         let Some(layout) = self.last_layout.as_ref() else {
             return;
@@ -208,8 +172,8 @@ impl EditorView {
         let cursor = self.cursor();
         let row = layout.row_for_offset(cursor);
 
-        // Reused verbatim: it re-widens a run of downs after a short row. An x
-        // from the row's start, so it means the same on every row.
+        // Reused verbatim: re-widens a run of downs after a short row (x is
+        // from the row's start, so it means the same on every row).
         let goal_x = match self.state.selection().goal() {
             Goal::Column(x) => px(x),
             Goal::None => layout.x_for_offset(cursor),
@@ -235,8 +199,7 @@ impl EditorView {
             return;
         }
 
-        // Drops the goal on purpose: the next vertical move should start from
-        // the column this landed in, not the one it was aiming for.
+        // Drops the goal: the next vertical move starts from where this landed, not where it aimed.
         let movement = match direction {
             Vertical::Up => LogicalMovement::DocStart,
             Vertical::Down => LogicalMovement::DocEnd,
@@ -244,10 +207,6 @@ impl EditorView {
         self.move_cursor(cx, |state, buffer| state.move_(buffer, movement, extend));
     }
 
-    /// Home and End: the ends of the caret's visual row. A second press stays
-    /// put — macOS has no escalation to the logical line; `ctrl-a`/`ctrl-e` go
-    /// there instead. Nothing painted yet means no rows, and, like up and down,
-    /// no move.
     fn move_to_row_edge(&mut self, cx: &mut Context<Self>, edge: RowEdge) {
         let Some(layout) = self.last_layout.as_ref() else {
             return;
@@ -260,14 +219,10 @@ impl EditorView {
         self.move_cursor(cx, |state, buffer| state.move_to(buffer, target, false));
     }
 
-    /// `pub(crate)` for `shell.rs`'s tests, which assert the caret did *not*
-    /// move when a key was claimed elsewhere. Used inside this module too, so
-    /// it is not dead in a release build.
     pub(crate) fn cursor(&self) -> ByteOffset {
         self.state.cursor()
     }
 
-    /// Unclipped; both callers pass the result to `move_to`, which clips.
     fn position_for_point(&self, position: Point<Pixels>) -> Option<ByteOffset> {
         let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
         Some(layout.offset_for_position(position - bounds.origin))

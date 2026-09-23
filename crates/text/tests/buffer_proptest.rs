@@ -7,10 +7,7 @@ use proptest::prelude::*;
 enum Op {
     Insert(usize, String),
     Delete(usize, usize),
-    /// Two edits that must collapse into a single undo step.
     ReplaceInTransaction(usize, usize, String),
-    /// Two inserts at *different* positions in one transaction — the case that
-    /// exercises inverting a multi-edit transaction in reverse order.
     InsertTwiceInTransaction(usize, usize, String, String),
     Undo,
     Redo,
@@ -26,9 +23,7 @@ fn text_strategy() -> impl Strategy<Value = String> {
         Just("café".to_string()),
         Just("e\u{301}".to_string()),
         Just("👨\u{200d}👩\u{200d}👧".to_string()),
-        // Newlines belong in the shared strategy, not a line-index-only one:
-        // undo, grapheme stepping and UTF-16 conversion all have to survive
-        // them too, and until multi-line they were never generated.
+        // Newlines live here, not a line-index-only strategy: undo and UTF-16 conversion must survive them too.
         Just("\n".to_string()),
         Just("\n\n".to_string()),
         Just("a\nb".to_string()),
@@ -48,8 +43,6 @@ fn op_strategy() -> impl Strategy<Value = Op> {
     ]
 }
 
-/// Maps an arbitrary index onto a char boundary of `text`, so generated offsets
-/// are always valid without the strategy knowing the buffer contents.
 fn boundary(text: &str, index: usize) -> usize {
     let boundaries: Vec<usize> = text
         .char_indices()
@@ -64,8 +57,6 @@ fn ordered_boundaries(text: &str, a: usize, b: usize) -> (usize, usize) {
     (a.min(b), a.max(b))
 }
 
-/// Every invariant the line index owes its callers, checked against `text()`
-/// rather than against a second implementation of the same scan.
 fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
     let count = buf.line_count();
     prop_assert_eq!(buf.lines().count(), count);
@@ -81,11 +72,9 @@ fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
             "line {} holds a newline",
             line
         );
-        // Every offset on the line resolves back to it, both edges included.
         prop_assert_eq!(buf.line_for_offset(range.start), line);
         prop_assert_eq!(buf.line_for_offset(range.end), line);
 
-        // The next line starts one byte past this one's newline.
         expected_start = ByteOffset(range.end.0 + 1);
     }
     prop_assert_eq!(buf.line_range(count - 1).end, buf.len());
@@ -141,9 +130,6 @@ proptest! {
                     model_undo.push(model.clone());
                     model_redo.clear();
 
-                    // The second position is chosen against the text as it
-                    // stands *after* the first insert, matching what a caller
-                    // composing two edits would actually compute.
                     let mut expected = model.clone();
                     expected.insert_str(first_at, &first);
                     let second_at = boundary(&expected, second_at);
@@ -185,11 +171,8 @@ proptest! {
             observations.push((buf.version(), buf.text().to_owned()));
         }
 
-        // Equal versions imply equal text. The converse does not hold: undoing
-        // and retyping the same characters reaches the same text at a new
-        // version. This holds for a per-transaction id too — nothing here
-        // calls `transact_at`, so nothing merges; the merge case is
-        // `version_moves_whenever_a_timed_edit_changes_the_text`.
+        // Equal versions imply equal text; the converse doesn't hold — undo then retype reaches
+        // the same text at a new version. The merge case is covered separately, below.
         for (i, (version_i, text_i)) in observations.iter().enumerate() {
             for (version_j, text_j) in observations.iter().skip(i + 1) {
                 if version_i == version_j {
@@ -199,11 +182,7 @@ proptest! {
         }
     }
 
-    /// The version must move on every edit that moves the text, including one
-    /// that merges into the previous transaction. Delays straddle
-    /// `GROUP_INTERVAL` (300 ms), so both the merging and the non-merging
-    /// branch of `close` are exercised. A per-transaction id passes every
-    /// other property in this file and fails here.
+    /// Delays straddle `GROUP_INTERVAL` so both the merging and non-merging branch of `close` run.
     #[test]
     fn version_moves_whenever_a_timed_edit_changes_the_text(
         edits in prop::collection::vec((any::<usize>(), text_strategy(), 0u64..600), 1..20)
@@ -216,8 +195,7 @@ proptest! {
             let before = buf.version();
             now += Duration::from_millis(delay);
 
-            // Every generated string is non-empty, so every insert moves the
-            // text and owes a new version.
+            // Every generated string is non-empty, so every insert moves the text and owes a new version.
             buf.transact_at(now, |buf| buf.insert(ByteOffset(at), &text));
 
             prop_assert!(
@@ -244,9 +222,6 @@ proptest! {
         );
     }
 
-    /// The line index is derived from the text on every call, so the thing to
-    /// prove is that its four views agree with each other and with `text()` —
-    /// including after edits, which is where a cached index would drift.
     #[test]
     fn the_line_index_stays_consistent_across_edits(
         parts in prop::collection::vec(text_strategy(), 0..8),

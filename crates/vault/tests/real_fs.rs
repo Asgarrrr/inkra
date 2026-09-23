@@ -1,9 +1,6 @@
 //! `RealFs` against a real temporary directory. Separate from the unit tests
 //! because it touches the disk.
 
-// `[lints] workspace = true` applies to every target of the crate, including
-// integration tests, so `expect_used` is denied here too. A failed setup call
-// must abort with a message naming what broke, not hide behind a `Result`.
 #![allow(clippy::expect_used)]
 
 use std::fs;
@@ -14,8 +11,7 @@ use std::time::SystemTime;
 use futures::executor::block_on;
 use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp};
 
-/// A temp directory that removes itself. `tempfile` is not a dependency, and
-/// this is the only place that would want it.
+/// A temp directory that removes itself.
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -33,13 +29,12 @@ impl Drop for TempDir {
     }
 }
 
-/// What the file currently says, for a save that expects to find it unchanged.
 fn stamp_of(path: &Path) -> Stamp {
     block_on(RealFs.load(path)).expect("load").stamp
 }
 
-/// For a save of a path that does not exist yet. Never compared: `save` stats
-/// nothing when there is no file to stat, so any value does.
+/// For a save of a path that does not exist yet. Never compared: no file
+/// means nothing to stat.
 fn absent() -> Stamp {
     Stamp {
         mtime: Mtime(SystemTime::UNIX_EPOCH),
@@ -47,7 +42,6 @@ fn absent() -> Stamp {
     }
 }
 
-/// Every `.md` file in the directory, by name.
 fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<_> = fs::read_dir(dir)
         .expect("read_dir")
@@ -85,7 +79,6 @@ fn save_writes_lf_and_round_trips() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "hello\nworld\n");
 }
 
-/// Pins that a replace changes the inode — see `Fs::save`.
 #[test]
 fn save_replaces_the_file_and_reports_the_new_identity() {
     let dir = TempDir::new("replace");
@@ -104,8 +97,6 @@ fn save_replaces_the_file_and_reports_the_new_identity() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "after");
 }
 
-/// Pins the umask restore in `replace`. The default mode usually matches by
-/// accident, hence the explicit `chmod` here.
 #[test]
 fn save_preserves_the_file_mode() {
     let dir = TempDir::new("mode");
@@ -119,8 +110,6 @@ fn save_preserves_the_file_mode() {
     assert_eq!(mode & 0o777, 0o640);
 }
 
-/// Invisible in the vault (`read_dir` filters `.tmp`), so the test has to look
-/// at the raw directory listing. See `TempFile`.
 #[test]
 fn save_leaves_no_temp_file_behind() {
     let dir = TempDir::new("temp");
@@ -135,7 +124,6 @@ fn save_leaves_no_temp_file_behind() {
     assert_eq!(names, vec!["note.md"]);
 }
 
-/// Pins the in-place write for a hard-linked note — see `RealFs::save`.
 #[test]
 fn save_of_a_hard_linked_note_keeps_one_inode() {
     let dir = TempDir::new("links");
@@ -155,7 +143,6 @@ fn save_of_a_hard_linked_note_keeps_one_inode() {
     );
 }
 
-/// Pins write-through for a symlink — see `RealFs::save`.
 #[test]
 fn save_writes_through_a_symlink_rather_than_replacing_it() {
     let dir = TempDir::new("symlink");
@@ -173,8 +160,6 @@ fn save_writes_through_a_symlink_rather_than_replacing_it() {
     assert_eq!(fs::read_to_string(&target).expect("read"), "after");
 }
 
-/// An external write between the load and the save. Its bytes survive under a
-/// new name, and the note itself holds ours.
 #[test]
 fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
     let dir = TempDir::new("conflict");
@@ -182,9 +167,8 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
     fs::write(&note, "before").expect("write");
     let stamp = stamp_of(&note);
 
-    // The other writer. The differing length is what this test relies on; the
-    // sleep is there so the mtime differs too, on a filesystem coarse enough
-    // that two writes in one second share a timestamp.
+    // Sleep so the mtime differs too: some filesystems share a timestamp
+    // across writes within one second.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     fs::write(&note, "someone else's much longer text").expect("write");
 
@@ -203,9 +187,6 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
     );
 }
 
-/// The self-healing property: the stamp a save returns is the expectation the
-/// next save of that note passes with. Without it every second keystroke would
-/// mint a conflict file holding the note's own text.
 #[test]
 fn save_reports_a_stamp_the_next_save_accepts() {
     let dir = TempDir::new("chain");
@@ -220,7 +201,6 @@ fn save_reports_a_stamp_the_next_save_accepts() {
     assert_eq!(names(&dir.0), vec!["note.md"]);
 }
 
-/// Pins the missing-file case — see `RealFs::save`.
 #[test]
 fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
     let dir = TempDir::new("missing");
@@ -235,8 +215,6 @@ fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
     assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
 }
 
-/// If the preserve fails, the replace must not happen: the file must keep the
-/// other writer's bytes. See `Fs::save`.
 #[test]
 fn a_failed_preserve_leaves_the_file_untouched() {
     let dir = TempDir::new("preserve-fails");
@@ -246,9 +224,6 @@ fn a_failed_preserve_leaves_the_file_untouched() {
 
     std::thread::sleep(std::time::Duration::from_millis(1100));
     fs::write(&note, "theirs").expect("write");
-    // A conflict file cannot be created in a directory with no write
-    // permission, while the note itself stays writable in place. Only the
-    // preserve step can fail, which is what this isolates.
     fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o500)).expect("chmod");
 
     let result = block_on(RealFs.save(&note, "ours", stamp));
@@ -262,9 +237,6 @@ fn a_failed_preserve_leaves_the_file_untouched() {
     );
 }
 
-/// `replace` restores the note's mode onto its temp file, and
-/// `save_preserves_the_file_mode` pins that. The conflict file is a second
-/// fresh file holding the same note's content and owes the same.
 #[test]
 fn a_preserved_file_keeps_the_note_mode() {
     let dir = TempDir::new("conflict-mode");
@@ -300,16 +272,11 @@ fn read_dir_separates_directories_from_notes_and_skips_dotfiles() {
     assert_eq!(entries[1].kind, Kind::Dir);
 }
 
-/// The two filters the dotfile test does not reach. Both are load-bearing and
-/// neither has a visible symptom when removed: a non-`.md` file would become a
-/// note, and a symlink would let the walk leave the vault root or loop.
 #[test]
 fn read_dir_skips_other_extensions_and_symlinks() {
     let dir = TempDir::new("filters");
     fs::write(dir.0.join("a.md"), "a").expect("write");
     fs::write(dir.0.join("notes.txt"), "t").expect("write");
-    // Deliberately outside the vault: following this link is exactly the
-    // escape `symlink_metadata` refuses.
     std::os::unix::fs::symlink(std::env::temp_dir(), dir.0.join("escape.md"))
         .expect("create symlink");
 
@@ -319,8 +286,6 @@ fn read_dir_skips_other_extensions_and_symlinks() {
     assert_eq!(paths, vec![dir.0.join("a.md")]);
 }
 
-/// The identity is what `Vault::apply` keys every `EntryId` on, so a rename
-/// that minted a new inode would silently detach the note from its open buffer.
 #[test]
 fn rename_moves_the_note_and_keeps_its_identity() {
     let dir = TempDir::new("rename-identity");
@@ -340,9 +305,6 @@ fn rename_moves_the_note_and_keeps_its_identity() {
     );
 }
 
-/// Pins the one cell `rename(2)` does not refuse for us — see `RealFs::rename`.
-/// Nothing else in the suite would notice the `hard_link` guard being
-/// replaced by a bare `fs::rename`.
 #[test]
 fn rename_refuses_to_destroy_a_different_note() {
     let dir = TempDir::new("rename-collision");
@@ -358,12 +320,8 @@ fn rename_refuses_to_destroy_a_different_note() {
     assert_eq!(fs::read_to_string(&from).expect("read"), "mine");
 }
 
-/// APFS is case-insensitive-but-preserving by default, so `hard_link` reports
-/// `EEXIST` here even though both names are one file. Without the
-/// same-identity branch a user cannot fix the capitalisation of their own note.
-///
-/// Cannot run against `MemFs`, which keys a case-sensitive `BTreeMap` and so
-/// reports success whatever the branch does.
+/// APFS is case-insensitive-but-preserving by default, so this only exercises
+/// the same-identity branch on real disk, never on the case-sensitive `MemFs`.
 #[test]
 fn rename_can_change_only_the_case_of_a_name() {
     let dir = TempDir::new("rename-case");
@@ -378,14 +336,12 @@ fn rename_can_change_only_the_case_of_a_name() {
     assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
 }
 
-/// The same trap through a second door: macOS compares names
-/// normalization-insensitively, so the NFC and NFD spellings of `Réunion` are
-/// one file. A French vault reaches this on its first accented note.
+/// macOS compares names normalization-insensitively, so NFC and NFD spellings
+/// of the same name are one file.
 #[test]
 fn rename_can_change_only_the_unicode_normalization_of_a_name() {
     let dir = TempDir::new("rename-normalization");
-    // Composed: U+00E9. Decomposed: U+0065 U+0301. Written out rather than
-    // normalized at runtime, so the test states which bytes it means.
+    // Composed (U+00E9) vs decomposed (U+0065 U+0301).
     let from = dir.0.join("R\u{e9}union.md");
     let to = dir.0.join("Re\u{301}union.md");
     fs::write(&from, "text").expect("write");
@@ -397,8 +353,6 @@ fn rename_can_change_only_the_unicode_normalization_of_a_name() {
     assert_eq!(names(&dir.0).len(), 1, "one file, not two spellings of it");
 }
 
-/// The fallback branch for a directory — see `RealFs::rename`. Must still
-/// move, and still refuse a destination it would destroy.
 #[test]
 fn rename_moves_a_folder_with_its_subtree() {
     let dir = TempDir::new("rename-folder");
@@ -415,7 +369,6 @@ fn rename_moves_a_folder_with_its_subtree() {
     assert_eq!(fs::metadata(&to).expect("stat").ino(), before);
 }
 
-/// Pins symlink-safe rename — see `RealFs::rename`.
 #[test]
 fn rename_of_a_symlink_moves_the_link_not_its_target() {
     let dir = TempDir::new("rename-symlink");

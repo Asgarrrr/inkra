@@ -1,9 +1,5 @@
 //! An in-memory `Fs` for tests: a `BTreeMap`, injectable errors and gates on
-//! both I/O paths, not a simulated kernel. Zed's `FakeFs` is 2207 lines
-//! (`vendor/zed-reference/crates/fs/src/fs.rs:1440-3646`) because it amortizes
-//! over hundreds of scanner tests; ours does not.
-//!
-//! Compiled under `--all-features`, so `unwrap_used = "deny"` applies here too.
+//! both I/O paths, not a simulated kernel.
 
 mod faults;
 
@@ -27,33 +23,18 @@ struct State {
     files: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
     dirs: BTreeMap<PathBuf, (Mtime, FileIdentity)>,
     next_inode: u64,
-    /// `read_dir` on exactly this path fails. Models an unreadable directory;
-    /// its children are unreachable anyway, since the walk never descends past
-    /// a directory it could not read.
     unreadable: Option<PathBuf>,
-    /// Every `save` of these paths fails. Models a read-only file, a full disk,
-    /// or a directory the process cannot write into. See `make_unwritable`.
     unwritable: BTreeSet<PathBuf>,
-    /// Seconds past the base, advanced by every mutation. See `MemFs::tick`.
     clock: u64,
-    /// Every `create` or `rename` **into** one of these paths fails. Models a
-    /// directory the process cannot write into, which `unwritable` cannot:
-    /// that one fails a write to a file that already exists, and neither a
-    /// create nor a rename has a file at the destination yet.
+    /// Separate from `unwritable`: that fails a write to a file that already
+    /// exists, but a create/rename has no file at the destination yet.
     uncreatable: BTreeSet<PathBuf>,
-    /// The next `load` of each of these paths parks until its `Gate` is
-    /// released or dropped. See `MemFs::block_load`.
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
-    /// The same, for the next `save` of each path. See `MemFs::block_save`.
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
-    /// Every `trash` of these paths fails. Models a Trash the platform refuses
-    /// — no trash on the volume, or a permission the process does not have.
-    /// Separate from `unwritable`: a note can be perfectly writable and still
-    /// not removable.
+    /// Separate from `unwritable`: a note can be writable and still not
+    /// removable (no trash on the volume, say).
     untrashable: BTreeSet<PathBuf>,
-    /// What `trash` took, by the path it was taken from. A move, never a drop:
-    /// the whole promise of a trash is that the bytes survive, and a fake that
-    /// forgot them would let a test assert a recovery that cannot happen.
+    /// A move, not a drop, so a trashed note stays recoverable in tests.
     trashed: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
 }
 
@@ -78,9 +59,6 @@ impl MemFs {
         }
     }
 
-    /// Recovers the guard from a poisoned lock rather than panicking: the lock
-    /// is only poisoned when another test thread already panicked, and its
-    /// failure is the one worth reading.
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         match self.state.lock() {
             Ok(guard) => guard,
@@ -94,18 +72,15 @@ impl MemFs {
         FileIdentity { device: 1, inode }
     }
 
-    /// Advances one second and returns the new time. Takes `&mut State` rather
-    /// than nothing, because a clock that does not move is not a clock — and a
-    /// fixed one made every write of a path compare equal to every other,
-    /// which put conflict detection out of reach of every test.
+    /// Advances one second. A fixed clock would make every write of a path
+    /// compare equal, putting conflict detection out of reach of any test.
     fn tick(state: &mut State) -> Mtime {
         state.clock += 1;
         Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 + state.clock))
     }
 
-    /// Inserts a file, creating every parent directory. Reuses the identity if
-    /// the path already exists, so writing to a file does not change what it
-    /// is.
+    /// Creates every parent directory. Reuses the identity if the path
+    /// already exists, so writing to a file does not change what it is.
     pub fn insert_file(&self, path: impl Into<PathBuf>, text: impl Into<String>) {
         let path = path.into();
         let mut state = self.state();
@@ -139,8 +114,6 @@ impl MemFs {
         state.dirs.remove(path);
     }
 
-    /// A second name for the same file: one identity, two paths. What the scan
-    /// has to collapse to a single entry.
     pub fn hard_link(&self, from: &Path, to: impl Into<PathBuf>) {
         let mut state = self.state();
         if let Some(entry) = state.files.get(from).cloned() {
@@ -148,8 +121,6 @@ impl MemFs {
         }
     }
 
-    /// What `trash` took from `path`, if anything. The only way a test can
-    /// assert a trashed note is recoverable rather than destroyed.
     #[must_use]
     pub fn trashed(&self, path: &Path) -> Option<String> {
         self.state()
@@ -203,10 +174,6 @@ impl Fs for MemFs {
     }
 
     async fn load(&self, path: &Path) -> Result<Loaded> {
-        // Taken out of the map, and the guard dropped, before the await: a
-        // `MutexGuard` held across one would make this future non-`Send`, which
-        // `async_trait` requires. A dropped sender resolves the receiver with
-        // an error, which releases the load just as a send does.
         let blocked = self.state().blocked_loads.remove(path);
         if let Some(wait) = blocked {
             let _ = wait.await;
@@ -226,26 +193,13 @@ impl Fs for MemFs {
         })
     }
 
-    /// Mints a **fresh** identity, unlike `insert_file`, which keeps the path's
-    /// existing one. That asymmetry is the point: `insert_file` models an
-    /// external writer rewriting a file in place, while `RealFs::save` renames a
-    /// temp file over the destination and so changes the inode. A fake that kept
-    /// the identity here would hide every re-keying bug from every `app` test,
-    /// since they all run on `MemFs`.
-    ///
-    /// No link count is modelled, so this always takes the replacing path —
-    /// `RealFs::save` falls back to writing in place when `nlink > 1`.
+    /// Mints a fresh identity, unlike `insert_file`: `RealFs::save` renames a
+    /// temp file over the destination, so the inode changes too.
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
-        // Parked before the insert, and the guard dropped before the await for
-        // the same `Send` reason as `load`. A gated write must not have landed
-        // while it is still held: a test that releases the gate is asserting
-        // that *this* write is the one reaching the file.
         let blocked = self.state().blocked_saves.remove(path);
         if let Some(wait) = blocked {
             let _ = wait.await;
         }
-        // Checked after the gate, so a blocked write still fails where a real
-        // one would — at the end, having consumed the time.
         if self.state().unwritable.contains(path) {
             return Err(VaultError::Io {
                 path: path.to_path_buf(),
@@ -253,13 +207,7 @@ impl Fs for MemFs {
             });
         }
 
-        // Preserved before the replace, in the order `RealFs` uses and for the
-        // same reason. A fake that reversed it would stay green while the real
-        // one lost data.
-        //
-        // The guard is scoped to this block and dropped before `insert_file`,
-        // which takes the same lock: `state()` is a `std::sync::Mutex` and is
-        // not reentrant.
+        // Guard scoped to this block: `state()`'s mutex is not reentrant.
         let preserved = {
             let state = self.state();
             match state.files.get(path) {
@@ -321,23 +269,16 @@ impl Fs for MemFs {
         Ok(identity)
     }
 
-    /// Moves the stored entry rather than rebuilding it, so the identity travels
-    /// with the file exactly as an inode does under `rename(2)`. A fake that
-    /// minted a fresh one here would hide every `EntryId`-survives-a-rename bug
-    /// from every `app` test, since they all run on this.
-    ///
-    /// The subtree moves with a directory, for the same reason: `rename(2)` is
-    /// one call on the directory entry and never touches the children's inodes.
+    /// Moves the stored entry rather than rebuilding it, so the identity
+    /// travels with the file as an inode does under `rename(2)`. The subtree
+    /// moves with a directory for the same reason.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let mut state = self.state();
         if state.uncreatable.contains(to) {
             return Err(permission_denied(to));
         }
-        // Byte equality, which on this fake is the *only* way two paths name one
-        // file: the maps are keyed by raw `PathBuf`. A real volume also folds
-        // case and Unicode normalization, and `RealFs::rename` answers that by
-        // inode. Recorded rather than modelled — see the design's note on the
-        // deferred case-insensitive `MemFs`.
+        // Byte equality only: unlike a real volume, this fake does not fold
+        // case or Unicode normalization.
         if from == to {
             return Ok(());
         }
@@ -421,8 +362,6 @@ fn permission_denied(path: &Path) -> VaultError {
     }
 }
 
-/// The stamp a stored file would report. `size` is the byte length of the text
-/// as stored, which is what `RealFs` reports for the same content.
 fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
     Stamp {
         mtime,
@@ -441,8 +380,6 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
-    /// `expect` is denied in this file, so the load goes through the `let Ok`
-    /// shape the rest of the module uses.
     fn stamp_of(fs: &MemFs, path: &str) -> Stamp {
         let Ok(loaded) = block_on(fs.load(Path::new(path))) else {
             panic!("load must succeed");
@@ -450,8 +387,6 @@ mod tests {
         loaded.stamp
     }
 
-    /// The scan walks with `read_dir` alone, so every directory on the way to
-    /// a note has to exist without being inserted by hand.
     #[test]
     fn inserting_a_file_creates_its_parent_directories() {
         let fs = MemFs::new();
@@ -503,8 +438,6 @@ mod tests {
         assert!(matches!(result, Err(VaultError::Io { .. })));
     }
 
-    /// Identity tracks the file, not the name: a rename is the same file, a
-    /// recreated file is a different one.
     #[test]
     fn a_rename_keeps_the_identity_and_a_recreated_file_gets_a_new_one() {
         let fs = MemFs::new();
@@ -527,8 +460,6 @@ mod tests {
         assert_ne!(recreated.identity, before.identity);
     }
 
-    /// The injector the `SaveFailed` path needs: without it every write
-    /// succeeds and the error arm is unreachable from any test.
     #[test]
     fn an_unwritable_file_reports_an_error_and_keeps_its_old_text() {
         let fs = MemFs::new();
@@ -546,8 +477,6 @@ mod tests {
         );
     }
 
-    /// The gate has to hold the *write*, not just the future: a test that
-    /// releases it is asserting the write lands at that moment and not before.
     #[test]
     fn a_blocked_save_does_not_reach_the_file_until_the_gate_releases() {
         let fs = MemFs::new();
@@ -556,7 +485,6 @@ mod tests {
         let gate = fs.block_save("/vault/a.md");
         let stamp = stamp_of(&fs, "/vault/a.md");
         let mut write = Box::pin(fs.save(Path::new("/vault/a.md"), "after", stamp));
-        // Polled once so the future reaches the gate and parks there.
         assert!(write.as_mut().now_or_never().is_none());
         assert_eq!(
             fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
@@ -572,8 +500,6 @@ mod tests {
         );
     }
 
-    /// Pins `tick`: delete it and every stamp of a path compares equal, and
-    /// this is the test that catches it.
     #[test]
     fn two_writes_of_one_path_get_different_stamps() {
         let fs = MemFs::new();
@@ -585,15 +511,13 @@ mod tests {
         assert_ne!(first, second);
     }
 
-    /// Must preserve in `RealFs`'s order — see `Fs::save`.
     #[test]
     fn a_stale_stamp_preserves_the_external_text() {
         let fs = MemFs::new();
         fs.insert_file("/vault/a.md", "before");
         let stamp = stamp_of(&fs, "/vault/a.md");
 
-        // `insert_file` keeps the path's identity, exactly as a second process
-        // rewriting a file in place would.
+        // Keeps the path's identity, as a second process writing in place would.
         fs.insert_file("/vault/a.md", "theirs");
 
         let Ok(saved) = block_on(fs.save(Path::new("/vault/a.md"), "ours", stamp)) else {
@@ -610,8 +534,6 @@ mod tests {
         );
     }
 
-    /// The only conflict test with an mtime moving *backwards*; every other
-    /// one stays green if `!=` is relaxed to `>`. See `Stamp`.
     #[test]
     fn a_file_older_than_the_expectation_still_conflicts() {
         let fs = MemFs::new();
@@ -672,7 +594,6 @@ mod tests {
         assert_eq!(entries[0].identity, identity);
     }
 
-    /// Byte-for-byte, so `Vault::apply` keeps the `EntryId` across the move.
     #[test]
     fn rename_carries_the_identity_to_the_new_path() {
         let fs = MemFs::new();
@@ -706,8 +627,6 @@ mod tests {
         );
     }
 
-    /// A fake that dropped the subtree would make every folder rename look
-    /// like a mass delete — see `MemFs::rename`.
     #[test]
     fn renaming_a_folder_moves_its_subtree() {
         let fs = MemFs::new();
@@ -733,8 +652,6 @@ mod tests {
         );
     }
 
-    /// A trash the user can recover from. A fake that dropped the bytes would
-    /// let a test claim a recovery the real platform makes and this one does not.
     #[test]
     fn trash_takes_the_note_out_of_the_vault_and_keeps_its_bytes() {
         let fs = MemFs::new();
@@ -766,8 +683,7 @@ mod tests {
     fn save_round_trips_and_load_normalizes_line_endings() {
         let fs = MemFs::new();
 
-        // Not compared: no file exists yet to stat. See `real_fs.rs`'s
-        // `absent()`.
+        // Not compared: no file exists yet to stat.
         let absent = Stamp {
             mtime: Mtime(SystemTime::UNIX_EPOCH),
             size: 0,

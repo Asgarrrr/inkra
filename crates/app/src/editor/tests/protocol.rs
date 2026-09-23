@@ -1,6 +1,3 @@
-//! The UTF-16 protocol conversions and input-method composition — the half
-//! of `EntityInputHandler` that only a window can prove.
-
 use gpui::{EntityInputHandler, TestAppContext};
 
 use super::{at, dispatching, with_editor};
@@ -50,7 +47,6 @@ fn input_method_composition_marks_then_commits(cx: &mut TestAppContext) {
         assert_eq!(view.buffer.read(cx).text(), "か");
         assert_eq!(view.marked_text_range(window, cx), Some(0..1));
 
-        // The next composition keystroke replaces the marked region.
         view.replace_and_mark_text_in_range(None, "かん", Some(2..2), window, cx);
         assert_eq!(view.buffer.read(cx).text(), "かん");
         assert_eq!(view.marked_text_range(window, cx), Some(0..2));
@@ -98,8 +94,6 @@ fn typing_replaces_the_selection_through_the_protocol(cx: &mut TestAppContext) {
     });
 }
 
-/// macOS anchors the input method's candidate window to this rect, so it has to
-/// follow the caret down the document rather than staying on line 0.
 #[gpui::test]
 fn bounds_for_range_follows_the_line_the_range_starts_on(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "aaa\nbbb\nccc");
@@ -107,22 +101,17 @@ fn bounds_for_range_follows_the_line_the_range_starts_on(cx: &mut TestAppContext
 
     window
         .update(&mut cx, |view, window, cx| {
-            // Read the field, don't `read` the entity again: this closure
-            // already holds a lease on it, and a second one panics.
+            // This closure already holds a lease on `view`; a second one panics.
             let element = view.last_bounds.unwrap();
             let first = view.bounds_for_range(0..1, element, window, cx).unwrap();
             let third = view.bounds_for_range(8..9, element, window, cx).unwrap();
 
             assert_eq!(third.origin.y - first.origin.y, gpui::px(28. * 2.));
-            // One line tall, not three: a rect spanning the range's whole span
-            // would anchor the candidate window nowhere useful.
             assert_eq!(first.size.height, gpui::px(28.));
         })
         .unwrap();
 }
 
-/// A composition away from line 0 is where absolute-offset `TextRun`s would
-/// stop summing to the line's length and mis-shape it.
 #[gpui::test]
 fn composition_on_a_later_line_marks_and_commits_there(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "aaa\nbbb\n");

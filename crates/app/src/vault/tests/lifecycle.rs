@@ -60,8 +60,6 @@ fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
     });
 }
 
-/// A note left behind is written, so its edits do not sit in memory until
-/// the user happens to come back to it.
 #[gpui::test]
 fn switching_notes_writes_the_one_being_left(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
