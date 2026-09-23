@@ -37,7 +37,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
   and the no-gpui-below-app check. Green is the definition of done.
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault`.
+- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown`.
   **Never `cargo fmt --all`**: it rewrites the vendored gpui source. A new
   workspace member joins this list and `check.sh`'s in the same change.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
@@ -45,8 +45,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - run: `cargo run -p inkra-app [path]`
 - tests moved: `./scripts/test-names.sh` — diff before and after splitting a
   file; a forgotten `mod` line drops tests and still compiles green.
-- mutants: `cargo mutants` after changing `text` or `editor` logic. Zero missed
-  is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
+- mutants: `cargo mutants` after changing `text`, `editor` or `markdown` logic.
+  Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
 - bench: `cargo bench -p inkra-text -- --quick` — before/after comparison for
   `Buffer` hot paths, not a gate.
 - `vendor/zed-reference` is gitignored; `./scripts/vendor-gpui.sh` restores it
@@ -56,10 +56,12 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - `inkra-text` → `inkra-editor` → `inkra-app`, one way. `inkra-vault` sits
   beside the chain: `app` depends on it, it depends on no workspace crate.
-- `text`, `editor` and `vault` have no gpui dependency; `check.sh` enforces it
-  and a new crate below `app` joins that check.
+  `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
+- `text`, `editor`, `vault` and `markdown` have no gpui dependency; `check.sh`
+  enforces it and a new crate below `app` joins that check.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
+  - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
@@ -73,8 +75,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 ## Code
 
-- Offsets are `ByteOffset` and `Utf16Offset`; never mix them, never add a char
-  offset. Move and delete by grapheme.
+- Offsets are `ByteOffset`, `Utf16Offset` and, in layout, `DisplayOffset`;
+  never mix them, never add a char offset. Move and delete by grapheme.
 - Mutate a buffer only through `Buffer::transact_at`. Call
   `finalize_transaction` on **both** sides of a gesture that must not merge
   (paste, cut), and on neither side when it edits nothing.
@@ -100,6 +102,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 Read the spec before changing its area:
 
+- `docs/superpowers/specs/2026-09-23-markdown-live-preview-design.md` —
+  markdown styling and concealment
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path

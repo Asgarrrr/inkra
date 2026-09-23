@@ -95,6 +95,33 @@ before text can reach a `Buffer`. The CRLF *round-trip* — preserving a file's
 original line endings on save — is a different item and is in that same
 Deferred table.
 
+## Markdown
+
+Live preview shipped on 2026-09-23, in two slices: styled source, then
+concealment. Syntax hides except on the element the caret or selection
+touches. The design, and each edge the implementation corrected, are in
+`superpowers/specs/2026-09-23-markdown-live-preview-design.md`, with a
+Deferred table of its own.
+
+| Item | Trigger | Estimate |
+|---|---|---|
+| Heading sizes (H1 larger than H2, rows of their own height) | Next slice of the spec (D8); every `line_height` caller is listed there. | 1–2 d |
+| Measure slice: `parse` bench, profile of a fence typed atop a 500 KB note | Before windowed shaping is considered. Release figures so far: 5,000 lines, 20,000 conceals, 4.5 ms per shape. | 0.5 d |
+| Checkboxes, a bar for quotes, code-block background with hidden fences | The user asks. Each needs a quad per row. | 1–2 d |
+| Clickable links, inline images | `inkra-index` resolves `[[target]]`. | — |
+
+Known limits, accepted:
+
+- `[[a|]]`, a wikilink with an empty alias, keeps its `]]` visible:
+  pulldown-cmark 0.13.4 emits it as link text.
+- Revealing an element shifts the text after it on the same row, as in
+  Obsidian.
+- Selecting up to the middle of a `**` and typing leaves the other delimiter.
+  Backspace after a revealed element deletes its last delimiter character.
+- Images, quotes, task boxes, code fences, tables and frontmatter keep their
+  syntax, dimmed.
+- Debug builds overstate shaping cost about 30×; measure in release.
+
 ## Application
 
 The crates that do not exist yet — `inkra-vault`, `inkra-markdown`,

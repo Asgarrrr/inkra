@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gpui::{
     Entity, EntityInputHandler, Subscription, TestAppContext, VisualTestContext, point, px,
 };
+use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
 use super::{Cancelled, Confirmed, NameField, shape_document};
@@ -184,8 +185,15 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
         view.update(cx, |field, cx| {
             let marked = field.state.marked_range();
             let style = window.text_style();
-            let layout =
-                shape_document(field.buffer.read(cx), marked.as_ref(), &style, None, window);
+            let layout = shape_document(
+                field.buffer.read(cx),
+                &Markdown::default(),
+                &field.state.selection().range(),
+                marked.as_ref(),
+                &style,
+                None,
+                window,
+            );
 
             assert_eq!(layout.row_count(), 1);
             assert_eq!(layout.top_for_row(0), px(0.));

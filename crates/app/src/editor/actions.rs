@@ -94,78 +94,103 @@ impl EditorView {
         self.edit_buffer(window, cx, |state, buffer| state.delete(buffer, now));
     }
 
-    pub(super) fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::Left, false);
         });
     }
 
-    pub(super) fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn right(&mut self, _: &Right, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::Right, false);
         });
     }
 
-    pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn select_left(
+        &mut self,
+        _: &SelectLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::Left, true);
         });
     }
 
-    pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn select_right(
+        &mut self,
+        _: &SelectRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::Right, true);
         });
     }
 
-    pub(super) fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(cx, Vertical::Up, false);
+    pub(super) fn up(&mut self, _: &Up, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Up, false);
     }
 
-    pub(super) fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(cx, Vertical::Down, false);
+    pub(super) fn down(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Down, false);
     }
 
-    pub(super) fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(cx, Vertical::Up, true);
+    pub(super) fn select_up(&mut self, _: &SelectUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Up, true);
     }
 
-    pub(super) fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(cx, Vertical::Down, true);
+    pub(super) fn select_down(
+        &mut self,
+        _: &SelectDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_vertically(window, cx, Vertical::Down, true);
     }
 
-    pub(super) fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, inkra_editor::EditorState::select_all);
+    pub(super) fn select_all(
+        &mut self,
+        _: &SelectAll,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor(window, cx, inkra_editor::EditorState::select_all);
     }
 
-    pub(super) fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to_row_edge(cx, RowEdge::Start);
+    pub(super) fn home(&mut self, _: &Home, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_to_row_edge(window, cx, RowEdge::Start);
     }
 
-    pub(super) fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to_row_edge(cx, RowEdge::End);
+    pub(super) fn end(&mut self, _: &End, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_to_row_edge(window, cx, RowEdge::End);
     }
 
-    pub(super) fn line_start(&mut self, _: &LineStart, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn line_start(
+        &mut self,
+        _: &LineStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::LineStart, false);
         });
     }
 
-    pub(super) fn line_end(&mut self, _: &LineEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn line_end(&mut self, _: &LineEnd, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::LineEnd, false);
         });
     }
 
-    pub(super) fn doc_start(&mut self, _: &DocStart, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn doc_start(&mut self, _: &DocStart, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::DocStart, false);
         });
     }
 
-    pub(super) fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(cx, |state, buffer| {
+    pub(super) fn doc_end(&mut self, _: &DocEnd, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::DocEnd, false);
         });
     }

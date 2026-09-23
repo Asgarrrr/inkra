@@ -24,6 +24,28 @@ const WRAPPED: &str = "Soft wrap keeps a paragraph inside the text column rather
                        https://example.com/a/very/long/path/that/has/no/spaces/in/it/at/all/so/the/wrap/has/to/break/it/in/the/middle/of/a/word\n\
                        A short last line.";
 
+const MARKDOWN: &str = "---\n\
+                        title: Styled source\n\
+                        ---\n\
+                        # Heading one\n\
+                        ## Heading two ##\n\
+                        \n\
+                        Plain, **strong**, *emphasis*, ***both***, ~~struck~~ and `code`.\n\
+                        \n\
+                        A [link](https://example.com), an <https://auto.link>, a [[Wiki Page|wikilink]], and ![an image](a.png).\n\
+                        > A quote that runs onto\n\
+                        > a second line.\n\
+                        - a bullet with **bold**\n\
+                        - [ ] a task\n\
+                        1. a numbered item\n\
+                        ```rust\n\
+                        let x = 1;\n\
+                        ```\n\
+                        ---\n\
+                        | a | b |\n\
+                        |---|---|\n\
+                        | 1 | 2 |";
+
 const VAULT: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
     ("reading.md", "Books to read.\n"),
@@ -62,6 +84,26 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             name: "editor-wrapped-selection",
             shows: "a selection across a wrap and a newline: one quad per row, a stub only at the newline",
             open: editor_wrapped_selection,
+        },
+        Scene {
+            name: "editor-markdown",
+            shows: "every construct styled, syntax concealed: offset 0 reveals nothing",
+            open: editor_markdown,
+        },
+        Scene {
+            name: "editor-concealed",
+            shows: "concealment: caret at the end, every marker hidden, bullets as dots",
+            open: editor_concealed,
+        },
+        Scene {
+            name: "editor-revealed-bold",
+            shows: "the caret inside **strong** reveals that element only",
+            open: editor_revealed_bold,
+        },
+        Scene {
+            name: "editor-revealed-link",
+            shows: "the caret inside the wikilink reveals its [[target| and ]] only",
+            open: editor_revealed_link,
         },
         Scene {
             name: "sidebar-vault",
@@ -138,6 +180,34 @@ fn editor_wrapped_selection(stage: &mut Stage) -> WindowHandle<AppShell> {
         window,
         "cmd-up down right right right shift-down shift-down shift-right",
     );
+    window
+}
+
+fn editor_markdown(stage: &mut Stage) -> WindowHandle<AppShell> {
+    stage.open_note(MARKDOWN)
+}
+
+fn editor_concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(MARKDOWN);
+    stage.focus(window);
+    stage.keys(window, "cmd-down");
+    window
+}
+
+fn editor_revealed_bold(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(MARKDOWN);
+    stage.focus(window);
+    let keys = format!("cmd-up {}{}", "down ".repeat(6), "right ".repeat(10));
+    stage.keys(window, keys.trim_end());
+    window
+}
+
+/// `ctrl-e` goes to the logical line end, so the wrap of the link line cannot shift the landing.
+fn editor_revealed_link(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_note(MARKDOWN);
+    stage.focus(window);
+    let keys = format!("cmd-up {}ctrl-e {}", "down ".repeat(8), "left ".repeat(31));
+    stage.keys(window, keys.trim_end());
     window
 }
 

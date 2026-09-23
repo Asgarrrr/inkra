@@ -23,6 +23,7 @@ required-features = ["shot"]
 inkra-text = { workspace = true }
 inkra-editor = { workspace = true }
 inkra-vault = { workspace = true }
+inkra-markdown = { workspace = true }
 # `block_on` only, for loads before a window, and so a gpui executor, exists.
 futures = { workspace = true }
 # Wrap snapping per line; `Buffer`'s grapheme steps scan the whole document.

@@ -13,7 +13,9 @@ paths:
   (notifies on drop), then reshapes with the style stored in `DocumentLayout`
   before revealing the caret: outside a draw, `window.text_style()` is gpui's
   default.
-- `move_cursor` — caret moves; reads the buffer, notifies the view, no reshape.
+- `move_cursor` — caret moves; reads the buffer, notifies the view, and
+  reshapes only when the move changes which markdown elements the selection
+  touches, so `reveal_cursor` scrolls by the revealed layout.
 - `update_state` — `EditorState` changes that must not look like a text change
   (`unmark_text`).
 - `open_buffer` — the only path that rebinds the buffer. Never swap text through
