@@ -1,6 +1,7 @@
 pub(crate) mod actions;
-pub(crate) mod element;
+mod element;
 mod input;
+pub(crate) mod layout;
 mod scroll;
 #[cfg(test)]
 mod tests;
@@ -14,7 +15,8 @@ use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::theme;
-use element::{DocumentLayout, TextElement};
+use element::TextElement;
+use layout::DocumentLayout;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Vertical {
@@ -121,7 +123,7 @@ impl EditorView {
         };
         let (style, wrap_width) = (last.style().clone(), last.wrap_width());
         let marked = self.state.marked_range();
-        self.last_layout = Some(element::shape_document(
+        self.last_layout = Some(layout::shape_document(
             self.buffer.read(cx),
             marked.as_ref(),
             &style,

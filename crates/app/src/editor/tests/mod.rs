@@ -46,3 +46,35 @@ pub(super) fn dispatching(
 pub(super) fn at(offset: usize) -> ByteOffset {
     ByteOffset(offset)
 }
+
+/// Written out rather than read back from the view: a derived expectation
+/// would restate the implementation, so a padding or line-height regression would pass quietly.
+pub(crate) mod geometry {
+    /// The editor's `p_4()`.
+    pub(crate) const PADDING: f32 = 16.;
+    pub(crate) const TEXT_TOP: f32 = PADDING;
+    pub(crate) const LINE_HEIGHT: f32 = 28.;
+    pub(crate) const VIEWPORT: f32 = 1080.;
+    pub(crate) const MARGIN: f32 = 3. * LINE_HEIGHT;
+
+    pub(crate) fn offset_showing_from_below(n: f32) -> gpui::Pixels {
+        gpui::px(VIEWPORT - MARGIN - (TEXT_TOP + LINE_HEIGHT * (n + 1.)))
+    }
+
+    pub(crate) fn top_of_line(n: f32, offset: gpui::Pixels) -> gpui::Pixels {
+        gpui::px(TEXT_TOP + LINE_HEIGHT * n) + offset
+    }
+
+    pub(crate) fn line_at(y: gpui::Pixels, offset: gpui::Pixels) -> usize {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let line = f32::from(y - offset - gpui::px(TEXT_TOP)) / LINE_HEIGHT;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let line = line as usize;
+        line
+    }
+
+    pub(crate) fn line_is_visible(n: f32, offset: gpui::Pixels) -> bool {
+        let top = top_of_line(n, offset);
+        top >= gpui::px(0.) && top + gpui::px(LINE_HEIGHT) <= gpui::px(VIEWPORT)
+    }
+}

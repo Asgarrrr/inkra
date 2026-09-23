@@ -14,6 +14,7 @@ use super::NoteStore;
 mod autosave;
 mod lifecycle;
 mod quit;
+mod rescan;
 mod trash;
 
 pub(super) fn open_shell(

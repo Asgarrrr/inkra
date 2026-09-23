@@ -14,10 +14,16 @@ esac
 
 [ -f "$file" ] || exit 0
 
-rustfmt --edition 2024 "$file" 2>/dev/null
-
 repo_root="$(cd "$(dirname "$file")" && git rev-parse --show-toplevel 2>/dev/null)"
 [ -n "$repo_root" ] || exit 0
+
+case "$file" in
+  "$repo_root"/vendor/*) exit 0 ;;
+esac
+
+# From the repo root, so rustup picks rust-toolchain.toml's rustfmt even when
+# the session sits in vendor/zed-reference, which pins another toolchain.
+(cd "$repo_root" && rustfmt --edition 2024 "$file" 2>/dev/null)
 
 check_output=$(cd "$repo_root" && cargo check --workspace --message-format=short 2>&1)
 check_status=$?
