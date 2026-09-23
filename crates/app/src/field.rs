@@ -12,6 +12,7 @@ use gpui::{
     point, prelude::*, px, relative, size,
 };
 use inkra_editor::{EditorState, LogicalMovement, Selection};
+use inkra_markdown::Markdown;
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::editor::layout::{DocumentLayout, shape_document};
@@ -354,7 +355,15 @@ impl Element for FieldElement {
         let marked = field.state.marked_range();
 
         let style = window.text_style();
-        let layout = shape_document(buffer, marked.as_ref(), &style, None, window);
+        let layout = shape_document(
+            buffer,
+            &Markdown::default(),
+            &range,
+            marked.as_ref(),
+            &style,
+            None,
+            window,
+        );
         let line_height = layout.line_height();
 
         let (selection, cursor) = if range.is_empty() {

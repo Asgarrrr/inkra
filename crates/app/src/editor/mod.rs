@@ -12,6 +12,7 @@ use gpui::{
     Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, point, px,
 };
 use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
+use inkra_markdown::{Markdown, touched};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::theme;
@@ -33,6 +34,9 @@ pub(super) enum RowEdge {
 pub(crate) struct EditorView {
     buffer: Entity<Buffer>,
     state: EditorState,
+    markdown: Markdown,
+    /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
+    parsed_at: Option<u64>,
     focus_handle: FocusHandle,
     is_selecting: bool,
     last_layout: Option<DocumentLayout>,
@@ -51,11 +55,13 @@ pub(crate) struct EditorView {
 impl EditorView {
     pub(crate) fn new(buffer: Entity<Buffer>, cx: &mut Context<Self>) -> Self {
         let end = buffer.read(cx).len();
-        let buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
+        let buffer_changed = cx.observe(&buffer, Self::on_buffer_changed);
 
-        Self {
+        let mut view = Self {
             buffer,
             state: EditorState::new(Selection::at(end)),
+            markdown: Markdown::default(),
+            parsed_at: None,
             focus_handle: cx.focus_handle(),
             is_selecting: false,
             last_layout: None,
@@ -63,7 +69,9 @@ impl EditorView {
             last_text_top: None,
             scroll_handle: ScrollHandle::new(),
             _buffer_changed: buffer_changed,
-        }
+        };
+        view.refresh_markdown(cx);
+        view
     }
 
     /// The only gate that may rebind the buffer: through `edit_buffer` instead,
@@ -74,8 +82,11 @@ impl EditorView {
     )]
     pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
         // Rebuilt: the old `Subscription` would observe the closed note.
-        self._buffer_changed = cx.observe(&buffer, |_, _, cx| cx.notify());
+        self._buffer_changed = cx.observe(&buffer, Self::on_buffer_changed);
         self.buffer = buffer;
+        // Reset, not compared: versions are per buffer, so two notes can share one.
+        self.parsed_at = None;
+        self.refresh_markdown(cx);
 
         self.state = EditorState::new(Selection::at(ByteOffset(0)));
         self.is_selecting = false;
@@ -92,6 +103,32 @@ impl EditorView {
     #[cfg(test)]
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
         &self.buffer
+    }
+
+    #[cfg(test)]
+    fn spans(&self) -> &[inkra_markdown::Span] {
+        &self.markdown.spans
+    }
+
+    fn markdown(&self) -> &Markdown {
+        &self.markdown
+    }
+
+    /// Parses only when the buffer moved since the last parse; a caret move costs nothing.
+    fn refresh_markdown(&mut self, cx: &App) {
+        let buffer = self.buffer.read(cx);
+        let version = buffer.version();
+        if self.parsed_at == Some(version) {
+            return;
+        }
+        self.markdown = inkra_markdown::parse(buffer.text());
+        self.parsed_at = Some(version);
+    }
+
+    /// Covers writes that bypass `edit_buffer`; tests make them today.
+    fn on_buffer_changed(&mut self, _: Entity<Buffer>, cx: &mut Context<Self>) {
+        self.refresh_markdown(cx);
+        cx.notify();
     }
 
     #[cfg(test)]
@@ -118,6 +155,8 @@ impl EditorView {
     }
 
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // First: the observer only runs when effects flush, after this reshape.
+        self.refresh_markdown(cx);
         let Some(last) = self.last_layout.as_ref() else {
             return;
         };
@@ -125,6 +164,8 @@ impl EditorView {
         let marked = self.state.marked_range();
         self.last_layout = Some(layout::shape_document(
             self.buffer.read(cx),
+            &self.markdown,
+            &self.state.selection().range(),
             marked.as_ref(),
             &style,
             wrap_width,
@@ -139,8 +180,20 @@ impl EditorView {
         cx.notify();
     }
 
-    fn move_cursor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState, &Buffer)) {
+    /// Reshapes when the move reveals or hides an element, so `last_layout` is never stale (spec D7).
+    fn move_cursor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut EditorState, &Buffer),
+    ) {
+        let old = self.state.selection().range();
         f(&mut self.state, self.buffer.read(cx));
+        let new = self.state.selection().range();
+        let conceals = &self.markdown.conceals;
+        if !touched(conceals, &old).eq(touched(conceals, &new)) {
+            self.reshape(window, cx);
+        }
         cx.notify();
         self.reveal_cursor();
     }
@@ -167,7 +220,13 @@ impl EditorView {
         }
     }
 
-    fn move_vertically(&mut self, cx: &mut Context<Self>, direction: Vertical, extend: bool) {
+    fn move_vertically(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        direction: Vertical,
+        extend: bool,
+    ) {
         let Some(layout) = self.last_layout.as_ref() else {
             return;
         };
@@ -195,7 +254,7 @@ impl EditorView {
 
         if let Some(offset) = target {
             let goal = Goal::Column(f32::from(goal_x));
-            self.move_cursor(cx, |state, buffer| {
+            self.move_cursor(window, cx, |state, buffer| {
                 state.move_vertically(buffer, offset, extend, goal);
             });
             return;
@@ -206,10 +265,12 @@ impl EditorView {
             Vertical::Up => LogicalMovement::DocStart,
             Vertical::Down => LogicalMovement::DocEnd,
         };
-        self.move_cursor(cx, |state, buffer| state.move_(buffer, movement, extend));
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_(buffer, movement, extend);
+        });
     }
 
-    fn move_to_row_edge(&mut self, cx: &mut Context<Self>, edge: RowEdge) {
+    fn move_to_row_edge(&mut self, window: &mut Window, cx: &mut Context<Self>, edge: RowEdge) {
         let Some(layout) = self.last_layout.as_ref() else {
             return;
         };
@@ -218,7 +279,9 @@ impl EditorView {
             RowEdge::Start => *row.start(),
             RowEdge::End => *row.end(),
         };
-        self.move_cursor(cx, |state, buffer| state.move_to(buffer, target, false));
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_to(buffer, target, false);
+        });
     }
 
     pub(crate) fn cursor(&self) -> ByteOffset {
@@ -242,17 +305,26 @@ impl EditorView {
             return;
         };
         let extend = event.modifiers.shift;
-        self.move_cursor(cx, |state, buffer| state.move_to(buffer, offset, extend));
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_to(buffer, offset, extend);
+        });
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.is_selecting {
             return;
         }
         let Some(offset) = self.position_for_point(event.position) else {
             return;
         };
-        self.move_cursor(cx, |state, buffer| state.move_to(buffer, offset, true));
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_to(buffer, offset, true);
+        });
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {

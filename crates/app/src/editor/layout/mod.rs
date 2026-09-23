@@ -1,14 +1,20 @@
 //! Every pixel ↔ offset conversion, in rows: one `shape_text` call per line, so a
 //! keystroke does not re-shape the whole document.
 
+mod rows;
+mod runs;
+mod shape;
+
+pub(crate) use shape::shape_document;
+
 use std::ops::{Range, RangeInclusive};
 
 use gpui::{
-    App, Bounds, HighlightStyle, PaintQuad, Pixels, Point, SharedString, TextAlign, TextRun,
-    TextStyle, UnderlineStyle, Window, WrappedLine, fill, point, px,
+    App, Bounds, PaintQuad, Pixels, Point, TextAlign, TextStyle, Window, WrappedLine, fill, point,
+    px,
 };
-use inkra_text::{Buffer, ByteOffset};
-use unicode_segmentation::GraphemeCursor;
+use inkra_markdown::{DisplayLine, DisplayOffset};
+use inkra_text::{Bias, ByteOffset};
 
 use crate::theme;
 
@@ -17,6 +23,7 @@ const NEWLINE_STUB: f32 = 0.25;
 struct LineLayout {
     wrapped: WrappedLine,
     range: Range<ByteOffset>,
+    display: DisplayLine,
     first_row: usize,
     rows: Vec<Row>,
 }
@@ -56,6 +63,12 @@ impl DocumentLayout {
 
     pub(crate) fn line_height(&self) -> Pixels {
         self.line_height
+    }
+
+    /// The text line `line` was shaped from.
+    #[cfg(test)]
+    pub(crate) fn shown(&self, line: usize) -> &str {
+        &self.lines[line].wrapped.text
     }
 
     pub(crate) fn height(&self) -> Pixels {
@@ -106,7 +119,8 @@ impl DocumentLayout {
     }
 
     fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
-        let index = offset.0.clamp(line.range.start.0, line.range.end.0) - line.range.start.0;
+        let offset = offset.clamp(line.range.start, line.range.end);
+        let index = line.display.to_display(offset).0;
         line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
     }
 
@@ -141,11 +155,17 @@ impl DocumentLayout {
     pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
         let (line, within) = self.locate(row);
         let target = &line.rows[within];
-        let index = line
-            .wrapped
-            .unwrapped_layout
-            .closest_index_for_x(x + target.start_x);
-        ByteOffset(line.range.start.0 + index).clamp(target.start, target.caret_end)
+        let layout = &line.wrapped.unwrapped_layout;
+        let index = layout.closest_index_for_x(x + target.start_x);
+        // At or past the display end, land after a hidden suffix (live-preview spec, D5).
+        let bias = if index >= layout.len {
+            Bias::Right
+        } else {
+            Bias::Left
+        };
+        line.display
+            .to_buffer(DisplayOffset(index), bias)
+            .clamp(target.start, target.caret_end)
     }
 
     pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
@@ -223,142 +243,4 @@ impl DocumentLayout {
             }
         }
     }
-}
-
-/// Runs indexed from zero within the line: the marked range is clipped and
-/// rebased, since left absolute it would stop summing to the line's length after the first line.
-fn line_runs(
-    style: &TextStyle,
-    composing: &TextStyle,
-    line: &Range<ByteOffset>,
-    marked: Option<&Range<ByteOffset>>,
-) -> Vec<TextRun> {
-    let length = line.end.0 - line.start.0;
-    let marked = marked
-        .map(|marked| marked.start.max(line.start)..marked.end.min(line.end))
-        .filter(|marked| marked.start < marked.end);
-
-    let Some(marked) = marked else {
-        return vec![style.to_run(length)];
-    };
-    let lead = marked.start.0 - line.start.0;
-    let composed = marked.end.0 - marked.start.0;
-    [
-        style.to_run(lead),
-        composing.to_run(composed),
-        style.to_run(length - lead - composed),
-    ]
-    .into_iter()
-    .filter(|run| run.len > 0)
-    .collect()
-}
-
-/// Takes `style` explicitly since the editor also shapes outside any draw,
-/// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
-pub(crate) fn shape_document(
-    buffer: &Buffer,
-    marked: Option<&Range<ByteOffset>>,
-    style: &TextStyle,
-    wrap_width: Option<Pixels>,
-    window: &mut Window,
-) -> DocumentLayout {
-    let composing = style.clone().highlight(HighlightStyle {
-        underline: Some(UnderlineStyle {
-            color: Some(style.color),
-            thickness: px(1.0),
-            wavy: false,
-        }),
-        ..HighlightStyle::default()
-    });
-    let font_size = style.font_size.to_pixels(window.rem_size());
-
-    let mut row_count = 0;
-    let lines = buffer
-        .lines()
-        .map(|(start, text)| {
-            let range = start..ByteOffset(start.0 + text.len());
-            let runs = line_runs(style, &composing, &range, marked);
-            let wrapped = window
-                .text_system()
-                .shape_text(
-                    SharedString::from(text.to_string()),
-                    font_size,
-                    &runs,
-                    wrap_width,
-                    None,
-                )
-                .map_err(|err| eprintln!("failed to shape line at {start}: {err}"))
-                .ok()
-                .and_then(|mut shaped| shaped.pop())
-                .unwrap_or_default();
-            let rows = rows(text, &wrapped, &range);
-            let first_row = row_count;
-            row_count += rows.len();
-            LineLayout {
-                wrapped,
-                range,
-                first_row,
-                rows,
-            }
-        })
-        .collect();
-
-    DocumentLayout {
-        lines,
-        row_count,
-        line_height: style.line_height_in_pixels(window.rem_size()),
-        style: style.clone(),
-        wrap_width,
-    }
-}
-
-/// One row per gpui row. Each wrap point snaps forward to the next grapheme
-/// boundary, so no caret lands inside a cluster (the glyphs before the snap still paint on the new row).
-fn rows(text: &str, wrapped: &WrappedLine, range: &Range<ByteOffset>) -> Vec<Row> {
-    let layout = &wrapped.unwrapped_layout;
-    let at = |index: usize| ByteOffset(range.start.0 + index);
-
-    let mut starts = vec![(0, px(0.))];
-    for boundary in wrapped.wrap_boundaries() {
-        let glyph = &layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix];
-        let snapped = grapheme_at_or_after(text, glyph.index);
-        // Monotonic: two wraps snapping to one cluster end must not collide.
-        let previous = starts.last().map_or(0, |(start, _)| *start);
-        starts.push((snapped.max(previous), glyph.position.x));
-    }
-
-    let ends = starts
-        .iter()
-        .skip(1)
-        .map(|(next, _)| Some(*next))
-        .chain([None]);
-    starts
-        .iter()
-        .zip(ends)
-        .map(|(&(start, start_x), next)| Row {
-            start: at(start),
-            caret_end: at(next.map_or(text.len(), |next| grapheme_before(text, next).max(start))),
-            start_x,
-        })
-        .collect()
-}
-
-fn grapheme_at_or_after(text: &str, index: usize) -> usize {
-    let mut cursor = GraphemeCursor::new(index, text.len(), true);
-    if cursor.is_boundary(text, 0).unwrap_or(true) {
-        return index;
-    }
-    cursor
-        .next_boundary(text, 0)
-        .ok()
-        .flatten()
-        .unwrap_or(text.len())
-}
-
-fn grapheme_before(text: &str, index: usize) -> usize {
-    GraphemeCursor::new(index, text.len(), true)
-        .prev_boundary(text, 0)
-        .ok()
-        .flatten()
-        .unwrap_or(0)
 }

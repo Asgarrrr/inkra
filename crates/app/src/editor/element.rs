@@ -98,6 +98,8 @@ impl Element for TextElement {
                 let marked = editor.state.marked_range();
                 let layout = shape_document(
                     editor.buffer.read(cx),
+                    editor.markdown(),
+                    &editor.state.selection().range(),
                     marked.as_ref(),
                     &text_style,
                     Some(width),
@@ -128,6 +130,8 @@ impl Element for TextElement {
             let style = window.text_style();
             shape_document(
                 editor.buffer.read(cx),
+                editor.markdown(),
+                &editor.state.selection().range(),
                 marked.as_ref(),
                 &style,
                 Some(bounds.size.width),

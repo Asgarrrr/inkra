@@ -1,0 +1,312 @@
+use std::ops::Range;
+
+use inkra_text::ByteOffset;
+use pulldown_cmark::{Event, Options, Parser, Tag};
+
+use crate::{Conceal, Styles};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Markdown {
+    /// Sorted, non-overlapping, never empty, never across a `\n`.
+    pub spans: Vec<Span>,
+    /// Sorted by `marker.start`; markers never overlap, never empty, never across a `\n`.
+    pub conceals: Vec<Conceal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub range: Range<ByteOffset>,
+    pub styles: Styles,
+}
+
+/// One pass over pulldown-cmark's events. A byte inside an element that no
+/// leaf covers is a marker (live-preview spec, D3). `text` is LF-only, as
+/// `Buffer` holds it: a `\r` would be styled as a marker.
+#[must_use]
+pub fn parse(text: &str) -> Markdown {
+    let mut out = Out {
+        text,
+        spans: Vec::new(),
+        conceals: Vec::new(),
+        cursor: 0,
+    };
+    let mut open: Vec<Open> = Vec::new();
+
+    for (event, range) in Unrepeated::new(Parser::new_ext(text, options()).into_offset_iter()) {
+        let current = open.last().cloned();
+        let styles = current.as_ref().map_or(Styles::NONE, |open| open.styles);
+        match event {
+            Event::Start(tag) => {
+                out.markers_until(range.start, current.as_ref());
+                if let Tag::Item = tag {
+                    out.bullet(range.start);
+                }
+                open.push(Open {
+                    styles: styles | tag_styles(&tag),
+                    end: range.end,
+                    element: concealable(text, &tag, &range),
+                });
+            }
+            Event::End(_) => {
+                out.markers_until(range.end, current.as_ref());
+                open.pop();
+            }
+            Event::Text(_) | Event::Html(_) | Event::InlineHtml(_) => {
+                out.markers_until(range.start, current.as_ref());
+                out.leaf(range, styles);
+            }
+            Event::Code(_) => {
+                let (content_start, content_end) = backtick_runs(text, &range);
+                let code = Open {
+                    styles: styles | Styles::CODE,
+                    end: range.end,
+                    element: Some(range.clone()),
+                };
+                out.markers_until(range.start, current.as_ref());
+                out.markers_until(content_start, Some(&code));
+                out.leaf(content_start..content_end, code.styles);
+                out.markers_until(range.end, Some(&code));
+            }
+            // At top level no element encloses it, so the gap rule alone would leave it unstyled.
+            Event::Rule => {
+                out.markers_until(range.start, current.as_ref());
+                out.leaf(range, styles | Styles::MARKER);
+            }
+            // Breaks and task boxes are left to the next gap, which marks them.
+            _ => {}
+        }
+    }
+    Markdown {
+        spans: out.spans,
+        conceals: out.conceals,
+    }
+}
+
+/// pulldown-cmark 0.13.4 emits the subtrees after an empty wikilink alias inside the link too;
+/// this drops each copy that starts at or past the innermost open element's end.
+struct Unrepeated<I> {
+    events: I,
+    /// The end of each open element yielded so far, innermost last.
+    ends: Vec<usize>,
+    /// Depth of the subtree being skipped.
+    skipped: usize,
+}
+
+impl<I> Unrepeated<I> {
+    fn new(events: I) -> Self {
+        Self {
+            events,
+            ends: Vec::new(),
+            skipped: 0,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = (Event<'a>, Range<usize>)>> Iterator for Unrepeated<I> {
+    type Item = (Event<'a>, Range<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (event, range) = self.events.next()?;
+            match event {
+                Event::End(_) if self.skipped > 0 => self.skipped -= 1,
+                Event::End(_) => {
+                    self.ends.pop();
+                    return Some((event, range));
+                }
+                _ if self.ends.last().is_some_and(|&end| range.start >= end) => {
+                    if let Event::Start(_) = event {
+                        self.skipped += 1;
+                    }
+                }
+                Event::Start(_) => {
+                    self.ends.push(range.end);
+                    return Some((event, range));
+                }
+                _ => return Some((event, range)),
+            }
+        }
+    }
+}
+
+fn options() -> Options {
+    Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_WIKILINKS
+        | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+        | Options::ENABLE_TABLES
+}
+
+fn tag_styles(tag: &Tag<'_>) -> Styles {
+    match tag {
+        Tag::Heading { level, .. } => Styles::heading(*level as u8),
+        Tag::Strong => Styles::STRONG,
+        Tag::Emphasis => Styles::EMPHASIS,
+        Tag::Strikethrough => Styles::STRIKETHROUGH,
+        Tag::CodeBlock(_) => Styles::CODE,
+        Tag::Link { .. } | Tag::Image { .. } => Styles::LINK,
+        Tag::BlockQuote(_) => Styles::QUOTE,
+        Tag::MetadataBlock(_) => Styles::FRONTMATTER,
+        _ => Styles::NONE,
+    }
+}
+
+/// The range whose touch reveals this element's markers, or `None` when they never hide (spec D2).
+fn concealable(text: &str, tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
+    let element = &text[range.clone()];
+    let concealable = match tag {
+        Tag::Heading { .. } => is_atx(element),
+        Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link { .. } => true,
+        _ => false,
+    };
+    // An ATX heading's range includes its line ending.
+    let len = element.strip_suffix('\n').unwrap_or(element).len();
+    concealable.then(|| range.start..range.start + len)
+}
+
+/// 1 to 6 `#`, then a space, a tab or the line end; pulldown-cmark starts the range after any indent.
+fn is_atx(heading: &str) -> bool {
+    let hashes = heading.bytes().take_while(|&byte| byte == b'#').count();
+    (1..=6).contains(&hashes)
+        && matches!(
+            heading.as_bytes().get(hashes),
+            None | Some(b' ' | b'\t' | b'\n')
+        )
+}
+
+/// A `Code` event's range includes its backticks; returns where the content starts and ends.
+fn backtick_runs(text: &str, range: &Range<usize>) -> (usize, usize) {
+    let code = &text.as_bytes()[range.clone()];
+    let open = code.iter().take_while(|&&byte| byte == b'`').count();
+    let close = code[open..]
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'`')
+        .count();
+    (range.start + open, range.end - close)
+}
+
+/// An open element: the union of its and its ancestors' tags, its end, and its range when its
+/// markers can hide.
+#[derive(Clone)]
+struct Open {
+    styles: Styles,
+    end: usize,
+    element: Option<Range<usize>>,
+}
+
+struct Out<'a> {
+    text: &'a str,
+    spans: Vec<Span>,
+    conceals: Vec<Conceal>,
+    /// Everything before this byte is already emitted or known to be unstyled.
+    cursor: usize,
+}
+
+impl Out<'_> {
+    /// `current` is the innermost open element; `None` means outside every element, where the
+    /// gap is unstyled, not a marker.
+    fn markers_until(&mut self, end: usize, current: Option<&Open>) {
+        let end = current.map_or(end, |open| end.min(open.end));
+        if end <= self.cursor {
+            return;
+        }
+        if let Some(open) = current {
+            let gap = self.cursor..end;
+            self.emit(gap.clone(), open.styles | Styles::MARKER);
+            if let Some(element) = &open.element {
+                self.conceal(gap, element);
+            }
+        }
+        self.cursor = end;
+    }
+
+    fn conceal(&mut self, gap: Range<usize>, element: &Range<usize>) {
+        for (index, line) in lines(self.text, gap).enumerate() {
+            let bytes = &self.text.as_bytes()[line.clone()];
+            // After a `\n` in the gap, a container prefix or indent leads the line, not this element's syntax.
+            let prefix = if index == 0 {
+                0
+            } else {
+                bytes
+                    .iter()
+                    .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'>'))
+                    .count()
+            };
+            if prefix < bytes.len() {
+                self.conceals.push(Conceal {
+                    element: to_offsets(element.clone()),
+                    marker: to_offsets(line.start + prefix..line.end),
+                    replacement: "",
+                });
+            }
+        }
+    }
+
+    /// The element is the bullet byte alone, so a caret at the item's content does not reveal it.
+    fn bullet(&mut self, item_start: usize) {
+        // An indented top-level item's range starts at its indentation.
+        let indent = self.text.as_bytes()[item_start..]
+            .iter()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        let start = item_start + indent;
+        // An ordered item's marker starts with a digit (CommonMark 5.2), so it keeps its number.
+        if !matches!(self.text.as_bytes().get(start), Some(b'-' | b'*' | b'+')) {
+            return;
+        }
+        let bullet = to_offsets(start..start + 1);
+        self.conceals.push(Conceal {
+            element: bullet.clone(),
+            marker: bullet,
+            replacement: "•",
+        });
+    }
+
+    fn leaf(&mut self, range: Range<usize>, styles: Styles) {
+        let start = range.start.max(self.cursor).min(range.end);
+        self.emit(start..range.end, styles);
+        self.cursor = self.cursor.max(range.end);
+    }
+
+    /// Splits at `\n`: a newline byte never carries a style, so no span crosses a line.
+    fn emit(&mut self, range: Range<usize>, styles: Styles) {
+        for line in lines(self.text, range) {
+            self.push(line, styles);
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, styles: Styles) {
+        if range.is_empty() || styles.is_empty() {
+            return;
+        }
+        let range = to_offsets(range);
+        if let Some(last) = self.spans.last_mut()
+            && last.range.end == range.start
+            && last.styles == styles
+        {
+            last.range.end = range.end;
+            return;
+        }
+        self.spans.push(Span { range, styles });
+    }
+}
+
+/// The pieces of `range` between its `\n` bytes, which they exclude.
+fn lines(text: &str, range: Range<usize>) -> impl Iterator<Item = Range<usize>> {
+    let mut start = range.start;
+    text.as_bytes()[range]
+        .split(|&byte| byte == b'\n')
+        .map(move |line| {
+            let piece = start..start + line.len();
+            start = piece.end + 1;
+            piece
+        })
+}
+
+fn to_offsets(range: Range<usize>) -> Range<ByteOffset> {
+    ByteOffset(range.start)..ByteOffset(range.end)
+}
+
+#[cfg(test)]
+mod tests;

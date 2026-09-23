@@ -7,7 +7,9 @@ use super::EditorView;
 use crate::keymap::key_bindings;
 
 mod clipboard;
+mod conceal;
 mod dispatch;
+mod markdown;
 mod protocol;
 mod scroll;
 mod swap;
