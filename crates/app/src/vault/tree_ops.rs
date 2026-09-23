@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use gpui::{Context, Task, prelude::*};
+use gpui::{AsyncApp, Context, Task, WeakEntity, prelude::*};
 use inkra_vault::{EntryId, Kind, Vault};
 
 use super::NoteStore;
@@ -30,43 +30,34 @@ impl NoteStore {
         // the previous save's text, the only copy the user gets back.
         self.schedule_save(id, Duration::ZERO, cx);
 
-        let ops = self.ops.entry(id).or_default();
-        ops.trashing = true;
-        let previous = ops.chain.take();
+        self.ops.entry(id).or_default().trashing = true;
 
         let fs = Arc::clone(&self.fs);
-        let (done, wait) = oneshot::channel();
-        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
-            if let Some(previous) = previous {
-                previous.await;
-            }
+        self.after_chain(id, cx, async move |this, cx| {
             // Resolved here, not at issue time: a delete queued behind a
             // rename must use the path after the move.
             let Ok(Some(path)) =
                 this.update(cx, |this, cx| this.vault.as_ref()?.read(cx).absolute(id))
             else {
-                if let Ok(()) = this.update(cx, |this, cx| {
+                let _ = this.update(cx, |this, cx| {
                     if let Some(ops) = this.ops.get_mut(&id) {
                         ops.trashing = false;
                     }
                     cx.emit(TrashFailed(id));
-                }) {
-                    let _ = done.send(false);
-                }
-                return;
+                });
+                return false;
             };
             let removed = cx
                 .background_spawn(async move { fs.trash(&path).await })
                 .await;
 
-            let _ = this.update(cx, |this, cx| {
+            this.update(cx, |this, cx| {
                 if removed.is_err() {
                     if let Some(ops) = this.ops.get_mut(&id) {
                         ops.trashing = false;
                     }
                     cx.emit(TrashFailed(id));
-                    let _ = done.send(false);
-                    return;
+                    return false;
                 }
                 // Closed only once the file is actually gone: an
                 // optimistic close on a failed delete strands the buffer.
@@ -78,12 +69,10 @@ impl NoteStore {
                 cx.emit(NoteClosed(id));
                 drop(this.rescan(cx));
                 cx.notify();
-                let _ = done.send(true);
-            });
-        }));
-
-        cx.foreground_executor()
-            .spawn(async move { wait.await == Ok(true) })
+                true
+            })
+            .unwrap_or(false)
+        })
     }
 
     /// The id comes from `Fs::create`'s identity, never the path — a
@@ -153,12 +142,7 @@ impl NoteStore {
 
         let name = name.to_owned();
         let fs = Arc::clone(&self.fs);
-        let previous = self.ops.entry(id).or_default().chain.take();
-        let (done, wait) = oneshot::channel();
-        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
-            if let Some(previous) = previous {
-                previous.await;
-            }
+        self.after_chain(id, cx, async move |this, cx| {
             // Resolved here, not at issue time: an operation queued behind
             // a rename must act on the moved name.
             let Ok(Some((from, to))) = this.update(cx, |this, cx| {
@@ -171,8 +155,7 @@ impl NoteStore {
                 let to = from.parent()?.join(&file_name);
                 Some((from, to))
             }) else {
-                let _ = done.send(false);
-                return;
+                return false;
             };
 
             let moved = cx
@@ -181,19 +164,34 @@ impl NoteStore {
 
             if moved.is_err() {
                 let _ = this.update(cx, |_, cx| cx.emit(RenameFailed(id)));
-                let _ = done.send(false);
-                return;
+                return false;
             }
             // Awaited inside the chain link: a write released before this
             // lands would resolve the old path and recreate the note there.
             let Ok(applied) = this.update(cx, Self::rescan) else {
-                return;
+                return false;
             };
             let _ = applied.await;
             let _ = this.update(cx, |_, cx| cx.notify());
-            let _ = done.send(true);
-        }));
+            true
+        })
+    }
 
+    /// Runs `op` after every operation already queued on the note's chain,
+    /// and resolves to its result.
+    fn after_chain<Op>(&mut self, id: EntryId, cx: &mut Context<Self>, op: Op) -> Task<bool>
+    where
+        Op: AsyncFnOnce(WeakEntity<Self>, &mut AsyncApp) -> bool + 'static,
+    {
+        let ops = self.ops.entry(id).or_default();
+        let previous = ops.chain.take();
+        let (done, wait) = oneshot::channel();
+        ops.chain = Some(cx.spawn(async move |this, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let _ = done.send(op(this, cx).await);
+        }));
         cx.foreground_executor()
             .spawn(async move { wait.await == Ok(true) })
     }

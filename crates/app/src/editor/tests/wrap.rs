@@ -3,11 +3,10 @@
 
 use gpui::{ClipboardItem, EntityInputHandler, Pixels, TestAppContext, px, size};
 
+use super::geometry::{LINE_HEIGHT, MARGIN, PADDING, VIEWPORT};
 use super::{at, dispatching};
 use crate::editor::EditorView;
 
-const PADDING: f32 = 16.;
-const LINE_HEIGHT: f32 = 28.;
 const WINDOW_WIDTH: f32 = 1920.;
 
 /// Seventeen four-char words: 68 chars, fits a 70 `ch` row with room to spare.
@@ -164,7 +163,7 @@ fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestApp
             assert_eq!(layout.row_count(), 42, "the edit wrapped the last line");
             assert_eq!(layout.row_for_offset(view.cursor()), 41);
             let row_bottom = PADDING + LINE_HEIGHT * 42.;
-            let expected = 1080. - 3. * LINE_HEIGHT - row_bottom;
+            let expected = VIEWPORT - MARGIN - row_bottom;
             assert_eq!(view.scroll_handle.offset().y, px(expected));
         })
         .unwrap();
@@ -194,7 +193,7 @@ fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
             assert!(row > 61, "the URL wrapped onto rows past line 60");
             #[allow(clippy::cast_precision_loss)]
             let row_bottom = PADDING + LINE_HEIGHT * (row as f32 + 1.);
-            let expected = 1080. - 3. * LINE_HEIGHT - row_bottom;
+            let expected = VIEWPORT - MARGIN - row_bottom;
             assert_eq!(view.scroll_handle.offset().y, px(expected));
         })
         .unwrap();

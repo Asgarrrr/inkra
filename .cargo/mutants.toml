@@ -11,7 +11,8 @@ examine_globs = ["crates/text/src/**/*.rs", "crates/editor/src/**/*.rs"]
 # This also keeps gpui out of every test run.
 test_package = ["inkra-text", "inkra-editor"]
 
+# Matched by column, not line, so edits above it do not silently re-enable it.
 # Equivalent. `removed_len` is a `usize`, so `>= 0` is always true. When
 # `removed_len == 0`, `touched_end == at`, and this branch has `offset >= at`,
 # so `offset.0 < touched_end` is false and the conjunction is false either way.
-exclude_re = ["^crates/text/src/anchor\\.rs:59:48: replace > with >= in transform$"]
+exclude_re = ["^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$"]

@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
-use unicode_segmentation::UnicodeSegmentation;
+use unicode_segmentation::GraphemeCursor;
 
 use crate::anchor::{Anchor, AnchorState, Bias, transform};
 use crate::offset::{ByteOffset, Utf16Offset};
@@ -262,21 +262,48 @@ impl Buffer {
         start.min(end)..start.max(end)
     }
 
+    /// The last grapheme start before `offset`, or 0. Cost is local to `offset`.
     #[must_use]
     pub fn previous_grapheme(&self, offset: ByteOffset) -> ByteOffset {
-        self.text
-            .grapheme_indices(true)
+        let offset = offset.0.min(self.text.len());
+        let floor = (0..=offset)
             .rev()
-            .find_map(|(index, _)| (index < offset.0).then_some(ByteOffset(index)))
-            .unwrap_or_default()
+            .find(|&i| self.text.is_char_boundary(i))
+            .unwrap_or(0);
+        let mut cursor = GraphemeCursor::new(floor, self.text.len(), true);
+        if floor < offset && cursor.is_boundary(&self.text, 0).unwrap_or(false) {
+            return ByteOffset(floor);
+        }
+        ByteOffset(
+            cursor
+                .prev_boundary(&self.text, 0)
+                .ok()
+                .flatten()
+                .unwrap_or(0),
+        )
     }
 
+    /// The first grapheme start after `offset`, or the end. Cost is local to `offset`.
     #[must_use]
     pub fn next_grapheme(&self, offset: ByteOffset) -> ByteOffset {
-        self.text
-            .grapheme_indices(true)
-            .find_map(|(index, _)| (index > offset.0).then_some(ByteOffset(index)))
-            .unwrap_or_else(|| self.len())
+        let len = self.text.len();
+        if offset.0 >= len {
+            return self.len();
+        }
+        let ceil = (offset.0..=len)
+            .find(|&i| self.text.is_char_boundary(i))
+            .unwrap_or(len);
+        let mut cursor = GraphemeCursor::new(ceil, len, true);
+        if ceil > offset.0 && cursor.is_boundary(&self.text, 0).unwrap_or(false) {
+            return ByteOffset(ceil);
+        }
+        ByteOffset(
+            cursor
+                .next_boundary(&self.text, 0)
+                .ok()
+                .flatten()
+                .unwrap_or(len),
+        )
     }
 
     #[must_use]

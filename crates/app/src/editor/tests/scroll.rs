@@ -1,6 +1,6 @@
 use gpui::TestAppContext;
 
-use super::{at, dispatching};
+use super::{at, dispatching, geometry};
 use crate::editor::actions::Down;
 
 /// `max_offset` is non-zero only for a tracked handle on a genuinely
@@ -30,36 +30,6 @@ fn a_document_that_fits_has_no_room_to_scroll(cx: &mut TestAppContext) {
             assert_eq!(view.scroll_handle.max_offset().y, gpui::px(0.));
         })
         .unwrap();
-}
-
-/// Written out rather than read back from the view: a derived expectation
-/// would restate the implementation, so a padding or line-height regression would pass quietly.
-mod geometry {
-    pub(super) const TEXT_TOP: f32 = 16.;
-    pub(super) const LINE_HEIGHT: f32 = 28.;
-    pub(super) const VIEWPORT: f32 = 1080.;
-    pub(super) const MARGIN: f32 = 3. * LINE_HEIGHT;
-
-    pub(super) fn offset_showing_from_below(n: f32) -> gpui::Pixels {
-        gpui::px(VIEWPORT - MARGIN - (TEXT_TOP + LINE_HEIGHT * (n + 1.)))
-    }
-
-    pub(super) fn top_of_line(n: f32, offset: gpui::Pixels) -> gpui::Pixels {
-        gpui::px(TEXT_TOP + LINE_HEIGHT * n) + offset
-    }
-
-    pub(super) fn line_at(y: gpui::Pixels, offset: gpui::Pixels) -> usize {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let line = f32::from(y - offset - gpui::px(TEXT_TOP)) / LINE_HEIGHT;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let line = line as usize;
-        line
-    }
-
-    pub(super) fn line_is_visible(n: f32, offset: gpui::Pixels) -> bool {
-        let top = top_of_line(n, offset);
-        top >= gpui::px(0.) && top + gpui::px(LINE_HEIGHT) <= gpui::px(VIEWPORT)
-    }
 }
 
 const TALL: usize = 200;

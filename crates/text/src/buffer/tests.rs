@@ -887,3 +887,37 @@ mod anchors {
         }
     }
 }
+
+mod grapheme_steps {
+    use proptest::prelude::*;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    use super::*;
+
+    /// The whole-text scan the local cursor replaced: the definition of right.
+    fn previous_by_scan(text: &str, offset: usize) -> usize {
+        text.grapheme_indices(true)
+            .rev()
+            .find_map(|(index, _)| (index < offset).then_some(index))
+            .unwrap_or_default()
+    }
+
+    fn next_by_scan(text: &str, offset: usize) -> usize {
+        text.grapheme_indices(true)
+            .find_map(|(index, _)| (index > offset).then_some(index))
+            .unwrap_or(text.len())
+    }
+
+    proptest! {
+        #[test]
+        fn steps_agree_with_a_whole_text_scan(
+            text in "[a\u{301}\u{302}e\r\n \u{1F468}\u{200D}\u{1F469}\u{1F1EB}\u{1F1F7}é]{0,24}",
+        ) {
+            let buffer = Buffer::new(&text);
+            for offset in 0..=text.len() + 2 {
+                prop_assert_eq!(buffer.previous_grapheme(at(offset)).0, previous_by_scan(&text, offset));
+                prop_assert_eq!(buffer.next_grapheme(at(offset)).0, next_by_scan(&text, offset));
+            }
+        }
+    }
+}
