@@ -79,7 +79,10 @@ fn select_all_reveals_everything(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             assert_eq!(shown(view, 0), "a **b** c");
-            assert_eq!(shown(view, 1), "# T");
+            // A heading's `# ` hangs left of the text instead (live-preview spec, D12).
+            assert_eq!(shown(view, 1), "T");
+            let layout = view.last_layout.as_ref().unwrap();
+            assert!(layout.x_for_offset(at(10)) < gpui::px(0.));
         })
         .unwrap();
 }

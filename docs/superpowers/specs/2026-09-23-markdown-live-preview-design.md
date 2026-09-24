@@ -1,7 +1,8 @@
 # Markdown live preview
 
 Status: approved (2026-09-23). Slices 1 (styled source), 2 (concealment) and
-3 (heading sizes) implemented. The first draft was a source-mode design; "What the review
+3 (heading sizes) implemented. Slice 5 (D12, hanging heading markers)
+implemented on 2026-09-24. The first draft was a source-mode design; "What the review
 changed" records what survives from it.
 
 The editor has one mode. A note reads as formatted text: `**strong**` shows as
@@ -31,14 +32,15 @@ height (`gpui/src/text_system.rs:750`, `text_system/line.rs:460`).
   inside the selection, so a delete or a copy never removes or copies syntax
   the user cannot see.
 - **Headings are larger**, per level, whether revealed or not. Revealing a
-  heading shows its `# ` without changing its size.
+  heading shows its `# ` in the left margin, without moving its text (D12).
 - **A bullet `-`, `*` or `+` shows as `•`.** Numbers stay as typed.
 - **A link shows its text only.** `[t](u)` shows `t`, `[[page|alias]]` shows
   `alias`, `[[page]]` shows `page`, `<u>` shows `u`, in the link colour.
 - **Everything else shows its syntax, dimmed**, as in source mode: images,
   quotes, code fences, task boxes, frontmatter. Concealing those is deferred.
 - **Layout shifts when an element reveals.** Revealing `**` pushes the text
-  after it right. Obsidian and Typora accept the same shift.
+  after it right. Obsidian and Typora accept the same shift. A heading's
+  opening `# ` is the exception: it hangs in the margin (D12).
 
 ## What Zed does
 
@@ -123,6 +125,13 @@ concealment crosses a line, so no row or line count changes.
 Zed injects the fence's language into a code block. We style a code block as
 one monospace span. A note application is not an IDE.
 
+### X5. A heading's opening marker hangs in a margin
+
+Zed's editor never hides a heading marker, so it has no reference for where a
+revealed one goes. Its gutter holds line numbers and fold controls, painted
+beside the text, never text of the buffer. D12 paints buffer text in a margin
+left of the column. The user chose it from a mock-up on 2026-09-23.
+
 ## Decisions
 
 ### D1. `inkra-markdown`: `&str` in, spans and concealments out
@@ -171,7 +180,7 @@ Not `ENABLE_SMART_PUNCTUATION`: it rewrites text, and we only read ranges.
 
 | Construct | Content | Markers (D3) | Concealed when not revealed |
 |---|---|---|---|
-| ATX heading | `Heading(n)` | `#…# `, closing ` ##` | yes; element = the heading |
+| ATX heading | `Heading(n)` | `#…# `, closing ` ##` | the opening `#…# ` only, hung in the margin (D12); element = the heading. The closing ` ##` is dimmed, never hidden |
 | setext heading | `Heading(n)` | the `===` / `---` line | no, dimmed |
 | `**x**`, `__x__` | `Strong` | the delimiters | yes; element = the strong |
 | `*x*`, `_x_` | `Emphasis` | the delimiters | yes |
@@ -443,6 +452,111 @@ stay in `theme::markdown_style` and `layout/shape.rs`; `layout/{mod,rows,runs}.r
 and `field.rs` see only `DisplayLine`, `DisplayOffset` and `Markdown` as data. Views still talk through events; nothing here adds a reference
 between views.
 
+### D12. A heading's opening marker hangs in the margin
+
+**Problem.** Slice 3 concealed `# ` like `**`: out of the display text when
+not revealed, back in when revealed. Putting it back re-wraps the line. The
+text moves right, and a heading that nearly fills the column gains a row, so
+everything below it drops by one heading row. `# aaaa aaaa aaaa aaaa aaaa aaaa
+aaaa a\nbody` lays out 2 rows concealed and 3 revealed.
+
+**Rule.** A heading's shaped text never depends on the reveal state. Its
+opening marker is never part of it. When the heading is revealed, the marker
+paints in a margin left of the column, right-aligned against it. The closing
+sequence stays in the text, dimmed, in both states. No reveal of a heading can
+move text, by construction.
+
+**The parser names the opening marker.** `Heading` gains
+`marker: Option<Range<ByteOffset>>`: an ATX heading's opening sequence, its
+`#` run and the spaces or tabs after it, or `None` for a setext heading.
+`parse.rs` conceals it with one explicit call at `Tag::Heading`, as `bullet`
+does for a bullet. The same range feeds `marker` and the `Conceal`, so the two
+cannot disagree. A heading's `Open` gets no `element`, so the gap rule (D3)
+still dims both sequences but conceals neither. The closing sequence is
+therefore dimmed and never hidden, and so is any other gap directly inside a
+heading: the `\` of `# a\*b` now shows dimmed, as it does in a paragraph. This names a structure, not a place, so
+the crate stays free of pixels.
+
+Deriving the marker in `app` was rejected. "The first conceal on a heading
+line, at the line's start" also matches the `**` of the setext heading
+`**b**\n===`, whose strong element starts where the heading starts.
+
+**The margin is only at the line start.** A marker hangs when
+`marker.start` is its line's start. `> # q`, `- # a` and `  # q` keep slice
+3's inline conceal, and keep its re-wrap: no margin exists left of a
+container prefix. This is an accepted limit.
+
+**Layout.** In `shape_document`, a hanging marker goes to `DisplayLine` as a
+hidden range in both states. It is left out of the reveal filter. The line
+also gets a `Hanging { range, shaped: Option<ShapedLine> }`:
+
+- `LineLayout.hanging: Option<Hanging>` is `Some` whenever the marker hangs,
+  revealed or not: the coordinates below need its range in both states.
+- `shaped` is `Some` only while the marker's `Conceal` is not active (D4). A
+  concealed marker needs no shape; its width is the shape's own.
+- The marker shapes through `line_runs` over its own range with an identity
+  `DisplayLine`, at the heading's size. Its style (heading weight, `Marker`
+  dim) and an IME underline come from the same code as the body's. There is
+  no second styling path.
+- The marker's trailing space is its gap to the text. It is right-aligned, so
+  its end is at `x = 0`, where the body starts. The offset at `marker.end` has
+  one `x` in both, and the caret there needs no tie-break.
+
+**Coordinates.** Only two functions branch on `hanging`, and only on row 0:
+
+- `x_on_row`: an offset before `marker.end` gets `Hanging::x_for_offset`, a
+  negative `x`. `caret_bounds`, `range_bounds` (IME) and `selection_quads`
+  call it and need no change of their own.
+- `offset_on_row`: `x < 0` hit-tests the marker. `position_for_point` already
+  passes a negative `x` (`editor/mod.rs:299`).
+
+`selection_quads` draws a row that is not the first one from the `x` of the
+row's start, not from `px(0.)`. On a revealed heading that start is the
+marker's, so a selection across a heading highlights its `#` in the margin.
+The selection revealed it, and its bytes are selected. `paint` draws
+`hanging.shaped` at `x = -width` on the line's top, with the line's height, so
+the baselines match. `rows()` is unchanged: a hidden prefix already maps row
+0's start to `line.start` (`display.rs`, `to_buffer` with `Bias::Left`).
+
+**The body never maps into the marker.** A click or a vertical move at
+`x >= 0` on a line that hangs its marker lands at `marker.end` or later, shown
+or not. D5's `Bias::Left` would put it at `line.start`, left of the `#`, away
+from the click. D5 lands `|bold` before the `**` so that the click touches the
+element; a heading's element is its whole line, so any offset on it already
+touches it. The marker's own offsets are reached through the margin, `x < 0`,
+or by the arrow keys. Row 0 of a hanging line splits at `x = 0` and at nothing
+else. A concealed marker shows no glyph, so its whole margin lands on
+`line.start`, which reveals it: a goal `x` left in the margin by `Home` comes
+back to the `#` after a vertical move away and back. `Home` goes to `line.start`, left of the `#` in the
+margin. An empty heading `#` follows the same rule: `x >= 0` lands at
+`marker.end`.
+
+**The margin is measured, not guessed.** `TextElement` measures the margin
+where it measures the column (`element.rs`, `column_width`): the widest
+opening marker, `#` × n and a space, shaped at level n's size and weight, over
+n = 1 to 6, rounded up to a whole pixel so taffy's snapping does not shift
+the text. Only the left side needs it: no marker hangs on the right. The text
+starts at `left = max(margin, (pane − column) / 2)` and is
+`min(column, pane − left)` wide, never below zero. A wide window keeps the
+column centred where it was. A narrow one gives up the margin from the
+column's width, on the left only; a symmetric margin cost a 748 px pane
+148 px of text. A pane narrower than the margin leaves the text zero wide,
+one glyph per row (`text_system/line_layout.rs:251`). The editor's `p_4()`
+stays. `NameField` shapes with `Markdown::default()` and gets
+no margin. A marker with extra spaces, `#   T`, can be wider than the margin;
+it then paints into the pane's padding. Nothing clips it: gpui's content mask
+ignores padding (`gpui/src/style.rs:638-660`), and no ancestor of the editor
+sets an overflow.
+
+The marker and the body share a baseline only when they share metrics. A
+heading holding inline code takes Menlo's larger descent, so its body sits
+0.42 px (one device pixel) above its marker. gpui places a line's baseline
+from that line's own ascent and descent (`text_system/line.rs:547-548`).
+Accepted.
+
+Cost: one extra `shape_line` per revealed heading, and six cached ones per
+layout for the margin.
+
 ## Deferred
 
 | Item | Trigger |
@@ -455,6 +569,7 @@ between views.
 | Windowed shaping (lay out visible lines only) | The Measure slice's profile of typing a fence at the top of a large note shows the next frame above 16 ms. This is the roadmap's Virtualization item, with a measured trigger. |
 | Table styling | A note with a table reads badly in a render pass. |
 | Highlighting inside fenced code | A user asks. |
+| Hang a heading marker inside a quote or a list item (D12) | A user writes headings in containers and the re-wrap on reveal hurts. Needs a margin that starts after the container prefix. |
 | Space above headings (Zed's `mt_6` on H2 and below) | A render pass shows headings cramped against the paragraph above. The slice-3 `editor-markdown` render already shows H1 and H2 nearly touching. The space fits the per-line `top` as a gap before the heading's rows, and leaves `row_height` alone. |
 
 ## Tests
@@ -493,6 +608,31 @@ between views.
   restored by an undo, replaced by `open_buffer`, refreshed by a write outside
   the gates.
 
+D12:
+
+- `inkra-markdown`: `Heading.marker` for `# T`, `###### T`, `#`, `#\tT`,
+  `# T ##` (the opening sequence only) and a setext heading (`None`). `# T ##`
+  conceals one marker; ` ##` keeps a `Marker` span. Proptest: `marker` is
+  `Some` iff the heading is ATX, it starts with `#`, it equals exactly one
+  conceal's marker, and every byte of it carries `Marker`.
+- Revealing a heading keeps the row count and every row top: the D12 repro
+  lays out 2 rows in both states.
+- The body starts at `x = 0` in both states. This replaces
+  `a_heading_is_shaped_at_its_own_size`, which asserted the old inline width.
+- A caret inside the marker is at a negative `x`, as tall as the heading row;
+  at `marker.end` it is at `x = 0`.
+- A click at a negative `x` on a revealed heading lands in the marker; on a
+  concealed one at `line.start`; on a body line at the line's start. A click
+  at `x >= 0` on a heading lands at `marker.end` or later.
+- `Home`, down, up on a revealed heading comes back to `line.start`.
+- A selection across a heading covers the marker; the IME rectangle of a
+  range in the marker is in the margin.
+- `> # q` keeps its inline conceal.
+- Margin: a wide window keeps the column centred at its old `x`; a narrow
+  window loses `margin` from the text's width, left side only; a pane
+  narrower than the margin gives the text zero width. Tests that assume the text starts 16 px in from the pane change
+  their constants, not their intent.
+
 No key binding is added. Existing `simulate_keystrokes` tests must pass
 unchanged; their notes carry no markdown syntax, or it is revealed under the
 caret.
@@ -518,6 +658,12 @@ Each slice ships on its own and is looked at in a render.
    note of an ordinary keystroke, a caret move that reveals, and typing a
    fence at the top. Figures written back here; a fired trigger is recorded
    in Deferred and `docs/roadmap.md`, not built.
+5. **Hanging heading markers.** D12, in four green steps: the explicit
+   opening conceal and `Heading.marker`, with the closing sequence dimmed and
+   no longer hidden; then the margin measured and reserved, with no marker
+   painted yet; then `Hanging`: its shape, coordinates and paint; then the
+   `editor-headings` and `editor-heading-revealed` renders, with the second
+   scene's claim corrected.
 
 ## What the review changed
 

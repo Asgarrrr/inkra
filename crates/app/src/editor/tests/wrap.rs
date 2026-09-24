@@ -3,7 +3,7 @@
 
 use gpui::{ClipboardItem, EntityInputHandler, Pixels, TestAppContext, px, size};
 
-use super::geometry::{LINE_HEIGHT, MARGIN, PADDING, VIEWPORT};
+use super::geometry::{HEADING_MARGIN, LINE_HEIGHT, MARGIN, PADDING, VIEWPORT};
 use super::{at, dispatching};
 use crate::editor::EditorView;
 
@@ -69,9 +69,9 @@ fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(column_width(view), px(400. - 2. * PADDING));
+            assert_eq!(column_width(view), px(400. - 2. * PADDING - HEADING_MARGIN));
             let layout = view.last_layout.as_ref().unwrap();
-            assert!(layout.row_count() > 1, "68 chars cannot fit 368 px");
+            assert!(layout.row_count() > 1, "68 chars cannot fit 292 px");
             #[allow(clippy::cast_precision_loss)]
             let rows = layout.row_count() as f32;
             assert_eq!(
@@ -361,10 +361,10 @@ fn ctrl_e_goes_to_the_end_of_the_logical_line(cx: &mut TestAppContext) {
 /// with no caret position of its own; up/down must step over it, not get stuck.
 #[gpui::test]
 fn up_steps_over_a_row_with_no_caret_position(cx: &mut TestAppContext) {
-    // Five glyphs in one cluster, in a pane two glyphs wide.
+    // Five glyphs in one cluster, in a text column two glyphs wide.
     let text = format!("ab{}cd", "e\u{301}\u{302}\u{303}\u{304}");
     let (window, mut cx) = dispatching(cx, &text);
-    cx.simulate_resize(size(px(2. * PADDING + 25.), px(600.)));
+    cx.simulate_resize(size(px(2. * PADDING + HEADING_MARGIN + 25.), px(600.)));
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-down");
 

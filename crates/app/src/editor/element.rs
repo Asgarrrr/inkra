@@ -5,8 +5,10 @@ use std::rc::Rc;
 
 use gpui::{
     App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
-    PaintQuad, Pixels, Point, Style, TextStyle, Window, fill, prelude::*, px, relative, size,
+    PaintQuad, Pixels, Point, Style, TextStyle, Window, fill, point, prelude::*, px, relative,
+    size,
 };
+use inkra_markdown::Styles;
 
 use super::EditorView;
 use super::layout::{DocumentLayout, shape_document};
@@ -35,7 +37,7 @@ impl IntoElement for TextElement {
 type Stash = Rc<RefCell<Vec<DocumentLayout>>>;
 
 impl Element for TextElement {
-    type RequestLayoutState = Stash;
+    type RequestLayoutState = (Stash, Inset);
     type PrepaintState = PrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -56,11 +58,16 @@ impl Element for TextElement {
         // Read here: the closure runs in `compute_layout`, outside the div's
         // text style, where `window.text_style()` would be the default instead.
         let text_style = window.text_style();
-        let column = column_width(&text_style, window);
+        let inset = Inset {
+            column: column_width(&text_style, window),
+            margin: margin_width(&text_style, window),
+        };
+        // Wide enough to centre the column between two margins; D12 reserves only the left one.
+        let widest = inset.column + inset.margin * 2.;
 
         let mut style = Style::default();
         style.size.width = relative(1.).into();
-        style.max_size.width = column.into();
+        style.max_size.width = widest.into();
         // Flex column's default flex_shrink of 1 would squeeze an overtall
         // document back down instead of overflowing into the scroll container.
         style.flex_shrink = 0.;
@@ -71,26 +78,27 @@ impl Element for TextElement {
         let layout_id =
             window.request_measured_layout(style, move |known, available, window, cx| {
                 // The sizing pass hands `known` unclamped by max_size; only the
-                // layout pass clamps, so the column is reapplied here.
+                // layout pass clamps, so the widest width is reapplied here.
                 let width = known
                     .width
                     .or(match available.width {
                         AvailableSpace::Definite(width) => Some(width),
                         _ => None,
                     })
-                    .map_or(column, |width| width.min(column));
+                    .map_or(widest, |width| width.min(widest));
 
-                // Wrapped text has no minimum width; reporting the column here
+                // Wrapped text has no minimum width; reporting a width here
                 // would become the flex item's automatic minimum and push it past a narrower pane.
                 let reported = match (known.width, available.width) {
                     (None, AvailableSpace::MinContent) => px(0.),
                     _ => width,
                 };
 
+                let text = inset.text_width(width);
                 let mut stash = measured.borrow_mut();
                 if let Some(layout) = stash
                     .iter()
-                    .find(|layout| layout.wrap_width() == Some(width))
+                    .find(|layout| layout.wrap_width() == Some(text))
                 {
                     return size(reported, layout.height());
                 }
@@ -102,14 +110,14 @@ impl Element for TextElement {
                     &editor.state.selection().range(),
                     marked.as_ref(),
                     &text_style,
-                    Some(width),
+                    Some(text),
                     window,
                 );
                 let height = layout.height();
                 stash.push(layout);
                 size(reported, height)
             });
-        (layout_id, stash)
+        (layout_id, (stash, inset))
     }
 
     fn prepaint(
@@ -117,10 +125,11 @@ impl Element for TextElement {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        stash: &mut Self::RequestLayoutState,
+        (stash, inset): &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let bounds = inset.text_bounds(bounds);
         let layout = take_measured(stash, bounds.size.width).unwrap_or_else(|| {
             // One frame stale height; corrects next frame. gpui's own `Text`
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
@@ -170,11 +179,12 @@ impl Element for TextElement {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
+        (_, inset): &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
+        let bounds = inset.text_bounds(bounds);
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         window.handle_input(
             &focus_handle,
@@ -229,6 +239,46 @@ pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
         .ch_advance(font, font_size)
         .unwrap_or(font_size / 2.);
     ch * theme::BODY_COLUMN_CHARS
+}
+
+/// The widest opening heading marker, `#` × n and a space, over levels 1 to 6.
+pub(super) fn margin_width(style: &TextStyle, window: &mut Window) -> Pixels {
+    (1..=6)
+        .map(|level| {
+            let marker = format!("{} ", "#".repeat(usize::from(level)));
+            let run = theme::markdown_style(style, Styles::heading(level) | Styles::MARKER)
+                .to_run(marker.len());
+            let size = theme::heading_metrics(level).size;
+            window
+                .text_system()
+                .shape_line(marker.into(), size, &[run], None)
+                .width()
+        })
+        .fold(px(0.), Pixels::max)
+        // Whole pixels: the element's origin is snapped, so the text keeps the column's old x.
+        .ceil()
+}
+
+/// Where the text sits in the element (live-preview spec, D12).
+#[derive(Clone, Copy)]
+pub(super) struct Inset {
+    column: Pixels,
+    margin: Pixels,
+}
+
+impl Inset {
+    /// The parent centres the element, capped at `column + 2 × margin`, so the text starts one
+    /// margin in; a pane narrower than the margin leaves it no width.
+    fn text_width(self, element: Pixels) -> Pixels {
+        self.column.min(element - self.margin).max(px(0.))
+    }
+
+    fn text_bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
+        Bounds::new(
+            point(element.origin.x + self.margin, element.origin.y),
+            size(self.text_width(element.size.width), element.size.height),
+        )
+    }
 }
 
 fn translate(mut quad: PaintQuad, origin: Point<Pixels>) -> PaintQuad {

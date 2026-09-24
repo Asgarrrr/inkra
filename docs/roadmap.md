@@ -98,7 +98,9 @@ Deferred table.
 ## Markdown
 
 Live preview shipped on 2026-09-23, in three slices: styled source,
-concealment, then heading sizes. Syntax hides except on the element the
+concealment, then heading sizes. Slice 5, on 2026-09-24, hangs a revealed
+heading's `#` in a margin left of the text, so revealing a heading moves no
+text. Syntax hides except on the element the
 caret or selection touches. The design, and each edge the implementation corrected, are in
 `superpowers/specs/2026-09-23-markdown-live-preview-design.md`, with a
 Deferred table of its own.
@@ -113,8 +115,10 @@ Known limits, accepted:
 
 - `[[a|]]`, a wikilink with an empty alias, keeps its `]]` visible:
   pulldown-cmark 0.13.4 emits it as link text.
-- Revealing an element shifts the text after it on the same row, as in
-  Obsidian.
+- Revealing an inline element shifts the text after it on the same row, as
+  in Obsidian. A heading's `#` hangs instead, except inside a quote or a list
+  item, or indented.
+- A heading's closing ` ##` stays visible, dimmed.
 - Selecting up to the middle of a `**` and typing leaves the other delimiter.
   Backspace after a revealed element deletes its last delimiter character.
 - Images, quotes, task boxes, code fences, tables and frontmatter keep their

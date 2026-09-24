@@ -25,6 +25,8 @@ pub struct Span {
 pub struct Heading {
     pub range: Range<ByteOffset>,
     pub level: u8,
+    /// An ATX heading's opening sequence, its `#` run and the spaces or tabs after it; `None` for setext.
+    pub marker: Option<Range<ByteOffset>>,
 }
 
 /// One pass over pulldown-cmark's events. A byte inside an element that no
@@ -51,15 +53,17 @@ pub fn parse(text: &str) -> Markdown {
                     out.bullet(range.start);
                 }
                 if let Tag::Heading { level, .. } = tag {
+                    let heading = heading_text(text, &range);
                     headings.push(Heading {
-                        range: to_offsets(heading_text(text, &range)),
+                        marker: out.heading(heading.clone()),
+                        range: to_offsets(heading),
                         level: level as u8,
                     });
                 }
                 open.push(Open {
                     styles: styles | tag_styles(&tag),
                     end: range.end,
-                    element: concealable(text, &tag, &range),
+                    element: concealable(&tag, &range),
                 });
             }
             Event::End(_) => {
@@ -168,16 +172,12 @@ fn tag_styles(tag: &Tag<'_>) -> Styles {
 }
 
 /// The range whose touch reveals this element's markers, or `None` when they never hide (spec D2).
-fn concealable(text: &str, tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
-    let element = &text[range.clone()];
-    let concealable = match tag {
-        Tag::Heading { .. } => is_atx(element),
-        Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link { .. } => true,
-        _ => false,
-    };
-    // An ATX heading's range includes its line ending.
-    let len = element.strip_suffix('\n').unwrap_or(element).len();
-    concealable.then(|| range.start..range.start + len)
+fn concealable(tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
+    matches!(
+        tag,
+        Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link { .. }
+    )
+    .then(|| range.clone())
 }
 
 /// The heading's text lines: an ATX heading is one line, and a setext heading's last line is its underline.
@@ -188,14 +188,16 @@ fn heading_text(text: &str, range: &Range<usize>) -> Range<usize> {
     range.start..range.start + len
 }
 
-/// 1 to 6 `#`, then a space, a tab or the line end; pulldown-cmark starts the range after any indent.
-fn is_atx(heading: &str) -> bool {
+/// The length of an ATX opening sequence: 1 to 6 `#`, then spaces and tabs up to the text or the
+/// line end. `None` for setext; pulldown-cmark starts the range after any indent.
+fn opening_sequence(heading: &str) -> Option<usize> {
     let hashes = heading.bytes().take_while(|&byte| byte == b'#').count();
-    (1..=6).contains(&hashes)
-        && matches!(
-            heading.as_bytes().get(hashes),
-            None | Some(b' ' | b'\t' | b'\n')
-        )
+    let blanks = heading.as_bytes()[hashes..]
+        .iter()
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let atx = (1..=6).contains(&hashes) && (blanks > 0 || hashes == heading.len());
+    atx.then_some(hashes + blanks)
 }
 
 /// A `Code` event's range includes its backticks; returns where the content starts and ends.
@@ -265,6 +267,18 @@ impl Out<'_> {
                 });
             }
         }
+    }
+
+    /// Conceals an ATX heading's opening sequence, and only it; `heading` excludes its line ending.
+    fn heading(&mut self, heading: Range<usize>) -> Option<Range<ByteOffset>> {
+        let len = opening_sequence(&self.text[heading.clone()])?;
+        let marker = to_offsets(heading.start..heading.start + len);
+        self.conceals.push(Conceal {
+            element: to_offsets(heading),
+            marker: marker.clone(),
+            replacement: "",
+        });
+        Some(marker)
     }
 
     /// The element is the bullet byte alone, so a caret at the item's content does not reveal it.
