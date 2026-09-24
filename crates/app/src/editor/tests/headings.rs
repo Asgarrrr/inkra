@@ -2,10 +2,9 @@
 
 use gpui::{EntityInputHandler, TestAppContext, point, px};
 
-use super::geometry::{LINE_HEIGHT, MARGIN, TEXT_TOP, VIEWPORT};
+use super::geometry::{H1_LINE_HEIGHT as H1, LINE_HEIGHT, MARGIN, TEXT_TOP, VIEWPORT};
 use super::{at, dispatching};
 
-const H1: f32 = 44.;
 const H2: f32 = 36.;
 const H3: f32 = 30.;
 
@@ -67,21 +66,28 @@ fn a_wrapped_heading_steps_its_rows_by_its_own_height(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+/// D12: `# ` hangs in the margin once revealed, so the text starts at zero in both states.
 #[gpui::test]
-fn a_heading_is_shaped_at_its_own_size(cx: &mut TestAppContext) {
+fn a_heading_starts_at_zero_at_its_own_size_in_both_states(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "# T\nT");
     cx.run_until_parked();
+    let xs = |cx: &mut gpui::VisualTestContext| {
+        window
+            .update(cx, |view, _, _| {
+                let layout = view.last_layout.as_ref().unwrap();
+                [2, 3, 5].map(|offset| f32::from(layout.x_for_offset(at(offset))))
+            })
+            .unwrap()
+    };
+    let concealed = xs(&mut cx);
     // A view opens with the caret at the end; move it onto the heading so `# ` shows.
     cx.simulate_keystrokes("cmd-up");
-    window
-        .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
-            let heading = f32::from(layout.x_for_offset(at(3)));
-            let body = f32::from(layout.x_for_offset(at(5)));
-            assert!((heading - 3. * 0.6 * 34.).abs() < 0.01, "{heading}");
-            assert!((body - 0.6 * 18.).abs() < 0.01, "{body}");
-        })
-        .unwrap();
+    let revealed = xs(&mut cx);
+    for [start, end, body] in [concealed, revealed] {
+        assert!(start.abs() < 0.01, "{start}");
+        assert!((end - 0.6 * 34.).abs() < 0.01, "{end}");
+        assert!((body - 0.6 * 18.).abs() < 0.01, "{body}");
+    }
 }
 
 #[gpui::test]
@@ -198,7 +204,8 @@ fn the_reveal_margin_stays_in_body_lines_on_a_heading(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.cursor(), at(120));
+            // Goal x 0 lands after `# `: the body never maps into the marker (D12).
+            assert_eq!(view.cursor(), at(122));
             let expected = VIEWPORT - MARGIN - (TEXT_TOP + 60. * LINE_HEIGHT + H1);
             assert_eq!(view.scroll_handle.offset().y, px(expected));
         })

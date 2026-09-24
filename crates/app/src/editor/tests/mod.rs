@@ -9,7 +9,9 @@ use crate::keymap::key_bindings;
 mod clipboard;
 mod conceal;
 mod dispatch;
+mod hanging;
 mod headings;
+mod margin;
 mod markdown;
 mod protocol;
 mod scroll;
@@ -55,8 +57,12 @@ pub(super) fn at(offset: usize) -> ByteOffset {
 pub(crate) mod geometry {
     /// The editor's `p_4()`.
     pub(crate) const PADDING: f32 = 16.;
+    /// `###### ` headless: seven glyphs of 0.6 × 18 px, 75.6 rounded up.
+    pub(crate) const HEADING_MARGIN: f32 = 76.;
     pub(crate) const TEXT_TOP: f32 = PADDING;
     pub(crate) const LINE_HEIGHT: f32 = 28.;
+    /// `theme::heading_metrics(1)`'s line height.
+    pub(crate) const H1_LINE_HEIGHT: f32 = 44.;
     pub(crate) const VIEWPORT: f32 = 1080.;
     pub(crate) const MARGIN: f32 = 3. * LINE_HEIGHT;
 

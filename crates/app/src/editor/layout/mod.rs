@@ -10,8 +10,8 @@ pub(crate) use shape::shape_document;
 use std::ops::{Range, RangeInclusive};
 
 use gpui::{
-    App, Bounds, PaintQuad, Pixels, Point, TextAlign, TextStyle, Window, WrappedLine, fill, point,
-    px, size,
+    App, Bounds, PaintQuad, Pixels, Point, ShapedLine, TextAlign, TextStyle, Window, WrappedLine,
+    fill, point, px, size,
 };
 use inkra_markdown::{DisplayLine, DisplayOffset};
 use inkra_text::{Bias, ByteOffset};
@@ -29,6 +29,31 @@ struct LineLayout {
     rows: Vec<Row>,
     top: Pixels,
     row_height: Pixels,
+    /// A heading's opening marker, kept out of the text in both states (live-preview spec, D12).
+    hanging: Option<Hanging>,
+}
+
+struct Hanging {
+    range: Range<ByteOffset>,
+    /// `Some` only while revealed; painted left of the text and right-aligned to it.
+    shaped: Option<ShapedLine>,
+}
+
+impl Hanging {
+    /// Negative, since the text starts at 0; `None` while concealed.
+    fn x_for_offset(&self, offset: ByteOffset) -> Option<Pixels> {
+        let shaped = self.shaped.as_ref()?;
+        Some(shaped.x_for_index(offset.0 - self.range.start.0) - shaped.width())
+    }
+
+    /// A concealed marker shows no glyph, so its whole margin lands on its start.
+    fn offset_for_x(&self, x: Pixels) -> ByteOffset {
+        let index = self
+            .shaped
+            .as_ref()
+            .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()));
+        ByteOffset(self.range.start.0 + index)
+    }
 }
 
 /// A wrap offset belongs to the next row, never the earlier one's `caret_end`
@@ -133,8 +158,19 @@ impl DocumentLayout {
         line.first_row + within.min(line.rows.len() - 1)
     }
 
+    /// Only row 0 holds the marker.
+    fn hanging_on(line: &LineLayout, within: usize) -> Option<&Hanging> {
+        line.hanging.as_ref().filter(|_| within == 0)
+    }
+
     fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
         let offset = offset.clamp(line.range.start, line.range.end);
+        if let Some(x) = Self::hanging_on(line, within)
+            .filter(|hanging| offset < hanging.range.end)
+            .and_then(|hanging| hanging.x_for_offset(offset))
+        {
+            return x;
+        }
         let index = line.display.to_display(offset).0;
         line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
     }
@@ -179,6 +215,13 @@ impl DocumentLayout {
     pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
         let (line, within) = self.locate(row);
         let target = &line.rows[within];
+        // A hanging row splits at x = 0: the margin is the marker's, the text starts at its end (D12).
+        let hanging = Self::hanging_on(line, within);
+        if let Some(hanging) = hanging.filter(|_| x < px(0.)) {
+            return hanging
+                .offset_for_x(x)
+                .clamp(target.start, target.caret_end);
+        }
         let layout = &line.wrapped.unwrapped_layout;
         let index = layout.closest_index_for_x(x + target.start_x);
         // At or past the display end, land after a hidden suffix (live-preview spec, D5).
@@ -187,9 +230,11 @@ impl DocumentLayout {
         } else {
             Bias::Left
         };
-        line.display
+        let offset = line
+            .display
             .to_buffer(DisplayOffset(index), bias)
-            .clamp(target.start, target.caret_end)
+            .clamp(target.start, target.caret_end);
+        hanging.map_or(offset, |hanging| offset.max(hanging.range.end))
     }
 
     pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
@@ -232,7 +277,7 @@ impl DocumentLayout {
                 let left = if row == first {
                     Self::x_on_row(line, within, selection.start)
                 } else {
-                    px(0.)
+                    Self::x_on_row(line, within, line.rows[within].start)
                 };
                 let right = if row == last {
                     Self::x_on_row(line, within, selection.end)
@@ -264,6 +309,23 @@ impl DocumentLayout {
                 cx,
             ) {
                 eprintln!("failed to paint line {index}: {err}");
+            }
+            if let Some(shaped) = line
+                .hanging
+                .as_ref()
+                .and_then(|hanging| hanging.shaped.as_ref())
+            {
+                let marker_origin = line_origin - point(shaped.width(), px(0.));
+                if let Err(err) = shaped.paint(
+                    marker_origin,
+                    line.row_height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                ) {
+                    eprintln!("failed to paint the marker of line {index}: {err}");
+                }
             }
         }
     }

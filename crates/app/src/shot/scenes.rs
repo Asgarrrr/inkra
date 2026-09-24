@@ -98,12 +98,12 @@ pub(crate) fn catalogue() -> &'static [Scene] {
         },
         Scene {
             name: "editor-markdown",
-            shows: "every construct styled, syntax concealed: offset 0 reveals nothing",
+            shows: "every construct styled, syntax concealed except a closing ## (dimmed): offset 0 reveals nothing",
             open: editor_markdown,
         },
         Scene {
             name: "editor-concealed",
-            shows: "concealment: caret at the end, every marker hidden, bullets as dots",
+            shows: "concealment: caret at the end, markers hidden except a closing ## (dimmed), bullets as dots",
             open: editor_concealed,
         },
         Scene {
@@ -123,7 +123,7 @@ pub(crate) fn catalogue() -> &'static [Scene] {
         },
         Scene {
             name: "editor-heading-revealed",
-            shows: "the caret on the wrapped H1: `# ` shows and no row moves vertically",
+            shows: "the caret on the wrapped H1: `# ` shows dimmed in the margin, and no text moves",
             open: editor_heading_revealed,
         },
         Scene {
