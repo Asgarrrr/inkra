@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[lib]
+# Else `cargo bench` forwards criterion flags like `--quick` to the lib and fails.
+bench = false
+
 [dependencies]
 inkra-text = { workspace = true }
 # Pure Rust with runtime wikilinks; tree-sitter-md measured 20x slower (live-preview spec, X1).
@@ -12,6 +16,11 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "parse"
+harness = false
 
 [lints]
 workspace = true

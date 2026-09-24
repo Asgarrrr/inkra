@@ -2717,6 +2717,7 @@ dependencies = [
 name = "inkra-markdown"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "inkra-text",
  "proptest 1.11.0",
  "pulldown-cmark",

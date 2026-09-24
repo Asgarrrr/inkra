@@ -51,7 +51,7 @@ drops a whole file's tests and still compiles green.
 - `criterion` runs without its default `rayon` and `plotters`: no baseline is
   committed and no HTML report is opened. `cargo_bench_support` stays, because
   `cargo bench` refuses a `harness = false` binary without it.
-- `inkra-text` sets `bench = false` on its lib. Otherwise `cargo bench` runs
+- `inkra-text` and `inkra-markdown` set `bench = false` on their lib. Otherwise `cargo bench` runs
   the lib as a bench harness and passes it criterion flags like `--quick`,
   which it rejects.
 

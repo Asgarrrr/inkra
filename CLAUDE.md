@@ -47,8 +47,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   file; a forgotten `mod` line drops tests and still compiles green.
 - mutants: `cargo mutants` after changing `text`, `editor`, `markdown` or `index` logic.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
-- bench: `cargo bench -p inkra-text -- --quick` — before/after comparison for
-  `Buffer` hot paths, not a gate.
+- bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
+  `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
 - `vendor/zed-reference` is gitignored; `./scripts/vendor-gpui.sh` restores it
   at the pinned commit. Nothing builds before it runs.
 

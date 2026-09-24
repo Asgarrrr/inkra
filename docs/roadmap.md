@@ -16,7 +16,8 @@ uncertainty, for reasons given below.
 |---|---|---|---|
 | ~~Horizontal scroll and reveal~~ | **Closed 2026-09-23, by removal.** Soft wrap leaves no right edge to lose the caret past. | — | — |
 | ~~Soft wrap~~ | **Shipped 2026-09-23.** Its trigger was the one above: a pasted URL. | — | — |
-| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. | 2–3 d | — |
+| One shape per keystroke | **Fired 2026-09-24**, see Measurements below: three full shapes per keystroke, two of them redundant. | 0.5–1 d | — |
+| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-24: it costs above ~75 KB now, above ~200 KB once the redundant shapes go. | 2–3 d | One shape per keystroke |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 
 ### Soft wrap and horizontal scroll
@@ -28,6 +29,33 @@ the edges it accepts — End stopping one character short on a mid-word wrap, a
 resize shifting the text under the viewport — are in
 `superpowers/specs/2026-09-23-soft-wrap-design.md`, with a Deferred table of
 its own.
+
+### Measurements, 2026-09-24
+
+Release build, Apple M5 Pro. `parse` comes from
+`cargo bench -p inkra-markdown`. The keystroke figures come from a throwaway
+off-screen scene: one character typed at the top of a synthetic note, each
+phase timed around its call, then the timers removed. The note repeats one
+markdown section: a heading, styled prose, links, a quote, a list and a fence.
+
+| Note | `parse` | `reshape` | `measure`, twice | Keystroke, dispatch to paint |
+|---|---:|---:|---:|---:|
+| 5 KB, 218 lines | 37 µs | 0.4 ms | 0.2 ms each | 1.0 ms |
+| 50 KB, 2,162 lines | 0.35 ms | 3.3 ms | 2.5 ms each | 10.5 ms |
+| 500 KB, 21,602 lines | 3.5 ms | 32 ms | 27 ms each | 115 ms |
+
+Every cost is linear in the note, and shaping dominates parsing about 20 to 1.
+A keystroke shapes the whole note three times:
+
+- `EditorView::reshape`, to reveal the caret.
+- `request_layout`'s measure, in taffy's `MinContent` sizing pass. It shapes
+  at the widest column, then reports a width of 0 and discards the layout.
+- The same measure in the definite pass. It shapes at the width `reshape` just
+  used, from the same buffer and selection.
+
+Removing the two redundant shapes is the next item. It moves the 16 ms frame
+budget from about 75 KB to about 200 KB. Past that, only windowed shaping
+helps.
 
 ### Virtualization
 
@@ -107,7 +135,7 @@ Deferred table of its own.
 
 | Item | Trigger | Estimate |
 |---|---|---|
-| Measure slice: `parse` bench, profile of a fence typed atop a 500 KB note | Before windowed shaping is considered. Release figures so far: 5,000 lines, 20,000 conceals, 4.5 ms per shape. | 0.5 d |
+| ~~Measure slice~~ | **Done 2026-09-24.** Figures under Editor, Measurements. | — |
 | Checkboxes, a bar for quotes, code-block background with hidden fences | The user asks. Each needs a quad per row. | 1–2 d |
 | ~~Clickable links~~ | **Shipped 2026-09-24**, with `inkra-index` and the backlinks panel. ⌘-click and ⌘↵ follow a link. See `superpowers/specs/2026-09-24-links-and-backlinks-design.md`, whose Deferred table holds what links left out. | — |
 | Inline images | Images need an element beside text. | — |
