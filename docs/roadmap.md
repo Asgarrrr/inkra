@@ -109,7 +109,8 @@ Deferred table of its own.
 |---|---|---|
 | Measure slice: `parse` bench, profile of a fence typed atop a 500 KB note | Before windowed shaping is considered. Release figures so far: 5,000 lines, 20,000 conceals, 4.5 ms per shape. | 0.5 d |
 | Checkboxes, a bar for quotes, code-block background with hidden fences | The user asks. Each needs a quad per row. | 1–2 d |
-| Clickable links, inline images | `inkra-index` resolves `[[target]]`. | — |
+| ~~Clickable links~~ | **Shipped 2026-09-24**, with `inkra-index` and the backlinks panel. ⌘-click and ⌘↵ follow a link. See `superpowers/specs/2026-09-24-links-and-backlinks-design.md`, whose Deferred table holds what links left out. | — |
+| Inline images | Images need an element beside text. | — |
 
 Known limits, accepted:
 
@@ -127,9 +128,9 @@ Known limits, accepted:
 
 ## Application
 
-The crates that do not exist yet — `inkra-vault`, `inkra-markdown`,
-`inkra-index` — and where panes, tabs and the command palette land are recorded
-in the "Where future work lands" table of
+`inkra-vault`, `inkra-markdown` and `inkra-index` exist now. Where full-text
+search, panes, tabs and the command palette land is recorded in the "Where
+future work lands" table of
 `superpowers/specs/2026-09-20-modular-architecture-design.md`. Not repeated
 here, so the two cannot drift.
 

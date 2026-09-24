@@ -31,14 +31,14 @@ fn a_later_write_wins_when_it_lands_second() {
         Arc::clone(&writer),
         Arc::clone(&dyn_fs),
         PathBuf::from("/vault/a.md"),
-        "older".to_owned(),
+        "older".into(),
         1,
     );
     let newer = super::write_through(
         writer,
         dyn_fs,
         PathBuf::from("/vault/a.md"),
-        "newer".to_owned(),
+        "newer".into(),
         2,
     );
     assert!(futures::executor::block_on(older).is_some_and(|r| r.is_ok()));
@@ -61,14 +61,14 @@ fn a_later_write_wins_when_it_lands_first() {
         Arc::clone(&writer),
         Arc::clone(&dyn_fs),
         PathBuf::from("/vault/a.md"),
-        "newer".to_owned(),
+        "newer".into(),
         2,
     );
     let older = super::write_through(
         writer,
         dyn_fs,
         PathBuf::from("/vault/a.md"),
-        "older".to_owned(),
+        "older".into(),
         1,
     );
     assert!(futures::executor::block_on(newer).is_some_and(|r| r.is_ok()));

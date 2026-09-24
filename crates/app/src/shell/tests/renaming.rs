@@ -149,6 +149,21 @@ fn renaming_a_note_to_its_own_name_is_accepted(cx: &mut TestAppContext) {
     );
 }
 
+/// `a#b` is a name `check_name` refuses, but confirming it unchanged renames nothing.
+#[gpui::test]
+fn confirming_an_unchanged_refused_name_closes_the_field(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a#b.md", "alpha");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("down enter enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["a#b.md"]);
+    assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+}
+
 #[gpui::test]
 fn renaming_replaces_the_row_rather_than_adding_one(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

@@ -149,7 +149,7 @@ impl<'a, I: Iterator<Item = (Event<'a>, Range<usize>)>> Iterator for Unrepeated<
     }
 }
 
-fn options() -> Options {
+pub(crate) fn options() -> Options {
     Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_WIKILINKS

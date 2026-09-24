@@ -273,6 +273,24 @@ fn read_dir_separates_directories_from_notes_and_skips_dotfiles() {
 }
 
 #[test]
+fn read_dir_accepts_md_in_any_case() {
+    let dir = TempDir::new("md-case");
+    for file in ["a.md", "B.MD", "c.Md", "d.mdx", "e.markdown"] {
+        fs::write(dir.0.join(file), "x").expect("write");
+    }
+
+    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
+
+    let mut paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec![dir.0.join("B.MD"), dir.0.join("a.md"), dir.0.join("c.Md")]
+    );
+    assert!(entries.iter().all(|entry| entry.kind == Kind::Note));
+}
+
+#[test]
 fn read_dir_skips_other_extensions_and_symlinks() {
     let dir = TempDir::new("filters");
     fs::write(dir.0.join("a.md"), "a").expect("write");

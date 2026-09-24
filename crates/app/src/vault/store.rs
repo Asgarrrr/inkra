@@ -11,10 +11,10 @@ use inkra_vault::{EntryId, Fs, Stamp, Vault};
 
 use super::ops::Ops;
 use super::writer::{Writer, write_through};
-use super::{ConflictPreserved, SaveFailed};
+use super::{ConflictPreserved, NoteSaved, SaveFailed};
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
-pub(super) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
+pub(crate) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
 
 pub(super) struct OpenNote {
     buffer: Entity<Buffer>,
@@ -63,6 +63,10 @@ impl NoteStore {
     fn next_seq(&mut self) -> u64 {
         self.next_write += 1;
         self.next_write
+    }
+
+    pub(crate) fn fs(&self) -> Arc<dyn Fs> {
+        Arc::clone(&self.fs)
     }
 
     pub(crate) fn vault(&self) -> Option<&Entity<Vault>> {
@@ -245,7 +249,7 @@ impl NoteStore {
                 } else {
                     self.vault.as_ref()?.read(cx).absolute(*id)?
                 };
-                Some((Arc::clone(&note.writer), path, buffer.text().to_owned()))
+                Some((Arc::clone(&note.writer), path, Arc::from(buffer.text())))
             })
             .collect();
 
@@ -270,7 +274,7 @@ impl NoteStore {
             // though `finalize_transaction` changes no text.
             let (text, version) = note.buffer.update(cx, |buffer, _| {
                 buffer.finalize_transaction();
-                (buffer.text().to_owned(), buffer.version())
+                (Arc::<str>::from(buffer.text()), buffer.version())
             });
             if version == note.saved_version {
                 return None;
@@ -294,7 +298,7 @@ impl NoteStore {
         };
 
         let written = cx
-            .background_spawn(write_through(writer, fs, path, text, seq))
+            .background_spawn(write_through(writer, fs, path, Arc::clone(&text), seq))
             .await;
         // `None` means a newer write already landed; not a failure.
         let Some(written) = written else {
@@ -312,6 +316,14 @@ impl NoteStore {
             // orphans on the next rescan.
             if let Some(vault) = this.vault.clone() {
                 vault.update(cx, |vault, _| vault.reidentify(id, saved.identity));
+            }
+            // The index's only signal for an ordinary write: it neither rescans nor notifies.
+            if id != EntryId::DETACHED {
+                cx.emit(NoteSaved {
+                    id,
+                    text,
+                    stamp: saved.stamp,
+                });
             }
             if let Some(preserved) = saved.preserved.clone() {
                 cx.emit(ConflictPreserved {

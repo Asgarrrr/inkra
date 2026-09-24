@@ -1,9 +1,20 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::EventEmitter;
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Stamp};
 
 use super::NoteStore;
+
+/// A write landed; never emitted for `EntryId::DETACHED`, which no vault indexes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NoteSaved {
+    pub(crate) id: EntryId,
+    pub(crate) text: Arc<str>,
+    pub(crate) stamp: Stamp,
+}
+
+impl EventEmitter<NoteSaved> for NoteStore {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SaveFailed(pub(crate) EntryId);

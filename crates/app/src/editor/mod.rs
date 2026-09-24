@@ -7,12 +7,13 @@ mod scroll;
 mod tests;
 
 use gpui::{
-    App, Bounds, Context, CursorStyle, Entity, FocusHandle, Focusable, InteractiveElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window, div, point, px,
+    App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, point, px,
 };
 use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
-use inkra_markdown::{Markdown, touched};
+use inkra_markdown::{Link, Markdown, links, touched};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::theme;
@@ -30,6 +31,12 @@ pub(super) enum RowEdge {
     Start,
     End,
 }
+
+/// A link the user asked to follow, with ⌘-click or ⌘↵.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinkFollowed(pub(crate) Link);
+
+impl EventEmitter<LinkFollowed> for EditorView {}
 
 pub(crate) struct EditorView {
     buffer: Entity<Buffer>,
@@ -299,6 +306,29 @@ impl EditorView {
         Some(layout.offset_for_position(position - bounds.origin))
     }
 
+    /// The innermost link whose drawn span holds the pointer. Not `link_at` on the click's
+    /// offset: that is the nearest boundary, which past a line's end, beside a link, or inside
+    /// its hidden syntax lands on the link's edge.
+    fn link_under(&self, position: Point<Pixels>, cx: &App) -> Option<Link> {
+        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
+        let local = position - bounds.origin;
+        if local.y < px(0.) || local.y >= layout.height() {
+            return None;
+        }
+        let row = layout.row_for_offset(layout.offset_for_position(local));
+        let spans = |link: &Link| {
+            let (start, end) = (link.range.start, link.range.end);
+            let (first, last) = (layout.row_for_offset(start), layout.row_for_offset(end));
+            (first..=last).contains(&row)
+                && (row > first || local.x >= layout.x_for_offset(start))
+                && (row < last || local.x < layout.x_for_offset(end))
+        };
+        links(self.buffer.read(cx).text())
+            .into_iter()
+            .filter(spans)
+            .min_by_key(|link| link.range.end.0 - link.range.start.0)
+    }
+
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -306,10 +336,18 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus_handle, cx);
-        self.is_selecting = true;
         let Some(offset) = self.position_for_point(event.position) else {
+            self.is_selecting = true;
             return;
         };
+        // Before `is_selecting`: a ⌘-click follows and must not start a drag selection.
+        if event.modifiers.platform
+            && let Some(link) = self.link_under(event.position, cx)
+        {
+            cx.emit(LinkFollowed(link));
+            return;
+        }
+        self.is_selecting = true;
         let extend = event.modifiers.shift;
         self.move_cursor(window, cx, |state, buffer| {
             state.move_to(buffer, offset, extend);
@@ -376,6 +414,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::follow_link))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))

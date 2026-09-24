@@ -28,6 +28,45 @@ fn inserting_a_file_creates_its_parent_directories() {
 }
 
 #[test]
+fn loads_are_counted_per_path_found_or_not() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "a");
+    let _ = block_on(fs.load(Path::new("/vault/a.md")));
+    let _ = block_on(fs.load(Path::new("/vault/a.md")));
+    let _ = block_on(fs.load(Path::new("/vault/gone.md")));
+
+    assert_eq!(fs.loads(Path::new("/vault/a.md")), 2);
+    assert_eq!(fs.loads(Path::new("/vault/gone.md")), 1);
+    assert_eq!(fs.loads(Path::new("/vault/other.md")), 0);
+}
+
+#[test]
+fn read_dir_lists_notes_in_any_case_and_nothing_else() {
+    let fs = MemFs::new();
+    for file in ["a.md", "B.MD", "c.Md", "d.txt", "e.markdown", "md"] {
+        fs.insert_file(format!("/vault/{file}"), "x");
+    }
+
+    let Ok(entries) = block_on(fs.read_dir(Path::new("/vault"))) else {
+        panic!("read_dir must succeed");
+    };
+
+    let mut names: Vec<_> = entries
+        .iter()
+        .map(|entry| {
+            entry
+                .path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    assert_eq!(names, ["B.MD", "a.md", "c.Md"]);
+}
+
+#[test]
 fn read_dir_lists_direct_children_and_separates_kinds() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "a");

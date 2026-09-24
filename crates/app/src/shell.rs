@@ -2,20 +2,27 @@ use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Pixels, Render, Styled, Task, Window, div, px,
 };
+use inkra_index::Resolution;
+use inkra_markdown::Link;
 use inkra_vault::{EntryId, Kind};
 
-use crate::editor::EditorView;
+use crate::backlinks::BacklinksPanel;
+use crate::editor::{EditorView, LinkFollowed};
+use crate::index::LinkSync;
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
 use crate::theme;
 use crate::vault::{NoteClosed, NoteStore, Save, SaveFailed};
 
 const SIDEBAR_WIDTH: Pixels = px(220.);
+const BACKLINKS_WIDTH: Pixels = px(260.);
 
 pub(crate) struct AppShell {
     /// Must not default to a real, untracked `Buffer` — see CLAUDE.md.
     editor: Option<Entity<EditorView>>,
     notes: Entity<NoteStore>,
     sidebar: Entity<Sidebar>,
+    links: Entity<LinkSync>,
+    backlinks: Entity<BacklinksPanel>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
     /// Not `NoteStore::current`: `trash` clears that before `NoteClosed` is delivered.
@@ -32,6 +39,18 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), cx));
+        let links = cx.new(|cx| LinkSync::new(&notes, cx));
+        let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
+        // A note linking to itself lists itself; reopening it would reset its caret and scroll.
+        cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
+            if shell.showing != Some(event.0) {
+                shell.open_note(event.0, cx);
+            }
+        })
+        .detach();
+        if let Some(editor) = &editor {
+            Self::follow_links_of(editor, cx);
+        }
         cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
             shell.open_note(event.0, cx);
         })
@@ -47,7 +66,7 @@ impl AppShell {
                 return;
             }
             shell.editor = None;
-            shell.showing = None;
+            shell.set_showing(None, cx);
             cx.notify();
         })
         .detach();
@@ -55,6 +74,8 @@ impl AppShell {
             editor,
             notes,
             sidebar,
+            links,
+            backlinks,
             focus_handle: cx.focus_handle(),
             showing: None,
             activation: None,
@@ -69,16 +90,47 @@ impl AppShell {
         self.activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                match &shell.editor {
-                    Some(editor) => editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx)),
-                    None => shell.editor = Some(cx.new(|cx| EditorView::new(buffer, cx))),
+                if let Some(editor) = &shell.editor {
+                    editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx));
+                } else {
+                    let editor = cx.new(|cx| EditorView::new(buffer, cx));
+                    Self::follow_links_of(&editor, cx);
+                    shell.editor = Some(editor);
                 }
                 let focus = shell.focus_handle(cx);
                 window.focus(&focus, cx);
-                shell.showing = Some(id);
+                shell.set_showing(Some(id), cx);
                 notes.update(cx, |notes, cx| notes.set_current(id, cx));
             });
         }));
+    }
+
+    /// The one place `showing` changes, so the backlinks panel cannot lag it.
+    fn set_showing(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
+        self.showing = note;
+        self.backlinks
+            .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+    }
+
+    /// Detached, like the shell's other subscriptions: the editor is created once and rebound
+    /// after, so it lives as long as the shell.
+    fn follow_links_of(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+        cx.subscribe(editor, |shell, _, event: &LinkFollowed, cx| {
+            shell.follow(&event.0, cx);
+        })
+        .detach();
+    }
+
+    /// Resolved against the note showing; a detached note resolves only URLs.
+    fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
+        let source = self.showing.unwrap_or(EntryId::DETACHED);
+        match self.links.read(cx).index().resolve_link(source, link) {
+            // Rebinding the note showing would reset its caret and scroll.
+            Resolution::Note(id) if self.showing == Some(id) => {}
+            Resolution::Note(id) => self.open_note(id, cx),
+            Resolution::External(url) => cx.open_url(&url),
+            Resolution::Unresolved | Resolution::SelfLink => {}
+        }
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
@@ -166,6 +218,13 @@ impl Render for AppShell {
             .child(div().flex_1().h_full().child(match &self.editor {
                 Some(editor) => editor.clone().into_any_element(),
                 None => self.render_empty(cx).into_any_element(),
+            }))
+            .children(self.editor.is_some().then(|| {
+                div()
+                    .flex_none()
+                    .w(BACKLINKS_WIDTH)
+                    .h_full()
+                    .child(self.backlinks.clone())
             }))
     }
 }
