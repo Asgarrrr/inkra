@@ -64,6 +64,16 @@ const VAULT: &[(&str, &str)] = &[
     ("projects/archive/old.md", "Superseded.\n"),
 ];
 
+/// No folders, so `index` is the first row.
+const LINKED: &[(&str, &str)] = &[
+    ("index.md", "# Index\n\nThe vault's front page.\n"),
+    ("reading.md", "Books to read, listed from the [[index]].\n"),
+    (
+        "today.md",
+        "Back to [[index]] after lunch.\nThen [[index|the front page]] once more.\n",
+    ),
+];
+
 pub(crate) fn catalogue() -> &'static [Scene] {
     &[
         Scene {
@@ -155,6 +165,11 @@ pub(crate) fn catalogue() -> &'static [Scene] {
             name: "sidebar-dirty",
             shows: "the dirty dot on a note edited but not written",
             open: sidebar_dirty,
+        },
+        Scene {
+            name: "backlinks",
+            shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
+            open: backlinks,
         },
     ]
 }
@@ -297,3 +312,9 @@ fn sidebar_renaming(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 const SIDEBAR_X: gpui::Pixels = px(80.);
+
+fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(LINKED);
+    stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    window
+}

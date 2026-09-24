@@ -36,6 +36,8 @@ struct State {
     untrashable: BTreeSet<PathBuf>,
     /// A move, not a drop, so a trashed note stays recoverable in tests.
     trashed: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
+    /// Loads started per path, found or not.
+    loads: BTreeMap<PathBuf, usize>,
 }
 
 pub struct MemFs {
@@ -129,6 +131,12 @@ impl MemFs {
             .map(|(text, _, _)| text.clone())
     }
 
+    /// How many loads of `path` have started.
+    #[must_use]
+    pub fn loads(&self, path: &Path) -> usize {
+        self.state().loads.get(path).copied().unwrap_or_default()
+    }
+
     #[must_use]
     pub fn read_to_string(&self, path: &Path) -> Option<String> {
         self.state()
@@ -161,7 +169,11 @@ impl Fs for MemFs {
             }
         }
         for (file, (_, mtime, identity)) in &state.files {
-            if file.parent() == Some(path) {
+            // As `RealFs` does: only notes are listed.
+            let note = file
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+            if note && file.parent() == Some(path) {
                 entries.push(DirEntry {
                     path: file.clone(),
                     kind: Kind::Note,
@@ -174,7 +186,11 @@ impl Fs for MemFs {
     }
 
     async fn load(&self, path: &Path) -> Result<Loaded> {
-        let blocked = self.state().blocked_loads.remove(path);
+        let blocked = {
+            let mut state = self.state();
+            *state.loads.entry(path.to_path_buf()).or_default() += 1;
+            state.blocked_loads.remove(path)
+        };
         if let Some(wait) = blocked {
             let _ = wait.await;
         }

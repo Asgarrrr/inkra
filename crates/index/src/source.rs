@@ -1,0 +1,69 @@
+use std::ops::Range;
+
+use inkra_markdown::links;
+use inkra_text::ByteOffset;
+
+use crate::target::Target;
+
+/// Bytes of a link's line kept for the backlinks panel, and how many of them precede the link.
+const CONTEXT: usize = 160;
+const BEFORE: usize = 60;
+
+/// A note's links to other notes, parsed from its text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Source {
+    pub links: Vec<SourceLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceLink {
+    pub target: Target,
+    pub range: Range<ByteOffset>,
+    /// Part of the link's line, for display only: nothing resolves by it.
+    pub context: String,
+    /// The link inside `context`, clamped to it.
+    pub context_link: Range<usize>,
+}
+
+impl Source {
+    #[must_use]
+    pub fn parse(text: &str) -> Self {
+        let links = links(text)
+            .into_iter()
+            .filter_map(|link| {
+                let target = Target::parse(&link);
+                matches!(target, Target::Note { .. }).then(|| {
+                    let (context, context_link) =
+                        context(text, link.range.start.0..link.range.end.0);
+                    SourceLink {
+                        target,
+                        range: link.range,
+                        context,
+                        context_link,
+                    }
+                })
+            })
+            .collect();
+        Self { links }
+    }
+}
+
+fn context(text: &str, link: Range<usize>) -> (String, Range<usize>) {
+    let line_start = text[..link.start].rfind('\n').map_or(0, |at| at + 1);
+    let line_end = text[link.start..]
+        .find('\n')
+        .map_or(text.len(), |at| link.start + at);
+    let mut start = link.start.saturating_sub(BEFORE).max(line_start);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let mut end = (start + CONTEXT).min(line_end);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let within = link.start - start..link.end.min(end).max(link.start) - start;
+    (text[start..end].to_owned(), within)
+}
+
+#[cfg(test)]
+mod tests;

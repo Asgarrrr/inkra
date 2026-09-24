@@ -37,7 +37,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
   and the no-gpui-below-app check. Green is the definition of done.
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown`.
+- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown -p inkra-index`.
   **Never `cargo fmt --all`**: it rewrites the vendored gpui source. A new
   workspace member joins this list and `check.sh`'s in the same change.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
@@ -45,7 +45,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - run: `cargo run -p inkra-app [path]`
 - tests moved: `./scripts/test-names.sh` — diff before and after splitting a
   file; a forgotten `mod` line drops tests and still compiles green.
-- mutants: `cargo mutants` after changing `text`, `editor` or `markdown` logic.
+- mutants: `cargo mutants` after changing `text`, `editor`, `markdown` or `index` logic.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
 - bench: `cargo bench -p inkra-text -- --quick` — before/after comparison for
   `Buffer` hot paths, not a gate.
@@ -57,11 +57,13 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - `inkra-text` → `inkra-editor` → `inkra-app`, one way. `inkra-vault` sits
   beside the chain: `app` depends on it, it depends on no workspace crate.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
-- `text`, `editor`, `vault` and `markdown` have no gpui dependency; `check.sh`
+  `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
+- `text`, `editor`, `vault`, `markdown` and `index` have no gpui dependency; `check.sh`
   enforces it and a new crate below `app` joins that check.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
+  - resolving links, backlinks, search → `index`; it reads no file
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
@@ -105,6 +107,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-23-markdown-live-preview-design.md` —
   markdown styling and concealment
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
+- `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
+  resolution, `LinkSync`, following links, the backlinks panel
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

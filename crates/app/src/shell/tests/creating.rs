@@ -127,6 +127,39 @@ fn a_duplicate_is_caught_through_the_extension(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_note_with_an_uppercase_extension_takes_its_name(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/plan.MD", "plan");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("cmd-n p l a n enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["plan.MD"]);
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("That name is already taken.")
+    );
+}
+
+#[gpui::test]
+fn a_name_a_wikilink_cannot_spell_is_refused(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    visual.simulate_keystrokes("cmd-n a # b enter");
+    visual.run_until_parked();
+
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("A name cannot contain #, |, ^, [ or ].")
+    );
+}
+
+#[gpui::test]
 fn an_invalid_name_is_refused_with_its_own_reason(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);

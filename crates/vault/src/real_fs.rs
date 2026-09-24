@@ -75,7 +75,10 @@ impl Fs for RealFs {
 
             let kind = if metadata.is_dir() {
                 Kind::Dir
-            } else if entry_path.extension().is_some_and(|ext| ext == "md") {
+            } else if entry_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            {
                 Kind::Note
             } else {
                 continue;

@@ -37,7 +37,7 @@ pub(super) async fn write_through(
     writer: Arc<Writer>,
     fs: Arc<dyn Fs>,
     path: PathBuf,
-    text: String,
+    text: Arc<str>,
     seq: u64,
 ) -> Option<inkra_vault::Result<Saved>> {
     let mut state = writer.state.lock().await;

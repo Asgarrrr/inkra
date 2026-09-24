@@ -15,5 +15,9 @@ mod tests;
 
 actions!(vault, [Save]);
 
-pub(crate) use events::{ConflictPreserved, NoteClosed, RenameFailed, SaveFailed, TrashFailed};
+pub(crate) use events::{
+    ConflictPreserved, NoteClosed, NoteSaved, RenameFailed, SaveFailed, TrashFailed,
+};
+#[cfg(test)]
+pub(crate) use store::AUTOSAVE_DELAY;
 pub(crate) use store::NoteStore;

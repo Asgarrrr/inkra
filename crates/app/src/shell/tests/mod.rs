@@ -12,8 +12,10 @@ use crate::test_support;
 use super::{AppShell, EditorView, NoteActivated, NoteStore, Sidebar};
 
 mod activation;
+mod backlinks;
 mod column;
 mod creating;
+mod following;
 mod renaming;
 mod trashing;
 
@@ -31,6 +33,12 @@ pub(super) fn open_vault(
         .update(cx, |shell, _, _| shell.sidebar.clone())
         .expect("the shell is open");
     (window, sidebar, notes)
+}
+
+pub(super) fn showing(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Option<EntryId> {
+    window
+        .update(cx, |shell, _, _| shell.showing)
+        .expect("the shell is open")
 }
 
 /// Panics if no note has been activated yet — that is the contract.

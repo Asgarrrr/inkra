@@ -5,9 +5,9 @@ use gpui::KeyBinding;
 
 use crate::Quit;
 use crate::editor::actions::{
-    Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, Home, Left, LineEnd, LineStart,
-    Newline, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp, Undo,
-    Up,
+    Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, FollowLink, Home, Left, LineEnd,
+    LineStart, Newline, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight,
+    SelectUp, Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
@@ -37,6 +37,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-up", DocStart, editor),
         KeyBinding::new("cmd-down", DocEnd, editor),
         KeyBinding::new("enter", Newline, editor),
+        KeyBinding::new("cmd-enter", FollowLink, editor),
         KeyBinding::new("cmd-c", Copy, editor),
         KeyBinding::new("cmd-x", Cut, editor),
         KeyBinding::new("cmd-v", Paste, editor),

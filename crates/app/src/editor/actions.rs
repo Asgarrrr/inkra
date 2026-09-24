@@ -3,7 +3,7 @@ use std::time::Instant;
 use gpui::{ClipboardItem, Context, Window, actions};
 use inkra_editor::{Copied, LogicalMovement};
 
-use super::{EditorView, RowEdge, Vertical};
+use super::{EditorView, LinkFollowed, RowEdge, Vertical};
 
 actions!(
     editor,
@@ -31,6 +31,7 @@ actions!(
         Newline,
         Undo,
         Redo,
+        FollowLink,
     ]
 );
 
@@ -198,6 +199,14 @@ impl EditorView {
     pub(super) fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         let now = Instant::now();
         self.edit_buffer(window, cx, |state, buffer| state.insert(buffer, now, "\n"));
+    }
+
+    /// Follows at the selection's head; the view never resolves, the shell does.
+    pub(super) fn follow_link(&mut self, _: &FollowLink, _: &mut Window, cx: &mut Context<Self>) {
+        let text = self.buffer.read(cx).text();
+        if let Some(link) = inkra_markdown::link_at(text, self.cursor()) {
+            cx.emit(LinkFollowed(link));
+        }
     }
 
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {

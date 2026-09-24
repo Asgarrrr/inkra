@@ -2,7 +2,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, Focusable, PromptLevel, ScrollStrategy, Subscription,
     Window,
 };
-use inkra_vault::{EntryId, Kind, NameProblem};
+use inkra_vault::{Entry, EntryId, Kind, NameProblem};
 
 use crate::field::{Cancelled, Confirmed, NameField};
 
@@ -34,16 +34,24 @@ impl Rejection {
             Self::Name(NameProblem::Separator) => "A name cannot contain / or :.",
             Self::Name(NameProblem::LeadingDot) => "A name cannot start with a dot.",
             Self::Name(NameProblem::Reserved) => "That name is reserved.",
+            Self::Name(NameProblem::LinkSyntax) => "A name cannot contain #, |, ^, [ or ].",
             Self::Name(NameProblem::TooLong) => "That name is too long.",
             Self::Duplicate => "That name is already taken.",
         }
     }
 }
 
-/// Compared against `note_file_name`'s output, so `plan` and `plan.md` collide as one name.
-fn file_name_of(path: &std::path::Path) -> String {
-    path.file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+/// Compared against `note_file_name`'s output, so `plan`, `plan.md` and `plan.MD` collide as one name.
+fn file_name_of(entry: &Entry) -> String {
+    let name = entry
+        .path
+        .as_path()
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    match entry.kind {
+        Kind::Note => inkra_vault::note_file_name(&name),
+        Kind::Dir => name,
+    }
 }
 
 impl Sidebar {
@@ -191,6 +199,12 @@ impl Sidebar {
             return;
         };
         let (target, parent, kind) = (edit.target, edit.parent, edit.kind);
+        // Before `check_name`: a note made outside the app may hold a name it now refuses.
+        if self.is_current_name(target, name, cx) {
+            self.editing = None;
+            cx.notify();
+            return;
+        }
 
         let rejected = inkra_vault::check_name(name)
             .map(Rejection::Name)
@@ -228,6 +242,15 @@ impl Sidebar {
         cx.notify();
     }
 
+    fn is_current_name(&self, target: Option<EntryId>, name: &str, cx: &App) -> bool {
+        let Some(vault) = self.notes.read(cx).vault() else {
+            return false;
+        };
+        target
+            .and_then(|id| vault.read(cx).entry(id))
+            .is_some_and(|entry| entry.path.display_name() == name.trim())
+    }
+
     /// `target` is excluded so a same-name (or case-only) rename is a no-op, not a duplicate.
     fn taken(
         &self,
@@ -250,16 +273,14 @@ impl Sidebar {
             .map(|e| e.path.clone())
         else {
             return vault.entries().any(|entry| {
-                Some(entry.id) != target
-                    && entry.path.depth() == 0
-                    && file_name_of(entry.path.as_path()) == wanted
+                Some(entry.id) != target && entry.path.depth() == 0 && file_name_of(entry) == wanted
             });
         };
         vault.entries().any(|entry| {
             Some(entry.id) != target
                 && entry.path.depth() == parent_path.depth() + 1
                 && entry.path.starts_with(&parent_path)
-                && file_name_of(entry.path.as_path()) == wanted
+                && file_name_of(entry) == wanted
         })
     }
 }

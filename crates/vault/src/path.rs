@@ -19,6 +19,8 @@ pub enum NameProblem {
     LeadingDot,
     /// `.` or `..`.
     Reserved,
+    /// `#`, `|`, `^`, `[` or `]`, which a wikilink cannot spell.
+    LinkSyntax,
     /// Longer than the filesystem accepts.
     TooLong,
 }
@@ -39,6 +41,9 @@ pub fn check_name(name: &str) -> Option<NameProblem> {
     }
     if name.contains('/') || name.contains(':') {
         return Some(NameProblem::Separator);
+    }
+    if name.contains(['#', '|', '^', '[', ']']) {
+        return Some(NameProblem::LinkSyntax);
     }
     // Measured on the file name, not the typed one: `note_file_name` is what
     // reaches the filesystem, and it is up to four units longer.

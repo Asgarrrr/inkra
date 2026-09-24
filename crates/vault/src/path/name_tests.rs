@@ -29,6 +29,26 @@ fn a_colon_is_refused_because_the_finder_shows_it_as_a_separator() {
 }
 
 #[test]
+fn a_character_a_wikilink_cannot_spell_is_refused() {
+    for name in ["a#b", "a|b", "a^b", "a[b", "a]b", "#", "b]"] {
+        assert_eq!(check_name(name), Some(NameProblem::LinkSyntax), "{name}");
+    }
+}
+
+#[test]
+fn a_separator_is_reported_before_link_syntax() {
+    assert_eq!(check_name("a/#b"), Some(NameProblem::Separator));
+}
+
+#[test]
+fn link_syntax_is_reported_before_length() {
+    assert_eq!(
+        check_name(&format!("#{}", "a".repeat(260))),
+        Some(NameProblem::LinkSyntax)
+    );
+}
+
+#[test]
 fn a_leading_dot_is_refused() {
     assert_eq!(check_name(".plan"), Some(NameProblem::LeadingDot));
 }
@@ -62,7 +82,7 @@ fn an_existing_extension_is_not_doubled() {
     assert_eq!(note_file_name("plan.md"), "plan.md");
 }
 
-/// `read_dir` matches `md` case-sensitively; `plan.MD` must not survive.
+/// `read_dir` accepts `plan.MD`, but the app only ever creates the lowercase form.
 #[test]
 fn an_uppercase_extension_is_normalized_rather_than_kept() {
     assert_eq!(note_file_name("plan.MD"), "plan.md");
