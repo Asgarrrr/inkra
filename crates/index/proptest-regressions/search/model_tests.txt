@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bd9f7b32d26ccc68cfb78ab5f2b0f850afab354aefd02ea3bdc0cb696d4a3eb9 # shrinks to head = "e\u{301}", tail = "", planted = true, sensitive = false, word = false
+cc 3949b0246fbe49255477eaf169967e5aa9da5e478e6dc28bd9a21bfb4b6114ed # shrinks to texts = [Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")], needle = "a", word = false, limit = 0
+cc 699368a72e017778929a4fae6ce9193f2a45ebb7f693926aba7a9e829bed48e1 # shrinks to text = "µÅ", needle = "μ", word = false
+cc 5dbc96a9a55a158a6800b4bede5d13a9beaa57f885b3046352d8c8b6654779e4 # shrinks to text = "ı", needle = "i", word = false
+cc f7f2fbac531cdd2e12e5c907de963c7bdbf120ce2b02f7f91d486d2d37c2a303 # shrinks to texts = [Some("a\u{301}")], needle = "a\u{301}", word = false, limit = 1
+cc 0f2697920c513949fdd7f28dcdf5f0391e57f4e696a573a68c32a760198116d8 # shrinks to text = "ǅe\u{301}", needle = "e\u{301}", word = false
+cc db8e9dfea5495081a5e1455a14a2cce3e7d37613bab98e3bd8598e08d376dc47 # shrinks to (needle, text) = ("é é", "aé é é "), sensitive = false, word = true, limit = 9

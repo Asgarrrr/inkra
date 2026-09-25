@@ -142,7 +142,7 @@ fn bench_set_notes(c: &mut Criterion) {
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, _, kind) in ENTRIES.iter() {
         if *kind == Kind::Note {
-            index.insert(*id, Source::parse(""));
+            index.insert(*id, Source::parse(""), "".into());
         }
     }
     let mut group = c.benchmark_group("set_notes");
@@ -156,6 +156,7 @@ fn bench_set_notes(c: &mut Criterion) {
         );
     });
     bench_prune(&mut group);
+    bench_set_notes_with_text(&mut group);
     group.finish();
 }
 
@@ -172,7 +173,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, source) in notes.iter().zip(&sources) {
-        index.insert(*id, source.clone());
+        index.insert(*id, source.clone(), "".into());
     }
 
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -215,8 +216,44 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
                     total += start.elapsed();
                     partial = Some(index.set_notes(full));
                     for (id, source) in notes[..count].iter().zip(&sources) {
-                        index.insert(*id, source.clone());
+                        index.insert(*id, source.clone(), "".into());
                     }
+                }
+                total
+            });
+        });
+    }
+}
+
+/// Every note holds a text, so `set_notes` moves 50k slots; with a snapshot held, it first
+/// copies the pointers.
+fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
+    for (n, (id, _, kind)) in ENTRIES.iter().enumerate() {
+        if *kind == Kind::Note {
+            let text = format!("note {n}\n");
+            index.insert(*id, Source::parse(&text), text.into());
+        }
+    }
+    let mut other = Some(NoteSet::build(ENTRIES.clone()));
+    for (case, held) in [
+        ("50k, text in every slot", false),
+        ("50k, text in every slot, a snapshot held", true),
+    ] {
+        group.bench_function(case, |b| {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let Some(set) = other.take() else {
+                        unreachable!("the set is put back every iteration");
+                    };
+                    let snapshot = held.then(|| index.corpus());
+                    let start = Instant::now();
+                    let previous = black_box(index.set_notes(set));
+                    total += start.elapsed();
+                    drop(snapshot);
+                    other = Some(previous);
                 }
                 total
             });

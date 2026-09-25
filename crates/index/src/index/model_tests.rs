@@ -10,6 +10,104 @@ use crate::key::{Key, strip_md};
 use crate::test_support::{id, note_set, try_rename, vault};
 use crate::{Resolution, Source, Style, Target};
 
+#[derive(Debug, Clone)]
+enum Op {
+    Create(String),
+    Delete(String),
+    Rename(String, String),
+    Load(String, String),
+    Unload(String),
+    Build,
+    Hold,
+}
+
+fn small() -> impl Strategy<Value = String> {
+    prop::sample::select(&["a.md", "b.md", "f/a.md", "F/b.md", "cafe\u{301}.md", "x.md"][..])
+        .prop_map(str::to_owned)
+}
+
+fn op() -> impl Strategy<Value = Op> {
+    prop_oneof![
+        small().prop_map(Op::Create),
+        small().prop_map(Op::Delete),
+        (small(), small()).prop_map(|(a, b)| Op::Rename(a, b)),
+        (small(), "[a-cé]{0,6}").prop_map(|(a, t)| Op::Load(a, t)),
+        (small(), "[a-cé]{0,6}").prop_map(|(a, t)| Op::Load(a, t)),
+        small().prop_map(Op::Unload),
+        Just(Op::Build),
+        Just(Op::Hold),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn the_corpus_agrees_with_a_model_across_vault_changes(ops in prop::collection::vec(op(), 0..40)) {
+        use std::collections::HashMap;
+        use crate::corpus::{SLOT_BYTES, TEXT_HEADER_BYTES};
+        use crate::test_support::{ROOT, texts};
+        let (fs, mut vault) = vault(&["a.md"]);
+        let mut index = NoteIndex::default();
+        let _ = index.set_notes(note_set(&vault));
+        let mut table: Vec<EntryId> = Model::new(&vault).notes.iter().map(|n| n.0).collect();
+        let mut model: HashMap<EntryId, String> = HashMap::new();
+        let mut held = Vec::new();
+        let find = |vault: &Vault, path: &str| {
+            vault.entries().find(|e| e.path.as_path() == std::path::Path::new(path) && e.kind == Kind::Note).map(|e| e.id)
+        };
+        for op in ops {
+            match op {
+                Op::Create(path) => {
+                    fs.insert_file(format!("{ROOT}/{path}"), "");
+                    let _ = futures::executor::block_on(vault.rescan(&fs));
+                }
+                Op::Delete(path) => {
+                    fs.remove(std::path::Path::new(&format!("{ROOT}/{path}")));
+                    let _ = futures::executor::block_on(vault.rescan(&fs));
+                }
+                Op::Rename(from, to) => {
+                    let _ = try_rename(&fs, &mut vault, &from, &to);
+                }
+                Op::Load(path, text) => {
+                    if let Some(id) = find(&vault, &path) {
+                        index.insert(id, Source::default(), text.as_str().into());
+                        if table.contains(&id) {
+                            model.insert(id, text);
+                        }
+                    }
+                }
+                Op::Unload(path) => {
+                    if let Some(id) = find(&vault, &path) {
+                        index.remove(id);
+                        model.remove(&id);
+                    }
+                }
+                Op::Build => {
+                    let _ = index.set_notes(note_set(&vault));
+                    table = Model::new(&vault).notes.iter().map(|n| n.0).collect();
+                    model.retain(|id, _| table.contains(id));
+                }
+                Op::Hold => {
+                    let snap = index.corpus();
+                    let seen = texts(&snap);
+                    held.push((snap, seen));
+                }
+            }
+            let corpus = index.corpus();
+            let expected: Vec<(EntryId, String)> = table
+                .iter()
+                .filter_map(|id| Some((*id, model.get(id)?.clone())))
+                .collect();
+            prop_assert_eq!(texts(&corpus), expected);
+            prop_assert_eq!(corpus.len(), table.len());
+            let bytes: usize = model.values().map(String::len).sum();
+            prop_assert_eq!(corpus.heap_bytes(), table.len() * SLOT_BYTES + model.len() * TEXT_HEADER_BYTES + bytes);
+            for (snap, seen) in &held {
+                prop_assert_eq!(&texts(snap), seen);
+            }
+        }
+    }
+}
+
 struct Model {
     /// Notes in vault order: id and NFC path without `.md`.
     notes: Vec<(EntryId, String)>,
@@ -194,14 +292,21 @@ proptest! {
         let (fs, mut vault) = vault(&files);
         let mut index = NoteIndex::default();
         let _ = index.set_notes(note_set(&vault));
-        let sources: Vec<(EntryId, Source)> = files
+        let loaded: Vec<(EntryId, Source, String)> = files
             .iter()
             .zip(&texts)
-            .map(|(file, links)| (id(&vault, file), Source::parse(&links.join(" "))))
+            .map(|(file, links)| {
+                let text = links.join(" ");
+                (id(&vault, file), Source::parse(&text), text)
+            })
             .collect();
-        for (source, parsed) in &sources {
-            index.insert(*source, parsed.clone());
+        for (source, parsed, text) in &loaded {
+            index.insert(*source, parsed.clone(), text.as_str().into());
         }
+        let sources: Vec<(EntryId, Source)> = loaded
+            .into_iter()
+            .map(|(source, parsed, _)| (source, parsed))
+            .collect();
         check(&index, &Model::new(&vault), &vault, &sources);
 
         for (from, to) in renames {

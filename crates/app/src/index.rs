@@ -190,15 +190,16 @@ impl IndexSync {
             };
             let loaded = cx
                 .background_spawn(async move {
-                    fs.load(&path)
-                        .await
-                        .map(|loaded| Source::parse(&loaded.text))
+                    fs.load(&path).await.map(|loaded| {
+                        let source = Source::parse(&loaded.text);
+                        (source, Arc::<str>::from(loaded.text))
+                    })
                 })
                 .await;
             let applied = this.update(cx, |this, cx| {
                 this.loading = None;
                 match loaded {
-                    Ok(source) => this.apply(id, seq, source, cx),
+                    Ok((source, text)) => this.apply(id, seq, source, text, cx),
                     // Retried by the next reconcile; a GUI error has nowhere to go yet.
                     Err(_) => this.forget(id, seq, cx),
                 }
@@ -236,10 +237,11 @@ impl IndexSync {
         let (id, text) = (event.id, Arc::clone(&event.text));
         let seq = self.next_seq();
         self.indexed.insert(id, event.stamp.mtime);
-        let parsed = cx.background_spawn(async move { Source::parse(&text) });
+        let parsing = Arc::clone(&text);
+        let parsed = cx.background_spawn(async move { Source::parse(&parsing) });
         cx.spawn(async move |this, cx| {
             let source = parsed.await;
-            let _ = this.update(cx, |this, cx| this.apply(id, seq, source, cx));
+            let _ = this.update(cx, |this, cx| this.apply(id, seq, source, text, cx));
         })
         .detach();
     }
@@ -256,12 +258,19 @@ impl IndexSync {
         cx.notify();
     }
 
-    fn apply(&mut self, id: EntryId, seq: u64, source: Source, cx: &mut Context<Self>) {
+    fn apply(
+        &mut self,
+        id: EntryId,
+        seq: u64,
+        source: Source,
+        text: Arc<str>,
+        cx: &mut Context<Self>,
+    ) {
         if self.applied.get(&id).is_some_and(|&last| seq < last) {
             return;
         }
         self.applied.insert(id, seq);
-        self.index.insert(id, source);
+        self.index.insert(id, source, text);
         self.revision += 1;
         // Not a note of the index yet (its build is still running): the next diff reloads it.
         if !self.index.is_indexed(id) {

@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Instant, SystemTime};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
-use inkra_index::{NameQuery, NoteSet, Source, match_names};
+use inkra_index::{NameQuery, NoteSet, Source, TextQuery, match_names, search};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
@@ -98,6 +98,25 @@ fn create(cx: &mut TestAppContext, notes: &Entity<NoteStore>, name: &str) {
     cx.run_until_parked();
     drop(created);
     cx.run_until_parked();
+}
+
+/// The notes whose saved text contains `text`, with the hit's context.
+fn found(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec<(EntryId, String)> {
+    links.read_with(cx, |links, _| {
+        let corpus = links.index().corpus();
+        let query = TextQuery::new(text, false, false).expect("a query");
+        search(
+            &corpus,
+            0..corpus.len(),
+            &query,
+            &AtomicBool::new(false),
+            100,
+        )
+        .hits
+        .into_iter()
+        .map(|hit| (hit.note, hit.context))
+        .collect()
+    })
 }
 
 #[gpui::test]
@@ -205,7 +224,7 @@ fn a_save_landing_before_its_note_joins_the_index_is_reloaded(cx: &mut TestAppCo
     links.update(cx, |sync, cx| {
         sync.indexed.insert(a, mtime);
         let seq = sync.next_seq();
-        sync.apply(a, seq, Source::parse("[[b]]"), cx);
+        sync.apply(a, seq, Source::parse("[[b]]"), "[[b]]".into(), cx);
     });
     cx.run_until_parked();
 
@@ -332,6 +351,48 @@ fn a_load_finishing_after_a_newer_write_is_dropped(cx: &mut TestAppContext) {
 
     assert_eq!(backlinks(cx, &notes, &links, "c"), ["a"]);
     assert_eq!(backlinks(cx, &notes, &links, "stale"), Vec::<String>::new());
+}
+
+#[gpui::test]
+async fn a_load_and_a_save_put_their_text_in_the_corpus(cx: &mut TestAppContext) {
+    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "loaded words"), ("b.md", "")]);
+    cx.run_until_parked();
+    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    assert_eq!(found(cx, &links, "words"), [(a, "loaded words".to_owned())]);
+
+    edit(cx, &notes, "b", "saved words").await;
+
+    assert_eq!(
+        found(cx, &links, "words"),
+        [
+            (a, "loaded words".to_owned()),
+            (b, "saved words".to_owned())
+        ]
+    );
+}
+
+/// Passes against an `apply` that stores no text: the load test above pins the write.
+#[gpui::test]
+fn a_load_finishing_after_a_trash_leaves_no_text(cx: &mut TestAppContext) {
+    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "old"), ("b.md", "")]);
+    cx.run_until_parked();
+
+    let gate = fs.block_load("/vault/a.md");
+    fs.insert_file("/vault/a.md", "changed");
+    create(cx, &notes, "c");
+    assert!(
+        links.read_with(cx, |links, _| links.is_building()),
+        "the load is parked"
+    );
+    let a = entry_id(&notes, cx, "a");
+    let trashed = notes.update(cx, |notes, cx| notes.trash(a, cx));
+    cx.run_until_parked();
+    drop(trashed);
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(found(cx, &links, "changed"), []);
+    assert_eq!(found(cx, &links, "old"), []);
 }
 
 #[gpui::test]

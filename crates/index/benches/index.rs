@@ -70,7 +70,8 @@ fn built_index(vault: &Vault) -> NoteIndex {
         .map(|entry| entry.id)
         .collect();
     for (at, id) in notes.into_iter().enumerate() {
-        index.insert(id, Source::parse(&note_text(at)));
+        let text = note_text(at);
+        index.insert(id, Source::parse(&text), text.into());
     }
     index
 }

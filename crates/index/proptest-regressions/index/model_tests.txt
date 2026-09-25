@@ -8,3 +8,4 @@ cc 68304ed449bf1acb552318ca9861337919e3eb50b65c3bf8b9aab9079d75fd30 # shrinks to
 cc cf8b2a62ada0a13b5af61e4d57bf6577f2dbea32bf737fb94d30caa775dd99c1 # shrinks to files = {"a.md"}, texts = [["[[x.md]]"], [], [], [], [], [], [], [], [], []], renames = [(Index(0), "x.md.md")]
 cc 341600139bba2a31affd88c379f4504d4833f986f9b312c85a5edad65c2fae53 # shrinks to files = {"a.md"}, texts = [[], [], [], [], [], [], [], [], [], []], renames = [(Index(0), "f/a.md"), (Index(0), "a.md")]
 cc 9d8962ae9a50acb542072b27d81e3a8dc6d76df1eae8e59ad4c167393f1653eb # shrinks to files = {"A.md", "a.md"}, texts = [[], [], [], [], [], [], [], [], [], []], renames = [(Index(0), "F/cafe\u{301}.md"), (Index(0), "F/cafe\u{301}.md")]
+cc 9ba5ed36440c22fb1baab690c5b515a048676f68b39fc61f96bf40cea6dccc4c # shrinks to ops = [Create("f/a.md"), Create("F/b.md"), Create("x.md"), Load("a.md", ""), Build, Load("f/a.md", ""), Load("F/b.md", ""), Hold, Hold, Load("x.md", "")]
