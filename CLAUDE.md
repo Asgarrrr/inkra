@@ -108,7 +108,7 @@ Read the spec before changing its area:
   markdown styling and concealment
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
-  resolution, `LinkSync`, following links, the backlinks panel
+  resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
   search, `NoteIndex`/`IndexSync`, the picker and modal layer (not yet built)
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and

@@ -1,9 +1,9 @@
-use super::{NoteTable, Resolution};
-use crate::test_support::{id, target, vault};
+use super::Resolution;
+use crate::test_support::{id, table, target, vault};
 
 fn resolves(files: &[&str], from: &str, link: &str) -> Option<String> {
     let (_fs, vault) = vault(files);
-    let table = NoteTable::new(vault.entries());
+    let table = table(&vault);
     match table.resolve(id(&vault, from), &target(link)) {
         Resolution::Note(found) => vault
             .entries()
@@ -207,7 +207,7 @@ fn a_relative_collision_breaks_ties_like_a_name() {
 #[test]
 fn a_source_outside_the_table_resolves_names_but_not_relatives() {
     let (_fs, vault) = vault(&["Plan.md"]);
-    let table = NoteTable::new(vault.entries());
+    let table = table(&vault);
     let outside = inkra_vault::EntryId::DETACHED;
     assert_eq!(
         table.resolve(outside, &target("[[Plan]]")),
@@ -226,7 +226,7 @@ fn a_source_outside_the_table_resolves_names_but_not_relatives() {
 #[test]
 fn urls_and_self_links_pass_through() {
     let (_fs, vault) = vault(&["src.md"]);
-    let table = NoteTable::new(vault.entries());
+    let table = table(&vault);
     let source = id(&vault, "src.md");
     assert_eq!(
         table.resolve(source, &target("<https://x.org>")),

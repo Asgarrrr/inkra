@@ -1,13 +1,13 @@
-//! `LinkIndex` against a model that scans every note and every link, sharing only `Key`
+//! `NoteIndex` against a model that scans every note and every link, sharing only `Key`
 //! folding and `Target::parse` with the code under test.
 
 use inkra_vault::{EntryId, Kind, Vault};
 use proptest::prelude::*;
 use unicode_normalization::UnicodeNormalization;
 
-use super::LinkIndex;
+use super::NoteIndex;
 use crate::key::{Key, strip_md};
-use crate::test_support::{id, try_rename, vault};
+use crate::test_support::{id, note_set, try_rename, vault};
 use crate::{Resolution, Source, Style, Target};
 
 struct Model {
@@ -123,7 +123,7 @@ fn link() -> impl Strategy<Value = String> {
         })
 }
 
-fn check(index: &LinkIndex, model: &Model, vault: &Vault, sources: &[(EntryId, Source)]) {
+fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, Source)]) {
     for (source, parsed) in sources {
         for link in &parsed.links {
             assert_eq!(
@@ -192,8 +192,8 @@ proptest! {
     ) {
         let files: Vec<&str> = files.iter().map(String::as_str).collect();
         let (fs, mut vault) = vault(&files);
-        let mut index = LinkIndex::default();
-        index.set_notes(vault.entries());
+        let mut index = NoteIndex::default();
+        let _ = index.set_notes(note_set(&vault));
         let sources: Vec<(EntryId, Source)> = files
             .iter()
             .zip(&texts)
@@ -220,7 +220,7 @@ proptest! {
             if !try_rename(&fs, &mut vault, from, &to) {
                 continue;
             }
-            index.set_notes(vault.entries());
+            let _ = index.set_notes(note_set(&vault));
             check(&index, &Model::new(&vault), &vault, &sources);
         }
     }

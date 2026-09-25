@@ -31,10 +31,16 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # positive and an unreachable one stays near `NONE`. So `>=`, `NONE * 2`
 # (`i32::MIN`, no overflow) and `true` admit only cells that lose every `max`
 # to a real one or that no real score equals; `fits` guarantees a real one.
+#
+# Equivalent. Each seq comes from `next_seq` once and is applied or forgotten at
+# most once, so `seq == last` never happens and `<` equals `<=`.
+# App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
+# which keeps this config, so this entry applies.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
-    "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in LinkIndex::backlinks$",
+    "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in NoteIndex::backlinks$",
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (fits -> bool with true|\\|\\| with && in score)$",
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
+    "^crates/app/src/index\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::(forget|apply)$",
 ]

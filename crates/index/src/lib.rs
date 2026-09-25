@@ -9,7 +9,7 @@ mod target;
 #[cfg(test)]
 mod test_support;
 
-pub use index::{Backlink, LinkIndex};
+pub use index::{Backlink, NoteIndex};
 pub use names::{NameMatch, NameQuery, NamesSnapshot, match_names, merge_names};
 pub use note_set::NoteSet;
 pub use notes::Resolution;

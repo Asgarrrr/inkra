@@ -169,7 +169,7 @@ pruning rule:
 
 ```rust
 impl NoteIndex {
-    pub fn set_notes(&mut self, notes: NoteSet);             // swap membership, prune, reorder corpus
+    pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet;   // swap, prune, reorder corpus; returns the previous set
     pub fn insert(&mut self, id: EntryId, source: Source, text: Arc<str>); // ignored for a non-note
     pub fn remove(&mut self, id: EntryId);
     pub fn names(&self) -> NamesSnapshot;                    // Arc clone
@@ -399,6 +399,38 @@ renamed `IndexSync`, in the same commit as `NoteIndex`.
 During the startup load, vault search runs over the notes already loaded, and
 says so (D9).
 
+**Built in slice 2.** `note_set::prepare` filters, strips and normalizes the
+notes once. `NoteTable` and `NamesSnapshot` share each path as one
+`Arc<str>`. `insert` keeps its signature until slice 5 adds the text.
+`generation` counts builds started and `built` names the one applied. A build
+applies only while it is the latest. `apply_notes` frees the previous set off
+the foreground. Freeing a 50k set took about 9 ms of the 10.53 ms first
+measured; the swap alone takes 1.39 ms (Performance). `is_building()` is true
+before the first build applies or while loads are queued or loading. A
+rebuild that queues no load does not show "building"; a create shows it while
+the new note loads. A load in flight for a note that leaves the vault stops
+counting as pending. A stale build is freed off the foreground too.
+`set_notes` prunes the gone sources in one pass per stem row (Performance).
+`IndexSync` emits `NotesChanged` right after `set_notes` applies. The
+backlinks panel rebuilds on it, not on the vault's notify. Its rows come from
+the last applied build and their names from the vault. A load that notifies
+inside the one-build window can show a renamed source's new name early. A row
+whose source has no vault entry is skipped, so no row is ever nameless.
+`IndexSync::revision()` is bumped on each change to the index; the panel skips
+a notify whose revision and building state it has already seen, so one applied
+build recomputes its rows once, not once for `NotesChanged` and again for the
+notify after it. Vault search reuses this in slice 6. A save
+can now reach `apply` before its note joins the index. `insert` then ignores
+it, so `apply` forgets the note's mtime and the next diff reloads it. Until a
+build applies, following a link resolves against the previous table; the
+window is one build long, and accepted.
+
+Two foreground turns remain per rescan. Measured at 50,000 notes, release, in
+the slice 2 reviews: `reconcile` takes 1.4 to 4.9 ms by method (a criterion
+bench of the path copy alone gave 3.33 ms; timed release tests of the whole
+turn gave the rest); `apply_notes` with nothing changed takes 4.2 to 4.8 ms.
+Both fit the 8 ms step budget. The Evolution table lists the levers.
+
 ### D6. The MRU
 
 `AppShell` keeps the last 20 notes shown, newest first, in memory, updated in
@@ -456,12 +488,14 @@ delegate sets its cancel flag on `Drop`, so a dismissed picker stops scanning
 at once: dropping a `Task` does not interrupt a synchronous scan already
 running.
 
-**A changing vault.** The delegate observes `IndexSync`. On a change it re-runs
-the query after 200 ms, as Zed's file finder does, and keeps the selected
-note if it is still listed. During the startup load, the refresh is throttled
-by `BUILDING_REFRESH`, as the backlinks panel does
-(`crates/app/src/backlinks/mod.rs:81-92`). Confirming a row whose note is gone
-does nothing.
+**A changing vault.** Quick open subscribes to `IndexSync`'s `NotesChanged`,
+since names change only when a build applies. On it, it re-runs the query
+after 200 ms, as Zed's file finder does, and keeps the selected note if it is
+still listed. It needs no `BUILDING_REFRESH`: loads do not change names. Vault
+search observes `IndexSync`, since each load changes the corpus, and throttles
+its refresh during the startup load by `BUILDING_REFRESH`, as the backlinks
+panel does (`crates/app/src/backlinks/mod.rs`). Confirming a row whose note is
+gone does nothing.
 
 ### D8. The modal layer
 
@@ -616,8 +650,35 @@ second (`Throughput::Bytes`) is the figure that travels between machines.
   The base vault meets every budget on one core. Realistic names do not: a
   short, frequent query over long stems or deep paths takes up to 31 ms. So
   "Parallel quick open" ships in slice 3. At 31 ms on one core it needs about
-  two cores to fit 16 ms. `set_notes` needs `NoteIndex`, which slice 2
-  builds; its figure is recorded then.
+  two cores to fit 16 ms.
+
+  Measured, slice 2, on 2026-09-24, same machine and method, base vault:
+
+  | Case | Figure | Budget |
+  |---|---:|---|
+  | `NoteSet::build`, 50k, now with the `NoteTable` | 104.84 ms (was 41.35 ms) | none, background |
+  | `set_notes`, 50k, a built `NoteSet`, one source per note, before the change | 10.53 ms | 8 ms, **missed** |
+  | of which: dropping the previous `NoteSet` (diagnostic, not kept) | 8.86 ms | — |
+  | `set_notes`, 50k, foreground part, the previous set returned | 1.39 ms | 8 ms, met |
+  | `set_notes`, 10k notes, 200k links (`index` bench), before the change | 1.23 ms | none |
+  | `set_notes`, 10k notes, 200k links (`index` bench), the previous set returned | 0.11 ms | none |
+
+  The swap and the pruning take about 1.4 ms. Freeing the previous table and
+  names took the rest. The lever is applied: `set_notes` returns the previous
+  `NoteSet`, and `IndexSync` drops it on the background executor.
+
+  Pruning, a linked vault: note n links `[[note n+1]] [[index]]`, so every
+  source's `[[index]]` link shares one `by_stem` key, the `index` row. The
+  targets do not resolve in this vault, so only the row's length matters.
+  Only `set_notes` is timed. The first pruning removed each gone note on its
+  own, one pass over the `index` row per note. It now removes all gone
+  sources, then passes once over each row they touched.
+
+  | Case | Per-note pruning | One pass per row | Budget 8 ms |
+  |---|---:|---:|---|
+  | nothing gone | 0.85 ms | 0.78 ms | met |
+  | the first 500 notes gone | 11.67 ms | 1.52 ms | met |
+  | the first 5,500 notes gone | 107.83 ms | 3.82 ms | met |
 - **`search`**: 50,000 notes of 1 to 5 KB of generated French and English
   prose, about 150 MB. Cases, each single-thread over the full corpus, in
   bytes per second:
@@ -732,6 +793,10 @@ differential oracle, and is justified by a bench figure before and after.
 | Compressed text (e.g. lz4) | `heap_bytes` over 300 MB on a real vault | `Corpus` stores compressed blocks; `search` decompresses candidates. Best after the prefilter |
 | No resident text | Memory still too high after compression | `Corpus` keeps the prefilter only. **Changes the API**: `CorpusSnapshot::candidates(range, &TextQuery)` lists notes, `app` loads them through `Fs` and calls `find_in`. Needs the prefilter first, as fff shows |
 | Parallel startup loads | The startup figure over 10 s | `IndexSync` keeps N loads in flight and applies them in batches, one foreground update per K notes |
+| Vault entries as `Arc<[Entry]>` | A file watcher lands, or a foreground step over 8 ms | `Vault` shares its entries; `reconcile` becomes an `Arc` clone, and the build returns the mtime list for the diff |
+| Cheaper `Key` in `NoteTable::new` | A file watcher lands, or rebuild latency is noticed | Skip the redundant NFC, derive the stem key as a suffix of the path key; needs a proptest against today's keys. About 106 → 80 ms per build |
+| Coalesced rebuilds | A file watcher lands (the red team noted starvation under a stream of notifies) | A notify during a build sets a dirty flag instead of starting a second build; the build restarts once it applies |
+| `apply_notes` liveness via `NoteIndex` | The `apply_notes` turn over 5 ms after slice 4 | Drop the 50k `HashSet` of live ids; ask the index for membership |
 | Persisted index | Cold start too slow even with parallel loads | **Changes the API**: `index` serializes the prefilter to bytes, `app` writes them through `Fs` and invalidates by mtime |
 
 ## Deferred

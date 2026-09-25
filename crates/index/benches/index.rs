@@ -2,9 +2,9 @@ use std::fmt::Write as _;
 use std::hint::black_box;
 use std::path::Path;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{LinkIndex, Source};
+use inkra_index::{NoteIndex, NoteSet, Source};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
 
@@ -50,9 +50,20 @@ fn note_text(note: usize) -> String {
     text
 }
 
-fn built_index(vault: &Vault) -> LinkIndex {
-    let mut index = LinkIndex::default();
-    index.set_notes(vault.entries());
+/// `vault`'s entries as `NoteSet::build` takes them.
+fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind)> {
+    vault
+        .entries()
+        .map(|entry| {
+            let path = entry.path.as_path().to_string_lossy().into_owned();
+            (entry.id, path, entry.kind)
+        })
+        .collect()
+}
+
+fn built_index(vault: &Vault) -> NoteIndex {
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(NoteSet::build(entries(vault)));
     let notes: Vec<EntryId> = vault
         .entries()
         .filter(|entry| entry.kind == Kind::Note)
@@ -76,9 +87,14 @@ fn note_named(vault: &Vault, path: &str) -> EntryId {
 
 fn bench_set_notes(c: &mut Criterion) {
     let vault = build_vault();
+    let all = entries(&vault);
     let mut index = built_index(&vault);
     c.bench_function("set_notes/10k notes, 200k links", |b| {
-        b.iter(|| index.set_notes(black_box(vault.entries())));
+        b.iter_batched(
+            || NoteSet::build(all.clone()),
+            |notes| index.set_notes(notes),
+            BatchSize::LargeInput,
+        );
     });
 }
 

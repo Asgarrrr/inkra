@@ -52,3 +52,18 @@ fn a_snapshot_splits_into_ranges_over_its_notes() {
     assert!(NoteSet::build(Vec::new()).names().chunks(4).is_empty());
     assert!(NoteSet::build(Vec::new()).names().is_empty());
 }
+
+#[test]
+fn a_candidate_index_is_its_note_order() {
+    let (_fs, vault) = vault(&["b.md", "a/c.md", "a/d.md", "e.md"]);
+    let all = entries(&vault);
+    let recent: Vec<EntryId> = all.iter().map(|(id, _, _)| *id).collect();
+    let set = NoteSet::build(all);
+    let names = set.names();
+    let query = NameQuery::new("", None, &recent);
+    assert_eq!(names.len(), 4);
+    for at in 0..names.len() {
+        let found = match_names(&names, at..at + 1, &query, &AtomicBool::new(false), 1);
+        assert_eq!(set.notes.order(found[0].id), at, "candidate {at}");
+    }
+}

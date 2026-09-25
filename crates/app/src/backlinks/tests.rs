@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -7,13 +7,13 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind};
 
 use super::BacklinksPanel;
-use crate::index::LinkSync;
+use crate::index::IndexSync;
 use crate::test_support::{entry_id, scan_notes};
 use crate::vault::NoteStore;
 
 fn panel(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| LinkSync::new(&notes, cx)));
+    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
     let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, notes.clone(), cx)));
     (notes, panel)
 }
@@ -33,20 +33,22 @@ fn rows(
     cx: &mut TestAppContext,
     panel: &Entity<BacklinksPanel>,
 ) -> Vec<(String, Vec<(String, String)>)> {
-    panel.read_with(cx, |panel, _| {
-        panel
-            .rows
-            .iter()
-            .map(|row| {
-                let occurrences = row
-                    .occurrences
-                    .iter()
-                    .map(|o| (o.context.to_string(), o.context[o.link.clone()].to_owned()))
-                    .collect();
-                (row.name.to_string(), occurrences)
-            })
-            .collect()
-    })
+    panel.read_with(cx, |panel, _| rows_of(panel))
+}
+
+fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
+    panel
+        .rows
+        .iter()
+        .map(|row| {
+            let occurrences = row
+                .occurrences
+                .iter()
+                .map(|o| (o.context.to_string(), o.context[o.link.clone()].to_owned()))
+                .collect();
+            (row.name.to_string(), occurrences)
+        })
+        .collect()
 }
 
 fn one(context: &str, lit: &str) -> (String, String) {
@@ -199,4 +201,131 @@ fn an_index_change_that_leaves_the_rows_alone_redraws_nothing(cx: &mut TestAppCo
 
     assert!(count.get() >= 1, "c now links to b");
     assert_eq!(rows(cx, &panel).len(), 2);
+}
+
+/// What `NoteStore::rescan` does once the trash's walk returns; the new build is not run.
+fn trash_behind_the_store(
+    cx: &mut TestAppContext,
+    notes: &Entity<NoteStore>,
+    fs: &Arc<MemFs>,
+    path: &str,
+) {
+    fs.remove(std::path::Path::new(path));
+    let Some(vault) = notes.read_with(cx, |notes, _| notes.vault().cloned()) else {
+        panic!("a vault");
+    };
+    vault.update(cx, |vault, cx| {
+        let rescan = futures::executor::block_on(vault.rescan(&**fs));
+        assert!(rescan.is_ok(), "a MemFs rescan: {rescan:?}");
+        cx.notify();
+    });
+}
+
+/// The state between the vault's notify and the `NoteSet` build applying: at 50,000
+/// notes the build takes about 105 ms.
+#[gpui::test]
+fn a_trashed_source_never_shows_as_a_nameless_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    assert_eq!(rows(cx, &panel).len(), 1);
+
+    trash_behind_the_store(cx, &notes, &fs, "/vault/a.md");
+
+    let names: Vec<String> = rows(cx, &panel).into_iter().map(|(name, _)| name).collect();
+    assert!(names.iter().all(|name| !name.is_empty()), "{names:?}");
+    cx.run_until_parked();
+    assert_eq!(rows(cx, &panel), []);
+}
+
+/// `x.md` at the root wins `[[x]]` over `d/x.md`: the old rows must never take the new name.
+#[gpui::test]
+fn a_rename_never_shows_a_stale_or_nameless_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[x]]");
+    fs.insert_file("/vault/c.md", "[[x]]");
+    fs.insert_file("/vault/d/x.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "x");
+    let before = vec![
+        ("a".to_owned(), vec![one("[[x]]", "[[x]]")]),
+        ("c".to_owned(), vec![one("[[x]]", "[[x]]")]),
+    ];
+    let after = Vec::new();
+    assert_eq!(rows(cx, &panel), before);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&seen);
+    let _guard = cx.update(|cx| {
+        cx.observe(&panel, move |panel, cx| {
+            sink.borrow_mut().push(rows_of(panel.read(cx)));
+        })
+    });
+
+    let a = entry_id(&notes, cx, "a");
+    let renamed = notes.update(cx, |notes, cx| notes.rename(a, "x", cx));
+    cx.run_until_parked();
+    drop(renamed);
+
+    let seen = seen.borrow();
+    assert!(
+        seen.iter().all(|rows| *rows == before || *rows == after),
+        "{seen:?}"
+    );
+    assert_eq!(rows(cx, &panel), after);
+}
+
+/// A load's notify can land after the vault changed and before the build of it applies.
+#[gpui::test]
+fn a_source_gone_from_the_vault_is_skipped_until_its_build_applies(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "[[b]]");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    assert_eq!(rows(cx, &panel).len(), 2);
+
+    trash_behind_the_store(cx, &notes, &fs, "/vault/a.md");
+    let links = panel.read_with(cx, |panel, _| panel.links.clone());
+    links.update(cx, |_, cx| cx.notify());
+    assert_eq!(
+        rows(cx, &panel).len(),
+        2,
+        "a notify that changed nothing keeps the rows of the last applied build"
+    );
+
+    links.update(cx, IndexSync::simulate_load);
+    assert_eq!(
+        rows(cx, &panel),
+        [("c".to_owned(), vec![one("[[b]]", "[[b]]")])]
+    );
+}
+
+#[gpui::test]
+fn an_applied_build_recomputes_the_rows_once(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    let before = panel.read_with(cx, |panel, _| panel.rebuilds);
+
+    let c = entry_id(&notes, cx, "c");
+    let renamed = notes.update(cx, |notes, cx| notes.rename(c, "d", cx));
+    cx.run_until_parked();
+    drop(renamed);
+
+    let after = panel.read_with(cx, |panel, _| panel.rebuilds);
+    assert_eq!(
+        after - before,
+        1,
+        "NotesChanged and the notify after it are one change"
+    );
 }

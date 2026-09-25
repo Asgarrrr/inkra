@@ -8,7 +8,7 @@ use inkra_vault::{EntryId, Kind};
 
 use crate::backlinks::BacklinksPanel;
 use crate::editor::{EditorView, LinkFollowed};
-use crate::index::LinkSync;
+use crate::index::IndexSync;
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
 use crate::theme;
 use crate::vault::{NoteClosed, NoteStore, Save, SaveFailed};
@@ -21,7 +21,7 @@ pub(crate) struct AppShell {
     editor: Option<Entity<EditorView>>,
     notes: Entity<NoteStore>,
     sidebar: Entity<Sidebar>,
-    links: Entity<LinkSync>,
+    links: Entity<IndexSync>,
     backlinks: Entity<BacklinksPanel>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
@@ -39,7 +39,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), cx));
-        let links = cx.new(|cx| LinkSync::new(&notes, cx));
+        let links = cx.new(|cx| IndexSync::new(&notes, cx));
         let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
         // A note linking to itself lists itself; reopening it would reset its caret and scroll.
         cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
