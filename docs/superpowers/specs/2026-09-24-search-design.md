@@ -437,6 +437,9 @@ Both fit the 8 ms step budget. The Evolution table lists the levers.
 `set_showing`. It passes them to `NameQuery::new`. A note no longer in the
 vault is dropped when the list is read. Persistence is deferred.
 
+A trashed note's id keeps its slot until newer notes push it off the end.
+It is hidden when the list is read, so the list can show fewer than 20.
+
 ### D7. The picker
 
 A new `app/src/picker/` module holds `Picker<D: PickerDelegate>`. The
@@ -497,6 +500,39 @@ its refresh during the startup load by `BUILDING_REFRESH`, as the backlinks
 panel does (`crates/app/src/backlinks/mod.rs`). Confirming a row whose note is
 gone does nothing.
 
+**Built in slice 3.** `PickerDelegate` takes no `Window`: no method needs one.
+It has no `dismissed` hook: the delegate's `Drop` sets its cancel flag. The
+delegate stores its results and the picker owns the selection. The delegate's
+task ends with `Picker::matches_updated(select, cx)`, where `select` is `0` for
+a new query or the kept note's row after a refresh; the picker snaps it to a
+selectable row. The 200 ms refresh wait lives in `update_matches`, as Zed's
+`debounce_next_refresh` (`file_finder.rs:1944-1954`). `NotesChanged` marks the
+next run as a refresh and calls `Picker::refresh`, so a keystroke during the
+wait supersedes it: one pending task, never two. `Edited` fires only when
+`Buffer::version` changed, so a backspace at offset 0 runs no search. `up` and
+`down` stop at the ends, as in the sidebar. Quick open runs one range per core
+(`num_cpus`), not the one range of step 4 (Performance, slice 3). The stale-id
+test calls the delegate directly: the picker drops the previous task, so only a
+direct call reaches the id check. Highlight tests read the `(Range,
+HighlightStyle)` runs a row is built from; the shots check the pixels.
+
+**Confirm while a query is pending.** `enter` typed before the delegate's
+result lands confirms that result, not the stale selection, as Zed's
+`confirm_on_update` (`picker.rs:1034-1047`). `Picker::refresh` marks a result
+pending and `matches_updated` clears it. An `enter` in between is stored and
+confirms the row `matches_updated` selects: the first selectable row for a new
+query, the kept note after a refresh. So `⌘P` `enter` typed at once opens the
+previous note. A refresh reads the kept note when its result lands, not when
+`NotesChanged` arrives, as Zed's `set_search_matches`
+(`file_finder.rs:1117-1126`); a move during the 200 ms wait is kept.
+
+**A refresh must not cancel a running scan of the same query.** Today a
+`NotesChanged` bumps the search id and sets the cancel flag, so it drops the
+scan of a query the user is still waiting on. A refresh, from `NotesChanged`
+or, in slice 6, from observing `IndexSync`, either skips while a scan of the
+same query runs, or marks the query dirty and re-runs it when that scan
+completes. On a vault that keeps changing, cancelling would starve the scan.
+
 ### D8. The modal layer
 
 `AppShell` gains `modal: Option<Modal>`, holding the picker view and the focus
@@ -525,6 +561,32 @@ handle that was focused when the first picker opened. It follows Zed's
 > **Corrected.** The draft had no occlusion and returned focus to the shell,
 > which is the editor whenever one exists. From the tree, `cmd-p` then
 > `escape` would have moved focus to the editor.
+
+**Built in slice 3.** The delegate gives the two labels: `label()` names the
+dialog and `row_label(ix)` gives a row's plain text. The picker dismisses on
+blur only while the window is active, as Zed (`picker.rs:1197`, `:1208`), so
+switching to another app keeps it open. Confirming the note showing does not
+reopen it, as from the backlinks panel: reopening would reset its caret and
+scroll. From the picker or the panel, it still focuses the editor, as another note does.
+gpui has `.aria_active_descendant()`, but it needs the focused node to
+be an ancestor of the row, and the focused query field is not; see
+`docs/gpui-accessibility.md`.
+
+**A load landing under the picker.** An activation that completes while a
+modal is open does not move focus to the editor. The editor's handle becomes
+the modal's stored handle instead, so the picker keeps its query and its keys,
+and dismissing it lands on the note.
+
+**Picking the note showing supersedes a pending load.** From quick open or the
+backlinks panel, confirming the note showing does not reopen it, and it drops
+the pending activation of any other note: the pick is the user's last word.
+
+**Focus after the note showing closes.** `NoteClosed` moves focus to the
+shell's handle when the dropped editor held it; a dropped view's handle
+reaches no action. On dismiss, a stored handle not drawn in the last frame
+falls back to the shell's handle, as the one of a trashed note's editor.
+
+A row confirms on click, not on mouse down, as Zed's.
 
 Bindings, in the `AppShell` context so they fire from any focus, as `cmd-n`
 does:
@@ -563,6 +625,23 @@ The field's trailer shows the two toggles, `Aa` and `W`, each lit when on.
 | `limit_reached` | — | footer "1,000+ results; refine the query" |
 
 Each state is rendered in a shot scene and looked at.
+
+**Built in slice 3.** At most 10 rows show; the list scrolls past them, and its
+height is `rows × UI_LINE_HEIGHT`. The placeholder is an overlay the picker
+draws over the field while the query is empty; `NameField` has no placeholder.
+A long folder is cut by width with gpui's `text_ellipsis_start`
+(`gpui/src/styled.rs:97`). The end stays visible, but the cut can fall inside
+a folder name rather than at a `/`. A row is cut from the match's NFC path,
+which `positions` index, and a highlight covers the whole grapheme the matched
+char lies in: `é` is one grapheme whether precomposed or not, and an emoji ZWJ
+sequence lights whole. The shot scenes `quick-open-results`, `quick-open-empty`,
+`quick-open-no-match` and `quick-open-graphemes` render the quick-open states.
+
+A file name may hold a newline on macOS. A row, and its `aria_label`, draws
+each ASCII control char as a space: one byte for one, so the highlight ranges
+stay valid. The sidebar tree row does the same. A stem wider than the row
+shrinks with an end ellipsis; the folder's flex basis is 0, so it gives up
+its width first.
 
 ### D10. Opening a hit at the match
 
@@ -679,6 +758,26 @@ second (`Throughput::Bytes`) is the figure that travels between machines.
   | nothing gone | 0.85 ms | 0.78 ms | met |
   | the first 500 notes gone | 11.67 ms | 1.52 ms | met |
   | the first 5,500 notes gone | 107.83 ms | 3.82 ms | met |
+
+  Measured, slice 3, on 2026-09-24, same machine (Apple M1 Pro, 10 cores),
+  `cargo bench -p inkra-index --bench names -- parallel`, criterion's middle
+  estimate. The `parallel` group runs the quick-open delegate's split on 10
+  threads with `std::thread::scope`: `chunks(10)`, `match_names` per range,
+  then `merge_names`. gpui's test executor is simulated and single-threaded, so
+  no headless test times the real split.
+
+  | Vault | Query | One core (slice 1) | 10 threads | Budget 16 ms |
+  |---|---|---:|---:|---|
+  | long stems | `ete` | 31.21 ms | 9.02 ms | met |
+  | long stems | `aeiou` | 23.37 ms | 6.28 ms | met |
+  | long stems | `pln` | 9.70 ms | 2.91 ms | met |
+  | deep | `ete` | 24.16 ms | 6.38 ms | met |
+  | deep | `aeiou` | 12.93 ms | 3.72 ms | met |
+  | deep | `pln` | 9.38 ms | 3.06 ms | met |
+
+  Every case meets 16 ms, so "Sparse DP" stays untriggered. The speed-up is
+  3.1 to 3.8 times on 10 threads, not 10. Thread start-up, the serial merge
+  and the two efficiency cores probably account for the rest; not profiled.
 - **`search`**: 50,000 notes of 1 to 5 KB of generated French and English
   prose, about 150 MB. Cases, each single-thread over the full corpus, in
   bytes per second:
@@ -705,6 +804,9 @@ queue is empty is recorded here. The app also logs that time and
 
 **End to end**, a release-only log in each delegate records the time from
 `Edited` to `notify`. It is checked once on the generated vault.
+The quick-open log is built in slice 3 (`quick open: N matches, T from the
+edit`). It has not been read on a 50,000-note vault on disk yet: that needs a
+person typing in a release build, so slice 3 claims no end-to-end figure.
 
 ## Testing
 
@@ -786,7 +888,7 @@ differential oracle, and is justified by a bench figure before and after.
 | Whole-word check in Rust | The whole-word bench over budget | Inside `find_in` (D4) |
 | `memchr::memmem` fast path | A profile shows `regex` in the case-sensitive path | Inside `find_in` |
 | Balanced chunks | Ranges finish far apart in the end-to-end log | `chunks` splits by bytes, not by count |
-| Parallel quick open | Met: `ete` over 50,000 long stems takes 31 ms on one core (slice 1 figures). Ships in slice 3 | `app` passes `num_cpus` to `NamesSnapshot::chunks`, runs one range per core, and calls `merge_names` |
+| Parallel quick open | Shipped in slice 3: `ete` over 50,000 long stems takes 31 ms on one core and 9.02 ms on 10 threads (Performance, slice 3) | `app` passes `num_cpus` to `NamesSnapshot::chunks`, runs one range per core, and calls `merge_names` |
 | Sparse DP | `names` over 16 ms per core after parallel quick open | `fill` visits only the columns where the query char matches. The dense `fill` stays as a test-only differential oracle |
 | Compact candidates | A names memory figure over ~50 MB on a real vault | A candidate stores `exact` only, with a sparse `base` for the accented chars, and merges `chars` and `bonus` into one allocation. About 22 to 37 MB at 50,000 notes today |
 | Streaming results | First results over 100 ms on a real vault | The delegate appends each range's hits in vault order once every earlier range is done, as the Text Finder does; keeps the selection across batches |
@@ -814,4 +916,4 @@ differential oracle, and is justified by a bench figure before and after.
 | Unlinked mentions | The user asks | A `search` for each note's name |
 | `[[` completion | Links spec, Deferred | Reuses `match_names` |
 | Backlinks open at their line | Links spec, Deferred | Reuses `open_note` with a range |
-| Selected-row announcement | A screen-reader user asks | `set_active_descendant`, see `docs/gpui-accessibility.md` |
+| Query and selected-row announcement | A screen-reader user asks | Two conflicting fixes, decided by a manual screen-reader probe; see `docs/gpui-accessibility.md` |

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{Focusable, Pixels, Point, VisualTestAppContext, WindowHandle};
 use image::RgbaImage;
@@ -85,6 +86,18 @@ impl Stage {
 
     pub(crate) fn keys(&mut self, window: WindowHandle<AppShell>, keystrokes: &str) {
         self.cx.simulate_keystrokes(window.into(), keystrokes);
+        self.settle();
+    }
+
+    /// For text no key names, such as an emoji.
+    pub(crate) fn type_text(&mut self, window: WindowHandle<AppShell>, text: &str) {
+        self.cx.simulate_input(window.into(), text);
+        self.settle();
+    }
+
+    /// The pickers debounce on gpui's clock, which only moves when asked.
+    pub(crate) fn wait(&mut self, duration: Duration) {
+        self.cx.advance_clock(duration);
         self.settle();
     }
 

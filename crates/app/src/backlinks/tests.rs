@@ -329,3 +329,38 @@ fn an_applied_build_recomputes_the_rows_once(cx: &mut TestAppContext) {
         "NotesChanged and the notify after it are one change"
     );
 }
+
+#[gpui::test]
+fn a_backlink_row_highlights_its_link_in_the_link_colour(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+
+    let (range, style) = panel.read_with(cx, |panel, _| {
+        super::render::link_highlight(&panel.rows[0].occurrences[0])
+    });
+
+    assert_eq!(range, 4..9);
+    assert_eq!(
+        style.color,
+        Some(gpui::Hsla::from(crate::theme::link_text()))
+    );
+}
+
+#[gpui::test]
+fn a_newline_in_a_source_name_draws_as_a_space(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a\nb.md", "[[c]]");
+    fs.insert_file("/vault/c.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "c");
+
+    assert_eq!(
+        panel.read_with(cx, |panel, _| panel.source_names()),
+        ["a b"]
+    );
+}

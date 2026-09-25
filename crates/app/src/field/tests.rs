@@ -1,13 +1,14 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    Entity, EntityInputHandler, Subscription, TestAppContext, VisualTestContext, point, px,
+    AppContext, Context, Entity, EntityInputHandler, IntoElement, ParentElement, Render, Styled,
+    Subscription, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
-use super::{Cancelled, Confirmed, NameField, shape_document};
+use super::{Cancelled, Confirmed, Edited, NameField, shape_document};
 use crate::keymap::key_bindings;
 
 fn field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
@@ -202,5 +203,164 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
             let x = layout.x_for_offset(mid);
             assert_eq!(layout.offset_for_position(point(x, px(0.))), mid);
         });
+    });
+}
+
+fn watch_edits(
+    view: &Entity<NameField>,
+    cx: &mut TestAppContext,
+) -> (Rc<Cell<usize>>, Subscription) {
+    let edits = Rc::new(Cell::new(0));
+    let guard = cx.update(|cx| {
+        let edits = Rc::clone(&edits);
+        cx.subscribe(view, move |_, _: &Edited, _| edits.set(edits.get() + 1))
+    });
+    (edits, guard)
+}
+
+#[gpui::test]
+fn each_edit_emits_one_edited(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "");
+    let (edits, _guard) = watch_edits(&view, cx);
+
+    visual.simulate_keystrokes("a b backspace");
+
+    assert_eq!(text(&view, cx), "a");
+    assert_eq!(edits.get(), 3);
+}
+
+#[gpui::test]
+fn a_key_that_changes_nothing_emits_no_edited(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "");
+    let (edits, _guard) = watch_edits(&view, cx);
+
+    visual.simulate_keystrokes("backspace delete left right");
+
+    assert_eq!(edits.get(), 0);
+}
+
+#[gpui::test]
+fn delete_removes_the_character_after_the_caret(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "plan");
+    visual.simulate_keystrokes("left delete");
+
+    assert_eq!(text(&view, cx), "lan");
+}
+
+#[gpui::test]
+fn shift_left_extends_the_selection_leftward(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "plan");
+    visual.simulate_keystrokes("right shift-left shift-left X");
+
+    assert_eq!(text(&view, cx), "plX");
+}
+
+#[gpui::test]
+fn shift_right_extends_the_selection_rightward(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "plan");
+    visual.simulate_keystrokes("left shift-right shift-right X");
+
+    assert_eq!(text(&view, cx), "Xan");
+}
+
+fn handle<R>(
+    view: &Entity<NameField>,
+    visual: &mut VisualTestContext,
+    f: impl FnOnce(&mut NameField, &mut Window, &mut Context<NameField>) -> R,
+) -> R {
+    visual.update(|window, cx| view.update(cx, |field, cx| f(field, window, cx)))
+}
+
+#[gpui::test]
+fn text_for_range_counts_in_utf16(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "h😀llo");
+    let mut actual = None;
+
+    let text = handle(&view, &mut visual, |field, window, cx| {
+        field.text_for_range(1..4, &mut actual, window, cx)
+    });
+
+    assert_eq!(
+        text.as_deref(),
+        Some("😀l"),
+        "the emoji is two UTF-16 units"
+    );
+    assert_eq!(actual, Some(1..4));
+}
+
+#[gpui::test]
+fn selected_text_range_is_in_utf16_and_keeps_its_direction(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "héllo");
+    visual.simulate_keystrokes("right shift-left shift-left");
+
+    let selection = handle(&view, &mut visual, |field, window, cx| {
+        field.selected_text_range(false, window, cx)
+    })
+    .map(|selection| (selection.range, selection.reversed));
+
+    assert_eq!(selection, Some((3..5, true)), "é is one UTF-16 unit");
+}
+
+#[gpui::test]
+fn composing_marks_the_text_in_utf16_until_unmarked(cx: &mut TestAppContext) {
+    let (view, mut visual) = field(cx, "é");
+    visual.simulate_keystrokes("right");
+
+    handle(&view, &mut visual, |field, window, cx| {
+        field.replace_and_mark_text_in_range(None, "^", None, window, cx);
+    });
+    let marked = handle(&view, &mut visual, |field, window, cx| {
+        field.marked_text_range(window, cx)
+    });
+    assert_eq!(marked, Some(1..2), "é is one UTF-16 unit");
+
+    handle(&view, &mut visual, |field, window, cx| {
+        field.unmark_text(window, cx);
+    });
+    let marked = handle(&view, &mut visual, |field, window, cx| {
+        field.marked_text_range(window, cx)
+    });
+    assert_eq!(marked, None);
+}
+
+/// Hosts the field away from the window origin, as the picker does.
+struct Inset(Entity<NameField>);
+
+impl Render for Inset {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().pl(px(40.)).pt(px(20.)).child(self.0.clone())
+    }
+}
+
+fn inset_field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
+    let initial = initial.to_owned();
+    let (inset, visual) =
+        cx.add_window_view(move |_, cx| Inset(cx.new(|cx| NameField::new(&initial, cx))));
+    let visual = visual.clone();
+    let view = inset.read_with(&visual, |inset, _| inset.0.clone());
+    visual.run_until_parked();
+    (view, visual)
+}
+
+#[gpui::test]
+fn the_ime_rectangle_hit_tests_back_to_its_range(cx: &mut TestAppContext) {
+    let (view, mut visual) = inset_field(cx, "héllo world");
+
+    handle(&view, &mut visual, |field, window, cx| {
+        let element = field.last_bounds.expect("the field is drawn");
+        assert_eq!(element.origin, point(px(40.), px(20.)));
+
+        let rect = field
+            .bounds_for_range(1..3, element, window, cx)
+            .expect("the field is laid out");
+        assert_eq!(rect.top(), element.top());
+        assert!(rect.size.height > px(0.));
+        assert!(rect.left() > element.left(), "h precedes the range");
+
+        let inside = px(1.);
+        let y = rect.center().y;
+        let start = field.character_index_for_point(point(rect.left() + inside, y), window, cx);
+        let end = field.character_index_for_point(point(rect.right() - inside, y), window, cx);
+        assert_eq!((start, end), (Some(1), Some(3)));
     });
 }

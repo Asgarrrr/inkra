@@ -10,6 +10,8 @@ use crate::editor::actions::{
     SelectUp, Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
+use crate::picker;
+use crate::quick_open::QuickOpen;
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::vault::Save;
 
@@ -47,6 +49,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("up", SelectPrev, Some("Sidebar")),
         KeyBinding::new("down", SelectNext, Some("Sidebar")),
         KeyBinding::new("enter", Rename, Some("Sidebar")),
+        // `enter` and `escape` stay the field's: the deepest context wins, so a `Picker` binding would never fire.
+        KeyBinding::new("up", picker::SelectPrev, Some("Picker")),
+        KeyBinding::new("down", picker::SelectNext, Some("Picker")),
         // NameField repeats the editor's movement/deletion bindings since it
         // can't inherit them; `enter` confirms here, inserts a newline in the editor.
         KeyBinding::new("enter", Confirm, field),
@@ -68,6 +73,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // focused too — making a note is window-wide, like `cmd-s`.
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
+        KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

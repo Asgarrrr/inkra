@@ -7,6 +7,7 @@ use gpui::{Context, Entity, EventEmitter, SharedString, Subscription, Task};
 use inkra_vault::EntryId;
 
 use crate::index::{IndexSync, NotesChanged};
+use crate::one_line::one_line;
 use crate::sidebar::NoteActivated;
 use crate::vault::NoteStore;
 
@@ -117,7 +118,7 @@ impl BacklinksPanel {
         let name = |id: EntryId| {
             vault
                 .and_then(|vault| vault.entry(id))
-                .map(|entry| entry.path.display_name())
+                .map(|entry| one_line(&entry.path.display_name()).into_owned())
         };
         let rows: Vec<Row> = self
             .note

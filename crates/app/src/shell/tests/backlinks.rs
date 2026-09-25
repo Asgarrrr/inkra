@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui::{Focusable, Modifiers, TestAppContext, VisualTestContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use crate::keymap::key_bindings;
 use crate::test_support::entry_id;
 
-use super::{activate, editor, open_vault, showing};
+use super::{activate, editor, open_vault, showing, tree_focused};
 
 #[gpui::test]
 fn clicking_a_backlink_opens_its_source(cx: &mut TestAppContext) {
@@ -92,4 +92,57 @@ fn clicking_the_note_showing_in_its_own_backlinks_keeps_its_caret(cx: &mut TestA
 
     let caret = editor(&window, cx).read_with(cx, |editor, _| editor.cursor());
     assert_eq!(caret.0, 2);
+}
+
+/// The click is the user's last word: the slower activation before it must not land.
+#[gpui::test]
+fn clicking_the_note_showing_during_a_slow_load_keeps_it(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "see [[a]] here");
+    fs.insert_file("/vault/b.md", "beta");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    cx.run_until_parked();
+    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    activate(&sidebar, cx, a);
+    cx.run_until_parked();
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+
+    let gate = fs.block_load("/vault/b.md");
+    activate(&sidebar, &mut visual, b);
+    visual.run_until_parked();
+    let row = visual.debug_bounds("backlink-0").expect("a lists itself");
+    visual.simulate_click(row.center(), Modifiers::none());
+    gate.release();
+    visual.run_until_parked();
+
+    assert_eq!(showing(&window, cx), Some(a));
+}
+
+/// A click on the panel moves focus to the shell's root; opening another note moves it on to the
+/// editor, so the note showing must too.
+#[gpui::test]
+fn from_the_tree_clicking_the_note_showing_in_its_own_backlinks_focuses_the_editor(
+    cx: &mut TestAppContext,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "see [[a]] here");
+    let (window, sidebar, notes) = open_vault(cx, fs as Arc<dyn Fs>);
+    cx.run_until_parked();
+    let a = entry_id(&notes, cx, "a");
+    activate(&sidebar, cx, a);
+    cx.run_until_parked();
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    let row = visual.debug_bounds("backlink-0").expect("a lists itself");
+    visual.simulate_click(row.center(), Modifiers::none());
+    visual.run_until_parked();
+
+    assert_eq!(showing(&window, cx), Some(a));
+    let editor_focused = window
+        .update(&mut visual, |shell, window, cx| {
+            shell.focus_handle(cx).is_focused(window)
+        })
+        .expect("the shell is open");
+    assert!(editor_focused);
 }
