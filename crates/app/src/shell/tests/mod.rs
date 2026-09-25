@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
@@ -16,6 +16,8 @@ mod backlinks;
 mod column;
 mod creating;
 mod following;
+mod modal;
+mod quick_open;
 mod renaming;
 mod trashing;
 
@@ -78,14 +80,14 @@ pub(super) fn activate(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, id: E
 pub(super) fn tree_focused(
     cx: &mut TestAppContext,
     window: WindowHandle<AppShell>,
-    sidebar: &Entity<Sidebar>,
+    _sidebar: &Entity<Sidebar>,
 ) -> VisualTestContext {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window
-        .update(cx, |_, window, cx| {
-            let handle = sidebar.read(cx).focus_handle(cx);
+        .update(cx, |shell, window, cx| {
+            let handle = shell.tree_focus_handle(cx);
             window.focus(&handle, cx);
         })
         .expect("the shell is open");

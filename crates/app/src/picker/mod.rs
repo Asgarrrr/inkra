@@ -1,0 +1,183 @@
+//! A query field over a list of rows. A `PickerDelegate` owns the matches and draws each row.
+
+use gpui::{
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ScrollStrategy,
+    SharedString, Subscription, Task, UniformListScrollHandle, Window, actions, prelude::*,
+};
+
+use crate::field::{Cancelled, Confirmed, Edited, NameField};
+
+#[cfg(test)]
+pub(crate) mod letters;
+mod render;
+#[cfg(test)]
+mod tests;
+
+actions!(picker, [SelectPrev, SelectNext]);
+
+/// The picker is done: a row was confirmed, it was cancelled, or it lost focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Dismissed;
+
+impl<D: PickerDelegate> EventEmitter<Dismissed> for Picker<D> {}
+
+pub(crate) trait PickerDelegate: Sized + 'static {
+    /// Joins `Picker` in the key context, so a delegate's own bindings exist only in it.
+    fn key_context(&self) -> &'static str;
+    /// The dialog's accessible name.
+    fn label(&self) -> &'static str;
+    fn placeholder(&self) -> &'static str;
+    /// Shown in place of the rows when there are none; `None` before the first result.
+    fn empty_text(&self) -> Option<&'static str>;
+    fn match_count(&self) -> usize;
+    fn is_selectable(&self, ix: usize) -> bool;
+    /// The picker holds the task, so the next query drops it.
+    fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()>;
+    fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>);
+    /// One line of `UI_LINE_HEIGHT`: `uniform_list` measures every row from row 0.
+    fn render_row(&self, ix: usize, selected: bool, cx: &mut Context<Picker<Self>>) -> AnyElement;
+    /// The row's plain text, its accessible label.
+    fn row_label(&self, ix: usize) -> SharedString;
+}
+
+pub(crate) struct Picker<D: PickerDelegate> {
+    pub(crate) delegate: D,
+    field: Entity<NameField>,
+    query: String,
+    selected: Option<usize>,
+    scroll: UniformListScrollHandle,
+    /// Held, never detached: replacing it drops the previous query's task.
+    pending: Option<Task<()>>,
+    /// Until the delegate calls `matches_updated`, the rows answer an older query.
+    awaiting_matches: bool,
+    /// `enter` landed while `awaiting_matches`: confirm once the rows answer the current query.
+    confirm_on_update: bool,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl<D: PickerDelegate> Picker<D> {
+    pub(crate) fn new(delegate: D, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let field = cx.new(|cx| NameField::new("", cx));
+        let field_focus = field.read(cx).focus_handle(cx);
+        let subscriptions = vec![
+            cx.subscribe(&field, |picker, field, _: &Edited, cx| {
+                picker.query = field.read(cx).text(cx);
+                picker.refresh(cx);
+            }),
+            cx.subscribe(&field, |picker, _, _: &Confirmed, cx| {
+                picker.confirm(cx);
+            }),
+            cx.subscribe(&field, |_, _, _: &Cancelled, cx| cx.emit(Dismissed)),
+            // Switching to another app blurs the field; that is not a dismiss.
+            cx.on_blur(&field_focus, window, |_, window, cx| {
+                if window.is_window_active() {
+                    cx.emit(Dismissed);
+                }
+            }),
+        ];
+        let mut picker = Self {
+            delegate,
+            field,
+            query: String::new(),
+            selected: None,
+            scroll: UniformListScrollHandle::new(),
+            pending: None,
+            awaiting_matches: false,
+            confirm_on_update: false,
+            _subscriptions: subscriptions,
+        };
+        picker.refresh(cx);
+        picker
+    }
+
+    #[cfg(test)]
+    pub(crate) fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub(crate) fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// Re-runs the query as it stands.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        let query = self.query.clone();
+        self.awaiting_matches = true;
+        self.pending = Some(self.delegate.update_matches(&query, cx));
+    }
+
+    /// For a delegate whose matches changed: selects the first selectable row from `ix` on,
+    /// else the nearest one before it.
+    pub(crate) fn matches_updated(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let count = self.delegate.match_count();
+        let from = ix.min(count);
+        self.selected = (from..count)
+            .chain((0..from).rev())
+            .find(|&ix| self.delegate.is_selectable(ix));
+        self.awaiting_matches = false;
+        self.reveal_selected();
+        cx.notify();
+        if std::mem::take(&mut self.confirm_on_update) {
+            self.confirm_selected(cx);
+        }
+    }
+
+    fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
+        let from = self.selected.map_or(0, |ix| ix + 1);
+        let next = (from..self.delegate.match_count()).find(|&ix| self.delegate.is_selectable(ix));
+        if let Some(ix) = next {
+            self.select(ix, cx);
+        }
+    }
+
+    fn select_prev(&mut self, _: &SelectPrev, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(to) = self.selected else {
+            return;
+        };
+        if let Some(ix) = (0..to).rev().find(|&ix| self.delegate.is_selectable(ix)) {
+            self.select(ix, cx);
+        }
+    }
+
+    fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.selected = Some(ix);
+        self.reveal_selected();
+        cx.notify();
+    }
+
+    fn reveal_selected(&self) {
+        if let Some(ix) = self.selected {
+            self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        }
+    }
+
+    /// As Zed's `confirm_on_update`: `enter` typed right after a key confirms that key's result.
+    fn confirm(&mut self, cx: &mut Context<Self>) {
+        if self.awaiting_matches {
+            self.confirm_on_update = true;
+        } else {
+            self.confirm_selected(cx);
+        }
+    }
+
+    fn confirm_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.selected else {
+            return;
+        };
+        self.delegate.confirm(ix, cx);
+        cx.emit(Dismissed);
+    }
+
+    fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.delegate.is_selectable(ix) {
+            self.selected = Some(ix);
+            self.confirm_selected(cx);
+        }
+    }
+}
+
+impl<D: PickerDelegate> Focusable for Picker<D> {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.field.read(cx).focus_handle(cx)
+    }
+}

@@ -1,5 +1,7 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
+use std::time::Duration;
+
 use gpui::{WindowHandle, point, px};
 
 use super::stage::Stage;
@@ -64,6 +66,33 @@ const VAULT: &[(&str, &str)] = &[
     ("projects/archive/old.md", "Superseded.\n"),
 ];
 
+const NOTES: &[(&str, &str)] = &[
+    ("index.md", "# Index\n"),
+    ("reading list.md", "Books.\n"),
+    ("projects/inkra/plan.md", "Plan.\n"),
+    ("projects/inkra/release plan.md", "Release.\n"),
+    (
+        "projects/inkra/a plan whose name alone is wider than the whole row of the picker, and then some more words after that.md",
+        "Long.\n",
+    ),
+    (
+        "archive/2025/old projects/a very long folder name that runs past the row/and keeps going for a while longer still/projects/plan b.md",
+        "Old.\n",
+    ),
+];
+
+const GRAPHEMES: &[(&str, &str)] = &[
+    ("cafe\u{301} notes.md", ""),
+    ("\u{1f469}\u{200d}\u{1f4bb} dev log.md", ""),
+    (
+        "sprint e\u{301}te\u{301}/\u{1f469}\u{200d}\u{1f4bb} review.md",
+        "",
+    ),
+];
+
+/// Longer than any picker wait, so the last query has answered.
+const PICKER_SETTLE: Duration = Duration::from_millis(300);
+
 /// No folders, so `index` is the first row.
 const LINKED: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
@@ -74,104 +103,127 @@ const LINKED: &[(&str, &str)] = &[
     ),
 ];
 
+/// Not a function body: it grows with every scene, past clippy's `too_many_lines`.
+const CATALOGUE: &[Scene] = &[
+    Scene {
+        name: "empty-no-vault",
+        shows: "launch with no argument: the empty state, and no editor at all",
+        open: empty_no_vault,
+    },
+    Scene {
+        name: "editor-text",
+        shows: "per-line layout, a blank line, real font metrics",
+        open: editor_text,
+    },
+    Scene {
+        name: "editor-caret",
+        shows: "the caret, mid-document, in a focused window",
+        open: editor_caret,
+    },
+    Scene {
+        name: "editor-selection",
+        shows: "a selection over four lines: both ends, and a blank line's stub",
+        open: editor_selection,
+    },
+    Scene {
+        name: "editor-wrapped",
+        shows: "soft wrap: a paragraph and a URL in the centred column, caret on a wrapped row",
+        open: editor_wrapped,
+    },
+    Scene {
+        name: "editor-wrapped-selection",
+        shows: "a selection across a wrap and a newline: one quad per row, a stub only at the newline",
+        open: editor_wrapped_selection,
+    },
+    Scene {
+        name: "editor-markdown",
+        shows: "every construct styled, syntax concealed except a closing ## (dimmed): offset 0 reveals nothing",
+        open: editor_markdown,
+    },
+    Scene {
+        name: "editor-concealed",
+        shows: "concealment: caret at the end, markers hidden except a closing ## (dimmed), bullets as dots",
+        open: editor_concealed,
+    },
+    Scene {
+        name: "editor-revealed-bold",
+        shows: "the caret inside **strong** reveals that element only",
+        open: editor_revealed_bold,
+    },
+    Scene {
+        name: "editor-revealed-link",
+        shows: "the caret inside the wikilink reveals its [[target| and ]] only",
+        open: editor_revealed_link,
+    },
+    Scene {
+        name: "editor-headings",
+        shows: "heading sizes H1 to H6 and setext, caret on body text so every `#` is hidden",
+        open: editor_headings,
+    },
+    Scene {
+        name: "editor-heading-revealed",
+        shows: "the caret on the wrapped H1: `# ` shows dimmed in the margin, and no text moves",
+        open: editor_heading_revealed,
+    },
+    Scene {
+        name: "sidebar-vault",
+        shows: "the tree: directories first, indents, a nested note",
+        open: sidebar_vault,
+    },
+    Scene {
+        name: "sidebar-selected",
+        shows: "the selected row, which is what a tree command acts on",
+        open: sidebar_selected,
+    },
+    Scene {
+        name: "sidebar-naming",
+        shows: "a name being typed into the tree: the field's row, caret and indent",
+        open: sidebar_naming,
+    },
+    Scene {
+        name: "sidebar-rejected",
+        shows: "a refused name, with the reason under the field",
+        open: sidebar_rejected,
+    },
+    Scene {
+        name: "sidebar-renaming",
+        shows: "a rename in progress: the field replaces the row, holding the old name",
+        open: sidebar_renaming,
+    },
+    Scene {
+        name: "sidebar-dirty",
+        shows: "the dirty dot on a note edited but not written",
+        open: sidebar_dirty,
+    },
+    Scene {
+        name: "backlinks",
+        shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
+        open: backlinks,
+    },
+    Scene {
+        name: "quick-open-results",
+        shows: "cmd-p over the editor: stems with matched chars lit, folders dimmed and cut from the start",
+        open: quick_open_results,
+    },
+    Scene {
+        name: "quick-open-empty",
+        shows: "cmd-p before any note was shown: \"No recent notes\" under the placeholder",
+        open: quick_open_empty,
+    },
+    Scene {
+        name: "quick-open-no-match",
+        shows: "a query nothing matches: \"No matching notes\"",
+        open: quick_open_no_match,
+    },
+    Scene {
+        name: "quick-open-graphemes",
+        shows: "a highlight on a combining mark and inside an emoji ZWJ sequence: no panic, no garbled glyph",
+        open: quick_open_graphemes,
+    },
+];
+
 pub(crate) fn catalogue() -> &'static [Scene] {
-    &[
-        Scene {
-            name: "empty-no-vault",
-            shows: "launch with no argument: the empty state, and no editor at all",
-            open: empty_no_vault,
-        },
-        Scene {
-            name: "editor-text",
-            shows: "per-line layout, a blank line, real font metrics",
-            open: editor_text,
-        },
-        Scene {
-            name: "editor-caret",
-            shows: "the caret, mid-document, in a focused window",
-            open: editor_caret,
-        },
-        Scene {
-            name: "editor-selection",
-            shows: "a selection over four lines: both ends, and a blank line's stub",
-            open: editor_selection,
-        },
-        Scene {
-            name: "editor-wrapped",
-            shows: "soft wrap: a paragraph and a URL in the centred column, caret on a wrapped row",
-            open: editor_wrapped,
-        },
-        Scene {
-            name: "editor-wrapped-selection",
-            shows: "a selection across a wrap and a newline: one quad per row, a stub only at the newline",
-            open: editor_wrapped_selection,
-        },
-        Scene {
-            name: "editor-markdown",
-            shows: "every construct styled, syntax concealed except a closing ## (dimmed): offset 0 reveals nothing",
-            open: editor_markdown,
-        },
-        Scene {
-            name: "editor-concealed",
-            shows: "concealment: caret at the end, markers hidden except a closing ## (dimmed), bullets as dots",
-            open: editor_concealed,
-        },
-        Scene {
-            name: "editor-revealed-bold",
-            shows: "the caret inside **strong** reveals that element only",
-            open: editor_revealed_bold,
-        },
-        Scene {
-            name: "editor-revealed-link",
-            shows: "the caret inside the wikilink reveals its [[target| and ]] only",
-            open: editor_revealed_link,
-        },
-        Scene {
-            name: "editor-headings",
-            shows: "heading sizes H1 to H6 and setext, caret on body text so every `#` is hidden",
-            open: editor_headings,
-        },
-        Scene {
-            name: "editor-heading-revealed",
-            shows: "the caret on the wrapped H1: `# ` shows dimmed in the margin, and no text moves",
-            open: editor_heading_revealed,
-        },
-        Scene {
-            name: "sidebar-vault",
-            shows: "the tree: directories first, indents, a nested note",
-            open: sidebar_vault,
-        },
-        Scene {
-            name: "sidebar-selected",
-            shows: "the selected row, which is what a tree command acts on",
-            open: sidebar_selected,
-        },
-        Scene {
-            name: "sidebar-naming",
-            shows: "a name being typed into the tree: the field's row, caret and indent",
-            open: sidebar_naming,
-        },
-        Scene {
-            name: "sidebar-rejected",
-            shows: "a refused name, with the reason under the field",
-            open: sidebar_rejected,
-        },
-        Scene {
-            name: "sidebar-renaming",
-            shows: "a rename in progress: the field replaces the row, holding the old name",
-            open: sidebar_renaming,
-        },
-        Scene {
-            name: "sidebar-dirty",
-            shows: "the dirty dot on a note edited but not written",
-            open: sidebar_dirty,
-        },
-        Scene {
-            name: "backlinks",
-            shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
-            open: backlinks,
-        },
-    ]
+    CATALOGUE
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
@@ -316,5 +368,43 @@ const SIDEBAR_X: gpui::Pixels = px(80.);
 fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(LINKED);
     stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    window
+}
+
+fn quick_open_results(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(NOTES);
+    // Folders come first, so `index` is row 2.
+    stage.click(window, point(SIDEBAR_X, row_center(2.)));
+    stage.focus(window);
+    stage.keys(window, "cmd-p");
+    stage.keys(window, "p l a n");
+    stage.wait(PICKER_SETTLE);
+    window
+}
+
+fn quick_open_empty(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(NOTES);
+    stage.focus(window);
+    stage.keys(window, "cmd-p");
+    stage.wait(PICKER_SETTLE);
+    window
+}
+
+fn quick_open_no_match(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(NOTES);
+    stage.focus(window);
+    stage.keys(window, "cmd-p");
+    stage.keys(window, "z q x");
+    stage.wait(PICKER_SETTLE);
+    window
+}
+
+/// `e` lights `é`, which the index holds as NFC; the emoji ZWJ sequence lights whole.
+fn quick_open_graphemes(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(GRAPHEMES);
+    stage.focus(window);
+    stage.keys(window, "cmd-p");
+    stage.type_text(window, "e \u{1f469}");
+    stage.wait(PICKER_SETTLE);
     window
 }

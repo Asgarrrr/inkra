@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    Context, Entity, Modifiers, Subscription, TestAppContext, VisualTestContext, point, prelude::*,
-    px,
+    Context, Entity, Focusable, Modifiers, Subscription, TestAppContext, VisualTestContext, point,
+    prelude::*, px,
 };
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
@@ -33,6 +33,13 @@ impl Sidebar {
     #[cfg(test)]
     pub(crate) fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn field_is_focused(&self, window: &gpui::Window, cx: &gpui::App) -> bool {
+        self.editing
+            .as_ref()
+            .is_some_and(|edit| edit.field.focus_handle(cx).is_focused(window))
     }
 
     /// Asserts the sentence, not the variant: that is what catches a rejection reported with the wrong reason.
@@ -353,5 +360,26 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
         row_labels(&sidebar, cx),
         ["a", "b"],
         "the write caught the file up, so the note is no longer modified"
+    );
+}
+
+/// A file name may hold a newline on macOS; `uniform_list` sizes every row from row 0.
+#[gpui::test]
+fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a\nb.md", "text");
+    fs.insert_file("/vault/c.md", "text");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    let (seen, _guard) = watch(&sidebar, cx);
+
+    let c = row(&sidebar, cx, "c");
+    visual.simulate_click(point(px(20.), row_center(1.)), Modifiers::none());
+    visual.run_until_parked();
+
+    assert_eq!(
+        *seen.borrow(),
+        [NoteActivated(c.id)],
+        "a two-line row 0 covers row 1"
     );
 }

@@ -118,3 +118,31 @@ Two traps when re-running the probe:
 - Without `.role(…)` the editor appears as a bare `AXGroup`. The text
   attributes that show up on a naive tree walk belong to the title bar's
   10×16 px `AXStaticText`, not to the document.
+
+## The pickers (quick open, 2026-09-24)
+
+The picker is a `Role::Dialog` labelled "Quick open", its list a `Role::List`,
+and each row a `Role::ListItem` labelled with its path. Focus stays in the
+query field while the arrows move the selection.
+
+A screen reader hears neither the query nor the selected row. `NameField`'s
+div has no id and no role, so it has no accessibility node. gpui then reports
+focus on the whole window (`gpui/src/elements/div.rs:2330-2336`).
+
+gpui has an element-level API for the selected row: `.aria_active_descendant()`
+on the selected child (`gpui/src/elements/div.rs:1365`). The bridge honours the
+claim only when the focused node is an ancestor of that child
+(`gpui/src/window/a11y.rs:254`). The query field is a sibling of the list, not
+its ancestor.
+
+The two fixes conflict. Record both; a manual screen-reader probe decides:
+
+- **Expose the field.** Give `NameField` an id, a text-input role and a label.
+  VoiceOver then reads the query as it is typed. The focused node is the field,
+  a sibling of the list, so a row's active-descendant claim is still ignored.
+- **Expose the selected row.** Put the focused node on the picker's root, an
+  ancestor of both the field and the list, and mark the selected row with
+  `.aria_active_descendant()`. VoiceOver then reads each row as the arrows
+  move. The field is not the focused node, so the query is not read as typed.
+
+Wiring either is deferred in the search spec's Deferred table.

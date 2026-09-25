@@ -105,3 +105,28 @@ fn a_link_to_the_note_showing_keeps_its_caret(cx: &mut TestAppContext) {
         before
     );
 }
+
+/// Following a link to the note showing is the user's last word, as a click on it is.
+#[gpui::test]
+fn following_a_link_to_the_note_showing_during_a_slow_load_keeps_it(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[a]]");
+    fs.insert_file("/vault/b.md", "beta");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    cx.run_until_parked();
+    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    activate(&sidebar, cx, a);
+    cx.run_until_parked();
+
+    let gate = fs.block_load("/vault/b.md");
+    activate(&sidebar, cx, b);
+    cx.run_until_parked();
+    let link = inkra_markdown::links("[[a]]").remove(0);
+    window
+        .update(cx, |shell, _, cx| shell.follow(&link, cx))
+        .unwrap_or_else(|_| panic!("the window is open"));
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(showing(&window, cx), Some(a));
+}

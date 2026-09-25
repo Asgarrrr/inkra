@@ -36,6 +36,10 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # most once, so `seq == last` never happens and `<` equals `<=`.
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
 # which keeps this config, so this entry applies.
+#
+# Unobservable headlessly. These offsets place the caret and selection quads,
+# which reach only the scene; a `#[gpui::test]` window has no renderer and
+# exposes no scene (gpui platform/test/window.rs `draw`), so only a shot shows them.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -43,4 +47,5 @@ exclude_re = [
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (fits -> bool with true|\\|\\| with && in score)$",
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
     "^crates/app/src/index\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::(forget|apply)$",
+    "^crates/app/src/field\\.rs:[0-9]+:[0-9]+: replace \\+ with - in <impl Element for FieldElement>::prepaint$",
 ]

@@ -73,6 +73,14 @@ pub(crate) fn selected_row_background() -> Rgba {
     rgb(0x2d2d2d)
 }
 
+pub(crate) fn modal_background() -> Rgba {
+    rgb(0x252526)
+}
+
+pub(crate) fn modal_border() -> Rgba {
+    rgb(0x3c3c3c)
+}
+
 pub(crate) fn heading_text() -> Rgba {
     rgb(0xffffff)
 }
@@ -88,6 +96,10 @@ pub(crate) fn code_text() -> Rgba {
 
 pub(crate) fn link_text() -> Rgba {
     rgb(0x4ea1ff)
+}
+
+pub(crate) fn match_text() -> Rgba {
+    rgb(0xe5c07b)
 }
 
 pub(crate) fn quote_text() -> Rgba {

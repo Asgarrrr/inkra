@@ -6,6 +6,7 @@ use gpui::{
     App, Context, Div, InteractiveElement, MouseButton, ParentElement, Styled, Window, div,
 };
 
+use crate::one_line::one_line;
 use crate::theme;
 
 use super::{EditState, INDENT_BASE, INDENT_STEP, Row, Sidebar};
@@ -18,7 +19,7 @@ impl Sidebar {
         } else {
             ""
         };
-        format!("{}{dot}", row.name)
+        format!("{}{dot}", one_line(&row.name))
     }
 
     /// The field's row: same box as any other, or a pixel taller misplaces every row below it.

@@ -26,8 +26,13 @@ pub(crate) struct Confirmed(pub(crate) String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cancelled;
 
+/// The text changed: typed, deleted, pasted or composed. A key that changes nothing emits none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Edited;
+
 impl EventEmitter<Confirmed> for NameField {}
 impl EventEmitter<Cancelled> for NameField {}
+impl EventEmitter<Edited> for NameField {}
 
 pub(crate) struct NameField {
     buffer: Entity<Buffer>,
@@ -64,10 +69,14 @@ impl NameField {
         f: impl FnOnce(&mut EditorState, &mut Buffer),
     ) {
         let buffer = self.buffer.clone();
+        let before = buffer.read(cx).version();
         buffer.update(cx, |buffer, cx| {
             f(&mut self.state, buffer);
             cx.notify();
         });
+        if buffer.read(cx).version() != before {
+            cx.emit(Edited);
+        }
         cx.notify();
     }
 

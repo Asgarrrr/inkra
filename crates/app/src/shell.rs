@@ -9,12 +9,26 @@ use inkra_vault::{EntryId, Kind};
 use crate::backlinks::BacklinksPanel;
 use crate::editor::{EditorView, LinkFollowed};
 use crate::index::IndexSync;
+use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
 use crate::theme;
 use crate::vault::{NoteClosed, NoteStore, Save, SaveFailed};
 
+mod modal;
+
+use modal::Modal;
+
 const SIDEBAR_WIDTH: Pixels = px(220.);
 const BACKLINKS_WIDTH: Pixels = px(260.);
+/// The quick-open MRU (spec D6).
+const RECENT: usize = 20;
+
+/// Newest first, no repeat, at most `RECENT`.
+fn remember(recent: &mut Vec<EntryId>, id: EntryId) {
+    recent.retain(|&seen| seen != id);
+    recent.insert(0, id);
+    recent.truncate(RECENT);
+}
 
 pub(crate) struct AppShell {
     /// Must not default to a real, untracked `Buffer` — see CLAUDE.md.
@@ -30,6 +44,10 @@ pub(crate) struct AppShell {
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
     /// load cannot rebind the editor behind a later activation.
     activation: Option<Task<()>>,
+    /// The picker over the window, if any.
+    modal: Option<Modal>,
+    /// The notes shown, newest first; see `remember`.
+    recent: Vec<EntryId>,
 }
 
 impl AppShell {
@@ -41,11 +59,9 @@ impl AppShell {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), cx));
         let links = cx.new(|cx| IndexSync::new(&notes, cx));
         let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
-        // A note linking to itself lists itself; reopening it would reset its caret and scroll.
+        // A note linking to itself lists itself.
         cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
-            if shell.showing != Some(event.0) {
-                shell.open_note(event.0, cx);
-            }
+            shell.show_note(event.0, cx);
         })
         .detach();
         if let Some(editor) = &editor {
@@ -65,7 +81,15 @@ impl AppShell {
             if shell.showing != Some(event.0) {
                 return;
             }
-            shell.editor = None;
+            if let Some(editor) = shell.editor.take() {
+                // Focus left on a dropped view's handle reaches no action, not even the shell's.
+                let root = shell.focus_handle.clone();
+                cx.with_window(cx.entity_id(), |window, cx| {
+                    if editor.focus_handle(cx).contains_focused(window, cx) {
+                        window.focus(&root, cx);
+                    }
+                });
+            }
             shell.set_showing(None, cx);
             cx.notify();
         })
@@ -79,6 +103,8 @@ impl AppShell {
             focus_handle: cx.focus_handle(),
             showing: None,
             activation: None,
+            modal: None,
+            recent: Vec::new(),
         }
     }
 
@@ -98,16 +124,41 @@ impl AppShell {
                     shell.editor = Some(editor);
                 }
                 let focus = shell.focus_handle(cx);
-                window.focus(&focus, cx);
+                // The picker keeps the keys typed into it; dismissing it lands on the note.
+                match &mut shell.modal {
+                    Some(modal) => modal.restore_to(focus),
+                    None => window.focus(&focus, cx),
+                }
                 shell.set_showing(Some(id), cx);
                 notes.update(cx, |notes, cx| notes.set_current(id, cx));
             });
         }));
     }
 
+    /// Opens `id` unless it is showing: reopening would reset its caret and scroll. Either way
+    /// it is the last pick, so a slower activation of another note must not land after it.
+    fn show_note(&mut self, id: EntryId, cx: &mut Context<Self>) {
+        if self.showing == Some(id) {
+            self.activation = None;
+            // Focus lands on the note, as `open_note` moves it for another note.
+            let focus = self.focus_handle(cx);
+            match &mut self.modal {
+                Some(modal) => modal.restore_to(focus),
+                None => {
+                    cx.with_window(cx.entity_id(), |window, cx| window.focus(&focus, cx));
+                }
+            }
+        } else {
+            self.open_note(id, cx);
+        }
+    }
+
     /// The one place `showing` changes, so the backlinks panel cannot lag it.
     fn set_showing(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
         self.showing = note;
+        if let Some(id) = note {
+            remember(&mut self.recent, id);
+        }
         self.backlinks
             .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
     }
@@ -125,9 +176,7 @@ impl AppShell {
     fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
         let source = self.showing.unwrap_or(EntryId::DETACHED);
         match self.links.read(cx).index().resolve_link(source, link) {
-            // Rebinding the note showing would reset its caret and scroll.
-            Resolution::Note(id) if self.showing == Some(id) => {}
-            Resolution::Note(id) => self.open_note(id, cx),
+            Resolution::Note(id) => self.show_note(id, cx),
             Resolution::External(url) => cx.open_url(&url),
             Resolution::Unresolved | Resolution::SelfLink => {}
         }
@@ -144,6 +193,24 @@ impl AppShell {
 
     fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
         self.create(Kind::Dir, window, cx);
+    }
+
+    fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
+        if self.notes.read(cx).vault().is_none() {
+            return;
+        }
+        let (links, showing, recent) = (self.links.clone(), self.showing, self.recent.clone());
+        let Some(picker) = self.toggle_picker(window, cx, |cx| {
+            QuickOpenDelegate::new(&links, showing, recent, cx)
+        }) else {
+            return;
+        };
+        let opened = cx.subscribe(&picker, |shell, _, event: &NoteActivated, cx| {
+            shell.show_note(event.0, cx);
+        });
+        if let Some(modal) = &mut self.modal {
+            modal.hold(opened);
+        }
     }
 
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
@@ -204,6 +271,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::new_note))
             .on_action(cx.listener(Self::new_folder))
+            .on_action(cx.listener(Self::quick_open))
             .flex()
             .flex_row()
             .size_full()
@@ -226,6 +294,7 @@ impl Render for AppShell {
                     .h_full()
                     .child(self.backlinks.clone())
             }))
+            .children(self.render_modal(cx))
     }
 }
 

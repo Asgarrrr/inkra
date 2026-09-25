@@ -7,6 +7,9 @@ mod editor;
 mod field;
 mod index;
 mod keymap;
+mod one_line;
+mod picker;
+mod quick_open;
 mod shell;
 mod sidebar;
 #[cfg(test)]

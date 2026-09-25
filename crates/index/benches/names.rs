@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NameQuery, NamesSnapshot, NoteIndex, NoteSet, Source, match_names};
+use inkra_index::{
+    NameMatch, NameQuery, NamesSnapshot, NoteIndex, NoteSet, Source, match_names, merge_names,
+};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
 
@@ -283,11 +285,44 @@ fn bench_realistic(c: &mut Criterion) {
     bench_cases(c, "deep", &names, &cases);
 }
 
+/// The quick-open delegate's split: one range per thread, then the merge.
+fn parallel(names: &NamesSnapshot, query: &NameQuery, threads: usize) -> Vec<NameMatch> {
+    let cancel = &AtomicBool::new(false);
+    let found = std::thread::scope(|scope| {
+        let scans: Vec<_> = names
+            .chunks(threads)
+            .into_iter()
+            .map(|range| scope.spawn(move || match_names(names, range, query, cancel, LIMIT)))
+            .collect();
+        scans
+            .into_iter()
+            .map(|scan| scan.join().unwrap_or_default())
+            .collect()
+    });
+    merge_names(found, LIMIT)
+}
+
+fn bench_parallel(c: &mut Criterion) {
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let mut group = c.benchmark_group(format!("parallel, {threads} threads"));
+    for (vault, entries) in [("long stems", long_stems()), ("deep", deep())] {
+        let names = NoteSet::build(entries).names();
+        for text in ["ete", "aeiou", "pln"] {
+            let query = NameQuery::new(text, None, &[]);
+            group.bench_function(format!("{vault} {text}"), |b| {
+                b.iter(|| black_box(parallel(&names, &query, threads)));
+            });
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_build,
     bench_set_notes,
     bench_match,
-    bench_realistic
+    bench_realistic,
+    bench_parallel
 );
 criterion_main!(benches);
