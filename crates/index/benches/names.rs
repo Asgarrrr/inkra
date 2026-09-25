@@ -1,11 +1,14 @@
+use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NameQuery, NamesSnapshot, NoteSet, match_names};
+use inkra_index::{NameQuery, NamesSnapshot, NoteIndex, NoteSet, Source, match_names};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
 
@@ -132,6 +135,93 @@ fn bench_build(c: &mut Criterion) {
     });
 }
 
+fn bench_set_notes(c: &mut Criterion) {
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
+    for (id, _, kind) in ENTRIES.iter() {
+        if *kind == Kind::Note {
+            index.insert(*id, Source::parse(""));
+        }
+    }
+    let mut group = c.benchmark_group("set_notes");
+    // Each iteration's setup is a 50k build, so fewer samples keep the run short.
+    group.sample_size(10);
+    group.bench_function("50k with a built NoteSet", |b| {
+        b.iter_batched(
+            || NoteSet::build(ENTRIES.clone()),
+            |notes| index.set_notes(notes),
+            BatchSize::LargeInput,
+        );
+    });
+    bench_prune(&mut group);
+    group.finish();
+}
+
+/// Every note links `[[note n+1]]` and `[[index]]`, so the `index` stem row holds 50k links.
+fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
+    let notes: Vec<EntryId> = ENTRIES
+        .iter()
+        .filter(|(_, _, kind)| *kind == Kind::Note)
+        .map(|(id, _, _)| *id)
+        .collect();
+    let sources: Vec<Source> = (0..notes.len())
+        .map(|n| Source::parse(&format!("[[note {}]] [[index]]", n + 1)))
+        .collect();
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
+    for (id, source) in notes.iter().zip(&sources) {
+        index.insert(*id, source.clone());
+    }
+
+    let mut other = Some(NoteSet::build(ENTRIES.clone()));
+    group.bench_function("nothing gone", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                let Some(set) = other.take() else {
+                    unreachable!("the set is put back every iteration");
+                };
+                let start = Instant::now();
+                let previous = black_box(index.set_notes(set));
+                total += start.elapsed();
+                other = Some(previous);
+            }
+            total
+        });
+    });
+
+    for (case, count) in [
+        ("the first 500 notes gone", 500),
+        ("the first 5,500 notes gone", 5_500),
+    ] {
+        let gone: HashSet<EntryId> = notes[..count].iter().copied().collect();
+        let kept = ENTRIES
+            .iter()
+            .filter(|(id, _, _)| !gone.contains(id))
+            .cloned()
+            .collect();
+        let mut partial = Some(NoteSet::build(kept));
+        group.bench_function(case, |b| {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let Some(set) = partial.take() else {
+                        unreachable!("the set is put back every iteration");
+                    };
+                    let start = Instant::now();
+                    let full = black_box(index.set_notes(set));
+                    total += start.elapsed();
+                    partial = Some(index.set_notes(full));
+                    for (id, source) in notes[..count].iter().zip(&sources) {
+                        index.insert(*id, source.clone());
+                    }
+                }
+                total
+            });
+        });
+    }
+}
+
 fn bench_cases(c: &mut Criterion, vault: &str, names: &NamesSnapshot, cases: &[(&str, String)]) {
     let cancel = AtomicBool::new(false);
     for (case, text) in cases {
@@ -193,5 +283,11 @@ fn bench_realistic(c: &mut Criterion) {
     bench_cases(c, "deep", &names, &cases);
 }
 
-criterion_group!(benches, bench_build, bench_match, bench_realistic);
+criterion_group!(
+    benches,
+    bench_build,
+    bench_set_notes,
+    bench_match,
+    bench_realistic
+);
 criterion_main!(benches);

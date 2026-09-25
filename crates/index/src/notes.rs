@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use inkra_vault::{Entry, EntryId, Kind};
+use inkra_vault::EntryId;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::key::{Key, strip_md};
+use crate::key::Key;
 use crate::target::{Style, Target};
 
 /// What a link resolves to.
@@ -33,7 +34,7 @@ pub(crate) struct Query {
 
 struct Note {
     /// On disk, NFC, `/`-separated, `.md` stripped.
-    path: String,
+    path: Arc<str>,
     key: Key,
     stem: Key,
     order: usize,
@@ -57,30 +58,23 @@ impl Note {
 }
 
 impl NoteTable {
-    /// `entries` in `Vault::entries()` order, which breaks the last tie.
-    pub(crate) fn new<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> Self {
+    /// `notes` in `Vault::entries()` order, which breaks the last tie; paths as `prepare` gives.
+    pub(crate) fn new(notes: &[(EntryId, Arc<str>)]) -> Self {
         let mut table = Self::default();
-        let notes = entries.into_iter().filter(|entry| entry.kind == Kind::Note);
-        for (order, entry) in notes.enumerate() {
-            let on_disk = entry.path.as_path().to_string_lossy();
-            let path: String = strip_md(&on_disk).nfc().collect();
+        for (order, (id, path)) in notes.iter().enumerate() {
             let note = Note {
-                key: Key::path(&path),
-                stem: Key::stem(&path),
-                path,
+                key: Key::path(path),
+                stem: Key::stem(path),
+                path: Arc::clone(path),
                 order,
             };
             table
                 .by_stem
                 .entry(note.stem.clone())
                 .or_default()
-                .push(entry.id);
-            table
-                .by_path
-                .entry(note.key.clone())
-                .or_default()
-                .push(entry.id);
-            table.notes.insert(entry.id, note);
+                .push(*id);
+            table.by_path.entry(note.key.clone()).or_default().push(*id);
+            table.notes.insert(*id, note);
         }
         table
     }

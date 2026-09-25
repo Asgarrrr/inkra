@@ -1,18 +1,25 @@
-//! Keeps a `LinkIndex` current: fed by the vault's scans and by our own writes.
+//! Keeps a `NoteIndex` current: fed by the vault's scans and by our own writes.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use gpui::{AppContext as _, AsyncApp, Context, Entity, Subscription, WeakEntity};
-use inkra_index::{LinkIndex, Source};
+use gpui::{AppContext as _, AsyncApp, Context, Entity, EventEmitter, Subscription, WeakEntity};
+use inkra_index::{NoteIndex, NoteSet, Source};
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Vault};
 
 use crate::vault::{NoteSaved, NoteStore};
 
-pub(crate) struct LinkSync {
+/// A build applied: note names and link resolution may have changed.
+pub(crate) struct NotesChanged;
+
+impl EventEmitter<NotesChanged> for IndexSync {}
+
+pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
     vault: Option<Entity<Vault>>,
-    index: LinkIndex,
+    index: NoteIndex,
+    /// Bumped on each change to `index`, so a reader can skip a notify that changed nothing it reads.
+    revision: u64,
     /// The mtime each note was indexed at, or is queued to be.
     indexed: HashMap<EntryId, Mtime>,
     /// One counter orders loads and writes, as `NoteStore::next_write` orders writes.
@@ -23,10 +30,16 @@ pub(crate) struct LinkSync {
     queued: HashMap<EntryId, u64>,
     /// One note at a time, so a large vault does not open every file at once.
     working: bool,
+    /// Builds started; a build applies only if it is still the latest.
+    generation: u64,
+    /// The generation `index` holds.
+    built: u64,
+    /// The note whose load is in flight: popped from `queue`, not applied yet.
+    loading: Option<EntryId>,
     _subscriptions: Vec<Subscription>,
 }
 
-impl LinkSync {
+impl IndexSync {
     pub(crate) fn new(notes: &Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
         let fs = notes.read(cx).fs();
         let vault = notes.read(cx).vault().cloned();
@@ -37,26 +50,51 @@ impl LinkSync {
         let mut sync = Self {
             fs,
             vault,
-            index: LinkIndex::default(),
+            index: NoteIndex::default(),
+            revision: 0,
             indexed: HashMap::new(),
             applied: HashMap::new(),
             next_seq: 0,
             queue: VecDeque::new(),
             queued: HashMap::new(),
             working: false,
+            generation: 0,
+            built: 0,
+            loading: None,
             _subscriptions: subscriptions,
         };
         sync.reconcile(cx);
         sync
     }
 
-    pub(crate) fn index(&self) -> &LinkIndex {
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// A load applying: the index changed, and every reader is notified.
+    #[cfg(test)]
+    pub(crate) fn simulate_load(&mut self, cx: &mut Context<Self>) {
+        self.revision += 1;
+        cx.notify();
+    }
+
+    pub(crate) fn index(&self) -> &NoteIndex {
         &self.index
     }
 
-    /// True while notes found by a scan are loading; a write's own parse does not count.
+    /// `(loaded, total)`: the notes of the last build, less those queued or loading.
+    pub(crate) fn progress(&self) -> (usize, usize) {
+        let total = self.index.names().len();
+        // A note re-queued while its load is in flight is one note pending, not two.
+        let loading = self.loading.filter(|id| !self.queued.contains_key(id));
+        let pending = self.queued.len() + usize::from(loading.is_some());
+        (total.saturating_sub(pending), total)
+    }
+
+    /// True before the first build applies or while loads are pending; a rebuild alone is not.
     pub(crate) fn is_building(&self) -> bool {
-        self.working
+        let (loaded, total) = self.progress();
+        (self.generation != 0 && self.built == 0) || loaded < total
     }
 
     fn next_seq(&mut self) -> u64 {
@@ -64,13 +102,48 @@ impl LinkSync {
         self.next_seq
     }
 
-    /// Queues every note whose mtime differs from the one it was indexed at.
+    /// Builds the notes off the foreground; `apply_notes` swaps them in.
     fn reconcile(&mut self, cx: &mut Context<Self>) {
+        let Some(vault) = &self.vault else {
+            return;
+        };
+        let entries: Vec<(EntryId, String, Kind)> = vault
+            .read(cx)
+            .entries()
+            .map(|entry| {
+                let path = entry.path.as_path().to_string_lossy().into_owned();
+                (entry.id, path, entry.kind)
+            })
+            .collect();
+        self.generation += 1;
+        let generation = self.generation;
+        let build = cx.background_spawn(async move { NoteSet::build(entries) });
+        // Detached: it holds only a weak handle, so it ends when this entity does.
+        cx.spawn(async move |this, cx| {
+            let notes = build.await;
+            let _ = this.update(cx, |this, cx| this.apply_notes(generation, notes, cx));
+        })
+        .detach();
+    }
+
+    /// Applies a build unless a newer one started, then queues every note whose mtime differs
+    /// from the one it was indexed at.
+    fn apply_notes(&mut self, generation: u64, notes: NoteSet, cx: &mut Context<Self>) {
+        if generation != self.generation {
+            // As costly to free as the set a build replaces.
+            cx.background_spawn(async move { drop(notes) }).detach();
+            return;
+        }
+        self.built = generation;
+        let previous = self.index.set_notes(notes);
+        self.revision += 1;
+        // Freeing a 50k table takes about 9 ms, over the foreground budget.
+        cx.background_spawn(async move { drop(previous) }).detach();
+        cx.emit(NotesChanged);
         let Some(vault) = self.vault.clone() else {
             return;
         };
         let vault = vault.read(cx);
-        self.index.set_notes(vault.entries());
         let notes: Vec<(EntryId, Mtime)> = vault
             .entries()
             .filter(|entry| entry.kind == Kind::Note)
@@ -80,6 +153,10 @@ impl LinkSync {
         self.indexed.retain(|id, _| live.contains(id));
         self.applied.retain(|id, _| live.contains(id));
         self.queued.retain(|id, _| live.contains(id));
+        // A gone note is not pending; the worker still clears `loading` when its load returns.
+        if self.loading.is_some_and(|id| !live.contains(&id)) {
+            self.loading = None;
+        }
         for (id, mtime) in notes {
             if self.indexed.get(&id) != Some(&mtime) {
                 self.indexed.insert(id, mtime);
@@ -118,10 +195,13 @@ impl LinkSync {
                         .map(|loaded| Source::parse(&loaded.text))
                 })
                 .await;
-            let applied = this.update(cx, |this, cx| match loaded {
-                Ok(source) => this.apply(id, seq, source, cx),
-                // Retried by the next reconcile; a GUI error has nowhere to go yet.
-                Err(_) => this.forget(id, seq, cx),
+            let applied = this.update(cx, |this, cx| {
+                this.loading = None;
+                match loaded {
+                    Ok(source) => this.apply(id, seq, source, cx),
+                    // Retried by the next reconcile; a GUI error has nowhere to go yet.
+                    Err(_) => this.forget(id, seq, cx),
+                }
             });
             if applied.is_err() {
                 return;
@@ -140,6 +220,7 @@ impl LinkSync {
             }
             self.queued.remove(&id);
             if let Some(path) = vault.absolute(id) {
+                self.loading = Some(id);
                 return Some((id, seq, path, Arc::clone(&self.fs)));
             }
         }
@@ -171,6 +252,7 @@ impl LinkSync {
         }
         self.applied.insert(id, seq);
         self.index.remove(id);
+        self.revision += 1;
         cx.notify();
     }
 
@@ -180,6 +262,11 @@ impl LinkSync {
         }
         self.applied.insert(id, seq);
         self.index.insert(id, source);
+        self.revision += 1;
+        // Not a note of the index yet (its build is still running): the next diff reloads it.
+        if !self.index.is_indexed(id) {
+            self.indexed.remove(&id);
+        }
         cx.notify();
     }
 }

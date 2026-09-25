@@ -5,7 +5,9 @@ use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Vault};
 
-use crate::Target;
+use crate::note_set::prepare;
+use crate::notes::NoteTable;
+use crate::{NoteSet, Target};
 
 pub(crate) const ROOT: &str = "/vault";
 
@@ -44,6 +46,15 @@ pub(crate) fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind)> {
             (entry.id, path, entry.kind)
         })
         .collect()
+}
+
+/// `vault`'s notes as `NoteIndex::set_notes` takes them.
+pub(crate) fn note_set(vault: &Vault) -> NoteSet {
+    NoteSet::build(entries(vault))
+}
+
+pub(crate) fn table(vault: &Vault) -> NoteTable {
+    NoteTable::new(&prepare(entries(vault)))
 }
 
 pub(crate) fn id(vault: &Vault, path: &str) -> EntryId {

@@ -31,7 +31,7 @@ struct Candidate {
 }
 
 impl Candidate {
-    fn new(id: EntryId, path: String) -> Self {
+    fn new(id: EntryId, path: Arc<str>) -> Self {
         let raw: Vec<char> = path.chars().collect();
         let stem = raw.iter().rposition(|&c| c == '/').map_or(0, |at| at + 1);
         let chars: Box<[PathChar]> = raw.iter().map(|&c| PathChar::new(c)).collect();
@@ -45,7 +45,7 @@ impl Candidate {
         }
         Self {
             id,
-            path: path.into(),
+            path,
             chars,
             bonus,
             stem,
@@ -59,7 +59,7 @@ impl Candidate {
 pub struct NamesSnapshot(Arc<[Candidate]>);
 
 impl NamesSnapshot {
-    pub(crate) fn build(notes: impl IntoIterator<Item = (EntryId, String)>) -> Self {
+    pub(crate) fn build(notes: impl IntoIterator<Item = (EntryId, Arc<str>)>) -> Self {
         Self(
             notes
                 .into_iter()
