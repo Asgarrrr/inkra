@@ -28,3 +28,7 @@ workspace = true
 [[bench]]
 name = "index"
 harness = false
+
+[[bench]]
+name = "names"
+harness = false
