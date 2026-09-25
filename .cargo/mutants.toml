@@ -23,8 +23,18 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 #
 # Equivalent. The `Options` flags in `options` are pairwise disjoint bits in
 # pulldown-cmark 0.13.4, so `^` and `|` give the same set.
+#
+# Equivalent. `fits` and the `CharBag` test only skip the DP early: the DP finds
+# no alignment for a note they would reject, so `score` returns `None` anyway.
+#
+# Equivalent. No cell is ever within reach of `NONE / 2`: a real score is
+# positive and an unreachable one stays near `NONE`. So `>=`, `NONE * 2`
+# (`i32::MIN`, no overflow) and `true` admit only cells that lose every `max`
+# to a real one or that no real score equals; `fits` guarantees a real one.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
     "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in LinkIndex::backlinks$",
+    "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (fits -> bool with true|\\|\\| with && in score)$",
+    "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
 ]

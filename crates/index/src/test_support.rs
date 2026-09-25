@@ -3,7 +3,7 @@ use std::path::Path;
 use futures::executor::block_on;
 use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::{EntryId, Fs, Kind, Vault};
 
 use crate::Target;
 
@@ -33,6 +33,17 @@ pub(crate) fn try_rename(fs: &MemFs, vault: &mut Vault, from: &str, to: &str) ->
 
 pub(crate) fn rename(fs: &MemFs, vault: &mut Vault, from: &str, to: &str) {
     assert!(try_rename(fs, vault, from, to), "rename {from} to {to}");
+}
+
+/// `vault`'s entries as `NoteSet::build` takes them.
+pub(crate) fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind)> {
+    vault
+        .entries()
+        .map(|entry| {
+            let path = entry.path.as_path().to_string_lossy().into_owned();
+            (entry.id, path, entry.kind)
+        })
+        .collect()
 }
 
 pub(crate) fn id(vault: &Vault, path: &str) -> EntryId {

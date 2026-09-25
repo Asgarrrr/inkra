@@ -257,7 +257,7 @@ integers, so ties are exact and the order is deterministic:
 | A match right after the previous match | bonus |
 | A gap between matches | penalty that grows with the gap, with a floor |
 | Every matched char of a term inside the stem | bonus |
-| The stem equals the query, folded | large bonus |
+| The stem equals the query's terms joined by one space, folded | large bonus |
 | The note currently showing (`NameQuery::showing`) | minus a quarter of its score, as fff does |
 
 Ties break by MRU rank (`NameQuery::recent`), then shorter path, then vault
@@ -272,8 +272,38 @@ changes the result.
 
 An empty query lists the MRU (D6) without the note showing. A query with
 results lists every match, best first, capped at 100 like Zed
-(`file_finder.rs:609`). In v1 `app` calls `match_names` once, on
-`0..len`; the split is a lever.
+(`file_finder.rs:609`). From slice 3, `app` runs
+`match_names` over `chunks(num_cpus)` and merges; see "Parallel quick open"
+in Evolution.
+
+**Settled in the plan.** The slice 1 plan and its review fix these points D2
+left open:
+
+- `NameMatch` carries `path: Arc<str>`, the NFC path its positions index. A
+  row draws that string, not the vault's path, which is NFD on macOS.
+- Positions are byte offsets into `NameMatch::path`, on char starts.
+  `StyledText::with_highlights` takes byte ranges.
+- No mutable `Names` type. `NoteSet` holds a `NamesSnapshot`; `names()`
+  clones it.
+- `match_names` handles the empty query: the recent notes in the range,
+  without `showing`, by MRU rank. A recent id no longer in the vault is not
+  found, so `app` does no filtering (D6).
+- `NoteSet::names()` is public, so tests and the bench reach names before
+  `NoteIndex` exists. Slice 2 keeps it.
+- Score constants: match 16; boundary 24; stem start 32; consecutive 16; a gap
+  of `g` chars costs `min(3 + g − 1, 12)`; 8 per char of a term wholly in the
+  stem; exact stem 1024; the note showing loses `score / 4`. No leading-gap
+  penalty.
+- The exact-stem bonus compares the stem with the query's terms joined by one
+  space, by the char rule. `meeting notes` gains it on `x/meeting notes`. The
+  terms are taken as typed, before repeats are dropped, so `plan plan` gains
+  it on the stem `plan plan`.
+- A term repeated after folding counts once. `plan plan` scores as `plan`.
+- The query keeps its first 64 chars after NFC (`QUERY_MAX_CHARS`). A match
+  costs terms × term chars × path chars, and dropping repeats does not bound
+  a paste of many distinct terms.
+- `NamesSnapshot` and `NameQuery` have `is_empty`.
+- "Shorter path" in the tie-break counts chars, not bytes.
 
 ### D3. The corpus holds the saved text, in vault order
 
@@ -549,6 +579,45 @@ second (`Throughput::Bytes`) is the figure that travels between machines.
     8 ms, the foreground limit.
   - `match_names` on one core, queries of 1, 3 and 8 chars, two terms, and an
     unaccented query over accented names. Budget 16 ms each.
+
+  Measured, slice 1, on 2026-09-24: Apple M1 Pro (MacBookPro18,1), 10 cores,
+  one core per case, `cargo bench -p inkra-index --bench names`, criterion's
+  middle estimate. "First" is the plan's code; "after review" adds the
+  red and blue team fixes (ASCII fast paths, the stem-pass skip, the query
+  cap and repeat drop). Three vaults of 50,000 notes:
+
+  - **base**: 3 to 5 components, 2 to 4 folders then a stem `<word> <n>`,
+    about 36 bytes; two thirds hold an accented word. Scanned through `MemFs`.
+  - **long stems**: 2 or 3 folders, then a stem such as `Meeting with Zoé
+    about the roadmap 12`, about 56 chars.
+  - **deep**: 7 to 9 components, about 60 chars.
+
+  | Vault | Case | First | After review | Budget 16 ms |
+  |---|---|---:|---:|---|
+  | base | `NoteSet::build` | 65.13 ms | 41.35 ms | none, background |
+  | base | 1 char `p` | 3.18 ms | 2.94 ms | met |
+  | base | 3 chars `pln` | 3.33 ms | 2.76 ms | met |
+  | base | 8 chars `projplan` | 0.81 ms | 0.71 ms | met |
+  | base | two terms `plan jour` | 1.31 ms | 1.12 ms | met |
+  | base | unaccented `ete` | 11.52 ms | 9.77 ms | met |
+  | base | `e e e e e e e e` | — | 6.49 ms | met |
+  | base | `"e ".repeat(150)` | — | 6.47 ms | met |
+  | base | 300 chars of distinct 2-char terms | — | 3.68 ms | met |
+  | base | empty query, 20-note MRU | — | 0.37 ms | met |
+  | long stems | `ete` | — | 31.21 ms | **missed** |
+  | long stems | `pln` | — | 9.70 ms | met |
+  | long stems | two terms `plan jour` | — | 3.87 ms | met |
+  | long stems | `aeiou` | — | 23.37 ms | **missed** |
+  | deep | `ete` | — | 24.16 ms | **missed** |
+  | deep | `pln` | — | 9.38 ms | met |
+  | deep | two terms `plan jour` | — | 7.48 ms | met |
+  | deep | `aeiou` | — | 12.93 ms | met |
+
+  The base vault meets every budget on one core. Realistic names do not: a
+  short, frequent query over long stems or deep paths takes up to 31 ms. So
+  "Parallel quick open" ships in slice 3. At 31 ms on one core it needs about
+  two cores to fit 16 ms. `set_notes` needs `NoteIndex`, which slice 2
+  builds; its figure is recorded then.
 - **`search`**: 50,000 notes of 1 to 5 KB of generated French and English
   prose, about 150 MB. Cases, each single-thread over the full corpus, in
   bytes per second:
@@ -656,7 +725,9 @@ differential oracle, and is justified by a bench figure before and after.
 | Whole-word check in Rust | The whole-word bench over budget | Inside `find_in` (D4) |
 | `memchr::memmem` fast path | A profile shows `regex` in the case-sensitive path | Inside `find_in` |
 | Balanced chunks | Ranges finish far apart in the end-to-end log | `chunks` splits by bytes, not by count |
-| Parallel quick open | The `names` bench over 16 ms | `app` passes `num_cpus` to `NamesSnapshot::chunks` |
+| Parallel quick open | Met: `ete` over 50,000 long stems takes 31 ms on one core (slice 1 figures). Ships in slice 3 | `app` passes `num_cpus` to `NamesSnapshot::chunks`, runs one range per core, and calls `merge_names` |
+| Sparse DP | `names` over 16 ms per core after parallel quick open | `fill` visits only the columns where the query char matches. The dense `fill` stays as a test-only differential oracle |
+| Compact candidates | A names memory figure over ~50 MB on a real vault | A candidate stores `exact` only, with a sparse `base` for the accented chars, and merges `chars` and `bonus` into one allocation. About 22 to 37 MB at 50,000 notes today |
 | Streaming results | First results over 100 ms on a real vault | The delegate appends each range's hits in vault order once every earlier range is done, as the Text Finder does; keeps the selection across batches |
 | Compressed text (e.g. lz4) | `heap_bytes` over 300 MB on a real vault | `Corpus` stores compressed blocks; `search` decompresses candidates. Best after the prefilter |
 | No resident text | Memory still too high after compression | `Corpus` keeps the prefilter only. **Changes the API**: `CorpusSnapshot::candidates(range, &TextQuery)` lists notes, `app` loads them through `Fs` and calls `find_in`. Needs the prefilter first, as fff shows |
