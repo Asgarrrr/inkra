@@ -229,6 +229,11 @@ on a single text (Find in note, search in unsaved buffers), and because the
 
 ### D2. The name matcher
 
+> **Amended 2026-09-25.** Quick open no longer uses this matcher: see
+> [`2026-09-25-smart-quick-open-design.md`](2026-09-25-smart-quick-open-design.md)
+> (word-start matching on names and text, a word index). `match_names` stays
+> for `[[` completion. The slice list below is renumbered there.
+
 Candidates are notes, never folders. A candidate is the note's path as the
 vault stores it, NFC, `/`-separated, `.md` stripped. Its stem is the last
 component. `NoteSet::build` computes each candidate's folded chars and
