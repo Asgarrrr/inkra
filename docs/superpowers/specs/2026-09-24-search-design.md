@@ -332,6 +332,27 @@ levers reduce.
 An inverted index (tantivy, SQLite FTS5) matches words, not substrings, and
 adds a large dependency with its own invalidation. It stays a lever.
 
+**Built in slice 4.** The slice 4 plan fixes these points D3 left open:
+
+- The text write lands in slice 4, not slice 5. The `set_notes` and snapshot
+  benches need a public slot write, and D1's only one is `insert` with the
+  text. So `insert(id, source, text)` and `remove` clearing the text ship
+  here, and `IndexSync::apply` passes the text: a load converts its `String`
+  once, a save shares `NoteSaved::text`. The app holds the text from slice 4,
+  about 156 MB at 50,000 generated notes, while its first reader, vault
+  search, arrives in slice 6.
+- `CorpusSnapshot` carries the ids beside the texts, since `Hit::note` needs
+  each slot's `EntryId`. `NoteSet::build` computes them off the foreground.
+  `set_notes` reads each id's previous slot from the previous `NoteTable`, in
+  one pass, and returns the previous ids in the previous `NoteSet`.
+- The texts of the notes gone move into the previous `NoteSet`, so the caller
+  frees them off the foreground with it.
+- `CorpusSnapshot` has `len`, `is_empty` and `heap_bytes`, as
+  `NamesSnapshot` has `len` and `is_empty`. `Corpus` itself is crate-private.
+- `heap_bytes` is slots × (`size_of::<Option<Arc<str>>>()` +
+  `size_of::<EntryId>()`) plus, per loaded text, its length and its `Arc`
+  header (the two counts, 16 bytes). A shared `Arc<str>` counts once per slot.
+
 ### D4. The text matcher
 
 `TextQuery::new` NFC-normalizes the query and compiles the escaped literal
@@ -376,6 +397,47 @@ handle a Unicode word boundary on a non-ASCII haystack (regex-automata 0.4.18,
 `hybrid/dfa.rs:243-254`). The bench below covers it. If it misses the budget,
 `find_in` searches the plain literal and checks the edges in Rust, behind the
 same API.
+
+**Built in slice 4.** The slice 4 plan fixes these points D4 left open:
+
+- A word char is regex's own, `regex_syntax::is_word_character`, not
+  "alphanumeric or `_`". They differ: `½` is alphanumeric and not a regex word
+  char, and a combining mark is the reverse. With Rust's rule, `\b` before `½`
+  would demand a word char before it. `regex-syntax` 0.8 becomes a direct
+  dependency; it was already in `Cargo.lock` through `regex`.
+- The query is a literal: its spaces are kept, not trimmed.
+- `limit_reached` means `hits.len() >= limit`, so it is true when exactly
+  `limit` hits exist. `Searched::merge` concatenates, truncates and
+  recomputes it, so any split equals one range.
+- A set `cancel` returns `Searched::default()` at any limit, checked
+  before the first note and between notes, as `match_names` returns an empty
+  list.
+- The query keeps its first 1,000 typed chars (`QUERY_MAX_CHARS`), so a huge
+  paste never makes `regex` refuse it silently. Compiling 1,000 chars takes
+  0.13 to 0.81 ms, the worst being an insensitive alternation of two forms.
+  A query that `regex` still refuses is `None`, as an empty one is.
+- A query that NFC changes matches in both forms. NFC maps singletons such as
+  the Kelvin sign `K`, `Å` (U+212B) or `Ω` (U+2126) to another char, so a
+  query pasted from a note would not find that note. When the typed query and
+  its NFC form differ, `TextQuery` compiles an alternation of both escaped
+  forms, each with its own whole-word edges. Both come from the same typed
+  chars. A consequence: a decomposed (NFD) query now also finds NFD text. The
+  NFD limitation above stays for an NFC query over decomposed text.
+- `HITS_PER_NOTE` (100) is public, so vault search can show "100+" on a note
+  whose hits reached the cap.
+- A hit's context is found inside its window first: the newline search reads
+  at most 60 bytes before and 100 after, never the whole line. On a 10 MB note
+  of one line, a common word went from 50.9 ms to 0.016 ms (Performance).
+- Whole word over a non-ASCII edge checks that edge in Rust. When whole word
+  is on, the query has one form, and an edge that gets `\b` is a non-ASCII
+  char, `find_in` searches the plain literal, which stays in regex's lazy DFA,
+  and checks each edge as regex's Unicode `\b` does. After a rejected match it
+  resumes one char after the match start, since a valid match can overlap a
+  rejected one. Every other query keeps the escaped regex with `\b`. The v1
+  regex is the test-only differential oracle over all four flag combinations.
+  It gains 12 % on `é` and 13 to 68 % on Greek, Cyrillic and CJK, with no
+  French or English case slower (Performance). An ASCII edge stays on the
+  regex: the same check made whole word `e` slower, 494 to 510 ms against 337.
 
 ### D5. Keeping the index current: `LinkSync` becomes `IndexSync`
 
@@ -796,6 +858,88 @@ second (`Throughput::Bytes`) is the figure that travels between machines.
 - **Snapshot**: `corpus()` and a slot write while a snapshot is held, at
   50,000 notes. Budget 2 ms.
 
+  Measured, slice 4, on 2026-09-25: Apple M1 Pro, 10 cores, one thread per
+  case, `cargo bench -p inkra-index --bench search` and `--bench names`,
+  criterion's middle estimate, regex 1.13.1. The corpus is 50,000 generated
+  notes of 1 to 5 KB of French and English prose: 155,445,432 bytes of text,
+  `heap_bytes()` 156,445,432. Every case runs case-insensitive, limit 1,000.
+  MB/s is 155.4 MB over the time; a case that stops at the cap reads less,
+  so it has no MB/s. The per-core budget is 375 MB/s.
+
+  | Case | Figure | MB/s | Budget |
+  |---|---:|---:|---|
+  | rare word `zanzibar`, full scan | 20.22 ms | 7,690 | met |
+  | common word `projet`, stops at 1,000 | 0.19 ms | — | met |
+  | 1 char `e`, stops at 1,000 | 0.09 ms | — | met |
+  | `projetzz`, no match, full scan | 115.47 ms | 1,346 | met |
+  | whole word `é`, no hit, full scan | 280.91 ms | 553 | met |
+  | whole word `e`, no hit, full scan | 334.05 ms | 465 | met |
+  | whole word `zanzibar`, full scan | 19.38 ms | 8,020 | met |
+  | whole word `réunion`, stops at 1,000 | 0.38 ms | — | met |
+  | `corpus()` | 11 ns | — | 2 ms, met |
+  | a slot write (`insert`), a snapshot held | 0.16 ms | — | 2 ms, met |
+  | `set_notes`, 50k, empty text in every slot | 2.99 ms | — | 8 ms, met |
+  | `set_notes`, 50k, text in every slot | 1.89 ms | — | 8 ms, met |
+  | `set_notes`, 50k, text in every slot, a snapshot held | 2.09 ms | — | 8 ms, met |
+
+  Parallel, measured by the slice 4 red and blue teams on the same machine:
+  `chunks(n)`, `search` per range on `std::thread::scope` threads, then
+  `Searched::merge`, as slice 3 measured quick open. The budget is 100 ms.
+
+  | Case | 4 threads | 10 threads | Budget 100 ms |
+  |---|---:|---:|---|
+  | whole word `e`, no hit | 88 to 94 ms | 51 to 60 ms | met, thin on 4 |
+  | whole word `é`, no hit | 79 ms | 45 ms | met |
+  | `projetzz`, no match | 31 ms | 22 ms | met |
+
+  On 10 threads, more ranges than threads (2 to 4 × `num_cpus`) finished
+  faster than one range per thread, since ranges of equal note counts carry
+  unequal bytes.
+
+  Scripts, the `scripts, 10 MB, lines of 80 bytes` group: one 10 MB note of
+  Greek, Cyrillic or CJK prose, whole word, no hit. "Before" is the escaped
+  regex with `\b`; "after" checks a non-ASCII edge in Rust (D4). The French
+  and English cases of the `search` group moved by −3.5 % to +0.8 %: whole
+  word `é` went from 281.26 to 248.53 ms (553 to 625 MB/s) and `é ` from 89.85
+  to 79.26 ms; whole word `e`, an ASCII edge, stayed at 332 ms.
+
+  | Case | Before | After | After, MB/s | Budget 375 MB/s |
+  |---|---:|---:|---:|---|
+  | Greek `σ` | 52.90 ms | 34.87 ms | 301 | **missed** |
+  | Greek `α` | 31.93 ms | 23.67 ms | 443 | met |
+  | Greek `ο` | 29.39 ms | 21.29 ms | 493 | met |
+  | Cyrillic `е` | 29.08 ms | 25.24 ms | 415 | met |
+  | Cyrillic `о` | 36.73 ms | 27.64 ms | 379 | met, at the edge |
+  | Cyrillic `ет` | 13.25 ms | 11.22 ms | 934 | met |
+  | CJK `的` | 7.19 ms | 5.03 ms | 2,085 | met |
+  | CJK `项` | 23.17 ms | 7.51 ms | 1,396 | met |
+  | CJK `会` | 22.94 ms | 7.50 ms | 1,398 | met |
+
+  Greek `σ` over Greek prose, a letter in nearly every word, stays under the
+  per-core budget. At 301 MB/s, 150 MB takes 125 ms on 4 cores and about 60 ms
+  on 10. The lever is the bigram prefilter (Evolution).
+
+  Long lines, the `long lines` group: one note of 10 MB, or ten of 1 MB, with
+  a line break every 80 bytes or none. The first context builder scanned the
+  whole line for its newlines; it now reads only its window (D4).
+
+  | Case | Before | After |
+  |---|---:|---:|
+  | one 10 MB note, one line, `projet` | 50.94 ms | 0.016 ms |
+  | ten 1 MB notes, one line each, `projet` | 48.50 ms | 0.16 ms |
+  | one 10 MB note, lines of 80 bytes, `projet` | 0.014 ms | 0.015 ms |
+  | any of them, `zanzibar` (rare, a full scan) | 1.13 to 1.16 ms | unchanged |
+
+  Mutants, slice 4, `cargo mutants` in a scratch worktree: the slice diff of
+  `crates/index/src` had 51 mutants, 32 caught, 2 missed, 17 unviable. The
+  two misses were on the slot cost and are now pinned by a test; `corpus.rs`
+  re-run: 34, 23 caught, 0 missed. `index.rs` and `note_set.rs`: 23, 16
+  caught, 0 missed. `crates/app/src/index.rs`: 53, 51 caught, 0 missed.
+  After the red and blue fixes, the diff of `crates/index/src` since those
+  runs: 46 mutants, 37 caught, 0 missed, 7 unviable, 2 timeouts. Both
+  timeouts turn the resume step of the whole-word check into an endless
+  loop, so a test does catch them.
+
 **Startup** cannot be measured headless: gpui's test scheduler is simulated
 and `MemFs` has no I/O cost. An `#[ignore]` test generates 50,000 notes in a
 temp dir and runs `IndexSync` over `RealFs` in release. The time until the
@@ -885,8 +1029,8 @@ differential oracle, and is justified by a bench figure before and after.
 | Lever | Trigger | What changes |
 |---|---|---|
 | Bigram prefilter (fff) | A `search` case over its per-core budget, or a slow real vault | `Corpus` keeps a bitset per bigram of case-folded text; `search` skips notes that lack one. About 30 MB at 50,000 notes, per fff |
-| Whole-word check in Rust | The whole-word bench over budget | Inside `find_in` (D4) |
-| `memchr::memmem` fast path | A profile shows `regex` in the case-sensitive path | Inside `find_in` |
+| Whole-word check in Rust | Shipped in slice 4 for a non-ASCII edge (D4): `é` −12 %, Greek, Cyrillic, CJK −13 to −68 %. Measured and rejected for an ASCII edge: the plain literal plus Rust edges took 494 to 510 ms on whole word `e` against 337. A `(?-u:\b)` candidate pass with a Unicode recheck is sound only for ASCII edges: `e` 306 against 341 ms, `réunion` 75 against 189 ms. Trigger: an ASCII-edge whole-word case over budget | Inside `find_in` (D4) |
+| `memchr::memmem` fast path | A profile shows `regex` in the case-sensitive path. regex already runs a single literal through its own `memchr`-based prefilter, so the gain is probably small | Inside `find_in` |
 | Balanced chunks | Ranges finish far apart in the end-to-end log | `chunks` splits by bytes, not by count |
 | Parallel quick open | Shipped in slice 3: `ete` over 50,000 long stems takes 31 ms on one core and 9.02 ms on 10 threads (Performance, slice 3) | `app` passes `num_cpus` to `NamesSnapshot::chunks`, runs one range per core, and calls `merge_names` |
 | Sparse DP | `names` over 16 ms per core after parallel quick open | `fill` visits only the columns where the query char matches. The dense `fill` stays as a test-only differential oracle |

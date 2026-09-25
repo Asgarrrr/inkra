@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
+use std::sync::Arc;
 
 use inkra_markdown::Link;
 use inkra_vault::EntryId;
 
+use crate::corpus::{Corpus, CorpusSnapshot};
 use crate::key::Key;
 use crate::names::NamesSnapshot;
 use crate::note_set::NoteSet;
@@ -21,6 +23,7 @@ pub struct NoteIndex {
     /// A note link's stem key → (source, index into its links). Every link resolving to `T`
     /// has `T`'s stem, so this finds backlinks without a reverse map.
     by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
+    corpus: Corpus,
 }
 
 /// The links of one source that resolve to a note, in document order.
@@ -31,14 +34,19 @@ pub struct Backlink<'a> {
 }
 
 impl NoteIndex {
-    /// Replaces the notes links resolve against and quick open lists, and drops the source of
-    /// every note gone. The caller frees the previous set, so a 50k table need not be freed on
-    /// the foreground.
+    /// Replaces the notes links resolve against and quick open lists, reorders the corpus, and
+    /// drops the source and text of every note gone. The caller frees the previous set, which
+    /// holds those texts, so a 50k table need not be freed on the foreground.
     #[must_use]
     pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet {
+        let (ids, retired) = self
+            .corpus
+            .reorder(Arc::clone(&notes.ids), |id| self.notes.order(id));
         let previous = NoteSet {
             notes: mem::replace(&mut self.notes, notes.notes),
             names: mem::replace(&mut self.names, notes.names),
+            ids,
+            _retired: retired,
         };
         let notes = &self.notes;
         let mut gone = HashSet::new();
@@ -73,9 +81,15 @@ impl NoteIndex {
         self.names.clone()
     }
 
-    /// Replaces `id`'s links. Ignored for an id that is not a note, so a load finishing after
-    /// its note was trashed leaves nothing behind.
-    pub fn insert(&mut self, id: EntryId, source: Source) {
+    /// The saved text of every note. Cloning is an `Arc` bump; a later write never reaches it.
+    #[must_use]
+    pub fn corpus(&self) -> CorpusSnapshot {
+        self.corpus.snapshot()
+    }
+
+    /// Replaces `id`'s links and text. Ignored for an id that is not a note, so a load
+    /// finishing after its note was trashed leaves nothing behind.
+    pub fn insert(&mut self, id: EntryId, source: Source, text: Arc<str>) {
         if !self.notes.contains(id) {
             return;
         }
@@ -89,9 +103,11 @@ impl NoteIndex {
             }
         }
         self.sources.insert(id, source);
+        self.corpus.set(self.notes.order(id), Some(text));
     }
 
     pub fn remove(&mut self, id: EntryId) {
+        self.corpus.set(self.notes.order(id), None);
         let Some(old) = self.sources.remove(&id) else {
             return;
         };
@@ -174,6 +190,8 @@ impl NoteIndex {
     }
 }
 
+#[cfg(test)]
+mod corpus_tests;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]

@@ -11,6 +11,10 @@ use crate::notes::NoteTable;
 pub struct NoteSet {
     pub(crate) notes: NoteTable,
     pub(crate) names: NamesSnapshot,
+    /// Vault order, as the corpus stores its slots.
+    pub(crate) ids: Arc<[EntryId]>,
+    /// The texts of the notes this set's successor dropped, freed with it.
+    pub(crate) _retired: Vec<Arc<str>>,
 }
 
 impl NoteSet {
@@ -18,9 +22,12 @@ impl NoteSet {
     #[must_use]
     pub fn build(entries: Vec<(EntryId, String, Kind)>) -> Self {
         let notes = prepare(entries);
+        let ids = notes.iter().map(|(id, _)| *id).collect();
         Self {
             notes: NoteTable::new(&notes),
+            ids,
             names: NamesSnapshot::build(notes),
+            _retired: Vec::new(),
         }
     }
 

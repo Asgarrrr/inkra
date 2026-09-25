@@ -3,8 +3,8 @@ use std::sync::atomic::AtomicBool;
 use inkra_markdown::links;
 
 use super::NoteIndex;
-use crate::test_support::{id, note_set, rename, vault};
-use crate::{NameQuery, Resolution, Source, match_names};
+use crate::test_support::{entries, id, load, note_set, rename, texts, vault};
+use crate::{NameQuery, Resolution, match_names};
 
 /// Each backlink as (source path, the linked text of each occurrence).
 fn backlinks(
@@ -43,11 +43,12 @@ fn backlinks_group_occurrences_by_source_in_vault_order() {
     let (_fs, vault) = vault(&["a.md", "b.md", "Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(
+    load(
+        &mut index,
         id(&vault, "b.md"),
-        Source::parse("[[Plan]] and [[plan|again]]"),
+        "[[Plan]] and [[plan|again]]",
     );
-    index.insert(id(&vault, "a.md"), Source::parse("[x](Plan.md) [[Other]]"));
+    load(&mut index, id(&vault, "a.md"), "[x](Plan.md) [[Other]]");
 
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
@@ -63,7 +64,7 @@ fn a_note_linking_to_itself_is_its_own_backlink() {
     let (_fs, vault) = vault(&["Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(id(&vault, "Plan.md"), Source::parse("[[Plan]]"));
+    load(&mut index, id(&vault, "Plan.md"), "[[Plan]]");
 
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
@@ -76,7 +77,7 @@ fn a_link_resolving_elsewhere_is_not_a_backlink() {
     let (_fs, vault) = vault(&["src.md", "Plan.md", "work/Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(id(&vault, "src.md"), Source::parse("[[work/Plan]]"));
+    load(&mut index, id(&vault, "src.md"), "[[work/Plan]]");
 
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
     assert_eq!(
@@ -91,15 +92,15 @@ fn replacing_a_source_with_fewer_links_leaves_no_stale_row() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let src = id(&vault, "src.md");
-    index.insert(src, Source::parse("[[x]] [[y]] [[Plan]] [[Plan]]"));
+    load(&mut index, src, "[[x]] [[y]] [[Plan]] [[Plan]]");
     assert!(index.is_indexed(src));
-    index.insert(src, Source::parse("[[Plan]]"));
+    load(&mut index, src, "[[Plan]]");
 
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
         [pair("src.md", &["[[Plan]]"])]
     );
-    index.insert(src, Source::parse("nothing"));
+    load(&mut index, src, "nothing");
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
     assert!(index.by_stem.is_empty());
 }
@@ -110,7 +111,7 @@ fn removing_a_source_drops_its_backlinks() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let src = id(&vault, "src.md");
-    index.insert(src, Source::parse("[[Plan]]"));
+    load(&mut index, src, "[[Plan]]");
     index.remove(src);
 
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
@@ -124,7 +125,7 @@ fn a_rename_moves_backlinks_without_reinserting() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let draft = id(&vault, "Draft.md");
-    index.insert(id(&vault, "src.md"), Source::parse("[[Plan]] [[Final]]"));
+    load(&mut index, id(&vault, "src.md"), "[[Plan]] [[Final]]");
 
     rename(&fs, &mut vault, "Plan.md", "Old.md");
     rename(&fs, &mut vault, "Draft.md", "Final.md");
@@ -144,7 +145,7 @@ fn a_note_gone_from_the_vault_loses_its_source() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let src = id(&vault, "src.md");
-    index.insert(src, Source::parse("[[Plan]]"));
+    load(&mut index, src, "[[Plan]]");
 
     fs.remove(std::path::Path::new(&format!(
         "{}/src.md",
@@ -181,7 +182,7 @@ fn pruning_many_notes_keeps_the_rest() {
         ("keep/c.md", "[[index]] [[keep/a]]"),
     ];
     for (path, text) in sources {
-        index.insert(id(&vault, path), Source::parse(text));
+        load(&mut index, id(&vault, path), text);
     }
     let gone: Vec<_> = ["gone/a.md", "gone/b.md", "gone/c.md"]
         .map(|path| id(&vault, path))
@@ -232,7 +233,7 @@ fn a_source_for_an_unknown_note_is_ignored() {
     let (_fs, vault) = vault(&["Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(inkra_vault::EntryId::DETACHED, Source::parse("[[Plan]]"));
+    load(&mut index, inkra_vault::EntryId::DETACHED, "[[Plan]]");
 
     assert!(!index.is_indexed(inkra_vault::EntryId::DETACHED));
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
@@ -243,7 +244,7 @@ fn backlinks_of_a_folder_or_unknown_id_are_empty() {
     let (_fs, vault) = vault(&["work/Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(id(&vault, "work/Plan.md"), Source::parse("[[work]]"));
+    load(&mut index, id(&vault, "work/Plan.md"), "[[work]]");
 
     assert_eq!(index.backlinks(id(&vault, "work")), []);
     assert_eq!(index.backlinks(inkra_vault::EntryId::DETACHED), []);
@@ -268,7 +269,7 @@ fn resolve_link_parses_then_resolves() {
 }
 
 #[test]
-fn an_insert_after_its_note_left_leaves_no_links() {
+fn an_insert_after_its_note_left_leaves_no_links_and_no_text() {
     let (fs, mut vault) = vault(&["src.md", "Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
@@ -282,10 +283,11 @@ fn an_insert_after_its_note_left_leaves_no_links() {
         panic!("rescan");
     };
     let _ = index.set_notes(note_set(&vault));
-    index.insert(src, Source::parse("[[Plan]]"));
+    load(&mut index, src, "[[Plan]]");
 
     assert!(!index.is_indexed(src));
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
+    assert_eq!(texts(&index.corpus()), []);
 }
 
 /// The paths of the names matching `query`.
@@ -319,8 +321,8 @@ fn the_same_relative_link_from_two_folders_names_two_notes() {
     let (_fs, vault) = vault(&["a/src.md", "a/Plan.md", "b/src.md", "b/Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
-    index.insert(id(&vault, "a/src.md"), Source::parse("[x](Plan.md)"));
-    index.insert(id(&vault, "b/src.md"), Source::parse("[x](Plan.md)"));
+    load(&mut index, id(&vault, "a/src.md"), "[x](Plan.md)");
+    load(&mut index, id(&vault, "b/src.md"), "[x](Plan.md)");
 
     assert_eq!(
         backlinks(&index, &vault, "a/Plan.md"),
@@ -339,6 +341,12 @@ fn set_notes_returns_the_previous_set() {
     let mut index = NoteIndex::default();
 
     assert!(index.set_notes(note_set(&two)).names().is_empty());
-    assert_eq!(index.set_notes(note_set(&three)).names().len(), 2);
+    let previous = index.set_notes(note_set(&three));
+    assert_eq!(previous.names().len(), 2);
+    let ids: Vec<_> = entries(&two).into_iter().map(|(id, _, _)| id).collect();
+    assert_eq!(
+        *previous.ids, *ids,
+        "the previous set's ids, for the caller to free"
+    );
     assert_eq!(index.names().len(), 3);
 }

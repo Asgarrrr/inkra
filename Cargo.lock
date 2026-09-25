@@ -2710,6 +2710,8 @@ dependencies = [
  "inkra-vault",
  "percent-encoding",
  "proptest 1.11.0",
+ "regex",
+ "regex-syntax",
  "unicode-normalization",
 ]
 

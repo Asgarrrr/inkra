@@ -7,7 +7,7 @@ use inkra_vault::{EntryId, Fs, Kind, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
-use crate::{NoteSet, Target};
+use crate::{CorpusSnapshot, NoteIndex, NoteSet, Source, Target};
 
 pub(crate) const ROOT: &str = "/vault";
 
@@ -72,4 +72,33 @@ pub(crate) fn target(text: &str) -> Target {
     let found = links(text);
     assert_eq!(found.len(), 1, "one link in {text:?}");
     Target::parse(&found[0])
+}
+
+/// `id`'s links and text, as a load gives them.
+pub(crate) fn load(index: &mut NoteIndex, id: EntryId, text: &str) {
+    index.insert(id, Source::parse(text), text.into());
+}
+
+/// Each loaded note of `corpus` with its text, in vault order.
+pub(crate) fn texts(corpus: &CorpusSnapshot) -> Vec<(EntryId, String)> {
+    corpus
+        .notes(0..corpus.len())
+        .map(|(id, text)| (id, text.to_owned()))
+        .collect()
+}
+
+/// A corpus of one note per text, in the given order; `None` is a note not loaded.
+pub(crate) fn corpus(texts: &[Option<&str>]) -> (Vec<EntryId>, CorpusSnapshot) {
+    let files: Vec<String> = (0..texts.len()).map(|n| format!("n{n:03}.md")).collect();
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    let (_fs, vault) = vault(&files);
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(note_set(&vault));
+    let ids: Vec<EntryId> = files.iter().map(|file| id(&vault, file)).collect();
+    for (id, text) in ids.iter().zip(texts) {
+        if let Some(text) = text {
+            index.insert(*id, Source::default(), (*text).into());
+        }
+    }
+    (ids, index.corpus())
 }
