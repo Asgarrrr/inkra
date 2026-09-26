@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::NoteIndex;
-use crate::Source;
+use crate::NoteContent;
 use crate::corpus::TEXT_HEADER_BYTES;
 use crate::test_support::{ROOT, id, load, note_set, rename, texts, vault};
 
@@ -94,7 +94,7 @@ fn a_gone_note_s_text_is_freed_with_the_previous_set() {
     let _ = index.set_notes(note_set(&vault));
     let text: Arc<str> = "gone".into();
     let weak = Arc::downgrade(&text);
-    index.insert(id(&vault, "gone.md"), Source::default(), text);
+    index.insert(id(&vault, "gone.md"), NoteContent::parse(text));
 
     fs.remove(std::path::Path::new(&format!("{ROOT}/gone.md")));
     let Ok(()) = futures::executor::block_on(vault.rescan(&fs)) else {

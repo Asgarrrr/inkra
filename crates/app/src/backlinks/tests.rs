@@ -8,7 +8,7 @@ use inkra_vault::{Fs, Kind};
 
 use super::BacklinksPanel;
 use crate::index::IndexSync;
-use crate::test_support::{entry_id, scan_notes};
+use crate::test_support::{entry_id, scan_notes, unscanned_notes};
 use crate::vault::NoteStore;
 
 fn panel(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
@@ -363,4 +363,22 @@ fn a_newline_in_a_source_name_draws_as_a_space(cx: &mut TestAppContext) {
         panel.read_with(cx, |panel, _| panel.source_names()),
         ["a b"]
     );
+}
+
+/// Before the first build no note has backlinks yet: "Indexing…", never "No backlinks".
+#[gpui::test]
+fn a_note_opened_during_the_initial_scan_shows_building(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "");
+    fs.insert_file("/vault/f/b.md", "[[a]]");
+    let gate = fs.block_read_dir("/vault/f");
+    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, notes.clone(), cx)));
+    cx.run_until_parked();
+
+    show(cx, &notes, &panel, "a");
+
+    assert!(panel.read_with(cx, |panel, _| panel.building));
+    gate.release();
 }

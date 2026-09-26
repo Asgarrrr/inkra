@@ -11,26 +11,34 @@ pub(crate) const SLOT_BYTES: usize = mem::size_of::<Option<Arc<str>>>() + mem::s
 /// What a loaded text costs beyond its bytes: its `Arc`'s strong and weak counts.
 pub(crate) const TEXT_HEADER_BYTES: usize = 2 * mem::size_of::<usize>();
 
+/// Slots per chunk; a write under a held snapshot copies one chunk.
+const CHUNK: usize = 256;
+
+/// `CHUNK` consecutive slots, fewer in the last chunk.
+type Chunk = Arc<[Option<Arc<str>>]>;
+
 /// Every note's saved text in vault order; `None` is a note not loaded yet.
 #[derive(Default)]
 pub(crate) struct Corpus {
     ids: Arc<[EntryId]>,
-    texts: Arc<Vec<Option<Arc<str>>>>,
+    texts: Arc<[Chunk]>,
     text_bytes: usize,
 }
 
 impl Corpus {
-    /// Copies the pointers only while a snapshot holds them. Ignored past the end.
+    /// Copies the chunk list and one chunk only while a snapshot holds them. Ignored past the end.
     pub(crate) fn set(&mut self, at: usize, text: Option<Arc<str>>) {
-        // `None` over `None` would copy the pointers for nothing while a snapshot is held.
+        let (chunk, at) = (at / CHUNK, at % CHUNK);
+        // `None` over `None` would copy a chunk for nothing while a snapshot is held.
         if self
             .texts
-            .get(at)
+            .get(chunk)
+            .and_then(|chunk| chunk.get(at))
             .is_none_or(|slot| slot.is_none() && text.is_none())
         {
             return;
         }
-        let slot = &mut Arc::make_mut(&mut self.texts)[at];
+        let slot = &mut Arc::make_mut(&mut Arc::make_mut(&mut self.texts)[chunk])[at];
         self.text_bytes -= cost(slot.as_deref());
         self.text_bytes += cost(text.as_deref());
         *slot = text;
@@ -43,18 +51,32 @@ impl Corpus {
         ids: Arc<[EntryId]>,
         order: impl Fn(EntryId) -> usize,
     ) -> (Arc<[EntryId]>, Vec<Arc<str>>) {
-        let previous = Arc::make_mut(&mut self.texts);
+        let mut previous: Vec<&mut [Option<Arc<str>>]> = Arc::make_mut(&mut self.texts)
+            .iter_mut()
+            .map(Arc::make_mut)
+            .collect();
         let mut text_bytes = 0;
         let texts = ids
-            .iter()
-            .map(|&id| {
-                let text = previous.get_mut(order(id)).and_then(Option::take);
-                text_bytes += cost(text.as_deref());
-                text
+            .chunks(CHUNK)
+            .map(|ids| {
+                ids.iter()
+                    .map(|&id| {
+                        let at = order(id);
+                        let text = previous
+                            .get_mut(at / CHUNK)
+                            .and_then(|chunk| chunk.get_mut(at % CHUNK))
+                            .and_then(Option::take);
+                        text_bytes += cost(text.as_deref());
+                        text
+                    })
+                    .collect()
             })
             .collect();
-        let retired = previous.drain(..).flatten().collect();
-        self.texts = Arc::new(texts);
+        let retired = previous
+            .into_iter()
+            .flat_map(|chunk| chunk.iter_mut().filter_map(Option::take))
+            .collect();
+        self.texts = texts;
         self.text_bytes = text_bytes;
         (mem::replace(&mut self.ids, ids), retired)
     }
@@ -76,7 +98,7 @@ fn cost(text: Option<&str>) -> usize {
 #[derive(Clone, Default)]
 pub struct CorpusSnapshot {
     ids: Arc<[EntryId]>,
-    texts: Arc<Vec<Option<Arc<str>>>>,
+    texts: Arc<[Chunk]>,
     heap_bytes: usize,
 }
 
@@ -104,9 +126,13 @@ impl CorpusSnapshot {
     }
 
     pub(crate) fn notes(&self, range: Range<usize>) -> impl Iterator<Item = (EntryId, &str)> {
-        self.ids[range.clone()]
+        let texts = self.texts[range.start / CHUNK..]
             .iter()
-            .zip(&self.texts[range])
+            .flat_map(|chunk| chunk.iter())
+            .skip(range.start % CHUNK);
+        self.ids[range]
+            .iter()
+            .zip(texts)
             .filter_map(|(id, text)| Some((*id, text.as_deref()?)))
     }
 }

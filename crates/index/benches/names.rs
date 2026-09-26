@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::Path;
-use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{
-    NameMatch, NameQuery, NamesSnapshot, NoteIndex, NoteSet, Source, match_names, merge_names,
+    NameMatch, NameQuery, NamesSnapshot, NoteContent, NoteIndex, NoteSet, match_names, merge_names,
 };
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
@@ -142,7 +142,7 @@ fn bench_set_notes(c: &mut Criterion) {
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, _, kind) in ENTRIES.iter() {
         if *kind == Kind::Note {
-            index.insert(*id, Source::parse(""), "".into());
+            index.insert(*id, NoteContent::parse("".into()));
         }
     }
     let mut group = c.benchmark_group("set_notes");
@@ -167,13 +167,13 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
         .filter(|(_, _, kind)| *kind == Kind::Note)
         .map(|(id, _, _)| *id)
         .collect();
-    let sources: Vec<Source> = (0..notes.len())
-        .map(|n| Source::parse(&format!("[[note {}]] [[index]]", n + 1)))
+    let texts: Vec<Arc<str>> = (0..notes.len())
+        .map(|n| format!("[[note {}]] [[index]]", n + 1).into())
         .collect();
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
-    for (id, source) in notes.iter().zip(&sources) {
-        index.insert(*id, source.clone(), "".into());
+    for (id, text) in notes.iter().zip(&texts) {
+        index.insert(*id, NoteContent::parse(Arc::clone(text)));
     }
 
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -215,8 +215,8 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
                     let full = black_box(index.set_notes(set));
                     total += start.elapsed();
                     partial = Some(index.set_notes(full));
-                    for (id, source) in notes[..count].iter().zip(&sources) {
-                        index.insert(*id, source.clone(), "".into());
+                    for (id, text) in notes[..count].iter().zip(&texts) {
+                        index.insert(*id, NoteContent::parse(Arc::clone(text)));
                     }
                 }
                 total
@@ -233,7 +233,7 @@ fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     for (n, (id, _, kind)) in ENTRIES.iter().enumerate() {
         if *kind == Kind::Note {
             let text = format!("note {n}\n");
-            index.insert(*id, Source::parse(&text), text.into());
+            index.insert(*id, NoteContent::parse(text.into()));
         }
     }
     let mut other = Some(NoteSet::build(ENTRIES.clone()));

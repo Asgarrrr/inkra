@@ -431,3 +431,16 @@ fn create_makes_a_folder_the_scan_lists() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Dir);
 }
+
+#[test]
+fn check_dir_accepts_a_folder_and_refuses_the_rest() {
+    let dir = TempDir::new("check-dir");
+    fs::write(dir.0.join("a.md"), "").expect("write");
+
+    assert!(block_on(RealFs.check_dir(&dir.0)).is_ok());
+    assert!(
+        block_on(RealFs.check_dir(&dir.0.join("a.md"))).is_err(),
+        "a file"
+    );
+    assert!(block_on(RealFs.check_dir(&dir.0.join("missing"))).is_err());
+}

@@ -7,13 +7,14 @@ use inkra_vault::{EntryId, Fs, Kind, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
-use crate::{CorpusSnapshot, NoteIndex, NoteSet, Source, Target};
+use crate::{CorpusSnapshot, NoteContent, NoteIndex, NoteSet, Target};
 
 pub(crate) const ROOT: &str = "/vault";
 
 /// A scanned vault holding `files`, each relative to the root.
 pub(crate) fn vault(files: &[&str]) -> (MemFs, Vault) {
     let fs = MemFs::new();
+    fs.insert_dir(ROOT);
     for file in files {
         fs.insert_file(format!("{ROOT}/{file}"), "");
     }
@@ -74,9 +75,9 @@ pub(crate) fn target(text: &str) -> Target {
     Target::parse(&found[0])
 }
 
-/// `id`'s links and text, as a load gives them.
+/// `id`'s links, text and words, as a load gives them.
 pub(crate) fn load(index: &mut NoteIndex, id: EntryId, text: &str) {
-    index.insert(id, Source::parse(text), text.into());
+    index.insert(id, NoteContent::parse(text.into()));
 }
 
 /// Each loaded note of `corpus` with its text, in vault order.
@@ -87,8 +88,8 @@ pub(crate) fn texts(corpus: &CorpusSnapshot) -> Vec<(EntryId, String)> {
         .collect()
 }
 
-/// A corpus of one note per text, in the given order; `None` is a note not loaded.
-pub(crate) fn corpus(texts: &[Option<&str>]) -> (Vec<EntryId>, CorpusSnapshot) {
+/// An index of one note per text, in the given order; `None` is a note not loaded.
+pub(crate) fn indexed(texts: &[Option<&str>]) -> (Vec<EntryId>, NoteIndex) {
     let files: Vec<String> = (0..texts.len()).map(|n| format!("n{n:03}.md")).collect();
     let files: Vec<&str> = files.iter().map(String::as_str).collect();
     let (_fs, vault) = vault(&files);
@@ -97,8 +98,14 @@ pub(crate) fn corpus(texts: &[Option<&str>]) -> (Vec<EntryId>, CorpusSnapshot) {
     let ids: Vec<EntryId> = files.iter().map(|file| id(&vault, file)).collect();
     for (id, text) in ids.iter().zip(texts) {
         if let Some(text) = text {
-            index.insert(*id, Source::default(), (*text).into());
+            load(&mut index, *id, text);
         }
     }
+    (ids, index)
+}
+
+/// A corpus of one note per text, in the given order; `None` is a note not loaded.
+pub(crate) fn corpus(texts: &[Option<&str>]) -> (Vec<EntryId>, CorpusSnapshot) {
+    let (ids, index) = indexed(texts);
     (ids, index.corpus())
 }

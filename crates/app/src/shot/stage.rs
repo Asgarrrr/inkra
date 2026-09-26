@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{Focusable, Pixels, Point, VisualTestAppContext, WindowHandle};
 use image::RgbaImage;
-use inkra_vault::mem_fs::MemFs;
+use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{Fs, Vault};
 
 use crate::Quit;
@@ -16,6 +16,8 @@ const VAULT_ROOT: &str = "/vault";
 
 pub(crate) struct Stage {
     cx: VisualTestAppContext,
+    /// Held walks, released on drop, after the shot.
+    gates: Vec<Gate>,
 }
 
 impl Stage {
@@ -27,7 +29,10 @@ impl Stage {
             cx.bind_keys(key_bindings());
             cx.on_action(|_: &Quit, cx| cx.quit());
         });
-        Self { cx }
+        Self {
+            cx,
+            gates: Vec::new(),
+        }
     }
 
     pub(crate) fn open_nothing(&mut self) -> WindowHandle<AppShell> {
@@ -51,6 +56,21 @@ impl Stage {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
         self.open(fs, Launch::Vault(scanned))
+    }
+
+    /// A vault the store scans behind the first frame; the walk is held at `held`, so the shot shows the root level only.
+    pub(crate) fn open_unscanned_vault(
+        &mut self,
+        files: &[(&str, &str)],
+        held: &str,
+    ) -> WindowHandle<AppShell> {
+        let fs = Arc::new(MemFs::new());
+        for (path, text) in files {
+            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
+        }
+        self.gates
+            .push(fs.block_read_dir(PathBuf::from(VAULT_ROOT).join(held)));
+        self.open(fs, Launch::Vault(Vault::new(Path::new(VAULT_ROOT))))
     }
 
     /// The one door to a window: every scene gets `WINDOW_SIZE`, never a literal of its own.
@@ -117,5 +137,13 @@ impl Stage {
 
     fn settle(&mut self) {
         self.cx.run_until_parked();
+    }
+}
+
+impl Drop for Stage {
+    /// A walk still held owns a vault handle, which gpui reports as leaked when the app drops.
+    fn drop(&mut self) {
+        self.gates.clear();
+        self.settle();
     }
 }

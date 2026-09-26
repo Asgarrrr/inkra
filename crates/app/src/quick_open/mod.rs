@@ -28,7 +28,9 @@ const LIMIT: usize = 100;
 /// Waited only while a search runs, so an idle picker answers the first keystroke at once.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
 /// After the names change, as Zed's file finder waits after a worktree update.
-const NOTES_CHANGED_REFRESH: Duration = Duration::from_millis(200);
+pub(crate) const NOTES_CHANGED_REFRESH: Duration = Duration::from_millis(200);
+
+const SCANNING: &str = "Scanning the vault…";
 
 impl EventEmitter<NoteActivated> for Picker<QuickOpenDelegate> {}
 
@@ -37,9 +39,7 @@ pub(crate) struct QuickOpenDelegate {
     showing: Option<EntryId>,
     recent: Vec<EntryId>,
     matches: Vec<NameMatch>,
-    /// False until the first result, so no empty text flashes before it.
-    searched: bool,
-    query_is_empty: bool,
+    answered: Answered,
     /// Set by the next query and on drop: a scan already running on another thread ignores a dropped task.
     cancel: Arc<AtomicBool>,
     search_id: u64,
@@ -47,6 +47,27 @@ pub(crate) struct QuickOpenDelegate {
     /// Set by `NotesChanged` for the next run only.
     next_run: Run,
     _notes_changed: Subscription,
+}
+
+/// What the empty text answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answered {
+    /// Before the first result, so no empty text flashes before it.
+    Nothing,
+    /// The vault's first scan and build have not applied: there are no names to search.
+    Scanning,
+    /// An empty query: the recent notes.
+    Recent,
+    Query,
+}
+
+/// One run of `update_matches`, applied once its matches arrive.
+#[derive(Clone, Copy)]
+struct Search {
+    id: u64,
+    run: Run,
+    answers: Answered,
+    started: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +86,10 @@ impl QuickOpenDelegate {
     ) -> Self {
         // Names change only when a build applies; a load changes none.
         let notes_changed = cx.subscribe(links, |picker, _, _: &NotesChanged, cx| {
-            picker.delegate.next_run = Run::Refresh;
+            // The first names after the scan list at once: the user is waiting, and nothing is selected.
+            if picker.delegate.answered != Answered::Scanning {
+                picker.delegate.next_run = Run::Refresh;
+            }
             picker.refresh(cx);
         });
         Self {
@@ -73,8 +97,7 @@ impl QuickOpenDelegate {
             showing,
             recent,
             matches: Vec::new(),
-            searched: false,
-            query_is_empty: true,
+            answered: Answered::Nothing,
             cancel: Arc::new(AtomicBool::new(false)),
             search_id: 0,
             running: false,
@@ -85,13 +108,16 @@ impl QuickOpenDelegate {
 
     fn apply(
         picker: &mut Picker<Self>,
-        id: u64,
+        search: Search,
         matches: Vec<NameMatch>,
-        query_is_empty: bool,
-        run: Run,
-        started: Instant,
         cx: &mut Context<Picker<Self>>,
     ) {
+        let Search {
+            id,
+            run,
+            answers,
+            started,
+        } = search;
         if id != picker.delegate.search_id {
             return;
         }
@@ -103,8 +129,7 @@ impl QuickOpenDelegate {
             .map(|found| found.id);
         let this = &mut picker.delegate;
         this.running = false;
-        this.searched = true;
-        this.query_is_empty = query_is_empty;
+        this.answered = answers;
         let select = kept
             .and_then(|kept| matches.iter().position(|found| found.id == kept))
             .unwrap_or(0);
@@ -140,11 +165,12 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn empty_text(&self) -> Option<&'static str> {
-        self.searched.then_some(if self.query_is_empty {
-            "No recent notes"
-        } else {
-            "No matching notes"
-        })
+        match self.answered {
+            Answered::Nothing => None,
+            Answered::Scanning => Some(SCANNING),
+            Answered::Recent => Some("No recent notes"),
+            Answered::Query => Some("No matching notes"),
+        }
     }
 
     fn match_count(&self) -> usize {
@@ -161,6 +187,18 @@ impl PickerDelegate for QuickOpenDelegate {
         self.search_id += 1;
         let (id, cancel) = (self.search_id, Arc::clone(&self.cancel));
         let run = std::mem::replace(&mut self.next_run, Run::Search);
+        if self.links.read(cx).awaits_first_build() {
+            // Nothing to list yet; `NotesChanged` re-runs the query once the first build applies.
+            self.answered = Answered::Scanning;
+            self.matches.clear();
+            return cx.spawn(async move |picker, cx| {
+                let _ = picker.update(cx, |picker, cx| {
+                    if picker.delegate.search_id == id {
+                        picker.matches_updated(0, cx);
+                    }
+                });
+            });
+        }
         let wait = match run {
             Run::Refresh => Some(NOTES_CHANGED_REFRESH),
             Run::Search => self.running.then_some(SEARCH_DEBOUNCE),
@@ -168,9 +206,17 @@ impl PickerDelegate for QuickOpenDelegate {
         self.running = true;
         let names = self.links.read(cx).index().names();
         let query = Arc::new(NameQuery::new(query, self.showing, &self.recent));
-        let query_is_empty = query.is_empty();
+        let search = Search {
+            id,
+            run,
+            answers: if query.is_empty() {
+                Answered::Recent
+            } else {
+                Answered::Query
+            },
+            started: Instant::now(),
+        };
         let cpus = cx.background_executor().num_cpus();
-        let started = Instant::now();
         cx.spawn(async move |picker, cx| {
             if let Some(wait) = wait {
                 cx.background_executor().timer(wait).await;
@@ -191,7 +237,7 @@ impl PickerDelegate for QuickOpenDelegate {
             }
             let matches = merge_names(found, LIMIT);
             let _ = picker.update(cx, |picker, cx| {
-                Self::apply(picker, id, matches, query_is_empty, run, started, cx);
+                Self::apply(picker, search, matches, cx);
             });
         })
     }

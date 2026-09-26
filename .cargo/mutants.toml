@@ -17,12 +17,12 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # so `offset.0 < touched_end` is false and the conjunction is false either way.
 #
 # Matched by function, not line, for the same reason.
+# Equivalent. The `Options` flags in `options` are pairwise disjoint bits in
+# pulldown-cmark 0.13.4, so `^` and `|` give the same set.
+#
 # Equivalent. `backlinks` shares a result per written target without allocating,
 # except for a relative link; forcing every link down the allocating path gives
 # the same resolutions.
-#
-# Equivalent. The `Options` flags in `options` are pairwise disjoint bits in
-# pulldown-cmark 0.13.4, so `^` and `|` give the same set.
 #
 # Equivalent. `fits` and the `CharBag` test only skip the DP early: the DP finds
 # no alignment for a note they would reject, so `score` returns `None` anyway.
@@ -32,20 +32,50 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # (`i32::MIN`, no overflow) and `true` admit only cells that lose every `max`
 # to a real one or that no real score equals; `fits` guarantees a real one.
 #
-# Equivalent. Each seq comes from `next_seq` once and is applied or forgotten at
-# most once, so `seq == last` never happens and `<` equals `<=`.
+# Matched by column: the other `||` in `representative` is not equivalent.
+# Equivalent. With `&&`, a cased ASCII char or an uncased non-ASCII one reaches the
+# lookup, but `REPRESENTATIVES` holds only cased chars from U+0080 up, so it returns `c`.
+#
+# Equivalent. `merged` joins a segment's alive postings with fresh ones, and an ordinal is
+# alive or fresh, never both, so no two items are equal and `<=` picks as `<` does.
+#
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
-# which keeps this config, so this entry applies.
+# which keeps this config, so the entries below apply.
 #
 # Unobservable headlessly. These offsets place the caret and selection quads,
 # which reach only the scene; a `#[gpui::test]` window has no renderer and
 # exposes no scene (gpui platform/test/window.rs `draw`), so only a shot shows them.
+#
+# Equivalent only while `LOADS_PER_CORE` is 1; revisit if it changes.
+#
+# Equivalent. `next_load` never starts a second load for a note already in
+# flight, and each seq is minted once, so the id alone and the seq alone each
+# find the same `Loading` entry.
+#
+# Unobservable. The apply budget is wall time: a turn whose elapsed time equals
+# the budget exactly cannot be staged in a test.
+#
+# Unobservable. The timeline line goes to stderr only; `||` prints it on every
+# mark in release and whenever the line is due in a test, and no test reads stderr.
+#
+# Equivalent. `step` takes only 1 or -1 (`select_next`, `select_prev`), so
+# `delta >= 0` and `delta > 0` agree on every call.
+#
+# Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
+# one after another, so the first drains the queue: 0 and 1 give the same walk.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
     "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in NoteIndex::backlinks$",
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (fits -> bool with true|\\|\\| with && in score)$",
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
-    "^crates/app/src/index\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::(forget|apply)$",
+    "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",
+    "^crates/index/src/words/segment\\.rs:[0-9]+:[0-9]+: replace < with <= in merged$",
     "^crates/app/src/field\\.rs:[0-9]+:[0-9]+: replace \\+ with - in <impl Element for FieldElement>::prepaint$",
+    "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace \\* with / in IndexSync::load_more$",
+    "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in IndexSync::apply_landed$",
+    "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
+    "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
+    "^crates/app/src/sidebar/tree\\.rs:[0-9]+:[0-9]+: replace > with >= in Sidebar::step$",
+    "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
 ]

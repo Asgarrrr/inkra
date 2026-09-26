@@ -8,7 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 use super::NoteIndex;
 use crate::key::{Key, strip_md};
 use crate::test_support::{id, note_set, try_rename, vault};
-use crate::{Resolution, Source, Style, Target};
+use crate::{NoteContent, Resolution, Source, Style, Target};
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -19,6 +19,10 @@ enum Op {
     Unload(String),
     Build,
     Hold,
+    Merge,
+    StartMerge,
+    ApplyMerge,
+    DropMerge,
 }
 
 fn small() -> impl Strategy<Value = String> {
@@ -31,11 +35,15 @@ fn op() -> impl Strategy<Value = Op> {
         small().prop_map(Op::Create),
         small().prop_map(Op::Delete),
         (small(), small()).prop_map(|(a, b)| Op::Rename(a, b)),
-        (small(), "[a-cé]{0,6}").prop_map(|(a, t)| Op::Load(a, t)),
-        (small(), "[a-cé]{0,6}").prop_map(|(a, t)| Op::Load(a, t)),
+        (small(), "[a-céÉ' ]{0,12}").prop_map(|(a, t)| Op::Load(a, t)),
+        (small(), "[a-céÉ' ]{0,12}").prop_map(|(a, t)| Op::Load(a, t)),
         small().prop_map(Op::Unload),
         Just(Op::Build),
         Just(Op::Hold),
+        Just(Op::Merge),
+        Just(Op::StartMerge),
+        Just(Op::ApplyMerge),
+        Just(Op::DropMerge),
     ]
 }
 
@@ -45,12 +53,15 @@ proptest! {
         use std::collections::HashMap;
         use crate::corpus::{SLOT_BYTES, TEXT_HEADER_BYTES};
         use crate::test_support::{ROOT, texts};
+        use crate::words::{NoteWords, Words};
         let (fs, mut vault) = vault(&["a.md"]);
         let mut index = NoteIndex::default();
         let _ = index.set_notes(note_set(&vault));
         let mut table: Vec<EntryId> = Model::new(&vault).notes.iter().map(|n| n.0).collect();
         let mut model: HashMap<EntryId, String> = HashMap::new();
         let mut held = Vec::new();
+        let mut held_words = Vec::new();
+        let mut running = None;
         let find = |vault: &Vault, path: &str| {
             vault.entries().find(|e| e.path.as_path() == std::path::Path::new(path) && e.kind == Kind::Note).map(|e| e.id)
         };
@@ -69,7 +80,7 @@ proptest! {
                 }
                 Op::Load(path, text) => {
                     if let Some(id) = find(&vault, &path) {
-                        index.insert(id, Source::default(), text.as_str().into());
+                        index.insert(id, NoteContent::parse(text.as_str().into()));
                         if table.contains(&id) {
                             model.insert(id, text);
                         }
@@ -90,7 +101,22 @@ proptest! {
                     let snap = index.corpus();
                     let seen = texts(&snap);
                     held.push((snap, seen));
+                    let words = index.words();
+                    let seen = words.entries();
+                    held_words.push((words, seen));
                 }
+                Op::Merge => index.merge_all(),
+                Op::StartMerge => {
+                    let started = index.words.start_merge();
+                    prop_assert!(running.is_none() || started.is_none(), "one merge at a time");
+                    running = running.or(started);
+                }
+                Op::ApplyMerge => {
+                    if let Some(merge) = running.take() {
+                        let _ = index.words_apply(merge.run());
+                    }
+                }
+                Op::DropMerge => drop(running.take()),
             }
             let corpus = index.corpus();
             let expected: Vec<(EntryId, String)> = table
@@ -103,6 +129,17 @@ proptest! {
             prop_assert_eq!(corpus.heap_bytes(), table.len() * SLOT_BYTES + model.len() * TEXT_HEADER_BYTES + bytes);
             for (snap, seen) in &held {
                 prop_assert_eq!(&texts(snap), seen);
+            }
+            let fresh = {
+                let mut words = Words::default();
+                for (id, text) in &model {
+                    words.set(*id, NoteWords::parse(text));
+                }
+                words.snapshot().entries()
+            };
+            prop_assert_eq!(index.words().entries(), fresh);
+            for (snap, seen) in &held_words {
+                prop_assert_eq!(&snap.entries(), seen);
             }
         }
     }
@@ -279,8 +316,16 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
     }
 }
 
+/// `PROPTEST_CASES` when it parses, else 96: fewer than proptest's default, as each case is slow.
+fn cases() -> u32 {
+    std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|cases| cases.parse().ok())
+        .unwrap_or(96)
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(96))]
+    #![proptest_config(ProptestConfig::with_cases(cases()))]
 
     #[test]
     fn the_index_agrees_with_a_scan_of_every_note(
@@ -300,8 +345,8 @@ proptest! {
                 (id(&vault, file), Source::parse(&text), text)
             })
             .collect();
-        for (source, parsed, text) in &loaded {
-            index.insert(*source, parsed.clone(), text.as_str().into());
+        for (source, _, text) in &loaded {
+            index.insert(*source, NoteContent::parse(text.as_str().into()));
         }
         let sources: Vec<(EntryId, Source)> = loaded
             .into_iter()

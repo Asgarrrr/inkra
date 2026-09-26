@@ -2,17 +2,56 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
 
+use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{AppContext as _, AsyncApp, Context, Entity, EventEmitter, Subscription, WeakEntity};
-use inkra_index::{NoteIndex, NoteSet, Source};
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Vault};
+use inkra_index::{NoteContent, NoteIndex, NoteSet};
+use inkra_vault::{Entry, EntryId, Fs, Kind, Mtime, Vault};
 
+use crate::timeline::{Step, Timeline, timed};
 use crate::vault::{NoteSaved, NoteStore};
+
+mod loading;
+mod merging;
+
+use loading::{Landed, Loading};
 
 /// A build applied: note names and link resolution may have changed.
 pub(crate) struct NotesChanged;
 
 impl EventEmitter<NotesChanged> for IndexSync {}
+
+/// A build of the vault's notes, with the inputs of `apply_notes`'s diff, derived off the foreground.
+struct Built {
+    notes: NoteSet,
+    /// Every note's id and mtime, in vault order.
+    mtimes: Vec<(EntryId, Mtime)>,
+    live: HashSet<EntryId>,
+}
+
+impl Built {
+    fn new(entries: &[Entry]) -> Self {
+        let named = entries
+            .iter()
+            .map(|entry| {
+                let path = entry.path.as_path().to_string_lossy().into_owned();
+                (entry.id, path, entry.kind)
+            })
+            .collect();
+        let mtimes: Vec<(EntryId, Mtime)> = entries
+            .iter()
+            .filter(|entry| entry.kind == Kind::Note)
+            .map(|entry| (entry.id, entry.mtime))
+            .collect();
+        let live = mtimes.iter().map(|(id, _)| *id).collect();
+        Self {
+            notes: NoteSet::build(named),
+            mtimes,
+            live,
+        }
+    }
+}
 
 pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
@@ -23,19 +62,32 @@ pub(crate) struct IndexSync {
     /// The mtime each note was indexed at, or is queued to be.
     indexed: HashMap<EntryId, Mtime>,
     /// One counter orders loads and writes, as `NoteStore::next_write` orders writes.
-    applied: HashMap<EntryId, u64>,
     next_seq: u64,
+    /// The latest seq minted per note: only a load or save carrying it acts; an older one is superseded.
+    latest: HashMap<EntryId, u64>,
     queue: VecDeque<(EntryId, u64)>,
     /// The latest sequence queued per note; an older queue entry for it is skipped.
     queued: HashMap<EntryId, u64>,
-    /// One note at a time, so a large vault does not open every file at once.
-    working: bool,
     /// Builds started; a build applies only if it is still the latest.
     generation: u64,
-    /// The generation `index` holds.
-    built: u64,
-    /// The note whose load is in flight: popped from `queue`, not applied yet.
-    loading: Option<EntryId>,
+    /// The generation `index` holds; `None` before the first build applies.
+    built: Option<u64>,
+    /// At most one per core, each counted until the foreground applies it.
+    loading: Vec<Loading>,
+    /// Where a finished load goes; `drain` applies it on the foreground.
+    landed: UnboundedSender<Landed>,
+    /// Replaces `APPLY_BUDGET`; zero makes each turn apply one load.
+    #[cfg(test)]
+    apply_budget: Option<std::time::Duration>,
+    #[cfg(test)]
+    turns: usize,
+    #[cfg(test)]
+    merges: usize,
+    /// The startup load's last turn left nothing building; cleared once the settle merge it asks
+    /// for applies, or finds nothing to merge.
+    settling: bool,
+    /// The `Indexed` mark is taken; every later turn skips it.
+    marked_indexed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -47,20 +99,32 @@ impl IndexSync {
         if let Some(vault) = &vault {
             subscriptions.push(cx.observe(vault, |this, _, cx| this.reconcile(cx)));
         }
+        let (landed, arrivals) = unbounded();
+        // Detached: it holds only a weak handle, so it ends when this entity does.
+        cx.spawn(async move |this, cx| Self::drain(this, arrivals, cx).await)
+            .detach();
         let mut sync = Self {
             fs,
             vault,
             index: NoteIndex::default(),
             revision: 0,
             indexed: HashMap::new(),
-            applied: HashMap::new(),
             next_seq: 0,
+            latest: HashMap::new(),
             queue: VecDeque::new(),
             queued: HashMap::new(),
-            working: false,
             generation: 0,
-            built: 0,
-            loading: None,
+            built: None,
+            loading: Vec::new(),
+            landed,
+            #[cfg(test)]
+            apply_budget: None,
+            #[cfg(test)]
+            turns: 0,
+            #[cfg(test)]
+            merges: 0,
+            settling: false,
+            marked_indexed: false,
             _subscriptions: subscriptions,
         };
         sync.reconcile(cx);
@@ -85,21 +149,35 @@ impl IndexSync {
     /// `(loaded, total)`: the notes of the last build, less those queued or loading.
     pub(crate) fn progress(&self) -> (usize, usize) {
         let total = self.index.names().len();
-        // A note re-queued while its load is in flight is one note pending, not two.
-        let loading = self.loading.filter(|id| !self.queued.contains_key(id));
-        let pending = self.queued.len() + usize::from(loading.is_some());
+        // A note loading and queued again is one note pending.
+        let loading = self
+            .loading
+            .iter()
+            .filter(|load| load.live && !self.queued.contains_key(&load.id))
+            .count();
+        let pending = self.queued.len() + loading;
         (total.saturating_sub(pending), total)
     }
 
     /// True before the first build applies or while loads are pending; a rebuild alone is not.
     pub(crate) fn is_building(&self) -> bool {
         let (loaded, total) = self.progress();
-        (self.generation != 0 && self.built == 0) || loaded < total
+        self.awaits_first_build() || loaded < total
     }
 
-    fn next_seq(&mut self) -> u64 {
+    /// Until the first build after the vault's full scan applies, there are no names to list.
+    pub(crate) fn awaits_first_build(&self) -> bool {
+        self.vault.is_some() && self.built.is_none()
+    }
+
+    fn next_seq(&mut self, id: EntryId) -> u64 {
         self.next_seq += 1;
+        self.latest.insert(id, self.next_seq);
         self.next_seq
+    }
+
+    fn is_latest(&self, id: EntryId, seq: u64) -> bool {
+        self.latest.get(&id) == Some(&seq)
     }
 
     /// Builds the notes off the foreground; `apply_notes` swaps them in.
@@ -107,170 +185,150 @@ impl IndexSync {
         let Some(vault) = &self.vault else {
             return;
         };
-        let entries: Vec<(EntryId, String, Kind)> = vault
-            .read(cx)
-            .entries()
-            .map(|entry| {
-                let path = entry.path.as_path().to_string_lossy().into_owned();
-                (entry.id, path, entry.kind)
-            })
-            .collect();
-        self.generation += 1;
-        let generation = self.generation;
-        let build = cx.background_spawn(async move { NoteSet::build(entries) });
-        // Detached: it holds only a weak handle, so it ends when this entity does.
-        cx.spawn(async move |this, cx| {
-            let notes = build.await;
-            let _ = this.update(cx, |this, cx| this.apply_notes(generation, notes, cx));
-        })
-        .detach();
-    }
-
-    /// Applies a build unless a newer one started, then queues every note whose mtime differs
-    /// from the one it was indexed at.
-    fn apply_notes(&mut self, generation: u64, notes: NoteSet, cx: &mut Context<Self>) {
-        if generation != self.generation {
-            // As costly to free as the set a build replaces.
-            cx.background_spawn(async move { drop(notes) }).detach();
+        // One build, after the full scan: the root pass alone would cost a build the next swap discards.
+        if !vault.read(cx).is_scanned() {
             return;
         }
-        self.built = generation;
+        let started = Instant::now();
+        let entries = vault.read(cx).shared_entries();
+        self.generation += 1;
+        let (generation, seq) = (self.generation, self.next_seq);
+        let building = cx.background_spawn(async move { Built::new(&entries) });
+        // Detached: it holds only a weak handle, so it ends when this entity does.
+        cx.spawn(async move |this, cx| {
+            let built = building.await;
+            Self::timed_turn(&this, cx, |this, cx| {
+                this.apply_notes(generation, seq, built, cx);
+            });
+        })
+        .detach();
+        Timeline::turn(started.elapsed(), cx);
+        // Before the first build applies `is_building` holds, so this marks nothing yet.
+        self.mark_indexed(cx);
+    }
+
+    /// Applies a build unless a newer one started, then queues each changed note; `seq` is the counter at its read.
+    fn apply_notes(&mut self, generation: u64, seq: u64, built: Built, cx: &mut Context<Self>) {
+        if generation != self.generation {
+            // As costly to free as the set a build replaces.
+            cx.background_spawn(async move { drop(built) }).detach();
+            return;
+        }
+        let Built {
+            notes,
+            mtimes,
+            live,
+        } = built;
+        self.built = Some(generation);
         let previous = self.index.set_notes(notes);
         self.revision += 1;
+        Timeline::mark(Step::NamesReady, cx);
         // Freeing a 50k table takes about 9 ms, over the foreground budget.
         cx.background_spawn(async move { drop(previous) }).detach();
         cx.emit(NotesChanged);
-        let Some(vault) = self.vault.clone() else {
-            return;
-        };
-        let vault = vault.read(cx);
-        let notes: Vec<(EntryId, Mtime)> = vault
-            .entries()
-            .filter(|entry| entry.kind == Kind::Note)
-            .map(|entry| (entry.id, entry.mtime))
-            .collect();
-        let live: HashSet<EntryId> = notes.iter().map(|(id, _)| *id).collect();
         self.indexed.retain(|id, _| live.contains(id));
-        self.applied.retain(|id, _| live.contains(id));
+        self.latest.retain(|id, _| live.contains(id));
         self.queued.retain(|id, _| live.contains(id));
-        // A gone note is not pending; the worker still clears `loading` when its load returns.
-        if self.loading.is_some_and(|id| !live.contains(&id)) {
-            self.loading = None;
+        // A load in flight for a note gone is not pending; it keeps its slot until it lands.
+        for load in &mut self.loading {
+            load.live &= live.contains(&load.id);
         }
-        for (id, mtime) in notes {
-            if self.indexed.get(&id) != Some(&mtime) {
+        // Reserved for the notes not yet indexed, so no insert rehashes (open-first spec, O7).
+        let missing = mtimes.len().saturating_sub(self.indexed.len());
+        self.indexed.reserve(missing);
+        self.latest.reserve(missing);
+        self.queued.reserve(missing);
+        self.queue.reserve(missing);
+        for (id, mtime) in mtimes {
+            // A save since the build read the vault holds a newer mtime than the build's.
+            let current = self.indexed.get(&id).is_some_and(|&indexed| {
+                indexed == mtime || self.latest.get(&id).is_some_and(|&latest| latest > seq)
+            });
+            if !current {
                 self.indexed.insert(id, mtime);
-                let seq = self.next_seq();
-                self.queue.push_back((id, seq));
-                self.queued.insert(id, seq);
+                self.queue_load(id);
             }
         }
-        if !self.working && !self.queue.is_empty() {
-            self.working = true;
-            // Detached: it holds only a weak handle, so it ends when this entity does.
-            cx.spawn(async move |this, cx| Self::work(this, cx).await)
-                .detach();
-        }
+        cx.background_spawn(async move { drop(live) }).detach();
+        self.load_more(cx);
         cx.notify();
     }
 
-    async fn work(this: WeakEntity<Self>, cx: &mut AsyncApp) {
-        loop {
-            // `working` clears in the same update that finds the queue empty, so a
-            // reconcile never queues behind a worker that is about to stop.
-            let Ok(Some((id, seq, path, fs))) = this.update(cx, |this, cx| {
-                let next = this.next_load(cx);
-                if next.is_none() {
-                    this.working = false;
-                    cx.notify();
-                }
-                next
-            }) else {
-                return;
-            };
-            let loaded = cx
-                .background_spawn(async move {
-                    fs.load(&path).await.map(|loaded| {
-                        let source = Source::parse(&loaded.text);
-                        (source, Arc::<str>::from(loaded.text))
-                    })
-                })
-                .await;
-            let applied = this.update(cx, |this, cx| {
-                this.loading = None;
-                match loaded {
-                    Ok((source, text)) => this.apply(id, seq, source, text, cx),
-                    // Retried by the next reconcile; a GUI error has nowhere to go yet.
-                    Err(_) => this.forget(id, seq, cx),
-                }
-            });
-            if applied.is_err() {
-                return;
-            }
-        }
+    fn queue_load(&mut self, id: EntryId) {
+        let seq = self.next_seq(id);
+        self.queue.push_back((id, seq));
+        self.queued.insert(id, seq);
     }
 
-    fn next_load(
-        &mut self,
-        cx: &Context<Self>,
-    ) -> Option<(EntryId, u64, std::path::PathBuf, Arc<dyn Fs>)> {
-        let vault = self.vault.as_ref()?.read(cx);
-        while let Some((id, seq)) = self.queue.pop_front() {
-            if self.queued.get(&id) != Some(&seq) {
-                continue;
-            }
-            self.queued.remove(&id);
-            if let Some(path) = vault.absolute(id) {
-                self.loading = Some(id);
-                return Some((id, seq, path, Arc::clone(&self.fs)));
-            }
-        }
-        None
+    /// One timed foreground update and the word merge it made due, then `mark_indexed`; `None`
+    /// once this entity is gone.
+    fn timed_turn(
+        this: &WeakEntity<Self>,
+        cx: &mut AsyncApp,
+        update: impl FnOnce(&mut Self, &mut Context<Self>),
+    ) -> Option<()> {
+        timed(cx, |cx| {
+            this.update(cx, |this, cx| {
+                let building = this.is_building();
+                update(this, cx);
+                // On the edge where the startup load ends, whichever turn ends it (a load or a rebuild).
+                this.settling |= building && !this.marked_indexed && !this.is_building();
+                this.merge_words(cx);
+            })
+        })
+        .ok()?;
+        this.update(cx, Self::mark_indexed).ok()
     }
 
-    /// Parsed off the main thread and never queued: a write needs no load, and must not wait
-    /// behind a startup queue.
+    /// The first time nothing is left to load and the settle it asked for has applied, for the
+    /// startup timeline.
+    fn mark_indexed(&mut self, cx: &mut Context<Self>) {
+        if self.marked_indexed || self.is_building() || self.settling {
+            return;
+        }
+        self.marked_indexed = true;
+        let corpus = self.index.corpus();
+        let step = Step::Indexed {
+            notes: corpus.len(),
+            corpus_bytes: corpus.heap_bytes(),
+            words_bytes: self.index.words().heap_bytes(),
+        };
+        Timeline::mark(step, cx);
+    }
+
+    /// Never queued: a write needs no load and must not wait behind the startup queue.
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
         if self.vault.is_none() {
             return;
         }
-        let (id, text) = (event.id, Arc::clone(&event.text));
-        let seq = self.next_seq();
+        let id = event.id;
+        let seq = self.next_seq(id);
         self.indexed.insert(id, event.stamp.mtime);
-        let parsing = Arc::clone(&text);
-        let parsed = cx.background_spawn(async move { Source::parse(&parsing) });
+        let text = Arc::clone(&event.text);
+        let parsed = cx.background_spawn(async move { NoteContent::parse(text) });
         cx.spawn(async move |this, cx| {
-            let source = parsed.await;
-            let _ = this.update(cx, |this, cx| this.apply(id, seq, source, text, cx));
+            let content = parsed.await;
+            Self::timed_turn(&this, cx, |this, cx| this.apply(id, seq, content, cx));
         })
         .detach();
     }
 
-    /// Drops links read before a failed load, unless a newer write already replaced them.
+    /// Drops links read before a failed load, unless a newer load or write is on its way.
     fn forget(&mut self, id: EntryId, seq: u64, cx: &mut Context<Self>) {
-        self.indexed.remove(&id);
-        if self.applied.get(&id).is_some_and(|&last| seq < last) {
+        if !self.is_latest(id, seq) {
             return;
         }
-        self.applied.insert(id, seq);
+        self.indexed.remove(&id);
         self.index.remove(id);
         self.revision += 1;
         cx.notify();
     }
 
-    fn apply(
-        &mut self,
-        id: EntryId,
-        seq: u64,
-        source: Source,
-        text: Arc<str>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.applied.get(&id).is_some_and(|&last| seq < last) {
+    fn apply(&mut self, id: EntryId, seq: u64, content: NoteContent, cx: &mut Context<Self>) {
+        if !self.is_latest(id, seq) {
             return;
         }
-        self.applied.insert(id, seq);
-        self.index.insert(id, source, text);
+        self.index.insert(id, content);
         self.revision += 1;
         // Not a note of the index yet (its build is still running): the next diff reloads it.
         if !self.index.is_indexed(id) {
@@ -283,3 +341,23 @@ impl IndexSync {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod corpus_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod startup_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod loading_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod scanning_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod words_tests;

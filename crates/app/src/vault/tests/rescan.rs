@@ -6,7 +6,7 @@ use gpui::{Entity, TestAppContext};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 
-use crate::test_support::two_notes;
+use crate::test_support::{edit, opened, two_notes};
 use crate::vault::store::AUTOSAVE_DELAY;
 
 #[gpui::test]
@@ -14,23 +14,13 @@ async fn a_conflict_reaches_the_vault_tree(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("the note opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
+    let buffer = opened(&store, cx, a).await;
     let before = store.read_with(cx, |store, cx| {
         store.vault().expect("a vault").read(cx).entries().count()
     });
 
     fs.insert_file("/vault/a.md", "theirs");
-    // `Buffer` cannot notify for itself; without this the write never schedules.
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| {
-            buffer.insert(ByteOffset(0), "X");
-        });
-        cx.notify();
-    });
+    edit(&buffer, cx, "X");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
 
@@ -45,21 +35,12 @@ async fn an_ordinary_write_does_not_rescan(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("the note opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
+    let buffer = opened(&store, cx, a).await;
 
     // An unreadable directory scans to nothing, so an unwanted rescan
     // here would empty the tree, not just leave it stale.
     fs.make_unreadable("/vault");
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| {
-            buffer.insert(ByteOffset(0), "X");
-        });
-        cx.notify();
-    });
+    edit(&buffer, cx, "X");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
 

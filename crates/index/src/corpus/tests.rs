@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::mem::size_of;
+use std::ops::Range;
 use std::sync::Arc;
 
 use inkra_vault::EntryId;
 
-use super::{Corpus, SLOT_BYTES, TEXT_HEADER_BYTES};
+use super::{CHUNK, Corpus, CorpusSnapshot, SLOT_BYTES, TEXT_HEADER_BYTES};
 use crate::test_support::{entries, texts, vault};
 
 fn ids(files: &[&str]) -> Vec<EntryId> {
@@ -15,6 +17,29 @@ fn corpus(ids: &[EntryId]) -> Corpus {
     let mut corpus = Corpus::default();
     let _ = corpus.reorder(ids.into(), |_| usize::MAX);
     corpus
+}
+
+/// `len` notes, each slot holding its own position as text.
+fn numbered(len: usize) -> (Vec<EntryId>, Corpus) {
+    let files: Vec<String> = (0..len).map(|n| format!("n{n}.md")).collect();
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    let ids = ids(&files);
+    let mut corpus = corpus(&ids);
+    for at in 0..len {
+        corpus.set(at, Some(at.to_string().into()));
+    }
+    (ids, corpus)
+}
+
+fn listed(snapshot: &CorpusSnapshot, range: Range<usize>) -> Vec<(EntryId, String)> {
+    snapshot
+        .notes(range)
+        .map(|(id, text)| (id, text.to_owned()))
+        .collect()
+}
+
+fn expected(ids: &[EntryId], range: Range<usize>) -> Vec<(EntryId, String)> {
+    range.map(|at| (ids[at], at.to_string())).collect()
 }
 
 #[test]
@@ -129,4 +154,82 @@ fn a_slot_costs_its_text_pointer_and_its_id() {
 #[test]
 fn a_loaded_text_costs_its_arc_s_two_counts() {
     assert_eq!(TEXT_HEADER_BYTES, 2 * size_of::<usize>());
+}
+
+#[test]
+fn a_write_under_a_held_snapshot_copies_one_chunk() {
+    let (ids, mut corpus) = numbered(3 * CHUNK);
+    let held = corpus.snapshot();
+
+    corpus.set(CHUNK + 5, Some("new".into()));
+
+    assert_eq!(texts(&held), expected(&ids, 0..3 * CHUNK));
+    let now = corpus.snapshot();
+    let shared: Vec<bool> = held
+        .texts
+        .iter()
+        .zip(now.texts.iter())
+        .map(|(held, now)| Arc::ptr_eq(held, now))
+        .collect();
+    assert_eq!(shared, [true, false, true]);
+    assert_eq!(
+        listed(&now, CHUNK + 4..CHUNK + 6),
+        [
+            (ids[CHUNK + 4], (CHUNK + 4).to_string()),
+            (ids[CHUNK + 5], "new".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn notes_crosses_chunk_boundaries() {
+    let (ids, corpus) = numbered(2 * CHUNK + 3);
+    let snapshot = corpus.snapshot();
+    for range in [
+        CHUNK / 2..2 * CHUNK + 1,
+        CHUNK..2 * CHUNK,
+        0..2 * CHUNK + 3,
+        2 * CHUNK..2 * CHUNK + 3,
+        CHUNK + 1..CHUNK + 1,
+    ] {
+        assert_eq!(listed(&snapshot, range.clone()), expected(&ids, range));
+    }
+}
+
+#[test]
+fn notes_reaches_the_end_of_whole_chunks() {
+    let (ids, corpus) = numbered(2 * CHUNK);
+    let snapshot = corpus.snapshot();
+    assert_eq!(snapshot.texts.len(), 2);
+    for range in [0..2 * CHUNK, CHUNK + 1..2 * CHUNK, 2 * CHUNK..2 * CHUNK] {
+        assert_eq!(listed(&snapshot, range.clone()), expected(&ids, range));
+    }
+}
+
+#[test]
+fn notes_of_an_empty_corpus_is_empty() {
+    assert_eq!(Corpus::default().snapshot().notes(0..0).count(), 0);
+    assert_eq!(corpus(&[]).snapshot().notes(0..0).count(), 0);
+}
+
+#[test]
+fn reorder_moves_texts_across_chunks() {
+    let (ids, mut corpus) = numbered(2 * CHUNK + 3);
+    let held = corpus.snapshot();
+    let order: HashMap<EntryId, usize> = ids.iter().enumerate().map(|(at, &id)| (id, at)).collect();
+    let kept: Vec<EntryId> = ids[1..].iter().rev().copied().collect();
+
+    let (_, retired) = corpus.reorder(kept.clone().into(), |id| order[&id]);
+
+    assert_eq!(retired, [Arc::<str>::from("0")]);
+    let now = corpus.snapshot();
+    let moved: Vec<(EntryId, String)> =
+        kept.iter().map(|id| (*id, order[id].to_string())).collect();
+    assert_eq!(texts(&now), moved);
+    let bytes: usize = (1..ids.len()).map(|at| at.to_string().len()).sum();
+    assert_eq!(
+        now.heap_bytes(),
+        kept.len() * (SLOT_BYTES + TEXT_HEADER_BYTES) + bytes
+    );
+    assert_eq!(texts(&held), expected(&ids, 0..ids.len()));
 }

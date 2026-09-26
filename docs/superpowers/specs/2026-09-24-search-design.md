@@ -89,6 +89,16 @@ Taken:
   results (`file_finder.rs:557-613`, `workspace/src/workspace.rs:178`).
 - **A placeholder and a "no matches" text** per picker
   (`picker/src/picker.rs:222-225`).
+- **Startup loads bounded by the core count, at low priority** (slice 5).
+  The `BackgroundScanner` runs `num_cpus()` workers under
+  `scoped_priority(Priority::Low, …)` (`worktree/src/worktree.rs:5289-5343`),
+  so at most one scan job per core runs at once, and user work goes first.
+  `IndexSync` keeps at most one load per core in flight, each spawned at
+  `Priority::Low`.
+- **Take everything already landed in one go.** Zed drains every ready batch
+  of file events with `poll!` before it processes them
+  (`worktree/src/worktree.rs:4544-4547`). `IndexSync` applies every landed
+  load in one foreground turn, up to its time budget.
 
 Deviations:
 
@@ -111,6 +121,23 @@ Deviations:
   budget (Performance); streaming is a lever.
 - **Accessibility roles on the picker.** Zed's picker sets none. We set them
   (D8).
+- **Startup results applied in timed turns, not in 100 ms snapshots**
+  (slice 5). Zed's workers write into one background snapshot under a mutex.
+  One worker sends it to the foreground at most every 100 ms
+  (`FS_WATCH_LATENCY`, `worktree/src/worktree.rs:83`, `:5310-5329`), and the
+  foreground swaps it in whole (`:1407-1426`). Our index lives on the
+  foreground and has no executor (D1), so each load crosses to it and is
+  applied note by note. A per-note apply has a cost, so a turn stops after
+  4 ms and yields. A load applies as soon as it lands, so search sees the
+  note at once; readers throttle their own refresh (`BUILDING_REFRESH`).
+- **Jobs are files from a known list, not directories found on the way.**
+  Zed's scan jobs discover subdirectories and queue them (`:5380-5670`). Our
+  vault is already scanned when loads start, so a job is one note, and the
+  queue keeps D5's sequence rule.
+- **The in-flight count ends at the apply, not at the read.** A load counts
+  until the foreground applies it, so at most one load per core waits in
+  memory. Zed bounds workers, not results, since its results share one
+  snapshot.
 - **Our own matcher, not a port.** `fuzzy`, `fuzzy_nucleo` and `picker` are
   GPL-3.0-or-later (`fuzzy/Cargo.toml:6`). We take the ideas above and write
   our own code. `nucleo-matcher`, which Zed uses, is MPL-2.0 and allowed by
@@ -163,6 +190,7 @@ indexes only links. It owns everything keyed by note membership:
 | link sources and `by_stem` | backlinks (unchanged) |
 | `names: Names` | quick-open candidates (D2) |
 | `corpus: Corpus` | saved text (D3) |
+| `words: Words` | the word index for quick open (smart quick open spec, S2; slice 7) |
 
 Three calls change all four together, with one membership check and one
 pruning rule:
@@ -170,18 +198,26 @@ pruning rule:
 ```rust
 impl NoteIndex {
     pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet;   // swap, prune, reorder corpus; returns the previous set
-    pub fn insert(&mut self, id: EntryId, source: Source, text: Arc<str>); // ignored for a non-note
+    pub fn insert(&mut self, id: EntryId, content: NoteContent); // ignored for a non-note (slice 7)
     pub fn remove(&mut self, id: EntryId);
     pub fn names(&self) -> NamesSnapshot;                    // Arc clone
     pub fn corpus(&self) -> CorpusSnapshot;                  // Arc clone
+    pub fn words(&self) -> WordsSnapshot;                    // Arc clones (slice 7)
+    pub fn words_merge(&mut self, when: MergeWhen) -> Option<WordsMerge>; // run off the foreground (slice 7)
+    pub fn words_apply(&mut self, merged: MergedWords) -> RetiredWords;  // free the result off the foreground (slice 7)
 }
 impl NoteSet {
     pub fn build(entries: Vec<(EntryId, String, Kind)>) -> NoteSet; // NoteTable + Names, off the foreground
 }
 ```
 
+> **Corrected in slice 7.** `insert` takes a `NoteContent`, parsed off the
+> foreground (links and words), in place of a `Source` and a text. The three
+> calls now change five fields together: `words` joins them, and a merge of the
+> word index is started and applied through `words_merge` and `words_apply`.
+
 A load that finishes after its note was trashed is ignored by `insert`, for
-links and text alike (`crates/index/src/index.rs:44-49`).
+links, text and words alike (`crates/index/src/index.rs:44-49`).
 
 > **Corrected.** The draft had `Corpus` and `Names` fed beside `LinkIndex`.
 > A late load after a trash would then put the text back, since only
@@ -312,7 +348,7 @@ left open:
 
 ### D3. The corpus holds the saved text, in vault order
 
-`Corpus` is an `Arc<Vec<Option<Arc<str>>>>` indexed by the vault order that
+`Corpus` holds `Option<Arc<str>>` slots indexed by the vault order that
 `NoteTable` already assigns (`crates/index/src/notes.rs:64-71`). `None` is a
 note not yet loaded.
 
@@ -320,8 +356,12 @@ note not yet loaded.
   (`crates/app/src/vault/events.rs:11-15`), shared, not copied. A load
   converts its `String` once.
 - A load or a save writes one slot through `Arc::make_mut`. The write copies
-  the `Vec` of pointers only if a search still holds the previous snapshot.
-- Only `set_notes` reorders the `Vec`, in one O(notes) pass.
+  pointers only if a search still holds the previous snapshot.
+- **Corrected in slice 7 (smart quick open).** The slots live in chunks of 256
+  behind `Arc`s, so that copy is the chunk list and one chunk, not every slot:
+  2.3 ms became about 2 µs at 50,000 notes (smart quick open spec, Evolution,
+  "Chunked corpus slots").
+- Only `set_notes` reorders the slots, in one O(notes) pass.
 - A snapshot is an `Arc` clone. No sort, no rebuild.
 
 > **Corrected.** The draft rebuilt a sorted snapshot on the first query after
@@ -345,7 +385,7 @@ adds a large dependency with its own invalidation. It stays a lever.
   here, and `IndexSync::apply` passes the text: a load converts its `String`
   once, a save shares `NoteSaved::text`. The app holds the text from slice 4,
   about 156 MB at 50,000 generated notes, while its first reader, vault
-  search, arrives in slice 6.
+  search, arrives in slice 10.
 - `CorpusSnapshot` carries the ids beside the texts, since `Hit::note` needs
   each slot's `EntryId`. `NoteSet::build` computes them off the foreground.
   `set_notes` reads each id's previous slot from the previous `NoteTable`, in
@@ -486,7 +526,7 @@ whose source has no vault entry is skipped, so no row is ever nameless.
 `IndexSync::revision()` is bumped on each change to the index; the panel skips
 a notify whose revision and building state it has already seen, so one applied
 build recomputes its rows once, not once for `NotesChanged` and again for the
-notify after it. Vault search reuses this in slice 6. A save
+notify after it. Vault search reuses this in slice 10. A save
 can now reach `apply` before its note joins the index. `insert` then ignores
 it, so `apply` forgets the note's mtime and the next diff reloads it. Until a
 build applies, following a link resolves against the previous table; the
@@ -497,6 +537,42 @@ the slice 2 reviews: `reconcile` takes 1.4 to 4.9 ms by method (a criterion
 bench of the path copy alone gave 3.33 ms; timed release tests of the whole
 turn gave the rest); `apply_notes` with nothing changed takes 4.2 to 4.8 ms.
 Both fit the 8 ms step budget. The Evolution table lists the levers.
+
+**Built in slice 5.** Startup loads run in parallel, and the app logs a
+startup timeline.
+
+- `IndexSync` keeps one load per core in flight: `num_cpus()` ×
+  `LOADS_PER_CORE`, with `LOADS_PER_CORE = 1`. Each load reads and parses at
+  `Priority::Low`, as Zed's scanner does. Two loads per core measured the same
+  (Performance, "Startup"), so one stays.
+- A load counts until the foreground applies it, not until its read ends. At
+  most one landed load per core waits in memory.
+- One note has at most one load in flight. A queue entry for a note that is
+  loading waits in the queue until that load lands, so a note rewritten in a
+  loop cannot take every slot.
+- Finished loads cross to the foreground over a channel. One foreground turn
+  applies landed loads until 4 ms pass, then yields, so input and frames run
+  between turns. A turn applies at least one load and never splits one. So
+  the heaviest single note bounds a turn. That limit is accepted; the
+  timeline's `longest turn` is its figure. A turn over 8 ms on a real vault
+  is the trigger to split `insert`.
+- A load for a note that left the vault keeps its slot until it lands, but
+  it no longer counts as pending.
+- A load or save acts only if its seq is the latest minted for its note, so
+  a failed load cannot drop a note while a newer load or save is pending.
+- A load that fails after a build applied, for a note still in the vault,
+  queues a fresh load. A rename keeps the mtime, so no rescan reloads the
+  note. The check is a build since the load started, not a changed path: a
+  rename there and back ends at the path the load read. Builds come only from
+  rescans, so the retries end.
+- The release-only startup timeline is a gpui `Global` that `run()` sets. It
+  logs one line once indexing has ended and the first frame is recorded,
+  whichever comes last: `launch: scan …, first frame …, names ready …,
+  indexed … (N notes, corpus B bytes, longest turn T)`. Each time counts
+  from launch: the start of `run()`, not of the process. "first frame" is
+  the first present, plus at most one frame interval. "longest turn" covers
+  every `IndexSync` foreground turn: reconcile, build, load and save,
+  observers included. A launch with no vault, or a run that draws no frame, logs no line.
 
 ### D6. The MRU
 
@@ -596,7 +672,7 @@ previous note. A refresh reads the kept note when its result lands, not when
 **A refresh must not cancel a running scan of the same query.** Today a
 `NotesChanged` bumps the search id and sets the cancel flag, so it drops the
 scan of a query the user is still waiting on. A refresh, from `NotesChanged`
-or, in slice 6, from observing `IndexSync`, either skips while a scan of the
+or, in slice 10, from observing `IndexSync`, either skips while a scan of the
 same query runs, or marks the query dirty and re-runs it when that scan
 completes. On a vault that keeps changing, cancelling would starve the scan.
 
@@ -946,10 +1022,80 @@ second (`Throughput::Bytes`) is the figure that travels between machines.
   loop, so a test does catch them.
 
 **Startup** cannot be measured headless: gpui's test scheduler is simulated
-and `MemFs` has no I/O cost. An `#[ignore]` test generates 50,000 notes in a
-temp dir and runs `IndexSync` over `RealFs` in release. The time until the
-queue is empty is recorded here. The app also logs that time and
-`heap_bytes()` when indexing ends.
+and `MemFs` has no I/O cost. `cargo run -p inkra-app --release --example
+startup_vault` writes 50,000 notes to `$TMPDIR/inkra-startup-50k` and prints
+the path. It writes them again only when its parameters change. The release
+app logs the time until the queue is empty and `heap_bytes()` when indexing
+ends. That `launch:` line, on this vault, is the figure recorded here.
+
+  Measured, slice 5, before parallel loads. The machine is an Apple M5 Pro
+  with 18 cores (`sysctl -n machdep.cpu.brand_string hw.ncpu`). The vault is
+  the one `startup_vault` writes: 50,000 notes of 1 to 5 KB in 100 folders,
+  in `$TMPDIR/inkra-startup-50k`, from the same generator as
+  `crates/index/benches/search.rs`.
+
+  - Release app, before parallel loads (`9c4ae9b`), taken by the
+    orchestrator with `./target/release/inkra-app "$TMPDIR/inkra-startup-50k"`:
+    - Cache partly warm, right after the `#[ignore]` runs: `launch: scan
+      279.7ms, first frame 514.3ms, names ready 416.5ms, indexed 10.2s
+      (50000 notes, corpus 157245432 bytes, longest turn 5.0ms)`.
+    - Cache warm: `launch: scan 264.2ms, first frame 488.6ms, names ready
+      387.9ms, indexed 5.5s (…, longest turn 4.7ms)`.
+
+  History, not a figure. Until review of slice 5, an `#[ignore]` test,
+  `startup_figure_on_real_fs`, generated the vault and ran `IndexSync` over
+  `RealFs`. It was removed because no app test touches the disk. Its
+  generator became the `startup_vault` example. Its serial figures stay here
+  for comparison only:
+
+  - Second run:
+    `cargo test -p inkra-app --release -- --ignored startup_figure_on_real_fs --nocapture`.
+    The scan takes 215.7 ms. Indexing ends at 1.9 s. The corpus holds
+    157,245,432 bytes. The test scheduler runs every load on one thread.
+  - Its timeline line: `launch: scan -, first frame -, names ready 238.4ms,
+    indexed 1.9s (50000 notes, corpus 157245432 bytes, longest turn 4.8ms)`.
+    The test takes no scan mark and draws no frame.
+  - Cache partly cold (the first run right after a release build): scan
+    379.7 ms, indexed 7.5 s, longest turn 4.0 ms.
+
+  Caveats on the `#[ignore]` figure:
+
+  - It is the second run, so the page cache is warm.
+  - The test scheduler polls background and foreground tasks on one thread.
+    Each serial load's round trip to the main thread costs nothing there,
+    unlike in the app.
+  - The test has no window and no observers, so `longest turn` excludes
+    observer work.
+  - The handoff's 11.25 s came from a different run whose vault is not
+    recorded.
+
+  So only the release app's line compares with 11.25 s and with Task 5.3.
+
+  Measured, slice 5, after parallel loads and the review fixes (`a269565`),
+  same machine and vault. `longest turn` now counts every `IndexSync`
+  foreground turn: reconcile, build, load and save. The release app ran in
+  the background until its `launch:` line, then was killed.
+
+  | Run | scan | first frame | names ready | indexed | longest turn |
+  |---|---:|---:|---:|---:|---:|
+  | first after the build, cache partly cold | 636.4 ms | 862.8 ms | 808.2 ms | 1.9 s | 6.3 ms |
+  | warm | 266.9 ms | 397.1 ms | 386.2 ms | 1.2 s | 5.9 ms |
+  | warm | 265.9 ms | 386.7 ms | 380.0 ms | 1.2 s | 5.8 ms |
+
+  - Indexing ends at 1.2 s warm, against 5.5 s warm before: about four
+    times faster. The main thread no longer pays one round trip per load.
+  - No turn goes over 6.3 ms, under the 8 ms step budget but over the 4 ms
+    aim. Before reconcile's own turn was counted, the longest turn measured
+    4.0 to 4.6 ms, so the extra is probably reconcile's copy of 50,000 vault
+    entries (D5, 1.4 to 4.9 ms in slice 2). The lever is "Vault entries as
+    `Arc<[Entry]>`" in the Evolution table.
+  - History: at `121f04e`, before reconcile and save turns were counted,
+    two loads per core measured the same as one (indexed 1.2 to 1.5 s), so
+    `LOADS_PER_CORE` stays 1. The serial `#[ignore]` test gave indexed
+    2.0 s.
+  - The first frame still takes 387 to 863 ms, over the 100 ms budget: the
+    window waits on the scan. Slice 6, "Open first, scan behind", takes that
+    on.
 
 **End to end**, a release-only log in each delegate records the time from
 `Edited` to `notify`. It is checked once on the generated vault.
@@ -1043,7 +1189,8 @@ differential oracle, and is justified by a bench figure before and after.
 | Streaming results | First results over 100 ms on a real vault | The delegate appends each range's hits in vault order once every earlier range is done, as the Text Finder does; keeps the selection across batches |
 | Compressed text (e.g. lz4) | `heap_bytes` over 300 MB on a real vault | `Corpus` stores compressed blocks; `search` decompresses candidates. Best after the prefilter |
 | No resident text | Memory still too high after compression | `Corpus` keeps the prefilter only. **Changes the API**: `CorpusSnapshot::candidates(range, &TextQuery)` lists notes, `app` loads them through `Fs` and calls `find_in`. Needs the prefilter first, as fff shows |
-| Parallel startup loads | The startup figure over 10 s | `IndexSync` keeps N loads in flight and applies them in batches, one foreground update per K notes |
+| Parallel startup loads | Shipped in slice 5: the release app went from 5.5–10.2 s to 1.2–1.6 s at 50,000 notes (Performance, "Startup") | `IndexSync` keeps one load per core in flight, one read per note, and applies landed loads until 4 ms pass, at least one per turn |
+| `next_load` scans the queue | A foreground turn over 8 ms whose profile shows `next_load` | A set of the notes in flight for `next_load`'s check, and held-back entries parked beside the queue until their load lands, instead of rescanning them on each call. Today at most one entry per load in flight is held back, so a call costs O(cores²) |
 | Vault entries as `Arc<[Entry]>` | A file watcher lands, or a foreground step over 8 ms | `Vault` shares its entries; `reconcile` becomes an `Arc` clone, and the build returns the mtime list for the diff |
 | Cheaper `Key` in `NoteTable::new` | A file watcher lands, or rebuild latency is noticed | Skip the redundant NFC, derive the stem key as a suffix of the path key; needs a proptest against today's keys. About 106 → 80 ms per build |
 | Coalesced rebuilds | A file watcher lands (the red team noted starvation under a stream of notifies) | A notify during a build sets a dirty flag instead of starting a second build; the build restarts once it applies |

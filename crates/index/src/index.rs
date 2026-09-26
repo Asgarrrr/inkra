@@ -5,6 +5,7 @@ use std::sync::Arc;
 use inkra_markdown::Link;
 use inkra_vault::EntryId;
 
+use crate::content::NoteContent;
 use crate::corpus::{Corpus, CorpusSnapshot};
 use crate::key::Key;
 use crate::names::NamesSnapshot;
@@ -12,6 +13,7 @@ use crate::note_set::NoteSet;
 use crate::notes::{NoteTable, Query, Resolution};
 use crate::source::{Source, SourceLink};
 use crate::target::{Style, Target};
+use crate::words::{MergeWhen, MergedWords, RetiredWords, Words, WordsMerge, WordsSnapshot};
 
 /// Every note's links, resolved on demand against the current notes, so a create, rename or
 /// trash invalidates nothing.
@@ -24,6 +26,7 @@ pub struct NoteIndex {
     /// has `T`'s stem, so this finds backlinks without a reverse map.
     by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
     corpus: Corpus,
+    words: Words,
 }
 
 /// The links of one source that resolve to a note, in document order.
@@ -35,8 +38,8 @@ pub struct Backlink<'a> {
 
 impl NoteIndex {
     /// Replaces the notes links resolve against and quick open lists, reorders the corpus, and
-    /// drops the source and text of every note gone. The caller frees the previous set, which
-    /// holds those texts, so a 50k table need not be freed on the foreground.
+    /// drops the source, text and words of every note gone. The caller frees the previous set,
+    /// which holds those texts, so a 50k table need not be freed on the foreground.
     #[must_use]
     pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet {
         let (ids, retired) = self
@@ -72,6 +75,7 @@ impl NoteIndex {
                 }
             }
         }
+        self.words.remove_all(&gone);
         previous
     }
 
@@ -87,13 +91,48 @@ impl NoteIndex {
         self.corpus.snapshot()
     }
 
-    /// Replaces `id`'s links and text. Ignored for an id that is not a note, so a load
+    /// The words of every loaded note. Cloning is an `Arc` bump; a later write never reaches it.
+    #[must_use]
+    pub fn words(&self) -> WordsSnapshot {
+        self.words.snapshot()
+    }
+
+    /// A word merge when `when` asks for one and none runs; run it off the foreground.
+    #[must_use]
+    pub fn words_merge(&mut self, when: MergeWhen) -> Option<WordsMerge> {
+        self.words.merge(when)
+    }
+
+    /// No note is fresh and no merge runs: lookups read the merged segment alone.
+    #[must_use]
+    pub fn words_settled(&self) -> bool {
+        !self.words.has_fresh() && !self.words.is_merging()
+    }
+
+    /// Swaps a merge's result in unless it is another index's; free the return off the foreground.
+    #[must_use = "free the retired words off the foreground"]
+    pub fn words_apply(&mut self, merged: MergedWords) -> RetiredWords {
+        self.words.apply(merged)
+    }
+
+    /// Starts, runs and applies merges until none is left to do; a running merge blocks it.
+    #[cfg(test)]
+    pub(crate) fn merge_all(&mut self) {
+        self.words.merge_all();
+    }
+
+    /// Replaces `id`'s links, text and words. Ignored for an id that is not a note, so a load
     /// finishing after its note was trashed leaves nothing behind.
-    pub fn insert(&mut self, id: EntryId, source: Source, text: Arc<str>) {
+    pub fn insert(&mut self, id: EntryId, content: NoteContent) {
         if !self.notes.contains(id) {
             return;
         }
-        self.remove(id);
+        self.remove_links(id);
+        let NoteContent {
+            source,
+            words,
+            text,
+        } = content;
         for (at, link) in source.links.iter().enumerate() {
             if let Target::Note { path, .. } = &link.target {
                 self.by_stem
@@ -104,10 +143,17 @@ impl NoteIndex {
         }
         self.sources.insert(id, source);
         self.corpus.set(self.notes.order(id), Some(text));
+        self.words.set(id, words);
     }
 
     pub fn remove(&mut self, id: EntryId) {
+        self.words.remove(id);
         self.corpus.set(self.notes.order(id), None);
+        self.remove_links(id);
+    }
+
+    /// `insert` calls this, not `remove`, so a reload keeps the note's word ordinal.
+    fn remove_links(&mut self, id: EntryId) {
         let Some(old) = self.sources.remove(&id) else {
             return;
         };
@@ -196,3 +242,5 @@ mod corpus_tests;
 mod model_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod words_tests;

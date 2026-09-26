@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8efcf403bb93505742c52f3160d6ab00979f375fddbed5e18006dadb745ba2eb # shrinks to ops = [Folder { folder: 0, name: 0 }, Folder { folder: 5, name: 0 }, Note { folder: 1, name: 0 }, Note { folder: 1, name: 1 }, HardLink { pick: 2, folder: 0, name: 0 }]
+cc 5e4d36043eeae7865e11ae7c58fdb3cd80de8b2e0a0ca520b4c2db12074d40a1 # shrinks to setup = [Folder { folder: 0, name: 0 }, Folder { folder: 5, name: 0 }, Remove(0), Note { folder: 1, name: 0 }], pick = 5, inside = [Note { folder: 0, name: 0 }]
+cc b10bdaf7611078ac5f61e0969a7cd4e5ff41c0e9e5ce5bf1fc3c8cc4bf329fdf # shrinks to ops = [Folder { folder: 0, name: 0 }, Folder { folder: 0, name: 1 }, Note { folder: 2, name: 0 }, Remove(1)]
+cc d2bae407eeed009d7d681127b14fadff6a8823d1e4cf4a94b6fa0a8e3808c282 # shrinks to setup = [Folder { folder: 0, name: 0 }, Folder { folder: 5, name: 0 }], pick = 7, inside = [Remove(0)]
+cc 0c77db822d5f6d5571758a8e629cd6df78b495e271ee0f7b0e203fc99a7bf0e6 # shrinks to setup = [Folder { folder: 0, name: 0 }, Folder { folder: 5, name: 0 }, Folder { folder: 1, name: 1 }, Note { folder: 3, name: 0 }, Folder { folder: 4, name: 2 }, Folder { folder: 1, name: 0 }], pick = 5, across = [Cross { pick: 3, folder: 1, name: 0, link: true }], inside = [Save(0), Note { folder: 0, name: 1 }]
+cc 4207b5f6feedd0fd71bc6b03fa5c4beb57ce5495241cc6e9ac5dd7d17caf2a31 # shrinks to setup = [Folder { folder: 0, name: 0 }, Note { folder: 5, name: 0 }], pick = 1, across = [Cross { pick: 0, folder: 0, name: 0, link: false }], inside = []
+cc b724184795fb209807b7579084c41d1c98703d068cd6f07f7e1fc39a03fbf727 # shrinks to setup = [Folder { folder: 0, name: 1 }, Folder { folder: 3, name: 0 }], pick = 1, after = [Folder { folder: 4, name: 1 }]
+cc 4d05fec2d8cc94f2dbbbd8cc291d3e66204f84c4e2e1964ecabc8508b1f086ab # shrinks to setup = [Remove(0), Folder { folder: 1, name: 0 }, Note { folder: 2, name: 3 }], pick = 0, after = [Remove(2), HardLink { pick: 3, folder: 2, name: 3 }, SaveInPlace(2)]
