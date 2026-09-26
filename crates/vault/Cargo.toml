@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[lib]
+# Else `cargo bench` forwards criterion flags like `--quick` to the lib and fails.
+bench = false
+
 [features]
 # Keeps `MemFs` out of release; the self dev-dependency enables it for tests.
 test-support = ["dep:futures"]
@@ -21,6 +25,11 @@ futures = { workspace = true, optional = true }
 inkra-vault = { path = ".", features = ["test-support"] }
 futures = { workspace = true }
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "vault"
+harness = false
 
 # Workspace lints are opt-in per crate.
 [lints]

@@ -10,6 +10,7 @@ use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Stamp, Vault};
 
 use super::ops::Ops;
+use super::scans::Scans;
 use super::writer::{Writer, write_through};
 use super::{ConflictPreserved, NoteSaved, SaveFailed};
 
@@ -35,8 +36,7 @@ pub(crate) struct NoteStore {
     pub(super) observers: HashMap<EntryId, Subscription>,
     /// `Buffer::version` can't order writes: undo lowers it.
     next_write: u64,
-    /// Per-store, not per-note: concurrent walks corrupt each other's `Vault::apply`.
-    pub(super) rescan: Option<Task<()>>,
+    pub(super) scans: Scans,
     /// Dropping this cancels the quit flush.
     _quit: Subscription,
 }
@@ -47,7 +47,7 @@ impl NoteStore {
         vault: Option<Entity<Vault>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self {
+        let mut store = Self {
             fs,
             vault,
             open: HashMap::new(),
@@ -55,9 +55,17 @@ impl NoteStore {
             current: None,
             observers: HashMap::new(),
             next_write: 0,
-            rescan: None,
+            scans: Scans::default(),
             _quit: cx.on_app_quit(Self::flush_all),
+        };
+        if store
+            .vault
+            .as_ref()
+            .is_some_and(|vault| !vault.read(cx).is_scanned())
+        {
+            store.start_scan(Vec::new(), cx);
         }
+        store
     }
 
     fn next_seq(&mut self) -> u64 {
@@ -312,11 +320,8 @@ impl NoteStore {
             if let Some(note) = this.open.get_mut(&id) {
                 note.saved_version = version;
             }
-            // The write moved the entry's identity; re-key or the id
-            // orphans on the next rescan.
-            if let Some(vault) = this.vault.clone() {
-                vault.update(cx, |vault, _| vault.reidentify(id, saved.identity));
-            }
+            // An atomic save moves the inode: without the re-key the id orphans on the next rescan.
+            this.reidentify(id, saved.identity, saved.stamp.mtime, cx);
             // The index's only signal for an ordinary write: it neither rescans nor notifies.
             if id != EntryId::DETACHED {
                 cx.emit(NoteSaved {

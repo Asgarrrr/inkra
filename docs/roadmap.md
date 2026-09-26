@@ -162,6 +162,19 @@ future work lands" table of
 `superpowers/specs/2026-09-20-modular-architecture-design.md`. Not repeated
 here, so the two cannot drift.
 
+## Startup performance
+
+Paused on 2026-09-26 by the user: slices 5–7 took the first frame from
+489–514 ms to 125–138 ms and indexing from 5.5–10.2 s to about 0.95 s at
+50,000 notes (figures in `superpowers/specs/2026-09-24-search-design.md`,
+`2026-09-25-open-first-design.md` and `2026-09-25-smart-quick-open-design.md`).
+Two levers are identified and left, each with its trigger.
+
+| Item | Trigger | Estimate |
+|---|---|---|
+| Overlap loads with parsing: `LOADS_PER_CORE` 2, or free a load slot when its read lands rather than when the foreground applies it. The pipeline is latency-bound per slot (~450 µs a cycle, slice 7's profile); 1 per core was set in slice 5, before the word parse made a load heavier. Probably 20–40 % off indexing, not measured | Indexing a real vault is noticed, or search results arrive late after launch | 0.5 d, with the release timeline before and after |
+| The window start-up floor, ~125–160 ms with a one-note vault, against the 100 ms first-frame budget. The vault costs the first frame nothing since slice 6; the rest is gpui window creation, Metal and font loading | The user notices the launch | 1–2 d to profile gpui's start-up before any change |
+
 ## Ordering
 
 No constraint is left. Soft wrap before virtualization was the last one, and

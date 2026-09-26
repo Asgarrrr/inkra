@@ -385,6 +385,10 @@ applied per note; a result below it is dropped. It is `Writer`'s pattern
 (`crates/app/src/vault/writer.rs:36-54`), not a new one, and it orders by a
 counter, never by `Stamp`, which `.claude/rules/vault.md` keeps unordered.
 
+> **Corrected.** Found in review of slice 5: a result acts only if its
+> sequence is the latest minted for its note, not the latest applied (search
+> spec, D5, "Built in slice 5").
+
 **Freshness, stated plainly.** Nothing rescans on its own. A rescan follows a
 create, a rename, a trash or a preserved conflict, and nothing else — an
 ordinary write does not (`an_ordinary_write_does_not_rescan`,
@@ -429,6 +433,12 @@ already replaced them, and is retried at the next reconcile.
 is retried on the next reconcile; nothing is shown, for the reason nothing is
 shown for a failed open (vault design, Deferred: "a home for user-visible
 errors").
+
+> **Corrected.** Found in review of slice 5: a rename keeps the mtime, so a
+> load that misses the renamed note must be retried by `IndexSync` itself.
+> With no build since the load started, the note is forgotten and the next
+> build reloads it. With a build since, and the note still in the vault, the
+> note is queued again at once (search spec, D5, "Built in slice 5").
 
 `EntryId::DETACHED`, a file opened outside a vault, is never indexed.
 

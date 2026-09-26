@@ -73,6 +73,9 @@ pub trait Fs: Send + Sync {
     /// the walk avoids link loops without detecting them.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
+    /// Fails unless `path` is a folder this process may list; lists nothing.
+    async fn check_dir(&self, path: &Path) -> Result<()>;
+
     /// Normalizes line endings: `Buffer` assumes no `\r` anywhere.
     async fn load(&self, path: &Path) -> Result<Loaded>;
 

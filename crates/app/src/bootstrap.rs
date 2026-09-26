@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use gpui::{
     App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, WindowBounds, WindowOptions, px,
@@ -12,6 +13,7 @@ use crate::Quit;
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
 use crate::shell::AppShell;
+use crate::timeline::{Step, Timeline};
 use crate::vault::NoteStore;
 
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
@@ -22,13 +24,14 @@ pub(crate) enum Launch {
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
     Note(PathBuf, String, Stamp),
+    /// Not scanned yet: the store scans it behind the first frame.
     Vault(Vault),
 }
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
 /// runner gets the same composition the real window gets.
 pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<AppShell> {
-    let (note, scanned) = match launched {
+    let (note, vault) = match launched {
         Launch::Nothing => (None, None),
         Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),
         Launch::Vault(vault) => (None, Some(vault)),
@@ -38,7 +41,7 @@ pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<Ap
         let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
         (buffer, editor, path, stamp)
     });
-    let vault = scanned.map(|vault| cx.new(|_| vault));
+    let vault = vault.map(|vault| cx.new(|_| vault));
     let editor = opened.as_ref().map(|(_, editor, _, _)| editor.clone());
     let notes = cx.new(|cx| {
         let mut store = NoteStore::new(fs, vault, cx);
@@ -58,12 +61,9 @@ fn launch() -> Result<Launch, String> {
     };
     let path = PathBuf::from(argument);
     if path.is_dir() {
-        // `Vault::scan` skips an unreadable directory rather than
-        // reporting it; read it once here to say why instead.
-        futures::executor::block_on(RealFs.read_dir(&path)).map_err(|error| format!("{error}"))?;
-        return futures::executor::block_on(Vault::scan(&RealFs, &path))
-            .map(Launch::Vault)
-            .map_err(|error| format!("{error}"));
+        // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
+        futures::executor::block_on(RealFs.check_dir(&path)).map_err(|error| format!("{error}"))?;
+        return Ok(Launch::Vault(Vault::new(&path)));
     }
     futures::executor::block_on(RealFs.load(&path))
         .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
@@ -71,7 +71,9 @@ fn launch() -> Result<Launch, String> {
 }
 
 pub fn run() {
-    gpui_platform::application().run(|cx: &mut App| {
+    let started = Instant::now();
+    gpui_platform::application().run(move |cx: &mut App| {
+        cx.set_global(Timeline::new(started));
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());
 
@@ -97,6 +99,10 @@ pub fn run() {
                 let focused = window.update(cx, |view, window, cx| {
                     window.focus(&view.focus_handle(cx), cx);
                     cx.activate(true);
+                    // A next-frame callback runs before that frame's present, so the mark waits one more.
+                    window.on_next_frame(|window, _| {
+                        window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
+                    });
                 });
                 if let Err(err) = focused {
                     eprintln!("failed to focus window: {err}");

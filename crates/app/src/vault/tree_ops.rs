@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use gpui::{AsyncApp, Context, Task, WeakEntity, prelude::*};
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind};
 
 use super::NoteStore;
 use super::{NoteClosed, RenameFailed, TrashFailed};
@@ -194,34 +194,5 @@ impl NoteStore {
         }));
         cx.foreground_executor()
             .spawn(async move { wait.await == Ok(true) })
-    }
-
-    /// `Vault::apply` replaces its maps outright with no staleness check:
-    /// concurrent walks can re-admit a trashed note or orphan a buffer's `EntryId`.
-    pub(super) fn rescan(&mut self, cx: &mut Context<Self>) -> oneshot::Receiver<()> {
-        let (applied, wait) = oneshot::channel();
-        let Some(vault) = self.vault.clone() else {
-            return wait;
-        };
-        let fs = Arc::clone(&self.fs);
-        let previous = self.rescan.take();
-        self.rescan = Some(cx.spawn(async move |_, cx| {
-            if let Some(previous) = previous {
-                previous.await;
-            }
-            let root = vault.read_with(cx, |vault, _| vault.root().to_path_buf());
-            // `RealFs::read_dir` blocks inside its future by design, so run
-            // it on the background executor or it freezes the window.
-            let walk = cx.background_spawn(async move { Vault::collect(&*fs, &root).await });
-            let Ok(children) = walk.await else {
-                return;
-            };
-            vault.update(cx, |vault, cx| {
-                vault.apply(children);
-                cx.notify();
-            });
-            let _ = applied.send(());
-        }));
-        wait
     }
 }

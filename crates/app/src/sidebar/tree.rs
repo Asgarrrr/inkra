@@ -12,7 +12,7 @@ impl Sidebar {
             cx.notify();
             return;
         };
-        let entries: Vec<_> = vault.read(cx).entries().cloned().collect();
+        let entries = vault.read(cx).shared_entries();
 
         let mut i = 0;
         while i < entries.len() {

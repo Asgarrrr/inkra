@@ -5,6 +5,7 @@ use gpui::actions;
 
 mod events;
 mod ops;
+mod scans;
 mod store;
 mod tree_ops;
 mod writer;

@@ -7,7 +7,7 @@ use inkra_text::ByteOffset;
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use crate::test_support::{entry_id, scan_notes, two_notes};
+use crate::test_support::{edit, entry_id, opened, scan_notes, two_notes};
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
 
@@ -18,15 +18,8 @@ async fn a_quit_flush_does_not_write_a_note_on_its_way_to_the_trash(cx: &mut Tes
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
-        cx.notify();
-    });
+    let buffer = opened(&store, cx, a).await;
+    edit(&buffer, cx, "X");
 
     let gate = fs.block_save("/vault/a.md");
     cx.executor().advance_clock(AUTOSAVE_DELAY);

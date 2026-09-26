@@ -196,6 +196,11 @@ const CATALOGUE: &[Scene] = &[
         open: sidebar_dirty,
     },
     Scene {
+        name: "sidebar-root-only",
+        shows: "the first frames of a launch: the root level, folders closed, while the rest is scanned",
+        open: sidebar_root_only,
+    },
+    Scene {
         name: "backlinks",
         shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
         open: backlinks,
@@ -219,6 +224,11 @@ const CATALOGUE: &[Scene] = &[
         name: "quick-open-graphemes",
         shows: "a highlight on a combining mark and inside an emoji ZWJ sequence: no panic, no garbled glyph",
         open: quick_open_graphemes,
+    },
+    Scene {
+        name: "quick-open-scanning",
+        shows: "cmd-p before the vault's first scan ends: \"Scanning the vault…\" under the placeholder",
+        open: quick_open_scanning,
     },
 ];
 
@@ -328,6 +338,21 @@ fn sidebar_dirty(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
+/// Three root notes and two folders; the walk is held at `projects`.
+const UNSCANNED: &[(&str, &str)] = &[
+    ("index.md", "# Index\n"),
+    ("reading.md", "Books to read.\n"),
+    ("todo.md", "Things to do.\n"),
+    ("projects/inkra.md", "# Inkra\n"),
+    ("archive/old.md", "Superseded.\n"),
+];
+
+fn sidebar_root_only(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_unscanned_vault(UNSCANNED, "projects");
+    stage.focus(window);
+    window
+}
+
 fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
     stage.click(window, point(SIDEBAR_X, row_center(1.)));
@@ -405,6 +430,14 @@ fn quick_open_graphemes(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     stage.keys(window, "cmd-p");
     stage.type_text(window, "e \u{1f469}");
+    stage.wait(PICKER_SETTLE);
+    window
+}
+
+fn quick_open_scanning(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_unscanned_vault(UNSCANNED, "projects");
+    stage.focus(window);
+    stage.keys(window, "cmd-p");
     stage.wait(PICKER_SETTLE);
     window
 }

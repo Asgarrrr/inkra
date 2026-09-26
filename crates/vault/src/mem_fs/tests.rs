@@ -366,3 +366,103 @@ fn save_round_trips_and_load_normalizes_line_endings() {
         "the stored bytes are untouched; normalization happens on load"
     );
 }
+
+#[test]
+fn read_dir_of_a_missing_folder_is_not_found() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+
+    let Err(VaultError::Io { source, .. }) = block_on(fs.read_dir(Path::new("/vault/gone"))) else {
+        panic!("a missing folder must fail");
+    };
+    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[test]
+fn insert_dir_creates_its_parents() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault/a/b");
+
+    let Ok(root) = block_on(fs.read_dir(Path::new("/vault"))) else {
+        panic!("read_dir must succeed");
+    };
+
+    let listed: Vec<_> = root.iter().map(|entry| entry.path.clone()).collect();
+    assert_eq!(listed, [PathBuf::from("/vault/a")]);
+    assert_eq!(root[0].kind, Kind::Dir);
+}
+
+#[test]
+fn a_read_dir_gate_parks_until_released() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "a");
+
+    let gate = fs.block_read_dir("/vault");
+    let (listed, ()) = block_on(async {
+        let listing = fs.read_dir(Path::new("/vault"));
+        let release = async {
+            fs.insert_file("/vault/b.md", "b");
+            gate.release();
+        };
+        futures::join!(listing, release)
+    });
+
+    let Ok(listed) = listed else {
+        panic!("read_dir must succeed");
+    };
+    assert_eq!(
+        listed.len(),
+        2,
+        "the listing ran after the gate, and sees b.md"
+    );
+}
+
+#[test]
+fn a_save_parked_after_the_write_already_moved_the_inode() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "before");
+    let path = Path::new("/vault/a.md");
+    let Ok(before) = block_on(fs.load(path)) else {
+        panic!("load must succeed");
+    };
+
+    let gate = fs.block_after_save("/vault/a.md");
+    let mut write = Box::pin(fs.save(path, "after", before.stamp));
+    assert!(block_on(async { futures::poll!(write.as_mut()) }).is_pending());
+    let Ok(during) = block_on(fs.load(path)) else {
+        panic!("load must succeed");
+    };
+    assert_eq!(during.text, "after");
+    assert_ne!(during.identity, before.identity);
+
+    gate.release();
+    let Ok(saved) = block_on(write) else {
+        panic!("the save must succeed");
+    };
+    assert_eq!(saved.identity, during.identity);
+}
+
+#[test]
+fn read_dirs_counts_each_listing() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    let _ = block_on(fs.read_dir(Path::new("/vault")));
+    let _ = block_on(fs.read_dir(Path::new("/vault")));
+    let _ = block_on(fs.read_dir(Path::new("/vault/gone")));
+
+    assert_eq!(fs.read_dirs(Path::new("/vault")), 2);
+    assert_eq!(fs.read_dirs(Path::new("/vault/gone")), 1);
+    assert_eq!(fs.read_dirs(Path::new("/vault/other")), 0);
+}
+
+#[test]
+fn check_dir_refuses_a_missing_or_unreadable_folder() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault/f");
+
+    assert!(block_on(fs.check_dir(Path::new("/vault/f"))).is_ok());
+    assert!(block_on(fs.check_dir(Path::new("/vault/gone"))).is_err());
+    fs.make_unreadable("/vault/f");
+    assert!(block_on(fs.check_dir(Path::new("/vault/f"))).is_err());
+    assert_eq!(fs.read_dirs(Path::new("/vault/f")), 0, "it lists nothing");
+}

@@ -28,6 +28,11 @@ impl Modal {
     pub(super) fn restore_to(&mut self, focus: FocusHandle) {
         self.restore = Some(focus);
     }
+
+    #[cfg(test)]
+    pub(super) fn view(&self) -> &AnyView {
+        &self.view
+    }
 }
 
 impl AppShell {

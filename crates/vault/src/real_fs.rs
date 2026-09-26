@@ -94,6 +94,13 @@ impl Fs for RealFs {
         Ok(entries)
     }
 
+    /// Opening the folder checks it; iterating would list it.
+    async fn check_dir(&self, path: &Path) -> Result<()> {
+        fs::read_dir(path)
+            .map(drop)
+            .map_err(|source| io_error(path, source))
+    }
+
     async fn load(&self, path: &Path) -> Result<Loaded> {
         // Stat before reading: on the racing case, this errs toward "changed
         // on disk" rather than silently overwriting on the next save.

@@ -6,16 +6,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::FutureExt;
 use gpui::{
     Context, Entity, Focusable, Modifiers, Subscription, TestAppContext, VisualTestContext, point,
     prelude::*, px,
 };
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::{EntryId, Fs};
 
 use super::edit::Rejection;
 use super::{Kind, NoteActivated, Row, Sidebar, row_center};
+use crate::test_support::opened;
 use crate::vault::NoteStore;
 
 impl Sidebar {
@@ -54,6 +56,22 @@ impl Sidebar {
     #[cfg(test)]
     pub(crate) fn selected(&self) -> Option<EntryId> {
         self.selected
+    }
+
+    #[cfg(test)]
+    pub(crate) fn row_names(&self) -> Vec<String> {
+        self.visible.iter().map(|row| row.name.clone()).collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn toggle_named(&mut self, name: &str, cx: &mut Context<Self>) {
+        let id = self
+            .visible
+            .iter()
+            .find(|row| row.name == name)
+            .map(|row| row.id)
+            .expect("the row is visible");
+        self.toggle(id, cx);
     }
 }
 
@@ -102,10 +120,8 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
     let vault = notes
         .read_with(cx, |notes, _| notes.vault().cloned())
         .expect("a vault");
-    let children =
-        futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault"))).expect("collect");
     vault.update(cx, |vault, cx| {
-        vault.apply(children);
+        futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
     });
 
@@ -113,6 +129,39 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
         !sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
         "the renamed entry is gone, so the gesture has no target left"
     );
+}
+
+/// A real scan swaps the vault in, through the store's worker, under an open rename field.
+#[gpui::test]
+fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let b = row(&sidebar, cx, "b");
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.select_for_test(b.id, cx);
+        sidebar.open_rename(cx);
+    });
+    assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.field_row()), 1);
+
+    // Sorts first, so the swap moves `b` down a row.
+    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "0", cx));
+    cx.run_until_parked();
+
+    assert!(
+        created.now_or_never().flatten().is_some(),
+        "the scan swapped in"
+    );
+    assert_eq!(labels(&sidebar, cx), ["0", "a", "b"]);
+    sidebar.read_with(cx, |sidebar, _| {
+        assert!(sidebar.is_editing());
+        assert_eq!(
+            sidebar.editing.as_ref().and_then(|edit| edit.target),
+            Some(b.id)
+        );
+        assert_eq!(sidebar.field_row(), 2);
+    });
 }
 
 /// A create has no target to lose, so the field stays open on a row the list still draws.
@@ -133,10 +182,8 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
     let vault = notes
         .read_with(cx, |notes, _| notes.vault().cloned())
         .expect("a vault");
-    let children =
-        futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault"))).expect("collect");
     vault.update(cx, |vault, cx| {
-        vault.apply(children);
+        futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
     });
 
@@ -160,10 +207,8 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     let vault = notes
         .read_with(cx, |notes, _| notes.vault().cloned())
         .expect("a vault");
-    let children =
-        futures::executor::block_on(Vault::collect(&*fs, Path::new("/vault"))).expect("collect");
     vault.update(cx, |vault, cx| {
-        vault.apply(children);
+        futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
     });
 
@@ -338,9 +383,7 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
     let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let b = row(&sidebar, cx, "b");
 
-    let opened = notes.update(cx, |notes, cx| notes.open_note(b.id, cx));
-    let buffer = opened.await.expect("`b` opens");
-    notes.update(cx, |notes, cx| notes.set_current(b.id, cx));
+    let buffer = opened(&notes, cx, b.id).await;
     assert_eq!(
         row_labels(&sidebar, cx),
         ["a", "b"],
@@ -382,4 +425,27 @@ fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
         [NoteActivated(c.id)],
         "a two-line row 0 covers row 1"
     );
+}
+
+#[gpui::test]
+fn the_rows_below_a_create_field_shift_down_by_one(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    fs.insert_file("/vault/c.md", "gamma");
+    let sidebar = open(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+
+    let first = row(&sidebar, cx, "a");
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.select_for_test(first.id, cx);
+        sidebar.open_create(Kind::Note, cx);
+    });
+
+    let rows: Vec<Option<String>> = sidebar.read_with(cx, |sidebar, _| {
+        (0..sidebar.row_count())
+            .map(|ix| sidebar.row_at(ix).map(|row| row.name))
+            .collect()
+    });
+    let expected = [Some("a"), None, Some("b"), Some("c")].map(|name| name.map(str::to_owned));
+    assert_eq!(rows, expected, "the field takes row 1");
 }

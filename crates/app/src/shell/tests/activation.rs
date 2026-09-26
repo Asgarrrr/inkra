@@ -227,7 +227,7 @@ fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     });
 }
 
-/// The only test using `root`, so the only one that would catch a regression to an unconditional editor.
+/// The only test of `root` with every `Launch`, so the only one that would catch a regression to an unconditional editor.
 #[gpui::test]
 fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

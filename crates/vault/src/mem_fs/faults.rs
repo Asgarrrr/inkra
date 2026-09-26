@@ -36,10 +36,24 @@ impl MemFs {
         self.state().blocked_saves.insert(path.into(), wait);
         Gate(release)
     }
+
+    /// Parks the next `read_dir` of `path`, before it reads anything.
+    pub fn block_read_dir(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_read_dirs.insert(path.into(), wait);
+        Gate(release)
+    }
+
+    /// Parks the next `save` of `path` after the write: the file already has its new inode.
+    pub fn block_after_save(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_after_saves.insert(path.into(), wait);
+        Gate(release)
+    }
 }
 
-/// Holds one `MemFs::load` or `MemFs::save` parked. Releasing or dropping it
-/// lets that operation finish.
+/// Holds one parked `MemFs` operation. Releasing or dropping it lets that
+/// operation finish.
 #[must_use]
 pub struct Gate(oneshot::Sender<()>);
 

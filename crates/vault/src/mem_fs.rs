@@ -1,21 +1,21 @@
 //! An in-memory `Fs` for tests: a `BTreeMap`, injectable errors and gates on
 //! both I/O paths, not a simulated kernel.
 
+mod errors;
 mod faults;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
-use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
-};
+use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp};
 
+use errors::{io, stamp_of};
 pub use faults::Gate;
 
 #[derive(Default)]
@@ -38,6 +38,23 @@ struct State {
     trashed: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
     /// Loads started per path, found or not.
     loads: BTreeMap<PathBuf, usize>,
+    blocked_read_dirs: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_after_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    /// Listings started per path, found or not.
+    read_dirs: BTreeMap<PathBuf, usize>,
+}
+
+impl State {
+    /// As `RealFs`: a folder renamed or removed under a walk fails, it does not read as empty.
+    fn readable_dir(&self, path: &Path) -> Result<()> {
+        if self.unreadable.as_deref() == Some(path) {
+            return Err(io(path, ErrorKind::PermissionDenied));
+        }
+        if !self.dirs.contains_key(path) {
+            return Err(io(path, ErrorKind::NotFound));
+        }
+        Ok(())
+    }
 }
 
 pub struct MemFs {
@@ -61,11 +78,8 @@ impl MemFs {
         }
     }
 
-    fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        match self.state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn fresh_identity(state: &mut State) -> FileIdentity {
@@ -84,30 +98,50 @@ impl MemFs {
     /// Creates every parent directory. Reuses the identity if the path
     /// already exists, so writing to a file does not change what it is.
     pub fn insert_file(&self, path: impl Into<PathBuf>, text: impl Into<String>) {
+        Self::put_file(&mut self.state(), path.into(), text.into(), None);
+    }
+
+    /// As `insert_file`, under a given identity: a real filesystem reuses a freed inode.
+    pub fn insert_file_with_identity(
+        &self,
+        path: impl Into<PathBuf>,
+        text: impl Into<String>,
+        identity: FileIdentity,
+    ) {
+        Self::put_file(&mut self.state(), path.into(), text.into(), Some(identity));
+    }
+
+    /// `None` keeps the path's identity, or mints one for a new path.
+    fn put_file(state: &mut State, path: PathBuf, text: String, identity: Option<FileIdentity>) {
+        Self::insert_parents(state, &path);
+        let identity = identity
+            .or_else(|| state.files.get(&path).map(|(_, _, id)| *id))
+            .unwrap_or_else(|| Self::fresh_identity(state));
+        let mtime = Self::tick(state);
+        state.files.insert(path, (text, mtime, identity));
+    }
+
+    /// Creates every parent directory, as `insert_file` does.
+    pub fn insert_dir(&self, path: impl Into<PathBuf>) {
         let path = path.into();
         let mut state = self.state();
+        Self::insert_parents(&mut state, &path);
+        let identity = Self::fresh_identity(&mut state);
+        let mtime = Self::tick(&mut state);
+        state.dirs.insert(path, (mtime, identity));
+    }
+
+    fn insert_parents(state: &mut State, path: &Path) {
         let mut parent = path.parent();
         while let Some(dir) = parent {
             if dir.as_os_str().is_empty() || state.dirs.contains_key(dir) {
                 break;
             }
-            let identity = Self::fresh_identity(&mut state);
-            let mtime = Self::tick(&mut state);
+            let identity = Self::fresh_identity(state);
+            let mtime = Self::tick(state);
             state.dirs.insert(dir.to_path_buf(), (mtime, identity));
             parent = dir.parent();
         }
-        let existing = state.files.get(&path).map(|(_, _, id)| *id);
-        let identity = existing.unwrap_or_else(|| Self::fresh_identity(&mut state));
-        let mtime = Self::tick(&mut state);
-        state.files.insert(path, (text.into(), mtime, identity));
-    }
-
-    pub fn insert_dir(&self, path: impl Into<PathBuf>) {
-        let path = path.into();
-        let mut state = self.state();
-        let identity = Self::fresh_identity(&mut state);
-        let mtime = Self::tick(&mut state);
-        state.dirs.insert(path, (mtime, identity));
     }
 
     pub fn remove(&self, path: &Path) {
@@ -137,6 +171,16 @@ impl MemFs {
         self.state().loads.get(path).copied().unwrap_or_default()
     }
 
+    /// How many listings of `path` have started.
+    #[must_use]
+    pub fn read_dirs(&self, path: &Path) -> usize {
+        self.state()
+            .read_dirs
+            .get(path)
+            .copied()
+            .unwrap_or_default()
+    }
+
     #[must_use]
     pub fn read_to_string(&self, path: &Path) -> Option<String> {
         self.state()
@@ -149,13 +193,17 @@ impl MemFs {
 #[async_trait]
 impl Fs for MemFs {
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>> {
-        let state = self.state();
-        if state.unreadable.as_deref() == Some(path) {
-            return Err(VaultError::Io {
-                path: path.to_path_buf(),
-                source: io::Error::from(io::ErrorKind::PermissionDenied),
-            });
+        let blocked = {
+            let mut state = self.state();
+            *state.read_dirs.entry(path.to_path_buf()).or_default() += 1;
+            state.blocked_read_dirs.remove(path)
+        };
+        if let Some(wait) = blocked {
+            let _ = wait.await;
         }
+
+        let state = self.state();
+        state.readable_dir(path)?;
 
         let mut entries = Vec::new();
         for (dir, (mtime, identity)) in &state.dirs {
@@ -185,6 +233,10 @@ impl Fs for MemFs {
         Ok(entries)
     }
 
+    async fn check_dir(&self, path: &Path) -> Result<()> {
+        self.state().readable_dir(path)
+    }
+
     async fn load(&self, path: &Path) -> Result<Loaded> {
         let blocked = {
             let mut state = self.state();
@@ -197,10 +249,7 @@ impl Fs for MemFs {
 
         let state = self.state();
         let Some((text, mtime, identity)) = state.files.get(path) else {
-            return Err(VaultError::Io {
-                path: path.to_path_buf(),
-                source: io::Error::from(io::ErrorKind::NotFound),
-            });
+            return Err(io(path, ErrorKind::NotFound));
         };
         Ok(Loaded {
             text: crate::fs::normalize_line_endings(text),
@@ -217,10 +266,7 @@ impl Fs for MemFs {
             let _ = wait.await;
         }
         if self.state().unwritable.contains(path) {
-            return Err(VaultError::Io {
-                path: path.to_path_buf(),
-                source: io::Error::from(io::ErrorKind::PermissionDenied),
-            });
+            return Err(io(path, ErrorKind::PermissionDenied));
         }
 
         // Guard scoped to this block: `state()`'s mutex is not reentrant.
@@ -242,18 +288,22 @@ impl Fs for MemFs {
 
         self.insert_file(path.to_path_buf(), text);
 
-        let mut state = self.state();
-        let identity = Self::fresh_identity(&mut state);
-        let mtime = Self::tick(&mut state);
-        let Some((stored_text, stored_mtime, stored_identity)) = state.files.get_mut(path) else {
-            return Err(VaultError::Io {
-                path: path.to_path_buf(),
-                source: io::Error::from(io::ErrorKind::NotFound),
-            });
+        let (stamp, identity, blocked) = {
+            let mut state = self.state();
+            let identity = Self::fresh_identity(&mut state);
+            let mtime = Self::tick(&mut state);
+            let Some((stored_text, stored_mtime, stored_identity)) = state.files.get_mut(path)
+            else {
+                return Err(io(path, ErrorKind::NotFound));
+            };
+            *stored_mtime = mtime;
+            *stored_identity = identity;
+            let stamp = stamp_of(stored_text, mtime);
+            (stamp, identity, state.blocked_after_saves.remove(path))
         };
-        *stored_mtime = mtime;
-        *stored_identity = identity;
-        let stamp = stamp_of(stored_text, mtime);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
         Ok(Saved {
             stamp,
             identity,
@@ -264,10 +314,10 @@ impl Fs for MemFs {
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         let mut state = self.state();
         if state.uncreatable.contains(path) {
-            return Err(permission_denied(path));
+            return Err(io(path, ErrorKind::PermissionDenied));
         }
         if state.files.contains_key(path) || state.dirs.contains_key(path) {
-            return Err(already_exists(path));
+            return Err(io(path, ErrorKind::AlreadyExists));
         }
 
         let identity = Self::fresh_identity(&mut state);
@@ -291,7 +341,7 @@ impl Fs for MemFs {
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let mut state = self.state();
         if state.uncreatable.contains(to) {
-            return Err(permission_denied(to));
+            return Err(io(to, ErrorKind::PermissionDenied));
         }
         // Byte equality only: unlike a real volume, this fake does not fold
         // case or Unicode normalization.
@@ -299,7 +349,7 @@ impl Fs for MemFs {
             return Ok(());
         }
         if state.files.contains_key(to) || state.dirs.contains_key(to) {
-            return Err(already_exists(to));
+            return Err(io(to, ErrorKind::AlreadyExists));
         }
 
         if let Some(entry) = state.files.remove(from) {
@@ -307,7 +357,7 @@ impl Fs for MemFs {
             return Ok(());
         }
         let Some(entry) = state.dirs.remove(from) else {
-            return Err(not_found(from));
+            return Err(io(from, ErrorKind::NotFound));
         };
         state.dirs.insert(to.to_path_buf(), entry);
 
@@ -347,41 +397,13 @@ impl Fs for MemFs {
     async fn trash(&self, path: &Path) -> Result<()> {
         let mut state = self.state();
         if state.untrashable.contains(path) {
-            return Err(permission_denied(path));
+            return Err(io(path, ErrorKind::PermissionDenied));
         }
         let Some(entry) = state.files.remove(path) else {
-            return Err(not_found(path));
+            return Err(io(path, ErrorKind::NotFound));
         };
         state.trashed.insert(path.to_path_buf(), entry);
         Ok(())
-    }
-}
-
-fn not_found(path: &Path) -> VaultError {
-    VaultError::Io {
-        path: path.to_path_buf(),
-        source: io::Error::from(io::ErrorKind::NotFound),
-    }
-}
-
-fn already_exists(path: &Path) -> VaultError {
-    VaultError::Io {
-        path: path.to_path_buf(),
-        source: io::Error::from(io::ErrorKind::AlreadyExists),
-    }
-}
-
-fn permission_denied(path: &Path) -> VaultError {
-    VaultError::Io {
-        path: path.to_path_buf(),
-        source: io::Error::from(io::ErrorKind::PermissionDenied),
-    }
-}
-
-fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
-    Stamp {
-        mtime,
-        size: text.len() as u64,
     }
 }
 

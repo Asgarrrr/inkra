@@ -15,6 +15,7 @@ mod autosave;
 mod lifecycle;
 mod quit;
 mod rescan;
+mod scans;
 mod trash;
 
 pub(super) fn open_shell(

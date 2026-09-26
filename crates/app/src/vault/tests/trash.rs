@@ -2,17 +2,16 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::{TestAppContext, prelude::*};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::Buffer;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::vault::store::AUTOSAVE_DELAY;
 use crate::vault::{NoteClosed, NoteStore, TrashFailed};
 
-use crate::test_support::two_notes;
+use crate::test_support::{edit, opened, two_notes};
 
 /// A write pending when the delete is issued would otherwise land after
 /// it and recreate the note; `block_save` makes this reproducible.
@@ -21,16 +20,8 @@ async fn a_trash_is_not_undone_by_a_write_already_in_flight(cx: &mut TestAppCont
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
-        // Only a notify fires the autosave observer.
-        cx.notify();
-    });
+    let buffer = opened(&store, cx, a).await;
+    edit(&buffer, cx, "X");
 
     let gate = fs.block_save("/vault/a.md");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
@@ -69,18 +60,11 @@ async fn typing_after_a_delete_does_not_bring_the_note_back(cx: &mut TestAppCont
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
+    let buffer = opened(&store, cx, a).await;
 
     let gate = fs.block_save("/vault/a.md");
     let trashed = store.update(cx, |store, cx| store.trash(a, cx));
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
-        cx.notify();
-    });
+    edit(&buffer, cx, "X");
     gate.release();
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
@@ -98,11 +82,7 @@ async fn trashing_the_current_note_closes_it_and_says_so(cx: &mut TestAppContext
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
+    opened(&store, cx, a).await;
 
     let closed = Rc::new(RefCell::new(Vec::new()));
     let _guard = cx.update(|cx| {
@@ -129,11 +109,7 @@ async fn a_failed_trash_keeps_the_note_and_reports_it(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
+    opened(&store, cx, a).await;
 
     let failed = Rc::new(RefCell::new(Vec::new()));
     let _guard = cx.update(|cx| {
@@ -186,15 +162,8 @@ async fn a_delete_during_the_autosave_window_trashes_the_newest_text(cx: &mut Te
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
-        cx.notify();
-    });
+    let buffer = opened(&store, cx, a).await;
+    edit(&buffer, cx, "X");
 
     // No `advance_clock`: the write is still waiting out its delay, so
     // only the preempt, not the timer, can have produced it.
@@ -215,15 +184,8 @@ async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let (store, a, _b) = two_notes(cx, &fs);
 
-    let buffer = store
-        .update(cx, |store, cx| store.open_note(a, cx))
-        .await
-        .expect("a opens");
-    store.update(cx, |store, cx| store.set_current(a, cx));
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
-        cx.notify();
-    });
+    let buffer = opened(&store, cx, a).await;
+    edit(&buffer, cx, "X");
 
     // Not `fs.remove`: the write this delete preempts would recreate the
     // file and the delete would then succeed, proving nothing.
@@ -231,10 +193,7 @@ async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
     assert!(!store.update(cx, |store, cx| store.trash(a, cx)).await);
     cx.run_until_parked();
 
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "Y"));
-        cx.notify();
-    });
+    edit(&buffer, cx, "Y");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
 

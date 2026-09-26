@@ -207,3 +207,28 @@ fn a_note_created_under_a_selected_folder_lands_inside_it(cx: &mut TestAppContex
         vault_names(&notes, cx)
     );
 }
+
+/// `g` sits between the note and its folder: the parent is the nearest folder one level up.
+#[gpui::test]
+fn a_note_created_beside_a_selected_note_lands_in_its_folder(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/f/g/x.md", "");
+    fs.insert_file("/vault/f/a.md", "alpha");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+    let a = entry_id(&notes, cx, "a");
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.toggle_named("f", cx);
+        sidebar.select_for_test(a, cx);
+    });
+    visual.run_until_parked();
+
+    visual.simulate_keystrokes("cmd-n p l a n enter");
+    visual.run_until_parked();
+
+    assert!(
+        vault_names(&notes, cx).contains(&"f/plan.md".to_owned()),
+        "got {:?}",
+        vault_names(&notes, cx)
+    );
+}

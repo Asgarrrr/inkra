@@ -7,6 +7,8 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::keymap::key_bindings;
+use crate::picker::{Picker, PickerDelegate as _};
+use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
 use super::{AppShell, EditorView, NoteActivated, NoteStore, Sidebar};
@@ -17,9 +19,34 @@ mod column;
 mod creating;
 mod following;
 mod modal;
+mod open_first;
 mod quick_open;
 mod renaming;
 mod trashing;
+
+impl AppShell {
+    pub(crate) fn tree_row_names(&self, cx: &gpui::App) -> Vec<String> {
+        self.sidebar.read(cx).row_names()
+    }
+
+    pub(crate) fn toggle_tree_row(&mut self, name: &str, cx: &mut gpui::Context<Self>) {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.toggle_named(name, cx));
+    }
+
+    /// The open quick-open picker's empty text and match count; `None` when it is not open.
+    pub(crate) fn quick_open_state(&self, cx: &gpui::App) -> Option<(Option<&'static str>, usize)> {
+        let picker = self
+            .modal
+            .as_ref()?
+            .view()
+            .clone()
+            .downcast::<Picker<QuickOpenDelegate>>()
+            .ok()?;
+        let delegate = &picker.read(cx).delegate;
+        Some((delegate.empty_text(), delegate.match_count()))
+    }
+}
 
 /// Rooted at `AppShell`, not `Sidebar`, so `AppShell::new`'s subscription is reachable.
 pub(super) fn open_vault(

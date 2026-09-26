@@ -8,11 +8,11 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
 use super::render::row_text;
-use super::{NOTES_CHANGED_REFRESH, QuickOpenDelegate, Run, SEARCH_DEBOUNCE};
+use super::{Answered, NOTES_CHANGED_REFRESH, QuickOpenDelegate, Run, SEARCH_DEBOUNCE, Search};
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
 use crate::picker::{Picker, PickerDelegate as _};
-use crate::test_support::{entry_id, scan_notes};
+use crate::test_support::{entry_id, scan_notes, unscanned_notes, vault};
 use crate::theme;
 use crate::vault::NoteStore;
 
@@ -20,14 +20,6 @@ struct Opened {
     notes: Entity<NoteStore>,
     picker: Entity<Picker<QuickOpenDelegate>>,
     visual: VisualTestContext,
-}
-
-fn vault(files: &[&str]) -> Arc<MemFs> {
-    let fs = Arc::new(MemFs::new());
-    for file in files {
-        fs.insert_file(format!("/vault/{file}"), "");
-    }
-    fs
 }
 
 /// `showing` and `recent` by name; the index has built before the picker opens.
@@ -179,15 +171,13 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
 
     opened.picker.update(&mut opened.visual, |picker, cx| {
         let stale = picker.delegate.search_id - 1;
-        QuickOpenDelegate::apply(
-            picker,
-            stale,
-            Vec::new(),
-            false,
-            Run::Search,
-            Instant::now(),
-            cx,
-        );
+        let search = Search {
+            id: stale,
+            run: Run::Search,
+            answers: Answered::Query,
+            started: Instant::now(),
+        };
+        QuickOpenDelegate::apply(picker, search, Vec::new(), cx);
     });
 
     assert_eq!(listed(&mut opened), ["plan"]);
@@ -393,4 +383,36 @@ fn a_stem_wider_than_the_row_is_cut_inside_it(cx: &mut TestAppContext) {
             .is_some_and(|(row, stem)| stem.right() <= row.right()),
         "the stem {stem:?} ends inside the row {row:?}"
     );
+}
+
+#[gpui::test]
+fn the_picker_says_scanning_then_lists_the_first_names_without_the_refresh_wait(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let fs = vault(&["a.md", "f/b.md"]);
+    // Held: typing runs until parked, which would otherwise finish the scan.
+    let gate = fs.block_read_dir("/vault/f");
+    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let (picker, visual) = cx.add_window_view(move |window, cx| {
+        let delegate = QuickOpenDelegate::new(&links, None, Vec::new(), cx);
+        Picker::new(delegate, window, cx)
+    });
+    let mut opened = Opened {
+        notes,
+        picker,
+        visual: visual.clone(),
+    };
+    opened
+        .visual
+        .update(|window, cx| window.focus(&opened.picker.focus_handle(cx), cx));
+
+    opened.visual.simulate_keystrokes("b");
+    assert_eq!(empty_text(&mut opened), Some("Scanning the vault…"));
+    assert_eq!(listed(&mut opened), Vec::<String>::new());
+
+    gate.release();
+    opened.visual.run_until_parked();
+    assert_eq!(listed(&mut opened), ["f/b"], "without the refresh's wait");
 }

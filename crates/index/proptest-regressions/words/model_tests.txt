@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 271b59c2272704c2fd660a1c570f840c7f171db6012ed927ea4c03a08f48a8f8 # shrinks to ops = [Set(1, "a"), StartMerge, Set(1, ""), ApplyMerge], query_text = ""
+cc 08315f70f76624fbe9d589f3183106277f6639dcde5e8acc29e830b69e6f075d # shrinks to ops = [Set(0, "")], query_text = "l'étéaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+cc 6835c2257bb8d2cd6f6cb63b9ddffe6ff7db9acb1370dbda39068b6576f8e34d # shrinks to text = "\u{94d}\u{fe0f}\u{20e3}\u{93c}"

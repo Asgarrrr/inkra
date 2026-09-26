@@ -18,4 +18,4 @@ pub use fs::{
 };
 pub use path::{NameProblem, RelPath, check_name, note_file_name};
 pub use real_fs::RealFs;
-pub use vault::{Entry, EntryId, Vault};
+pub use vault::{Entry, EntryId, Job, Jobs, Serial, Vault, Walk};

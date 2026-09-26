@@ -86,6 +86,12 @@ impl RelPath {
         Some(Self(Arc::from(normalized.as_path())))
     }
 
+    /// The vault root itself: the start of a full walk.
+    #[must_use]
+    pub fn root() -> Self {
+        Self(Arc::from(Path::new("")))
+    }
+
     #[must_use]
     pub fn as_path(&self) -> &Path {
         &self.0

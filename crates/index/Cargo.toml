@@ -10,6 +10,7 @@ publish.workspace = true
 bench = false
 
 [dependencies]
+foldhash = "0.2.0"
 inkra-markdown = { workspace = true }
 inkra-text = { workspace = true }
 inkra-vault = { workspace = true }
@@ -37,4 +38,8 @@ harness = false
 
 [[bench]]
 name = "search"
+harness = false
+
+[[bench]]
+name = "words"
 harness = false

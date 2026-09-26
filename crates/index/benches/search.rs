@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NoteIndex, NoteSet, Source, TextQuery, search};
+use inkra_index::{NoteContent, NoteIndex, NoteSet, TextQuery, search};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
 
@@ -89,7 +89,7 @@ fn index() -> (NoteIndex, u64, (EntryId, Arc<str>)) {
     for (note, (id, _, _)) in notes.enumerate() {
         let text: Arc<str> = note_text(&mut lcg, note).into();
         total += text.len();
-        index.insert(*id, Source::default(), Arc::clone(&text));
+        index.insert(*id, NoteContent::parse(Arc::clone(&text)));
         last = Some((*id, text));
     }
     let Some(last) = last else {
@@ -145,8 +145,9 @@ fn bench_search(c: &mut Criterion) {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let held = index.corpus();
+                let content = NoteContent::parse(Arc::clone(&text));
                 let start = Instant::now();
-                index.insert(id, Source::default(), Arc::clone(&text));
+                index.insert(id, content);
                 total += start.elapsed();
                 drop(held);
             }
@@ -200,7 +201,7 @@ fn long_notes(
     let total = u64::try_from(text.len() * copies).unwrap_or(u64::MAX);
     let text: Arc<str> = text.into();
     for id in ids {
-        index.insert(id, Source::default(), Arc::clone(&text));
+        index.insert(id, NoteContent::parse(Arc::clone(&text)));
     }
     (index, total)
 }

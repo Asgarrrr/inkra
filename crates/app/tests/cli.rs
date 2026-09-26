@@ -1,6 +1,10 @@
 use std::ffi::{OsStr, OsString};
+use std::io::Read as _;
 use std::os::unix::ffi::OsStringExt;
-use std::process::Command;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// `expect` is avoided so the crate's `expect_used = "deny"` needs no
 /// exception here.
@@ -47,4 +51,64 @@ fn a_non_utf8_argument_is_reported_not_aborted() {
 
     assert_eq!(code, Some(1), "stderr: {stderr}");
     assert!(!stderr.contains("panicked"), "stderr: {stderr}");
+}
+
+/// Makes the folder listable again on drop, so it can be removed even when the test fails.
+struct Unreadable(PathBuf);
+
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+/// A window would keep the process alive: exiting on its own within the bound is the proof.
+#[test]
+fn an_unreadable_vault_exits_one_before_any_window() {
+    let path = std::env::temp_dir().join("inkra-unreadable-vault");
+    // A run killed before its guard dropped leaves the folder unreadable.
+    drop(Unreadable(path.clone()));
+    if let Err(error) = std::fs::create_dir(&path) {
+        panic!("create {}: {error}", path.display());
+    }
+    let dir = Unreadable(path);
+    if let Err(error) = std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o000)) {
+        panic!("chmod 000: {error}");
+    }
+
+    let mut child = match Command::new(env!("CARGO_BIN_EXE_inkra-app"))
+        .arg(&dir.0)
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => panic!("spawn inkra-app: {error}"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("inkra-app still ran after 10 s: it opened a window");
+            }
+            Err(error) => {
+                let _ = child.kill();
+                panic!("wait for inkra-app: {error}");
+            }
+        }
+    };
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+
+    assert_eq!(status.code(), Some(1), "stderr: {stderr}");
+    assert!(
+        stderr.contains("inkra-unreadable-vault") && stderr.contains("ermission denied"),
+        "the message must name the folder and the error; stderr: {stderr}"
+    );
 }

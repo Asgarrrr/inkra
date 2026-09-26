@@ -4,7 +4,7 @@ use std::path::Path;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NoteIndex, NoteSet, Source};
+use inkra_index::{NoteContent, NoteIndex, NoteSet, Source};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Vault};
 
@@ -71,7 +71,7 @@ fn built_index(vault: &Vault) -> NoteIndex {
         .collect();
     for (at, id) in notes.into_iter().enumerate() {
         let text = note_text(at);
-        index.insert(id, Source::parse(&text), text.into());
+        index.insert(id, NoteContent::parse(text.into()));
     }
     index
 }
