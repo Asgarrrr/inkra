@@ -3,9 +3,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 
-/// Bytes of the hit's line kept before and after it.
-const BEFORE: usize = 60;
-const AFTER: usize = 100;
+use crate::window::around;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
@@ -20,18 +18,12 @@ pub struct Hit {
 impl Hit {
     pub(crate) fn new(note: EntryId, text: &str, range: Range<ByteOffset>) -> Self {
         let (start, end) = (range.start.0, range.end.0);
-        // Only the window is scanned for the line's ends: a line can be megabytes long.
-        let from = text.ceil_char_boundary(start.saturating_sub(BEFORE));
-        let to = text.floor_char_boundary((end + AFTER).min(text.len()));
-        let from = text[from..start]
-            .rfind('\n')
-            .map_or(from, |at| from + at + 1);
-        let to = text[end..to].find('\n').map_or(to, |at| end + at);
+        let window = around(text, start..end);
         Self {
             note,
             range,
-            context: text[from..to].to_owned(),
-            context_match: start - from..end - from,
+            context: text[window.clone()].to_owned(),
+            context_match: start - window.start..end - window.start,
         }
     }
 }

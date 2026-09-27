@@ -216,6 +216,12 @@ impl NoteSet {
 > calls now change five fields together: `words` joins them, and a merge of the
 > word index is started and applied through `words_merge` and `words_apply`.
 
+> **Corrected in slice 8.** `NoteSet::build` takes `(EntryId, String, Kind,
+> Mtime)`: each corpus slot holds its text and that text's mtime, and
+> `NoteContent::parse` takes the mtime. Quick open's matcher is `find_notes`,
+> which reads the names, the corpus (for the mtimes) and a `Lookup` (smart
+> quick open spec, S3, "Built in slice 8").
+
 A load that finishes after its note was trashed is ignored by `insert`, for
 links, text and words alike (`crates/index/src/index.rs:44-49`).
 
@@ -503,6 +509,10 @@ renamed `IndexSync`, in the same commit as `NoteIndex`.
 > measured 25 ms at 10,000 notes (Performance), about 125 ms at 50,000 if
 > linear, on every rescan.
 
+> **Corrected in slice 8.** The membership tuple is `(EntryId, String, Kind,
+> Mtime)`: each corpus slot holds its text and that text's mtime (smart quick
+> open spec, S3, "Built in slice 8").
+
 During the startup load, vault search runs over the notes already loaded, and
 says so (D9).
 
@@ -669,6 +679,18 @@ previous note. A refresh reads the kept note when its result lands, not when
 `NotesChanged` arrives, as Zed's `set_search_matches`
 (`file_finder.rs:1117-1126`); a move during the 200 ms wait is kept.
 
+> **Corrected in slice 8.** A run is a user search or a background refresh. A
+> keystroke starts a user search, and so do the first names after the scan: the
+> user waits on them. A `NotesChanged` refresh, a notify refresh and the re-run
+> after a stale scan are background refreshes. Step 3 waits 100 ms only behind
+> a user search: a keystroke during a background refresh cancels it and runs at
+> once. A background refresh calls `Picker::refresh_in_background`, which marks
+> no result pending, so `enter` during it confirms the row on screen at once.
+> Its result lands through `Picker::matches_refreshed`: the kept note stays
+> selected and the list keeps its scroll. When the kept note is gone, the first
+> row is selected and scrolled to, through `matches_updated` (smart quick open
+> spec, S5, "Built in slice 8").
+
 **A refresh must not cancel a running scan of the same query.** Today a
 `NotesChanged` bumps the search id and sets the cancel flag, so it drops the
 scan of a query the user is still waiting on. A refresh, from `NotesChanged`
@@ -755,6 +777,10 @@ hit's `context` with `context_match` highlighted.
 Highlights use `StyledText::with_highlights`, as the backlinks panel does
 (`crates/app/src/backlinks/render.rs:29-38`). Colours come from `theme.rs`.
 Every row is one line, so `uniform_list` can measure from row 0.
+
+> **Corrected in slice 8.** Quick open's rows are two lines: the name, then an
+> excerpt or the note's first line (smart quick open spec, S4, S5). Every row of
+> a picker still has one height, the delegate's `row_height`.
 
 The field's trailer shows the two toggles, `Aa` and `W`, each lit when on.
 

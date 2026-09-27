@@ -4,6 +4,7 @@ use std::sync::Arc;
 use inkra_vault::EntryId;
 
 use crate::chunks::split;
+use crate::words::NameWords;
 
 mod bag;
 mod fold;
@@ -56,36 +57,64 @@ impl Candidate {
 
 /// The quick-open candidates in vault order. Cloning is an `Arc` bump.
 #[derive(Clone, Default)]
-pub struct NamesSnapshot(Arc<[Candidate]>);
+pub struct NamesSnapshot {
+    candidates: Arc<[Candidate]>,
+    /// Read by `find`, never by `match_names`.
+    words: Arc<NameWords>,
+}
 
 impl NamesSnapshot {
-    pub(crate) fn build(notes: impl IntoIterator<Item = (EntryId, Arc<str>)>) -> Self {
-        Self(
-            notes
+    pub(crate) fn build(notes: Vec<(EntryId, Arc<str>)>) -> Self {
+        let words = NameWords::build(notes.iter().map(|(_, path)| &**path));
+        Self {
+            candidates: notes
                 .into_iter()
                 .map(|(id, path)| Candidate::new(id, path))
                 .collect(),
-        )
+            words: Arc::new(words),
+        }
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.candidates.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.candidates.is_empty()
     }
 
     /// Ranges to match in parallel; `merge_names` over their results equals one range.
     #[must_use]
     pub fn chunks(&self, n: usize) -> Vec<Range<usize>> {
-        split(self.0.len(), n)
+        split(self.candidates.len(), n)
+    }
+
+    /// The name words' bytes and arrays; the candidates are not counted.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.words.heap_bytes()
+    }
+
+    pub(crate) fn id(&self, order: usize) -> EntryId {
+        self.candidates[order].id
+    }
+
+    pub(crate) fn path(&self, order: usize) -> &Arc<str> {
+        &self.candidates[order].path
+    }
+
+    pub(crate) fn chars(&self, order: usize) -> usize {
+        self.candidates[order].chars.len()
+    }
+
+    pub(crate) fn words(&self) -> &NameWords {
+        &self.words
     }
 
     fn candidates(&self) -> &[Candidate] {
-        &self.0
+        &self.candidates
     }
 }
 

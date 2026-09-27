@@ -4,9 +4,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui::{AnyElement, Context, IntoElement, ParentElement, SharedString, Task, div};
+use gpui::{
+    AnyElement, Context, IntoElement, ParentElement, Pixels, SharedString, Styled, Task, div,
+};
 
 use super::{Picker, PickerDelegate};
+use crate::theme;
 
 /// Each query answers after this, so a test can type twice before the first answer.
 pub(crate) const DELAY: Duration = Duration::from_millis(10);
@@ -18,6 +21,8 @@ pub(crate) struct Letters<const KIND: u8 = 0> {
     pub(crate) confirmed: Rc<RefCell<Vec<&'static str>>>,
     /// Every query whose result reached the picker, in order.
     pub(crate) applied: Rc<RefCell<Vec<String>>>,
+    pub(crate) footer: Option<&'static str>,
+    pub(crate) lines: u8,
 }
 
 impl<const KIND: u8> Letters<KIND> {
@@ -27,6 +32,8 @@ impl<const KIND: u8> Letters<KIND> {
             rows: Vec::new(),
             confirmed: Rc::default(),
             applied: Rc::default(),
+            footer: None,
+            lines: 1,
         }
     }
 }
@@ -83,11 +90,20 @@ impl<const KIND: u8> PickerDelegate for Letters<KIND> {
 
     fn render_row(&self, ix: usize, _: bool, _: &mut Context<Picker<Self>>) -> AnyElement {
         div()
+            .h(self.row_height())
             .child(self.rows.get(ix).copied().unwrap_or_default())
             .into_any_element()
     }
 
     fn row_label(&self, ix: usize) -> SharedString {
         self.rows.get(ix).copied().unwrap_or_default().into()
+    }
+
+    fn render_footer(&self, _: &mut Context<Picker<Self>>) -> Option<AnyElement> {
+        self.footer.map(IntoElement::into_any_element)
+    }
+
+    fn row_height(&self) -> Pixels {
+        theme::UI_LINE_HEIGHT * f32::from(self.lines)
     }
 }

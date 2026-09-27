@@ -1,6 +1,6 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
-use std::time::Duration;
+mod quick_open;
 
 use gpui::{WindowHandle, point, px};
 
@@ -65,33 +65,6 @@ const VAULT: &[(&str, &str)] = &[
     ("projects/inkra.md", "# Inkra\n\nA note editor.\n"),
     ("projects/archive/old.md", "Superseded.\n"),
 ];
-
-const NOTES: &[(&str, &str)] = &[
-    ("index.md", "# Index\n"),
-    ("reading list.md", "Books.\n"),
-    ("projects/inkra/plan.md", "Plan.\n"),
-    ("projects/inkra/release plan.md", "Release.\n"),
-    (
-        "projects/inkra/a plan whose name alone is wider than the whole row of the picker, and then some more words after that.md",
-        "Long.\n",
-    ),
-    (
-        "archive/2025/old projects/a very long folder name that runs past the row/and keeps going for a while longer still/projects/plan b.md",
-        "Old.\n",
-    ),
-];
-
-const GRAPHEMES: &[(&str, &str)] = &[
-    ("cafe\u{301} notes.md", ""),
-    ("\u{1f469}\u{200d}\u{1f4bb} dev log.md", ""),
-    (
-        "sprint e\u{301}te\u{301}/\u{1f469}\u{200d}\u{1f4bb} review.md",
-        "",
-    ),
-];
-
-/// Longer than any picker wait, so the last query has answered.
-const PICKER_SETTLE: Duration = Duration::from_millis(300);
 
 /// No folders, so `index` is the first row.
 const LINKED: &[(&str, &str)] = &[
@@ -207,28 +180,43 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "quick-open-results",
-        shows: "cmd-p over the editor: stems with matched chars lit, folders dimmed and cut from the start",
-        open: quick_open_results,
+        shows: "cmd-p over the editor: name rows then text rows, word starts lit, a dimmed second line under each, folders cut from the start",
+        open: quick_open::results,
+    },
+    Scene {
+        name: "quick-open-groups",
+        shows: "`plan friday`: one row per group, name then name and text then text, each with its second line",
+        open: quick_open::groups,
+    },
+    Scene {
+        name: "quick-open-text-only",
+        shows: "`friday`, in no name: text rows only, the word lit in each excerpt",
+        open: quick_open::text_only,
+    },
+    Scene {
+        name: "quick-open-indexing",
+        shows: "a load still pending: \"Indexing 5 of 6 notes\" dimmed under the rows, the unloaded note with no second line",
+        open: quick_open::indexing,
     },
     Scene {
         name: "quick-open-empty",
         shows: "cmd-p before any note was shown: \"No recent notes\" under the placeholder",
-        open: quick_open_empty,
+        open: quick_open::empty,
     },
     Scene {
         name: "quick-open-no-match",
         shows: "a query nothing matches: \"No matching notes\"",
-        open: quick_open_no_match,
+        open: quick_open::no_match,
     },
     Scene {
         name: "quick-open-graphemes",
-        shows: "a highlight on a combining mark and inside an emoji ZWJ sequence: no panic, no garbled glyph",
-        open: quick_open_graphemes,
+        shows: "`e` lights a decomposed `é` whole, in a folder and in an excerpt, and a word right after an emoji ZWJ sequence: no garbled glyph",
+        open: quick_open::graphemes,
     },
     Scene {
         name: "quick-open-scanning",
         shows: "cmd-p before the vault's first scan ends: \"Scanning the vault…\" under the placeholder",
-        open: quick_open_scanning,
+        open: quick_open::scanning,
     },
 ];
 
@@ -393,51 +381,5 @@ const SIDEBAR_X: gpui::Pixels = px(80.);
 fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(LINKED);
     stage.click(window, point(SIDEBAR_X, row_center(0.)));
-    window
-}
-
-fn quick_open_results(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(NOTES);
-    // Folders come first, so `index` is row 2.
-    stage.click(window, point(SIDEBAR_X, row_center(2.)));
-    stage.focus(window);
-    stage.keys(window, "cmd-p");
-    stage.keys(window, "p l a n");
-    stage.wait(PICKER_SETTLE);
-    window
-}
-
-fn quick_open_empty(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(NOTES);
-    stage.focus(window);
-    stage.keys(window, "cmd-p");
-    stage.wait(PICKER_SETTLE);
-    window
-}
-
-fn quick_open_no_match(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(NOTES);
-    stage.focus(window);
-    stage.keys(window, "cmd-p");
-    stage.keys(window, "z q x");
-    stage.wait(PICKER_SETTLE);
-    window
-}
-
-/// `e` lights `é`, which the index holds as NFC; the emoji ZWJ sequence lights whole.
-fn quick_open_graphemes(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(GRAPHEMES);
-    stage.focus(window);
-    stage.keys(window, "cmd-p");
-    stage.type_text(window, "e \u{1f469}");
-    stage.wait(PICKER_SETTLE);
-    window
-}
-
-fn quick_open_scanning(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_unscanned_vault(UNSCANNED, "projects");
-    stage.focus(window);
-    stage.keys(window, "cmd-p");
-    stage.wait(PICKER_SETTLE);
     window
 }

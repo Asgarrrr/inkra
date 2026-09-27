@@ -1,21 +1,22 @@
 //! `NoteIndex` against a model that scans every note and every link, sharing only `Key`
 //! folding and `Target::parse` with the code under test.
 
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Vault};
 use proptest::prelude::*;
 use unicode_normalization::UnicodeNormalization;
 
 use super::NoteIndex;
 use crate::key::{Key, strip_md};
-use crate::test_support::{id, note_set, try_rename, vault};
-use crate::{NoteContent, Resolution, Source, Style, Target};
+use crate::test_support::{id, mtime, note_set, try_rename, vault};
+use crate::{CorpusSnapshot, NoteContent, Resolution, Source, Style, Target};
 
 #[derive(Debug, Clone)]
 enum Op {
     Create(String),
     Delete(String),
     Rename(String, String),
-    Load(String, String),
+    /// A load or a save: the text and its mtime.
+    Load(String, String, u64),
     Unload(String),
     Build,
     Hold,
@@ -35,8 +36,8 @@ fn op() -> impl Strategy<Value = Op> {
         small().prop_map(Op::Create),
         small().prop_map(Op::Delete),
         (small(), small()).prop_map(|(a, b)| Op::Rename(a, b)),
-        (small(), "[a-céÉ' ]{0,12}").prop_map(|(a, t)| Op::Load(a, t)),
-        (small(), "[a-céÉ' ]{0,12}").prop_map(|(a, t)| Op::Load(a, t)),
+        (small(), "[a-céÉ' ]{0,12}", 0..4u64).prop_map(|(a, t, m)| Op::Load(a, t, m)),
+        (small(), "[a-céÉ' ]{0,12}", 0..4u64).prop_map(|(a, t, m)| Op::Load(a, t, m)),
         small().prop_map(Op::Unload),
         Just(Op::Build),
         Just(Op::Hold),
@@ -59,6 +60,7 @@ proptest! {
         let _ = index.set_notes(note_set(&vault));
         let mut table: Vec<EntryId> = Model::new(&vault).notes.iter().map(|n| n.0).collect();
         let mut model: HashMap<EntryId, String> = HashMap::new();
+        let mut modified: HashMap<EntryId, Mtime> = scanned(&vault).collect();
         let mut held = Vec::new();
         let mut held_words = Vec::new();
         let mut running = None;
@@ -78,11 +80,12 @@ proptest! {
                 Op::Rename(from, to) => {
                     let _ = try_rename(&fs, &mut vault, &from, &to);
                 }
-                Op::Load(path, text) => {
+                Op::Load(path, text, at) => {
                     if let Some(id) = find(&vault, &path) {
-                        index.insert(id, NoteContent::parse(text.as_str().into()));
+                        index.insert(id, NoteContent::parse(text.as_str().into(), mtime(at)));
                         if table.contains(&id) {
                             model.insert(id, text);
+                            modified.insert(id, mtime(at));
                         }
                     }
                 }
@@ -96,10 +99,14 @@ proptest! {
                     let _ = index.set_notes(note_set(&vault));
                     table = Model::new(&vault).notes.iter().map(|n| n.0).collect();
                     model.retain(|id, _| table.contains(id));
+                    // A note keeping its text keeps that text's mtime; the others take the scan's.
+                    modified = scanned(&vault)
+                        .map(|(id, scan)| (id, if model.contains_key(&id) { modified[&id] } else { scan }))
+                        .collect();
                 }
                 Op::Hold => {
                     let snap = index.corpus();
-                    let seen = texts(&snap);
+                    let seen = (texts(&snap), mtimes(&snap));
                     held.push((snap, seen));
                     let words = index.words();
                     let seen = words.entries();
@@ -125,10 +132,12 @@ proptest! {
                 .collect();
             prop_assert_eq!(texts(&corpus), expected);
             prop_assert_eq!(corpus.len(), table.len());
+            let expected: Vec<Option<Mtime>> = table.iter().map(|id| modified.get(id).copied()).collect();
+            prop_assert_eq!(mtimes(&corpus), expected);
             let bytes: usize = model.values().map(String::len).sum();
             prop_assert_eq!(corpus.heap_bytes(), table.len() * SLOT_BYTES + model.len() * TEXT_HEADER_BYTES + bytes);
             for (snap, seen) in &held {
-                prop_assert_eq!(&texts(snap), seen);
+                prop_assert_eq!(&(texts(snap), mtimes(snap)), seen);
             }
             let fresh = {
                 let mut words = Words::default();
@@ -143,6 +152,74 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn external_edits_keep_each_old_mtime_until_the_reload() {
+    use crate::test_support::ROOT;
+    let (fs, mut vault) = vault(&["a.md", "b.md", "c.md"]);
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(note_set(&vault));
+    let (a, b, c) = (id(&vault, "a.md"), id(&vault, "b.md"), id(&vault, "c.md"));
+    for (note, at) in [(a, 0), (b, 1), (c, 2)] {
+        index.insert(note, NoteContent::parse("old".into(), mtime(at)));
+    }
+
+    for file in ["a.md", "b.md", "c.md", "d.md"] {
+        fs.insert_file(format!("{ROOT}/{file}"), "edited");
+    }
+    let Ok(()) = futures::executor::block_on(vault.rescan(&fs)) else {
+        panic!("a MemFs rescan cannot fail");
+    };
+    let _ = index.set_notes(note_set(&vault));
+    let d = id(&vault, "d.md");
+    let scan: std::collections::HashMap<EntryId, Mtime> = scanned(&vault).collect();
+    assert_eq!(
+        mtimes(&index.corpus()),
+        [
+            Some(mtime(0)),
+            Some(mtime(1)),
+            Some(mtime(2)),
+            Some(scan[&d])
+        ],
+        "each text keeps its mtime; d has no text yet"
+    );
+
+    index.insert(c, NoteContent::parse("edited".into(), scan[&c]));
+    index.insert(a, NoteContent::parse("edited".into(), scan[&a]));
+    let _ = index.set_notes(note_set(&vault));
+    assert_eq!(
+        mtimes(&index.corpus()),
+        [
+            Some(scan[&a]),
+            Some(mtime(1)),
+            Some(scan[&c]),
+            Some(scan[&d])
+        ],
+        "b's reload has not landed"
+    );
+
+    index.insert(b, NoteContent::parse("edited".into(), scan[&b]));
+    assert_eq!(
+        mtimes(&index.corpus()),
+        [
+            Some(scan[&a]),
+            Some(scan[&b]),
+            Some(scan[&c]),
+            Some(scan[&d])
+        ]
+    );
+}
+
+fn scanned(vault: &Vault) -> impl Iterator<Item = (EntryId, Mtime)> {
+    vault
+        .entries()
+        .filter(|entry| entry.kind == Kind::Note)
+        .map(|entry| (entry.id, entry.mtime))
+}
+
+fn mtimes(corpus: &CorpusSnapshot) -> Vec<Option<Mtime>> {
+    (0..corpus.len()).map(|at| corpus.modified(at)).collect()
 }
 
 struct Model {
@@ -346,7 +423,7 @@ proptest! {
             })
             .collect();
         for (source, _, text) in &loaded {
-            index.insert(*source, NoteContent::parse(text.as_str().into()));
+            index.insert(*source, NoteContent::parse(text.as_str().into(), mtime(0)));
         }
         let sources: Vec<(EntryId, Source)> = loaded
             .into_iter()

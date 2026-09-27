@@ -343,10 +343,19 @@ fn set_notes_returns_the_previous_set() {
     assert!(index.set_notes(note_set(&two)).names().is_empty());
     let previous = index.set_notes(note_set(&three));
     assert_eq!(previous.names().len(), 2);
-    let ids: Vec<_> = entries(&two).into_iter().map(|(id, _, _)| id).collect();
+    let ids: Vec<_> = entries(&two).into_iter().map(|(id, ..)| id).collect();
     assert_eq!(
         *previous.ids, *ids,
         "the previous set's ids, for the caller to free"
     );
     assert_eq!(index.names().len(), 3);
+
+    let previous = index.set_notes(previous);
+    assert_eq!(
+        previous.names().len(),
+        3,
+        "a returned set can be applied again"
+    );
+    assert_eq!(*previous.mtimes, *note_set(&three).mtimes);
+    assert_eq!(index.names().len(), 2);
 }

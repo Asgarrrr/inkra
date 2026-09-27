@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use inkra_vault::EntryId;
 
 use super::ordinal::Ordinal;
 use super::query::NoteQuery;
-use super::store::WordsSnapshot;
+use super::store::{Ordinals, WordsSnapshot};
 
 /// How a note holds one term: how many of its words start with it, and whether one equals it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +21,7 @@ const ABSENT: TermHit = TermHit {
 /// A query's terms resolved in the word index, once per keystroke; every range reads it.
 #[derive(Debug)]
 pub struct Lookup {
-    ordinals: Arc<HashMap<EntryId, Ordinal>>,
+    ordinals: Ordinals,
     /// Per term, a hit per ordinal; a count of 0 is a note without the term.
     terms: Vec<Vec<TermHit>>,
 }
@@ -32,7 +30,15 @@ impl Lookup {
     /// How the note holds the query's `term`-th term; `None` when it holds no word starting with it.
     #[must_use]
     pub fn get(&self, term: usize, id: EntryId) -> Option<TermHit> {
-        let ordinal = self.ordinals.get(&id)?;
+        self.hit(term, self.ordinal(id)?)
+    }
+
+    /// The note's ordinal, resolved once for all its terms; `None` when it has no words.
+    pub(crate) fn ordinal(&self, id: EntryId) -> Option<Ordinal> {
+        self.ordinals.get(id).copied()
+    }
+
+    pub(crate) fn hit(&self, term: usize, ordinal: Ordinal) -> Option<TermHit> {
         let hit = self.terms.get(term)?.get(ordinal.index())?;
         (hit.count > 0).then_some(*hit)
     }
@@ -72,7 +78,7 @@ impl WordsSnapshot {
             terms.push(hits);
         }
         Some(Lookup {
-            ordinals: Arc::clone(&self.ordinals),
+            ordinals: self.ordinals.clone(),
             terms,
         })
     }

@@ -10,7 +10,7 @@ use crate::{NameQuery, match_names};
 fn paths(files: &[&str]) -> Vec<String> {
     let (_fs, vault) = vault(files);
     let all = entries(&vault);
-    let recent: Vec<EntryId> = all.iter().map(|(id, _, _)| *id).collect();
+    let recent: Vec<EntryId> = all.iter().map(|(id, ..)| *id).collect();
     let names = NoteSet::build(all).names();
     let query = NameQuery::new("", None, &recent);
     match_names(
@@ -57,7 +57,7 @@ fn a_snapshot_splits_into_ranges_over_its_notes() {
 fn a_candidate_index_is_its_note_order() {
     let (_fs, vault) = vault(&["b.md", "a/c.md", "a/d.md", "e.md"]);
     let all = entries(&vault);
-    let recent: Vec<EntryId> = all.iter().map(|(id, _, _)| *id).collect();
+    let recent: Vec<EntryId> = all.iter().map(|(id, ..)| *id).collect();
     let set = NoteSet::build(all);
     let names = set.names();
     let query = NameQuery::new("", None, &recent);

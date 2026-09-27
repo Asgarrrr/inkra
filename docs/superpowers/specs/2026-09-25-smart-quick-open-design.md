@@ -61,6 +61,34 @@ note has no language scope. The rules differ on combining marks and join
 controls: they are word chars for `regex`, not for `is_alphanumeric`. So
 `e\u{301}te` is one word here and two in Zed.
 
+**Checked in slice 8** against `file_finder/src/file_finder.rs`,
+`picker/src/picker.rs` and `search/src/text_finder/delegate.rs`:
+
+- Zed merges matching history items into the search list by score and lifts the
+  file already open to the **top** (`cmp_matches`, `:622-634`); history matches
+  on the file name only (`matching_history_items`, `:687`). Inkra keeps D2's
+  rule: the note showing ranks after the notes of its group that tie with it
+  on the exact name and keys 1–2 (S3 key 3), since opening it again does
+  nothing. The MRU is key 4, a tie-break after the group, the exact name,
+  whole terms and stem terms or occurrences: a better word match beats a recent
+  note. The `Name` group gives Zed's name-only rule by construction.
+- Zed keeps the selected match when the query did not change
+  (`set_search_matches`, `:1097-1127`); Inkra keeps the selected note by id, as
+  since slice 3.
+- On a worktree update Zed refreshes after `WORKTREE_UPDATE_REFRESH_DEBOUNCE`,
+  200 ms (`:844`), cancels the running search, and extends the old matches when
+  a cancelled search's query did not change (`extend_old_matches`, `:1112`).
+  Inkra never cancels a running scan on a refresh (D7): it re-runs once the scan
+  lands. Zed's matches come as a stream per worktree; ours are ranked over the
+  whole vault, so a partial list is not a prefix of the final one.
+- Zed's text finder draws a bounded window around a match, trims the leading
+  indentation when the window starts at the line start, and highlights the match
+  (`render_matched_line`, `:1344-1428`). Inkra takes all three. Zed computes it
+  at render time from a rope; Inkra computes it off the foreground, after the
+  merge (S4, "Built in slice 8").
+- Zed's `PickerDelegate::render_footer` returns `Option<AnyElement>`, `None` by
+  default (`picker.rs:408`). Inkra's takes the same shape.
+
 ## Decisions
 
 ### S1. Words and folding
@@ -257,8 +285,9 @@ replaced twice before it shipped:
 - **Fresh** holds the notes written since the last merge, each with its own
   sorted words. An ordinal is fresh, alive, or neither (a note with no
   words), never both.
-- **A snapshot** is four `Arc`s: ordinals, segment, alive, fresh. A write
-  copies only pointer-sized state while a snapshot holds it.
+- **A snapshot** is four `Arc`s: ordinals, segment, alive, fresh. The
+  ordinals and fresh maps are 64 shards each (`f4d95de`), so a write under a
+  held snapshot copies the shard list and one shard.
 - **Merges run off the foreground.** The foreground captures three `Arc`s and
   starts recording the ordinals written from then on. The background builds a
   new segment. The foreground swaps it in, clears the bits of the ordinals
@@ -287,11 +316,19 @@ replaced twice before it shipped:
 
 ### S3. `find_notes`
 
+**Corrected in slice 8:** the block shows the API slice 8 built.
+
 ```rust
 pub struct NoteQuery;       // NoteQuery::new(text, showing: Option<EntryId>, recent: &[EntryId])
 pub struct Lookup;          // the query's terms resolved in the word index; cheap to share
-impl WordsSnapshot { pub fn lookup(&self, query: &NoteQuery, cancel: &AtomicBool) -> Option<Lookup>; } // None: cancelled (slice 7)
+pub struct IndexSnapshot;   // NoteIndex::snapshot(): names, corpus, words
+impl IndexSnapshot {
+    pub fn lookup(&self, query: &NoteQuery, cancel: &AtomicBool)
+        -> Option<Lookup>; // None: cancelled
+    pub fn chunks(&self, n: usize) -> Vec<Range<usize>>;
+}
 pub enum Group { Name, NameAndText, Text }
+pub struct Ranked;          // a note a range kept: its private rank only
 pub struct NoteMatch {
     pub id: EntryId,
     pub path: Arc<str>,            // NFC, `.md` stripped, as NameMatch::path
@@ -299,9 +336,10 @@ pub struct NoteMatch {
     pub name_highlights: Vec<Range<usize>>, // byte ranges into `path`, whole graphemes
     // private rank
 }
-pub fn find_notes(names: &NamesSnapshot, lookup: &Lookup, range: Range<usize>,
-                  query: &NoteQuery, cancel: &AtomicBool, limit: usize) -> Vec<NoteMatch>;
-pub fn merge_notes(chunks: Vec<Vec<NoteMatch>>, limit: usize) -> Vec<NoteMatch>;
+pub fn find_notes(snapshot: &IndexSnapshot, lookup: &Lookup, range: Range<usize>,
+                  query: &NoteQuery, cancel: &AtomicBool, limit: usize) -> Vec<Ranked>;
+pub fn merge_notes(snapshot: &IndexSnapshot, chunks: Vec<Vec<Ranked>>,
+                   query: &NoteQuery, limit: usize) -> Vec<NoteMatch>;
 ```
 
 A search runs in two steps on the background executor. `lookup` resolves each
@@ -320,16 +358,37 @@ path, or of its text. It is placed in:
 | `NameAndText` | at least one term matches in the stem or folders, the rest only in the text |
 | `Text` | no term matches in the stem or folders; every term matches in the text |
 
-Order: group first (`Name`, then `NameAndText`, then `Text`). Within a group,
-in this order:
+Order: group first (`Name`, then `NameAndText`, then `Text`), then the exact
+name (amended below). Within a group, after the exact name, in this order:
 
 1. more terms matching **whole** words beat fewer;
 2. for `Name`: more terms in the stem beat terms in folders; for `Text` and
    `NameAndText`: more occurrences of the matched words in the text beat fewer;
-3. the note showing ranks last in its group (D2's penalty, made simpler);
+3. the note showing ranks after the notes of its group that tie with it on
+   the exact name and keys 1–2 (D2's penalty, made simpler);
 4. MRU rank (search spec D6), recent first;
 5. the most recently modified first;
 6. shorter path, then vault order.
+
+**Amended 2026-09-27, decided by the user: exact name first.** A note whose
+name is the query ranks first in its group, before key 1: the note `plan` for
+the query `plan`, `Plan` for `plân`. The name is **exact** when the stem's S1
+words, folded and in path order, equal the query's typed words, folded and in
+typed order.
+
+- Repeats count: `plan plan` is exact for a stem `plan plan`, not for `plan`.
+- Non-word chars and whitespace do not count, on either side: `Plan - B` is
+  exact for `plan b`, and `2026-09` for `2026 09`.
+- A word that folds to nothing is dropped on both sides, as S1 drops it.
+- The typed words are the query's after S1's 64-char cut. They are capped at
+  64 folded chars, as terms, and stem words at 65, as stored words. So a stem
+  word over 64 folded chars is never exact.
+- The folders do not count: `plan/notes` is not exact for `plan`.
+- An empty query is never exact.
+
+An exact stem holds every term, so an exact note is always in `Name`. The key
+still sits right after the group, so the field order of the rank stays S3's key
+order. Keys 1–6 keep their numbers.
 
 The order is total and deterministic, so `merge_notes` over any split equals
 one range, as `merge_names` does.
@@ -339,25 +398,169 @@ An **empty query** lists the MRU without the note showing, as today.
 "Most recently modified" needs each note's mtime: `NoteSet::build` takes it in
 its tuple, `(EntryId, String, Kind, Mtime)`. A save updates it.
 
+**Built in slice 8 (S3).** The plan's slice 8 section holds the reasons in full.
+
+- **Mtimes.** A corpus slot holds its text and that text's mtime. A load writes
+  its `Loaded::stamp` and a save its `NoteSaved::stamp`, through
+  `NoteContent::parse(text, modified)`. A rebuild keeps a slot's mtime when the
+  note keeps its text, else takes the scan's. So the mtime always describes the
+  text the index holds: after an external edit, a note keeps its old mtime until
+  its reload lands. `NoteSet::build` takes `(EntryId, String, Kind, Mtime)`.
+  `Mtime` gains no order (the vault rule); key 5 orders the `SystemTime` inside.
+  Key 5 is a heuristic: a synced file's mtime need not follow the order of
+  edits, and notes imported together share one, so ties fall to key 6.
+- **`find_notes` takes the corpus**, for key 5, inside one `IndexSnapshot`:
+  `find_notes(snapshot, lookup, range, query, cancel, limit)`. The snapshot
+  holds the names, corpus and words, and only `NoteIndex::snapshot()` builds
+  it, so the names and corpus always come from one build: no runtime check or
+  fallback exists.
+- **A term's place.** A term is placed in the name when a word of the stem or
+  folders starts with it, else in the text. Key 1 counts the terms matching
+  whole in their place. Key 2 counts, for `Name`, the terms matching a stem
+  word; for `NameAndText` and `Text`, the occurrences of the terms placed in the
+  text. So a `Name` row never ranks by its text. The exact name (amended
+  2026-09-27), before key 1, compares the stem words with the typed words,
+  repeats kept, not with the terms. `NoteQuery` keeps the typed words beside
+  its terms; the rank reads the stem words of `NameWords` in place, only for a
+  `Name` row, with no allocation per note.
+- **Name words** are folded once per build, off the foreground, and stored
+  CSR-style beside the D2 candidates (`NameWords`): one string, one word array,
+  one start per note and an end sentinel, no allocation per word. `names`
+  stores `NameWords` and exposes it (`words()`), never reads it; `find` reads
+  it. `NamesSnapshot::heap_bytes` reports them, and the launch line prints
+  `names N bytes`.
+- **Highlights** light the matched prefix of each word, widened to whole
+  graphemes of the **path**: a word can start inside a grapheme (`🎉\u{301}x`) or
+  end inside one (`a🏻`). A range may start before the stem when a grapheme
+  straddles the last `/`; the row splits it between folder and stem. Highlights
+  are computed only for the rows a range returns.
+
 ### S4. The excerpt
 
 For each **visible** row, and only those, the delegate asks for a second line:
 
+**Corrected in slice 8:** the block shows the API slice 8 built.
+
 ```rust
 pub struct Excerpt { pub text: String, pub highlights: Vec<Range<usize>> }
-pub fn excerpt(text: &str, query: &NoteQuery) -> Option<Excerpt>;
+pub fn excerpt(snapshot: &IndexSnapshot, found: &NoteMatch, query: &NoteQuery,
+               cancel: &AtomicBool) -> Option<Excerpt>;
 ```
 
 - `NameAndText` and `Text` rows: the line around the first word of the text
   that a term matches, cut as a `Hit`'s context (search spec D4: up to 60 bytes
   before and 100 after, on char boundaries, within the line), with every
   matched word in it highlighted.
-- `Name` rows: the note's first non-empty line, as a preview, no highlight.
+- `Name` rows: the note's first prose line (amended below), as a preview, no
+  highlight.
 - A note whose text is not loaded yet: no second line.
 
 The text comes from the `CorpusSnapshot`, read for at most the rows on screen
 (10). The row stays one fixed height: two lines for every row, so
 `uniform_list` can measure from row 0.
+
+**Built in slice 8 (S4).** `excerpt(snapshot, found, query, cancel) ->
+Option<Excerpt>` reads the text at the match's vault order and checks the slot
+holds the match's id; the group comes from the match, so no vault order leaks
+into the public API.
+
+- **Rows first, then the excerpts of the rows on screen.** The rows apply as
+  soon as the merge lands. The picker's `render_rows` passes the rows it draws
+  to `PickerDelegate::rows_shown`, a no-op by default. Quick open spawns one
+  background task per row not asked for yet, so the rows on screen (10) spread
+  across the cores, and each second line fills when its excerpt lands.
+  Scrolling asks for the rows it shows. `uniform_list` also draws row 0 alone
+  each frame to measure it, so row 0 is asked even when scrolled away: at most
+  one excerpt more. A row is two lines tall before and after its excerpt lands,
+  so nothing moves; `row_label` is the path alone until then. Zed computes the
+  excerpt at render time from a rope with a line index; ours are plain strings,
+  so the scan stays off the foreground.
+- **Keying.** The rows, and the snapshot and query that found them, form one
+  `List` (`quick_open/list.rs`) keyed by the search id. An excerpt lands only on
+  the list that asked for it, and only while that list's cancel flag is clear.
+  The next user query sets the flag, and so does the list's drop: the next list,
+  or the picker closing.
+- **A background refresh asks again for the excerpts of the rows it keeps.**
+  The refresh runs because the index changed: a note that loads turns a blank
+  line into a preview, and a save moves the matched window. `IndexSnapshot`
+  cannot tell that a note's text is unchanged without a new public API. Until
+  the new excerpt lands, a kept note shows its previous one, so no line blanks.
+  The cost is at most the rows on screen per refresh, off the foreground.
+- Keystroke to rows is now keystroke to names: Zipf 0.22–3.33 ms, 40 words
+  0.17–1.49 ms. Before, the rows waited for 100 serial excerpts; the queries
+  matched deep in the text gain most (Zipf word 1,000 2.66 → 0.54 ms, rare word
+  2.27 → 0.46 ms; 40 words rare word 1.89 → 0.46 ms). The 10 excerpts on screen
+  add up to 0.3 ms after the rows (Performance, "Measured, slice 8").
+- The first matching word is searched in the first `EXCERPT_SCAN_BYTES` (1 MiB)
+  only, `cancel` read every 64 KB; past the limit the row has no second line.
+  The window is built around the word's first `WORD_MAX_CHARS` chars, so a 1 MB
+  word gives a short excerpt. The scan stops once the window is known.
+- The line's leading whitespace is trimmed when the window starts at the line
+  start (Zed). A matched word is lit on its matched prefix, widened to whole
+  graphemes of the excerpt.
+- A `Name` row, and every row of an empty query, shows the first prose line
+  (amended below), cut to 160 bytes, found within the same 1 MiB. A blank note
+  has no excerpt; the row keeps an empty second line.
+
+**Amended 2026-09-27, decided by the user: the first prose line.** The
+second line shows prose, not markdown syntax.
+
+- A `Name` row, and every row of an empty query, shows the first prose line.
+  The walk skips, in order: a leading front matter block, blank lines, lines
+  blank once their markup is dropped (`---`, `- `, `>`), and a leading heading
+  that names the note. The first remaining line is shown.
+- **Front matter** is pulldown-cmark 0.13's YAML metadata block on the first
+  line, as the editor styles it: a line of exactly `---` and trailing
+  whitespace, up to the next line of exactly `---` or `...` and trailing
+  spaces. The line after the opening is neither blank nor a closing fence.
+  Otherwise there is no front matter: a first `---` is a thematic break, blank
+  once dropped. `inkra-markdown` owns the rule: `front_matter(lines) ->
+  Option<usize>`, fed one line at a time and reading none past the closing
+  fence, so `index` feeds it lines with its cancel reads. A test checks it
+  against pulldown-cmark on generated texts. `index` feeds no line unless the
+  text starts with `---`: its one shortcut, so a long first line is not read.
+- A heading **names the note** when its S1 words, folded and capped as stem
+  words, equal the stem's words in order: S3's exact-name rule, with the
+  heading's words in place of the typed words. `# Plan` and `## PLÂN !` name
+  `plan`; `# The plan` and `# Projects plan` (for `projects/plan`) do not. Only
+  the first line with prose can be that heading, which may sit in a quote or an
+  item (`> # Plan`). It is an ATX heading, or a
+  setext heading whose underline is the next line (`Plan` then `====`): only
+  that one line more is read, and both lines are skipped. A heading that does
+  not name the note is shown, its markup dropped.
+- **Markup dropped** from the shown line: its leading block markers (a
+  heading's `#` runs, `>`, `-`, `*`, `+`, `1.`, `1)`, task boxes, nested or
+  combined like `> - [ ]`, a thematic break) and its emphasis, strong and
+  code-span delimiters. `_` inside a word is not emphasis (CommonMark), so
+  `snake_case_name` stays whole. Link, strikethrough, raw HTML and code-block
+  syntax stays.
+- `inkra-markdown` owns the rule: `markup(line, at_line_start) ->
+  Vec<Range<ByteOffset>>`, one pulldown-cmark pass over one line, with
+  `parse`'s options. Between an element's children, the bytes no leaf covers
+  are dropped when the element is a heading, quote, list, item, emphasis or
+  strong. A code span drops its backtick runs; a thematic break drops whole.
+  `index` parses no markdown.
+- A **text row's window** stays as it was. Its markup is dropped the same way,
+  and each highlight is mapped through the drop, then widened to whole
+  graphemes of the shown text. The markup is parsed over the window widened
+  within its line by up to 1 KiB each side, from the first non-blank byte when
+  that reaches the line start (an indent would read as a code block), so a delimiter whose partner lies
+  outside the window drops too; the ranges inside the window are kept, cut at
+  its edges. When the widened piece starts inside its line, it has no block
+  marker: `markup` parses it after a no-break space, which the emphasis rules
+  read as whitespace and which no block marker can follow. A matched word
+  inside the markup, like an ordered item's number, is not lit.
+- **Bounds.** The 1 MiB scan and the 64 KB cancel reads cover the front matter
+  and every skipped line. The first KiB of a line is parsed, and a KiB each side
+  of a window; markup closing past it stays, and a line that KiB skips is
+  skipped whole. The 160-byte cut
+  applies after the drop, on a char boundary, so it never splits a marker. A
+  skipped line that reaches the scan limit ends the walk: no second line.
+- **Measured** (`find` bench, `--quick`, top 100 rows, before → after): a
+  `Name` row's preview 3.5 → 44 µs per 100 rows (`workshop`, `e`), an empty
+  query's 20 recent 0.7 → 8.5 µs; a window row within noise to 11 % (Zipf top
+  word 325 → 360 µs, the markup parsed over a KiB each side). The 10 rows on
+  screen add under 5 µs.
 
 ### S5. The quick-open delegate
 
@@ -380,6 +583,43 @@ debounce and the `NotesChanged` refresh (search spec D7, D8) do not.
 `match_names` and the D2 matcher stay in `inkra-index`, tested and benched,
 for `[[` link completion (search spec, Deferred), where subsequence matching
 suits short targets.
+
+**Built in slice 8 (S5).**
+
+- `update_matches` takes the names, corpus and words in one borrow of the index,
+  then runs off the foreground: `lookup` on one task (`None`: cancelled),
+  `find_notes` over `names.chunks(num_cpus)` sharing the `Lookup`, then
+  `merge_notes` on one task; the excerpts follow (S4). S5 said 2–4 ranges per
+  core; the `find` bench measured one per core faster in almost every case,
+  since more ranges cost more merge (Performance, "Measured, slice 8").
+- `PickerDelegate` gains `render_footer` (`None` by default, as Zed's) and
+  `row_height` (`UI_LINE_HEIGHT` by default). Quick open's rows are `2 ×
+  UI_LINE_HEIGHT`: the name line, then the excerpt, dimmed, with its highlights,
+  or an empty line. The footer reads "Indexing 12,340 of 50,000 notes" while
+  `is_building()` and not `awaits_first_build()`, where "Scanning the vault…"
+  already speaks (O5).
+- **Refresh.** `IndexWatch` (`app/src/index/watch.rs`) holds the `(revision,
+  building)` last seen and one throttle task; the backlinks panel and quick open
+  share it. Quick open observes `IndexSync`: while it builds, at most one
+  refresh per `BUILDING_REFRESH` (100 ms), so text arriving adds rows; after, at
+  once. A `NotesChanged` still waits 200 ms. `update_matches` marks the revision
+  seen when it takes its snapshots, so one build runs one scan.
+- **D7.** A refresh from `NotesChanged` or from a notify, while a scan runs,
+  never cancels it: it marks the query dirty, and when the scan lands one re-run
+  starts, keeping the selected note, with no wait. A keystroke still cancels and
+  replaces the scan and clears the mark. A keystroke waits no debounce behind a
+  background run and cancels it; it waits `SEARCH_DEBOUNCE` only behind a user
+  search (a keystroke's, or the first names after the scan). The first names
+  after the scan still list at once (O5), and a build during that first scan no
+  longer cancels it. A confirm clears the mark. A background run's result keeps
+  the selected note and the scroll; when the kept note is gone, row 0 is
+  selected and scrolled to.
+- `row_label` is `path: excerpt`, both through `one_line`; the path alone until
+  the excerpt lands (S4).
+- **Shots**: `quick-open-groups` (a row per group, each with its second line),
+  `quick-open-text-only`, `quick-open-indexing` (the footer), and
+  `quick-open-results`, `-empty`, `-no-match`, `-graphemes`, `-scanning`
+  re-rendered on two-line rows.
 
 ## Performance
 
@@ -532,6 +772,99 @@ plus the process RSS one second after the launch line); runs 2–4 below.
   the lock through hashbrown, maintained, and it gives the seeding against
   flooding that the spelling counts need.
 
+### Measured, slice 8
+
+`cargo bench -p inkra-index --bench find`, Apple M5 Pro, 18 cores, release, load
+average about 1 at the start. The corpora are slice 7's (50,000 notes, 40 words
+and Zipf, words settled), with the `names` bench's long-stem paths. Medians;
+each includes the `lookup`.
+
+| Query | Zipf, one core | Zipf, 10 threads, 1 range each | 40 words, one core | 40 words, 10 threads |
+|---|---:|---:|---:|---:|
+| `e` | 7.88 ms | 3.54 ms | 5.78 ms | 1.52 ms |
+| top word | 4.65 ms | 0.94 ms | 5.70 ms | 1.39 ms |
+| rare word | 1.69 ms | 0.44 ms | 1.69 ms | 0.43 ms |
+| two words | 3.89 ms | 0.79 ms | 7.35 ms | 2.07 ms |
+| no match | 2.49 ms | 0.46 ms | 2.54 ms | 0.48 ms |
+| a word in names only | 2.29 ms | 1.23 ms | 2.29 ms | 1.24 ms |
+| empty query, 20 recent | 0.52 ms | 0.18 ms | 0.43 ms | 0.17 ms |
+
+- **Ranges.** Two and four ranges per thread were slower in almost every case
+  (Zipf `e`: 3.54, 3.99, 4.81 ms for 1, 2, 4), since each range returns its own
+  top 100 and computes their highlights before the merge. Quick open runs one
+  range per core (`f966bf0`).
+- **Ranges, re-run** (fix batch, in the "after" run of the pipeline split
+  below). Since `96c2f8c` a range returns ranks only, and the highlights are
+  built for the merged top only, so the reason above no longer holds. Medians
+  for 1×, 2×, 4× ranges per thread:
+
+  | Query | Zipf | 40 words |
+  |---|---:|---:|
+  | `e` | 3.33 / 3.35 / 3.39 ms | 1.22 / 1.29 / 1.31 ms |
+  | top word | 0.92 / 0.93 / 0.97 ms | 1.17 / 1.22 / 1.28 ms |
+  | word 1,000 | 0.54 / 0.55 / 0.55 ms | — |
+  | rare word | 0.47 / 0.44 / 0.41 ms | 0.46 / 0.44 / 0.41 ms |
+  | two words | 0.78 / 0.80 / 0.79 ms | 1.51 / 1.54 / 1.55 ms |
+  | no match | 0.49 / 0.49 / 0.48 ms | 0.49 / 0.49 / 0.48 ms |
+  | a word in names only | 0.56 / 0.55 / 0.57 ms | 0.56 / 0.56 / 0.57 ms |
+  | empty query, 20 recent | 0.22 / 0.21 / 0.22 ms | 0.17 / 0.17 / 0.18 ms |
+
+  The gaps have shrunk to a few percent. 4× wins on the rare word (−13 % and
+  −12 %) and by 2 % on no match; 1× wins on `e`, the top word and two words (1–9
+  %). Quick open keeps one range per core: 1× still wins on the costliest
+  queries.
+- **The pipeline**, as the delegate first ran it (lookup, `find_notes` over 10
+  ranges, merge, 100 excerpts): Zipf 0.17–3.54 ms, worst `e`; 40 words 0.17–1.96
+  ms. Budget 16 ms: met with a wide margin, so S3's one-letter cap is not built.
+- **The pipeline split** (fix batch): the rows apply after the merge, and only
+  the 10 rows on screen get an excerpt, one thread each. `keystroke to names`
+  is lookup, 10 ranges and merge; `keystroke to excerpts` adds the 10 excerpts.
+  "Before" is the pipeline above, re-run at `7350bc3`; its names equal the 1×
+  ranges group. Load average 1.9 before the "before" run, 1.1 before the
+  "after" run; each run raises it to about 6. Medians. The bench spawns a thread
+  per excerpt, which the app's executor does not, so the excerpt figures are an
+  upper bound.
+
+  | Query | Zipf before: names / rows | Zipf after: names / excerpts | 40 words before | 40 words after |
+  |---|---:|---:|---:|---:|
+  | `e` | 3.31 / 3.32 ms | 3.33 / 3.46 ms | 1.26 / 1.27 ms | 1.27 / 1.39 ms |
+  | top word | 0.91 / 1.18 ms | 0.91 / 1.03 ms | 1.17 / 1.21 ms | 1.17 / 1.27 ms |
+  | word 1,000 | 0.54 / 2.66 ms | 0.54 / 0.74 ms | — | — |
+  | rare word | 0.46 / 2.27 ms | 0.46 / 0.76 ms | 0.46 / 1.89 ms | 0.46 / 0.68 ms |
+  | two words | 0.78 / 1.09 ms | 0.79 / 0.90 ms | 1.48 / 1.49 ms | 1.49 / 1.60 ms |
+  | no match | 0.49 / 0.49 ms | 0.50 / 0.50 ms | 0.50 / 0.49 ms | 0.49 / 0.49 ms |
+  | a word in names only | 0.55 / 0.56 ms | 0.55 / 0.69 ms | 0.55 / 0.56 ms | 0.56 / 0.71 ms |
+  | empty query, 20 recent | 0.19 / 0.19 ms | 0.22 / 0.32 ms | 0.19 / 0.19 ms | 0.17 / 0.27 ms |
+
+  Before, the rows appeared with the last excerpt ("rows"). After, they appear
+  with the names, and the second lines fill by "excerpts".
+- **Excerpts for 100 rows**: 3–700 µs for `Name` rows (a first line) and up to
+  2.1 ms for `Text` rows whose match lies deep in the text. Adversarial: 1 MB of
+  punctuation then a 1 MB word, 1.48 ms (a 290-byte excerpt); a 10 MB line with
+  the match at its end, 3.77 ms, `None` past the 1 MiB scan limit.
+- **The end-to-end figure** (keystroke to rows in the release app on the
+  generated vault, the `quick open: N matches` log), taken by the orchestrator
+  on 2026-09-27 at `00337b2` through System Events, one key every 500 ms, after
+  `indexed`: `roadmap cafe` typed, then erased back to `r`. 23 keystrokes,
+  100 matches each: 1.9–6.0 ms from the edit to the rows. The session's first
+  query is the exception, 13.2 ms for `r` and 14.1 ms for `e` in a second
+  launch: cold, as the same `r` typed again answers in 4.7 ms. Both stay under
+  the 16 ms budget; the first query's margin is the thinnest.
+- **Startup at the gate** (taken by the orchestrator on 2026-09-27, M5 Pro,
+  warm, idle, runs 2–4 of 4 in one sitting, nested 50,000-note vault,
+  `/tmp/inkra-app-slice7` against `/tmp/inkra-app-slice8` at `00337b2`):
+
+  | | slice 7 | slice 8 |
+  |---|---:|---:|
+  | first frame | 148–162 ms | 157–179 ms |
+  | names ready | 239–253 ms | 230–266 ms |
+  | indexed | 994–1000 ms | 986–1010 ms |
+  | longest turn | 1.6–1.8 ms | 1.6–1.7 ms |
+  | RSS | 347–350 MB | 353–358 MB |
+
+  Unchanged within the sitting's noise. RSS grows about 6 MB: the name words
+  (`names 2233894 bytes`) and the mtimes beside the corpus texts.
+
 ## Testing
 
 - **Oracle.** A naive model re-reads every note, cuts and folds its words by
@@ -585,3 +918,8 @@ lead, red team, blue team, code review, gate, stop before push.
 | One startup state in `IndexSync` | A fourth startup flag, or a bug where `marked_indexed` and `settling` disagree | `enum Startup { Loading, Settling, Done }` absorbs `marked_indexed` and `settling` |
 | Compact ordinals | Ordinal churn measured on a real vault: the span passes 2× the live notes | A merge renumbers the live notes densely, so `lookup`'s dense vectors stay sized by the live notes |
 | BM25-style weighting | Occurrence counts rank long notes too high | Normalize by note length inside `Text` |
+| MRU-only empty query | The `find` bench's empty-query case passes 1 ms at 50,000 notes (0.17–0.22 ms over the cores in slice 8) | An empty query ranks the MRU's notes, found by id, instead of every note of each range |
+| One fold per highlighted word | A name or excerpt word long enough that highlighting shows in a profile | `highlight::prefix` folds the word once as it walks its graphemes, instead of folding the run again at each grapheme end (quadratic in the word) |
+| `IndexWatch::later` | A third observer needs the throttle, or the spawn after `Refresh::Later` is duplicated a third time | `IndexWatch` spawns the throttled refresh itself; the backlinks panel and quick open stop spawning it |
+| A `Seen` struct | A third field joins `IndexWatch`'s `(revision, building)` pair | A named `Seen` struct replaces the tuple |
+| One set of test hooks | A third delegate needs the same gates | Quick open's test-only `hold`, `hold_excerpts`, `runs` and `logged` move into one hook struct the delegates share |

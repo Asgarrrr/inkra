@@ -2,16 +2,19 @@
 
 mod fold;
 mod lookup;
+mod name_words;
 mod note_words;
 mod ordinal;
 mod policy;
 mod query;
 mod segment;
+mod shards;
 mod store;
 mod varint;
 
-use fold::{cap, fold, word_spans};
+pub(crate) use fold::{cap, fold, word_spans};
 pub use lookup::{Lookup, TermHit};
+pub(crate) use name_words::NameWords;
 pub(crate) use note_words::NoteWords;
 #[cfg(test)]
 pub(crate) use policy::FRESH_MIN;
@@ -30,6 +33,13 @@ fn wide(n: u32) -> usize {
         panic!("a u32 fits a usize on every supported target");
     };
     n
+}
+
+fn narrow(offset: usize) -> u32 {
+    let Ok(offset) = u32::try_from(offset) else {
+        panic!("the word index holds over 4 GiB of words or postings: {offset}");
+    };
+    offset
 }
 
 #[cfg(test)]

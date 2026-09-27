@@ -1,7 +1,9 @@
 //! A query field over a list of rows. A `PickerDelegate` owns the matches and draws each row.
 
+use std::ops::Range;
+
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ScrollStrategy,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, Pixels, ScrollStrategy,
     SharedString, Subscription, Task, UniformListScrollHandle, Window, actions, prelude::*,
 };
 
@@ -34,10 +36,16 @@ pub(crate) trait PickerDelegate: Sized + 'static {
     /// The picker holds the task, so the next query drops it.
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()>;
     fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>);
-    /// One line of `UI_LINE_HEIGHT`: `uniform_list` measures every row from row 0.
+    /// Exactly `row_height` tall: `uniform_list` measures every row from row 0.
     fn render_row(&self, ix: usize, selected: bool, cx: &mut Context<Picker<Self>>) -> AnyElement;
     /// The row's plain text, its accessible label.
     fn row_label(&self, ix: usize) -> SharedString;
+    fn render_footer(&self, _cx: &mut Context<Picker<Self>>) -> Option<AnyElement> {
+        None
+    }
+    fn row_height(&self) -> Pixels;
+    /// Rows about to draw; `uniform_list` also draws row 0 alone each frame to measure it.
+    fn rows_shown(&mut self, _range: Range<usize>, _cx: &mut Context<Picker<Self>>) {}
 }
 
 pub(crate) struct Picker<D: PickerDelegate> {
@@ -48,7 +56,7 @@ pub(crate) struct Picker<D: PickerDelegate> {
     scroll: UniformListScrollHandle,
     /// Held, never detached: replacing it drops the previous query's task.
     pending: Option<Task<()>>,
-    /// Until the delegate calls `matches_updated`, the rows answer an older query.
+    /// Until the delegate calls `matches_updated` or `matches_refreshed`, the rows answer an older query.
     awaiting_matches: bool,
     /// `enter` landed while `awaiting_matches`: confirm once the rows answer the current query.
     confirm_on_update: bool,
@@ -101,21 +109,39 @@ impl<D: PickerDelegate> Picker<D> {
 
     /// Re-runs the query as it stands.
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
-        let query = self.query.clone();
         self.awaiting_matches = true;
+        self.refresh_in_background(cx);
+    }
+
+    /// Re-runs the query for data that changed under it: an `enter` meanwhile confirms the rows shown.
+    pub(crate) fn refresh_in_background(&mut self, cx: &mut Context<Self>) {
+        let query = self.query.clone();
         self.pending = Some(self.delegate.update_matches(&query, cx));
     }
 
-    /// For a delegate whose matches changed: selects the first selectable row from `ix` on,
-    /// else the nearest one before it.
+    /// Selects the first selectable row from `ix`, else the nearest before it, and scrolls to it.
     pub(crate) fn matches_updated(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.select_from(ix);
+        self.reveal_selected();
+        self.matches_landed(cx);
+    }
+
+    /// As `matches_updated`, for a background refresh: the list keeps its scroll.
+    pub(crate) fn matches_refreshed(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.select_from(ix);
+        self.matches_landed(cx);
+    }
+
+    fn select_from(&mut self, ix: usize) {
         let count = self.delegate.match_count();
         let from = ix.min(count);
         self.selected = (from..count)
             .chain((0..from).rev())
             .find(|&ix| self.delegate.is_selectable(ix));
+    }
+
+    fn matches_landed(&mut self, cx: &mut Context<Self>) {
         self.awaiting_matches = false;
-        self.reveal_selected();
         cx.notify();
         if std::mem::take(&mut self.confirm_on_update) {
             self.confirm_selected(cx);

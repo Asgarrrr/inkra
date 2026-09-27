@@ -1,12 +1,11 @@
 //! The notes linking to the one showing, beside the editor.
 
 use std::ops::Range;
-use std::time::Duration;
 
-use gpui::{Context, Entity, EventEmitter, SharedString, Subscription, Task};
+use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
 use inkra_vault::EntryId;
 
-use crate::index::{IndexSync, NotesChanged};
+use crate::index::{BUILDING_REFRESH, IndexSync, IndexWatch, NotesChanged, Refresh};
 use crate::one_line::one_line;
 use crate::sidebar::NoteActivated;
 use crate::vault::NoteStore;
@@ -25,17 +24,12 @@ pub(crate) struct BacklinksPanel {
     /// link sharing the note's name.
     rows: Vec<Row>,
     building: bool,
-    /// The index revision and building state the rows were computed at.
-    seen: Option<(u64, bool)>,
-    /// While the index builds, each loaded note notifies; rebuilding on every one would repeat
-    /// a heavily linked note's `backlinks` hundreds of times.
-    throttled: Option<Task<()>>,
+    /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
+    watch: IndexWatch,
     #[cfg(test)]
     rebuilds: usize,
     _subscriptions: Vec<Subscription>,
 }
-
-const BUILDING_REFRESH: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Row {
@@ -68,8 +62,7 @@ impl BacklinksPanel {
             note: None,
             rows: Vec::new(),
             building: false,
-            seen: None,
-            throttled: None,
+            watch: IndexWatch::default(),
             #[cfg(test)]
             rebuilds: 0,
             _subscriptions: subscriptions,
@@ -87,33 +80,25 @@ impl BacklinksPanel {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let links = self.links.read(cx);
         // `NotesChanged` already rebuilt for the notify that follows it.
-        if self.seen == Some((links.revision(), links.is_building())) {
-            return;
+        match self.watch.on_notify(self.links.read(cx)) {
+            Refresh::Skip => {}
+            Refresh::Now => self.rebuild(cx),
+            Refresh::Later => self.watch.throttle(cx.spawn(async move |panel, cx| {
+                cx.background_executor().timer(BUILDING_REFRESH).await;
+                let _ = panel.update(cx, Self::rebuild);
+            })),
         }
-        if !links.is_building() {
-            self.rebuild(cx);
-            return;
-        }
-        if self.throttled.is_some() {
-            return;
-        }
-        self.throttled = Some(cx.spawn(async move |panel, cx| {
-            cx.background_executor().timer(BUILDING_REFRESH).await;
-            let _ = panel.update(cx, Self::rebuild);
-        }));
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
-        self.throttled = None;
         #[cfg(test)]
         {
             self.rebuilds += 1;
         }
         let links = self.links.read(cx);
         let building = links.is_building();
-        self.seen = Some((links.revision(), building));
+        self.watch.seen(links);
         let vault = self.notes.read(cx).vault().map(|vault| vault.read(cx));
         let name = |id: EntryId| {
             vault

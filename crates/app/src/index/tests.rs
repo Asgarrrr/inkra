@@ -216,7 +216,7 @@ fn a_save_landing_before_its_note_joins_the_index_is_reloaded(cx: &mut TestAppCo
     links.update(cx, |sync, cx| {
         sync.indexed.insert(a, mtime);
         let seq = sync.next_seq(a);
-        sync.apply(a, seq, NoteContent::parse(Arc::from("[[b]]")), cx);
+        sync.apply(a, seq, NoteContent::parse(Arc::from("[[b]]"), mtime), cx);
     });
     cx.run_until_parked();
 
@@ -520,7 +520,12 @@ fn a_stale_forget_does_not_erase_a_newer_writes_indexed_mtime(cx: &mut TestAppCo
         let stale_seq = sync.next_seq(a);
         let seq = sync.next_seq(a);
         sync.indexed.insert(a, newer_mtime);
-        sync.apply(a, seq, NoteContent::parse(Arc::from("new")), cx);
+        sync.apply(
+            a,
+            seq,
+            NoteContent::parse(Arc::from("new"), newer_mtime),
+            cx,
+        );
         assert_eq!(sync.indexed.get(&a).copied(), Some(newer_mtime));
         sync.forget(a, stale_seq, cx);
     });
@@ -549,7 +554,7 @@ fn a_stale_failed_load_does_not_force_an_unrelated_reload(cx: &mut TestAppContex
         let stale_seq = sync.next_seq(a);
         let seq = sync.next_seq(a);
         sync.indexed.insert(a, mtime);
-        sync.apply(a, seq, NoteContent::parse(Arc::from("old")), cx);
+        sync.apply(a, seq, NoteContent::parse(Arc::from("old"), mtime), cx);
         sync.forget(a, stale_seq, cx);
     });
 
@@ -763,7 +768,7 @@ fn snapshot(
             .iter()
             .map(|term| {
                 words
-                    .lookup(&NoteQuery::new(term), &AtomicBool::new(false))
+                    .lookup(&NoteQuery::new(term, None, &[]), &AtomicBool::new(false))
                     .expect("not cancelled")
             })
             .collect();

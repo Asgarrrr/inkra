@@ -3,6 +3,7 @@
 
 mod backlinks;
 mod bootstrap;
+mod count;
 mod editor;
 mod field;
 mod index;

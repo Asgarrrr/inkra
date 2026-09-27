@@ -6,25 +6,53 @@ use std::hint::black_box;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, SamplingMode, criterion_group, criterion_main};
 use inkra_index::{
-    CorpusSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, WordsSnapshot,
+    CorpusSnapshot, Lookup, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, WordsSnapshot,
 };
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::{EntryId, Kind, Mtime};
 
 use build::{FRESH_MIN, FRESH_RATIO, build, loaded_notes, max_fresh, settle};
-use corpus::{
-    Corpus, ENTRIES, Lcg, NOTE_IDS, NOTES, Pick, base64_note, contents, forty_word, greek_word,
-    prose, zipf_word,
-};
+use corpus::{Corpus, ENTRIES, Lcg, NOTE_IDS, NOTES, Pick, contents, forty_word, prose, zipf_word};
 
 /// A trash of this many notes while loaded.
 const GONE: usize = 5_500;
 /// Notes rewritten before `merge/12.5k re-set into 50k`.
 const RESET: usize = 12_500;
+
+const GREEK: &[&str] = &[
+    "σχέδιο",
+    "συνάντηση",
+    "καλοκαίρι",
+    "ομάδα",
+    "ιδέα",
+    "καφές",
+    "σημειώσεις",
+    "και",
+    "το",
+    "της",
+    "προϋπολογισμός",
+    "ανασκόπηση",
+];
+
+fn greek_word(lcg: &mut Lcg) -> &'static str {
+    GREEK[lcg.next(GREEK.len())]
+}
+
+/// A note holding a 1 MB base64 paste on one line: tens of thousands of distinct words.
+fn base64_note() -> Arc<str> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lcg = Lcg(17);
+    let mut text = String::from("A screenshot: ![shot](data:image/png;base64,");
+    while text.len() < 1 << 20 {
+        text.push(char::from(ALPHABET[lcg.next(ALPHABET.len())]));
+    }
+    text.push_str(")\n");
+    text.into()
+}
 
 fn rss_kb() -> u64 {
     let pid = std::process::id().to_string();
@@ -46,7 +74,7 @@ fn bench_memory(_: &mut Criterion) {
         let before = rss_kb();
         let parsed = texts
             .iter()
-            .map(|text| NoteContent::parse(Arc::clone(text)));
+            .map(|text| NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
         let _ = build(&mut index, parsed);
         let after = rss_kb();
         let (notes, heap_bytes) = (index.corpus().len(), index.words().heap_bytes());
@@ -70,7 +98,7 @@ fn bench_parse(c: &mut Criterion) {
     for (script, pick) in scripts {
         let text: Arc<str> = prose(&mut Lcg(29), 3_072, pick).into();
         group.bench_function(script, |b| {
-            b.iter_with_large_drop(|| NoteContent::parse(Arc::clone(&text)));
+            b.iter_with_large_drop(|| NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)));
         });
     }
     group.finish();
@@ -105,7 +133,7 @@ fn bench_lookups(c: &mut Criterion, corpus: Corpus, state: &str, index: &NoteInd
     let mut group = c.benchmark_group(format!("lookup, {}, {state}", corpus.name()));
     group.sample_size(20);
     for (case, text) in corpus.queries() {
-        let query = NoteQuery::new(&text);
+        let query = NoteQuery::new(&text, None, &[]);
         let Some(found) = words.lookup(&query, &cancel) else {
             panic!("not cancelled");
         };
@@ -124,20 +152,33 @@ fn bench_lookups(c: &mut Criterion, corpus: Corpus, state: &str, index: &NoteInd
     group.finish();
 }
 
-/// The snapshots held across an insert, as quick open holds them during a search.
+/// What is held across an insert, as quick open holds it during a search.
 #[derive(Clone, Copy)]
 enum Hold {
     Nothing,
     Words,
     Both,
+    Lookup,
 }
 
+type Held = (
+    Option<WordsSnapshot>,
+    Option<CorpusSnapshot>,
+    Option<Lookup>,
+);
+
 impl Hold {
-    fn take(self, index: &NoteIndex) -> (Option<WordsSnapshot>, Option<CorpusSnapshot>) {
+    fn take(self, index: &NoteIndex) -> Held {
         match self {
-            Self::Nothing => (None, None),
-            Self::Words => (Some(index.words()), None),
-            Self::Both => (Some(index.words()), Some(index.corpus())),
+            Self::Nothing => (None, None, None),
+            Self::Words => (Some(index.words()), None, None),
+            Self::Both => (Some(index.words()), Some(index.corpus()), None),
+            // A query matching nothing: the lookup is cheap to build and still holds the ordinals.
+            Self::Lookup => {
+                let query = NoteQuery::new("zzzz", None, &[]);
+                let lookup = index.words().lookup(&query, &AtomicBool::new(false));
+                (None, None, lookup)
+            }
         }
     }
 }
@@ -156,7 +197,7 @@ fn inserts(
         if new {
             index.remove(id);
         }
-        let content = NoteContent::parse(Arc::clone(text));
+        let content = NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH));
         let snapshots = hold.take(index);
         let started = Instant::now();
         index.insert(id, content);
@@ -185,6 +226,7 @@ fn bench_inserts(
         ("one note, a snapshot held", Hold::Words, false),
         ("one note, both snapshots held", Hold::Both, false),
         ("a new note, a snapshot held", Hold::Words, true),
+        ("a new note, a Lookup held", Hold::Lookup, true),
     ] {
         group.bench_function(case, |b| {
             b.iter_custom(|iters| inserts(index, iters, note, hold, new));
@@ -213,7 +255,7 @@ fn restore(index: &mut NoteIndex, texts: &[Arc<str>]) {
 fn set_notes(
     index: &mut NoteIndex,
     iters: u64,
-    notes: &[(EntryId, String, Kind)],
+    notes: &[(EntryId, String, Kind, Mtime)],
     held: bool,
     texts: &[Arc<str>],
 ) -> Duration {
@@ -238,7 +280,7 @@ fn bench_set_notes(c: &mut Criterion, corpus: Corpus, texts: &[Arc<str>]) {
     let gone: HashSet<EntryId> = NOTE_IDS[..GONE].iter().copied().collect();
     let kept: Vec<_> = ENTRIES
         .iter()
-        .filter(|(id, _, _)| !gone.contains(id))
+        .filter(|(id, ..)| !gone.contains(id))
         .cloned()
         .collect();
     let _ = index.set_notes(NoteSet::build(kept.clone()));

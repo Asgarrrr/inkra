@@ -15,7 +15,7 @@ fn counts(text: &str) -> Vec<(String, u32)> {
 }
 
 fn terms(text: &str) -> Vec<String> {
-    NoteQuery::new(text)
+    NoteQuery::new(text, None, &[])
         .terms()
         .iter()
         .map(ToString::to_string)
@@ -120,10 +120,10 @@ fn a_query_splits_like_the_text_then_folds_and_drops_repeats() {
 
 #[test]
 fn a_query_of_marks_is_empty() {
-    assert!(NoteQuery::new("\u{301} \u{301}").is_empty());
-    assert!(NoteQuery::new("  —  ").is_empty());
-    assert!(NoteQuery::new("").is_empty());
-    assert!(!NoteQuery::new("a").is_empty());
+    assert!(NoteQuery::new("\u{301} \u{301}", None, &[]).is_empty());
+    assert!(NoteQuery::new("  —  ", None, &[]).is_empty());
+    assert!(NoteQuery::new("", None, &[]).is_empty());
+    assert!(!NoteQuery::new("a", None, &[]).is_empty());
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn look(texts: &[Option<&str>], query: &str) -> (Vec<EntryId>, Lookup) {
     let (ids, index) = indexed(texts);
     let Some(found) = index
         .words()
-        .lookup(&NoteQuery::new(query), &AtomicBool::new(false))
+        .lookup(&NoteQuery::new(query, None, &[]), &AtomicBool::new(false))
     else {
         panic!("not cancelled");
     };
@@ -250,7 +250,7 @@ fn a_set_cancel_returns_no_lookup() {
     let (_ids, index) = indexed(&[Some("plan")]);
     let found = index
         .words()
-        .lookup(&NoteQuery::new("plan"), &AtomicBool::new(true));
+        .lookup(&NoteQuery::new("plan", None, &[]), &AtomicBool::new(true));
     assert!(found.is_none());
 }
 
@@ -278,4 +278,23 @@ fn a_64_char_term_starts_a_longer_stored_word_and_equals_its_own_length() {
             whole: true
         })
     );
+}
+
+#[test]
+fn a_query_ranks_recent_notes_newest_first_and_keeps_showing() {
+    let (ids, _index) = indexed(&[None, None, None, None]);
+    let [a, b, c, d] = ids[..] else {
+        panic!("four notes");
+    };
+    let query = NoteQuery::new("plan", Some(d), &[b, a, b, c]);
+    assert_eq!(
+        query.recent(b),
+        Some(0),
+        "a repeated id keeps its newest rank"
+    );
+    assert_eq!(query.recent(a), Some(1));
+    assert_eq!(query.recent(c), Some(3));
+    assert_eq!(query.recent(d), None);
+    assert_eq!(query.showing(), Some(d));
+    assert_eq!(NoteQuery::new("", None, &[]).showing(), None);
 }

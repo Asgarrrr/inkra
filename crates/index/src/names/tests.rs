@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 use inkra_vault::EntryId;
 
 use crate::test_support::{entries, id, vault};
+use crate::words::NameWords;
 use crate::{NameMatch, NameQuery, NoteSet, match_names, merge_names};
 
 const LIMIT: usize = 100;
@@ -320,4 +321,13 @@ fn the_matcher_types_cross_threads() {
     assert_send_sync::<NameQuery>();
     assert_send_sync::<NameMatch>();
     assert_send_sync::<NoteSet>();
+}
+
+#[test]
+fn heap_bytes_counts_the_name_words() {
+    let (_fs, vault) = vault(&["Ab/c.md", "d.md"]);
+    assert_eq!(
+        NoteSet::build(entries(&vault)).names().heap_bytes(),
+        NameWords::build(["Ab/c", "d"]).heap_bytes()
+    );
 }

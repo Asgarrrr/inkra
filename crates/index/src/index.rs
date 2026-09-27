@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
+use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use inkra_markdown::Link;
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Mtime};
 
 use crate::content::NoteContent;
 use crate::corpus::{Corpus, CorpusSnapshot};
@@ -13,7 +15,9 @@ use crate::note_set::NoteSet;
 use crate::notes::{NoteTable, Query, Resolution};
 use crate::source::{Source, SourceLink};
 use crate::target::{Style, Target};
-use crate::words::{MergeWhen, MergedWords, RetiredWords, Words, WordsMerge, WordsSnapshot};
+use crate::words::{
+    Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Words, WordsMerge, WordsSnapshot,
+};
 
 /// Every note's links, resolved on demand against the current notes, so a create, rename or
 /// trash invalidates nothing.
@@ -21,6 +25,8 @@ use crate::words::{MergeWhen, MergedWords, RetiredWords, Words, WordsMerge, Word
 pub struct NoteIndex {
     notes: NoteTable,
     names: NamesSnapshot,
+    /// The build's scanned mtimes, handed back whole in the set `set_notes` returns.
+    mtimes: Arc<[Mtime]>,
     sources: HashMap<EntryId, Source>,
     /// A note link's stem key → (source, index into its links). Every link resolving to `T`
     /// has `T`'s stem, so this finds backlinks without a reverse map.
@@ -44,11 +50,14 @@ impl NoteIndex {
     pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet {
         let (ids, retired) = self
             .corpus
-            .reorder(Arc::clone(&notes.ids), |id| self.notes.order(id));
+            .reorder(Arc::clone(&notes.ids), &notes.mtimes, |id| {
+                self.notes.order(id)
+            });
         let previous = NoteSet {
             notes: mem::replace(&mut self.notes, notes.notes),
             names: mem::replace(&mut self.names, notes.names),
             ids,
+            mtimes: mem::replace(&mut self.mtimes, notes.mtimes),
             _retired: retired,
         };
         let notes = &self.notes;
@@ -97,6 +106,16 @@ impl NoteIndex {
         self.words.snapshot()
     }
 
+    /// The names, corpus and words at this moment, so names and corpus are of one build.
+    #[must_use]
+    pub fn snapshot(&self) -> IndexSnapshot {
+        IndexSnapshot {
+            names: self.names(),
+            corpus: self.corpus(),
+            words: self.words(),
+        }
+    }
+
     /// A word merge when `when` asks for one and none runs; run it off the foreground.
     #[must_use]
     pub fn words_merge(&mut self, when: MergeWhen) -> Option<WordsMerge> {
@@ -132,6 +151,7 @@ impl NoteIndex {
             source,
             words,
             text,
+            modified,
         } = content;
         for (at, link) in source.links.iter().enumerate() {
             if let Target::Note { path, .. } = &link.target {
@@ -142,13 +162,13 @@ impl NoteIndex {
             }
         }
         self.sources.insert(id, source);
-        self.corpus.set(self.notes.order(id), Some(text));
+        self.corpus.write(self.notes.order(id), text, modified);
         self.words.set(id, words);
     }
 
     pub fn remove(&mut self, id: EntryId) {
         self.words.remove(id);
-        self.corpus.set(self.notes.order(id), None);
+        self.corpus.clear(self.notes.order(id));
         self.remove_links(id);
     }
 
@@ -233,6 +253,36 @@ impl NoteIndex {
                 }
             })
             .collect()
+    }
+}
+
+/// Taken at one moment for `find_notes`, `merge_notes` and `excerpt`; a clone bumps three `Arc`s.
+#[derive(Clone)]
+pub struct IndexSnapshot {
+    names: NamesSnapshot,
+    corpus: CorpusSnapshot,
+    words: WordsSnapshot,
+}
+
+impl IndexSnapshot {
+    /// Each term's notes, as `WordsSnapshot::lookup` gives them; `None` if cancelled.
+    #[must_use]
+    pub fn lookup(&self, query: &NoteQuery, cancel: &AtomicBool) -> Option<Lookup> {
+        self.words.lookup(query, cancel)
+    }
+
+    /// Ranges to search in parallel; `merge_notes` over their results equals one range.
+    #[must_use]
+    pub fn chunks(&self, n: usize) -> Vec<Range<usize>> {
+        self.names.chunks(n)
+    }
+
+    pub(crate) fn names(&self) -> &NamesSnapshot {
+        &self.names
+    }
+
+    pub(crate) fn corpus(&self) -> &CorpusSnapshot {
+        &self.corpus
     }
 }
 

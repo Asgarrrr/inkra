@@ -6,7 +6,7 @@ use foldhash::fast::RandomState;
 use super::NoteWords;
 use super::note_words::first_at_or_after;
 use super::ordinal::{Alive, Ordinal};
-use super::{varint, wide};
+use super::{narrow, varint, wide};
 
 /// The notes as of the last merge, in sorted arrays; every snapshot shares it.
 #[derive(Debug)]
@@ -220,13 +220,6 @@ fn merged<T: Ord>(
         (Some(_), _) => a.next(),
         (None, _) => b.next(),
     })
-}
-
-fn narrow(offset: usize) -> u32 {
-    let Ok(offset) = u32::try_from(offset) else {
-        panic!("the word index holds over 4 GiB of words or postings: {offset}");
-    };
-    offset
 }
 
 #[cfg(test)]

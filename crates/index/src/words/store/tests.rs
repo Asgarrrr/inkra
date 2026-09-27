@@ -7,6 +7,7 @@ use inkra_vault::EntryId;
 use super::{Words, WordsMerge, WordsSnapshot};
 use crate::test_support::{id, vault};
 use crate::words::NoteWords;
+use crate::words::shards::SHARDS;
 use crate::{NoteQuery, TermHit};
 
 pub(super) type Entries = BTreeMap<(String, EntryId), u32>;
@@ -42,7 +43,8 @@ pub(super) fn start(words: &mut Words) -> WordsMerge {
 }
 
 pub(super) fn hit(snapshot: &WordsSnapshot, term: &str, id: EntryId) -> Option<TermHit> {
-    let Some(found) = snapshot.lookup(&NoteQuery::new(term), &AtomicBool::new(false)) else {
+    let Some(found) = snapshot.lookup(&NoteQuery::new(term, None, &[]), &AtomicBool::new(false))
+    else {
         panic!("not cancelled");
     };
     found.get(0, id)
@@ -160,10 +162,32 @@ fn a_write_that_changes_nothing_copies_nothing() {
     words.remove_all(&[ids[1], ids[2]].into());
     words.remove_all(&HashSet::new());
     let after = words.snapshot();
-    assert!(Arc::ptr_eq(&before.ordinals, &after.ordinals));
+    assert!(before.ordinals.is_shared(&after.ordinals));
     assert!(Arc::ptr_eq(&before.segment, &after.segment));
     assert!(Arc::ptr_eq(&before.alive, &after.alive));
-    assert!(Arc::ptr_eq(&before.fresh, &after.fresh));
+    assert!(before.fresh.is_shared(&after.fresh));
+}
+
+#[test]
+fn a_new_note_under_a_snapshot_copies_one_shard_of_each_map() {
+    let ids = ids(3 * SHARDS);
+    let (settled, fresh) = ids.split_at(2 * SHARDS);
+    let mut words = Words::default();
+    for &id in settled {
+        set(&mut words, id, "plan");
+    }
+    words.merge_all();
+    for &id in &fresh[1..] {
+        set(&mut words, id, "neuf");
+    }
+    let before = words.snapshot();
+    set(&mut words, fresh[0], "neuf");
+    let after = words.snapshot();
+    assert_eq!(after.ordinals.shards_shared(&before.ordinals), SHARDS - 1);
+    assert_eq!(after.fresh.shards_shared(&before.fresh), SHARDS - 1);
+    assert_eq!(before.ordinals.len() + 1, after.ordinals.len());
+    assert_eq!(hit(&before, "neuf", fresh[0]), None);
+    assert!(hit(&after, "neuf", fresh[0]).is_some());
 }
 
 #[test]

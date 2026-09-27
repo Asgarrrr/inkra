@@ -1,15 +1,61 @@
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
 use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Vault};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
 use crate::{CorpusSnapshot, NoteContent, NoteIndex, NoteSet, Target};
 
 pub(crate) const ROOT: &str = "/vault";
+
+/// The oracles' alphabet: S1's edges (marks, case orbits, Hangul, apostrophes, long words).
+pub(crate) const PARTS: &[&str] = &[
+    "a",
+    "e",
+    "é",
+    "e\u{301}",
+    "É",
+    "E",
+    "ß",
+    "ss",
+    "\u{212A}",
+    "k",
+    "İ",
+    "i",
+    "ı",
+    "한",
+    "\u{1112}",
+    "'",
+    "’",
+    "-",
+    "_",
+    "1",
+    "🎉",
+    "\u{301}",
+    " ",
+    "\n",
+    ".",
+    "l'été",
+    "aaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ς",
+    "σ",
+    "Σ",
+    "ſ",
+    "s",
+    "\u{fe0f}\u{20e3}",
+    "\u{200d}",
+    "किताब",
+    "คืน",
+    "كَتَبَ",
+    "\u{34F}",
+    "\u{94D}",
+    "\u{93C}",
+];
 
 /// A scanned vault holding `files`, each relative to the root.
 pub(crate) fn vault(files: &[&str]) -> (MemFs, Vault) {
@@ -39,14 +85,19 @@ pub(crate) fn rename(fs: &MemFs, vault: &mut Vault, from: &str, to: &str) {
 }
 
 /// `vault`'s entries as `NoteSet::build` takes them.
-pub(crate) fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind)> {
+pub(crate) fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind, Mtime)> {
     vault
         .entries()
         .map(|entry| {
             let path = entry.path.as_path().to_string_lossy().into_owned();
-            (entry.id, path, entry.kind)
+            (entry.id, path, entry.kind, entry.mtime)
         })
         .collect()
+}
+
+/// `n` seconds after the epoch; `MemFs` stamps its files a million seconds later.
+pub(crate) fn mtime(n: u64) -> Mtime {
+    Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(n))
 }
 
 /// `vault`'s notes as `NoteIndex::set_notes` takes them.
@@ -55,7 +106,7 @@ pub(crate) fn note_set(vault: &Vault) -> NoteSet {
 }
 
 pub(crate) fn table(vault: &Vault) -> NoteTable {
-    NoteTable::new(&prepare(entries(vault)))
+    NoteTable::new(&prepare(entries(vault)).0)
 }
 
 pub(crate) fn id(vault: &Vault, path: &str) -> EntryId {
@@ -75,9 +126,9 @@ pub(crate) fn target(text: &str) -> Target {
     Target::parse(&found[0])
 }
 
-/// `id`'s links, text and words, as a load gives them.
+/// `id`'s links, text and words, as a load gives them, stamped `mtime(0)`.
 pub(crate) fn load(index: &mut NoteIndex, id: EntryId, text: &str) {
-    index.insert(id, NoteContent::parse(text.into()));
+    index.insert(id, NoteContent::parse(text.into(), mtime(0)));
 }
 
 /// Each loaded note of `corpus` with its text, in vault order.
