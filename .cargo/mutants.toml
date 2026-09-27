@@ -39,6 +39,10 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # Equivalent. `merged` joins a segment's alive postings with fresh ones, and an ordinal is
 # alive or fresh, never both, so no two items are equal and `<=` picks as `<` does.
 #
+# Matched by column: the other `+` in `build` is not equivalent.
+# Equivalent. `/` is no word char, so no word starts at the last `/`: a word is at or
+# past it exactly when it is past it, and `at * 1` places the same words in the stem.
+#
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
 # which keeps this config, so the entries below apply.
 #
@@ -71,6 +75,7 @@ exclude_re = [
     "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
     "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",
     "^crates/index/src/words/segment\\.rs:[0-9]+:[0-9]+: replace < with <= in merged$",
+    "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
     "^crates/app/src/field\\.rs:[0-9]+:[0-9]+: replace \\+ with - in <impl Element for FieldElement>::prepaint$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace \\* with / in IndexSync::load_more$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in IndexSync::apply_landed$",

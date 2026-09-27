@@ -2,13 +2,13 @@ use std::hint::black_box;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{NoteContent, NoteIndex, NoteSet, TextQuery, search};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Vault};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -22,7 +22,7 @@ const WORDS: &[&str] = &[
 /// One note in 1,000 holds it once.
 const RARE: &str = "zanzibar";
 /// Scanned once: a `MemFs` scan cost grows with files per folder times folders.
-static ENTRIES: LazyLock<Vec<(EntryId, String, Kind)>> = LazyLock::new(entries);
+static ENTRIES: LazyLock<Vec<(EntryId, String, Kind, Mtime)>> = LazyLock::new(entries);
 
 /// A fixed LCG, so every run benches the same corpus.
 struct Lcg(u64);
@@ -37,7 +37,7 @@ impl Lcg {
     }
 }
 
-fn entries() -> Vec<(EntryId, String, Kind)> {
+fn entries() -> Vec<(EntryId, String, Kind, Mtime)> {
     let fs = MemFs::new();
     for note in 0..NOTES {
         fs.insert_file(format!("/vault/f{}/n{note}.md", note % FOLDERS), "");
@@ -54,6 +54,7 @@ fn entries() -> Vec<(EntryId, String, Kind)> {
                 entry.id,
                 entry.path.as_path().to_string_lossy().into_owned(),
                 entry.kind,
+                entry.mtime,
             )
         })
         .collect()
@@ -85,11 +86,14 @@ fn index() -> (NoteIndex, u64, (EntryId, Arc<str>)) {
     let mut lcg = Lcg(13);
     let mut total = 0;
     let mut last = None;
-    let notes = ENTRIES.iter().filter(|(_, _, kind)| *kind == Kind::Note);
-    for (note, (id, _, _)) in notes.enumerate() {
+    let notes = ENTRIES.iter().filter(|(_, _, kind, _)| *kind == Kind::Note);
+    for (note, (id, ..)) in notes.enumerate() {
         let text: Arc<str> = note_text(&mut lcg, note).into();
         total += text.len();
-        index.insert(*id, NoteContent::parse(Arc::clone(&text)));
+        index.insert(
+            *id,
+            NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)),
+        );
         last = Some((*id, text));
     }
     let Some(last) = last else {
@@ -145,7 +149,7 @@ fn bench_search(c: &mut Criterion) {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let held = index.corpus();
-                let content = NoteContent::parse(Arc::clone(&text));
+                let content = NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH));
                 let start = Instant::now();
                 index.insert(id, content);
                 total += start.elapsed();
@@ -178,6 +182,7 @@ fn long_notes(
                 entry.id,
                 entry.path.as_path().to_string_lossy().into_owned(),
                 entry.kind,
+                entry.mtime,
             )
         })
         .collect();
@@ -201,7 +206,7 @@ fn long_notes(
     let total = u64::try_from(text.len() * copies).unwrap_or(u64::MAX);
     let text: Arc<str> = text.into();
     for id in ids {
-        index.insert(id, NoteContent::parse(Arc::clone(&text)));
+        index.insert(id, NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)));
     }
     (index, total)
 }

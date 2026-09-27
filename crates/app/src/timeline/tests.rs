@@ -11,6 +11,7 @@ fn indexed(notes: usize) -> Step {
         notes,
         corpus_bytes: 1_234,
         words_bytes: 567,
+        names_bytes: 89,
     }
 }
 
@@ -41,7 +42,7 @@ fn the_line_is_due_once_when_indexing_first_ends() {
     assert_eq!(
         timeline.line(),
         "launch: first frame 40.0ms, root -, scanned -, names ready -, \
-         indexed 900.00ms (3 notes, corpus 1234 bytes, words 567 bytes, longest turn 1.5ms)"
+         indexed 900.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms)"
     );
 }
 
@@ -59,7 +60,7 @@ fn indexed_before_first_frame_is_due_at_the_first_frame() {
     assert_eq!(
         timeline.line(),
         "launch: first frame 40.0ms, root -, scanned -, names ready -, \
-         indexed 30.00ms (3 notes, corpus 1234 bytes, words 567 bytes, longest turn 1.5ms)"
+         indexed 30.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms)"
     );
 }
 

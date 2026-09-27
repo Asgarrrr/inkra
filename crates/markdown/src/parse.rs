@@ -104,7 +104,7 @@ pub fn parse(text: &str) -> Markdown {
 
 /// pulldown-cmark 0.13.4 emits the subtrees after an empty wikilink alias inside the link too;
 /// this drops each copy that starts at or past the innermost open element's end.
-struct Unrepeated<I> {
+pub(crate) struct Unrepeated<I> {
     events: I,
     /// The end of each open element yielded so far, innermost last.
     ends: Vec<usize>,
@@ -113,7 +113,7 @@ struct Unrepeated<I> {
 }
 
 impl<I> Unrepeated<I> {
-    fn new(events: I) -> Self {
+    pub(crate) fn new(events: I) -> Self {
         Self {
             events,
             ends: Vec::new(),
@@ -201,7 +201,7 @@ fn opening_sequence(heading: &str) -> Option<usize> {
 }
 
 /// A `Code` event's range includes its backticks; returns where the content starts and ends.
-fn backtick_runs(text: &str, range: &Range<usize>) -> (usize, usize) {
+pub(crate) fn backtick_runs(text: &str, range: &Range<usize>) -> (usize, usize) {
     let code = &text.as_bytes()[range.clone()];
     let open = code.iter().take_while(|&&byte| byte == b'`').count();
     let close = code[open..]

@@ -2714,6 +2714,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "unicode-normalization",
+ "unicode-segmentation",
 ]
 
 [[package]]

@@ -3,20 +3,35 @@ use std::mem::size_of;
 use std::ops::Range;
 use std::sync::Arc;
 
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Mtime};
 
-use super::{CHUNK, Corpus, CorpusSnapshot, SLOT_BYTES, TEXT_HEADER_BYTES};
-use crate::test_support::{entries, texts, vault};
+use super::{CHUNK, Corpus, CorpusSnapshot, SLOT_BYTES, Slot, TEXT_HEADER_BYTES};
+use crate::test_support::{entries, mtime, texts, vault};
 
 fn ids(files: &[&str]) -> Vec<EntryId> {
     let (_fs, vault) = vault(files);
-    entries(&vault).into_iter().map(|(id, _, _)| id).collect()
+    entries(&vault).into_iter().map(|(id, ..)| id).collect()
+}
+
+fn stamps(first: u64, len: usize) -> Vec<Mtime> {
+    (first..).take(len).map(mtime).collect()
 }
 
 fn corpus(ids: &[EntryId]) -> Corpus {
     let mut corpus = Corpus::default();
-    let _ = corpus.reorder(ids.into(), |_| usize::MAX);
+    let _ = corpus.reorder(ids.into(), &stamps(0, ids.len()), |_| usize::MAX);
     corpus
+}
+
+fn modified(snapshot: &CorpusSnapshot) -> Vec<Option<Mtime>> {
+    (0..=snapshot.len())
+        .map(|at| snapshot.modified(at))
+        .collect()
+}
+
+/// `order` of `old`'s notes, as `NoteIndex` gives it to `reorder`.
+fn order_in(old: &[EntryId]) -> impl Fn(EntryId) -> usize {
+    move |id| old.iter().position(|&x| x == id).unwrap_or(usize::MAX)
 }
 
 /// `len` notes, each slot holding its own position as text.
@@ -26,7 +41,7 @@ fn numbered(len: usize) -> (Vec<EntryId>, Corpus) {
     let ids = ids(&files);
     let mut corpus = corpus(&ids);
     for at in 0..len {
-        corpus.set(at, Some(at.to_string().into()));
+        corpus.write(at, at.to_string().into(), mtime(0));
     }
     (ids, corpus)
 }
@@ -48,15 +63,15 @@ fn heap_bytes_counts_every_slot_and_each_text() {
     let mut corpus = corpus(&ids);
     assert_eq!(corpus.snapshot().heap_bytes(), 3 * SLOT_BYTES);
 
-    corpus.set(0, Some("hello".into()));
-    corpus.set(2, Some("été".into()));
+    corpus.write(0, "hello".into(), mtime(0));
+    corpus.write(2, "été".into(), mtime(0));
     assert_eq!(
         corpus.snapshot().heap_bytes(),
         3 * SLOT_BYTES + 2 * TEXT_HEADER_BYTES + 5 + 5
     );
 
-    corpus.set(0, Some("hi".into()));
-    corpus.set(2, None);
+    corpus.write(0, "hi".into(), mtime(0));
+    corpus.clear(2);
     assert_eq!(
         corpus.snapshot().heap_bytes(),
         3 * SLOT_BYTES + TEXT_HEADER_BYTES + 2
@@ -67,8 +82,8 @@ fn heap_bytes_counts_every_slot_and_each_text() {
 fn a_write_past_the_end_is_ignored() {
     let ids = ids(&["a.md"]);
     let mut corpus = corpus(&ids);
-    corpus.set(1, Some("x".into()));
-    corpus.set(usize::MAX, Some("x".into()));
+    corpus.write(1, "x".into(), mtime(0));
+    corpus.write(usize::MAX, "x".into(), mtime(0));
     assert_eq!(texts(&corpus.snapshot()), []);
     assert_eq!(corpus.snapshot().heap_bytes(), SLOT_BYTES);
 }
@@ -77,11 +92,11 @@ fn a_write_past_the_end_is_ignored() {
 fn a_held_snapshot_never_sees_a_later_write() {
     let ids = ids(&["a.md", "b.md"]);
     let mut corpus = corpus(&ids);
-    corpus.set(0, Some("old".into()));
+    corpus.write(0, "old".into(), mtime(10));
     let held = corpus.snapshot();
 
-    corpus.set(0, Some("new".into()));
-    corpus.set(1, Some("b".into()));
+    corpus.write(0, "new".into(), mtime(11));
+    corpus.write(1, "b".into(), mtime(12));
 
     assert_eq!(texts(&held), [(ids[0], "old".to_owned())]);
     assert_eq!(held.heap_bytes(), 2 * SLOT_BYTES + TEXT_HEADER_BYTES + 3);
@@ -89,6 +104,101 @@ fn a_held_snapshot_never_sees_a_later_write() {
         texts(&corpus.snapshot()),
         [(ids[0], "new".to_owned()), (ids[1], "b".to_owned())]
     );
+
+    corpus.clear(0);
+    let _ = corpus.reorder(vec![ids[1], ids[0]].into(), &stamps(20, 2), order_in(&ids));
+    assert_eq!(modified(&held), [Some(mtime(10)), Some(mtime(1)), None]);
+}
+
+#[test]
+fn a_write_sets_the_mtime_with_the_text() {
+    let ids = ids(&["a.md", "b.md"]);
+    let mut corpus = corpus(&ids);
+    corpus.write(1, "b".into(), mtime(5));
+    assert_eq!(
+        modified(&corpus.snapshot()),
+        [Some(mtime(0)), Some(mtime(5)), None]
+    );
+
+    corpus.write(1, "bb".into(), mtime(6));
+    corpus.write(2, "past".into(), mtime(7));
+    assert_eq!(
+        modified(&corpus.snapshot()),
+        [Some(mtime(0)), Some(mtime(6)), None]
+    );
+    assert_eq!(texts(&corpus.snapshot()), [(ids[1], "bb".to_owned())]);
+}
+
+#[test]
+fn a_remove_keeps_the_mtime() {
+    let (ids, mut corpus) = numbered(CHUNK + 1);
+    corpus.write(1, "b".into(), mtime(5));
+    let held = corpus.snapshot();
+
+    corpus.clear(1);
+    corpus.clear(1);
+    corpus.clear(CHUNK + 1);
+
+    let now = corpus.snapshot();
+    assert_eq!(now.modified(1), Some(mtime(5)));
+    assert_eq!(
+        listed(&now, 0..3),
+        [(ids[0], "0".to_owned()), (ids[2], "2".to_owned())]
+    );
+    assert_eq!(now.heap_bytes(), held.heap_bytes() - TEXT_HEADER_BYTES - 1);
+    assert!(
+        Arc::ptr_eq(&held.slots[1], &now.slots[1]),
+        "a clear copies one chunk"
+    );
+
+    let held = corpus.snapshot();
+    corpus.clear(1);
+    assert!(
+        Arc::ptr_eq(&held.slots, &corpus.snapshot().slots),
+        "clearing a slot with no text copies nothing"
+    );
+}
+
+#[test]
+fn a_note_without_text_takes_the_build_s_mtime() {
+    let all = ids(&["a.md", "b.md", "c.md"]);
+    let (a, b, c) = (all[0], all[1], all[2]);
+    let mut corpus = corpus(&[a, b]);
+    assert_eq!(
+        modified(&corpus.snapshot()),
+        [Some(mtime(0)), Some(mtime(1)), None]
+    );
+
+    corpus.write(0, "A".into(), mtime(5));
+    corpus.clear(0);
+    let _ = corpus.reorder(vec![c, b, a].into(), &stamps(20, 3), order_in(&[a, b]));
+
+    assert_eq!(
+        modified(&corpus.snapshot()),
+        [Some(mtime(20)), Some(mtime(21)), Some(mtime(22)), None]
+    );
+}
+
+#[test]
+fn a_slot_keeps_its_text_s_mtime_across_a_reorder() {
+    let (ids, mut corpus) = numbered(CHUNK + 2);
+    corpus.write(CHUNK + 1, "last".into(), mtime(5));
+    let kept: Vec<EntryId> = ids.iter().rev().copied().collect();
+
+    let _ = corpus.reorder(
+        kept.clone().into(),
+        &stamps(1000, kept.len()),
+        order_in(&ids),
+    );
+
+    let now = corpus.snapshot();
+    assert_eq!(now.modified(0), Some(mtime(5)), "the text written last");
+    assert_eq!(
+        now.modified(CHUNK + 1),
+        Some(mtime(0)),
+        "the text `numbered` wrote"
+    );
+    assert_eq!(listed(&now, 0..1), [(ids[CHUNK + 1], "last".to_owned())]);
 }
 
 #[test]
@@ -96,15 +206,13 @@ fn reorder_keeps_each_kept_note_s_text_and_drops_the_rest() {
     let all = ids(&["a.md", "b.md", "c.md", "d.md"]);
     let (a, b, c, d) = (all[0], all[1], all[2], all[3]);
     let mut corpus = corpus(&[a, b, c]);
-    corpus.set(0, Some("A".into()));
-    corpus.set(1, Some("BB".into()));
-    corpus.set(2, Some("CCC".into()));
+    corpus.write(0, "A".into(), mtime(0));
+    corpus.write(1, "BB".into(), mtime(0));
+    corpus.write(2, "CCC".into(), mtime(0));
     let held = corpus.snapshot();
 
     let old = [a, b, c];
-    let (previous, retired) = corpus.reorder(vec![d, c, a].into(), |id| {
-        old.iter().position(|&x| x == id).unwrap_or(usize::MAX)
-    });
+    let (previous, retired) = corpus.reorder(vec![d, c, a].into(), &stamps(10, 3), order_in(&old));
 
     assert_eq!(&*previous, &[a, b, c]);
     assert_eq!(
@@ -136,19 +244,17 @@ fn a_snapshot_splits_into_ranges_over_its_slots() {
 fn notes_lists_the_loaded_notes_of_a_range() {
     let ids = ids(&["a.md", "b.md", "c.md"]);
     let mut corpus = corpus(&ids);
-    corpus.set(0, Some("a".into()));
-    corpus.set(2, Some("c".into()));
+    corpus.write(0, "a".into(), mtime(0));
+    corpus.write(2, "c".into(), mtime(0));
     let snapshot = corpus.snapshot();
     let found: Vec<(EntryId, &str)> = snapshot.notes(1..3).collect();
     assert_eq!(found, [(ids[2], "c")]);
 }
 
 #[test]
-fn a_slot_costs_its_text_pointer_and_its_id() {
-    assert_eq!(
-        SLOT_BYTES,
-        size_of::<Option<Arc<str>>>() + size_of::<EntryId>()
-    );
+fn a_slot_costs_its_text_pointer_its_mtime_and_its_id() {
+    assert_eq!(SLOT_BYTES, size_of::<Slot>() + size_of::<EntryId>());
+    assert!(size_of::<Slot>() >= size_of::<Option<Arc<str>>>() + size_of::<Mtime>());
 }
 
 #[test]
@@ -161,14 +267,14 @@ fn a_write_under_a_held_snapshot_copies_one_chunk() {
     let (ids, mut corpus) = numbered(3 * CHUNK);
     let held = corpus.snapshot();
 
-    corpus.set(CHUNK + 5, Some("new".into()));
+    corpus.write(CHUNK + 5, "new".into(), mtime(0));
 
     assert_eq!(texts(&held), expected(&ids, 0..3 * CHUNK));
     let now = corpus.snapshot();
     let shared: Vec<bool> = held
-        .texts
+        .slots
         .iter()
-        .zip(now.texts.iter())
+        .zip(now.slots.iter())
         .map(|(held, now)| Arc::ptr_eq(held, now))
         .collect();
     assert_eq!(shared, [true, false, true]);
@@ -200,7 +306,7 @@ fn notes_crosses_chunk_boundaries() {
 fn notes_reaches_the_end_of_whole_chunks() {
     let (ids, corpus) = numbered(2 * CHUNK);
     let snapshot = corpus.snapshot();
-    assert_eq!(snapshot.texts.len(), 2);
+    assert_eq!(snapshot.slots.len(), 2);
     for range in [0..2 * CHUNK, CHUNK + 1..2 * CHUNK, 2 * CHUNK..2 * CHUNK] {
         assert_eq!(listed(&snapshot, range.clone()), expected(&ids, range));
     }
@@ -219,7 +325,7 @@ fn reorder_moves_texts_across_chunks() {
     let order: HashMap<EntryId, usize> = ids.iter().enumerate().map(|(at, &id)| (id, at)).collect();
     let kept: Vec<EntryId> = ids[1..].iter().rev().copied().collect();
 
-    let (_, retired) = corpus.reorder(kept.clone().into(), |id| order[&id]);
+    let (_, retired) = corpus.reorder(kept.clone().into(), &stamps(0, kept.len()), |id| order[&id]);
 
     assert_eq!(retired, [Arc::<str>::from("0")]);
     let now = corpus.snapshot();

@@ -1,11 +1,39 @@
 //! The corpus `IndexSync` keeps: each note's saved text, under its id, across vault changes.
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
-use gpui::TestAppContext;
+use gpui::{Entity, TestAppContext};
+use inkra_index::{NoteQuery, find_notes, merge_notes};
+use inkra_vault::EntryId;
 
-use super::tests::{create, found, indexed_vault};
+use super::IndexSync;
+use super::tests::{create, found, indexed_vault, saved_edit};
 use crate::test_support::entry_id;
+
+fn ranked(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec<EntryId> {
+    links.read_with(cx, |links, _| {
+        let index = links.index();
+        let query = NoteQuery::new(text, None, &[]);
+        let not_cancelled = AtomicBool::new(false);
+        let snapshot = index.snapshot();
+        let lookup = snapshot
+            .lookup(&query, &not_cancelled)
+            .expect("not cancelled");
+        let kept = find_notes(
+            &snapshot,
+            &lookup,
+            0..index.names().len(),
+            &query,
+            &not_cancelled,
+            usize::MAX,
+        );
+        merge_notes(&snapshot, vec![kept], &query, usize::MAX)
+            .into_iter()
+            .map(|found| found.id)
+            .collect()
+    })
+}
 
 #[gpui::test]
 fn a_rename_keeps_the_text(cx: &mut TestAppContext) {
@@ -83,4 +111,17 @@ fn progress_and_the_corpus_agree_once_indexing_ends(cx: &mut TestAppContext) {
         12
     );
     assert_eq!(found(cx, &links, "text").len(), 12);
+}
+
+#[gpui::test]
+async fn a_save_ranks_its_note_first_by_mtime(cx: &mut TestAppContext) {
+    // `MemFs` stamps each write a second later, so `b` loads newer than `a`.
+    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "plan alpha"), ("b.md", "plan beta")]);
+    cx.run_until_parked();
+    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    assert_eq!(ranked(cx, &links, "plan"), [b, a], "the load's mtimes");
+
+    saved_edit(cx, &notes, "a", "plan alpha again").await;
+
+    assert_eq!(ranked(cx, &links, "plan"), [a, b], "the save's mtime");
 }

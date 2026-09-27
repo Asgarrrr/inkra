@@ -18,6 +18,7 @@ percent-encoding = "2.3"
 regex = "1.13"
 regex-syntax = "0.8.11"
 unicode-normalization = "0.1.25"
+unicode-segmentation = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -27,6 +28,10 @@ proptest = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "find"
+harness = false
 
 [[bench]]
 name = "index"

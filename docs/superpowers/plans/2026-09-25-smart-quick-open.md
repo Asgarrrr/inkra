@@ -95,7 +95,8 @@ The user confirmed this method on 2026-09-25. It extends the handoff's method (`
 
 Each slice adds one block with one role and a narrow face. A later block uses an earlier one only through its public API.
 
-- `words` imports neither `names` nor `search`; `names` and `search` never import `words`. All three may use `chunks::split`.
+- `words` imports neither `names` nor `search`; `search` never imports `words`. `names` imports one type from `words`, `NameWords` (slice 8): `names` stores `NameWords` and exposes it (`words()`), never reads it; `find` reads it. All three may use `chunks::split`.
+- `find` (slice 8) imports `names`, `words`, `index` (for `IndexSnapshot`) and `window`; nothing imports `find`.
 - `NoteIndex` composes `NoteTable`, link sources, `NamesSnapshot`, `Corpus` and `Words`; it holds no matching logic.
 - `NoteContent` is the one value a load or a save hands the index. `app` never builds a `Source` or word counts itself.
 - `find` (slice 8) reads `NamesSnapshot`, `Lookup` and, for mtimes, `CorpusSnapshot`; it never reaches into a shard.
@@ -4803,63 +4804,283 @@ Each lever keeps the public API and passes Task 7.5's and Task 7.6's oracles unc
 
 ---
 
-## Slice 8 — Smart quick open (tasks)
+## Slice 8 — Smart quick open (detailed)
 
-Spec: smart quick open S3, S4, S5, Performance (`find_notes`, end to end), Testing (oracle, split, excerpt, app); search spec D7 (refresh never cancels a running scan of the same query), D8, D9. Branch `search/8-smart-quick-open` from `search/7-word-index`. The lead expands these tasks first, then has them challenged (Flow steps 2 and 3).
+> **Fix batch, 2026-09-27.** The review's fix batch changed the design below; the stale lines are fixed in place.
+> - `find_notes`, `merge_notes` and `excerpt` take one `IndexSnapshot` (names, corpus, words), built only by `NoteIndex::snapshot()`; the pair check and its fallback are gone.
+> - `find_notes` returns `Vec<Ranked>`, a rank only; `merge_notes(snapshot, chunks, query, limit)` builds the `NoteMatch` of the merged top alone.
+> - The words store's ordinals and fresh maps are sharded (64 each), so a write under a held snapshot copies one shard.
+> - A run is a user search or a background refresh (`Run`), and `Scan` tracks the scan in flight: a background refresh never cancels it, never moves the selection or the scroll, and a keystroke waits no debounce behind it.
+> - Rows apply first; excerpts are computed only for the rows on screen, one task per row, as they are ready.
+> - Each row's text (`RowText`) is built once, when its row or its excerpt lands, and stored with the row.
+> - The exact name ranks first in its group, right after the group (S3 amendment, decided by the user on 2026-09-27).
+> - The second line shows the first prose line, its markdown markup dropped and its highlights mapped through the drop (S4 amendment, decided by the user on 2026-09-27).
 
-**Zed check.** `file_finder/src/file_finder.rs`: how history (recently opened) and the current file rank against matches (`:557-613`, the `history_items` path), and how a refresh keeps the selection (`:1117-1126`). `search/src/text_finder/delegate.rs`: how a match row draws its excerpt with highlights. Record deviations in the smart quick open spec.
+Spec: smart quick open S3, S4, S5, Performance (`find_notes`, end to end), Testing (oracle, split, excerpt, app); search spec D7 (a refresh never cancels a running scan of the same query), D8, D9; open-first spec O5. Branch `search/8-smart-quick-open` from `search/7-word-index`.
 
-**Decisions this plan makes inside the spec** (the lead records them under S3 to S5, "Built in slice 8"):
+**Zed check** (slice lead, 2026-09-26; recorded in the spec under "What Zed does", in Task 8.6):
 
-- **Mtimes follow S3 exactly: a save updates them** (user, 2026-09-25: no shortcut). An ordinary save does not rescan the vault, so `Corpus` gains a slot of mtimes beside the texts: `NoteSet::build` takes `(EntryId, String, Kind, Mtime)` and fills it, `set_notes` swaps it in, and `insert` writes the note's slot. `NoteContent::parse(text, modified: Mtime)` carries the mtime: a load passes its `Loaded::stamp`, a save its `NoteSaved::stamp`. The copy while a snapshot is held is 50,000 × 16 bytes, measured by the snapshot bench (budget 2 ms). `find_notes` reads the mtimes through the `CorpusSnapshot` taken with the names, which the delegate already holds for the excerpt.
-- **Name words are built once per build.** `NoteSet::build` also folds each note's name into words: for each, its folded form, its byte range in the NFC path, and whether it is in the stem. They live in `NamesSnapshot` beside the D2 candidates; `names::matching` never reads them, `find` does. So a keystroke folds no path.
-- **`find` is its own module**, `crates/index/src/find.rs` + `find/{rank,run,excerpt}.rs`, importing `names` (for `NamesSnapshot`) and `words` (for `Lookup`, `NoteQuery`, `words`, `fold`); neither imports `find`.
+- `file_finder.rs` `push_new_matches` / `cmp_matches` (`:546-663`): history items that match are merged with the search matches into one list sorted by score; the currently opened file is bubbled to the **top**; history matches only on the file name (`matching_history_items`, `:675-700`), to avoid false positives from folders. Inkra keeps D2's rule instead: the note showing ranks after the notes of its group that tie with it on the exact name and keys 1–2 (S3 key 3), since opening the note already showing is a no-op. The MRU is a tie-break after the group, the exact name, whole terms and stem terms or occurrences (S3 key 4), not a score of its own: a better word match beats a recent note. Zed's name-only history rule is what S3's `Name` group gives by construction.
+- `set_search_matches` (`:1097-1127`): the selected match is kept when the query did not change. Inkra already keeps the selected note by id after a refresh (slice 3).
+- A worktree update in Zed calls `picker.refresh` with a 200 ms debounce (`:1003-1008`, `:1874`) and cancels the running search; a cancelled search of an unchanged query then *extends* the old matches (`extend_old_matches`, `:1112`). Inkra follows D7 instead: a refresh never cancels a running scan; it marks the query dirty and re-runs once the scan lands. Zed's extension works because its matches arrive as one stream per worktree; ours are ranked across the whole vault, so a partial list is not a prefix of the final one.
+- `text_finder/delegate.rs` `render_matched_line` (`:1342-1428`): the excerpt is a bounded window around the match, not the whole line ("a minified single-line file stays cheap"), leading indentation is trimmed when the window starts at the line start, and the match is highlighted. Inkra takes all three: S4's window (60 bytes before, 100 after, within the line), the trim, and the highlight. Zed computes the excerpt at render time per visible row from a buffer snapshot; Inkra computes it off the foreground, after the merge, for the rows on screen (decision below).
+- `picker.rs` `render_footer` (`:408`): `Option<AnyElement>`, `None` by default. Inkra's `PickerDelegate` takes the same shape.
 
-### Task 8.1: `NoteQuery` with `showing` and `recent`; mtimes and name words in `NoteSet`
+**Checked against the code on 2026-09-26 (slice lead, Flow step 2).** The task list above predates slices 5–7. What changed:
 
-- `NoteQuery::new(text, showing: Option<EntryId>, recent: &[EntryId])`, as S3 writes it; slice 7's call sites gain `None, &[]`.
-- `NoteSet::build(Vec<(EntryId, String, Kind, Mtime)>)`; `IndexSync::reconcile`, `test_support::entries` and every bench pass the entry's mtime.
-- `Corpus` holds a slot of mtimes, written by `insert`; filled by `NoteSet::build` and `reorder` from the scan for every note, so a note never lacks one (not `Option`, unlike a text: slice 7 blue team); `NoteContent::parse(text, modified)`; `IndexSync` passes each load's and each save's stamp. A test: a save moves its note ahead of an older one in the mtime order without a rescan.
-- `NamesSnapshot` gains, per candidate, the folded name words (decision above).
-- Tests: a note's name words and their ranges on an NFD file name (`crates/index/src/note_set/tests.rs`); `한` in a name; a stem with no word char.
+- `NoteQuery::new(text)` has one argument (slice 7); `Lookup::get(term, id) -> Option<TermHit>` and `term_count()`; `WordsSnapshot::lookup` returns `Option<Lookup>` (`None`: cancelled).
+- `Corpus` keeps its slots in chunks of 256 behind `Arc`s (`corpus.rs`), so a slot of mtimes beside the texts is one more field of the slot, copied with its chunk.
+- `NoteContent::parse(text)` runs in `IndexSync::load_more`'s task (`index/loading.rs`) and in `saved`'s parse task (`index.rs`); `Landed.loaded` holds the `NoteContent`, so the load's `Loaded::stamp` must be read in the task.
+- `NoteSet::build` has 22 call sites in index tests and benches, and `Built::new` in `app/src/index.rs`; `test_support::entries` feeds most of them.
+- The picker's list height is `UI_LINE_HEIGHT × rows` (`picker/render.rs`), fixed for every delegate.
+- The backlinks panel's `seen`/`throttled`/`BUILDING_REFRESH` (`backlinks/mod.rs`) is the refresh logic to share.
+- `QuickOpenDelegate::new` subscribes to `NotesChanged` only, and a `NotesChanged` calls `Picker::refresh`, which drops the pending task: that is the cancel D7 forbids.
+
+### Plan challenge, 2026-09-27
+
+Red and blue teams (sonnet, read-only) on this section. Each point, taken or rejected; the decisions and tasks below already integrate what was taken.
+
+| # | Point | Answer |
+|---|---|---|
+| R1 | One matched 1 MB word makes a 1 MB excerpt | Taken: the window is built around the matched word's first `WORD_MAX_CHARS` chars, so an excerpt is at most about 60 + 260 + 100 bytes; test `a_one_megabyte_word_gives_a_short_excerpt` |
+| R2 | Finding the first matching word is O(bytes before it), not O(window) | Taken: the scan stops after `EXCERPT_SCAN_BYTES` (1 MB, about 2–3 ms) with no second line, recorded in the spec; test and bench with the match at the **end** of a 10 MB line |
+| R3 | `NotesChanged` and the notify of the same turn refresh twice | Taken: `update_matches` records `IndexWatch::seen` when it takes the snapshots, so the notify after `NotesChanged` is skipped; test `one_build_runs_one_scan` |
+| R4 | `Run` cannot tell the 200 ms `NotesChanged` wait from a notify refresh | Taken: `Run::{Search, Refresh, Notify}`; `Notify` keeps the selection and waits nothing (`IndexWatch` throttles it) |
+| R5 | A slot keeps a stale mtime until its reload lands | Rejected as a change, taken as a record: the mtime describes the text the index holds, so the two never disagree; the window is the reload queue, empty at startup (no text yet, so the build's mtime is used). Writing the scan's mtime at once would rank a note by an edit its text does not show yet. Test `external_edits_keep_each_old_mtime_until_the_reload` over several notes |
+| R6 | `set(at, text, modified)` cannot express "clear the text, keep the mtime" | Taken: `Corpus::write(at, text, modified)` and `Corpus::clear(at)` |
+| R7 | The highlight property does not check minimality | Taken: no shorter grapheme prefix folds to a string starting with the term |
+| R8 | `NameWords` memory is not reported | Taken: `NamesSnapshot::heap_bytes()` and `names_bytes` in `Step::Indexed` |
+| R9 | The names/corpus pair is a convention | Taken by data shape: `find_notes` and `excerpt` take one `IndexSnapshot` (names, corpus, words), built only by `NoteIndex::snapshot()`, so the names and corpus always come from one build and no runtime check or fallback exists. (The first build checked `Arc::ptr_eq` on the build's ids and tied every mtime on a mismatch; the fix batch replaced it.) |
+| R10 | Notes imported together share an mtime | Taken as a record: ties fall to key 6; the spec says so |
+| R11 | `Rank::order` must be the global vault order | Taken: a doc line; the split oracle pins it |
+| R12 | `Built::new` is under-specified | Taken: every entry, folders included, carries its own `Entry::mtime` (a folder has one); the notes-only reload list is unchanged |
+| R13 | The footer toggling may move the selection | Taken: `the_selection_survives_the_footer_leaving`. Scroll is untouched: the footer sits under the list |
+| R14 | Cancel is checked only between excerpt rows | Taken: also every 64 KB inside the scan |
+| B1 | `Mtime` has no order, and the vault rule forbids ordering it | Taken: `Rank` holds `Reverse(SystemTime)` read from `Mtime::0`; `Mtime` gains no `Ord`. The spec records key 5 as a heuristic: a synced file's mtime need not follow the order of edits |
+| B2 | `fold`, `word_spans`, `cap` are private to `words` | Taken: `words.rs` re-exports them `pub(crate)` (Task 8.2) |
+| B3 | "No single-note read" contradicts `text(order)` | Taken: "no **public** single-note read" |
+| B4 | Keep `names` free of `words` with a fourth accessor | Rejected: name words are name data, built with the names in one pass; a separate accessor would add a third snapshot to pair by convention (R9). The amended rule keeps `names` from reading them |
+| B5 | Search spec D1/D5 still show the 3-tuple | Taken: Task 8.6 adds "Corrected in slice 8" notes to D1 and D5 |
+| B6 | Mutants scope misses new files | Taken: the gate list names `words/name_words.rs`, `window.rs`, `find/**`, `app/src/index/watch.rs`, `app/src/count.rs` and the quick-open files |
+| B7 | No sequence oracle for mtimes | Taken: the corpus model in `index/model_tests.rs` tracks and asserts mtimes |
+| B8 | No bench of the whole keystroke pipeline | Taken: `find.rs` gains `pipeline/<query>`: lookup, `find_notes` over the chosen split, merge, 100 excerpts |
+| B9 | The Zed paragraph is accurate | Noted; the 200 ms constant (`file_finder.rs:844`) is cited |
+| B10 | The code-drift section is accurate | Noted |
+
+### Decisions this plan makes inside the spec
+
+Each is recorded in the spec in Task 8.6, under S3, S4 or S5, "Built in slice 8".
+
+- **Mtimes follow S3 exactly: a save updates them** (user, 2026-09-25). A corpus slot holds its text **and** its mtime: `struct Slot { text: Option<Arc<str>>, modified: Mtime }`. `Mtime` gains no `Ord` (the vault rule: never order a stamp); `Rank` orders `Mtime::0`, a `SystemTime`, and the spec calls key 5 a heuristic. Notes sharing an mtime fall to key 6. `NoteSet::build` takes `(EntryId, String, Kind, Mtime)` and keeps the notes' mtimes in vault order. `set_notes` → `Corpus::reorder` gives each slot of the new build **its previous slot's mtime when the note keeps its text, else the build's**. `insert` writes the text and `NoteContent::modified`. So a slot's mtime is always the mtime of the text it holds, or the scan's while no text is loaded; a note never lacks one (not `Option`). A rescan that sees an external edit keeps the old mtime until the reload lands with the new text: text and mtime move together. `remove` clears the text and keeps the mtime. `NoteContent::parse(text, modified: Mtime)`: a load passes `Loaded::stamp.mtime`, a save `NoteSaved::stamp.mtime`.
+- **`find_notes` takes the corpus**, inside one `IndexSnapshot`: `find_notes(snapshot, lookup, range, query, cancel, limit)`. S3's signature has no corpus, but key 5 needs the mtimes, and the lego rule already names the `CorpusSnapshot` as `find`'s source for them. `names` and `corpus` must come from the same build: `IndexSnapshot` holds both, and only `NoteIndex::snapshot()` builds it, so no runtime check or fallback exists.
+- **Name words are built once per build**, by `NoteSet::build`, off the foreground: for each note, the S1 words of its NFC path (`word_spans` then `fold`, capped at `WORD_MAX_CHARS`), each with its byte range in the path and whether it is in the stem. They are stored CSR-style for the whole snapshot (one folded string, one word array, one start per candidate), not a `Box` per word: 50,000 names × about 5 words would otherwise be 250,000 allocations. The type is `words::NameWords` (crate-private); `NamesSnapshot` holds it beside the D2 candidates. **The lego rule is amended**: `names` stores `NameWords` and exposes it (`words()`), never reads it; `find` reads it. Name words are not sorted (they keep path order for highlights), so they do not fire the "shared `Lexicon`" lever.
+- **A term's place.** A term is placed in the name when it matches a word of the stem or folders, else in the text. S3's key 1 counts the terms matching whole **in their place** (a name word equal to the term, or `TermHit::whole`); key 2 counts, for `Name`, the terms matching a stem word; for `NameAndText` and `Text`, the sum of `TermHit::count` over the terms placed in the text. So a `Name` row never ranks by its text.
+- **Highlights light the matched prefix.** In a name and in an excerpt, a matched word lights the shortest run of its graphemes whose fold starts with the term, not the whole word: `pla` lights `Pla` in `Planning`. Computed only for the rows returned, never per candidate.
+- **The excerpt.** `pub fn excerpt(snapshot: &IndexSnapshot, found: &NoteMatch, query: &NoteQuery, cancel: &AtomicBool) -> Option<Excerpt>`: it reads the note's text at `found`'s vault order (checked against `found.id`) and uses `found.group`, so no vault order leaks into the public API and no **public** single-note read is added to `CorpusSnapshot`. The rows apply as soon as the merge lands; the delegate then computes the excerpts **off the foreground, for the rows on screen** (about 10), one background task per row, each checking `cancel` every 64 KB of its scan. The scan for the first matching word stops after `EXCERPT_SCAN_BYTES` (1 MB): past it the row has no second line. The window is built around the matched word's first `WORD_MAX_CHARS` chars, so a 1 MB word gives a short excerpt. S4 reads the text "for at most the rows on screen", as built, and a 10 MB note whose first matching word is at its end never costs a frame. Zed computes it at render time; its buffers are already in memory as ropes with line indexes, ours are plain strings.
+- **The picker gains two delegate methods with defaults**: `fn render_footer(&self, cx) -> Option<AnyElement> { None }` and `fn row_height(&self) -> Pixels { theme::UI_LINE_HEIGHT }`. Quick open returns `2 × UI_LINE_HEIGHT`; the list height is `row_height × shown rows`.
+- **The refresh helper** is `crate::index::IndexWatch` (`app/src/index/watch.rs`): it holds the `(revision, building)` last seen and the throttle task, and tells its owner to skip, refresh now, or refresh after `BUILDING_REFRESH`. The backlinks panel and quick open both use it. Quick open records `seen` when `update_matches` takes its snapshots, so the notify that follows a `NotesChanged` in the same turn is skipped.
+- **The footer** reads `Indexing 12,340 of 50,000 notes` while `is_building() && !awaits_first_build()`, from `IndexSync::progress()`, with thousands separators (a 10-line helper in `app`). While `awaits_first_build()` the picker already says "Scanning the vault…" (O5), so the footer stays off.
+- **Ranges.** Quick open runs `find_notes` over `names.chunks(num_cpus)`, one range per core (S5: 2–4×): Task 8.6's `find` bench compared 1×, 2× and 4×, and one per core was faster.
+
+### File structure
+
+| File | Status | Responsibility |
+|---|---|---|
+| `crates/index/src/words/query.rs` | modify | `NoteQuery::new(text, showing, recent)`, `showing()`, `recent(id)` |
+| `crates/index/src/words/name_words.rs`, `name_words/tests.rs` | create | `NameWords`: every name's folded words, CSR |
+| `crates/index/src/words/lookup.rs` | modify | `pub(crate)` per-ordinal access for `find` |
+| `crates/index/src/corpus.rs`, `corpus/tests.rs` | modify | `Slot { text, modified }`; `reorder` takes the build's mtimes; `set` writes the mtime; `CorpusSnapshot::modified(order)`, `text(order)` (crate) |
+| `crates/index/src/content.rs`, `content/tests.rs` | modify | `NoteContent::parse(text, modified)` |
+| `crates/index/src/note_set.rs`, `note_set/tests.rs` | modify | the 4-tuple; mtimes; name words |
+| `crates/index/src/names.rs` | modify | `NamesSnapshot` holds `NameWords` |
+| `crates/index/src/index.rs` | modify | `insert` writes the mtime; `set_notes` passes the build's mtimes |
+| `crates/index/src/window.rs`, `window/tests.rs` | create | the line window shared by `Hit` and the excerpt |
+| `crates/index/src/search/hit.rs` | modify | `Hit::new` uses `window` |
+| `crates/index/src/find.rs` | create | module list, re-exports, `Group`, `NoteMatch` |
+| `crates/index/src/find/rank.rs` | create | `Rank`, placing terms, S3's order |
+| `crates/index/src/find/run.rs` | create | `find_notes`, `merge_notes` |
+| `crates/index/src/find/highlight.rs` | create | the matched prefix of a word, grapheme-widened |
+| `crates/index/src/find/excerpt.rs` | create | `Excerpt`, `excerpt` |
+| `crates/index/src/find/{tests,model_tests,excerpt_tests}.rs` | create | behaviour, the oracle, the excerpt |
+| `crates/index/src/lib.rs` | modify | modules, re-exports |
+| `crates/index/src/test_support.rs`, index tests, benches | modify | the 4-tuple, `NoteContent::parse(text, mtime)`, `NoteQuery::new(text, None, &[])` |
+| `crates/index/benches/find.rs`, `crates/index/Cargo.toml` | create / modify | the `find` bench |
+| `crates/app/src/index.rs`, `index/loading.rs` | modify | the 4-tuple; stamps into `parse` |
+| `crates/app/src/index/watch.rs`, `watch/tests.rs` | create | `IndexWatch` |
+| `crates/app/src/backlinks/mod.rs` | modify | uses `IndexWatch` |
+| `crates/app/src/picker/{mod,render}.rs`, `picker/tests.rs` | modify | `render_footer`, `row_height` |
+| `crates/app/src/quick_open/mod.rs`, `quick_open/search.rs`, `render.rs`, tests | modify / create | the new delegate, two-line rows, footer, refresh |
+| `crates/app/src/count.rs` | create | `thousands(n)` for the footer |
+| `crates/app/src/shot/scenes.rs` | modify | new scenes, notes with text |
+| spec, `CLAUDE.md` | modify | Zed paragraph, "Built in slice 8", figures, shots |
+
+### Task 8.1: `NoteQuery` with `showing` and `recent`; mtimes; name words
+
+> **Reshaped at build time (slice lead, 2026-09-27).** `check.sh` builds the library without `cfg(test)`, so a field whose only reader is `find_notes` fails clippy's dead-code lint even with a test reader. Task 8.1 ships the mtimes alone (`ac8eb52`, `Index: each corpus slot holds its text's mtime`; `reorder` takes `&[Mtime]`, clippy's `needless_pass_by_value`). `NoteQuery`'s `showing` and `recent`, `NameWords`, `NamesSnapshot`'s `words`, `ids` and `heap_bytes`, and `Step::Indexed::names_bytes` move to Task 8.2, with `find_notes`, their reader. `CorpusSnapshot::modified` is `#[cfg(test)]` until 8.2 reads it; 8.2 also adds the app test that a load and a save hand their stamp's mtime to the index.
+
+**Files:** modify `words/query.rs`, `words.rs`, `corpus.rs` (+ tests), `content.rs` (+ tests), `note_set.rs` (+ tests), `names.rs`, `index.rs`, `test_support.rs`, every index test and bench call site, `app/src/index.rs`, `app/src/index/loading.rs`, app index tests; create `words/name_words.rs`, `words/name_words/tests.rs`.
+
+**Interfaces:**
+- `pub fn NoteQuery::new(text: &str, showing: Option<EntryId>, recent: &[EntryId]) -> Self` (S3); `pub(crate) fn showing(&self) -> Option<EntryId>`; `pub(crate) fn recent(&self, id) -> Option<usize>` (newest is 0; a repeated id keeps its newest rank, as `NameQuery`).
+- `pub fn NoteSet::build(entries: Vec<(EntryId, String, Kind, Mtime)>) -> NoteSet`.
+- `pub fn NoteContent::parse(text: Arc<str>, modified: Mtime) -> Self`; `pub(crate) modified: Mtime`.
+- `Corpus`: slot `Slot { text: Option<Arc<str>>, modified: Mtime }`; `write(at, text: Arc<str>, modified)` and `clear(at)` (the text only) replace `set`; `reorder(ids, mtimes: Arc<[Mtime]>, order)`; `CorpusSnapshot::modified(order) -> Option<Mtime>` and `text(order) -> Option<(EntryId, &str)>`, both `pub(crate)`. `Mtime` has no `Default`: `Corpus::default()` has no slots, so none is needed.
+- `pub(crate) struct NameWords` in `words/name_words.rs`: `build<'a>(paths: impl IntoIterator<Item = &'a str>) -> Self`; `of(order) -> impl Iterator<Item = NameWord<'_>>` where `NameWord { folded: &str, bytes: Range<usize>, in_stem: bool }`; `heap_bytes()`.
+- `NamesSnapshot` gains `words: Arc<NameWords>`, `#[must_use] pub fn heap_bytes(&self) -> usize` (the name words; `Step::Indexed` gains `names_bytes`), and `pub(crate) fn words(&self) -> &NameWords`, `pub(crate) fn path(&self, order) -> &Arc<str>`, `pub(crate) fn id(&self, order) -> EntryId`.
+
+- [ ] **Step 1: failing tests.**
+  - `words/tests.rs`: `a_query_ranks_recent_notes_newest_first_and_keeps_showing` (a repeated id keeps its newest rank; `showing` is returned).
+  - `words/name_words/tests.rs`: `a_name_s_words_are_folded_with_their_path_ranges` (`Projets/Été 2026` → `projets` 0..7 folder, `ete` 8..12 stem, `2026` stem); `an_nfd_file_name_folds_like_its_nfc_form` (NoteSet NFC-normalizes first, so the ranges index the NFC path); `a_hangul_name_folds_to_jamo` (`한글` → the NFD jamo, range covers the whole syllables); `a_stem_with_no_word_char_has_no_stem_word` (`notes/---` → `notes` only, in the folder); `a_long_name_word_is_capped` (70 × `a`).
+  - `corpus/tests.rs`: `a_slot_keeps_its_text_s_mtime_across_a_reorder`; `a_note_without_text_takes_the_build_s_mtime`; `a_write_sets_the_mtime_with_the_text`; `a_remove_keeps_the_mtime`; the existing snapshot-isolation test extended: a held snapshot's mtimes never change.
+  - `index/corpus_tests.rs`: `a_save_moves_the_note_s_mtime_without_a_rescan` (insert with a later mtime; `corpus().modified(order)` is the save's).
+  - `content/tests.rs`: `parse_keeps_the_mtime`.
+  - `index/model_tests.rs`: the corpus model tracks each note's mtime (a load or save carries a generated one, a build its scan's); asserted with the texts after every step. `external_edits_keep_each_old_mtime_until_the_reload` (several notes edited, reloads landing out of order).
+- [ ] **Step 2: implement.** `prepare` keeps the mtime; `NoteSet { …, mtimes: Arc<[Mtime]> }`; `NamesSnapshot::build` also builds `NameWords` from the same paths. `Corpus::reorder` fills `modified` from the previous slot when it keeps a text, else from `mtimes[i]`; `clear` returns early when the slot has no text (the chunk-copy guard). `NoteIndex::insert` calls `write` with `content.modified`; `remove` calls `clear`.
+- [ ] **Step 3: call sites.** `test_support::entries` returns the 4-tuple (the entry's `mtime`); benches build the tuple from their scans (`Mtime(SystemTime::UNIX_EPOCH)` where the bench has no scan); `NoteContent::parse(text, mtime)`: tests use a `test_support::mtime(n)` helper (`UNIX_EPOCH + n s`). App: `Built::new` builds the 4-tuple from every entry, folders included (each `Entry` has its `mtime`), and keeps its notes-only `mtimes` list for the reload diff unchanged; `load_more`'s task passes `loaded.stamp.mtime`; `saved` passes `event.stamp.mtime`; app tests follow. `NoteQuery::new(text, None, &[])` at slice 7's call sites.
+- [ ] **Step 4:** `./scripts/check.sh`; `./scripts/test-names.sh` diff clean (no file split). `timeline` logs `names_bytes`. Commit: `Index: mtimes beside the corpus texts, name words, NoteQuery ranks recent notes`.
 
 ### Task 8.2: `find_notes`, `merge_notes`, the order, the oracle
 
-- `pub enum Group { Name, NameAndText, Text }`, `pub struct NoteMatch { id, path, group, name_highlights, rank }`, `find_notes(names, lookup, range, query, cancel, limit)`, `merge_notes(chunks, limit)`, exactly as S3.
-- A note is listed when every term matches a name word or `lookup.get(t, id)` is `Some`. The group, then S3's order: whole terms, then stem terms (`Name`) or text occurrences (`NameAndText`, `Text`), then showing last, MRU rank, mtime (newest first), shorter path in chars, vault order. A bounded top-`limit` heap as `match_names`.
-- `name_highlights`: each matched name word's prefix, as byte ranges into `path`, widened to whole graphemes.
-- An empty query lists the MRU without `showing`, as `match_names` does. Test `NoteQuery::is_empty`, never `Lookup::terms() == 0`: a cancelled lookup has no terms too (slice 7 blue team).
-- Tests through the public API: the three groups; each order key alone decides a tie; accents both ways in names; highlight ranges on an NFD name and on an emoji ZWJ name; `cancel` returns an empty list.
-- **The oracle**, `find/model_tests.rs`: a naive model re-reads every name and text, splits with `str::split`, folds with the shared `fold`, applies S3's rule and order, and must list the same notes in the same order; alphabet as Task 7.5's; `showing` and `recent` generated. `merge_notes` over any split equals one range. 20,000 cases at the gate.
+> **Built** in `80d99d3` and `1a071af`. `inkra-index` gains `unicode-segmentation` from `[workspace.dependencies]` (already used by `text` and `app`), for grapheme-widened highlights. A highlight widens to the **path's** graphemes, not the word's: a word can start inside a grapheme (`🎉\u{301}x`, `\u{600}1`) or end inside one (`a🏻`), and a range may start before the stem when a grapheme straddles the last `/`; the renderer clamps.
+
+**Files:** create `find.rs`, `find/{rank,run,highlight}.rs`, `find/tests.rs`, `find/model_tests.rs`; modify `lib.rs`, `words.rs` (`pub(crate) use fold::{cap, fold, word_spans}`), `words/lookup.rs`.
+
+**Interfaces** (all `pub`, re-exported from `lib.rs`):
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Group { Name, NameAndText, Text }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteMatch {
+    pub id: EntryId,
+    pub path: Arc<str>,                     // NFC, `.md` stripped, as NameMatch::path
+    pub group: Group,
+    pub name_highlights: Vec<Range<usize>>, // byte ranges into `path`, whole graphemes, ascending, disjoint
+    rank: Rank,
+}
+
+/// A note a range kept: its rank only.
+pub struct Ranked(Rank);
+
+#[must_use]
+pub fn find_notes(snapshot: &IndexSnapshot, lookup: &Lookup, range: Range<usize>,
+                  query: &NoteQuery, cancel: &AtomicBool, limit: usize) -> Vec<Ranked>;
+#[must_use]
+pub fn merge_notes(snapshot: &IndexSnapshot, chunks: Vec<Vec<Ranked>>,
+                   query: &NoteQuery, limit: usize) -> Vec<NoteMatch>;
+```
+
+`Rank` (private, `Ord`, smaller is better): `(group, Reverse(exact: bool), Reverse(whole), Reverse(key2: u64), showing: bool, recent: usize /* MAX when absent */, Reverse(SystemTime), chars, order)`. `order` is the candidate's global vault order, not its index in `range`; it is unique, so the order is total and `merge_notes` over any split equals one range.
+
+- `lookup.rs` gains `pub(crate) fn ordinal(&self, id) -> Option<Ordinal>` and `pub(crate) fn hit(&self, term, ordinal) -> Option<TermHit>`, so a candidate resolves its ordinal once, not once per term.
+- A candidate's terms: for each term, `in_name` = some name word starts with it (and whether one equals it, and whether one in the stem starts with it); `in_text` = `lookup.hit(term, ordinal)`. Listed when every term is in its name or its text. Group: all in name → `Name`; some → `NameAndText`; none → `Text`.
+- An empty query lists the MRU without `showing`, group `Name`, no highlights; test `NoteQuery::is_empty`, never `Lookup::term_count() == 0`.
+- A bounded top-`limit` heap, as `match_names`; `cancel` checked every 1,024 candidates, and a set `cancel` returns an empty list. `limit` 0 returns none; `usize::MAX` is allowed.
+- `highlight.rs`: `pub(crate) fn prefix(word: &str, term: &str) -> Range<usize>`: the shortest run of `word`'s graphemes whose fold starts with `term` (the whole word if none does, which cannot happen for a matched word). `name_highlights` is computed for the returned rows only: every name word a term matches, its prefix shifted to the word's range, sorted, merged when touching.
+
+- [ ] **Step 1: failing tests, `find/tests.rs`** (through the public API, over `test_support` vaults with texts inserted):
+  - `every_term_must_match_a_word_start` (`plan` finds `Planning`; `ann` does not, since no word starts with it).
+  - `the_three_groups_rank_in_order` (`Name` ⊳ `NameAndText` ⊳ `Text`).
+  - One test per order key, each with notes equal on every earlier key: `whole_terms_beat_prefixes`, `stem_terms_beat_folder_terms`, `more_occurrences_rank_first_in_the_text_groups`, `the_note_showing_ranks_last_in_its_group`, `recent_notes_rank_first_newest_first`, `the_newest_mtime_ranks_first`, `a_shorter_path_ranks_first_then_vault_order`.
+  - `a_name_row_never_ranks_by_its_text` (two `Name` notes, one with the term 50 times in its text; the stem decides).
+  - `accents_fold_both_ways_in_names` (`ete` finds `Été`, `été` finds `ete`).
+  - `highlights_cover_the_matched_prefix_in_whole_graphemes`: an NFD name (`e\u{301}te` lit as one grapheme), an emoji ZWJ name, `Planning` lit `0..3` for `pla`, two terms on one word merged.
+  - `an_empty_query_lists_the_recent_notes_without_the_one_showing`.
+  - `a_cancelled_search_lists_nothing`; `limit_zero_lists_nothing`.
+  - `a_note_not_loaded_is_found_by_its_name_only`.
+- [ ] **Step 2: the oracle, `find/model_tests.rs`.** A naive model over random vaults (paths from Task 7.5's alphabet plus `/`, texts from it): for each note it splits its path and text with its own rule (`str::split` on every char that `regex_syntax::is_word_character` rejects), folds each word with the shared `fold` (S1: the oracle shares the fold; only its callers are under test), places each term, groups, and sorts by S3's keys, built independently of `Rank`. It must list the same ids in the same order as `find_notes` over `0..len` with `limit = usize::MAX`, and as `merge_notes` over a random split with a random `limit`. `showing`, `recent` and the mtimes are generated (mtimes with ties). Also `the_highlights_are_word_prefixes` over the same cases: each highlight's text folds to a string starting with some term, and no shorter grapheme prefix of it does (minimal). `PROPTEST_CASES=20000` at the gate.
+- [ ] **Step 3: implement**, run, `check.sh`. Commit: `Index: find_notes ranks notes by name and text in three groups`.
 
 ### Task 8.3: The excerpt
 
-- `pub struct Excerpt { pub text: String, pub highlights: Vec<Range<usize>> }`; `pub fn excerpt(text: &str, query: &NoteQuery, group: Group) -> Option<Excerpt>`. S4 has no `group` argument, but a `Name` row wants the first line and the others the matched line, and the caller knows the group. The lead records this in the spec.
-- The delegate reads each visible row's text by its vault order: `CorpusSnapshot::notes` is crate-private and walks a range, so slice 8 adds a public single-note read (a `text_at(order)`, or the match carrying its order), and records it (slice 7 blue team).
-- `NameAndText`, `Text`: the line around the first word a term matches, cut as a `Hit`'s context (60 bytes before, 100 after, char boundaries, within the line, the window read without scanning the line), each matched word in it highlighted. `Name`: the first non-empty line, no highlight.
-- Tests: char boundaries on multibyte text; a word at a line's start and end; a 10 MB one-line note (the window, not the line); a note with no match returns the first line only for `Name`, `None` otherwise.
+**Files:** create `window.rs`, `window/tests.rs`, `find/excerpt.rs`, `find/excerpt_tests.rs`; modify `search/hit.rs`, `find.rs`, `lib.rs`.
+
+**Interfaces:**
+- `pub(crate) fn window::around(text: &str, hit: Range<usize>) -> Range<usize>`: the hit extended within its line by up to 60 bytes before and 100 after, on char boundaries, reading only the window (moved from `Hit::new`, which then calls it; `search`'s tests stay green unchanged).
+- `pub struct Excerpt { pub text: String, pub highlights: Vec<Range<usize>> }` (`Debug`, `Clone`, `PartialEq`, `Eq`).
+- `#[must_use] pub fn excerpt(snapshot: &IndexSnapshot, found: &NoteMatch, query: &NoteQuery, cancel: &AtomicBool) -> Option<Excerpt>`.
+
+Rules:
+- `None` when the note's text is not loaded, or the slot at `found`'s order holds another id.
+- `Name` rows, and every row of an empty query: the first non-empty line, cut to its first 160 bytes on a char boundary, leading whitespace trimmed, no highlight.
+- `NameAndText`, `Text`: the first word of the text (`word_spans`, `fold`, `cap`) that a term matches, searched in the first `EXCERPT_SCAN_BYTES` (1 MB) only, `cancel` checked every 64 KB (`None` past the limit or on cancel); the window around that word's first `WORD_MAX_CHARS` chars; leading whitespace trimmed when the window starts at its line's start (Zed); every word inside the window that a term matches, highlighted on its matched prefix (`highlight::prefix`), ranges into `Excerpt::text`. `None` if no word matches (a text changed since the lookup: the `IndexSnapshot` is of one build, so this is only defensive).
+- The first matching word is found without folding a word whose first char cannot start any term: an ASCII word whose first byte, lowercased, is not the first byte of a term is skipped before `fold` (a pre-check, never a different answer; the model test pins it).
+
+- [ ] **Step 1: failing tests** (`excerpt_tests.rs`): `a_text_row_shows_the_line_around_the_first_match`; `every_matched_word_in_the_window_is_lit_on_its_prefix`; `a_match_at_a_line_start_and_at_a_line_end`; `a_multibyte_text_cuts_on_char_boundaries` (Greek, emoji); `a_ten_megabyte_line_gives_a_window_not_the_line` (one 10 MB line, match in the middle; the excerpt is at most 60 + 100 bytes around the word); `a_match_past_the_scan_limit_has_no_excerpt` (match at the end of a 10 MB line); `a_one_megabyte_word_gives_a_short_excerpt`; `a_set_cancel_gives_none`; `a_name_row_shows_the_first_non_empty_line_unlit`; `an_unloaded_note_has_no_excerpt`; `a_slot_of_another_note_gives_none`; `leading_indentation_is_trimmed_at_a_line_start`; `the_pre_check_never_changes_the_answer` (proptest against the excerpt without it).
+- [ ] **Step 2: implement**, `check.sh`. Commit: `Index: the excerpt under a quick-open row`.
 
 ### Task 8.4: The quick-open delegate
 
-- `crates/app/src/quick_open/` switches from `match_names` to `lookup` then `find_notes` over `names.chunks(2–4 × num_cpus)` on the background executor, and `merge_notes`. The lookup runs once per keystroke, before the ranges; the `Lookup` is shared by `Arc`.
-- Rows: line 1 the stem with `name_highlights`, then the folder dimmed, as today; line 2 the excerpt, dimmed, with its highlights. The excerpt is computed for the visible rows only (at most 10), from the `CorpusSnapshot` taken with the names. Every row is two lines tall, so `uniform_list` measures from row 0; the list's height becomes `rows × 2 × UI_LINE_HEIGHT` plus the gap, from `theme.rs`.
-- The picker gains `render_footer` (a default that renders nothing), which the search plan's Task 6.0 (vault search, slice 10) planned; it moves here, since quick open needs it first. The footer shows "Indexing 12,340 of 50,000 notes" while `IndexSync::is_building()`.
-- `row_label` gives the path, then the excerpt, for the accessible label.
-- Tests, headless against `MemFs`: rows by group; the second line of each group; a note not loaded has no second line; the indexing footer appears and leaves; every existing quick open test stays green (the matching tests move from subsequence to word-start expectations, each rewritten to S3, not deleted).
+**Files:** modify `picker/mod.rs`, `picker/render.rs`, `picker/tests.rs`, `quick_open/mod.rs`, `quick_open/render.rs`, `quick_open/render/tests.rs`, `quick_open/tests.rs`; create `quick_open/search.rs` (the background part of a query, to keep `mod.rs` under 400 lines), `app/src/count.rs`; modify `lib.rs`/`main` module list.
+
+**Interfaces:**
+- `PickerDelegate` gains `fn render_footer(&self, cx: &mut Context<Picker<Self>>) -> Option<AnyElement> { None }` and `fn row_height(&self) -> Pixels { theme::UI_LINE_HEIGHT }`. The picker draws the footer under the list (or under the empty text), dimmed, and sizes the list `row_height × shown`.
+- `QuickOpenDelegate::matches: Vec<Row>` with `struct Row { found: NoteMatch, excerpt: Option<Excerpt> }`.
+- `fn count::thousands(n: usize) -> String` (`12340` → `12,340`).
+
+Flow of `update_matches` (the O5 `Scanning` branch and the `Search`/`Refresh` runs unchanged):
+1. On the foreground: take `NoteIndex::snapshot()` (names, corpus and words of one build), build `Arc<NoteQuery>` with `showing` and `recent`.
+2. In the task, after the wait (none for `Run::Notify`): `lookup` on one background task (`None` → return, cancelled); then `find_notes` on each of `snapshot.chunks(num_cpus)` with the `Arc<Lookup>`; `merge_notes(snapshot, …, query, LIMIT)`; the rows apply at once. Then `rows_shown` spawns one background task per row on screen not asked for yet, running `excerpt`; each lands on its row only while its list's `cancel` is clear.
+3. `apply` as today, keyed by `found.id`.
+
+Rows (`render.rs`): line 1 as today, built from `name_highlights` (ranges, already whole graphemes) instead of `positions`; line 2 the excerpt, `placeholder_text` colour, its highlights in `match_text`, one line, ellipsis at the end; an empty second line when there is no excerpt, so every row is `2 × UI_LINE_HEIGHT`. ASCII control chars drawn as spaces (`one_line`), as line 1.
+
+`row_label`: `"{path}: {excerpt}"` when there is an excerpt, else the path, both through `one_line`.
+
+`render_footer`: `Some("Indexing {loaded} of {total} notes")` while `is_building() && !awaits_first_build()`.
+
+- [ ] **Step 1: failing tests.**
+  - `quick_open/tests.rs`: `the_selection_survives_the_footer_leaving`.
+  - `picker/tests.rs`: `a_delegate_s_footer_is_drawn_under_the_rows` and `the_list_is_as_tall_as_its_rows` (a test delegate with `row_height` 2×; measure the list's bounds via `debug_selector`, per the app-tests rule on pitches).
+  - `quick_open/tests.rs`: each existing matching test rewritten to S3 (never deleted): `typing_lists_the_matching_notes_best_first` now `plan` over `plan`, `projects/plan`, `other`, `planning` → `plan`, `projects/plan`, `planning` (whole before prefix, stem before folder), and `p l a n` (four one-letter terms) lists what four word-start terms give. New: `rows_come_in_three_groups`; `a_text_row_shows_its_excerpt`; `a_name_row_shows_its_first_line`; `a_note_not_loaded_has_no_second_line` (a `MemFs` `block_load` gate); `the_footer_counts_the_notes_indexed_then_leaves`; `the_scanning_state_shows_no_footer`; `each_row_label_holds_the_path_and_the_excerpt`; `enter_opens_a_text_only_match` (`simulate_keystrokes`).
+  - `quick_open/render/tests.rs`: `a_name_highlight_splits_into_stem_and_folder`; `an_excerpt_highlight_is_kept`.
+  - `count.rs` tests: `0`, `999`, `1,000`, `12,340`, `50,000`, `1,234,567`.
+- [ ] **Step 2: implement**, `check.sh`, render `quick-open-results` and `quick-open-graphemes` and report the paths. Commit: `Quick open: word-start matching on names and text, two-line rows, the indexing footer`.
 
 ### Task 8.5: Refresh during the load, without starving the scan
 
-- The delegate refreshes on `NotesChanged` (after 200 ms, as today) and, during the startup load, on `IndexSync`'s notify throttled by `BUILDING_REFRESH`: text arriving adds rows.
-- D7's rule: a refresh never cancels a running scan of the same query. It marks the query dirty; when the scan ends, the delegate applies its result and re-runs once. A keystroke still cancels.
-- Extract the backlinks panel's `seen`/`BUILDING_REFRESH` logic into one helper both use (search plan Task 6.0's extraction, moved here).
-- Tests: with a gated scan, ten notifies during it cause no cancel and exactly one re-run; a keystroke during the scan cancels it; the selected note is kept across a refresh.
+**Files:** create `app/src/index/watch.rs`, `index/watch/tests.rs`; modify `app/src/index.rs` (module, re-export), `backlinks/mod.rs`, `quick_open/mod.rs`, `quick_open/tests.rs`, `backlinks/tests.rs` (unchanged expectations).
+
+**Interfaces:**
+
+```rust
+/// What an observer of `IndexSync` does with a notify.
+pub(crate) enum Refresh { Skip, Now, Later }
+
+pub(crate) struct IndexWatch { seen: Option<(u64, bool)>, throttled: Option<Task<()>> }
+impl IndexWatch {
+    /// `Skip` when this revision and building state were seen; `Later` while building
+    /// (at most one pending, `BUILDING_REFRESH` apart); else `Now`.
+    pub(crate) fn on_notify(&mut self, sync: &IndexSync) -> Refresh;
+    /// Records what a rebuild read; drops the pending throttle.
+    pub(crate) fn seen(&mut self, sync: &IndexSync);
+    pub(crate) fn throttle(&mut self, task: Task<()>);
+}
+pub(crate) const BUILDING_REFRESH: Duration = Duration::from_millis(100);
+```
+
+The backlinks panel keeps its behaviour exactly (its tests unchanged) with `IndexWatch` in place of `seen` and `throttled`.
+
+Quick open:
+- It observes `IndexSync` (loads, saves, merges that notify) through `IndexWatch`, as the panel does, beside its `NotesChanged` subscription (names: `Run::Refresh`, after 200 ms; O5's first-names rule kept). A notify refresh is `Run::Notify`: it keeps the selection like `Refresh` and waits nothing, since `IndexWatch` already throttles it. `update_matches` calls `IndexWatch::seen` when it takes the snapshots.
+- **D7.** Any refresh (`NotesChanged` or a notify) while a scan runs (`self.running`) does not call `Picker::refresh`: it sets `dirty`. When the running scan's result applies, a set `dirty` is cleared and one `Run::Refresh` starts. A keystroke still cancels and replaces the scan, and clears `dirty` (its own scan reads the newest index).
+- A refresh keeps the selected note (slice 3's rule), whatever its source.
+
+- [ ] **Step 1: failing tests.**
+  - `watch/tests.rs`: `a_seen_revision_is_skipped`; `a_notify_while_building_waits_once`; `a_notify_after_building_is_immediate`.
+  - `quick_open/tests.rs`: `ten_notifies_during_a_scan_cause_no_cancel_and_one_rerun` (the scan is held by a test-only gate the task awaits before its scan; the cancel flag, read after each notify, stays false; a test-only counter of runs goes up by exactly one after the gate opens); `a_keystroke_during_the_scan_cancels_it`; `the_selected_note_is_kept_across_a_load_refresh`; `a_note_loading_under_the_picker_joins_its_rows` (text arrives, a `Text` row appears after `BUILDING_REFRESH`); `one_build_runs_one_scan` (`NotesChanged` and its notify in one turn); `notes_changed_during_a_scan_reruns_once`.
+  - `backlinks/tests.rs`: green, unchanged.
+- [ ] **Step 2: implement**, `check.sh`. Commit: `Quick open: refresh as text loads, never cancelling a running scan`; then, if the extraction is its own diff, `Backlinks: the refresh throttle moves to IndexWatch` first.
 
 ### Task 8.6: Benches, the end-to-end figure, shots, the spec
 
-- `crates/index/benches/find.rs`, on the `words` bench's corpus with names from the `names` bench's long-stem vault: `find_notes` for one letter, a common word, a rare word, two words, and a name-only query; one core, then split over 10 threads as the slice 3 `parallel` group. If a case misses 16 ms with the lookup included, apply S3's one-letter cap or split `lookup` by shards; the cap and its figure go in the spec.
-- The release log `quick open: N matches, T from the edit` stays; the orchestrator types the S3 queries in the release app on the generated vault and records p50 and p99.
-- Shots, each looked at by the orchestrator: `quick-open-groups` (the three groups), `quick-open-text-only` (a `Text` row with its excerpt), `quick-open-indexing` (the footer), and the existing `quick-open-results`, `quick-open-empty`, `quick-open-no-match`, `quick-open-graphemes` re-rendered on two-line rows.
-- The spec: "Built in slice 8" paragraphs, figures, shots listed. CLAUDE.md: drop "(not yet built)" from the smart quick open line. Mutants zero missed on `crates/index/src/find/**` and the quick-open files.
+- `crates/index/benches/find.rs` (`[[bench]] name = "find", harness = false`): the `words` bench's 50,000-note corpora (40 words, Zipf) with names from the `names` bench's long-stem generator (reuse by `#[path]` module includes, as `words/` does, or a shared bench module; no copy). Cases: `find_notes` with the lookup included for `e`, a common word, a rare word, two words, a name-only query, and an empty query with 20 recent; one core, then split over 10 threads (1×, 2×, 4× ranges); `excerpt` for 100 rows; and `pipeline/<query>`: lookup, `find_notes` over the chosen split, merge and 100 excerpts, as the delegate runs them. If a case misses 16 ms with the lookup, apply S3's one-letter cap or split `lookup`; record the cap and its figure in the spec.
+- The release log `quick open: N matches, T from the edit` stays; the orchestrator types the queries in the release app on the generated vault and records p50 and p99.
+- Shots (`scenes.rs`; the notes gain texts so rows have second lines): `quick-open-groups` (the three groups), `quick-open-text-only` (a `Text` row with its excerpt lit), `quick-open-indexing` (the footer; a `MemFs` `block_load` gate keeps the load pending), and `quick-open-results`, `quick-open-empty`, `quick-open-no-match`, `quick-open-graphemes`, `quick-open-scanning` re-rendered. Report the PNG paths; the orchestrator looks at them.
+- The spec: the Zed paragraph for slice 8, "Built in slice 8" under S3, S4, S5 with the decisions above, the figures, the shots. Search spec D9: rows are two lines in quick open; D1 and D5: "Corrected in slice 8" notes for the 4-tuple and `find_notes`'s corpus argument. The Zed paragraph cites `WORKTREE_UPDATE_REFRESH_DEBOUNCE` (`file_finder.rs:844`). `CLAUDE.md`: drop "(not yet built)" from the smart quick open line.
+- Mutants on `crates/index/src/find/**`, `words/name_words.rs`, `window.rs`, `app/src/index/watch.rs`, `app/src/count.rs` and the quick-open files are the orchestrator's gate (Flow step 10).
+
 
 ---
 

@@ -27,6 +27,7 @@ pub(crate) enum Step {
         notes: usize,
         corpus_bytes: usize,
         words_bytes: usize,
+        names_bytes: usize,
     },
 }
 
@@ -35,6 +36,7 @@ struct Indexed {
     notes: usize,
     corpus_bytes: usize,
     words_bytes: usize,
+    names_bytes: usize,
 }
 
 pub(crate) struct Timeline {
@@ -104,12 +106,14 @@ impl Timeline {
                 notes,
                 corpus_bytes,
                 words_bytes,
+                names_bytes,
             } => {
                 self.indexed.get_or_insert(Indexed {
                     at,
                     notes,
                     corpus_bytes,
                     words_bytes,
+                    names_bytes,
                 });
             }
         }
@@ -129,11 +133,12 @@ impl Timeline {
             |indexed| {
                 // Two decimals: the startup budget is judged on this figure.
                 format!(
-                    "{:.2?} ({} notes, corpus {} bytes, words {} bytes, longest turn {:.1?})",
+                    "{:.2?} ({} notes, corpus {} bytes, words {} bytes, names {} bytes, longest turn {:.1?})",
                     indexed.at,
                     indexed.notes,
                     indexed.corpus_bytes,
                     indexed.words_bytes,
+                    indexed.names_bytes,
                     self.longest_turn
                 )
             },

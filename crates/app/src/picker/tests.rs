@@ -8,6 +8,7 @@ use gpui::{
 use super::letters::{DELAY, Letters};
 use super::{Dismissed, Picker};
 use crate::keymap::key_bindings;
+use crate::theme;
 
 const ROWS: &[&str] = &["# fruit", "apple", "apricot", "# veg", "beet"];
 
@@ -15,9 +16,15 @@ fn open(
     cx: &mut TestAppContext,
     rows: &'static [&'static str],
 ) -> (Entity<Picker<Letters>>, VisualTestContext) {
+    open_with(cx, Letters::new(rows))
+}
+
+fn open_with(
+    cx: &mut TestAppContext,
+    letters: Letters,
+) -> (Entity<Picker<Letters>>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
-    let (picker, visual) =
-        cx.add_window_view(move |window, cx| Picker::new(Letters::new(rows), window, cx));
+    let (picker, visual) = cx.add_window_view(move |window, cx| Picker::new(letters, window, cx));
     let mut visual = visual.clone();
     visual.update(|window, cx| window.focus(&picker.focus_handle(cx), cx));
     settle(&mut visual);
@@ -276,4 +283,70 @@ fn a_row_confirms_on_release_not_on_press(cx: &mut TestAppContext) {
 
     visual.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
     assert_eq!(confirmed(&picker, &mut visual), ["beet"]);
+}
+
+#[gpui::test]
+fn a_delegate_s_footer_is_drawn_under_the_rows(cx: &mut TestAppContext) {
+    let mut letters = Letters::new(ROWS);
+    letters.footer = Some("Indexing");
+    let (_picker, mut visual) = open_with(cx, letters);
+
+    let list = visual.debug_bounds("picker-list");
+    let footer = visual.debug_bounds("picker-footer");
+
+    assert!(
+        list.zip(footer)
+            .is_some_and(|(list, footer)| footer.top() >= list.bottom()),
+        "the footer {footer:?} starts under the list {list:?}"
+    );
+}
+
+#[gpui::test]
+fn a_footer_is_drawn_under_the_empty_text(cx: &mut TestAppContext) {
+    let mut letters = Letters::new(ROWS);
+    letters.footer = Some("Indexing");
+    let (_picker, mut visual) = open_with(cx, letters);
+    visual.simulate_keystrokes("z");
+    settle(&mut visual);
+
+    let field = visual.debug_bounds("picker-field");
+    let footer = visual.debug_bounds("picker-footer");
+
+    assert!(visual.debug_bounds("picker-list").is_none(), "no row");
+    assert!(
+        field.zip(footer).is_some_and(|(field, footer)| {
+            footer.top() >= field.bottom() + theme::UI_LINE_HEIGHT
+        }),
+        "the footer {footer:?} starts a line under the field {field:?}, past the empty text"
+    );
+}
+
+#[gpui::test]
+fn no_footer_is_drawn_by_default(cx: &mut TestAppContext) {
+    let (_picker, mut visual) = open(cx, ROWS);
+    assert!(visual.debug_bounds("picker-footer").is_none());
+}
+
+#[gpui::test]
+fn the_list_is_as_tall_as_its_rows(cx: &mut TestAppContext) {
+    let mut letters = Letters::new(ROWS);
+    letters.lines = 2;
+    let (_picker, mut visual) = open_with(cx, letters);
+
+    let list = visual.debug_bounds("picker-list");
+    let top = visual.debug_bounds("picker-row-0");
+    let next = visual.debug_bounds("picker-row-1");
+    let fifth = visual.debug_bounds("picker-row-4");
+
+    let pitch = top.zip(next).map(|(top, next)| next.top() - top.top());
+    assert_eq!(pitch, Some(theme::UI_LINE_HEIGHT * 2.), "two lines a row");
+    assert_eq!(
+        list.map(|list| list.size.height),
+        pitch.map(|pitch| pitch * 5.),
+        "five rows, none cut"
+    );
+    assert_eq!(
+        list.map(|list| list.bottom()),
+        fifth.map(|fifth| fifth.bottom())
+    );
 }

@@ -1,9 +1,12 @@
+#[path = "names/paths.rs"]
+mod paths;
+
 use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
@@ -12,67 +15,15 @@ use inkra_index::{
     NameMatch, NameQuery, NamesSnapshot, NoteContent, NoteIndex, NoteSet, match_names, merge_names,
 };
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use paths::{Lcg, WORDS, folders, long_stem};
 
 const NOTES: usize = 50_000;
 const LIMIT: usize = 100;
 /// Built once: a `MemFs` scan of this vault takes minutes.
-static ENTRIES: LazyLock<Vec<(EntryId, String, Kind)>> = LazyLock::new(entries);
-const KINDS: &[&str] = &["Meeting", "Call", "Lunch", "Review", "Workshop"];
-const PEOPLE: &[&str] = &[
-    "Hélène", "Marc", "Zoé", "Jérôme", "Anaïs", "Paul", "Léa", "Thomas",
-];
-const TOPICS: &[&str] = &[
-    "the budget",
-    "the roadmap",
-    "l'été",
-    "la réunion",
-    "the design",
-    "l'équipe",
-    "la santé",
-    "the trip",
-];
-const WORDS: &[&str] = &[
-    "projet",
-    "réunion",
-    "été",
-    "notes",
-    "plan",
-    "journal",
-    "idée",
-    "café",
-    "budget",
-    "équipe",
-    "archive",
-    "lecture",
-    "voyage",
-    "santé",
-    "recherche",
-    "daily",
-    "meeting",
-    "design",
-    "draft",
-    "ideas",
-    "review",
-    "roadmap",
-    "inbox",
-    "reference",
-];
+static ENTRIES: LazyLock<Vec<(EntryId, String, Kind, Mtime)>> = LazyLock::new(entries);
 
-/// A fixed LCG, so every run benches the same vault.
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self, below: usize) -> usize {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1);
-        usize::try_from(self.0 >> 33).unwrap_or(0) % below
-    }
-}
-
-fn entries() -> Vec<(EntryId, String, Kind)> {
+fn entries() -> Vec<(EntryId, String, Kind, Mtime)> {
     let fs = MemFs::new();
     let mut lcg = Lcg(7);
     for note in 0..NOTES {
@@ -90,6 +41,7 @@ fn entries() -> Vec<(EntryId, String, Kind)> {
                 entry.id,
                 entry.path.as_path().to_string_lossy().into_owned(),
                 entry.kind,
+                entry.mtime,
             )
         })
         .collect()
@@ -97,34 +49,26 @@ fn entries() -> Vec<(EntryId, String, Kind)> {
 
 /// Generated notes without a scan: matching reads only the paths, and a `MemFs` scan of
 /// these trees would take far longer than the bench.
-fn generated(path: impl Fn(&mut Lcg, usize) -> String) -> Vec<(EntryId, String, Kind)> {
+fn generated(path: impl Fn(&mut Lcg, usize) -> String) -> Vec<(EntryId, String, Kind, Mtime)> {
     let mut lcg = Lcg(11);
     (0..NOTES)
-        .map(|note| (EntryId::DETACHED, path(&mut lcg, note), Kind::Note))
+        .map(|note| {
+            (
+                EntryId::DETACHED,
+                path(&mut lcg, note),
+                Kind::Note,
+                Mtime(UNIX_EPOCH),
+            )
+        })
         .collect()
 }
 
-fn folders(lcg: &mut Lcg, depth: usize) -> String {
-    (0..depth)
-        .map(|_| WORDS[lcg.next(WORDS.len())])
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// About 56-char paths: two or three folders, then "Meeting with Zoé about the roadmap 12".
-fn long_stems() -> Vec<(EntryId, String, Kind)> {
-    generated(|lcg, note| {
-        let depth = 2 + lcg.next(2);
-        let folders = folders(lcg, depth);
-        let kind = KINDS[lcg.next(KINDS.len())];
-        let person = PEOPLE[lcg.next(PEOPLE.len())];
-        let topic = TOPICS[lcg.next(TOPICS.len())];
-        format!("{folders}/{kind} with {person} about {topic} {note}.md")
-    })
+fn long_stems() -> Vec<(EntryId, String, Kind, Mtime)> {
+    generated(long_stem)
 }
 
 /// 7 to 9 components: 6 to 8 folders, then a stem `<word> <n>`.
-fn deep() -> Vec<(EntryId, String, Kind)> {
+fn deep() -> Vec<(EntryId, String, Kind, Mtime)> {
     generated(|lcg, note| {
         let depth = 7 + lcg.next(3);
         format!("{} {note}.md", folders(lcg, depth))
@@ -140,9 +84,9 @@ fn bench_build(c: &mut Criterion) {
 fn bench_set_notes(c: &mut Criterion) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
-    for (id, _, kind) in ENTRIES.iter() {
+    for (id, _, kind, _) in ENTRIES.iter() {
         if *kind == Kind::Note {
-            index.insert(*id, NoteContent::parse("".into()));
+            index.insert(*id, NoteContent::parse("".into(), Mtime(UNIX_EPOCH)));
         }
     }
     let mut group = c.benchmark_group("set_notes");
@@ -164,8 +108,8 @@ fn bench_set_notes(c: &mut Criterion) {
 fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     let notes: Vec<EntryId> = ENTRIES
         .iter()
-        .filter(|(_, _, kind)| *kind == Kind::Note)
-        .map(|(id, _, _)| *id)
+        .filter(|(_, _, kind, _)| *kind == Kind::Note)
+        .map(|(id, ..)| *id)
         .collect();
     let texts: Vec<Arc<str>> = (0..notes.len())
         .map(|n| format!("[[note {}]] [[index]]", n + 1).into())
@@ -173,7 +117,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, text) in notes.iter().zip(&texts) {
-        index.insert(*id, NoteContent::parse(Arc::clone(text)));
+        index.insert(*id, NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
     }
 
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -200,7 +144,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
         let gone: HashSet<EntryId> = notes[..count].iter().copied().collect();
         let kept = ENTRIES
             .iter()
-            .filter(|(id, _, _)| !gone.contains(id))
+            .filter(|(id, ..)| !gone.contains(id))
             .cloned()
             .collect();
         let mut partial = Some(NoteSet::build(kept));
@@ -216,7 +160,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
                     total += start.elapsed();
                     partial = Some(index.set_notes(full));
                     for (id, text) in notes[..count].iter().zip(&texts) {
-                        index.insert(*id, NoteContent::parse(Arc::clone(text)));
+                        index.insert(*id, NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
                     }
                 }
                 total
@@ -230,10 +174,10 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
 fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
-    for (n, (id, _, kind)) in ENTRIES.iter().enumerate() {
+    for (n, (id, _, kind, _)) in ENTRIES.iter().enumerate() {
         if *kind == Kind::Note {
             let text = format!("note {n}\n");
-            index.insert(*id, NoteContent::parse(text.into()));
+            index.insert(*id, NoteContent::parse(text.into(), Mtime(UNIX_EPOCH)));
         }
     }
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -294,9 +238,9 @@ fn bench_match(c: &mut Criterion) {
 
     let recent: Vec<EntryId> = ENTRIES
         .iter()
-        .filter(|(_, _, kind)| *kind == Kind::Note)
+        .filter(|(_, _, kind, _)| *kind == Kind::Note)
         .step_by(2_500)
-        .map(|(id, _, _)| *id)
+        .map(|(id, ..)| *id)
         .take(20)
         .collect();
     let query = NameQuery::new("", None, &recent);

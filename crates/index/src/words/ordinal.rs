@@ -4,7 +4,7 @@ use super::wide;
 
 /// A note's dense number in the word index; never reused, so a dead posting names no later note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) struct Ordinal(u32);
+pub(crate) struct Ordinal(u32);
 
 impl Ordinal {
     pub(super) const fn new(n: u32) -> Self {

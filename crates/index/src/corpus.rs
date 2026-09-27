@@ -2,81 +2,101 @@ use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Mtime};
 
 use crate::chunks::split;
 
 /// What a slot costs beyond its text.
-pub(crate) const SLOT_BYTES: usize = mem::size_of::<Option<Arc<str>>>() + mem::size_of::<EntryId>();
+pub(crate) const SLOT_BYTES: usize = mem::size_of::<Slot>() + mem::size_of::<EntryId>();
 /// What a loaded text costs beyond its bytes: its `Arc`'s strong and weak counts.
 pub(crate) const TEXT_HEADER_BYTES: usize = 2 * mem::size_of::<usize>();
 
 /// Slots per chunk; a write under a held snapshot copies one chunk.
 const CHUNK: usize = 256;
 
-/// `CHUNK` consecutive slots, fewer in the last chunk.
-type Chunk = Arc<[Option<Arc<str>>]>;
+/// `modified` is the last text's mtime, or the scan's if it never had one.
+#[derive(Clone)]
+struct Slot {
+    text: Option<Arc<str>>,
+    modified: Mtime,
+}
 
-/// Every note's saved text in vault order; `None` is a note not loaded yet.
+/// `CHUNK` consecutive slots, fewer in the last chunk.
+type Chunk = Arc<[Slot]>;
+
+/// Every note's saved text and its mtime, in vault order.
 #[derive(Default)]
 pub(crate) struct Corpus {
     ids: Arc<[EntryId]>,
-    texts: Arc<[Chunk]>,
+    slots: Arc<[Chunk]>,
     text_bytes: usize,
 }
 
 impl Corpus {
     /// Copies the chunk list and one chunk only while a snapshot holds them. Ignored past the end.
-    pub(crate) fn set(&mut self, at: usize, text: Option<Arc<str>>) {
-        let (chunk, at) = (at / CHUNK, at % CHUNK);
-        // `None` over `None` would copy a chunk for nothing while a snapshot is held.
-        if self
-            .texts
-            .get(chunk)
-            .and_then(|chunk| chunk.get(at))
-            .is_none_or(|slot| slot.is_none() && text.is_none())
-        {
+    pub(crate) fn write(&mut self, at: usize, text: Arc<str>, modified: Mtime) {
+        let Some(slot) = slot_mut(&mut self.slots, at) else {
             return;
-        }
-        let slot = &mut Arc::make_mut(&mut Arc::make_mut(&mut self.texts)[chunk])[at];
-        self.text_bytes -= cost(slot.as_deref());
-        self.text_bytes += cost(text.as_deref());
-        *slot = text;
+        };
+        self.text_bytes -= cost(slot.text.as_deref());
+        self.text_bytes += cost(Some(&text));
+        *slot = Slot {
+            text: Some(text),
+            modified,
+        };
     }
 
-    /// The notes of a new build, each keeping the text it had at `order(id)`; one pass.
-    /// Returns the previous ids and the texts of the notes gone.
+    /// Drops the text and keeps its mtime. Ignored past the end.
+    pub(crate) fn clear(&mut self, at: usize) {
+        // Clearing an empty slot would copy a chunk for nothing while a snapshot is held.
+        if slot(&self.slots, at).is_some_and(|slot| slot.text.is_some())
+            && let Some(slot) = slot_mut(&mut self.slots, at)
+        {
+            self.text_bytes -= cost(slot.text.take().as_deref());
+        }
+    }
+
+    /// Each note keeps its text and mtime from `order(id)`, else takes its `mtimes` entry.
+    /// Returns the previous build's ids and the texts of the notes gone.
     pub(crate) fn reorder(
         &mut self,
         ids: Arc<[EntryId]>,
+        mtimes: &[Mtime],
         order: impl Fn(EntryId) -> usize,
     ) -> (Arc<[EntryId]>, Vec<Arc<str>>) {
-        let mut previous: Vec<&mut [Option<Arc<str>>]> = Arc::make_mut(&mut self.texts)
+        assert_eq!(ids.len(), mtimes.len(), "one mtime per note");
+        let mut previous: Vec<&mut [Slot]> = Arc::make_mut(&mut self.slots)
             .iter_mut()
             .map(Arc::make_mut)
             .collect();
         let mut text_bytes = 0;
-        let texts = ids
+        let slots = ids
             .chunks(CHUNK)
-            .map(|ids| {
+            .zip(mtimes.chunks(CHUNK))
+            .map(|(ids, mtimes)| {
                 ids.iter()
-                    .map(|&id| {
+                    .zip(mtimes)
+                    .map(|(&id, &scanned)| {
                         let at = order(id);
-                        let text = previous
+                        let kept = previous
                             .get_mut(at / CHUNK)
                             .and_then(|chunk| chunk.get_mut(at % CHUNK))
-                            .and_then(Option::take);
+                            .and_then(|slot| Some((slot.text.take()?, slot.modified)));
+                        let (text, modified) = kept.unzip();
                         text_bytes += cost(text.as_deref());
-                        text
+                        Slot {
+                            text,
+                            modified: modified.unwrap_or(scanned),
+                        }
                     })
                     .collect()
             })
             .collect();
         let retired = previous
             .into_iter()
-            .flat_map(|chunk| chunk.iter_mut().filter_map(Option::take))
+            .flat_map(|chunk| chunk.iter_mut().filter_map(|slot| slot.text.take()))
             .collect();
-        self.texts = texts;
+        self.slots = slots;
         self.text_bytes = text_bytes;
         (mem::replace(&mut self.ids, ids), retired)
     }
@@ -84,10 +104,20 @@ impl Corpus {
     pub(crate) fn snapshot(&self) -> CorpusSnapshot {
         CorpusSnapshot {
             ids: Arc::clone(&self.ids),
-            texts: Arc::clone(&self.texts),
+            slots: Arc::clone(&self.slots),
             heap_bytes: self.ids.len() * SLOT_BYTES + self.text_bytes,
         }
     }
+}
+
+fn slot(slots: &[Chunk], at: usize) -> Option<&Slot> {
+    slots.get(at / CHUNK)?.get(at % CHUNK)
+}
+
+/// Checks the bounds before `make_mut`, so a write past the end copies nothing.
+fn slot_mut(slots: &mut Arc<[Chunk]>, at: usize) -> Option<&mut Slot> {
+    slot(slots, at)?;
+    Some(&mut Arc::make_mut(&mut Arc::make_mut(slots)[at / CHUNK])[at % CHUNK])
 }
 
 fn cost(text: Option<&str>) -> usize {
@@ -98,7 +128,7 @@ fn cost(text: Option<&str>) -> usize {
 #[derive(Clone, Default)]
 pub struct CorpusSnapshot {
     ids: Arc<[EntryId]>,
-    texts: Arc<[Chunk]>,
+    slots: Arc<[Chunk]>,
     heap_bytes: usize,
 }
 
@@ -126,14 +156,27 @@ impl CorpusSnapshot {
     }
 
     pub(crate) fn notes(&self, range: Range<usize>) -> impl Iterator<Item = (EntryId, &str)> {
-        let texts = self.texts[range.start / CHUNK..]
+        let slots = self.slots[range.start / CHUNK..]
             .iter()
             .flat_map(|chunk| chunk.iter())
             .skip(range.start % CHUNK);
         self.ids[range]
             .iter()
-            .zip(texts)
-            .filter_map(|(id, text)| Some((*id, text.as_deref()?)))
+            .zip(slots)
+            .filter_map(|(id, slot)| Some((*id, slot.text.as_deref()?)))
+    }
+
+    /// The note at `order` and its text; `None` past the end or while it is not loaded.
+    pub(crate) fn text(&self, order: usize) -> Option<(EntryId, &str)> {
+        Some((
+            *self.ids.get(order)?,
+            slot(&self.slots, order)?.text.as_deref()?,
+        ))
+    }
+
+    /// The mtime of the last text at `order`, or the scan's if it never had one; `None` past the end.
+    pub(crate) fn modified(&self, order: usize) -> Option<Mtime> {
+        Some(slot(&self.slots, order)?.modified)
     }
 }
 

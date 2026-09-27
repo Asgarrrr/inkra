@@ -1,12 +1,13 @@
 use std::fmt::Write as _;
 use std::hint::black_box;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{NoteContent, NoteIndex, NoteSet, Source};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Vault};
 
 const NOTES: usize = 10_000;
 const FOLDERS: usize = 100;
@@ -51,12 +52,12 @@ fn note_text(note: usize) -> String {
 }
 
 /// `vault`'s entries as `NoteSet::build` takes them.
-fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind)> {
+fn entries(vault: &Vault) -> Vec<(EntryId, String, Kind, Mtime)> {
     vault
         .entries()
         .map(|entry| {
             let path = entry.path.as_path().to_string_lossy().into_owned();
-            (entry.id, path, entry.kind)
+            (entry.id, path, entry.kind, entry.mtime)
         })
         .collect()
 }
@@ -71,7 +72,7 @@ fn built_index(vault: &Vault) -> NoteIndex {
         .collect();
     for (at, id) in notes.into_iter().enumerate() {
         let text = note_text(at);
-        index.insert(id, NoteContent::parse(text.into()));
+        index.insert(id, NoteContent::parse(text.into(), Mtime(UNIX_EPOCH)));
     }
     index
 }

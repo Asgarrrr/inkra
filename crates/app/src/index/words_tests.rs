@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 use inkra_index::{NoteContent, NoteQuery, TermHit};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Fs, Kind, Mtime};
 
 use super::IndexSync;
 use super::tests::{create, indexed_vault, saved_edit};
@@ -23,7 +23,7 @@ fn looked_up(
         let found = links
             .index()
             .words()
-            .lookup(&NoteQuery::new(term), &AtomicBool::new(false))
+            .lookup(&NoteQuery::new(term, None, &[]), &AtomicBool::new(false))
             .expect("not cancelled");
         ids.iter()
             .filter_map(|id| Some((*id, found.get(0, *id)?)))
@@ -276,7 +276,12 @@ async fn a_save_during_the_settle_waits_in_fresh_and_indexed_is_still_marked(
         links.settling = true;
         links.merge_words(cx);
         let seq = links.next_seq(a);
-        links.apply(a, seq, NoteContent::parse("during".into()), cx);
+        links.apply(
+            a,
+            seq,
+            NoteContent::parse("during".into(), Mtime(SystemTime::UNIX_EPOCH)),
+            cx,
+        );
     });
     cx.run_until_parked();
 

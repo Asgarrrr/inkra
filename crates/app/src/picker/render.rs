@@ -18,6 +18,7 @@ impl<D: PickerDelegate> Picker<D> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        self.delegate.rows_shown(range.clone(), cx);
         range
             .map(|ix| {
                 let selected = self.selected == Some(ix);
@@ -57,15 +58,23 @@ impl<D: PickerDelegate> Render for Picker<D> {
             div()
                 .id("picker-list")
                 .role(Role::List)
+                .debug_selector(|| "picker-list".into())
                 .w_full()
                 .child(
                     uniform_list("picker-rows", count, cx.processor(Self::render_rows))
                         .w_full()
-                        .h(theme::UI_LINE_HEIGHT * f32::from(shown))
+                        .h(self.delegate.row_height() * f32::from(shown))
                         .track_scroll(&self.scroll),
                 )
                 .into_any_element()
         };
+        let footer = self.delegate.render_footer(cx).map(|footer| {
+            div()
+                .debug_selector(|| "picker-footer".into())
+                .px_2()
+                .text_color(theme::placeholder_text())
+                .child(footer)
+        });
         div()
             .id("picker")
             .role(Role::Dialog)
@@ -97,5 +106,6 @@ impl<D: PickerDelegate> Render for Picker<D> {
                     })),
             )
             .child(body)
+            .children(footer)
     }
 }

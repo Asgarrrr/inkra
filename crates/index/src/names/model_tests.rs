@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
 
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::{EntryId, Kind, Mtime};
 use proptest::prelude::*;
 use proptest::sample::Index;
 use unicode_normalization::UnicodeNormalization;
@@ -45,10 +45,10 @@ fn model_matches(path: &str, query: &str) -> bool {
     })
 }
 
-fn notes(all: &[(EntryId, String, Kind)]) -> Vec<(EntryId, String)> {
+fn notes(all: &[(EntryId, String, Kind, Mtime)]) -> Vec<(EntryId, String)> {
     all.iter()
-        .filter(|(_, _, kind)| *kind == Kind::Note)
-        .map(|(id, path, _)| (*id, strip_md(path).nfc().collect()))
+        .filter(|(_, _, kind, _)| *kind == Kind::Note)
+        .map(|(id, path, ..)| (*id, strip_md(path).nfc().collect()))
         .collect()
 }
 

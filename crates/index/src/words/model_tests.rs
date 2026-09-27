@@ -10,52 +10,8 @@ use regex_syntax::is_word_character;
 use inkra_vault::EntryId;
 
 use super::{NoteWords, TERM_MAX_CHARS, Words, WordsMerge, cap, fold};
-use crate::test_support::{id, vault};
+use crate::test_support::{PARTS, id, vault};
 use crate::{Lookup, NoteQuery, TermHit, WordsSnapshot};
-
-const PARTS: &[&str] = &[
-    "a",
-    "e",
-    "é",
-    "e\u{301}",
-    "É",
-    "E",
-    "ß",
-    "ss",
-    "\u{212A}",
-    "k",
-    "İ",
-    "i",
-    "ı",
-    "한",
-    "\u{1112}",
-    "'",
-    "’",
-    "-",
-    "_",
-    "1",
-    "🎉",
-    "\u{301}",
-    " ",
-    "\n",
-    ".",
-    "l'été",
-    "aaaaaaaaaaaaaaaaaaaa",
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "ς",
-    "σ",
-    "Σ",
-    "ſ",
-    "s",
-    "\u{fe0f}\u{20e3}",
-    "\u{200d}",
-    "किताब",
-    "คืน",
-    "كَتَبَ",
-    "\u{34F}",
-    "\u{94D}",
-    "\u{93C}",
-];
 
 fn text(len: usize) -> impl Strategy<Value = String> {
     prop::collection::vec(prop::sample::select(PARTS), 0..len).prop_map(|parts| parts.concat())
@@ -181,7 +137,7 @@ proptest! {
         let mut ordinals: Vec<Option<u32>> = vec![None; ids.len()];
         let mut next = 0;
         let mut held = Vec::new();
-        let query = NoteQuery::new(&query_text);
+        let query = NoteQuery::new(&query_text, None, &[]);
         let terms = model_terms(&query_text);
         let not_cancelled = AtomicBool::new(false);
         let lookup = |snapshot: &WordsSnapshot| {

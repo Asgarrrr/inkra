@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::mem;
 use std::sync::{Arc, Weak};
 
@@ -7,22 +7,24 @@ use inkra_vault::EntryId;
 use super::ordinal::{Alive, Ordinal};
 use super::policy::{self, MergeWhen};
 use super::segment::Segment;
+use super::shards::Shards;
 use super::{NoteWords, wide};
 
 /// What a fresh note costs beyond its words: its map slot, and its `Arc`'s counts and struct.
 const FRESH_SLOT_BYTES: usize =
     size_of::<(Ordinal, Arc<NoteWords>)>() + 2 * size_of::<usize>() + size_of::<NoteWords>();
 
-type Fresh = HashMap<Ordinal, Arc<NoteWords>>;
+type Fresh = Shards<Ordinal, Arc<NoteWords>>;
+pub(super) type Ordinals = Shards<EntryId, Ordinal>;
 
 /// Every note's folded words: one merged segment, the bits of its live notes, the notes set since.
 #[derive(Default)]
 pub(crate) struct Words {
-    ordinals: Arc<HashMap<EntryId, Ordinal>>,
+    ordinals: Ordinals,
     segment: Arc<Segment>,
     /// An ordinal is here, in `fresh`, or in neither (a note with no words); never in both.
     alive: Arc<Alive>,
-    fresh: Arc<Fresh>,
+    fresh: Fresh,
     next: u32,
     /// The last merge started, until it applies.
     running: Option<Running>,
@@ -39,27 +41,26 @@ struct Running {
 impl Words {
     /// Replaces `id`'s words; an emptied note keeps its ordinal, so autosave mints none.
     pub(crate) fn set(&mut self, id: EntryId, words: NoteWords) {
-        let ordinal = match self.ordinals.get(&id) {
+        let ordinal = match self.ordinals.get(id) {
             Some(&ordinal) => ordinal,
             None if words.is_empty() => return,
             None => {
                 let ordinal = self.mint();
-                Arc::make_mut(&mut self.ordinals).insert(id, ordinal);
+                self.ordinals.insert(id, ordinal);
                 ordinal
             }
         };
         self.hide(ordinal);
         if !words.is_empty() {
-            Arc::make_mut(&mut self.fresh).insert(ordinal, Arc::new(words));
+            self.fresh.insert(ordinal, Arc::new(words));
         }
     }
 
     /// Drops `id`'s words and frees its ordinal.
     pub(crate) fn remove(&mut self, id: EntryId) {
-        let Some(&ordinal) = self.ordinals.get(&id) else {
+        let Some(ordinal) = self.ordinals.remove(id) else {
             return;
         };
-        Arc::make_mut(&mut self.ordinals).remove(&id);
         self.hide(ordinal);
     }
 
@@ -72,10 +73,10 @@ impl Words {
 
     pub(crate) fn snapshot(&self) -> WordsSnapshot {
         WordsSnapshot {
-            ordinals: Arc::clone(&self.ordinals),
+            ordinals: self.ordinals.clone(),
             segment: Arc::clone(&self.segment),
             alive: Arc::clone(&self.alive),
-            fresh: Arc::clone(&self.fresh),
+            fresh: self.fresh.clone(),
             next: self.next,
         }
     }
@@ -102,7 +103,7 @@ impl Words {
             token,
             segment: Arc::clone(&self.segment),
             alive: Arc::clone(&self.alive),
-            fresh: Arc::clone(&self.fresh),
+            fresh: self.fresh.clone(),
         }
     }
 
@@ -126,14 +127,13 @@ impl Words {
         }
         let fresh: Fresh = touched
             .iter()
-            .filter_map(|ordinal| self.fresh.get_key_value(ordinal))
-            .map(|(&ordinal, words)| (ordinal, Arc::clone(words)))
+            .filter_map(|&ordinal| Some((ordinal, Arc::clone(self.fresh.get(ordinal)?))))
             .collect();
         RetiredWords {
             _held: Held::Replaced {
                 _segment: mem::replace(&mut self.segment, Arc::new(segment)),
                 _alive: mem::replace(&mut self.alive, Arc::new(live)),
-                _fresh: mem::replace(&mut self.fresh, Arc::new(fresh)),
+                _fresh: mem::replace(&mut self.fresh, fresh),
             },
         }
     }
@@ -167,9 +167,7 @@ impl Words {
         if self.alive.contains(ordinal) {
             Arc::make_mut(&mut self.alive).remove(ordinal);
         }
-        if self.fresh.contains_key(&ordinal) {
-            Arc::make_mut(&mut self.fresh).remove(&ordinal);
-        }
+        self.fresh.remove(ordinal);
         self.forget_dead_merge();
         if let Some(running) = &mut self.running {
             running.touched.insert(ordinal);
@@ -203,7 +201,7 @@ pub struct WordsMerge {
     token: Arc<()>,
     segment: Arc<Segment>,
     alive: Arc<Alive>,
-    fresh: Arc<Fresh>,
+    fresh: Fresh,
 }
 
 impl WordsMerge {
@@ -251,7 +249,7 @@ enum Held {
     Replaced {
         _segment: Arc<Segment>,
         _alive: Arc<Alive>,
-        _fresh: Arc<Fresh>,
+        _fresh: Fresh,
     },
     /// Another store's result, never applied.
     Foreign { _merged: MergedWords },
@@ -260,10 +258,10 @@ enum Held {
 /// The word index at one moment. Cloning is four `Arc` bumps.
 #[derive(Clone)]
 pub struct WordsSnapshot {
-    pub(super) ordinals: Arc<HashMap<EntryId, Ordinal>>,
+    pub(super) ordinals: Ordinals,
     pub(super) segment: Arc<Segment>,
     pub(super) alive: Arc<Alive>,
-    pub(super) fresh: Arc<Fresh>,
+    pub(super) fresh: Fresh,
     next: u32,
 }
 
@@ -273,8 +271,8 @@ impl WordsSnapshot {
     pub fn heap_bytes(&self) -> usize {
         let fresh: usize = self
             .fresh
-            .values()
-            .map(|words| FRESH_SLOT_BYTES + words.heap_bytes())
+            .iter()
+            .map(|(_, words)| FRESH_SLOT_BYTES + words.heap_bytes())
             .sum();
         self.segment.heap_bytes()
             + self.alive.heap_bytes()

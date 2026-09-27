@@ -112,7 +112,7 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
   search, `NoteIndex`/`IndexSync`, the picker and modal layer (vault search not yet built)
 - `docs/superpowers/specs/2026-09-25-smart-quick-open-design.md` — `⌘P` by word
-  start on names and text, the word index, `find_notes` (not yet built)
+  start on names and text, the word index, `find_notes`
 - `docs/superpowers/specs/2026-09-25-open-first-design.md` — opening before the
   scan, the scan worker, `Walk`/`applied`
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and

@@ -4,12 +4,12 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 use inkra_index::NoteContent;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs};
+use inkra_vault::{EntryId, Fs, Mtime};
 
 use super::IndexSync;
 use super::loading::Landed;
@@ -109,7 +109,10 @@ fn land_at_once(
         links.apply_budget = Some(budget);
         for id in ids {
             let seq = links.next_seq(id);
-            let loaded = Ok(NoteContent::parse(Arc::from(text)));
+            let loaded = Ok(NoteContent::parse(
+                Arc::from(text),
+                Mtime(SystemTime::UNIX_EPOCH),
+            ));
             let built = links.built;
             links
                 .landed

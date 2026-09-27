@@ -2,11 +2,12 @@ use std::num::NonZero;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::thread;
+use std::time::UNIX_EPOCH;
 
 use futures::executor::block_on;
 use inkra_index::NoteContent;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Vault};
 
 pub(crate) const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -24,30 +25,16 @@ const WORDS: &[&str] = &[
     "project", "meeting", "summer", "team", "idea", "coffee", "notes", "plan", "draft", "review",
     "roadmap", "budget", "voyage", "lecture", "journal", "archive",
 ];
-const GREEK: &[&str] = &[
-    "σχέδιο",
-    "συνάντηση",
-    "καλοκαίρι",
-    "ομάδα",
-    "ιδέα",
-    "καφές",
-    "σημειώσεις",
-    "και",
-    "το",
-    "της",
-    "προϋπολογισμός",
-    "ανασκόπηση",
-];
 /// One note in 1,000 holds it once.
 const RARE: &str = "zanzibar";
 /// Scanned once: a `MemFs` scan cost grows with files per folder times folders.
-pub(crate) static ENTRIES: LazyLock<Vec<(EntryId, String, Kind)>> = LazyLock::new(entries);
+pub(crate) static ENTRIES: LazyLock<Vec<(EntryId, String, Kind, Mtime)>> = LazyLock::new(entries);
 /// The notes of `ENTRIES`, in vault order: the order the startup load inserts them.
 pub(crate) static NOTE_IDS: LazyLock<Vec<EntryId>> = LazyLock::new(|| {
     ENTRIES
         .iter()
-        .filter(|(_, _, kind)| *kind == Kind::Note)
-        .map(|(id, _, _)| *id)
+        .filter(|(_, _, kind, _)| *kind == Kind::Note)
+        .map(|(id, ..)| *id)
         .collect()
 });
 static VOCAB: LazyLock<Vec<String>> = LazyLock::new(|| (0..VOCABULARY).map(word).collect());
@@ -69,7 +56,7 @@ impl Lcg {
     }
 }
 
-fn entries() -> Vec<(EntryId, String, Kind)> {
+fn entries() -> Vec<(EntryId, String, Kind, Mtime)> {
     let fs = MemFs::new();
     for note in 0..NOTES {
         fs.insert_file(format!("/vault/f{}/n{note}.md", note % FOLDERS), "");
@@ -84,6 +71,7 @@ fn entries() -> Vec<(EntryId, String, Kind)> {
                 entry.id,
                 entry.path.as_path().to_string_lossy().into_owned(),
                 entry.kind,
+                entry.mtime,
             )
         })
         .collect()
@@ -124,10 +112,6 @@ pub(crate) fn zipf_word(lcg: &mut Lcg) -> &'static str {
 
 pub(crate) fn forty_word(lcg: &mut Lcg) -> &'static str {
     WORDS[lcg.next(WORDS.len())]
-}
-
-pub(crate) fn greek_word(lcg: &mut Lcg) -> &'static str {
-    GREEK[lcg.next(GREEK.len())]
 }
 
 /// Lines of 8 to 20 words until `bytes`, with `,` or `'` between some.
@@ -219,7 +203,7 @@ fn parse(texts: &[Arc<str>]) -> Vec<NoteContent> {
                 scope.spawn(move || {
                     texts
                         .iter()
-                        .map(|text| NoteContent::parse(Arc::clone(text)))
+                        .map(|text| NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)))
                         .collect::<Vec<_>>()
                 })
             })
@@ -239,16 +223,4 @@ fn parse(texts: &[Arc<str>]) -> Vec<NoteContent> {
 /// `texts` parsed a chunk at a time, as loads land.
 pub(crate) fn contents(texts: &[Arc<str>]) -> impl Iterator<Item = NoteContent> + '_ {
     texts.chunks(PARSE_CHUNK).flat_map(parse)
-}
-
-/// A note holding a 1 MB base64 paste on one line: tens of thousands of distinct words.
-pub(crate) fn base64_note() -> Arc<str> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut lcg = Lcg(17);
-    let mut text = String::from("A screenshot: ![shot](data:image/png;base64,");
-    while text.len() < 1 << 20 {
-        text.push(char::from(ALPHABET[lcg.next(ALPHABET.len())]));
-    }
-    text.push_str(")\n");
-    text.into()
 }

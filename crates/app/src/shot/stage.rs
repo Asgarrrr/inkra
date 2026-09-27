@@ -16,7 +16,7 @@ const VAULT_ROOT: &str = "/vault";
 
 pub(crate) struct Stage {
     cx: VisualTestAppContext,
-    /// Held walks, released on drop, after the shot.
+    /// Held walks and loads, released on drop, after the shot.
     gates: Vec<Gate>,
 }
 
@@ -53,6 +53,23 @@ impl Stage {
         for (path, text) in files {
             fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
         }
+        let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
+            .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
+        self.open(fs, Launch::Vault(scanned))
+    }
+
+    /// A scanned vault whose load of `held` is parked, so the index stays building.
+    pub(crate) fn open_vault_loading(
+        &mut self,
+        files: &[(&str, &str)],
+        held: &str,
+    ) -> WindowHandle<AppShell> {
+        let fs = Arc::new(MemFs::new());
+        for (path, text) in files {
+            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
+        }
+        self.gates
+            .push(fs.block_load(PathBuf::from(VAULT_ROOT).join(held)));
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
         self.open(fs, Launch::Vault(scanned))

@@ -14,8 +14,10 @@ use crate::vault::{NoteSaved, NoteStore};
 
 mod loading;
 mod merging;
+mod watch;
 
 use loading::{Landed, Loading};
+pub(crate) use watch::{BUILDING_REFRESH, IndexWatch, Refresh};
 
 /// A build applied: note names and link resolution may have changed.
 pub(crate) struct NotesChanged;
@@ -36,7 +38,7 @@ impl Built {
             .iter()
             .map(|entry| {
                 let path = entry.path.as_path().to_string_lossy().into_owned();
-                (entry.id, path, entry.kind)
+                (entry.id, path, entry.kind, entry.mtime)
             })
             .collect();
         let mtimes: Vec<(EntryId, Mtime)> = entries
@@ -292,6 +294,7 @@ impl IndexSync {
             notes: corpus.len(),
             corpus_bytes: corpus.heap_bytes(),
             words_bytes: self.index.words().heap_bytes(),
+            names_bytes: self.index.names().heap_bytes(),
         };
         Timeline::mark(step, cx);
     }
@@ -305,7 +308,8 @@ impl IndexSync {
         let seq = self.next_seq(id);
         self.indexed.insert(id, event.stamp.mtime);
         let text = Arc::clone(&event.text);
-        let parsed = cx.background_spawn(async move { NoteContent::parse(text) });
+        let modified = event.stamp.mtime;
+        let parsed = cx.background_spawn(async move { NoteContent::parse(text, modified) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
             Self::timed_turn(&this, cx, |this, cx| this.apply(id, seq, content, cx));
