@@ -29,7 +29,7 @@ pub(super) fn hold_scans(opened: &mut Opened) -> oneshot::Sender<()> {
 pub(super) fn runs(opened: &mut Opened) -> usize {
     opened
         .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.runs)
+        .read_with(&opened.visual, |picker, _| picker.delegate.runs.started())
 }
 
 pub(super) fn selected(opened: &mut Opened) -> Option<usize> {

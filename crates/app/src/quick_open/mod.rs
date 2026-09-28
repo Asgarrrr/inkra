@@ -2,7 +2,6 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -13,16 +12,15 @@ use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::EntryId;
 
 use crate::count::thousands;
-use crate::index::{BUILDING_REFRESH, IndexSync, IndexWatch, NotesChanged, Refresh};
+use crate::index::{IndexSync, NotesChanged};
+use crate::picker::runs::{Run, RunId, Runs};
 use crate::picker::{Picker, PickerDelegate};
 use crate::sidebar::NoteActivated;
 use crate::theme;
 use list::List;
-use scan::{Run, Scan};
 
 mod list;
 mod render;
-mod scan;
 mod search;
 #[cfg(test)]
 mod tests;
@@ -44,23 +42,13 @@ pub(crate) struct QuickOpenDelegate {
     recent: Vec<EntryId>,
     list: List,
     answered: Answered,
-    /// Set by the next query and on drop: a scan already running on another thread ignores a dropped task.
-    cancel: Arc<AtomicBool>,
-    search_id: u64,
-    scan: Scan,
-    /// Set by a refresh for the next run only.
-    next_run: Run,
-    /// Loads add text, so rows; a notify refreshes at most every `BUILDING_REFRESH` while they land.
-    watch: IndexWatch,
+    runs: Runs,
     /// A scan waits for it before it starts, so a test can hold one running.
     #[cfg(test)]
     hold: Option<futures::future::Shared<futures::channel::oneshot::Receiver<()>>>,
     /// Each excerpt, once computed, waits for it before it lands, so a test can order landings.
     #[cfg(test)]
     hold_excerpts: Option<futures::future::Shared<futures::channel::oneshot::Receiver<()>>>,
-    /// Scans started, the scanning state's empty runs aside.
-    #[cfg(test)]
-    runs: usize,
     /// User runs applied: the ones the release build logs.
     #[cfg(test)]
     logged: usize,
@@ -81,7 +69,7 @@ enum Answered {
 
 /// One run of `update_matches`, applied once its matches arrive.
 struct Search {
-    id: u64,
+    id: RunId,
     run: Run,
     answers: Answered,
     started: Instant,
@@ -104,23 +92,9 @@ impl QuickOpenDelegate {
                 } else {
                     Run::Refresh
                 };
-                Self::refresh_or_defer(picker, run, cx);
+                Runs::refresh_or_defer(picker, run, cx);
             }),
-            cx.observe(links, |picker, links, cx| {
-                match picker.delegate.watch.on_notify(links.read(cx)) {
-                    Refresh::Skip => {}
-                    Refresh::Now => Self::refresh_or_defer(picker, Run::Notify, cx),
-                    Refresh::Later => {
-                        let throttled = cx.spawn(async move |picker, cx| {
-                            cx.background_executor().timer(BUILDING_REFRESH).await;
-                            let _ = picker.update(cx, |picker, cx| {
-                                Self::refresh_or_defer(picker, Run::Notify, cx);
-                            });
-                        });
-                        picker.delegate.watch.throttle(throttled);
-                    }
-                }
-            }),
+            Runs::observe(links, cx),
         ];
         let list = List::new(
             links.read(cx).index().snapshot(),
@@ -132,17 +106,11 @@ impl QuickOpenDelegate {
             recent,
             list,
             answered: Answered::Nothing,
-            cancel: Arc::new(AtomicBool::new(false)),
-            search_id: 0,
-            scan: Scan::Idle,
-            next_run: Run::Search,
-            watch: IndexWatch::default(),
+            runs: Runs::default(),
             #[cfg(test)]
             hold: None,
             #[cfg(test)]
             hold_excerpts: None,
-            #[cfg(test)]
-            runs: 0,
             #[cfg(test)]
             logged: 0,
             _subscriptions: subscriptions,
@@ -163,10 +131,10 @@ impl QuickOpenDelegate {
             snapshot,
             query,
         } = search;
-        if id != picker.delegate.search_id {
+        if !picker.delegate.runs.is_current(id) {
             return;
         }
-        let user = run == Run::Search;
+        let user = run.is_user();
         // Read now, not when the names changed: the user may have moved during the wait.
         let kept = picker
             .selected()
@@ -196,10 +164,7 @@ impl QuickOpenDelegate {
             }
         }
         // Read after the rows land: an `enter` waiting on them confirms, and that clears the mark.
-        let scan = std::mem::replace(&mut picker.delegate.scan, Scan::Idle);
-        if matches!(scan, Scan::Stale { .. }) {
-            Self::refresh_or_defer(picker, Run::Notify, cx);
-        }
+        Runs::landed(picker, cx);
     }
 
     /// While the notes' texts load; before the first build the empty text says it is scanning.
@@ -217,9 +182,9 @@ impl QuickOpenDelegate {
     }
 }
 
-impl Drop for QuickOpenDelegate {
-    fn drop(&mut self) {
-        self.cancel.store(true, Ordering::Relaxed);
+impl AsMut<Runs> for QuickOpenDelegate {
+    fn as_mut(&mut self) -> &mut Runs {
+        &mut self.runs
     }
 }
 
@@ -254,22 +219,11 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
-        self.cancel.store(true, Ordering::Relaxed);
-        self.cancel = Arc::new(AtomicBool::new(false));
-        self.search_id += 1;
-        let (id, cancel) = (self.search_id, Arc::clone(&self.cancel));
-        let run = std::mem::replace(&mut self.next_run, Run::Search);
-        if run == Run::Search {
+        let started = self.runs.start(self.links.read(cx));
+        let (id, run) = (started.id, started.run);
+        if run.is_user() {
             self.list.cancel();
         }
-        // A keystroke supersedes a background run at once; it waits only behind a user search.
-        let behind_user = matches!(
-            self.scan,
-            Scan::Running { user: true } | Scan::Stale { user: true }
-        );
-        // This run reads the newest index, whatever made the scan before it stale.
-        self.scan = Scan::Idle;
-        self.watch.seen(self.links.read(cx));
         let snapshot = self.links.read(cx).index().snapshot();
         let query = Arc::new(NoteQuery::new(query, self.showing, &self.recent));
         if self.links.read(cx).awaits_first_build() {
@@ -278,7 +232,7 @@ impl PickerDelegate for QuickOpenDelegate {
             self.list.replace(id, snapshot, query, Vec::new(), false);
             return cx.spawn(async move |picker, cx| {
                 let _ = picker.update(cx, |picker, cx| {
-                    if picker.delegate.search_id == id {
+                    if picker.delegate.runs.is_current(id) {
                         picker.matches_updated(0, cx);
                     }
                 });
@@ -286,16 +240,10 @@ impl PickerDelegate for QuickOpenDelegate {
         }
         let wait = match run {
             Run::Refresh => Some(NOTES_CHANGED_REFRESH),
-            Run::Search => behind_user.then_some(SEARCH_DEBOUNCE),
+            Run::Search => started.behind_user.then_some(SEARCH_DEBOUNCE),
             Run::Notify => None,
         };
-        self.scan = Scan::Running {
-            user: run == Run::Search,
-        };
-        #[cfg(test)]
-        {
-            self.runs += 1;
-        }
+        self.runs.scanning(&started);
         #[cfg(test)]
         let hold = self.hold.clone();
         let search = Search {
@@ -319,7 +267,7 @@ impl PickerDelegate for QuickOpenDelegate {
             if let Some(hold) = hold {
                 let _ = hold.await;
             }
-            let Some(found) = search::found(executor, snapshot, query, cancel).await else {
+            let Some(found) = search::found(executor, snapshot, query, started.cancel).await else {
                 return;
             };
             let _ = picker.update(cx, |picker, cx| {
@@ -329,10 +277,7 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
-        // The picker dismisses: a deferred refresh has nothing left to refresh.
-        if let Scan::Stale { user } = self.scan {
-            self.scan = Scan::Running { user };
-        }
+        self.runs.confirmed();
         if let Some(row) = self.list.rows.get(ix) {
             cx.emit(NoteActivated(row.found.id));
         }

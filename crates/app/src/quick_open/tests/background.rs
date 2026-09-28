@@ -7,8 +7,8 @@ use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point, px};
 use super::refresh::{advance, hold_scans, notify, runs, selected};
 use super::{Opened, cancel_flag, listed, open, search};
 use crate::index::BUILDING_REFRESH;
+use crate::picker::runs::Scan;
 use crate::quick_open::NOTES_CHANGED_REFRESH;
-use crate::quick_open::scan::Scan;
 use crate::sidebar::NoteActivated;
 use crate::test_support::{entry_id, vault};
 use crate::theme;
@@ -19,10 +19,10 @@ fn logged(opened: &mut Opened) -> usize {
         .read_with(&opened.visual, |picker, _| picker.delegate.logged)
 }
 
-fn scan(opened: &mut Opened) -> Scan {
+fn scan(opened: &mut Opened) -> Option<Scan> {
     opened
         .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.scan)
+        .read_with(&opened.visual, |picker, _| picker.delegate.runs.scan())
 }
 
 fn plans() -> Vec<String> {
@@ -186,7 +186,13 @@ fn a_keystroke_cancels_a_stale_background_refresh_and_no_rerun_follows(cx: &mut 
     let before = runs(&mut opened);
     refresh_in_background(&mut opened);
     refresh_in_background(&mut opened);
-    assert_eq!(scan(&mut opened), Scan::Stale { user: false });
+    assert_eq!(
+        scan(&mut opened),
+        Some(Scan {
+            user: false,
+            rerun: true
+        })
+    );
     assert_eq!(runs(&mut opened), before + 1, "the second refresh waits");
     let refresh = cancel_flag(&mut opened);
     opened
