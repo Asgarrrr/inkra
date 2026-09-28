@@ -12,11 +12,14 @@ use crate::shell::AppShell;
 use super::NoteStore;
 
 mod autosave;
+mod gone;
 mod lifecycle;
 mod quit;
+mod reload;
 mod rescan;
 mod scans;
 mod trash;
+mod watch;
 
 pub(super) fn open_shell(
     cx: &mut TestAppContext,

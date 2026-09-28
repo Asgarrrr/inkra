@@ -95,8 +95,14 @@ review agents were exposed to it and ignored it, per the `vendor/` rule.
 #[async_trait]
 pub trait Fs: Send + Sync {
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
+    async fn check_dir(&self, path: &Path) -> Result<()>;
     async fn load(&self, path: &Path) -> Result<Loaded>;
-    async fn save(&self, path: &Path, text: &str) -> Result<Mtime>;
+    async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved>;
+    async fn create_parents(&self, path: &Path) -> Result<()>;
+    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()>;
+    async fn trash(&self, path: &Path) -> Result<()>;
+    fn watch(&self, root: &Path) -> Result<Watch>;
 }
 ```
 
@@ -211,6 +217,19 @@ exactly where it was not.
 So identity is `FileIdentity { device: u64, inode: u64 }`. A rename keeps the
 id and changes the path. A case-only rename is one file, so one inode, so one
 id. A recreated file has a new inode, so a new id.
+
+**Narrowed (watcher spec, F5, 2026-09-27).** A recreated file keeps the id when
+its path's old inode is found nowhere in the same walk: Vim, VS Code and `git
+checkout` save by renaming a new file over the note. When the old inode is found
+elsewhere (renamed away), the new file gets a new id. The third case above, an
+unrelated file created at a deleted note's path, now keeps the id when both land
+between two reads of the folder; no signal tells the two apart.
+
+**Narrowed again (watcher spec, F9, 2026-09-28).** An open note gone from disk
+reclaims a note file that appears at its last path, unless that file's id is
+itself an open note's: the note keeps its id when autosave or a restore
+recreates it. An unrelated file created at that path is taken as the note's
+return, the same ambiguity.
 
 Zed's `Entry` carries `inode: u64` alone, without a device
 (`crates/worktree/src/worktree.rs:3963`). We pair it with the device because an
@@ -649,7 +668,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 
 | Item | Trigger | Notes |
 |---|---|---|
-| File watcher + diff reload | A *clean* note changed on disk shows stale text until it is reopened. No longer gates conflict detection, which shipped without it — see `2026-09-21-conflict-detection-design.md`. | Needs anchored selections; `apply_diff`, `crates/language/src/buffer.rs:2459` |
+| ~~File watcher + diff reload~~ | **Closed 2026-09-28.** The vault follows the disk, a clean open note reloads through a diff, and a note deleted on disk stays open. | `2026-09-27-file-watcher-design.md` |
 | ~~Conflict detection~~ | **Closed 2026-09-21.** `Fs::save` takes a required `Stamp` and preserves the file's bytes beside the note before replacing them. Its premise here — that it "lands with the watcher" — was wrong: that describes Zed's implementation, not a constraint. | `2026-09-21-conflict-detection-design.md` |
 | ~~Create / rename / delete~~ | **Closed 2026-09-22.** `Fs` gained `create`, `rename` and `trash`; `NoteStore` gained the three commands, each ordered on the note's `Ops` chain. Folder *deletion* is the one part left out — it destroys N notes with one gesture — with its own row below. | `2026-09-22-create-rename-delete-design.md` |
 | Delete a folder | A user creates a folder they then want rid of. | Needs a prompt that counts the notes it destroys, and the closing of every open buffer in the subtree with its writer neutralised. The other five operations shipped without it |

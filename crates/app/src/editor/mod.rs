@@ -2,35 +2,26 @@ pub(crate) mod actions;
 mod element;
 mod input;
 pub(crate) mod layout;
+mod motion;
+mod mouse;
+mod reload;
 mod scroll;
 #[cfg(test)]
 mod tests;
 
 use gpui::{
     App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Point, Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window,
-    div, point, px,
+    InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
+    StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
-use inkra_editor::{EditorState, Goal, LogicalMovement, Selection};
-use inkra_markdown::{Link, Markdown, links, touched};
+use inkra_editor::{EditorState, Selection};
+use inkra_markdown::{Link, Markdown};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::theme;
 use element::TextElement;
 use layout::DocumentLayout;
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum Vertical {
-    Up,
-    Down,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum RowEdge {
-    Start,
-    End,
-}
+use reload::TopLine;
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,15 +45,17 @@ pub(crate) struct EditorView {
     /// `last_bounds` arrives already scrolled (`gpui/elements/div.rs:2027`), so
     /// no hit-test subtracts the offset.
     scroll_handle: ScrollHandle,
-    /// Held for its `Drop`: losing it stops the view repainting on buffer
-    /// changes, with no warning and no test failure short of a two-view test.
-    _buffer_changed: Subscription,
+    /// Set by a reload, taken by the next `render`.
+    restore_top: Option<TopLine>,
+    /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
+    /// no test failure short of a two-view test, and leaves a reload's caret on the old text.
+    _buffer: [Subscription; 2],
 }
 
 impl EditorView {
     pub(crate) fn new(buffer: Entity<Buffer>, cx: &mut Context<Self>) -> Self {
         let end = buffer.read(cx).len();
-        let buffer_changed = cx.observe(&buffer, Self::on_buffer_changed);
+        let subscriptions = Self::watch_buffer(&buffer, cx);
 
         let mut view = Self {
             buffer,
@@ -75,7 +68,8 @@ impl EditorView {
             last_bounds: None,
             last_text_top: None,
             scroll_handle: ScrollHandle::new(),
-            _buffer_changed: buffer_changed,
+            restore_top: None,
+            _buffer: subscriptions,
         };
         view.refresh_markdown(cx);
         view
@@ -88,8 +82,8 @@ impl EditorView {
         reason = "resubscribing is the point of the gate"
     )]
     pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
-        // Rebuilt: the old `Subscription` would observe the closed note.
-        self._buffer_changed = cx.observe(&buffer, Self::on_buffer_changed);
+        // Rebuilt: the old `Subscription`s would observe the closed note.
+        self._buffer = Self::watch_buffer(&buffer, cx);
         self.buffer = buffer;
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
@@ -103,8 +97,16 @@ impl EditorView {
         self.last_bounds = None;
         self.last_text_top = None;
         self.scroll_handle = ScrollHandle::new();
+        self.restore_top = None;
 
         cx.notify();
+    }
+
+    fn watch_buffer(buffer: &Entity<Buffer>, cx: &mut Context<Self>) -> [Subscription; 2] {
+        [
+            cx.observe(buffer, Self::on_buffer_changed),
+            cx.subscribe(buffer, Self::on_buffer_reloaded),
+        ]
     }
 
     #[cfg(test)]
@@ -187,192 +189,8 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Reshapes when the move reveals or hides an element, so `last_layout` is never stale (spec D7).
-    fn move_cursor(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut EditorState, &Buffer),
-    ) {
-        let old = self.state.selection().range();
-        f(&mut self.state, self.buffer.read(cx));
-        let new = self.state.selection().range();
-        let conceals = &self.markdown.conceals;
-        if !touched(conceals, &old).eq(touched(conceals, &new)) {
-            self.reshape(window, cx);
-        }
-        cx.notify();
-        self.reveal_cursor();
-    }
-
-    /// Called from both gates, not the action handlers, which would forget it.
-    /// Must run here: from `TextElement::prepaint` it would land a frame late.
-    fn reveal_cursor(&mut self) {
-        let (Some(text_top), Some(layout)) = (self.last_text_top, self.last_layout.as_ref()) else {
-            return;
-        };
-        let viewport = self.scroll_handle.bounds();
-        // Nothing prepainted yet: bounds stay default() until the first clamp.
-        if viewport.size.height <= px(0.) {
-            return;
-        }
-
-        let row = layout.row_for_offset(self.cursor());
-        let top = text_top + layout.top_for_row(row);
-        let extent = top..top + layout.row_height(row);
-        let viewport = viewport.top()..viewport.bottom();
-
-        if let Some(offset) = scroll::reveal(
-            extent,
-            viewport,
-            self.scroll_handle.offset().y,
-            layout.body_row_height(),
-        ) {
-            self.scroll_handle
-                .set_offset(point(self.scroll_handle.offset().x, offset));
-        }
-    }
-
-    fn move_vertically(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        direction: Vertical,
-        extend: bool,
-    ) {
-        let Some(layout) = self.last_layout.as_ref() else {
-            return;
-        };
-        let cursor = self.cursor();
-        let row = layout.row_for_offset(cursor);
-
-        // Reused verbatim: re-widens a run of downs after a short row (x is
-        // from the row's start, so it means the same on every row).
-        let goal_x = match self.state.selection().goal() {
-            Goal::Column(x) => px(x),
-            Goal::None => layout.x_for_offset(cursor),
-        };
-
-        let step = |row: usize| match direction {
-            Vertical::Up => row.checked_sub(1),
-            Vertical::Down => (row + 1 < layout.row_count()).then_some(row + 1),
-        };
-        let mut target = step(row);
-        while let Some(candidate) = target
-            && !layout.holds_caret(candidate)
-        {
-            target = step(candidate);
-        }
-        let target = target.map(|row| layout.offset_on_row(row, goal_x));
-
-        if let Some(offset) = target {
-            let goal = Goal::Column(f32::from(goal_x));
-            self.move_cursor(window, cx, |state, buffer| {
-                state.move_vertically(buffer, offset, extend, goal);
-            });
-            return;
-        }
-
-        // Drops the goal: the next vertical move starts from where this landed, not where it aimed.
-        let movement = match direction {
-            Vertical::Up => LogicalMovement::DocStart,
-            Vertical::Down => LogicalMovement::DocEnd,
-        };
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, movement, extend);
-        });
-    }
-
-    fn move_to_row_edge(&mut self, window: &mut Window, cx: &mut Context<Self>, edge: RowEdge) {
-        let Some(layout) = self.last_layout.as_ref() else {
-            return;
-        };
-        let row = layout.row_bounds(layout.row_for_offset(self.cursor()));
-        let target = match edge {
-            RowEdge::Start => *row.start(),
-            RowEdge::End => *row.end(),
-        };
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, target, false);
-        });
-    }
-
     pub(crate) fn cursor(&self) -> ByteOffset {
         self.state.cursor()
-    }
-
-    fn position_for_point(&self, position: Point<Pixels>) -> Option<ByteOffset> {
-        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
-        Some(layout.offset_for_position(position - bounds.origin))
-    }
-
-    /// The innermost link whose drawn span holds the pointer. Not `link_at` on the click's
-    /// offset: that is the nearest boundary, which past a line's end, beside a link, or inside
-    /// its hidden syntax lands on the link's edge.
-    fn link_under(&self, position: Point<Pixels>, cx: &App) -> Option<Link> {
-        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
-        let local = position - bounds.origin;
-        if local.y < px(0.) || local.y >= layout.height() {
-            return None;
-        }
-        let row = layout.row_for_offset(layout.offset_for_position(local));
-        let spans = |link: &Link| {
-            let (start, end) = (link.range.start, link.range.end);
-            let (first, last) = (layout.row_for_offset(start), layout.row_for_offset(end));
-            (first..=last).contains(&row)
-                && (row > first || local.x >= layout.x_for_offset(start))
-                && (row < last || local.x < layout.x_for_offset(end))
-        };
-        links(self.buffer.read(cx).text())
-            .into_iter()
-            .filter(spans)
-            .min_by_key(|link| link.range.end.0 - link.range.start.0)
-    }
-
-    fn on_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        window.focus(&self.focus_handle, cx);
-        let Some(offset) = self.position_for_point(event.position) else {
-            self.is_selecting = true;
-            return;
-        };
-        // Before `is_selecting`: a ⌘-click follows and must not start a drag selection.
-        if event.modifiers.platform
-            && let Some(link) = self.link_under(event.position, cx)
-        {
-            cx.emit(LinkFollowed(link));
-            return;
-        }
-        self.is_selecting = true;
-        let extend = event.modifiers.shift;
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, extend);
-        });
-    }
-
-    fn on_mouse_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_selecting {
-            return;
-        }
-        let Some(offset) = self.position_for_point(event.position) else {
-            return;
-        };
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, true);
-        });
-    }
-
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
-        self.is_selecting = false;
     }
 }
 
@@ -383,7 +201,8 @@ impl Focusable for EditorView {
 }
 
 impl Render for EditorView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        self.restore_scroll(window, cx);
         div()
             .id("editor")
             .key_context("EditorView")

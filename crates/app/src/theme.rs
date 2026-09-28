@@ -81,6 +81,15 @@ pub(crate) fn modal_border() -> Rgba {
     rgb(0x3c3c3c)
 }
 
+/// The one line over a note deleted on disk (watcher spec, F9).
+pub(crate) fn gone_banner_background() -> Rgba {
+    rgb(0x2b2622)
+}
+
+pub(crate) fn gone_banner_text() -> Rgba {
+    rgb(0xe0b27a)
+}
+
 pub(crate) fn heading_text() -> Rgba {
     rgb(0xffffff)
 }

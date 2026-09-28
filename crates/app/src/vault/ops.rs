@@ -17,3 +17,13 @@ pub(super) struct Ops {
     /// the trash is deleting.
     pub(super) trashing: bool,
 }
+
+impl Ops {
+    /// Drops the write waiting on the chain, whatever its delay; one already writing still lands.
+    pub(super) fn cancel_pending(&mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+        }
+        self.scheduled = false;
+    }
+}

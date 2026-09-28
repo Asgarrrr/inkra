@@ -18,6 +18,8 @@ pub(crate) struct Stage {
     cx: VisualTestAppContext,
     /// Held walks and loads, released on drop, after the shot.
     gates: Vec<Gate>,
+    /// `open_vault`'s, so a scene can change a file after opening.
+    fs: Option<Arc<MemFs>>,
 }
 
 impl Stage {
@@ -32,6 +34,7 @@ impl Stage {
         Self {
             cx,
             gates: Vec::new(),
+            fs: None,
         }
     }
 
@@ -55,7 +58,26 @@ impl Stage {
         }
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
+        self.fs = Some(Arc::clone(&fs));
         self.open(fs, Launch::Vault(scanned))
+    }
+
+    /// A change outside the app to a file of the vault `open_vault` opened.
+    pub(crate) fn write(&mut self, path: &str, text: &str) {
+        let Some(fs) = self.fs.as_ref() else {
+            panic!("a scene writes only after `open_vault`");
+        };
+        fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), text);
+        self.settle();
+    }
+
+    /// A file of the vault `open_vault` opened, deleted outside the app.
+    pub(crate) fn remove(&mut self, path: &str) {
+        let Some(fs) = self.fs.as_ref() else {
+            panic!("a scene removes only after `open_vault`");
+        };
+        fs.remove(&PathBuf::from(VAULT_ROOT).join(path));
+        self.settle();
     }
 
     /// A scanned vault whose load of `held` is parked, so the index stays building.

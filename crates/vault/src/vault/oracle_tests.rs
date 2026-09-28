@@ -44,10 +44,15 @@ impl Reference {
         self.by_identity.insert(identity, id);
     }
 
-    /// The sort is the slice-6 rule (ids in path order); the rest is today's `apply`, verbatim.
+    /// The sort is the slice-6 rule (ids in path order), the path's id for a replaced inode is
+    /// the watcher spec's F5; the rest is today's `apply`, verbatim.
     fn apply(&mut self, mut children: Vec<DirEntry>) {
         let root = Path::new(ROOT);
         children.sort_by(|a, b| compare(&Key::of(&probe(root, a)), &Key::of(&probe(root, b))));
+        let claimed: HashSet<EntryId> = children
+            .iter()
+            .filter_map(|child| self.by_identity.get(&child.identity).copied())
+            .collect();
         let mut found = Vec::new();
         let mut next_by_identity = HashMap::new();
         for child in children {
@@ -59,6 +64,10 @@ impl Reference {
             }
             let id = if let Some(existing) = self.by_identity.get(&child.identity) {
                 *existing
+            } else if let Some(replaced) = self.entries.iter().find(|entry| {
+                entry.path == path && entry.kind == child.kind && !claimed.contains(&entry.id)
+            }) {
+                replaced.id
             } else {
                 let id = EntryId(self.next_id);
                 self.next_id += 1;
@@ -93,16 +102,16 @@ fn probe(root: &Path, child: &DirEntry) -> Entry {
     }
 }
 
-type Rows = Vec<(EntryId, PathBuf, Kind, Mtime)>;
+pub(super) type Rows = Vec<(EntryId, PathBuf, Kind, Mtime)>;
 
-fn rows<'a>(entries: impl Iterator<Item = &'a Entry>) -> Rows {
+pub(super) fn rows<'a>(entries: impl Iterator<Item = &'a Entry>) -> Rows {
     entries
         .map(|e| (e.id, e.path.as_path().to_path_buf(), e.kind, e.mtime))
         .collect()
 }
 
 #[derive(Debug, Clone)]
-enum Op {
+pub(super) enum Op {
     Note {
         folder: usize,
         name: usize,
@@ -130,7 +139,7 @@ enum Op {
 const NAMES: &[&str] = &["a", "b", "Ab", "é", "z"];
 
 /// Every op but a hard link.
-fn edit() -> impl Strategy<Value = Op> {
+pub(super) fn edit() -> impl Strategy<Value = Op> {
     prop_oneof![
         (0usize..6, 0..NAMES.len()).prop_map(|(folder, name)| Op::Note { folder, name }),
         (0usize..6, 0..NAMES.len()).prop_map(|(folder, name)| Op::Folder { folder, name }),
@@ -180,7 +189,7 @@ fn picks(vault: &Vault, under: &Path) -> Vec<(EntryId, PathBuf, Kind)> {
 }
 
 /// Runs `op` on `fs`, confined to `under`; a save re-keys through `rekey`.
-fn run(
+pub(super) fn run(
     fs: &MemFs,
     vault: &Vault,
     under: &Path,
@@ -252,18 +261,6 @@ fn run(
     }
 }
 
-/// Every edit but a removal: `MemFs` leaves a removed folder's files to reappear on a move.
-fn grow() -> impl Strategy<Value = Op> {
-    prop_oneof![
-        (0usize..6, 0..NAMES.len()).prop_map(|(folder, name)| Op::Note { folder, name }),
-        (0usize..6, 0..NAMES.len()).prop_map(|(folder, name)| Op::Folder { folder, name }),
-        (0usize..12, 0..NAMES.len()).prop_map(|(pick, name)| Op::Rename { pick, name }),
-        (0usize..12).prop_map(Op::Recreate),
-        (0usize..12).prop_map(Op::Save),
-        (0usize..12).prop_map(Op::SaveInPlace),
-    ]
-}
-
 /// A move, or a hard link, of one entry across the boundary of a partial walk.
 #[derive(Debug, Clone)]
 struct Cross {
@@ -288,16 +285,14 @@ fn cross() -> impl Strategy<Value = Cross> {
         })
 }
 
-/// Moves or links an entry below `under` out of it, or one outside it in.
-fn run_across(fs: &MemFs, vault: &Vault, under: &Path, cross: &Cross) {
+/// Moves or links an entry below `under` out of it, or one outside it in; the path it moved or linked out.
+fn run_across(fs: &MemFs, vault: &Vault, under: &Path, cross: &Cross) -> Option<PathBuf> {
     // `under` and its parents stay: the partial walk starts at `under`.
     let picks: Vec<&Entry> = vault
         .entries()
         .filter(|e| !under.starts_with(e.path.as_path()))
         .collect();
-    let Some(entry) = picks.get(cross.pick) else {
-        return;
-    };
+    let entry = picks.get(cross.pick)?;
     let from = Path::new(ROOT).join(entry.path.as_path());
     let leaving = entry.path.as_path().starts_with(under);
     let mut folders: Vec<PathBuf> = vec![PathBuf::new()];
@@ -309,7 +304,7 @@ fn run_across(fs: &MemFs, vault: &Vault, under: &Path, cross: &Cross) {
     );
     folders.retain(|folder| folder.starts_with(under) != leaving);
     if folders.is_empty() {
-        return;
+        return None;
     }
     let folder = Path::new(ROOT).join(&folders[cross.folder % folders.len()]);
     let to = match entry.kind {
@@ -320,13 +315,25 @@ fn run_across(fs: &MemFs, vault: &Vault, under: &Path, cross: &Cross) {
     if cross.link {
         if entry.kind == Kind::Note && !exists {
             fs.hard_link(&from, to);
+            return leaving.then_some(from);
         }
+        None
     } else {
-        let _ = block_on(fs.rename(&from, &to));
+        let moved = block_on(fs.rename(&from, &to)).is_ok();
+        (moved && leaving).then_some(from)
     }
 }
 
-fn walk(fs: &MemFs, from: &Path) -> Walk {
+/// The inode at `path`, as its folder lists it.
+fn identity_at(fs: &MemFs, path: &Path) -> Option<FileIdentity> {
+    let listing = block_on(fs.read_dir(path.parent()?)).ok()?;
+    listing
+        .into_iter()
+        .find(|child| child.path == path)
+        .map(|child| child.identity)
+}
+
+pub(super) fn walk(fs: &MemFs, from: &Path) -> Walk {
     let from = RelPath::new(from).expect("relative");
     block_on(Vault::walk(fs, Path::new(ROOT), &from, &Serial)).expect("the start reads")
 }
@@ -408,7 +415,7 @@ proptest! {
 
     #[test]
     fn a_partial_walk_then_a_full_one_matches_a_full_one(
-        setup in prop::collection::vec(grow(), 1..20),
+        setup in prop::collection::vec(edit(), 1..20),
         pick in 0usize..8,
         across in prop::collection::vec(cross(), 1..8),
         inside in prop::collection::vec(op(), 0..12),
@@ -428,13 +435,20 @@ proptest! {
         dirs.extend(vault.entries().filter(|e| e.kind == Kind::Dir).map(|e| e.path.as_path().to_path_buf()));
         let under = dirs[pick % dirs.len()].clone();
 
-        for cross in &across {
-            run_across(&fs, &vault, &under, cross);
-        }
+        let left: Vec<(PathBuf, Option<FileIdentity>)> = across
+            .iter()
+            .filter_map(|cross| run_across(&fs, &vault, &under, cross))
+            .map(|from| {
+                let identity = identity_at(&fs, &from);
+                (from, identity)
+            })
+            .collect();
         // New files only below `under`: a partial walk mints first what it reads, not in path order.
         for op in &inside {
             run(&fs, &vault, &under, op, &mut |_, _, _| {});
         }
+        // An inode moved or linked out, then a new one at its path, read in two walks: the watcher spec's F5 limit.
+        prop_assume!(left.iter().all(|(path, identity)| identity_at(&fs, path) == *identity));
         let settled = vault.applied(walk(&fs, &under)).applied(walk(&fs, Path::new("")));
         let full = vault.applied(walk(&fs, Path::new("")));
 
@@ -522,8 +536,9 @@ proptest! {
         let listing = Walk {
             read: vec![RelPath::root()],
             found: block_on(fs.read_dir(root)).expect("the root reads"),
+            reach: Reach::Partial,
         };
-        let after_root = vault.applied(Walk { read: listing.read.clone(), found: listing.found.clone() });
+        let after_root = vault.applied(listing.clone());
         let listed = fs.read_dirs(root);
 
         let seeded = after_root.applied(block_on(Vault::walk_seeded(&fs, root, listing, &Serial)));

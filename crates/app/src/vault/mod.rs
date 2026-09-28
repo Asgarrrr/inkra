@@ -4,10 +4,14 @@
 use gpui::actions;
 
 mod events;
+mod gone;
 mod ops;
+mod reload;
+mod save;
 mod scans;
 mod store;
 mod tree_ops;
+mod watch;
 mod writer;
 
 #[cfg(test)]
@@ -17,7 +21,7 @@ mod tests;
 actions!(vault, [Save]);
 
 pub(crate) use events::{
-    ConflictPreserved, NoteClosed, NoteSaved, RenameFailed, SaveFailed, TrashFailed,
+    ConflictPreserved, GoneChanged, NoteClosed, NoteSaved, RenameFailed, SaveFailed, TrashFailed,
 };
 #[cfg(test)]
 pub(crate) use store::AUTOSAVE_DELAY;

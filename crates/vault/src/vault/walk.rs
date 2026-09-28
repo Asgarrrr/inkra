@@ -1,7 +1,8 @@
 //! Reading a vault's folders from disk (open-first spec, O3).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::future::poll_fn;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -18,6 +19,19 @@ pub struct Walk {
     pub read: Vec<RelPath>,
     /// Their children, absolute.
     pub found: Vec<DirEntry>,
+    pub reach: Reach,
+}
+
+/// What a walk answers for (watcher spec, F5).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// The folders it read, and no more.
+    #[default]
+    Partial,
+    /// Read from the root down, so an identity it did not find is gone.
+    Whole,
+    /// A folder `walk_changed` was asked to read failed, other than gone: a full scan retries it.
+    Incomplete,
 }
 
 pub type Job<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -140,7 +154,16 @@ impl Vault {
     pub async fn walk(fs: &dyn Fs, root: &Path, from: &RelPath, jobs: &dyn Jobs) -> Result<Walk> {
         let start = root.join(from.as_path());
         let folders = vec![(start.clone(), from.as_path().components().count())];
-        let queue = run(fs, root, Some(&start), folders, Walk::default(), jobs).await;
+        let reach = if *from == RelPath::root() {
+            Reach::Whole
+        } else {
+            Reach::Partial
+        };
+        let walk = Walk {
+            reach,
+            ..Walk::default()
+        };
+        let queue = run(fs, root, Some(&start), folders, walk, jobs).await;
         match queue.failed {
             Some(error) => Err(error),
             None => Ok(queue.walk),
@@ -149,20 +172,69 @@ impl Vault {
 
     /// Reads every folder `seed` found and did not read, and below them (open-first spec, O3).
     pub async fn walk_seeded(fs: &dyn Fs, root: &Path, seed: Walk, jobs: &dyn Jobs) -> Walk {
-        let folders = {
-            let read: HashSet<&Path> = seed.read.iter().map(RelPath::as_path).collect();
-            seed.found
-                .iter()
-                .filter(|child| child.kind == Kind::Dir)
-                .filter_map(|child| {
-                    let path = child.path.strip_prefix(root).ok()?;
-                    let depth = path.components().count();
-                    (!read.contains(path)).then(|| (child.path.clone(), depth))
-                })
-                .collect()
+        let folders = unread(root, &seed, |_| true);
+        // It reads below every folder the seed listed: a seed that read the root makes it whole.
+        let reach = if seed.read.contains(&RelPath::root()) {
+            Reach::Whole
+        } else {
+            Reach::Partial
         };
+        run(fs, root, None, folders, Walk { reach, ..seed }, jobs)
+            .await
+            .walk
+    }
+
+    /// Reads `folders` alone, then walks the folders in them this vault does not hold (watcher spec, F5).
+    pub async fn walk_changed(
+        &self,
+        fs: &dyn Fs,
+        folders: &BTreeSet<RelPath>,
+        jobs: &dyn Jobs,
+    ) -> Walk {
+        let root = self.root();
+        let mut seed = Walk::default();
+        let within = |folder: &&RelPath| folder.as_path().components().count() <= MAX_DEPTH;
+        for folder in folders.iter().filter(within) {
+            match fs.read_dir(&root.join(folder.as_path())).await {
+                Ok(children) => {
+                    seed.read.push(folder.clone());
+                    seed.found.extend(children);
+                }
+                // Gone, or replaced by a file: its parent is pending too, and reading it drops the folder.
+                Err(VaultError::Io { source, .. })
+                    if matches!(
+                        source.kind(),
+                        ErrorKind::NotFound | ErrorKind::NotADirectory
+                    ) => {}
+                // Its entries stay until the full scan this asks for.
+                Err(_) => seed.reach = Reach::Incomplete,
+            }
+        }
+        let folders = unread(root, &seed, |child| !self.holds(child));
         run(fs, root, None, folders, seed, jobs).await.walk
     }
+
+    /// The same folder at the same path: one moved or replaced there is new.
+    fn holds(&self, folder: &DirEntry) -> bool {
+        let path = folder.path.strip_prefix(self.root());
+        self.id_for(folder.identity)
+            .and_then(|id| self.entry(id))
+            .is_some_and(|entry| path == Ok(entry.path.as_path()))
+    }
+}
+
+/// The folders `seed` found and did not read that `descend` keeps, with their depth.
+fn unread(root: &Path, seed: &Walk, descend: impl Fn(&DirEntry) -> bool) -> Vec<(PathBuf, usize)> {
+    let read: HashSet<&Path> = seed.read.iter().map(RelPath::as_path).collect();
+    seed.found
+        .iter()
+        .filter(|child| child.kind == Kind::Dir && descend(child))
+        .filter_map(|child| {
+            let path = child.path.strip_prefix(root).ok()?;
+            let depth = path.components().count();
+            (!read.contains(path)).then(|| (child.path.clone(), depth))
+        })
+        .collect()
 }
 
 async fn run(

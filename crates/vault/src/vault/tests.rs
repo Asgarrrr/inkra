@@ -60,19 +60,65 @@ fn a_rename_keeps_the_entry_id() {
     assert_eq!(entry.path.display_name(), "b");
 }
 
+/// The note's inode is found elsewhere, so the file at its old path is another (watcher spec, F5).
 #[test]
-fn a_file_recreated_at_the_same_path_gets_a_new_id() {
+fn a_new_file_where_a_note_was_renamed_away_gets_a_new_id() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "first");
     let mut vault = scan(&fs);
     let old = vault.entries().next().expect("one entry").id;
 
-    fs.remove(Path::new("/vault/a.md"));
+    block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).expect("rename");
     fs.insert_file("/vault/a.md", "second");
     block_on(vault.rescan(&fs)).expect("rescan");
 
-    let new = vault.entries().next().expect("one entry").id;
-    assert_ne!(old, new, "a different file must not inherit the id");
+    assert_eq!(
+        vault.entry(old).map(|e| e.path.display_name()).as_deref(),
+        Some("b")
+    );
+    let new = vault
+        .entries()
+        .find(|e| e.path.display_name() == "a")
+        .expect("a")
+        .id;
+    assert_ne!(new, old, "a different file must not inherit the id");
+}
+
+/// A kind changed at a path is another thing, whatever became of the old inode.
+#[test]
+fn a_folder_where_a_note_was_gets_a_new_id() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "note");
+    let mut vault = scan(&fs);
+    let old = vault.entries().next().expect("one entry").id;
+
+    fs.remove(Path::new("/vault/a.md"));
+    fs.insert_dir("/vault/a.md");
+    block_on(vault.rescan(&fs)).expect("rescan");
+
+    let entry = vault.entries().next().expect("one entry");
+    assert_eq!(entry.kind, Kind::Dir);
+    assert_ne!(entry.id, old);
+}
+
+/// A hard link is an inode the vault knows: it keeps that inode's id, not the path's.
+#[test]
+fn a_hard_link_replacing_a_note_takes_its_inodes_id() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "a");
+    fs.insert_file("/vault/b.md", "b");
+    let mut vault = scan(&fs);
+    let b = vault.entries().nth(1).expect("b").id;
+
+    fs.remove(Path::new("/vault/a.md"));
+    fs.hard_link(Path::new("/vault/b.md"), "/vault/a.md");
+    block_on(vault.rescan(&fs)).expect("rescan");
+
+    let after: Vec<_> = vault
+        .entries()
+        .map(|e| (e.id, e.path.display_name()))
+        .collect();
+    assert_eq!(after, [(b, "a".to_owned())], "the links collapse to a.md");
 }
 
 #[test]
@@ -113,8 +159,9 @@ fn a_save_keeps_the_entry_id_across_a_rescan() {
     );
 }
 
+/// Vim, VS Code and `git checkout` rename a new file over the note (watcher spec, F5).
 #[test]
-fn a_save_without_reidentify_loses_the_entry_id() {
+fn an_external_atomic_save_keeps_the_entry_id() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "before");
     let mut vault = scan(&fs);
@@ -123,10 +170,12 @@ fn a_save_without_reidentify_loses_the_entry_id() {
     let stamp = block_on(fs.load(Path::new("/vault/a.md")))
         .expect("load")
         .stamp;
-    block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
+    let saved = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
     block_on(vault.rescan(&fs)).expect("rescan");
 
-    assert!(vault.entry(id).is_none(), "the old id names nothing");
+    let entries: Vec<_> = vault.entries().map(|e| (e.id, e.mtime)).collect();
+    assert_eq!(entries, [(id, saved.stamp.mtime)]);
+    assert_eq!(vault.id_for(saved.identity), Some(id));
 }
 
 #[test]
@@ -140,14 +189,15 @@ fn reidentify_reclaims_the_id_for_the_inode_our_save_produced() {
         .expect("load")
         .stamp;
     let saved = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
-    // The scan read the saved file before the re-key reached the vault, so it minted a fresh id.
+    block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).expect("rename");
+    // The scan read the saved file, moved, before the re-key reached the vault: a fresh id.
     block_on(vault.rescan(&fs)).expect("rescan");
     assert!(vault.entry(ours).is_none());
     assert!(vault.reidentify(ours, saved.identity, saved.stamp.mtime));
 
     assert_eq!(
         vault.entry(ours).map(|e| e.path.display_name()).as_deref(),
-        Some("a")
+        Some("b")
     );
     assert_eq!(
         vault.entries().count(),
@@ -185,74 +235,14 @@ fn a_scan_between_a_save_and_its_re_key_keeps_the_note_for_the_next_save() {
     let stamp = block_on(fs.load(path)).expect("load").stamp;
     let first = block_on(fs.save(path, "two", stamp)).expect("save");
     block_on(vault.rescan(&fs)).expect("rescan");
-    assert!(vault.reidentify(ours, first.identity, first.stamp.mtime));
+    // The scan gave the saved inode the path's id already: no id moves.
+    assert!(!vault.reidentify(ours, first.identity, first.stamp.mtime));
 
     let second = block_on(fs.save(path, "three", first.stamp)).expect("the next save");
     assert!(!vault.reidentify(ours, second.identity, second.stamp.mtime));
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(vault.absolute(ours).as_deref(), Some(path));
-}
-
-/// Two saves during one held scan: the walk read the first, and the swap replays both re-keys.
-#[test]
-fn replayed_re_keys_leave_the_entry_at_the_last_saves_mtime() {
-    let fs = MemFs::new();
-    fs.insert_file("/vault/a.md", "one");
-    let mut vault = scan(&fs);
-    let a = vault.entries().next().expect("one entry").id;
-    let path = Path::new("/vault/a.md");
-
-    let stamp = block_on(fs.load(path)).expect("load").stamp;
-    let first = block_on(fs.save(path, "two", stamp)).expect("save 1");
-    let mid_walk = block_on(Vault::walk(
-        &fs,
-        Path::new("/vault"),
-        &RelPath::root(),
-        &Serial,
-    ))
-    .expect("the scan's walk");
-    let second = block_on(fs.save(path, "three", first.stamp)).expect("save 2, during the walk");
-
-    vault = vault.applied(mid_walk);
-    assert!(vault.reidentify(a, first.identity, first.stamp.mtime));
-    assert!(!vault.reidentify(a, second.identity, second.stamp.mtime));
-
-    assert_eq!(vault.id_for(second.identity), Some(a));
-    let disk = block_on(fs.load(path)).expect("load").stamp.mtime;
-    assert_eq!(vault.entry(a).expect("kept").mtime, disk);
-}
-
-/// A save during a held scan, then a write outside the app to the saved inode, which the walk reads.
-#[test]
-fn a_replayed_re_key_keeps_the_mtime_the_walk_read() {
-    let fs = MemFs::new();
-    fs.insert_file("/vault/a.md", "one");
-    let mut vault = scan(&fs);
-    let a = vault.entries().next().expect("one entry").id;
-    let path = Path::new("/vault/a.md");
-
-    let stamp = block_on(fs.load(path)).expect("load").stamp;
-    let saved = block_on(fs.save(path, "two", stamp)).expect("save, during the scan");
-    fs.insert_file(path, "outside");
-    let walk = block_on(Vault::walk(
-        &fs,
-        Path::new("/vault"),
-        &RelPath::root(),
-        &Serial,
-    ))
-    .expect("the scan's walk");
-
-    vault = vault.applied(walk);
-    assert!(vault.reidentify(a, saved.identity, saved.stamp.mtime));
-
-    let disk = block_on(fs.load(path)).expect("load");
-    assert_eq!(
-        disk.identity, saved.identity,
-        "an in-place write keeps the inode"
-    );
-    assert_eq!(vault.id_for(saved.identity), Some(a));
-    assert_eq!(vault.entry(a).expect("kept").mtime, disk.stamp.mtime);
 }
 
 /// `RealFs` writes a hard-linked or symlinked note in place: the save keeps the inode a scan read.

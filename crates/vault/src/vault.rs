@@ -8,9 +8,11 @@ use std::sync::Arc;
 use crate::RelPath;
 use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
 
+mod identity;
+mod reclaim;
 mod walk;
 
-pub use walk::{Job, Jobs, Serial, Walk};
+pub use walk::{Job, Jobs, Reach, Serial, Walk};
 
 /// Guards against a pathological tree; no real vault approaches it.
 const MAX_DEPTH: usize = 64;
@@ -23,7 +25,7 @@ impl EntryId {
     pub const DETACHED: Self = Self(0);
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
@@ -33,12 +35,13 @@ pub struct Entry {
 }
 
 /// Cloning is an `Arc` bump: a scan applies onto a clone off the foreground (open-first spec, O1).
-#[derive(Clone)]
+/// Equality compares every entry and identity: off the foreground at 50,000 notes.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Vault {
     state: Arc<State>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct State {
     root: PathBuf,
     entries: Arc<[Entry]>,
@@ -48,6 +51,8 @@ struct State {
     next_id: u32,
     /// A full scan has applied; never turns back.
     scanned: bool,
+    /// A `Reach::Whole` walk has applied; never turns back. Unlike `scanned`, O8 does not set it.
+    read_whole: bool,
 }
 
 impl Vault {
@@ -62,6 +67,7 @@ impl Vault {
                 by_id: HashMap::new(),
                 next_id: 1,
                 scanned: false,
+                read_whole: false,
             }),
         }
     }
@@ -79,6 +85,12 @@ impl Vault {
     #[must_use]
     pub fn is_scanned(&self) -> bool {
         self.state.scanned
+    }
+
+    /// Whether some walk has read every folder: until then, a scoped read has no base (watcher spec, F4).
+    #[must_use]
+    pub fn has_read_whole(&self) -> bool {
+        self.state.read_whole
     }
 
     pub fn mark_scanned(&mut self) {
@@ -144,6 +156,22 @@ impl Vault {
         live.is_none()
     }
 
+    /// `reidentify` at a scan's swap. `in_place`: the live vault mapped `identity` to `id` when the re-key was queued.
+    #[must_use]
+    pub fn replay_reidentify(
+        &mut self,
+        id: EntryId,
+        identity: FileIdentity,
+        mtime: Mtime,
+        in_place: bool,
+    ) -> bool {
+        // A moved inode the walk mapped to `id` was read at or after the save; a kept one maybe before (watcher spec, F5).
+        if !in_place && self.id_for(identity) == Some(id) {
+            return false;
+        }
+        self.reidentify(id, identity, mtime)
+    }
+
     /// # Errors
     ///
     /// When the root cannot be read.
@@ -170,6 +198,7 @@ impl Vault {
     #[must_use]
     pub fn applied(&self, walk: Walk) -> Self {
         let state = &self.state;
+        let whole = walk.reach == Reach::Whole;
         let read: HashSet<&Path> = walk.read.iter().map(RelPath::as_path).collect();
         let mut rows: Vec<(Entry, FileIdentity)> = walk
             .found
@@ -186,8 +215,7 @@ impl Vault {
             })
             .collect();
         // A file the walk found claims its inode from an entry kept under a folder it did not read.
-        let mut unclaimed: HashSet<FileIdentity> =
-            rows.iter().map(|(_, identity)| *identity).collect();
+        let unclaimed: HashSet<FileIdentity> = rows.iter().map(|(_, identity)| *identity).collect();
         for (identity, id) in &state.by_identity {
             if unclaimed.contains(identity) {
                 continue;
@@ -207,24 +235,7 @@ impl Vault {
         }
         // Path order, not the walk's: a parallel walk reads folders in no fixed order.
         let mut rows = sorted(rows);
-
-        let mut next_id = state.next_id;
-        // A found row holds `DETACHED` until minted; a kept entry never does.
-        rows.retain_mut(|(entry, identity)| {
-            if entry.id != EntryId::DETACHED {
-                return true;
-            }
-            // Hard links collapse to the path that sorts first.
-            if !unclaimed.remove(identity) {
-                return false;
-            }
-            entry.id = state.by_identity.get(identity).copied().unwrap_or_else(|| {
-                let id = EntryId(next_id);
-                next_id += 1;
-                id
-            });
-            true
-        });
+        let next_id = self.mint(&mut rows, unclaimed);
 
         // A folder sorts before its subtree, so one pass knows every surviving folder.
         let keep: Vec<bool> = {
@@ -250,17 +261,15 @@ impl Vault {
                 entries.push(entry);
             }
         }
-        // A walk from the root answers for every identity: what it keeps unread stays an entry.
-        if !read.contains(Path::new("")) {
-            for (identity, id) in &state.by_identity {
-                by_identity.entry(*identity).or_insert(*id);
-            }
-        }
-        let by_id = entries
+        let by_id: HashMap<EntryId, usize> = entries
             .iter()
             .enumerate()
             .map(|(at, entry)| (entry.id, at))
             .collect();
+        // A whole walk answers for every identity: what it keeps unread stays an entry.
+        if !whole {
+            self.carry_over(&mut by_identity, &by_id);
+        }
         Self {
             state: Arc::new(State {
                 root: state.root.clone(),
@@ -269,6 +278,7 @@ impl Vault {
                 by_id,
                 next_id,
                 scanned: state.scanned,
+                read_whole: state.read_whole || whole,
             }),
         }
     }
@@ -325,21 +335,33 @@ fn sorted(rows: Vec<(Entry, FileIdentity)>) -> Vec<(Entry, FileIdentity)> {
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod test_helpers;
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod tests;
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod walk_tests;
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod parallel_tests;
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::expect_used))]
+#[allow(clippy::expect_used)]
 mod oracle_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod changed_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod replay_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod reclaim_tests;

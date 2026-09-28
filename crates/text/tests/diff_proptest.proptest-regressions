@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+# The seeds below came from the failing-first stub, whose `diff` returned no hunk.
+cc a4fc4eef6fe37b9350415d0322f0300374a48c67c8533b5ae0bf109b3f514d18 # shrinks to (old, new) = ("a", "")
+cc abdf9ac76b1953ea3e9f36c72cc0fd1ff67346ae3b7fb88c158efb15e279100b # shrinks to (old, new) = ("aa", "")
+# This one came from the tokenizer that split a grapheme.
+cc 420e78a2ceebc8dbbab00f50e1f5fcda826b5b9cb86c764d94a53ae09dec8018 # shrinks to (old, new) = ("e\u{300}éa", "ée\u{300}")

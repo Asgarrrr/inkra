@@ -3,6 +3,8 @@
 
 mod errors;
 mod faults;
+mod fixture;
+mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
@@ -14,6 +16,8 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 
 use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp};
+use crate::temp::temp_path;
+use crate::watch::Watch;
 
 use errors::{io, stamp_of};
 pub use faults::Gate;
@@ -42,6 +46,7 @@ struct State {
     blocked_after_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Listings started per path, found or not.
     read_dirs: BTreeMap<PathBuf, usize>,
+    watches: Vec<watch::Watching>,
 }
 
 impl State {
@@ -49,6 +54,9 @@ impl State {
     fn readable_dir(&self, path: &Path) -> Result<()> {
         if self.unreadable.as_deref() == Some(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
+        }
+        if self.files.contains_key(path) {
+            return Err(io(path, ErrorKind::NotADirectory));
         }
         if !self.dirs.contains_key(path) {
             return Err(io(path, ErrorKind::NotFound));
@@ -95,22 +103,6 @@ impl MemFs {
         Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 + state.clock))
     }
 
-    /// Creates every parent directory. Reuses the identity if the path
-    /// already exists, so writing to a file does not change what it is.
-    pub fn insert_file(&self, path: impl Into<PathBuf>, text: impl Into<String>) {
-        Self::put_file(&mut self.state(), path.into(), text.into(), None);
-    }
-
-    /// As `insert_file`, under a given identity: a real filesystem reuses a freed inode.
-    pub fn insert_file_with_identity(
-        &self,
-        path: impl Into<PathBuf>,
-        text: impl Into<String>,
-        identity: FileIdentity,
-    ) {
-        Self::put_file(&mut self.state(), path.into(), text.into(), Some(identity));
-    }
-
     /// `None` keeps the path's identity, or mints one for a new path.
     fn put_file(state: &mut State, path: PathBuf, text: String, identity: Option<FileIdentity>) {
         Self::insert_parents(state, &path);
@@ -119,16 +111,6 @@ impl MemFs {
             .unwrap_or_else(|| Self::fresh_identity(state));
         let mtime = Self::tick(state);
         state.files.insert(path, (text, mtime, identity));
-    }
-
-    /// Creates every parent directory, as `insert_file` does.
-    pub fn insert_dir(&self, path: impl Into<PathBuf>) {
-        let path = path.into();
-        let mut state = self.state();
-        Self::insert_parents(&mut state, &path);
-        let identity = Self::fresh_identity(&mut state);
-        let mtime = Self::tick(&mut state);
-        state.dirs.insert(path, (mtime, identity));
     }
 
     fn insert_parents(state: &mut State, path: &Path) {
@@ -140,53 +122,9 @@ impl MemFs {
             let identity = Self::fresh_identity(state);
             let mtime = Self::tick(state);
             state.dirs.insert(dir.to_path_buf(), (mtime, identity));
+            state.changed(dir);
             parent = dir.parent();
         }
-    }
-
-    pub fn remove(&self, path: &Path) {
-        let mut state = self.state();
-        state.files.remove(path);
-        state.dirs.remove(path);
-    }
-
-    pub fn hard_link(&self, from: &Path, to: impl Into<PathBuf>) {
-        let mut state = self.state();
-        if let Some(entry) = state.files.get(from).cloned() {
-            state.files.insert(to.into(), entry);
-        }
-    }
-
-    #[must_use]
-    pub fn trashed(&self, path: &Path) -> Option<String> {
-        self.state()
-            .trashed
-            .get(path)
-            .map(|(text, _, _)| text.clone())
-    }
-
-    /// How many loads of `path` have started.
-    #[must_use]
-    pub fn loads(&self, path: &Path) -> usize {
-        self.state().loads.get(path).copied().unwrap_or_default()
-    }
-
-    /// How many listings of `path` have started.
-    #[must_use]
-    pub fn read_dirs(&self, path: &Path) -> usize {
-        self.state()
-            .read_dirs
-            .get(path)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    #[must_use]
-    pub fn read_to_string(&self, path: &Path) -> Option<String> {
-        self.state()
-            .files
-            .get(path)
-            .map(|(text, _, _)| text.clone())
     }
 }
 
@@ -265,8 +203,18 @@ impl Fs for MemFs {
         if let Some(wait) = blocked {
             let _ = wait.await;
         }
-        if self.state().unwritable.contains(path) {
-            return Err(io(path, ErrorKind::PermissionDenied));
+        {
+            let state = self.state();
+            if state.unwritable.contains(path) {
+                return Err(io(path, ErrorKind::PermissionDenied));
+            }
+            // As `RealFs`: the temporary file cannot be created in a missing folder.
+            if path
+                .parent()
+                .is_some_and(|parent| !state.dirs.contains_key(parent))
+            {
+                return Err(io(path, ErrorKind::NotFound));
+            }
         }
 
         // Guard scoped to this block: `state()`'s mutex is not reentrant.
@@ -286,7 +234,7 @@ impl Fs for MemFs {
             self.insert_file(destination, bytes);
         }
 
-        self.insert_file(path.to_path_buf(), text);
+        Self::put_file(&mut self.state(), path.to_path_buf(), text.to_owned(), None);
 
         let (stamp, identity, blocked) = {
             let mut state = self.state();
@@ -299,6 +247,9 @@ impl Fs for MemFs {
             *stored_mtime = mtime;
             *stored_identity = identity;
             let stamp = stamp_of(stored_text, mtime);
+            // As `RealFs::save`: a temporary file, renamed onto the note.
+            state.changed(&temp_path(path));
+            state.changed(path);
             (stamp, identity, state.blocked_after_saves.remove(path))
         };
         if let Some(wait) = blocked {
@@ -309,6 +260,11 @@ impl Fs for MemFs {
             identity,
             preserved: preserved.map(|(destination, _)| destination),
         })
+    }
+
+    async fn create_parents(&self, path: &Path) -> Result<()> {
+        Self::insert_parents(&mut self.state(), path);
+        Ok(())
     }
 
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
@@ -332,6 +288,7 @@ impl Fs for MemFs {
                 state.dirs.insert(path.to_path_buf(), (mtime, identity));
             }
         }
+        state.changed(path);
         Ok(identity)
     }
 
@@ -354,6 +311,8 @@ impl Fs for MemFs {
 
         if let Some(entry) = state.files.remove(from) {
             state.files.insert(to.to_path_buf(), entry);
+            state.changed(from);
+            state.changed(to);
             return Ok(());
         }
         let Some(entry) = state.dirs.remove(from) else {
@@ -391,6 +350,9 @@ impl Fs for MemFs {
                 state.dirs.insert(destination, entry);
             }
         }
+        // As FSEvents: the two names, not the subtree that moved with them.
+        state.changed(from);
+        state.changed(to);
         Ok(())
     }
 
@@ -403,10 +365,19 @@ impl Fs for MemFs {
             return Err(io(path, ErrorKind::NotFound));
         };
         state.trashed.insert(path.to_path_buf(), entry);
+        state.changed(path);
         Ok(())
+    }
+
+    fn watch(&self, root: &Path) -> Result<Watch> {
+        Ok(self.start_watch(root))
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod watch_tests;

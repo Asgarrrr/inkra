@@ -1,6 +1,8 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
+mod gone;
 mod quick_open;
+mod reload;
 
 use gpui::{WindowHandle, point, px};
 
@@ -172,6 +174,16 @@ const CATALOGUE: &[Scene] = &[
         name: "sidebar-root-only",
         shows: "the first frames of a launch: the root level, folders closed, while the rest is scanned",
         open: sidebar_root_only,
+    },
+    Scene {
+        name: "reload-scroll",
+        shows: "30 lines inserted on disk above the viewport: `line 120` stays at the top, the caret on `line 123`",
+        open: reload::scroll,
+    },
+    Scene {
+        name: "gone-from-disk",
+        shows: "the note showing deleted on disk: one line over the editor says so, its text kept, gone from the tree",
+        open: gone::banner,
     },
     Scene {
         name: "backlinks",

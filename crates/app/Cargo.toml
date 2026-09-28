@@ -46,7 +46,7 @@ gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
 ] }
 # `MemFs` — tests must never reach the real filesystem.
 inkra-vault = { workspace = true, features = ["test-support"] }
-# For the scroll geometry only, which is pixel arithmetic and needs no window.
+# For the scroll geometry and the index's snapshot diff: pure logic, no window.
 proptest = { workspace = true }
 
 [lints]

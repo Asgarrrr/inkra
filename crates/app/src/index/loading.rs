@@ -28,8 +28,8 @@ pub(super) struct Loading {
 pub(super) struct Landed {
     pub(super) id: EntryId,
     pub(super) seq: u64,
-    /// The generation `index` held when the load started.
-    pub(super) built: Option<u64>,
+    /// `note_sets` when the load started.
+    pub(super) note_sets: u64,
     pub(super) loaded: inkra_vault::Result<NoteContent>,
 }
 
@@ -47,7 +47,7 @@ impl IndexSync {
             });
             let fs = Arc::clone(&self.fs);
             let landed = self.landed.clone();
-            let built = self.built;
+            let note_sets = self.note_sets;
             // Low, as Zed's scanner: a query's scan goes first.
             cx.background_executor()
                 .spawn_with_priority(Priority::Low, async move {
@@ -59,7 +59,7 @@ impl IndexSync {
                     let _ = landed.unbounded_send(Landed {
                         id,
                         seq,
-                        built,
+                        note_sets,
                         loaded,
                     });
                 })
@@ -73,10 +73,10 @@ impl IndexSync {
         cx: &mut AsyncApp,
     ) {
         while let Some(first) = arrivals.next().await {
-            let applied = Self::timed_turn(&this, cx, |this, cx| {
+            let alive = Self::timed_turn(&this, cx, |this, cx| {
                 this.apply_landed(first, &mut arrivals, cx);
             });
-            if applied.is_none() {
+            if alive.is_none() {
                 return;
             }
             // Loads that landed meanwhile would otherwise keep this turn going past its budget.
@@ -100,7 +100,7 @@ impl IndexSync {
         while let Some(Landed {
             id,
             seq,
-            built,
+            note_sets,
             loaded,
         }) = next
         {
@@ -113,7 +113,7 @@ impl IndexSync {
             }
             match loaded {
                 Ok(content) => self.apply(id, seq, content, cx),
-                Err(_) => self.failed(id, seq, built, cx),
+                Err(_) => self.failed(id, seq, note_sets, cx),
             }
             next = if started.elapsed() < budget {
                 arrivals.try_recv().ok()
@@ -130,15 +130,15 @@ impl IndexSync {
     }
 
     /// A build since the load started may have moved the note; a rename keeps its mtime, so no rescan reloads it.
-    fn failed(&mut self, id: EntryId, seq: u64, built: Option<u64>, cx: &mut Context<Self>) {
+    fn failed(&mut self, id: EntryId, seq: u64, note_sets: u64, cx: &mut Context<Self>) {
         let present = self
             .vault
             .as_ref()
             .is_some_and(|vault| vault.read(cx).entry(id).is_some());
-        if built != self.built && present && self.is_latest(id, seq) {
+        if note_sets != self.note_sets && present && self.is_latest(id, seq) {
             self.queue_load(id);
         } else {
-            // `forget` drops the indexed mtime, so the next build reloads the note.
+            // `forget` records the note in `forgotten`, so the next change of either kind reloads it.
             self.forget(id, seq, cx);
         }
     }

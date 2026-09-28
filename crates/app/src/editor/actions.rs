@@ -3,7 +3,8 @@ use std::time::Instant;
 use gpui::{ClipboardItem, Context, Window, actions};
 use inkra_editor::{Copied, LogicalMovement};
 
-use super::{EditorView, LinkFollowed, RowEdge, Vertical};
+use super::motion::{RowEdge, Vertical};
+use super::{EditorView, LinkFollowed};
 
 actions!(
     editor,

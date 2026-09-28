@@ -181,9 +181,10 @@ async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
     cx.run_until_parked();
     drop(notes.update(cx, NoteStore::rescan));
     cx.run_until_parked();
-    assert!(
-        ids(&notes, cx).iter().all(|(_, id)| *id != a),
-        "the scan minted the saved file a fresh id"
+    assert_eq!(
+        ids(&notes, cx),
+        [("a.md".to_owned(), a)],
+        "the saved file took the note's id at its path (watcher spec, F5)"
     );
     gate.release();
     cx.run_until_parked();
@@ -192,8 +193,19 @@ async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
     assert_eq!(
         named(&links, cx, "a"),
         [a],
-        "the reclaim notifies: quick open lists the note's id"
+        "quick open lists the note's id"
     );
+    let disk = fs
+        .load(Path::new("/vault/a.md"))
+        .await
+        .expect("the saved note loads")
+        .stamp
+        .mtime;
+    let mtime = notes.read_with(cx, |notes, cx| {
+        let vault = notes.vault().expect("a vault").read(cx);
+        vault.entry(a).map(|entry| entry.mtime)
+    });
+    assert_eq!(mtime, Some(disk));
     edit(&buffer, cx, "2");
     cx.executor().advance_clock(AUTOSAVE_DELAY);
     cx.run_until_parked();
@@ -201,6 +213,40 @@ async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
         fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
         Some("21alpha")
     );
+}
+
+/// `RealFs` saves a hard-linked note in place: the held walk read its inode before the save.
+#[gpui::test]
+async fn an_in_place_save_re_keyed_during_a_held_scan_keeps_the_saves_mtime(
+    cx: &mut TestAppContext,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_dir("/vault/f");
+    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let a = entry_id(&notes, cx, "a");
+
+    // The walk reads the root, then waits on `f`.
+    let gate = fs.block_read_dir("/vault/f");
+    drop(notes.update(cx, NoteStore::rescan));
+    cx.run_until_parked();
+    // `MemFs::save` always moves the inode: the in-place write is `RealFs`'s for a hard link.
+    fs.insert_file("/vault/a.md", "beta");
+    let saved = fs
+        .load(Path::new("/vault/a.md"))
+        .await
+        .expect("the saved note loads");
+    notes.update(cx, |notes, cx| {
+        notes.reidentify(a, saved.identity, saved.stamp.mtime, cx);
+    });
+    gate.release();
+    cx.run_until_parked();
+
+    let mtime = notes.read_with(cx, |notes, cx| {
+        let vault = notes.vault().expect("a vault").read(cx);
+        vault.entry(a).map(|entry| entry.mtime)
+    });
+    assert_eq!(mtime, Some(saved.stamp.mtime));
 }
 
 #[gpui::test]

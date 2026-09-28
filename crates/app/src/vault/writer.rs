@@ -21,6 +21,16 @@ impl Writer {
             }),
         }
     }
+
+    /// The stamp the next save hands `Fs::save`: that of the file the buffer last matched.
+    pub(super) async fn expected(&self) -> Stamp {
+        self.state.lock().await.stamp
+    }
+
+    /// After a reload applied, so the next save expects the file it loaded (watcher spec, F8).
+    pub(super) async fn adopt(&self, stamp: Stamp) {
+        self.state.lock().await.stamp = stamp;
+    }
 }
 
 /// Lives here, not beside `saved_version` on `OpenNote`: a second write
@@ -31,6 +41,12 @@ struct WriterState {
     stamp: Stamp,
 }
 
+/// Only a gone note recreates its folder: a present note's folder that left fails the save.
+pub(super) enum Folder {
+    MustExist,
+    Create,
+}
+
 /// `None` means overtaken, not failed — the caller must not report it and
 /// must not advance `saved_version`.
 pub(super) async fn write_through(
@@ -39,10 +55,16 @@ pub(super) async fn write_through(
     path: PathBuf,
     text: Arc<str>,
     seq: u64,
+    folder: Folder,
 ) -> Option<inkra_vault::Result<Saved>> {
     let mut state = writer.state.lock().await;
     if seq < state.written {
         return None;
+    }
+    if matches!(folder, Folder::Create)
+        && let Err(error) = fs.create_parents(&path).await
+    {
+        return Some(Err(error));
     }
     let result = fs.save(&path, &text, state.stamp).await;
     // Only a landed write advances the mark, or a failure corrupts the

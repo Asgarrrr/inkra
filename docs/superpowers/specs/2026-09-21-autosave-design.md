@@ -198,9 +198,11 @@ observers: HashMap<EntryId, Subscription>,
 ```
 
 **Scheduling.** `open_note` and `adopt` register `cx.observe(&buffer)`. The
-callback does one thing: `schedule_save(id, AUTOSAVE_DELAY, cx)`. It must not
-touch the buffer — an observer callback that leases the buffer it observes
-panics (`gpui/app/entity_map.rs:231`).
+callback does one thing: `schedule_save(id, AUTOSAVE_DELAY, cx)` when the note
+is dirty (`is_dirty`). A clean notify, such as a reload (watcher spec, F8),
+schedules nothing. It reads the buffer's version but must not lease the
+buffer — an observer callback that leases the buffer it observes panics
+(`gpui/app/entity_map.rs:231`).
 
 `schedule_save(id, delay)`:
 

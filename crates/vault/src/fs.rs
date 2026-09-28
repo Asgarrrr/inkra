@@ -7,6 +7,8 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
+use crate::watch::Watch;
+
 /// Paired, not inode alone: an inode is unique only within one filesystem, and
 /// a vault root can span a mount point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,6 +69,9 @@ pub enum VaultError {
 
 pub type Result<T> = std::result::Result<T, VaultError>;
 
+/// Dropping it stops the watch and ends its stream.
+pub trait Watcher: Send + Sync {}
+
 #[async_trait]
 pub trait Fs: Send + Sync {
     /// Direct children only, filtering out dotfiles and symlinks itself so
@@ -81,7 +86,13 @@ pub trait Fs: Send + Sync {
 
     /// Replaces the file rather than truncating it. If `expected` disagrees
     /// with what's on disk, preserves the current bytes before overwriting.
+    /// Fails when `path`'s folder is missing.
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved>;
+
+    /// Creates every missing folder above `path`, as `mkdir -p`; succeeds when they exist. Not
+    /// part of `save`: only the caller knows the folder should come back (a note gone from disk),
+    /// and a present note whose folder moved away must fail, not be written beside its copy.
+    async fn create_parents(&self, path: &Path) -> Result<()>;
 
     /// Creates an empty note or directory; fails if `path` already exists.
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
@@ -92,6 +103,13 @@ pub trait Fs: Send + Sync {
 
     /// Moves a note to the platform trash. Notes only; directories deferred.
     async fn trash(&self, path: &Path) -> Result<()>;
+
+    /// Watches `root` and everything below it; forwards every event, filtering none.
+    ///
+    /// # Errors
+    ///
+    /// When `root` cannot be resolved or the platform refuses the watch.
+    fn watch(&self, root: &Path) -> Result<Watch>;
 }
 
 /// CRLF and lone CR to LF. `Buffer` assumes LF. Public because both
