@@ -119,6 +119,8 @@ Read the spec before changing its area:
   watch, scoped rescans, reload, gone notes
 - `docs/superpowers/specs/2026-09-27-coalesced-reconcile-design.md` — `IndexSync`
   builds, mtime fast path
+- `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
+  walk: skipped subtrees, note runs, rows built when drawn
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

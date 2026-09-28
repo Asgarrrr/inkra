@@ -63,13 +63,14 @@ impl Sidebar {
         let Some(id) = self.selected else {
             return;
         };
-        let Some(row) = self.visible.iter().find(|row| row.id == id) else {
+        let Some(at) = self.visible.index_of(id) else {
             return;
         };
         // Folders are not deletable yet: one gesture would take every note inside.
-        if row.kind == Kind::Dir {
+        if self.visible.entry(at).kind == Kind::Dir {
             return;
         }
+        let row = self.visible.row(at);
 
         let message = format!("Move \u{201c}{}\u{201d} to the Trash?", row.name);
         let detail = self
@@ -170,9 +171,9 @@ impl Sidebar {
             return None;
         }
         let id = self.selected?;
-        let at = self.index_of(id)?;
-        let row = self.visible[at].clone();
-        let parent = self.parent_of(&row);
+        let at = self.visible.index_of(id)?;
+        let row = self.visible.row(at);
+        let parent = self.visible.parent_of(at);
         Some(self.open_edit(Some(id), (parent, at, row.depth), row.kind, &row.name, cx))
     }
 
@@ -180,17 +181,18 @@ impl Sidebar {
         &mut self,
         cx: &mut Context<Self>,
     ) -> (Option<EntryId>, usize, usize) {
-        let Some(selected) = self.selected.and_then(|id| self.index_of(id)) else {
+        let Some(selected) = self.selected.and_then(|id| self.visible.index_of(id)) else {
             return (None, self.visible.len(), 0);
         };
-        let row = self.visible[selected].clone();
-        if row.kind == Kind::Dir {
-            if !self.expanded.contains(&row.id) {
-                self.toggle(row.id, cx);
+        let entry = self.visible.entry(selected);
+        let (id, depth) = (entry.id, entry.path.depth());
+        if entry.kind == Kind::Dir {
+            if !self.expanded.contains(&id) {
+                self.toggle(id, cx);
             }
-            return (Some(row.id), selected + 1, row.depth + 1);
+            return (Some(id), selected + 1, depth + 1);
         }
-        (self.parent_of(&row), selected + 1, row.depth)
+        (self.visible.parent_of(selected), selected + 1, depth)
     }
 
     /// A refused name leaves the field open with the reason under it.

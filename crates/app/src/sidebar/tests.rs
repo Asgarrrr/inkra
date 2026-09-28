@@ -58,16 +58,22 @@ impl Sidebar {
         self.selected
     }
 
+    fn rows(&self) -> Vec<Row> {
+        (0..self.visible.len())
+            .map(|ix| self.visible.row(ix))
+            .collect()
+    }
+
     #[cfg(test)]
     pub(crate) fn row_names(&self) -> Vec<String> {
-        self.visible.iter().map(|row| row.name.clone()).collect()
+        self.rows().into_iter().map(|row| row.name).collect()
     }
 
     #[cfg(test)]
     pub(crate) fn toggle_named(&mut self, name: &str, cx: &mut Context<Self>) {
         let id = self
-            .visible
-            .iter()
+            .rows()
+            .into_iter()
             .find(|row| row.name == name)
             .map(|row| row.id)
             .expect("the row is visible");
@@ -235,7 +241,7 @@ fn watch(
 
 /// Trailing `/` on directories: `Projects` and `Projects.md` are otherwise indistinguishable.
 fn labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
-    sidebar.update(cx, |sidebar, _| sidebar.visible.iter().map(label).collect())
+    sidebar.update(cx, |sidebar, _| sidebar.rows().iter().map(label).collect())
 }
 
 fn label(row: &Row) -> String {
@@ -247,18 +253,20 @@ fn label(row: &Row) -> String {
 
 fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, cx| {
-        let rows = sidebar.visible.clone();
-        rows.iter().map(|row| sidebar.row_label(row, cx)).collect()
+        sidebar
+            .rows()
+            .iter()
+            .map(|row| sidebar.row_label(row, cx))
+            .collect()
     })
 }
 
 fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row {
     sidebar.update(cx, |sidebar, _| {
         sidebar
-            .visible
-            .iter()
+            .rows()
+            .into_iter()
             .find(|row| label(row) == wanted)
-            .cloned()
             .expect("the row is visible")
     })
 }
@@ -448,4 +456,42 @@ fn the_rows_below_a_create_field_shift_down_by_one(cx: &mut TestAppContext) {
     });
     let expected = [Some("a"), None, Some("b"), Some("c")].map(|name| name.map(str::to_owned));
     assert_eq!(rows, expected, "the field takes row 1");
+}
+
+/// A hidden target has no row, so the field closes rather than land on an undrawn one.
+#[gpui::test]
+fn a_rename_field_closes_when_its_note_moves_under_a_collapsed_folder(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/Archive/old.md", "o");
+    fs.insert_file("/vault/a.md", "alpha");
+    let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let a = row(&sidebar, cx, "a");
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.select_for_test(a.id, cx);
+        sidebar.open_rename(cx);
+    });
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+
+    let vault = notes
+        .read_with(cx, |notes, _| notes.vault().cloned())
+        .expect("a vault");
+    vault.update(cx, |vault, cx| {
+        futures::executor::block_on(
+            fs.rename(Path::new("/vault/a.md"), Path::new("/vault/Archive/a.md")),
+        )
+        .expect("rename");
+        futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
+        cx.notify();
+    });
+
+    assert!(
+        notes.read_with(cx, |notes, cx| notes
+            .vault()
+            .expect("a vault")
+            .read(cx)
+            .entries()
+            .any(|entry| entry.id == a.id)),
+        "the move keeps the note's id, so only the collapse hides it"
+    );
+    assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 }
