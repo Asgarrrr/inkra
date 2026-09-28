@@ -1219,7 +1219,8 @@ Each slice merges alone with `check.sh` green, and records its bench figures.
    it on load and save. The startup figure is recorded.
 6. **Vault search**: the delegate, headers, `cmd-shift-f`,
    `HitActivated`, `open_note` with a range, `pending_reveal`, the key tests,
-   the shots.
+   the shots. A test that a blank or punctuation-only query (`[[`) runs no
+   lookup: `search` cannot check it, the delegate must (word-start spec).
 
 ## Evolution
 
