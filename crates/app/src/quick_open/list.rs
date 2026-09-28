@@ -36,7 +36,7 @@ impl Row {
     }
 
     fn set_excerpt(&mut self, excerpt: Option<Excerpt>) {
-        self.text.set_excerpt(&self.found.path, excerpt.as_ref());
+        self.text.set_excerpt(excerpt.as_ref());
         self.excerpt = excerpt;
     }
 }

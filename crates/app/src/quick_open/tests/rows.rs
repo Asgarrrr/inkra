@@ -210,11 +210,10 @@ fn an_nfd_file_name_is_listed_and_highlighted_on_its_nfc_path(cx: &mut TestAppCo
             .iter()
             .map(|row| {
                 let text = &row.text;
-                let lit = text.stem_highlights.iter().map(|(range, _)| range.clone());
                 (
-                    text.stem.clone(),
-                    text.folder.clone(),
-                    lit.collect::<Vec<_>>(),
+                    text.path.name.text().clone(),
+                    text.path.folder.text().clone(),
+                    text.path.name.ranges().to_vec(),
                 )
             })
             .collect::<Vec<_>>()
@@ -289,7 +288,7 @@ fn a_stem_wider_than_the_row_is_cut_inside_it(cx: &mut TestAppContext) {
     assert_eq!(listed(&mut opened).len(), 1);
 
     let row = opened.visual.debug_bounds("picker-row-0");
-    let stem = opened.visual.debug_bounds("quick-open-stem");
+    let stem = opened.visual.debug_bounds("row-name");
 
     assert!(
         row.zip(stem)

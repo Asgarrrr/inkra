@@ -44,7 +44,13 @@ fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
             let occurrences = row
                 .occurrences
                 .iter()
-                .map(|o| (o.context.to_string(), o.context[o.link.clone()].to_owned()))
+                .map(|o| {
+                    let text = o.context.text();
+                    (
+                        text.to_string(),
+                        text[o.context.ranges()[0].clone()].to_owned(),
+                    )
+                })
                 .collect();
             (row.name.to_string(), occurrences)
         })
@@ -331,22 +337,19 @@ fn an_applied_build_recomputes_the_rows_once(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_backlink_row_highlights_its_link_in_the_link_colour(cx: &mut TestAppContext) {
+fn an_indented_link_drops_its_indent_and_draws_a_tab_as_a_space(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "see [[b]]");
+    // Two spaces: a leading tab or four spaces would open a code block, which holds no link.
+    fs.insert_file("/vault/a.md", "  see\t[[b]]");
     fs.insert_file("/vault/b.md", "");
     let (notes, panel) = panel(cx, &fs);
     cx.run_until_parked();
+
     show(cx, &notes, &panel, "b");
 
-    let (range, style) = panel.read_with(cx, |panel, _| {
-        super::render::link_highlight(&panel.rows[0].occurrences[0])
-    });
-
-    assert_eq!(range, 4..9);
     assert_eq!(
-        style.color,
-        Some(gpui::Hsla::from(crate::theme::link_text()))
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("see [[b]]", "[[b]]")])]
     );
 }
 
