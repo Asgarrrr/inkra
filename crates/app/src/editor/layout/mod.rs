@@ -5,6 +5,8 @@ mod rows;
 mod runs;
 mod shape;
 
+#[cfg(test)]
+pub(crate) use shape::shape_count;
 pub(crate) use shape::shape_document;
 
 use std::ops::{Range, RangeInclusive};
@@ -13,8 +15,8 @@ use gpui::{
     App, Bounds, PaintQuad, Pixels, Point, ShapedLine, TextAlign, TextStyle, Window, WrappedLine,
     fill, point, px, size,
 };
-use inkra_markdown::{DisplayLine, DisplayOffset};
-use inkra_text::{Bias, ByteOffset};
+use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
+use inkra_text::{Bias, Buffer, ByteOffset};
 
 use crate::theme;
 
@@ -75,6 +77,9 @@ pub(crate) struct DocumentLayout {
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
+    version: u64,
+    selection: Range<ByteOffset>,
+    marked: Option<Range<ByteOffset>>,
 }
 
 impl DocumentLayout {
@@ -84,6 +89,25 @@ impl DocumentLayout {
 
     pub(crate) fn wrap_width(&self) -> Option<Pixels> {
         self.wrap_width
+    }
+
+    /// Whether `shape_document` would give this layout back. The selection counts only
+    /// through the elements it reveals, so a caret move within the same ones reuses it.
+    pub(crate) fn is_shaped_from(
+        &self,
+        buffer: &Buffer,
+        markdown: &Markdown,
+        selection: &Range<ByteOffset>,
+        marked: Option<&Range<ByteOffset>>,
+        style: &TextStyle,
+        wrap_width: Option<Pixels>,
+    ) -> bool {
+        self.version == buffer.version()
+            && self.wrap_width == wrap_width
+            && self.marked.as_ref() == marked
+            && self.style == *style
+            && touched(&markdown.conceals, &self.selection)
+                .eq(touched(&markdown.conceals, selection))
     }
 
     pub(crate) fn row_count(&self) -> usize {

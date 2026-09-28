@@ -8,6 +8,17 @@ use super::runs::{RunStyles, line_runs};
 use super::{DocumentLayout, Hanging, LineLayout, rows::rows};
 use crate::theme;
 
+#[cfg(test)]
+thread_local! {
+    static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Whole-document shapes so far on this thread; a keystroke's budget is one.
+#[cfg(test)]
+pub(crate) fn shape_count() -> usize {
+    SHAPES.with(std::cell::Cell::get)
+}
+
 /// Takes `style` explicitly since the editor also shapes outside any draw,
 /// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
 pub(crate) fn shape_document(
@@ -19,6 +30,8 @@ pub(crate) fn shape_document(
     wrap_width: Option<Pixels>,
     window: &mut Window,
 ) -> DocumentLayout {
+    #[cfg(test)]
+    SHAPES.with(|shapes| shapes.set(shapes.get() + 1));
     let mut styles = RunStyles::new(style);
     let body_size = style.font_size.to_pixels(window.rem_size());
     let body_height = style.line_height_in_pixels(window.rem_size());
@@ -118,6 +131,9 @@ pub(crate) fn shape_document(
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
+        version: buffer.version(),
+        selection: selection.clone(),
+        marked: marked.cloned(),
     }
 }
 

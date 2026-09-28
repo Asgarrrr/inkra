@@ -9,6 +9,8 @@ mod scroll;
 #[cfg(test)]
 mod tests;
 
+use std::rc::Rc;
+
 use gpui::{
     App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
@@ -37,7 +39,8 @@ pub(crate) struct EditorView {
     parsed_at: Option<u64>,
     focus_handle: FocusHandle,
     is_selecting: bool,
-    last_layout: Option<DocumentLayout>,
+    /// Shared with the frame's measure, which reuses it when its inputs still hold.
+    last_layout: Option<Rc<DocumentLayout>>,
     last_bounds: Option<Bounds<Pixels>>,
     /// Text top at zero scroll, as of the last paint. Never re-derive it from
     /// `last_bounds` and a live `offset()`: that counts the scroll twice.
@@ -171,7 +174,7 @@ impl EditorView {
         };
         let (style, wrap_width) = (last.style().clone(), last.wrap_width());
         let marked = self.state.marked_range();
-        self.last_layout = Some(layout::shape_document(
+        self.last_layout = Some(Rc::new(layout::shape_document(
             self.buffer.read(cx),
             &self.markdown,
             &self.state.selection().range(),
@@ -179,7 +182,7 @@ impl EditorView {
             &style,
             wrap_width,
             window,
-        ));
+        )));
     }
 
     /// The buffer's observers must not fire for these: an autosave or a vault

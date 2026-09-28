@@ -16,8 +16,8 @@ uncertainty, for reasons given below.
 |---|---|---|---|
 | ~~Horizontal scroll and reveal~~ | **Closed 2026-09-23, by removal.** Soft wrap leaves no right edge to lose the caret past. | — | — |
 | ~~Soft wrap~~ | **Shipped 2026-09-23.** Its trigger was the one above: a pasted URL. | — | — |
-| One shape per keystroke | **Fired 2026-09-24**, see Measurements below: three full shapes per keystroke, two of them redundant. A reload adds one more on its frame: `restore_scroll` (`editor/reload.rs`) reshapes, then `request_layout`'s measure (`editor/element.rs`) shapes again; fold it into this item. | 0.5–1 d | — |
-| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-24: it costs above ~75 KB now, above ~200 KB once the redundant shapes go. | 2–3 d | One shape per keystroke |
+| ~~One shape per keystroke~~ | **Shipped 2026-09-28.** A frame reuses the layout its inputs already produced, a reload included; see Measurements below. | — | — |
+| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-28: it costs above ~290 KB. | 2–3 d | — |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 
 ### Soft wrap and horizontal scroll
@@ -53,17 +53,29 @@ A keystroke shapes the whole note three times:
 - The same measure in the definite pass. It shapes at the width `reshape` just
   used, from the same buffer and selection.
 
-Removing the two redundant shapes is the next item. It moves the 16 ms frame
-budget from about 75 KB to about 200 KB. Past that, only windowed shaping
-helps.
+The two redundant shapes went on 2026-09-28. `DocumentLayout` records what
+it was shaped from, so the measure reuses `edit_buffer`'s layout when those
+inputs still hold. Taffy's intrinsic-width queries now shape at the last
+width, not the widest one. Measured again with 20 keystrokes through the
+off-screen harness, which draws a frame before each keystroke:
+
+| Note | Before | After |
+|---|---:|---:|
+| 5 KB | 0.69 ms | 0.34 ms |
+| 50 KB | 6.68 ms | 2.51 ms |
+| 500 KB | 81.4 ms | 27.9 ms |
+
+The 16 ms frame budget now holds up to about 290 KB. Past that, only
+windowed shaping helps.
 
 ### Virtualization
 
 Soft wrap has shipped, so rows are no longer one `line_height` per line and
 `uniform_list` is out. It is a custom windowed element that shapes visible rows
 only — the same conclusion markdown live preview reaches independently, per the
-modular architecture design doc. It removes two passes, not one: `edit_buffer`
-now shapes the whole document too, before revealing the caret.
+modular architecture design doc. One whole-document pass is left:
+`edit_buffer` shapes before revealing the caret, and the frame reuses that
+layout. The windowed element must shape only visible rows there as well.
 
 ### Multi-cursor
 

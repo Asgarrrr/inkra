@@ -19,7 +19,7 @@ pub(super) struct TextElement {
 }
 
 pub(super) struct PrepaintState {
-    layout: Option<DocumentLayout>,
+    layout: Option<Rc<DocumentLayout>>,
     selection: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
 }
@@ -34,7 +34,7 @@ impl IntoElement for TextElement {
 
 /// Every layout shaped this frame, keyed by width: taffy may call the measure
 /// closure several times and answer its final pass from a cache, so the last call isn't necessarily final.
-type Stash = Rc<RefCell<Vec<DocumentLayout>>>;
+type Stash = Rc<RefCell<Vec<Rc<DocumentLayout>>>>;
 
 impl Element for TextElement {
     type RequestLayoutState = (Stash, Inset);
@@ -79,22 +79,33 @@ impl Element for TextElement {
             window.request_measured_layout(style, move |known, available, window, cx| {
                 // The sizing pass hands `known` unclamped by max_size; only the
                 // layout pass clamps, so the widest width is reapplied here.
-                let width = known
+                let definite = known
                     .width
                     .or(match available.width {
                         AvailableSpace::Definite(width) => Some(width),
                         _ => None,
                     })
-                    .map_or(widest, |width| width.min(widest));
+                    .map(|width| width.min(widest));
 
                 // Wrapped text has no minimum width; reporting a width here
                 // would become the flex item's automatic minimum and push it past a narrower pane.
                 let reported = match (known.width, available.width) {
                     (None, AvailableSpace::MinContent) => px(0.),
-                    _ => width,
+                    _ => definite.unwrap_or(widest),
                 };
 
-                let text = inset.text_width(width);
+                let editor = editor.read(cx);
+                // An intrinsic query asks only for a width, so it reuses the last one's layout.
+                let text = definite.map_or_else(
+                    || {
+                        editor
+                            .last_layout
+                            .as_ref()
+                            .and_then(|layout| layout.wrap_width())
+                            .unwrap_or_else(|| inset.text_width(widest))
+                    },
+                    |width| inset.text_width(width),
+                );
                 let mut stash = measured.borrow_mut();
                 if let Some(layout) = stash
                     .iter()
@@ -102,17 +113,30 @@ impl Element for TextElement {
                 {
                     return size(reported, layout.height());
                 }
-                let editor = editor.read(cx);
+                let buffer = editor.buffer.read(cx);
+                let selection = editor.state.selection().range();
                 let marked = editor.state.marked_range();
-                let layout = shape_document(
-                    editor.buffer.read(cx),
-                    editor.markdown(),
-                    &editor.state.selection().range(),
-                    marked.as_ref(),
-                    &text_style,
-                    Some(text),
-                    window,
-                );
+                let layout = match editor.last_layout.as_ref().filter(|layout| {
+                    layout.is_shaped_from(
+                        buffer,
+                        editor.markdown(),
+                        &selection,
+                        marked.as_ref(),
+                        &text_style,
+                        Some(text),
+                    )
+                }) {
+                    Some(last) => Rc::clone(last),
+                    None => Rc::new(shape_document(
+                        buffer,
+                        editor.markdown(),
+                        &selection,
+                        marked.as_ref(),
+                        &text_style,
+                        Some(text),
+                        window,
+                    )),
+                };
                 let height = layout.height();
                 stash.push(layout);
                 size(reported, height)
@@ -137,7 +161,7 @@ impl Element for TextElement {
             let editor = self.editor.read(cx);
             let marked = editor.state.marked_range();
             let style = window.text_style();
-            shape_document(
+            Rc::new(shape_document(
                 editor.buffer.read(cx),
                 editor.markdown(),
                 &editor.state.selection().range(),
@@ -145,7 +169,7 @@ impl Element for TextElement {
                 &style,
                 Some(bounds.size.width),
                 window,
-            )
+            ))
         });
 
         let editor = self.editor.read(cx);
@@ -219,7 +243,7 @@ impl Element for TextElement {
 
 /// The measured layout nearest the element's width — not equal, since bounds
 /// are pixel-snapped after taffy measured them.
-fn take_measured(stash: &Stash, width: Pixels) -> Option<DocumentLayout> {
+fn take_measured(stash: &Stash, width: Pixels) -> Option<Rc<DocumentLayout>> {
     let mut stash = stash.borrow_mut();
     let distance = |layout: &DocumentLayout| {
         layout.wrap_width().map_or(f32::INFINITY, |measured| {
