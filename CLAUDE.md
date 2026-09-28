@@ -111,6 +111,8 @@ Read the spec before changing its area:
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
   search, `NoteIndex`/`IndexSync`, the picker and modal layer (vault search not yet built)
+- `docs/superpowers/specs/2026-09-28-vault-search-integration-design.md` — `⌘⇧F`
+  in the app: `Runs`, the delegate, `Hit.line`, `Searched::capped`, opening a hit
 - `docs/superpowers/specs/2026-09-25-smart-quick-open-design.md` — `⌘P` by word
   start on names and text, the word index, `find_notes`
 - `docs/superpowers/specs/2026-09-25-open-first-design.md` — opening before the
@@ -131,6 +133,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
 - `docs/superpowers/specs/2026-09-20-modular-architecture-design.md` — crates
+- `docs/startup-floor.md` — the launch's floor, the WindowServer oracle,
+  why `first frame` reads late
 - `docs/roadmap.md` — deferred work and the trigger for each
 - `docs/gpui-notes.md`, `docs/buffer-model.md`, `docs/gpui-accessibility.md`,
   `docs/tooling.md`
