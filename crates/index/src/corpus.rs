@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use inkra_vault::{EntryId, Mtime};
 
-use crate::chunks::split;
-
 /// What a slot costs beyond its text.
 pub(crate) const SLOT_BYTES: usize = mem::size_of::<Slot>() + mem::size_of::<EntryId>();
 /// What a loaded text costs beyond its bytes: its `Arc`'s strong and weak counts.
@@ -143,12 +141,6 @@ impl CorpusSnapshot {
         self.ids.is_empty()
     }
 
-    /// Ranges to search in parallel; `Searched::merge` over their results equals one range.
-    #[must_use]
-    pub fn chunks(&self, n: usize) -> Vec<Range<usize>> {
-        split(self.ids.len(), n)
-    }
-
     /// Each loaded text's bytes and `Arc` counts, plus a fixed cost per note.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
@@ -166,8 +158,11 @@ impl CorpusSnapshot {
             .filter_map(|(id, slot)| Some((*id, slot.text.as_deref()?)))
     }
 
-    /// The note at `order` and its text; `None` past the end or while it is not loaded.
-    pub(crate) fn text(&self, order: usize) -> Option<(EntryId, &str)> {
+    /// The note at `order` and its text; `None` past the end or while it is not loaded. For
+    /// tests and the bench.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn text(&self, order: usize) -> Option<(EntryId, &str)> {
         Some((
             *self.ids.get(order)?,
             slot(&self.slots, order)?.text.as_deref()?,

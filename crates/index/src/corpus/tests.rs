@@ -228,16 +228,14 @@ fn reorder_keeps_each_kept_note_s_text_and_drops_the_rest() {
 }
 
 #[test]
-fn a_snapshot_splits_into_ranges_over_its_slots() {
+fn a_snapshot_counts_its_slots() {
     let files: Vec<String> = (0..10).map(|n| format!("n{n}.md")).collect();
     let files: Vec<&str> = files.iter().map(String::as_str).collect();
     let corpus = corpus(&ids(&files));
     let snapshot = corpus.snapshot();
     assert_eq!(snapshot.len(), 10);
     assert!(!snapshot.is_empty());
-    assert_eq!(snapshot.chunks(3), [0..3, 3..6, 6..10]);
     assert!(Corpus::default().snapshot().is_empty());
-    assert!(Corpus::default().snapshot().chunks(4).is_empty());
 }
 
 #[test]

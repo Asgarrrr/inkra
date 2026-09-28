@@ -11,3 +11,5 @@ cc 5dbc96a9a55a158a6800b4bede5d13a9beaa57f885b3046352d8c8b6654779e4 # shrinks to
 cc f7f2fbac531cdd2e12e5c907de963c7bdbf120ce2b02f7f91d486d2d37c2a303 # shrinks to texts = [Some("a\u{301}")], needle = "a\u{301}", word = false, limit = 1
 cc 0f2697920c513949fdd7f28dcdf5f0391e57f4e696a573a68c32a760198116d8 # shrinks to text = "ǅe\u{301}", needle = "e\u{301}", word = false
 cc db8e9dfea5495081a5e1455a14a2cce3e7d37613bab98e3bd8598e08d376dc47 # shrinks to (needle, text) = ("é é", "aé é é "), sensitive = false, word = true, limit = 9
+cc 12e31a1b4b9840b6d1f57636ee76f64158b05c40d0c900f6ece82ef57493c0eb # shrinks to texts = [], query = "", limit = 0
+cc 7297f7dba63615ae8c75bfa5aca3f425ba0c2104b0fc9c64a05d5eb9d77edd33 # shrinks to case = Case { files: ["a.md", "e.md", "k.md", "ss.md", "ß.md", "é.md", "K.md"], scanned: [0, 0, 0, 0, 0, 0, 0, 0], loaded: [None, None, None, None, None, None, Some(("'", 0)), None], query: "", showing: None, recent: [], merged: false }, cuts = [], limit = 0

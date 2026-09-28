@@ -1,11 +1,9 @@
-//! Literal full-text search over the saved notes (spec D3, D4).
+//! Vault search: each word start of the query's terms in the notes holding them all.
 
 mod hit;
-mod query;
 mod run;
 
 pub use hit::{Hit, Searched};
-pub use query::TextQuery;
 pub use run::{HITS_PER_NOTE, search};
 
 #[cfg(test)]

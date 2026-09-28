@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use inkra_vault::Vault;
 use proptest::prelude::*;
 
-use super::excerpt::{EXCERPT_SCAN_BYTES, Terms, around_match, each_word};
+use super::excerpt::{EXCERPT_SCAN_BYTES, around_match};
+use super::terms::{Terms, each_word};
 use crate::test_support::{PARTS, id, load, note_set, rename, vault};
 use crate::{Excerpt, NoteIndex, NoteMatch, NoteQuery, excerpt, find_notes, merge_notes};
 

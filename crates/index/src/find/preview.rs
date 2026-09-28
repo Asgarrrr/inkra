@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use inkra_markdown::{front_matter, parse};
 
 use super::Excerpt;
-use super::excerpt::{CANCEL_EVERY, EXCERPT_SCAN_BYTES};
+use super::excerpt::EXCERPT_SCAN_BYTES;
 use super::plain::{LINE_BYTES, Plain};
+use super::terms::CANCEL_EVERY;
 use crate::words::{WORD_MAX_CHARS, cap, fold, word_spans};
 
 const PREVIEW_BYTES: usize = 160;
