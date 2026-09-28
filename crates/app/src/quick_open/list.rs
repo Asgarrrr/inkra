@@ -13,6 +13,7 @@ use inkra_vault::EntryId;
 use super::QuickOpenDelegate;
 use super::render::RowText;
 use crate::picker::Picker;
+use crate::picker::runs::RunId;
 
 pub(super) struct Row {
     pub(super) found: NoteMatch,
@@ -42,7 +43,7 @@ impl Row {
 
 pub(super) struct List {
     /// The search that found the rows: an excerpt asked for by another list is dropped.
-    id: u64,
+    id: RunId,
     pub(super) rows: Vec<Row>,
     snapshot: IndexSnapshot,
     query: Arc<NoteQuery>,
@@ -64,7 +65,7 @@ impl List {
 
     pub(super) fn new(snapshot: IndexSnapshot, query: Arc<NoteQuery>) -> Self {
         Self {
-            id: 0,
+            id: RunId::default(),
             rows: Vec::new(),
             snapshot,
             query,
@@ -75,7 +76,7 @@ impl List {
     /// On a refresh, a row keeps its previous excerpt until its new one lands, so no line blanks.
     pub(super) fn replace(
         &mut self,
-        id: u64,
+        id: RunId,
         snapshot: IndexSnapshot,
         query: Arc<NoteQuery>,
         found: Vec<NoteMatch>,
@@ -105,7 +106,7 @@ impl List {
         };
     }
 
-    fn land(&mut self, id: u64, ix: usize, excerpt: Option<Excerpt>) -> bool {
+    fn land(&mut self, id: RunId, ix: usize, excerpt: Option<Excerpt>) -> bool {
         if self.id != id || self.cancel.load(Ordering::Relaxed) {
             return false;
         }

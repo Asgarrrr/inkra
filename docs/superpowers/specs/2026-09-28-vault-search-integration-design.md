@@ -48,6 +48,15 @@ this a real seam (CLAUDE.md, "Abstract only at a real seam").
   tests do not change and are its oracle. `./scripts/test-names.sh` is diffed
   before and after.
 
+**As built (slice 1).** `Runs` is private state with a small API: `start`
+returns a `Started` (`id: RunId`, `cancel`, `run`, `behind_user`),
+`scanning(&started)` marks that run's scan in flight, `is_current(RunId)`
+checks a result, `confirmed` drops a pending re-run. The scan in flight is
+`Option<Scan { user, rerun }>`. The parts that must call back into the `Picker`
+(`refresh_or_defer`, `landed`, `observe`) are generic over
+`D: PickerDelegate + AsMut<Runs>`: a std trait, so no one-implementer trait.
+The tests changed only where a moved field is read, through `delegate.runs`.
+
 ## S2. `inkra-index`: the line and the per-note cap
 
 ### `Hit.line`

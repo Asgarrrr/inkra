@@ -75,7 +75,7 @@ fn empty_text(opened: &mut Opened) -> Option<&'static str> {
 
 fn cancel_flag(opened: &mut Opened) -> Arc<AtomicBool> {
     opened.picker.read_with(&opened.visual, |picker, _| {
-        Arc::clone(&picker.delegate.cancel)
+        picker.delegate.runs.cancel_flag()
     })
 }
 
@@ -212,7 +212,7 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
     opened.visual.simulate_keystrokes("p");
 
     opened.picker.update(&mut opened.visual, |picker, cx| {
-        let stale = picker.delegate.search_id - 1;
+        let stale = picker.delegate.runs.id().previous();
         let search = Search {
             id: stale,
             run: Run::Search,

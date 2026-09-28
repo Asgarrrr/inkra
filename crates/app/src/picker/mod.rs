@@ -12,6 +12,7 @@ use crate::field::{Cancelled, Confirmed, Edited, NameField};
 #[cfg(test)]
 pub(crate) mod letters;
 mod render;
+pub(crate) mod runs;
 #[cfg(test)]
 mod tests;
 
