@@ -47,7 +47,7 @@ fn each_name_reads_its_own_words() {
 #[test]
 fn an_nfd_file_name_folds_like_its_nfc_form() {
     let (_fs, vault) = vault(&["E\u{301}te\u{301}.md"]);
-    let names = note_set(&vault).names();
+    let names = note_set(&vault).names;
     let path = names.path(0);
     assert_eq!(&**path, "E\u{301}te\u{301}".nfc().collect::<String>());
     let found: Vec<(String, std::ops::Range<usize>, bool)> = names

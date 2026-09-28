@@ -16,7 +16,7 @@ use inkra_index::{
 use inkra_vault::{EntryId, Kind, Mtime};
 
 use corpus::{Corpus, NOTE_IDS, NOTES, contents};
-use paths::{Lcg, long_stem};
+use paths::{Lcg, folders};
 
 /// Quick open's `LIMIT`.
 const LIMIT: usize = 100;
@@ -28,6 +28,31 @@ const ON_SCREEN: usize = 10;
 const RECENT: usize = 20;
 /// A word of the long-stem names that no text of either corpus holds.
 const NAME_ONLY: &str = "workshop";
+
+const KINDS: &[&str] = &["Meeting", "Call", "Lunch", "Review", "Workshop"];
+const PEOPLE: &[&str] = &[
+    "Hélène", "Marc", "Zoé", "Jérôme", "Anaïs", "Paul", "Léa", "Thomas",
+];
+const TOPICS: &[&str] = &[
+    "the budget",
+    "the roadmap",
+    "l'été",
+    "la réunion",
+    "the design",
+    "l'équipe",
+    "la santé",
+    "the trip",
+];
+
+/// About 56 chars: two or three folders, then "Meeting with Zoé about the roadmap 12".
+fn long_stem(lcg: &mut Lcg, note: usize) -> String {
+    let depth = 2 + lcg.next(2);
+    let folders = folders(lcg, depth);
+    let kind = KINDS[lcg.next(KINDS.len())];
+    let person = PEOPLE[lcg.next(PEOPLE.len())];
+    let topic = TOPICS[lcg.next(TOPICS.len())];
+    format!("{folders}/{kind} with {person} about {topic} {note}.md")
+}
 
 fn indexed(corpus: Corpus) -> IndexSnapshot {
     let mut lcg = Lcg(11);

@@ -34,11 +34,6 @@ impl NoteSet {
             _retired: Vec::new(),
         }
     }
-
-    #[must_use]
-    pub fn names(&self) -> NamesSnapshot {
-        self.names.clone()
-    }
 }
 
 /// One pass both halves share: the notes in order, `.md` stripped, NFC, with their mtimes apart.

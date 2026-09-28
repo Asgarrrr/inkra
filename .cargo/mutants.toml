@@ -24,14 +24,6 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # except for a relative link; forcing every link down the allocating path gives
 # the same resolutions.
 #
-# Equivalent. `fits` and the `CharBag` test only skip the DP early: the DP finds
-# no alignment for a note they would reject, so `score` returns `None` anyway.
-#
-# Equivalent. No cell is ever within reach of `NONE / 2`: a real score is
-# positive and an unreachable one stays near `NONE`. So `>=`, `NONE * 2`
-# (`i32::MIN`, no overflow) and `true` admit only cells that lose every `max`
-# to a real one or that no real score equals; `fits` guarantees a real one.
-#
 # Matched by column: the other `||` in `representative` is not equivalent.
 # Equivalent. With `&&`, a cased ASCII char or an uncased non-ASCII one reaches the
 # lookup, but `REPRESENTATIVES` holds only cased chars from U+0080 up, so it returns `c`.
@@ -71,8 +63,6 @@ exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
     "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in NoteIndex::backlinks$",
-    "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (fits -> bool with true|\\|\\| with && in score)$",
-    "^crates/index/src/names/score\\.rs:[0-9]+:[0-9]+: replace (reachable -> bool with true|> with >= in reachable|/ with \\* in reachable)$",
     "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",
     "^crates/index/src/words/segment\\.rs:[0-9]+:[0-9]+: replace < with <= in merged$",
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",

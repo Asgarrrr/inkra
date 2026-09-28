@@ -19,7 +19,7 @@ pub use content::NoteContent;
 pub use corpus::CorpusSnapshot;
 pub use find::{Excerpt, Group, NoteMatch, Ranked, excerpt, find_notes, merge_notes};
 pub use index::{Backlink, IndexSnapshot, NoteIndex};
-pub use names::{NameMatch, NameQuery, NamesSnapshot, match_names, merge_names};
+pub use names::NamesSnapshot;
 pub use note_set::NoteSet;
 pub use notes::Resolution;
 pub use search::{HITS_PER_NOTE, Hit, NoteHits, Searched, search};

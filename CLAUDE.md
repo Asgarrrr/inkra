@@ -129,6 +129,8 @@ Read the spec before changing its area:
   match: BM25, per-ordinal note lengths
 - `docs/superpowers/specs/2026-09-29-row-text-design.md` — `row_text`: lit
   one-line row text, the path split, `name_row`
+- `docs/superpowers/specs/2026-09-29-names-delete-design.md` — the name table
+  `find` reads, why the fuzzy matcher is gone
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

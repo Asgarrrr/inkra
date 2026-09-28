@@ -582,9 +582,9 @@ debounce and the `NotesChanged` refresh (search spec D7, D8) do not.
   today; line 2 is the excerpt, dimmed, with its highlights. Colours come from
   `theme.rs`.
 
-`match_names` and the D2 matcher stay in `inkra-index`, tested and benched,
+~~`match_names` and the D2 matcher stay in `inkra-index`, tested and benched,
 for `[[` link completion (search spec, Deferred), where subsequence matching
-suits short targets.
+suits short targets.~~ Amended 2026-09-29: the matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `fee89d1` or start from Zed's `fuzzy`.
 
 **Built in slice 8 (S5).**
 

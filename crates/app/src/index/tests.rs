@@ -9,14 +9,14 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::FutureExt as _;
 use futures::channel::oneshot;
 use gpui::{App, AppContext as _, Entity, TestAppContext};
-use inkra_index::{NameQuery, NoteContent, NoteQuery, TermHit, match_names, search};
+use inkra_index::{NoteContent, NoteQuery, TermHit, search};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
 
 use super::loading::LOADS_PER_CORE;
 use super::{Build, IndexSync};
-use crate::test_support::{entry_id, named, scan_notes};
+use crate::test_support::{entry_id, named, quick_open, scan_notes};
 use crate::vault::{AUTOSAVE_DELAY, NoteSaved, NoteStore};
 
 pub(super) fn indexed_vault(
@@ -156,7 +156,7 @@ fn startup_indexes_every_note(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn the_notes_are_built_off_the_foreground_and_follow_a_rescan(cx: &mut TestAppContext) {
-    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
+    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "see [[b]]"), ("b.md", "")]);
     assert_eq!(
         links.read_with(cx, |links, _| links.index().names().len()),
         0,
@@ -883,17 +883,11 @@ fn assert_pending_are_notes(links: &IndexSync, cx: &App) {
         pending.len(),
         names.len()
     );
-    let query = NameQuery::new("", None, &pending);
-    let found: HashSet<EntryId> = match_names(
-        &names,
-        0..names.len(),
-        &query,
-        &AtomicBool::new(false),
-        pending.len(),
-    )
-    .into_iter()
-    .map(|found| found.id)
-    .collect();
+    let query = NoteQuery::new("", None, &pending);
+    let found: HashSet<EntryId> = quick_open(links.index(), &query, 0..names.len(), pending.len())
+        .into_iter()
+        .map(|found| found.id)
+        .collect();
     let missing: Vec<&EntryId> = pending.iter().filter(|id| !found.contains(id)).collect();
     assert!(missing.is_empty(), "pending, not in the table: {missing:?}");
 }

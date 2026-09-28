@@ -4,7 +4,7 @@ use inkra_markdown::links;
 
 use super::NoteIndex;
 use crate::test_support::{entries, id, load, note_set, rename, texts, vault};
-use crate::{NameQuery, Resolution, match_names};
+use crate::{Group, NoteQuery, Resolution, find_notes, merge_notes};
 
 /// Each backlink as (source path, the linked text of each occurrence).
 fn backlinks(
@@ -290,12 +290,25 @@ fn an_insert_after_its_note_left_leaves_no_links_and_no_text() {
     assert_eq!(texts(&index.corpus()), []);
 }
 
-/// The paths of the names matching `query`.
+/// The paths of the notes whose name matches `query`.
 fn names(index: &NoteIndex, query: &str) -> Vec<String> {
-    let names = index.names();
-    let query = NameQuery::new(query, None, &[]);
-    match_names(&names, 0..names.len(), &query, &AtomicBool::new(false), 10)
+    let snapshot = index.snapshot();
+    let query = NoteQuery::new(query, None, &[]);
+    let cancel = AtomicBool::new(false);
+    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
+        panic!("not cancelled");
+    };
+    let kept = find_notes(
+        &snapshot,
+        &lookup,
+        0..index.names().len(),
+        &query,
+        &cancel,
+        10,
+    );
+    merge_notes(&snapshot, vec![kept], &query, 10)
         .into_iter()
+        .filter(|found| found.group == Group::Name)
         .map(|found| found.path.to_string())
         .collect()
 }
@@ -340,9 +353,9 @@ fn set_notes_returns_the_previous_set() {
     let (_fs, three) = vault(&["a.md", "b.md", "c.md"]);
     let mut index = NoteIndex::default();
 
-    assert!(index.set_notes(note_set(&two)).names().is_empty());
+    assert!(index.set_notes(note_set(&two)).names.is_empty());
     let previous = index.set_notes(note_set(&three));
-    assert_eq!(previous.names().len(), 2);
+    assert_eq!(previous.names.len(), 2);
     let ids: Vec<_> = entries(&two).into_iter().map(|(id, ..)| id).collect();
     assert_eq!(
         *previous.ids, *ids,
@@ -352,7 +365,7 @@ fn set_notes_returns_the_previous_set() {
 
     let previous = index.set_notes(previous);
     assert_eq!(
-        previous.names().len(),
+        previous.names.len(),
         3,
         "a returned set can be applied again"
     );

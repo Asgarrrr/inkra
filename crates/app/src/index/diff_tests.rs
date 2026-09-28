@@ -1,16 +1,16 @@
 //! The snapshot comparison `reconcile` runs off the foreground (coalesced-reconcile spec, R2).
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
-use inkra_index::{NameQuery, match_names};
+use inkra_index::{NoteIndex, NoteQuery};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Entry, EntryId, Mtime, RelPath, Vault};
 use proptest::prelude::*;
 
 use super::diff::{Change, notes};
+use crate::test_support::quick_open;
 
 /// Notes in two folders beside an empty one, as a scan lists them.
 fn snapshot() -> Vec<Entry> {
@@ -156,12 +156,13 @@ fn names(entries: &[Entry]) -> Vec<(EntryId, String)> {
     let Change::Layout(built) = Change::between(None, entries) else {
         panic!("with no last snapshot, a build");
     };
-    let names = built.notes.names();
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(built.notes);
     let every: Vec<EntryId> = entries.iter().map(|entry| entry.id).collect();
     // An empty query lists exactly its recent notes, so one position at a time reads the order.
-    let query = NameQuery::new("", None, &every);
-    (0..names.len())
-        .flat_map(|at| match_names(&names, at..at + 1, &query, &AtomicBool::new(false), 1))
+    let query = NoteQuery::new("", None, &every);
+    (0..index.names().len())
+        .flat_map(|at| quick_open(&index, &query, at..at + 1, 1))
         .map(|found| (found.id, found.path.to_string()))
         .collect()
 }
