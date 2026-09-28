@@ -4,16 +4,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use inkra_text::ByteOffset;
 
-use super::hit::{Hit, Searched};
+use super::hit::{Hit, NoteHits, Searched};
 use crate::find::{Terms, each_word, light, word_prefix};
 use crate::index::IndexSnapshot;
 use crate::words::{Lookup, NoteQuery};
 
-/// A note gives at most this many hits; slice 6 shows "100+" on a capped note.
+/// A note gives at most this many hits; a capped `NoteHits` says it was cut short.
 pub const HITS_PER_NOTE: usize = 100;
 
-/// The first `limit` word starts of the query's terms in `range`, in vault order, from the
-/// notes holding every term. Pass the `lookup` of this `snapshot` and `query`. Empty when
+/// The first `limit` word starts of the query's terms in `range`, grouped by note in vault
+/// order, from the notes holding every term. Pass the `lookup` of this `snapshot` and `query`. Empty when
 /// `cancel` is set, and without a hit when the query has no term.
 #[must_use]
 pub fn search(
@@ -36,9 +36,10 @@ pub fn search(
     }
     // Built at the first candidate: a query no note holds pays only the lookup.
     let terms = LazyCell::new(|| Terms::new(query));
-    let mut hits = Vec::new();
+    let mut notes = Vec::new();
+    let mut count = 0;
     for (note, text) in snapshot.corpus().notes(range) {
-        if hits.len() == limit {
+        if count == limit {
             break;
         }
         if cancel.load(Ordering::Relaxed) {
@@ -50,23 +51,31 @@ pub fn search(
         if !holds {
             continue;
         }
-        let room = HITS_PER_NOTE.min(limit - hits.len());
-        let Some(lit) = locate(text, &terms, room, cancel) else {
+        let room = HITS_PER_NOTE.min(limit - count);
+        let Some(mut lit) = locate(text, &terms, room, cancel) else {
             return Searched::default();
         };
-        hits.extend(
-            lit.into_iter()
-                .map(|range| Hit::new(note, text, ByteOffset(range.start)..ByteOffset(range.end))),
-        );
+        let capped = lit.len() > room;
+        lit.truncate(room);
+        count += lit.len();
+        notes.push(NoteHits {
+            note,
+            hits: lines(text, lit)
+                .map(|(range, line)| {
+                    Hit::new(text, ByteOffset(range.start)..ByteOffset(range.end), line)
+                })
+                .collect(),
+            capped,
+        });
     }
-    let limit_reached = hits.len() >= limit;
     Searched {
-        hits,
-        limit_reached,
+        notes,
+        limit_reached: count >= limit,
     }
 }
 
-/// The first `room` hits in `text`; `None` once `cancel` is set.
+/// The first `room` hits in `text`, and one more when the walk read past them; `None` once
+/// `cancel` is set.
 fn locate(
     text: &str,
     terms: &Terms<'_>,
@@ -85,6 +94,15 @@ fn locate(
         // One hit past `room`: until then, a later word may still merge into the last one.
         if lit.len() > room { 0 } else { usize::MAX }
     })?;
-    lit.truncate(room);
     Some(lit)
+}
+
+/// Each range of `lit`, ascending, with the 1-based line of its start.
+fn lines(text: &str, lit: Vec<Range<usize>>) -> impl Iterator<Item = (Range<usize>, usize)> {
+    let (mut from, mut line) = (0, 1);
+    lit.into_iter().map(move |range| {
+        line += text[from..range.start].matches('\n').count();
+        from = range.start;
+        (range, line)
+    })
 }

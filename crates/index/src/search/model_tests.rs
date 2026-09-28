@@ -14,7 +14,7 @@ use super::tests::searched;
 use crate::find::model_cases::{self, Built, Case, build, split, terms, typed, words};
 use crate::find::{boundaries, prefix};
 use crate::test_support::indexed;
-use crate::{Group, HITS_PER_NOTE, Hit, Searched, find_notes, merge_notes};
+use crate::{Group, HITS_PER_NOTE, Hit, NoteHits, Searched, find_notes, merge_notes};
 
 /// Whether every term starts a folded word of `text`; never for no term.
 fn holds(text: &str, terms: &[String]) -> bool {
@@ -25,7 +25,8 @@ fn holds(text: &str, terms: &[String]) -> bool {
             .all(|term| words.iter().any(|(_, _, word)| word.starts_with(term)))
 }
 
-/// Each word a term starts, lit by `prefix` for the longest such term, touching ranges merged.
+/// Each word a term starts, lit by `prefix` for the longest such term, touching ranges merged;
+/// every hit of the note, with no cap.
 fn model_hits(text: &str, terms: &[String]) -> Vec<Range<usize>> {
     let bounds = boundaries(text);
     let mut lit: Vec<Range<usize>> = Vec::new();
@@ -43,34 +44,40 @@ fn model_hits(text: &str, terms: &[String]) -> Vec<Range<usize>> {
             _ => lit.push(range),
         }
     }
-    lit.truncate(HITS_PER_NOTE);
     lit
 }
 
 /// The model's hits over `texts` in order, and the `Searched` it predicts under `limit`.
 fn model(texts: &[(EntryId, Option<&str>)], query: &str, limit: usize) -> Searched {
     let terms = terms(&typed(query));
-    let mut all: Vec<(EntryId, Range<usize>)> = Vec::new();
+    let mut notes = Vec::new();
+    let mut room = limit;
+    let mut total = 0;
     for (id, text) in texts {
-        if let Some(text) = text
-            && holds(text, &terms)
-        {
-            all.extend(model_hits(text, &terms).into_iter().map(|r| (*id, r)));
+        let Some(text) = text.filter(|text| holds(text, &terms)) else {
+            continue;
+        };
+        let every = model_hits(text, &terms);
+        total += every.len().min(HITS_PER_NOTE);
+        let kept = every.len().min(HITS_PER_NOTE).min(room);
+        room -= kept;
+        if kept > 0 {
+            notes.push(NoteHits {
+                note: *id,
+                hits: every[..kept]
+                    .iter()
+                    .map(|range| {
+                        let line = text[..range.start].matches('\n').count() + 1;
+                        Hit::new(text, ByteOffset(range.start)..ByteOffset(range.end), line)
+                    })
+                    .collect(),
+                capped: kept < every.len(),
+            });
         }
     }
-    let limit_reached = all.len() >= limit;
-    all.truncate(limit);
     Searched {
-        hits: all
-            .into_iter()
-            .map(|(note, range)| {
-                let Some((_, Some(text))) = texts.iter().find(|(id, _)| *id == note) else {
-                    panic!("a hit is in a loaded note");
-                };
-                Hit::new(note, text, ByteOffset(range.start)..ByteOffset(range.end))
-            })
-            .collect(),
-        limit_reached,
+        notes,
+        limit_reached: total >= limit,
     }
 }
 
@@ -111,8 +118,7 @@ fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseEr
         model(&texts, &case.query, limit)
     );
 
-    let mut hit: Vec<EntryId> = found.hits.iter().map(|hit| hit.note).collect();
-    hit.dedup();
+    let hit: Vec<EntryId> = found.notes.iter().map(|group| group.note).collect();
     let Some(lookup) = snapshot.lookup(&query, &cancel) else {
         panic!("not cancelled");
     };

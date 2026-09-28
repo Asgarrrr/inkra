@@ -304,6 +304,7 @@ case of the same needle.
 | 10 × 1 MB, one line, `projet` | 149 µs | 1.01 ms |
 | each `long lines` case, `zanzibar` | 1.26 ms | 0.30 to 0.39 µs |
 | **new**: 10 MB, lines of 80, `zanzibar` once at its end | — | **87.6 ms**, 48.7 ms with the skip |
+| same, with `Hit.line` (integration spec S2) | S2 before: 49.8 ms | S2 after: 51.0 ms |
 | cyrillic `е`, `ет`, `зzz` (no hit) | 20.4, 11.4, 1.26 ms | 0.30 µs each |
 | cyrillic `о` | 23.1 ms, no hit | 267 µs, 100 hits |
 | greek `σ`, `α`, `ο` | 32.4, 22.3, 20.2 ms, no hit | 170, 440, 351 µs, 100 hits |
@@ -315,6 +316,9 @@ Every 50,000-note case is under 3 ms, against 16. The cases that got slower
 their hits in the first notes before; now they pay the lookup and a fold per
 candidate word, and stay under 3 ms. A `cjk` word is its whole run of
 ideographs, so `的` starts none: it was a substring match before.
+
+The `Hit.line` row is an A/B of the integration spec's slice 2, before and
+after, interleaved twice: the line count adds about 1.2 ms over 10 MB.
 
 **The new case is over budget: 87.6 ms, then 48.7 ms.** First profile
 (Time Profiler, samples inside `search`): `fold` 50 % inclusive,

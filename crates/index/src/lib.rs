@@ -22,7 +22,7 @@ pub use index::{Backlink, IndexSnapshot, NoteIndex};
 pub use names::{NameMatch, NameQuery, NamesSnapshot, match_names, merge_names};
 pub use note_set::NoteSet;
 pub use notes::Resolution;
-pub use search::{HITS_PER_NOTE, Hit, Searched, search};
+pub use search::{HITS_PER_NOTE, Hit, NoteHits, Searched, search};
 pub use source::{Source, SourceLink};
 pub use target::{Style, Target};
 pub use words::{
