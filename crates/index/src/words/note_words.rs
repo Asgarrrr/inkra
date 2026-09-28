@@ -12,6 +12,8 @@ pub(crate) struct NoteWords {
     bytes: Box<str>,
     bounds: Box<[usize]>,
     counts: Box<[u32]>,
+    /// The sum of `counts`, saturating: the note's words, repeats counted.
+    length: u32,
 }
 
 impl Default for NoteWords {
@@ -20,6 +22,7 @@ impl Default for NoteWords {
             bytes: Box::default(),
             bounds: Box::new([0]),
             counts: Box::default(),
+            length: 0,
         }
     }
 }
@@ -50,20 +53,27 @@ impl NoteWords {
         let mut bounds = Vec::with_capacity(folded.len() + 1);
         bounds.push(0);
         let mut counts = Vec::with_capacity(folded.len());
+        let mut length: u32 = 0;
         for (word, count) in folded {
             bytes.push_str(&word);
             bounds.push(bytes.len());
             counts.push(count);
+            length = length.saturating_add(count);
         }
         Self {
             bytes: bytes.into(),
             bounds: bounds.into(),
             counts: counts.into(),
+            length,
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.counts.is_empty()
+    }
+
+    pub(crate) fn length(&self) -> u32 {
+        self.length
     }
 
     /// Every word and its count, in order.

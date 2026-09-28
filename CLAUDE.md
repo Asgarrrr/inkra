@@ -121,6 +121,8 @@ Read the spec before changing its area:
   builds, mtime fast path
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
+- `docs/superpowers/specs/2026-09-28-ranking-idf-design.md` — key 2 of a text
+  match: BM25, per-ordinal note lengths
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

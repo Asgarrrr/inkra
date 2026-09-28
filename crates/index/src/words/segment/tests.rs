@@ -36,6 +36,10 @@ fn word(word: &str, postings: &[(u32, u32)]) -> Word {
     (word.to_owned(), postings.to_vec())
 }
 
+fn lengths(segment: &Segment, span: u32) -> Vec<u32> {
+    (0..span).map(|n| segment.length(Ordinal::new(n))).collect()
+}
+
 #[test]
 fn a_segment_built_from_nothing_is_empty() {
     for segment in [Segment::default(), built(&Segment::default(), &[], &[])] {
@@ -189,9 +193,33 @@ fn heap_bytes_counts_the_words_bounds_starts_and_postings_exactly() {
     let ete = 1 + 1;
     let plan = (1 + 1) + (2 + 1);
     let zebre = 2 + 1;
+    // Ordinals 0 to 200: one `u32` length each.
+    let lengths = 201 * size_of::<u32>();
     assert_eq!(
         segment.heap_bytes(),
-        words + offsets + offsets + ete + plan + zebre
+        words + offsets + offsets + ete + plan + zebre + lengths
     );
     assert_eq!(Segment::default().heap_bytes(), 2 * size_of::<u32>());
+}
+
+#[test]
+fn a_merge_keeps_live_lengths_takes_fresh_ones_and_zeroes_the_dead() {
+    let first = built(
+        &Segment::default(),
+        &[],
+        &[(0, "plan plan été"), (3, "zèbre")],
+    );
+    assert_eq!(lengths(&first, 5), [3, 0, 0, 1, 0]);
+    let second = built(&first, &[3], &[(1, "a b")]);
+    assert_eq!(
+        lengths(&second, 5),
+        [0, 2, 0, 1, 0],
+        "0 dead, 3 kept past the last fresh ordinal"
+    );
+    let third = built(&second, &[3], &[(1, "c d e"), (6, "f")]);
+    assert_eq!(
+        lengths(&third, 8),
+        [0, 3, 0, 1, 0, 0, 1, 0],
+        "a re-set note takes its fresh length"
+    );
 }

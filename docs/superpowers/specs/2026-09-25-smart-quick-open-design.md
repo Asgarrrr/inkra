@@ -364,6 +364,8 @@ name (amended below). Within a group, after the exact name, in this order:
 1. more terms matching **whole** words beat fewer;
 2. for `Name`: more terms in the stem beat terms in folders; for `Text` and
    `NameAndText`: more occurrences of the matched words in the text beat fewer;
+   **amended 2026-09-28**: BM25 over the text terms, not a raw count
+   (`2026-09-28-ranking-idf-design.md`);
 3. the note showing ranks after the notes of its group that tie with it on
    the exact name and keys 1–2 (D2's penalty, made simpler);
 4. MRU rank (search spec D6), recent first;

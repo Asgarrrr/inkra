@@ -19,6 +19,8 @@ pub(super) struct Segment {
     postings: Box<[u8]>,
     /// How many notes have postings here, live or not.
     notes: usize,
+    /// Per ordinal, the live note's words with repeats; 0 for a dead or absent one.
+    lengths: Box<[u32]>,
 }
 
 impl Default for Segment {
@@ -29,6 +31,7 @@ impl Default for Segment {
             starts: [0].into(),
             postings: Box::default(),
             notes: 0,
+            lengths: Box::default(),
         }
     }
 }
@@ -62,7 +65,27 @@ impl Segment {
                 .unwrap_or_default();
             out.push(word, merged(kept, added));
         }
-        out.finish(alive.len() + fresh.len())
+        out.finish(alive.len() + fresh.len(), self.merged_lengths(alive, fresh))
+    }
+
+    /// The words of `ordinal`'s note, repeats counted, as of the merge; 0 when it has none here.
+    pub(super) fn length(&self, ordinal: Ordinal) -> u32 {
+        self.lengths.get(ordinal.index()).copied().unwrap_or(0)
+    }
+
+    fn merged_lengths(&self, alive: &Alive, fresh: &[(Ordinal, &NoteWords)]) -> Box<[u32]> {
+        let last = alive
+            .iter()
+            .chain(fresh.iter().map(|&(ordinal, _)| ordinal))
+            .max();
+        let mut lengths = vec![0; last.map_or(0, |ordinal| ordinal.index() + 1)];
+        for ordinal in alive.iter() {
+            lengths[ordinal.index()] = self.length(ordinal);
+        }
+        for &(ordinal, words) in fresh {
+            lengths[ordinal.index()] = words.length();
+        }
+        lengths.into()
     }
 
     /// The words starting with `term` and their postings: one binary search, then a run.
@@ -91,6 +114,7 @@ impl Segment {
             + size_of_val(&*self.bounds)
             + size_of_val(&*self.starts)
             + self.postings.len()
+            + size_of_val(&*self.lengths)
     }
 
     fn len(&self) -> usize {
@@ -159,13 +183,14 @@ impl Builder {
         }
     }
 
-    fn finish(self, notes: usize) -> Segment {
+    fn finish(self, notes: usize, lengths: Box<[u32]>) -> Segment {
         Segment {
             bytes: self.bytes.into(),
             bounds: self.bounds.into(),
             starts: self.starts.into(),
             postings: self.postings.into(),
             notes,
+            lengths,
         }
     }
 }

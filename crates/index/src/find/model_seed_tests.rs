@@ -13,6 +13,7 @@ fn case(files: &[&str], query: &str) -> Case {
         query: query.to_owned(),
         showing: None,
         recent: Vec::new(),
+        merged: false,
     }
 }
 

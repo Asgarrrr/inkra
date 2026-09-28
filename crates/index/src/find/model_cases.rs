@@ -51,6 +51,8 @@ pub(super) struct Case {
     /// Notes by vault order, modulo the note count.
     pub(super) showing: Option<usize>,
     pub(super) recent: Vec<usize>,
+    /// Merge every fresh note into the segment before the snapshot.
+    pub(super) merged: bool,
 }
 
 /// A quarter type a stem next to a rival adding a word: only the exact name orders them.
@@ -65,9 +67,10 @@ pub(super) fn case() -> impl Strategy<Value = Case> {
         prop::collection::vec(any::<usize>(), 0..5),
         component(),
         any::<bool>(),
+        any::<bool>(),
     )
         .prop_map(
-            |(mut files, scanned, loaded, query, named, showing, recent, word, repeat)| {
+            |(mut files, scanned, loaded, query, named, showing, recent, word, repeat, merged)| {
                 let named = named.map(|at| {
                     let path = strip_md(&files[at.index(files.len())]);
                     let (folder, stem) = path.split_at(path.rfind('/').map_or(0, |at| at + 1));
@@ -93,6 +96,7 @@ pub(super) fn case() -> impl Strategy<Value = Case> {
                     query,
                     showing,
                     recent,
+                    merged,
                 }
             },
         )

@@ -173,7 +173,7 @@ impl Hold {
             Self::Nothing => (None, None, None),
             Self::Words => (Some(index.words()), None, None),
             Self::Both => (Some(index.words()), Some(index.corpus()), None),
-            // A query matching nothing: the lookup is cheap to build and still holds the ordinals.
+            // A query matching nothing: the lookup is cheap to build and still holds the snapshot.
             Self::Lookup => {
                 let query = NoteQuery::new("zzzz", None, &[]);
                 let lookup = index.words().lookup(&query, &AtomicBool::new(false));

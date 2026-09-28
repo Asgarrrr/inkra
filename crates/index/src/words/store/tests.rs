@@ -318,14 +318,52 @@ fn heap_bytes_counts_the_segment_bits_fresh_notes_and_ordinals_exactly() {
     let word = size_of::<usize>();
 
     // `ete` and `plan`, three `u32` offsets in each of `bounds` and `starts`, and one byte per
-    // gap or count: `ete` (0, 1), `plan` (0, 2) then (1, 1).
-    let segment = "eteplan".len() + 2 * 3 * size_of::<u32>() + 2 + 4;
+    // gap or count: `ete` (0, 1), `plan` (0, 2) then (1, 1); then two `u32` lengths.
+    let segment = "eteplan".len() + 2 * 3 * size_of::<u32>() + 2 + 4 + 2 * size_of::<u32>();
     // Ordinals 0 and 1: one `u64` of bits.
     let bits = size_of::<u64>();
-    // Its map slot (ordinal padded to a pointer, and the `Arc`), the `Arc`'s two counts and
-    // `NoteWords`' three boxed slices, then `autre`, two `usize` bounds and one `u32` count.
-    let fresh = (2 + 2 + 3 * 2) * word + "autre".len() + 2 * word + size_of::<u32>();
+    // Its map slot (ordinal padded to a pointer, and the `Arc`), the `Arc`'s two counts,
+    // `NoteWords`' three boxed slices and its length padded to a word, then `autre`, two `usize`
+    // bounds and one `u32` count.
+    let fresh = (2 + 2 + 3 * 2 + 1) * word + "autre".len() + 2 * word + size_of::<u32>();
     // Three notes, each an `EntryId` and an `Ordinal`, both `u32`.
     let ordinals = 3 * (2 * size_of::<u32>());
     assert_eq!(snapshot.heap_bytes(), segment + bits + fresh + ordinals);
+}
+
+#[test]
+fn total_counts_the_live_words_through_writes_and_a_merge_applied_after_them() {
+    let ids = ids(3);
+    let (a, b, c) = (ids[0], ids[1], ids[2]);
+    let mut words = Words::default();
+    let total = |words: &Words| words.snapshot().total;
+    set(&mut words, a, "plan plan été");
+    set(&mut words, b, "x");
+    assert_eq!(total(&words), 4);
+    set(&mut words, a, "un");
+    assert_eq!(total(&words), 2, "a fresh re-set replaces its words");
+    words.merge_all();
+    assert_eq!(total(&words), 2, "a merge changes no total");
+    set(&mut words, a, "un deux trois");
+    assert_eq!(total(&words), 4, "a merged re-set replaces its words");
+
+    let running = start(&mut words);
+    set(&mut words, a, "quatre cinq");
+    words.remove(b);
+    assert_eq!(total(&words), 2);
+    let _ = words.apply(running.run());
+    assert_eq!(total(&words), 2);
+    words.remove(a);
+    assert_eq!(total(&words), 0, "the write after the merge started wins");
+    set(&mut words, c, "c c");
+    words.merge_all();
+    assert_eq!(total(&words), 2);
+    set(&mut words, c, "");
+    assert_eq!(
+        total(&words),
+        0,
+        "an emptied note keeps its ordinal and no words"
+    );
+    words.remove(c);
+    assert_eq!(total(&words), 0);
 }

@@ -105,6 +105,12 @@ fn whole_terms_beat_prefixes() {
 fn stem_terms_beat_folder_terms() {
     let (_vault, index) = with_names(&["plan/aaa.md", "zzz/plan.md"]);
     assert_eq!(paths(&find(&index, "plan")), ["zzz/plan", "plan/aaa"]);
+    let (_vault, index) = with_names(&["plan/aaa b.md", "zzz/plan b.md"]);
+    assert_eq!(
+        paths(&find(&index, "plan")),
+        ["zzz/plan b", "plan/aaa b"],
+        "neither is exact"
+    );
 }
 
 #[test]
@@ -335,4 +341,61 @@ fn merging_the_snapshot_s_chunks_equals_one_range() {
         .map(|range| find_notes(&snapshot, &lookup, range, &query, &cancel, 5))
         .collect();
     assert_eq!(merge_notes(&snapshot, parts, &query, 5), whole);
+}
+
+#[test]
+fn a_rare_term_outweighs_a_common_one() {
+    let filler = |n: usize| "mot ".repeat(n);
+    let many_common = format!("{}kubernetes", "projet ".repeat(40));
+    let many_rare = format!(
+        "{}{}{}",
+        "projet ".repeat(2),
+        "kubernetes ".repeat(8),
+        filler(31)
+    );
+    let others: Vec<(String, String)> = (0..10)
+        .map(|n| (format!("c{n}.md"), format!("projet {}", filler(40))))
+        .collect();
+    let mut files = vec![("a.md", Some(&*many_common)), ("b.md", Some(&*many_rare))];
+    files.extend(others.iter().map(|(name, text)| (&**name, Some(&**text))));
+    let (_vault, index) = with_texts(&files);
+    assert_eq!(paths(&find(&index, "projet kubernetes")), ["b", "a"]);
+}
+
+#[test]
+fn at_one_length_the_rarer_term_decides() {
+    let a = format!("{}kubernetes {}", "projet ".repeat(3), "mot ".repeat(36));
+    let b = format!("projet {}{}", "kubernetes ".repeat(2), "mot ".repeat(37));
+    let filler = format!("projet {}", "mot ".repeat(39));
+    let others: Vec<String> = (0..10).map(|n| format!("c{n}.md")).collect();
+    let mut files = vec![("a.md", Some(&*a)), ("b.md", Some(&*b))];
+    files.extend(others.iter().map(|name| (&**name, Some(&*filler))));
+    let (_vault, index) = with_texts(&files);
+    assert_eq!(paths(&find(&index, "projet kubernetes")), ["b", "a"]);
+}
+
+#[test]
+fn a_short_note_outranks_a_long_one_with_as_many_occurrences() {
+    let long = format!("{}{}", "graphe ".repeat(3), "mot ".repeat(2997));
+    let short = format!("{}{}", "graphe ".repeat(3), "mot ".repeat(27));
+    let (_vault, index) = with_texts(&[("a.md", Some(&long)), ("b.md", Some(&short))]);
+    assert_eq!(paths(&find(&index, "graphe")), ["b", "a"]);
+}
+
+#[test]
+fn more_occurrences_still_rank_first_at_one_length() {
+    let few = format!("{}{}", "graphe ".repeat(3), "mot ".repeat(297));
+    let many = "graphe ".repeat(300);
+    let (_vault, index) = with_texts(&[("a.md", Some(&few)), ("b.md", Some(&many))]);
+    assert_eq!(paths(&find(&index, "graphe")), ["b", "a"]);
+}
+
+#[test]
+fn matches_differing_only_in_key_2_are_not_equal() {
+    let (_vault, once) = with_texts(&[("a.md", Some("plan x"))]);
+    let (_vault, twice) = with_texts(&[("a.md", Some("plan plan"))]);
+    let (once, twice) = (find(&once, "plan"), find(&twice, "plan"));
+    assert_eq!(once[0].id, twice[0].id);
+    assert_eq!(groups(&once), groups(&twice));
+    assert_ne!(once, twice, "the score is part of the match");
 }
