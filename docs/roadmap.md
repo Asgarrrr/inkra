@@ -189,7 +189,7 @@ Two levers are identified and left, each with its trigger.
 | Item | Trigger | Estimate |
 |---|---|---|
 | Overlap loads with parsing: `LOADS_PER_CORE` 2, or free a load slot when its read lands rather than when the foreground applies it. The pipeline is latency-bound per slot (~450 µs a cycle, slice 7's profile); 1 per core was set in slice 5, before the word parse made a load heavier. Probably 20–40 % off indexing, not measured | Indexing a real vault is noticed, or search results arrive late after launch | 0.5 d, with the release timeline before and after |
-| ~~The window start-up floor~~ | **Profiled 2026-09-28**: a bare AppKit window with one Metal frame is on screen 156–167 ms after spawn; Inkra is 1–11 ms above it. The time is macOS's, not gpui's or the vault's, and `first frame` reads ~27 ms late (it marks the second frame). See `startup-floor.md` | Fix the mark; keeping the process resident is the only lever left, a product choice |
+| ~~The window start-up floor~~ | **Profiled 2026-09-28**: a bare AppKit window with one Metal frame is on screen 156–167 ms after spawn; Inkra is 1–11 ms above it. The time is macOS's, not gpui's or the vault's, and `first frame` read ~27 ms late (it marked the second frame). **Mark fixed 2026-09-29**: it marks the first draw's start. See `startup-floor.md` | Keeping the process resident is the only lever left, a product choice |
 
 ## Index and search: the 2026-09-27 audit
 
