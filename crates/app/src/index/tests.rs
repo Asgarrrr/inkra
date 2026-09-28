@@ -130,9 +130,12 @@ pub(super) fn found(
             &cancel,
             100,
         )
-        .hits
+        .notes
         .into_iter()
-        .map(|hit| (hit.note, hit.context))
+        .flat_map(|group| {
+            let note = group.note;
+            group.hits.into_iter().map(move |hit| (note, hit.context))
+        })
         .collect()
     })
 }

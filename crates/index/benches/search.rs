@@ -122,6 +122,10 @@ fn keystroke(snapshot: &IndexSnapshot, query: &NoteQuery, cancel: &AtomicBool) -
     search(snapshot, &lookup, all, query, cancel, LIMIT)
 }
 
+fn hit_count(found: &Searched) -> usize {
+    found.notes.iter().map(|group| group.hits.len()).sum()
+}
+
 fn bench_search(c: &mut Criterion) {
     let (mut index, total, (id, text)) = index();
     let corpus = index.corpus();
@@ -148,7 +152,7 @@ fn bench_search(c: &mut Criterion) {
         ("1 char twice", "e e"),
     ] {
         let query = NoteQuery::new(needle, None, &[]);
-        let hits = keystroke(&snapshot, &query, &cancel).hits.len();
+        let hits = hit_count(&keystroke(&snapshot, &query, &cancel));
         group.bench_function(format!("{case}, {needle:?}, {hits} hits"), |b| {
             b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
         });
@@ -254,7 +258,7 @@ fn bench_long_line(c: &mut Criterion) {
     let (index, total) = long_notes(WORDS, 10 << 20, Some(80), 1, "zanzibar.\n");
     let snapshot = index.snapshot();
     let query = NoteQuery::new("zanzibar", None, &[]);
-    assert_eq!(keystroke(&snapshot, &query, &cancel).hits.len(), 1);
+    assert_eq!(hit_count(&keystroke(&snapshot, &query, &cancel)), 1);
     group.throughput(Throughput::Bytes(total));
     group.bench_function(
         "one 10 MB note, lines of 80 bytes, zanzibar once at its end",
@@ -324,7 +328,7 @@ fn bench_scripts(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(total));
         for &needle in needles {
             let query = NoteQuery::new(needle, None, &[]);
-            let hits = keystroke(&snapshot, &query, &cancel).hits.len();
+            let hits = hit_count(&keystroke(&snapshot, &query, &cancel));
             group.bench_function(format!("{script}, {needle}, {hits} hits"), |b| {
                 b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
             });

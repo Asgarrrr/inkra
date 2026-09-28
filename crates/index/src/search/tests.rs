@@ -32,14 +32,30 @@ fn all(index: &NoteIndex, text: &str, limit: usize) -> Searched {
     searched(&snapshot, 0..len, text, &AtomicBool::new(false), limit)
 }
 
+/// Each hit with its note, in order.
+fn hits(found: &Searched) -> impl Iterator<Item = (EntryId, &Hit)> {
+    found
+        .notes
+        .iter()
+        .flat_map(|group| group.hits.iter().map(move |hit| (group.note, hit)))
+}
+
+/// The notes cut short, in order.
+fn capped(found: &Searched) -> Vec<EntryId> {
+    found
+        .notes
+        .iter()
+        .filter(|group| group.capped)
+        .map(|group| group.note)
+        .collect()
+}
+
 /// Each hit as its note's place in `texts` and the text it lights.
 fn lit<'a>(texts: &[Option<&'a str>], query: &str) -> Vec<(usize, &'a str)> {
     let (ids, index) = indexed(texts);
-    all(&index, query, usize::MAX)
-        .hits
-        .iter()
-        .map(|hit| {
-            let Some(at) = ids.iter().position(|id| *id == hit.note) else {
+    hits(&all(&index, query, usize::MAX))
+        .map(|(note, hit)| {
+            let Some(at) = ids.iter().position(|id| *id == note) else {
                 panic!("a hit names a note of the index");
             };
             let Some(text) = texts[at] else {
@@ -61,10 +77,8 @@ fn lit_in<'a>(text: &'a str, query: &str) -> Vec<&'a str> {
 fn hits_come_in_vault_order_and_skip_notes_not_loaded() {
     let (ids, index) = indexed(&[Some("x plan"), None, Some("plan plan")]);
     let found = all(&index, "plan", 10);
-    let at: Vec<(EntryId, usize)> = found
-        .hits
-        .iter()
-        .map(|hit| (hit.note, hit.range.start.0))
+    let at: Vec<(EntryId, usize)> = hits(&found)
+        .map(|(note, hit)| (note, hit.range.start.0))
         .collect();
     assert_eq!(at, [(ids[0], 2), (ids[2], 0), (ids[2], 5)]);
     assert!(!found.limit_reached);
@@ -120,10 +134,8 @@ fn a_hit_touching_the_last_one_at_the_limit_still_merges_into_it() {
     // One grapheme spans `a` and the mark starting `\u{301}b`: their hits touch.
     let text = "a\u{1F3FB}\u{301}b";
     let found = run(&[Some(text)], "a b", 1);
-    let ranges: Vec<(usize, usize)> = found
-        .hits
-        .iter()
-        .map(|hit| (hit.range.start.0, hit.range.end.0))
+    let ranges: Vec<(usize, usize)> = hits(&found)
+        .map(|(_, hit)| (hit.range.start.0, hit.range.end.0))
         .collect();
     assert_eq!(ranges, [(0, text.len())]);
 }
@@ -135,17 +147,50 @@ fn a_word_two_terms_start_gives_one_hit_for_the_longer() {
 }
 
 #[test]
-fn a_note_gives_at_most_100_hits() {
+fn a_note_gives_at_most_100_hits_and_is_capped_past_them() {
     let many = "a ".repeat(150);
-    let found = run(&[Some(&many), Some("a")], "a", 1_000);
-    assert_eq!(found.hits.len(), HITS_PER_NOTE + 1);
+    let (ids, index) = indexed(&[Some(&many), Some("a")]);
+    let found = all(&index, "a", 1_000);
+    assert_eq!(hits(&found).count(), HITS_PER_NOTE + 1);
     assert!(!found.limit_reached);
+    assert_eq!(capped(&found), [ids[0]]);
+}
+
+#[test]
+fn a_note_with_exactly_100_hits_is_not_capped() {
+    let exact = "a ".repeat(HITS_PER_NOTE);
+    let found = run(&[Some(&exact)], "a", 1_000);
+    assert_eq!(hits(&found).count(), HITS_PER_NOTE);
+    assert_eq!(capped(&found), []);
+}
+
+#[test]
+fn a_note_cut_by_the_limit_is_capped() {
+    let (ids, index) = indexed(&[Some("a a a"), Some("a a")]);
+    assert_eq!(capped(&all(&index, "a", 4)), [ids[1]]);
+    assert_eq!(capped(&all(&index, "a", 3)), [], "exactly its room of hits");
+    assert_eq!(capped(&all(&index, "a", 2)), [ids[0]]);
+}
+
+#[test]
+fn a_hit_knows_the_line_of_its_start() {
+    let line_of = |text: &str| -> Vec<usize> {
+        hits(&run(&[Some(text)], "a", 10))
+            .map(|(_, hit)| hit.line)
+            .collect()
+    };
+    assert_eq!(line_of("a\nb a\n\n a"), [1, 2, 4]);
+    assert_eq!(
+        line_of(&format!("{}\na", "é".repeat(40))),
+        [2],
+        "multibyte before"
+    );
 }
 
 #[test]
 fn the_search_stops_at_the_limit() {
     let found = run(&[Some("a a a"), Some("a a")], "a", 4);
-    assert_eq!(found.hits.len(), 4);
+    assert_eq!(hits(&found).count(), 4);
     assert!(found.limit_reached);
     let exact = run(&[Some("a a"), Some("a a")], "a", 4);
     assert!(
@@ -187,7 +232,7 @@ fn a_set_flag_returns_nothing() {
 fn a_range_searches_only_its_notes() {
     let (ids, index) = indexed(&[Some("a"), Some("a"), Some("a")]);
     let found = searched(&index.snapshot(), 1..2, "a", &AtomicBool::new(false), 10);
-    let notes: Vec<_> = found.hits.iter().map(|hit| hit.note).collect();
+    let notes: Vec<_> = hits(&found).map(|(note, _)| note).collect();
     assert_eq!(notes, [ids[1]]);
 }
 
@@ -209,14 +254,42 @@ fn merge_concatenates_in_range_order_and_truncates() {
 }
 
 #[test]
+fn merge_caps_the_note_its_limit_cuts_once() {
+    let (ids, index) = indexed(&[Some("a"), Some("a a a"), Some("a")]);
+    let snapshot = index.snapshot();
+    let cancel = AtomicBool::new(false);
+    let parts = |limit| -> Vec<Searched> {
+        [0..1, 1..2, 2..3]
+            .into_iter()
+            .map(|range| searched(&snapshot, range, "a", &cancel, limit))
+            .collect()
+    };
+    let merged = Searched::merge(parts(3), 3);
+    assert_eq!(capped(&merged), [ids[1]], "cut by the merge");
+    assert_eq!(merged, searched(&snapshot, 0..3, "a", &cancel, 3));
+    let merged = Searched::merge(parts(2), 2);
+    assert_eq!(
+        capped(&merged),
+        [ids[1]],
+        "cut by its range and by the merge"
+    );
+    assert_eq!(merged, searched(&snapshot, 0..3, "a", &cancel, 2));
+    let merged = Searched::merge(parts(1), 1);
+    assert_eq!(capped(&merged), [], "a capped note with no hit kept");
+    assert_eq!(merged, searched(&snapshot, 0..3, "a", &cancel, 1));
+}
+
+#[test]
 fn a_snapshot_pairs_the_words_and_the_text_of_one_moment() {
     let (ids, mut index) = indexed(&[Some("old words")]);
     let before = index.snapshot();
     load(&mut index, ids[0], "new text");
     let after = index.snapshot();
     let found = |snapshot: &IndexSnapshot, query: &str| {
-        let hits = searched(snapshot, 0..1, query, &AtomicBool::new(false), 10).hits;
-        hits.into_iter().map(|hit| hit.context).collect::<Vec<_>>()
+        let found = searched(snapshot, 0..1, query, &AtomicBool::new(false), 10);
+        hits(&found)
+            .map(|(_, hit)| hit.context.clone())
+            .collect::<Vec<_>>()
     };
     assert_eq!(found(&before, "old"), ["old words"]);
     assert_eq!(found(&before, "new"), Vec::<String>::new());
@@ -230,7 +303,7 @@ fn context_of(text: &str, query: &str) -> (String, String) {
         context,
         context_match,
         ..
-    }) = found.hits.into_iter().next()
+    }) = found.notes.into_iter().flat_map(|group| group.hits).next()
     else {
         panic!("{query:?} in {text:?}");
     };

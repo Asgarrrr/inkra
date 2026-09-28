@@ -3,7 +3,7 @@
 mod hit;
 mod run;
 
-pub use hit::{Hit, Searched};
+pub use hit::{Hit, NoteHits, Searched};
 pub use run::{HITS_PER_NOTE, search};
 
 #[cfg(test)]

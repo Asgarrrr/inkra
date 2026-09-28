@@ -71,8 +71,9 @@ LF text. So the count of `\n` before the start, plus one, is the line.
 - **Corrected.** The draft counted during the walk. `light` may still extend
   the last range when a later word merges into it (`find/highlight.rs:67-72`),
   so a range is final only once `locate` returns.
-- The pass reads `cancel` every `CANCEL_EVERY` bytes (`find/terms.rs`), as
-  `each_word` does. A set flag returns `Searched::default()`.
+- **As built.** The pass reads no `cancel`. It rereads a prefix `locate`
+  already read under `cancel`, at +1.2 ms at worst over 10 MB; `search`
+  still reads `cancel` between notes.
 - Cost: O(bytes up to the last hit) of one note, a byte scan. It adds to the
   10 MB late-hit case, which is already over budget (48.7 ms against 16,
   word-start spec, Budget). `cargo bench -p inkra-index --bench search` runs
@@ -100,6 +101,29 @@ A header shows how many hits its note gave. A note cut short must say so.
 - Invariant, stated at `merge`: the ranges of `chunks` are disjoint and
   contiguous, so the hits of one note never span two ranges.
 
+### As built (slice 2)
+
+- **Hits are grouped by note.** `Searched { notes: Vec<NoteHits>,
+  limit_reached }`, and `NoteHits { note, hits, capped: bool }`, never
+  empty, in vault order. `Hit` loses `note`: a hit's note is its group's.
+  The flat `capped: Vec<EntryId>` needed a `retain`, an `extend` and a
+  `dedup` in `merge` to stay true; a flag on the group holds by
+  construction.
+- `merge` concatenates the groups in range order and keeps hits down to
+  `limit`. The last kept group is truncated, and `capped` is set when any
+  hit of it was dropped. `limit_reached` keeps its rule: `limit` hits kept.
+- `Hit.line` is a `usize`: no saturation branch.
+- `locate` returns up to `room + 1` ranges; `search` sets `capped` from
+  `lit.len() > room`, then truncates.
+- `lines` takes the final ranges by value and pairs each with its line. It
+  counts with `str::matches('\n')`: a byte filter-count fails clippy's
+  `naive_bytecount`, and `bytecount` would be a new dependency.
+- The late-hit case: 49.8 ms before, 51.0 ms after (+1.2 ms, the line
+  count over 10 MB), with the cancelling block walk. Measured A/B,
+  interleaved twice on the same machine state, since the load drifted by
+  60 % between two full runs. The grouped shape without the block walk:
+  50.4 ms against 50.9 ms for the first build, same method.
+
 ## S3. The delegate: `vault_search/`
 
 Modelled on `quick_open/`: `mod.rs` (the delegate), `search.rs` (the
@@ -123,7 +147,7 @@ and highlight runs. Every row is one `UI_LINE_HEIGHT` tall, so
 `uniform_list` measures from row 0.
 
 - **Header**, not selectable: the note's name, its folder dimmed, then its hit
-  count, or `{n}+` when the note is in `Searched::capped`. The path comes from
+  count, or `{n}+` when its `NoteHits` is `capped`. The path comes from
   the vault's entry on landing, as the backlinks panel reads it. A hit whose
   note has no entry any more is dropped with its header.
 - **Hit**: the line number, dimmed, in a column as wide as the largest listed
@@ -208,7 +232,7 @@ Headless `#[gpui::test]` against `MemFs`, each key with
 Each merges alone with `check.sh` green.
 
 1. **`Runs`**: the move of S1, no behavior change.
-2. **The index**: `Hit.line`, `Searched::capped`, the oracles, the bench
+2. **The index**: `Hit.line`, `NoteHits::capped`, the oracles, the bench
    figure.
 3. **The picker**: the delegate, rows, states, `cmd-shift-f`, the key tests,
    the shots. Confirming a hit opens its note, at the top.
@@ -229,9 +253,9 @@ taken, for a note app in v1:
 ## Amendments to the search spec
 
 - **D9**: the table gains "Before the first build: Scanning the vault…" for
-  both pickers. A capped note's header shows `{n}+` from `Searched::capped`.
-- **D1 / the word-start spec's S2**: `Hit` gains `line`; `Searched` gains
-  `capped`.
+  both pickers. A capped note's header shows `{n}+` from `NoteHits::capped`.
+- **D1 / the word-start spec's S2**: `Hit` gains `line` and loses `note`;
+  `Searched` lists `NoteHits` groups, each with `capped`.
 - **Slices**: slice 6 is split as above.
 - **Roadmap**: when slice 4 ships, `docs/roadmap.md` marks vault search as
   shipped, and CLAUDE.md drops "(vault search not yet built)".
