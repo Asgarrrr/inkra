@@ -908,6 +908,7 @@ lead, red team, blue team, code review, gate, stop before push.
 
 | Lever | Trigger | What changes |
 |---|---|---|
+| Words in scripts without spaces (Chinese, Japanese, Thai) | A note in one of these scripts is missed by a word in its middle | A word is a maximal `\w` run cut at `WORD_MAX_CHARS` (`words/tests.rs:60-66` pins 30 × `한` as one word), so in such text only a run's first chars are prefix-searchable. Cheap fix: index character bigrams for Han, Kana and Thai runs, as charabia's fallback does; a dictionary segmenter (jieba, lindera) is the costly one. Needs a reindex; the 2026-09-27 audit found it recorded nowhere |
 | Typo tolerance | The user misses notes because of typos | A term also matches words within one edit, for terms of 5 chars or more; a fourth, lower group |
 | Search by meaning | The user asks (option 3 of 2026-09-25) | A second index of note embeddings beside `words`; its matches join a group below `Text`. Needs a local model and its own spec |
 | Persisted word index | Startup too slow even with parallel loads | Serialize the segment; invalidate by mtime. `EntryId` and the store's ordinals are minted per session, so the file keys notes by a stable key (path or `FileIdentity`) and remaps them to the scan's ids at load (slice 7 blue team) |
