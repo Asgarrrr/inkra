@@ -13,6 +13,7 @@ use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
 use crate::theme;
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
+use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod modal;
 
@@ -206,17 +207,26 @@ impl AppShell {
             return;
         }
         let (links, showing, recent) = (self.links.clone(), self.showing, self.recent.clone());
-        let Some(picker) = self.toggle_picker(window, cx, |cx| {
-            QuickOpenDelegate::new(&links, showing, recent, cx)
-        }) else {
+        self.toggle_picker_with(
+            window,
+            cx,
+            |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
+            |shell, event: &NoteActivated, cx| shell.show_note(event.0, cx),
+        );
+    }
+
+    fn search_vault(&mut self, _: &SearchVault, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(vault) = self.notes.read(cx).vault().cloned() else {
             return;
         };
-        let opened = cx.subscribe(&picker, |shell, _, event: &NoteActivated, cx| {
-            shell.show_note(event.0, cx);
-        });
-        if let Some(modal) = &mut self.modal {
-            modal.hold(opened);
-        }
+        let links = self.links.clone();
+        // Vault search spec, slice 4: the note opens at the hit; for now at its top.
+        self.toggle_picker_with(
+            window,
+            cx,
+            |cx| VaultSearchDelegate::new(&links, vault, cx),
+            |shell, event: &HitActivated, cx| shell.show_note(event.note, cx),
+        );
     }
 
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
@@ -294,6 +304,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::new_note))
             .on_action(cx.listener(Self::new_folder))
             .on_action(cx.listener(Self::quick_open))
+            .on_action(cx.listener(Self::search_vault))
             .flex()
             .flex_row()
             .size_full()

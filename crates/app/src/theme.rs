@@ -36,6 +36,11 @@ pub(crate) const UI_TEXT_SIZE: Pixels = px(14.);
 /// is its own line box cannot clip it.
 pub(crate) const UI_LINE_HEIGHT: Pixels = px(22.);
 
+/// A digit of `UI_TEXT_SIZE`, at least: a number column is this per digit, as Zed's rems per digit.
+pub(crate) fn ui_digit_width() -> Pixels {
+    UI_TEXT_SIZE * 0.6
+}
+
 pub(crate) fn editor_background() -> Rgba {
     rgb(0x1e1e1e)
 }
@@ -75,6 +80,13 @@ pub(crate) fn selected_row_background() -> Rgba {
 
 pub(crate) fn modal_background() -> Rgba {
     rgb(0x252526)
+}
+
+/// The line between two groups of a picker's rows.
+pub(crate) const RULE_WIDTH: Pixels = px(1.);
+
+pub(crate) fn group_rule() -> Rgba {
+    rgb(0x3c3c3c)
 }
 
 pub(crate) fn modal_border() -> Rgba {

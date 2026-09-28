@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, IntoElement, ParentElement, Pixels, SharedString, Styled, Task, div,
+    AnyElement, App, Context, IntoElement, ParentElement, Pixels, SharedString, Styled, Task, div,
 };
 
 use super::{Picker, PickerDelegate};
@@ -51,8 +51,8 @@ impl<const KIND: u8> PickerDelegate for Letters<KIND> {
         "Type a letter…"
     }
 
-    fn empty_text(&self) -> Option<&'static str> {
-        Some("Nothing")
+    fn empty_text(&self, _: &App) -> Option<SharedString> {
+        Some("Nothing".into())
     }
 
     fn match_count(&self) -> usize {

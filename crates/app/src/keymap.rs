@@ -14,6 +14,7 @@ use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::vault::Save;
+use crate::vault_search::SearchVault;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
     let editor = Some("EditorView");
@@ -74,6 +75,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
         KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
+        KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

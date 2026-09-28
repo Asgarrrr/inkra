@@ -67,10 +67,10 @@ fn listed(opened: &mut Opened) -> Vec<String> {
     })
 }
 
-fn empty_text(opened: &mut Opened) -> Option<&'static str> {
-    opened
-        .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.empty_text())
+fn empty_text(opened: &mut Opened) -> Option<String> {
+    opened.picker.read_with(&opened.visual, |picker, cx| {
+        picker.delegate.empty_text(cx).map(String::from)
+    })
 }
 
 fn cancel_flag(opened: &mut Opened) -> Arc<AtomicBool> {
@@ -113,7 +113,7 @@ fn no_recent_note_says_so(cx: &mut TestAppContext) {
     let fs = vault(&["a.md"]);
     let mut opened = open(cx, &fs, None, &[]);
     assert_eq!(listed(&mut opened), Vec::<String>::new());
-    assert_eq!(empty_text(&mut opened), Some("No recent notes"));
+    assert_eq!(empty_text(&mut opened), Some("No recent notes".into()));
 }
 
 #[gpui::test]
@@ -121,7 +121,7 @@ fn a_query_with_no_match_says_so(cx: &mut TestAppContext) {
     let fs = vault(&["a.md"]);
     let mut opened = open(cx, &fs, None, &[]);
     opened.visual.simulate_keystrokes("z");
-    assert_eq!(empty_text(&mut opened), Some("No matching notes"));
+    assert_eq!(empty_text(&mut opened), Some("No matching notes".into()));
 }
 
 #[gpui::test]
@@ -357,7 +357,7 @@ fn the_picker_says_scanning_then_lists_the_first_names_without_the_refresh_wait(
         .update(|window, cx| window.focus(&opened.picker.focus_handle(cx), cx));
 
     opened.visual.simulate_keystrokes("b");
-    assert_eq!(empty_text(&mut opened), Some("Scanning the vault…"));
+    assert_eq!(empty_text(&mut opened), Some("Scanning the vault…".into()));
     assert_eq!(listed(&mut opened), Vec::<String>::new());
 
     gate.release();

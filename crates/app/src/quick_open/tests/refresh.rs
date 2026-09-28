@@ -21,7 +21,7 @@ use crate::test_support::{entry_id, unscanned_notes, vault};
 pub(super) fn hold_scans(opened: &mut Opened) -> oneshot::Sender<()> {
     let (release, hold) = oneshot::channel();
     opened.picker.update(&mut opened.visual, |picker, _| {
-        picker.delegate.hold = Some(hold.shared());
+        picker.delegate.runs.hold(Some(hold.shared()));
     });
     release
 }

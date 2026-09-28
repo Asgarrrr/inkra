@@ -1,8 +1,9 @@
 //! One picker at a time over the whole window, after Zed's `ModalLayer`.
 
 use gpui::{
-    AnyView, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Styled, Subscription, Window, div, px, relative,
+    AnyView, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, Styled, Subscription, Window, div, px,
+    relative,
 };
 
 use super::AppShell;
@@ -68,6 +69,28 @@ impl AppShell {
         window.focus(&focus, cx);
         cx.notify();
         Some(picker)
+    }
+
+    /// As `toggle_picker`, and maps each `E` the picker emits to the shell for as long as it is open.
+    pub(super) fn toggle_picker_with<D, E: 'static>(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        delegate: impl FnOnce(&mut Context<Picker<D>>) -> D,
+        on_pick: impl Fn(&mut Self, &E, &mut Context<Self>) + 'static,
+    ) where
+        D: PickerDelegate,
+        Picker<D>: EventEmitter<E>,
+    {
+        let Some(picker) = self.toggle_picker(window, cx, delegate) else {
+            return;
+        };
+        let subscription = cx.subscribe(&picker, move |shell, _, event: &E, cx| {
+            on_pick(shell, event, cx);
+        });
+        if let Some(modal) = &mut self.modal {
+            modal.hold(subscription);
+        }
     }
 
     /// Focus goes back only if the picker still holds it: a click elsewhere already moved it.

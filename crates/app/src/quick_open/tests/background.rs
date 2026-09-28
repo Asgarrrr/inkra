@@ -82,9 +82,9 @@ fn a_keystroke_cancels_a_background_refresh_and_waits_no_debounce(cx: &mut TestA
     assert_eq!(runs(&mut opened), before + 1, "a refresh is in flight");
     let refresh = cancel_flag(&mut opened);
     // The refresh stays held; the keystroke's scan does not.
-    opened
-        .picker
-        .update(&mut opened.visual, |picker, _| picker.delegate.hold = None);
+    opened.picker.update(&mut opened.visual, |picker, _| {
+        picker.delegate.runs.hold(None);
+    });
 
     opened.visual.simulate_keystrokes("p");
 
@@ -195,9 +195,9 @@ fn a_keystroke_cancels_a_stale_background_refresh_and_no_rerun_follows(cx: &mut 
     );
     assert_eq!(runs(&mut opened), before + 1, "the second refresh waits");
     let refresh = cancel_flag(&mut opened);
-    opened
-        .picker
-        .update(&mut opened.visual, |picker, _| picker.delegate.hold = None);
+    opened.picker.update(&mut opened.visual, |picker, _| {
+        picker.delegate.runs.hold(None);
+    });
 
     opened.visual.simulate_keystrokes("p");
 

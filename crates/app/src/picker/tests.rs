@@ -102,6 +102,31 @@ fn up_and_down_stop_at_the_ends(cx: &mut TestAppContext) {
     assert_eq!(selected(&picker, &mut visual), Some(4));
 }
 
+/// Two groups longer than the list's ten rows, so moving scrolls it.
+const LONG: &[&str] = &[
+    "# a", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11", "a12", "# b", "b1",
+    "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9", "b10", "b11", "b12",
+];
+
+#[gpui::test]
+fn up_to_a_groups_first_row_shows_its_header(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, LONG);
+    visual.simulate_keystrokes(&"down ".repeat(24));
+    assert_eq!(selected(&picker, &mut visual), Some(25));
+
+    visual.simulate_keystrokes(&"up ".repeat(11));
+    visual.run_until_parked();
+    assert_eq!(selected(&picker, &mut visual), Some(14), "b1");
+
+    let list = visual.debug_bounds("picker-list");
+    let header = visual.debug_bounds("picker-row-13");
+    assert!(
+        list.zip(header)
+            .is_some_and(|(list, header)| header.top() >= list.top()),
+        "`# b` {header:?} is inside the list {list:?}"
+    );
+}
+
 #[gpui::test]
 fn typing_runs_the_query_and_selects_its_first_row(cx: &mut TestAppContext) {
     let (picker, mut visual) = open(cx, ROWS);

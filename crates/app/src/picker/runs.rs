@@ -2,11 +2,15 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use gpui::{Context, Entity, Subscription};
+use gpui::{Context, Entity, Subscription, Task};
 
 use super::{Picker, PickerDelegate};
 use crate::index::{BUILDING_REFRESH, IndexSync, IndexWatch, Refresh};
+
+/// Waited only behind a user search, so an idle or refreshing picker answers at once.
+pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// A scan in flight. Search spec D7: a refresh never cancels it; it marks it for a re-run instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +62,13 @@ pub(crate) struct Runs {
     /// Scans started, the scanning state's empty runs aside.
     #[cfg(test)]
     started: usize,
+    /// Each scan waits for it before it starts, so a test can hold one running.
+    #[cfg(test)]
+    hold: Option<Hold>,
 }
+
+#[cfg(test)]
+pub(crate) type Hold = futures::future::Shared<futures::channel::oneshot::Receiver<()>>;
 
 /// The run `Runs::start` begins.
 #[must_use]
@@ -93,15 +103,23 @@ impl Runs {
         }
     }
 
-    /// The started run scans; a refresh until it applies is deferred.
-    pub(crate) fn scanning(&mut self, started: &Started) {
+    /// The started run scans; a refresh until it applies is deferred. The scan awaits the
+    /// future returned first: ready at once, unless a test holds scans.
+    pub(crate) fn scanning(&mut self, started: &Started) -> impl Future<Output = ()> + use<> {
         self.scan = Some(Scan {
             user: started.run.is_user(),
             rerun: false,
         });
         #[cfg(test)]
-        {
+        let hold = {
             self.started += 1;
+            self.hold.clone()
+        };
+        async move {
+            #[cfg(test)]
+            if let Some(hold) = hold {
+                let _ = hold.await;
+            }
         }
     }
 
@@ -114,6 +132,20 @@ impl Runs {
         if let Some(scan) = &mut self.scan {
             scan.rerun = false;
         }
+    }
+
+    /// Lands a run that scans nothing: the delegate already set its rows.
+    pub(crate) fn settle<D>(id: RunId, cx: &mut Context<Picker<D>>) -> Task<()>
+    where
+        D: PickerDelegate + AsMut<Self>,
+    {
+        cx.spawn(async move |picker, cx| {
+            let _ = picker.update(cx, |picker, cx| {
+                if picker.delegate.as_mut().is_current(id) {
+                    picker.matches_updated(0, cx);
+                }
+            });
+        })
     }
 
     /// The current run's rows landed; a refresh deferred behind it starts now.
@@ -165,6 +197,12 @@ impl Runs {
                 }
             }
         })
+    }
+
+    /// `None` releases the scans started from now on.
+    #[cfg(test)]
+    pub(crate) fn hold(&mut self, hold: Option<Hold>) {
+        self.hold = hold;
     }
 
     #[cfg(test)]

@@ -25,6 +25,7 @@ mod quick_open;
 mod reload;
 mod renaming;
 mod trashing;
+mod vault_search;
 
 impl AppShell {
     pub(crate) fn tree_row_names(&self, cx: &gpui::App) -> Vec<String> {
@@ -37,7 +38,7 @@ impl AppShell {
     }
 
     /// The open quick-open picker's empty text and match count; `None` when it is not open.
-    pub(crate) fn quick_open_state(&self, cx: &gpui::App) -> Option<(Option<&'static str>, usize)> {
+    pub(crate) fn quick_open_state(&self, cx: &gpui::App) -> Option<(Option<String>, usize)> {
         let picker = self
             .modal
             .as_ref()?
@@ -46,7 +47,10 @@ impl AppShell {
             .downcast::<Picker<QuickOpenDelegate>>()
             .ok()?;
         let delegate = &picker.read(cx).delegate;
-        Some((delegate.empty_text(), delegate.match_count()))
+        Some((
+            delegate.empty_text(cx).map(String::from),
+            delegate.match_count(),
+        ))
     }
 }
 
