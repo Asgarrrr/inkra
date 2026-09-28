@@ -1,5 +1,5 @@
 use std::cell::LazyCell;
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 use std::time::SystemTime;
 
 use inkra_vault::EntryId;
@@ -16,8 +16,8 @@ pub(super) struct Rank {
     pub(super) group: Group,
     exact: Reverse<bool>,
     whole: Reverse<usize>,
-    /// Stem terms for `Name`; else the occurrences of the terms placed in the text.
-    weight: Reverse<u64>,
+    /// Stem terms for `Name`; else the BM25 score of the terms placed in the text.
+    weight: Reverse<Weight>,
     showing: bool,
     recent: usize,
     modified: Reverse<SystemTime>,
@@ -37,7 +37,7 @@ pub(super) fn rank(
         if query.recent(id).is_none() || query.showing() == Some(id) {
             return None;
         }
-        (Group::Name, false, 0, 0)
+        (Group::Name, false, 0, 0.0)
     } else {
         let (group, whole, weight) = place(names, lookup, query, order, id)?;
         // An exact stem holds every term, so only a `Name` row can be exact.
@@ -51,7 +51,7 @@ pub(super) fn rank(
         group,
         exact: Reverse(exact),
         whole: Reverse(whole),
-        weight: Reverse(weight),
+        weight: Reverse(Weight::new(weight)),
         showing: query.showing() == Some(id),
         recent: query.recent(id).unwrap_or(usize::MAX),
         modified: Reverse(modified.0),
@@ -67,10 +67,10 @@ fn place(
     query: &NoteQuery,
     order: usize,
     id: EntryId,
-) -> Option<(Group, usize, u64)> {
+) -> Option<(Group, usize, f64)> {
     let terms = query.terms();
     let ordinal = LazyCell::new(|| lookup.ordinal(id));
-    let (mut in_name, mut whole, mut stem, mut occurrences) = (0, 0, 0, 0);
+    let (mut in_name, mut whole, mut stem, mut score) = (0, 0, 0, 0.0);
     for (at, term) in terms.iter().enumerate() {
         let (mut found, mut equal, mut in_stem) = (false, false, false);
         for word in names.words().of(order) {
@@ -83,20 +83,20 @@ fn place(
         if found {
             in_name += 1;
             whole += usize::from(equal);
-            stem += u64::from(in_stem);
+            stem += u32::from(in_stem);
         } else {
             let ordinal = (*ordinal)?;
             let hit = lookup.hit(at, ordinal)?;
             whole += usize::from(hit.whole);
-            occurrences += u64::from(hit.count);
+            score += lookup.score(at, ordinal, hit);
         }
     }
     Some(if in_name == terms.len() {
-        (Group::Name, whole, stem)
+        (Group::Name, whole, f64::from(stem))
     } else if in_name > 0 {
-        (Group::NameAndText, whole, occurrences)
+        (Group::NameAndText, whole, score)
     } else {
-        (Group::Text, whole, occurrences)
+        (Group::Text, whole, score)
     })
 }
 
@@ -109,3 +109,34 @@ fn is_exact(names: &NamesSnapshot, query: &NoteQuery, order: usize) -> bool {
         .map(|word| word.folded)
         .eq(query.typed())
 }
+
+/// Key 2's value: finite and non-negative, so `total_cmp` orders it as the numbers.
+#[derive(Debug, Clone, Copy)]
+struct Weight(f64);
+
+impl Weight {
+    fn new(weight: f64) -> Self {
+        debug_assert!(weight.is_finite() && weight >= 0.0, "{weight}");
+        Self(weight)
+    }
+}
+
+impl Ord for Weight {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for Weight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Weight {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for Weight {}

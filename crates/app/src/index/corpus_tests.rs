@@ -121,7 +121,8 @@ async fn a_save_ranks_its_note_first_by_mtime(cx: &mut TestAppContext) {
     let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
     assert_eq!(ranked(cx, &links, "plan"), [b, a], "the load's mtimes");
 
-    saved_edit(cx, &notes, "a", "plan alpha again").await;
+    // One length on both sides, so key 2 ties and the mtime decides.
+    saved_edit(cx, &notes, "a", "plan gamma").await;
 
     assert_eq!(ranked(cx, &links, "plan"), [a, b], "the save's mtime");
 }

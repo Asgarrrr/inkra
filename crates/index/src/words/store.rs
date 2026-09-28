@@ -26,6 +26,8 @@ pub(crate) struct Words {
     alive: Arc<Alive>,
     fresh: Fresh,
     next: u32,
+    /// The words of the live notes, repeats counted: the sum of their `NoteWords::len`.
+    total: u64,
     /// The last merge started, until it applies.
     running: Option<Running>,
 }
@@ -52,6 +54,7 @@ impl Words {
         };
         self.hide(ordinal);
         if !words.is_empty() {
+            self.total += u64::from(words.length());
             self.fresh.insert(ordinal, Arc::new(words));
         }
     }
@@ -78,6 +81,7 @@ impl Words {
             alive: Arc::clone(&self.alive),
             fresh: self.fresh.clone(),
             next: self.next,
+            total: self.total,
         }
     }
 
@@ -164,6 +168,7 @@ impl Words {
 
     /// Clears `ordinal`'s bit and drops its fresh entry, copying each only when it held it.
     fn hide(&mut self, ordinal: Ordinal) {
+        self.total -= u64::from(length(&self.segment, &self.alive, &self.fresh, ordinal));
         if self.alive.contains(ordinal) {
             Arc::make_mut(&mut self.alive).remove(ordinal);
         }
@@ -255,6 +260,15 @@ enum Held {
     Foreign { _merged: MergedWords },
 }
 
+/// The words of `ordinal`'s note, repeats counted: from the segment while alive, else fresh.
+fn length(segment: &Segment, alive: &Alive, fresh: &Fresh, ordinal: Ordinal) -> u32 {
+    if alive.contains(ordinal) {
+        segment.length(ordinal)
+    } else {
+        fresh.get(ordinal).map_or(0, |words| words.length())
+    }
+}
+
 /// The word index at one moment. Cloning is four `Arc` bumps.
 #[derive(Clone)]
 pub struct WordsSnapshot {
@@ -263,6 +277,7 @@ pub struct WordsSnapshot {
     pub(super) alive: Arc<Alive>,
     pub(super) fresh: Fresh,
     next: u32,
+    pub(super) total: u64,
 }
 
 impl WordsSnapshot {
@@ -278,6 +293,10 @@ impl WordsSnapshot {
             + self.alive.heap_bytes()
             + fresh
             + self.ordinals.len() * size_of::<(EntryId, Ordinal)>()
+    }
+
+    pub(super) fn length(&self, ordinal: Ordinal) -> u32 {
+        length(&self.segment, &self.alive, &self.fresh, ordinal)
     }
 
     /// One past the last ordinal minted, a removed note's included; for tests and the bench.

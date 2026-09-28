@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::model_cases::{self, Case};
 use crate::key::strip_md;
 use crate::test_support::{entries, mtime, vault};
-use crate::words::{TERM_MAX_CHARS, cap, fold};
+use crate::words::{TERM_MAX_CHARS, bm25, cap, fold, idf};
 use crate::{
     Group, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, find_notes, merge_notes,
 };
@@ -58,6 +58,9 @@ fn build(case: &Case) -> Built {
         if let Some((text, n)) = &case.loaded[k % 8] {
             index.insert(note.id, NoteContent::parse(text.as_str().into(), mtime(*n)));
         }
+    }
+    if case.merged {
+        index.merge_all();
     }
     let showing = case.showing.map(|at| notes[at % notes.len()].id);
     let recent: Vec<EntryId> = case
@@ -107,6 +110,41 @@ fn terms(typed: &[String]) -> Vec<String> {
     terms
 }
 
+/// BM25's figures over the notes with words: how many, their mean length, each term's df.
+struct Corpus {
+    notes: u32,
+    avg: f64,
+    df: Vec<u32>,
+}
+
+fn small(n: usize) -> u32 {
+    let Ok(n) = u32::try_from(n) else {
+        panic!("a drawn vault is small");
+    };
+    n
+}
+
+fn corpus(notes: &[Note], terms: &[String]) -> Corpus {
+    let texts: Vec<Vec<(usize, &str, String)>> = notes
+        .iter()
+        .filter_map(|note| note.text.as_deref().map(words))
+        .filter(|text| !text.is_empty())
+        .collect();
+    let holds = |text: &[(usize, &str, String)], term: &str| {
+        text.iter().any(|(_, _, word)| word.starts_with(term))
+    };
+    let total = small(texts.iter().map(Vec::len).sum());
+    Corpus {
+        notes: small(texts.len()),
+        avg: f64::from(total) / f64::from(small(texts.len())),
+        df: terms
+            .iter()
+            .map(|term| small(texts.iter().filter(|text| holds(text, term)).count()))
+            .collect(),
+    }
+}
+
+/// Key 2 as its bits: a non-negative float orders as its bits do.
 type Key = (
     Group,
     Reverse<bool>,
@@ -125,6 +163,7 @@ fn key(
     order: usize,
     typed: &[String],
     terms: &[String],
+    corpus: &Corpus,
     showing: Option<EntryId>,
     recent: &[EntryId],
 ) -> Option<Key> {
@@ -134,7 +173,7 @@ fn key(
         if showing == Some(note.id) {
             return None;
         }
-        (Group::Name, false, 0, 0)
+        (Group::Name, false, 0, 0.0)
     } else {
         let stem = note.path.rfind('/').map_or(0, |at| at + 1);
         let name = words(&note.path);
@@ -145,8 +184,9 @@ fn key(
             .collect();
         let exact = stem_words == typed;
         let text = note.text.as_deref().map(words).unwrap_or_default();
-        let (mut in_name, mut whole, mut in_stem, mut count) = (0, 0, 0, 0);
-        for term in terms {
+        let len = small(text.len());
+        let (mut in_name, mut whole, mut in_stem, mut score) = (0, 0, 0, 0.0);
+        for (at, term) in terms.iter().enumerate() {
             let matched: Vec<_> = name
                 .iter()
                 .filter(|(_, _, word)| word.starts_with(term.as_str()))
@@ -160,26 +200,27 @@ fn key(
                     return None;
                 }
                 whole += usize::from(hits.iter().any(|(_, _, word)| word == term));
-                count += hits.len() as u64;
+                let idf = idf(corpus.df[at], corpus.notes);
+                score += bm25(idf, small(hits.len()), len, corpus.avg);
             } else {
                 in_name += 1;
                 whole += usize::from(matched.iter().any(|(_, _, word)| word == term));
-                in_stem += u64::from(matched.iter().any(|(at, _, _)| *at >= stem));
+                in_stem += u32::from(matched.iter().any(|(at, _, _)| *at >= stem));
             }
         }
         if in_name == terms.len() {
-            (Group::Name, exact, whole, in_stem)
+            (Group::Name, exact, whole, f64::from(in_stem))
         } else if in_name == 0 {
-            (Group::Text, exact, whole, count)
+            (Group::Text, exact, whole, score)
         } else {
-            (Group::NameAndText, exact, whole, count)
+            (Group::NameAndText, exact, whole, score)
         }
     };
     Some((
         group,
         Reverse(exact),
         Reverse(whole),
-        Reverse(weight),
+        Reverse(weight.to_bits()),
         showing == Some(note.id),
         rank.unwrap_or(usize::MAX),
         Reverse(note.modified),
@@ -196,11 +237,13 @@ fn model(
 ) -> Vec<(EntryId, Group)> {
     let typed = typed(query);
     let terms = terms(&typed);
+    let corpus = corpus(notes, &terms);
     let mut listed: Vec<(Key, EntryId)> = notes
         .iter()
         .enumerate()
         .filter_map(|(order, note)| {
-            Some((key(note, order, &typed, &terms, showing, recent)?, note.id))
+            let key = key(note, order, &typed, &terms, &corpus, showing, recent)?;
+            Some((key, note.id))
         })
         .collect();
     listed.sort_unstable();

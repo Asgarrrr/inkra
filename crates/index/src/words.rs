@@ -7,6 +7,7 @@ mod note_words;
 mod ordinal;
 mod policy;
 mod query;
+mod score;
 mod segment;
 mod shards;
 mod store;
@@ -20,6 +21,8 @@ pub(crate) use note_words::NoteWords;
 pub(crate) use policy::FRESH_MIN;
 pub use policy::MergeWhen;
 pub use query::NoteQuery;
+#[cfg(test)]
+pub(crate) use score::{bm25, idf};
 pub(crate) use store::Words;
 pub use store::{MergedWords, RetiredWords, WordsMerge, WordsSnapshot};
 

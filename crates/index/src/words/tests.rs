@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use inkra_vault::EntryId;
 
-use super::{NoteWords, TERM_MAX_CHARS, WORD_MAX_CHARS};
+use super::{NoteWords, TERM_MAX_CHARS, WORD_MAX_CHARS, bm25, idf};
 use crate::test_support::indexed;
 use crate::{Lookup, NoteQuery, TermHit};
 
@@ -39,6 +39,17 @@ fn a_note_s_words_are_folded_counted_and_sorted() {
         [],
         "a word folding to nothing is dropped"
     );
+}
+
+#[test]
+fn a_note_s_length_counts_its_words_with_repeats() {
+    assert_eq!(NoteWords::parse("Été, l'été et ETE. Plan").length(), 6);
+    assert_eq!(
+        NoteWords::parse("\u{301} plan ! \u{301}").length(),
+        1,
+        "a word folding to nothing does not count"
+    );
+    assert_eq!(NoteWords::parse("").length(), 0);
 }
 
 #[test]
@@ -205,6 +216,32 @@ fn a_term_finds_every_word_it_starts_and_counts_them() {
         None,
         "a term matches the start of a word only"
     );
+}
+
+#[test]
+fn a_term_in_two_words_of_one_note_counts_that_note_once_fresh_or_merged() {
+    let (ids, mut index) = indexed(&[Some("cats catalog"), Some("cat"), Some("dog")]);
+    for state in ["fresh", "merged"] {
+        let query = NoteQuery::new("cat", None, &[]);
+        let Some(found) = index.words().lookup(&query, &AtomicBool::new(false)) else {
+            panic!("not cancelled");
+        };
+        let Some(ordinal) = found.ordinal(ids[0]) else {
+            panic!("the note has words");
+        };
+        let Some(hit) = found.hit(0, ordinal) else {
+            panic!("the note holds the term");
+        };
+        assert_eq!(hit.count, 2, "{state}");
+        // tf 2 in a note of 2 words, df 2 of 3 notes, a mean of 4 / 3 words.
+        let expected = bm25(idf(2, 3), 2, 2, 4.0 / 3.0);
+        assert_eq!(
+            found.score(0, ordinal, hit).to_bits(),
+            expected.to_bits(),
+            "{state}"
+        );
+        index.merge_all();
+    }
 }
 
 #[test]
