@@ -53,7 +53,7 @@ fn rows(window: WindowHandle<AppShell>, visual: &mut VisualTestContext) -> Vec<S
 fn shown(
     window: WindowHandle<AppShell>,
     visual: &mut VisualTestContext,
-) -> (Option<&'static str>, usize) {
+) -> (Option<String>, usize) {
     window
         .update(visual, |shell, _, cx| shell.quick_open_state(cx))
         .expect("the shell is open")
@@ -119,7 +119,10 @@ fn cmd_p_during_the_scan_says_so_then_lists(cx: &mut TestAppContext) {
     // An empty query lists recent notes only; a query lists matches.
     visual.simulate_keystrokes("cmd-p b");
     visual.run_until_parked();
-    assert_eq!(shown(window, &mut visual), (Some("Scanning the vault…"), 0));
+    assert_eq!(
+        shown(window, &mut visual),
+        (Some("Scanning the vault…".into()), 0)
+    );
 
     gate.release();
     visual.run_until_parked();
@@ -141,7 +144,7 @@ fn an_unreadable_root_during_the_scan_releases_quick_open(cx: &mut TestAppContex
 
     assert_eq!(
         shown(window, &mut visual),
-        (Some("No recent notes"), 0),
+        (Some("No recent notes".into()), 0),
         "never waits forever"
     );
 }

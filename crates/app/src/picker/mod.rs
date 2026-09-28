@@ -31,7 +31,7 @@ pub(crate) trait PickerDelegate: Sized + 'static {
     fn label(&self) -> &'static str;
     fn placeholder(&self) -> &'static str;
     /// Shown in place of the rows when there are none; `None` before the first result.
-    fn empty_text(&self) -> Option<&'static str>;
+    fn empty_text(&self, cx: &App) -> Option<SharedString>;
     fn match_count(&self) -> usize;
     fn is_selectable(&self, ix: usize) -> bool;
     /// The picker holds the task, so the next query drops it.
@@ -172,9 +172,15 @@ impl<D: PickerDelegate> Picker<D> {
         cx.notify();
     }
 
+    /// The rows no one can select right before it, a group's header, show with it.
     fn reveal_selected(&self) {
         if let Some(ix) = self.selected {
-            self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+            let lead = (0..ix)
+                .rev()
+                .take_while(|&row| !self.delegate.is_selectable(row))
+                .count();
+            self.scroll
+                .scroll_to_item_with_offset(ix, ScrollStrategy::Nearest, lead);
         }
     }
 

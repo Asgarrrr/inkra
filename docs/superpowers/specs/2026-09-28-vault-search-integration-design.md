@@ -128,12 +128,13 @@ A header shows how many hits its note gave. A note cut short must say so.
 
 Modelled on `quick_open/`: `mod.rs` (the delegate), `search.rs` (the
 background part), `rows.rs` (built rows), `render.rs`, and tests in their own
-files.
+files. As built, the background part is `index::fan_out`, shared with quick
+open, so neither has a `search.rs`.
 
 **Per keystroke.** One `lookup`, then `search` over each range of
 `chunks(num_cpus)`, then `Searched::merge`, limit 1,000. All of it runs off
-the foreground, as `quick_open/search.rs`. A field whose text has no term
-(`""`, `"   "`, `"[["`) runs no lookup. `search` cannot check that, since the
+the foreground, in `index::fan_out`, shared with quick open. A field whose
+text has no term (`""`, `"   "`, `"[["`) runs no lookup. `search` cannot check that, since the
 caller takes the lookup, so a delegate test does (word-start spec).
 
 **A changing vault.** The delegate observes `IndexSync` through `IndexWatch`:
@@ -168,6 +169,53 @@ and highlight runs. Every row is one `UI_LINE_HEIGHT` tall, so
 
 **Labels.** The dialog is "Search notes". A header's `row_label` is
 "`name`, `N` matches"; a hit's is "line `N`: `context`".
+
+### As built (slice 3)
+
+- **`HitActivated` from this slice.** The delegate emits `HitActivated
+  { note, range }`, and the shell maps it to `show_note(note)` for now. Slice
+  4 then changes only the shell's handler; with `NoteActivated` it would also
+  change the event, the delegate's `confirm` and its tests. The shell's
+  `toggle_picker_with` maps a picker's event for both pickers.
+- **The empty text is read when drawn.** `PickerDelegate::empty_text(cx)`
+  returns `Option<SharedString>`, since "No matches in …" is not static. The
+  delegate stores what the rows answer (`Answered`: blank, scanning, no
+  term, a query), and "No matches in …" reads the progress live, as the
+  footer does.
+- **The footer.** `limit_reached` wins over "Indexing …": more loads can only
+  add hits past the limit. No rows, no footer: "No matches in …" already
+  says how far indexing is. The indexing footer is
+  `IndexSync::indexing_footer`, for both pickers, so `picker/` knows no index.
+- **Shared with quick open.** `SEARCH_DEBOUNCE`, `Runs::settle` (a run that
+  scans nothing), the test hold on scans (`Runs::scanning` returns what a scan
+  awaits), and `index::fan_out`: the lookup, one scan per core-sized range,
+  the merge and the cancel check, generic over the scan and the merge.
+- **Revealing a selection.** The picker scrolls the unselectable rows right
+  before the selected one into view with it, so `up` onto a note's first hit
+  shows its header too.
+- **Rows.** A header's label says "1 match" for one uncut hit. A hit's
+  context drops its leading whitespace, capped at the match's start, so an
+  indented line does not push the match right. Hit rows are inset (`pl_4`)
+  under their header, whatever the width of the line column.
+- **Groups.** Each header after the first has a hairline above it
+  (`theme::group_rule`), drawn absolute so every row keeps one height for
+  `uniform_list`. Zed inserts an `Entry::Separator` row instead; a row of
+  another height would break `uniform_list`'s measure from row 0.
+- **The line column** is `digits × theme::ui_digit_width()`
+  (`0.6 × UI_TEXT_SIZE`), right-aligned, as Zed's `ilog10 + 1` × 0.5 rem.
+  Digits are proportional in the UI font, so the column aligns right edges,
+  not digits. The `vault-search-results` shot shows 998 to 1001 unclipped.
+- **Measured.** `Results::new` builds 1,010 rows in 0.35 ms (release, M-series),
+  far under the 8 ms foreground turn.
+- **Known costs, by design.**
+  - Each chunk runs with the full limit: `merge` over any split equals one
+    range only if any one chunk may hold all the first 1,000 hits. So a
+    common word builds up to `num_cpus × 1,000` contexts off the foreground
+    before the merge keeps 1,000. Quick open does the same with 100.
+  - No `NotesChanged` (S1): while loads land, a trashed note's rows stay up
+    to `BUILDING_REFRESH`; once built, the refresh is at once.
+  - Leaving the scanning state takes the first build's notify, so the first
+    rows can wait up to `BUILDING_REFRESH` while loads follow the build.
 
 ## S4. The shell and the editor
 
@@ -249,6 +297,8 @@ taken, for a note app in v1:
 - Streaming results: the search spec's Evolution row "Streaming results".
 - A preview of the hit.
 - Multi-select and its checkboxes.
+- A header's file icon and disclosure chevron, and the separator row between
+  notes (slice 3): a hairline above each header marks each group.
 
 ## Amendments to the search spec
 

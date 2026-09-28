@@ -8,12 +8,11 @@ use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
     Subscription, Task, actions, div,
 };
-use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
+use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery, find_notes, merge_notes};
 use inkra_vault::EntryId;
 
-use crate::count::thousands;
-use crate::index::{IndexSync, NotesChanged};
-use crate::picker::runs::{Run, RunId, Runs};
+use crate::index::{IndexSync, NotesChanged, fan_out};
+use crate::picker::runs::{Run, RunId, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate};
 use crate::sidebar::NoteActivated;
 use crate::theme;
@@ -21,14 +20,13 @@ use list::List;
 
 mod list;
 mod render;
-mod search;
 #[cfg(test)]
 mod tests;
 
 actions!(quick_open, [QuickOpen]);
 
-/// Waited only behind a user search, so an idle or refreshing picker answers at once.
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
+/// Zed's file finder lists 100 too.
+const LIMIT: usize = 100;
 /// After the names change, as Zed's file finder waits after a worktree update.
 pub(crate) const NOTES_CHANGED_REFRESH: Duration = Duration::from_millis(200);
 
@@ -43,9 +41,6 @@ pub(crate) struct QuickOpenDelegate {
     list: List,
     answered: Answered,
     runs: Runs,
-    /// A scan waits for it before it starts, so a test can hold one running.
-    #[cfg(test)]
-    hold: Option<futures::future::Shared<futures::channel::oneshot::Receiver<()>>>,
     /// Each excerpt, once computed, waits for it before it lands, so a test can order landings.
     #[cfg(test)]
     hold_excerpts: Option<futures::future::Shared<futures::channel::oneshot::Receiver<()>>>,
@@ -108,8 +103,6 @@ impl QuickOpenDelegate {
             answered: Answered::Nothing,
             runs: Runs::default(),
             #[cfg(test)]
-            hold: None,
-            #[cfg(test)]
             hold_excerpts: None,
             #[cfg(test)]
             logged: 0,
@@ -167,18 +160,8 @@ impl QuickOpenDelegate {
         Runs::landed(picker, cx);
     }
 
-    /// While the notes' texts load; before the first build the empty text says it is scanning.
     fn footer(&self, cx: &App) -> Option<SharedString> {
-        let links = self.links.read(cx);
-        (links.is_building() && !links.awaits_first_build()).then(|| {
-            let (loaded, total) = links.progress();
-            format!(
-                "Indexing {} of {} notes",
-                thousands(loaded),
-                thousands(total)
-            )
-            .into()
-        })
+        self.links.read(cx).indexing_footer()
     }
 }
 
@@ -201,13 +184,14 @@ impl PickerDelegate for QuickOpenDelegate {
         "Open a note…"
     }
 
-    fn empty_text(&self) -> Option<&'static str> {
-        match self.answered {
+    fn empty_text(&self, _: &App) -> Option<SharedString> {
+        let text = match self.answered {
             Answered::Nothing => None,
             Answered::Scanning => Some(SCANNING),
             Answered::Recent => Some("No recent notes"),
             Answered::Query => Some("No matching notes"),
-        }
+        };
+        text.map(SharedString::from)
     }
 
     fn match_count(&self) -> usize {
@@ -230,22 +214,14 @@ impl PickerDelegate for QuickOpenDelegate {
             // Nothing to list yet; `NotesChanged` re-runs the query once the first build applies.
             self.answered = Answered::Scanning;
             self.list.replace(id, snapshot, query, Vec::new(), false);
-            return cx.spawn(async move |picker, cx| {
-                let _ = picker.update(cx, |picker, cx| {
-                    if picker.delegate.runs.is_current(id) {
-                        picker.matches_updated(0, cx);
-                    }
-                });
-            });
+            return Runs::settle(id, cx);
         }
         let wait = match run {
             Run::Refresh => Some(NOTES_CHANGED_REFRESH),
             Run::Search => started.behind_user.then_some(SEARCH_DEBOUNCE),
             Run::Notify => None,
         };
-        self.runs.scanning(&started);
-        #[cfg(test)]
-        let hold = self.hold.clone();
+        let released = self.runs.scanning(&started);
         let search = Search {
             id,
             run,
@@ -263,11 +239,18 @@ impl PickerDelegate for QuickOpenDelegate {
             if let Some(wait) = wait {
                 cx.background_executor().timer(wait).await;
             }
-            #[cfg(test)]
-            if let Some(hold) = hold {
-                let _ = hold.await;
-            }
-            let Some(found) = search::found(executor, snapshot, query, started.cancel).await else {
+            released.await;
+            let found = fan_out(
+                executor,
+                snapshot,
+                query,
+                started.cancel,
+                |snapshot, lookup, range, query, cancel| {
+                    find_notes(snapshot, lookup, range, query, cancel, LIMIT)
+                },
+                |snapshot, found, query| merge_notes(snapshot, found, query, LIMIT),
+            );
+            let Some(found) = found.await else {
                 return;
             };
             let _ = picker.update(cx, |picker, cx| {

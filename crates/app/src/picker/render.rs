@@ -52,7 +52,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             div()
                 .px_2()
                 .text_color(theme::placeholder_text())
-                .children(self.delegate.empty_text())
+                .children(self.delegate.empty_text(cx))
                 .into_any_element()
         } else {
             div()

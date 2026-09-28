@@ -19,6 +19,7 @@ mod test_support;
 mod theme;
 mod timeline;
 mod vault;
+mod vault_search;
 
 #[cfg(feature = "shot")]
 pub mod shot;

@@ -4,20 +4,26 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
-use gpui::{AppContext as _, AsyncApp, Context, Entity, EventEmitter, Subscription, WeakEntity};
+use gpui::{
+    AppContext as _, AsyncApp, Context, Entity, EventEmitter, SharedString, Subscription,
+    WeakEntity,
+};
 use inkra_index::{NoteContent, NoteIndex};
 use inkra_vault::{Entry, EntryId, Fs, Mtime, Vault};
 
+use crate::count::thousands;
 use crate::timeline::{Step, Timeline, timed};
 use crate::vault::{NoteSaved, NoteStore};
 
 mod building;
 mod diff;
+mod fan_out;
 mod loading;
 mod merging;
 mod watch;
 
 use building::Build;
+pub(crate) use fan_out::fan_out;
 use loading::{Landed, Loading};
 pub(crate) use watch::{BUILDING_REFRESH, IndexWatch, Refresh};
 
@@ -153,6 +159,19 @@ impl IndexSync {
     pub(crate) fn is_building(&self) -> bool {
         let (loaded, total) = self.progress();
         self.awaits_first_build() || loaded < total
+    }
+
+    /// A picker's footer while the notes' texts load; before the first build its empty text says it is scanning.
+    pub(crate) fn indexing_footer(&self) -> Option<SharedString> {
+        (self.is_building() && !self.awaits_first_build()).then(|| {
+            let (loaded, total) = self.progress();
+            format!(
+                "Indexing {} of {} notes",
+                thousands(loaded),
+                thousands(total)
+            )
+            .into()
+        })
     }
 
     /// Until the first build after the vault's full scan applies, there are no names to list.

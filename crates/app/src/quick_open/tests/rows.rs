@@ -159,7 +159,7 @@ fn the_scanning_state_shows_no_footer(cx: &mut TestAppContext) {
     };
     opened.visual.run_until_parked();
 
-    assert_eq!(empty_text(&mut opened), Some("Scanning the vault…"));
+    assert_eq!(empty_text(&mut opened), Some("Scanning the vault…".into()));
     assert_eq!(footer(&mut opened), None);
     assert!(opened.visual.debug_bounds("picker-footer").is_none());
 }

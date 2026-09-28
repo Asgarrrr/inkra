@@ -54,7 +54,7 @@ const GRAPHEMES: &[(&str, &str)] = &[
 ];
 
 /// Longer than any picker wait, so the last query has answered.
-const PICKER_SETTLE: Duration = Duration::from_millis(300);
+pub(super) const PICKER_SETTLE: Duration = Duration::from_millis(300);
 
 pub(super) fn results(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(NOTES);

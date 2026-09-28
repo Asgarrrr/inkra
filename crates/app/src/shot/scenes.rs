@@ -3,6 +3,7 @@
 mod gone;
 mod quick_open;
 mod reload;
+mod vault_search;
 
 use gpui::{WindowHandle, point, px};
 
@@ -229,6 +230,36 @@ const CATALOGUE: &[Scene] = &[
         name: "quick-open-scanning",
         shows: "cmd-p before the vault's first scan ends: \"Scanning the vault…\" under the placeholder",
         open: quick_open::scanning,
+    },
+    Scene {
+        name: "vault-search-results",
+        shows: "cmd-shift-f `plan`: a header per note (name, folder dimmed, count; `100+` past the cap) under a hairline, then its hits, line numbers 998 to 1001 right-aligned in one column, the word lit",
+        open: vault_search::results,
+    },
+    Scene {
+        name: "vault-search-empty",
+        shows: "cmd-shift-f with nothing typed: the placeholder \"Search notes…\" and no rows",
+        open: vault_search::empty,
+    },
+    Scene {
+        name: "vault-search-no-match",
+        shows: "a query nothing matches: \"No matches\"",
+        open: vault_search::no_match,
+    },
+    Scene {
+        name: "vault-search-indexing",
+        shows: "a load still pending: the loaded notes' hits, \"Indexing 2 of 3 notes\" dimmed under them",
+        open: vault_search::indexing,
+    },
+    Scene {
+        name: "vault-search-limit",
+        shows: "1,100 hits: the first 1,000 listed, \"1,000+ results; refine the query\" dimmed under them",
+        open: vault_search::limit,
+    },
+    Scene {
+        name: "vault-search-scanning",
+        shows: "cmd-shift-f before the vault's first scan ends: \"Scanning the vault…\"",
+        open: vault_search::scanning,
     },
 ];
 
