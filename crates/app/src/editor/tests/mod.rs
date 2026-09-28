@@ -72,6 +72,11 @@ pub(crate) mod geometry {
         gpui::px(VIEWPORT - MARGIN - (TEXT_TOP + LINE_HEIGHT * (n + 1.)))
     }
 
+    /// The offset `Reveal::Center` puts line `n`'s middle at the viewport's with.
+    pub(crate) fn offset_centering(n: f32) -> gpui::Pixels {
+        gpui::px(VIEWPORT / 2. - (TEXT_TOP + LINE_HEIGHT * (n + 0.5)))
+    }
+
     pub(crate) fn top_of_line(n: f32, offset: gpui::Pixels) -> gpui::Pixels {
         gpui::px(TEXT_TOP + LINE_HEIGHT * n) + offset
     }

@@ -1,10 +1,21 @@
 //! A change from disk: the caret, the composition and the top line follow their text (F8).
 
-use gpui::{Context, Entity, Pixels, Window, point, px};
+use gpui::{Context, Entity, Pixels, point, px};
 use inkra_text::{Bias, Buffer, ByteOffset, Diff};
 
 use super::EditorView;
+use super::scroll::ScrollTo;
 use crate::buffer_events::Reloaded;
+
+impl ScrollTo {
+    /// The caret needs no mapping here: `map_through` already moved it.
+    fn mapped(self, diff: &Diff) -> Self {
+        match self {
+            Self::Top(top) => Self::Top(top.mapped(diff)),
+            cursor @ Self::Cursor(_) => cursor,
+        }
+    }
+}
 
 /// The text at the viewport's top, to put back there once the new text is laid out.
 pub(super) struct TopLine {
@@ -33,12 +44,10 @@ impl EditorView {
     ) {
         let diff = &event.0;
         self.state.map_through(diff);
-        // A pending one is in the previous reload's text, which `last_layout` does not describe.
-        self.restore_top = self
-            .restore_top
-            .take()
-            .or_else(|| self.top_line())
-            .map(|top| top.mapped(diff));
+        if let Some(top) = self.top_line() {
+            self.request_scroll(ScrollTo::Top(top));
+        }
+        self.scroll_to = self.scroll_to.take().map(|to| to.mapped(diff));
         cx.notify();
     }
 
@@ -62,12 +71,8 @@ impl EditorView {
         Some(self.scroll_handle.bounds().top() - self.last_text_top?)
     }
 
-    /// From `render`, before prepaint reads the offset, else the new text lands a frame late.
-    pub(super) fn restore_scroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(top) = self.restore_top.take() else {
-            return;
-        };
-        self.reshape(window, cx);
+    /// Puts `top` back at the viewport's top; the layout must describe the current text.
+    pub(super) fn restore_top(&mut self, top: &TopLine) {
         let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
         else {
             return;
@@ -105,5 +110,18 @@ impl EditorView {
 
     pub(crate) fn scroll_y(&self) -> Pixels {
         self.scroll_handle.offset().y
+    }
+
+    /// Whether the caret's whole row lies inside the viewport, read from the last layout.
+    pub(crate) fn caret_in_view(&self) -> bool {
+        let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
+        else {
+            panic!("the editor has not been drawn");
+        };
+        let top = viewport_top - self.scroll_handle.offset().y;
+        let bottom = top + self.scroll_handle.bounds().size.height;
+        let row = layout.row_for_offset(self.cursor());
+        let row_top = layout.top_for_row(row);
+        top <= row_top && row_top + layout.row_height(row) <= bottom
     }
 }

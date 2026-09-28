@@ -618,6 +618,9 @@ threading one through `bootstrap::root`). So the work is split:
   `restore_top = Some(TopLine { offset, below })`, with
   `offset = diff.map(row_bounds(row).start, Left)` and
   `below = y - top_for_row(row)`.
+- **As built 2026-09-28:** the field is now `scroll_to: Option<ScrollTo>`
+  (`editor/scroll.rs`), shared with a search hit's reveal; `restore_top` is
+  the method that computes a `Top`. See the vault search integration spec, S4.
 - **Two reloads before one render.** The second finds `restore_top` still
   pending, and `last_layout` still describes the text before the first reload.
   So the handler maps the pending top line through the new diff and reads the

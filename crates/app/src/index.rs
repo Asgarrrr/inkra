@@ -27,6 +27,9 @@ pub(crate) use fan_out::fan_out;
 use loading::{Landed, Loading};
 pub(crate) use watch::{BUILDING_REFRESH, IndexWatch, Refresh};
 
+/// A picker's empty text before the first build.
+pub(crate) const SCANNING: &str = "Scanning the vault…";
+
 /// A build applied: note names and link resolution may have changed.
 pub(crate) struct NotesChanged;
 

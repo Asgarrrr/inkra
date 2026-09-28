@@ -908,7 +908,49 @@ mod grapheme_steps {
             .unwrap_or(text.len())
     }
 
+    fn at_or_before_by_scan(text: &str, offset: usize) -> usize {
+        let offset = offset.min(text.len());
+        text.grapheme_indices(true)
+            .map(|(index, _)| index)
+            .chain(std::iter::once(text.len()))
+            .rev()
+            .find(|&index| index <= offset)
+            .unwrap_or_default()
+    }
+
+    fn at_or_after_by_scan(text: &str, offset: usize) -> usize {
+        let floor = (0..=offset.min(text.len()))
+            .rev()
+            .find(|&index| text.is_char_boundary(index))
+            .unwrap_or_default();
+        text.grapheme_indices(true)
+            .map(|(index, _)| index)
+            .chain(std::iter::once(text.len()))
+            .find(|&index| index >= floor)
+            .unwrap_or(text.len())
+    }
+
+    #[test]
+    fn clip_grapheme_snaps_inside_a_cluster_by_its_bias() {
+        let buf = Buffer::new("ae\u{301}b");
+        assert_eq!(buf.clip_grapheme(at(2), Bias::Left), at(1));
+        assert_eq!(buf.clip_grapheme(at(2), Bias::Right), at(4));
+        assert_eq!(buf.clip_grapheme(at(4), Bias::Left), at(4));
+        assert_eq!(buf.clip_grapheme(at(99), Bias::Right), buf.len());
+    }
+
     proptest! {
+        #[test]
+        fn clip_grapheme_agrees_with_a_whole_text_scan(
+            text in "[a\u{301}\u{302}e\r\n \u{1F468}\u{200D}\u{1F469}\u{1F1EB}\u{1F1F7}é]{0,24}",
+        ) {
+            let buffer = Buffer::new(&text);
+            for offset in 0..=text.len() + 2 {
+                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Left).0, at_or_before_by_scan(&text, offset));
+                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Right).0, at_or_after_by_scan(&text, offset));
+            }
+        }
+
         #[test]
         fn steps_agree_with_a_whole_text_scan(
             text in "[a\u{301}\u{302}e\r\n \u{1F468}\u{200D}\u{1F469}\u{1F1EB}\u{1F1F7}é]{0,24}",

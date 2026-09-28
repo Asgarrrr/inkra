@@ -1,9 +1,12 @@
+use std::ops::Range;
+
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Pixels, Render, Styled, Task, Window, div, px,
 };
 use inkra_index::Resolution;
 use inkra_markdown::Link;
+use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Kind};
 
 use crate::backlinks::BacklinksPanel;
@@ -62,14 +65,14 @@ impl AppShell {
         let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
         // A note linking to itself lists itself.
         cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
-            shell.show_note(event.0, cx);
+            shell.show_note(event.0, None, cx);
         })
         .detach();
         if let Some(editor) = &editor {
             Self::follow_links_of(editor, cx);
         }
         cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
-            shell.open_note(event.0, cx);
+            shell.open_note(event.0, None, cx);
         })
         .detach();
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
@@ -115,20 +118,25 @@ impl AppShell {
         }
     }
 
-    /// Bind, focus and `set_current` run with no `await` between them, so
+    /// Bind, select, focus and `set_current` run with no `await` between them, so
     /// nothing can observe one without the others.
-    fn open_note(&mut self, id: EntryId, cx: &mut Context<Self>) {
+    fn open_note(&mut self, id: EntryId, at: Option<Range<ByteOffset>>, cx: &mut Context<Self>) {
         let notes = self.notes.clone();
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
         self.activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                if let Some(editor) = &shell.editor {
+                let editor = if let Some(editor) = &shell.editor {
                     editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx));
+                    editor.clone()
                 } else {
                     let editor = cx.new(|cx| EditorView::new(buffer, cx));
                     Self::follow_links_of(&editor, cx);
-                    shell.editor = Some(editor);
+                    shell.editor = Some(editor.clone());
+                    editor
+                };
+                if let Some(range) = at {
+                    editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
                 }
                 let focus = shell.focus_handle(cx);
                 // The picker keeps the keys typed into it; dismissing it lands on the note.
@@ -142,11 +150,16 @@ impl AppShell {
         }));
     }
 
-    /// Opens `id` unless it is showing: reopening would reset its caret and scroll. Either way
-    /// it is the last pick, so a slower activation of another note must not land after it.
-    fn show_note(&mut self, id: EntryId, cx: &mut Context<Self>) {
+    /// Opens `id` unless it is showing: reopening would reset its caret, scroll and undo stack.
+    /// Either way it is the last pick, so a slower activation of another note must not land after it.
+    fn show_note(&mut self, id: EntryId, at: Option<Range<ByteOffset>>, cx: &mut Context<Self>) {
         if self.showing == Some(id) {
             self.activation = None;
+            if let (Some(range), Some(editor)) = (at, &self.editor) {
+                cx.with_window(cx.entity_id(), |window, cx| {
+                    editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
+                });
+            }
             // Focus lands on the note, as `open_note` moves it for another note.
             let focus = self.focus_handle(cx);
             match &mut self.modal {
@@ -156,7 +169,7 @@ impl AppShell {
                 }
             }
         } else {
-            self.open_note(id, cx);
+            self.open_note(id, at, cx);
         }
     }
 
@@ -183,7 +196,7 @@ impl AppShell {
     fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
         let source = self.showing.unwrap_or(EntryId::DETACHED);
         match self.links.read(cx).index().resolve_link(source, link) {
-            Resolution::Note(id) => self.show_note(id, cx),
+            Resolution::Note(id) => self.show_note(id, None, cx),
             Resolution::External(url) => cx.open_url(&url),
             Resolution::Unresolved | Resolution::SelfLink => {}
         }
@@ -211,7 +224,7 @@ impl AppShell {
             window,
             cx,
             |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
-            |shell, event: &NoteActivated, cx| shell.show_note(event.0, cx),
+            |shell, event: &NoteActivated, cx| shell.show_note(event.0, None, cx),
         );
     }
 
@@ -220,12 +233,13 @@ impl AppShell {
             return;
         };
         let links = self.links.clone();
-        // Vault search spec, slice 4: the note opens at the hit; for now at its top.
         self.toggle_picker_with(
             window,
             cx,
             |cx| VaultSearchDelegate::new(&links, vault, cx),
-            |shell, event: &HitActivated, cx| shell.show_note(event.note, cx),
+            |shell, event: &HitActivated, cx| {
+                shell.show_note(event.note, Some(event.range.clone()), cx);
+            },
         );
     }
 

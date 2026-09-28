@@ -5,8 +5,7 @@ use gpui::{
 use super::rows::{Header, HitRow};
 use crate::theme;
 
-/// The name, its folder dimmed and cut from the start, then the hit count; a hairline above
-/// sets it off from the group before.
+/// The name, its folder dimmed, then the hit count; a hairline sets off a later group.
 pub(super) fn header(header: &Header, after_group: bool) -> AnyElement {
     div()
         .relative()

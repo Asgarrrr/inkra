@@ -20,6 +20,8 @@ paths:
   (`unmark_text`).
 - `open_buffer` — the only path that rebinds the buffer. Never swap text through
   `edit_buffer`: it would land on the previous note's undo stack.
+- A scroll decided before its geometry exists goes through `request_scroll`
+  into `scroll_to`, which `render` applies; never a second field.
 - `copy` takes no gate: `as_mut` notifies unconditionally and would schedule an
   autosave for a `⌘C`.
 
