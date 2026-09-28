@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant, SystemTime};
 
+use futures::FutureExt as _;
+use futures::channel::oneshot;
 use gpui::{App, AppContext as _, Entity, TestAppContext};
 use inkra_index::{NameQuery, NoteContent, NoteQuery, TermHit, TextQuery, match_names, search};
 use inkra_text::{Buffer, ByteOffset};
@@ -13,7 +15,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
 
 use super::loading::LOADS_PER_CORE;
-use super::{Built, IndexSync};
+use super::{Build, IndexSync};
 use crate::test_support::{entry_id, named, scan_notes};
 use crate::vault::{AUTOSAVE_DELAY, NoteSaved, NoteStore};
 
@@ -81,6 +83,26 @@ pub(super) async fn saved_edit(
     buffer
 }
 
+/// Every build started from now on waits until the returned sender fires or drops.
+pub(super) fn hold_builds(
+    cx: &mut TestAppContext,
+    links: &Entity<IndexSync>,
+) -> oneshot::Sender<()> {
+    let (release, hold) = oneshot::channel();
+    links.update(cx, |links, _| links.hold = Some(hold.shared()));
+    release
+}
+
+/// Swaps in a rescan of `fs` that no create, rename or trash asked for, as an outside edit's would.
+pub(super) fn rescan(cx: &mut TestAppContext, fs: &MemFs, notes: &Entity<NoteStore>) {
+    let vault = notes.read_with(cx, |notes, _| notes.vault().expect("a vault").clone());
+    vault.update(cx, |vault, cx| {
+        futures::executor::block_on(vault.rescan(fs)).expect("a MemFs rescan");
+        cx.notify();
+    });
+    cx.run_until_parked();
+}
+
 pub(super) fn create(cx: &mut TestAppContext, notes: &Entity<NoteStore>, name: &str) {
     let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, name, cx));
     cx.background_executor.run_until_parked();
@@ -142,19 +164,45 @@ fn the_notes_are_built_off_the_foreground_and_follow_a_rescan(cx: &mut TestAppCo
     assert_eq!(named(&links, cx, "new"), [entry_id(&notes, cx, "new")]);
 }
 
+/// Every build applies; notifies during one start a single rebuild after it.
 #[gpui::test]
-fn a_stale_build_is_dropped(cx: &mut TestAppContext) {
+fn a_build_landing_behind_the_vault_applies_then_rebuilds(cx: &mut TestAppContext) {
     let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]]"), ("b.md", "")]);
     cx.run_until_parked();
+    let (note_sets, reconciles) =
+        links.read_with(cx, |links, _| (links.note_sets, links.reconciles));
+    let first = hold_builds(cx, &links);
+    create(cx, &notes, "c");
+    let second = hold_builds(cx, &links);
+    create(cx, &notes, "d");
+    assert_eq!(
+        links.read_with(cx, |links, _| (links.reconciles, links.build)),
+        (reconciles + 1, Build::Dirty),
+        "the notify during the build starts none"
+    );
 
-    // A build started before the latest one, finishing after it.
-    links.update(cx, |sync, cx| {
-        let stale = sync.generation - 1;
-        sync.apply_notes(stale, sync.next_seq, Built::new(&[]), cx);
+    first.send(()).expect("the build waits");
+    cx.run_until_parked();
+
+    assert_eq!(named(&links, cx, "c"), [entry_id(&notes, cx, "c")]);
+    assert!(named(&links, cx, "d").is_empty(), "read before d");
+    links.read_with(cx, |links, _| {
+        assert_eq!(links.note_sets, note_sets + 1);
+        assert_eq!(
+            (links.reconciles, links.build),
+            (reconciles + 2, Build::Running)
+        );
     });
 
-    assert_eq!(named(&links, cx, "b"), [entry_id(&notes, cx, "b")]);
+    second.send(()).expect("the rebuild waits");
+    cx.run_until_parked();
+
+    assert_eq!(named(&links, cx, "d"), [entry_id(&notes, cx, "d")]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
+    links.read_with(cx, |links, _| {
+        assert_eq!(links.note_sets, note_sets + 2);
+        assert_eq!(links.build, Build::Idle);
+    });
 }
 
 #[gpui::test]
@@ -179,7 +227,7 @@ fn progress_counts_the_notes_loaded(cx: &mut TestAppContext) {
 fn a_rebuild_alone_is_not_building(cx: &mut TestAppContext) {
     let (_fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
-    let built = links.read_with(cx, |links, _| links.built);
+    let note_sets = links.read_with(cx, |links, _| links.note_sets);
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
     let _subscription = cx.update(|cx| {
@@ -195,7 +243,7 @@ fn a_rebuild_alone_is_not_building(cx: &mut TestAppContext) {
     drop(renamed);
 
     assert!(
-        links.read_with(cx, |links, _| links.built) > built,
+        links.read_with(cx, |links, _| links.note_sets) > note_sets,
         "a rebuild applied"
     );
     let seen = seen.lock().expect("unpoisoned");
@@ -314,7 +362,8 @@ async fn an_in_place_write_the_held_walk_read_is_reloaded_after_its_swap(cx: &mu
     cx.run_until_parked();
     drop(created);
 
-    assert_eq!(fs.loads(Path::new("/vault/a.md")), loads + 1);
+    // The index's reload, and the open note's (watcher spec, F8).
+    assert_eq!(fs.loads(Path::new("/vault/a.md")), loads + 2);
     let a = entry_id(&notes, cx, "a");
     assert_eq!(found(cx, &links, "outside"), [(a, "outside".to_owned())]);
 }
@@ -484,6 +533,8 @@ fn a_failed_load_behind_a_newer_write_keeps_the_write(cx: &mut TestAppContext) {
         });
     });
     cx.run_until_parked();
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
     fs.remove(Path::new("/vault/a.md"));
     gate.release();
     cx.run_until_parked();
@@ -500,6 +551,8 @@ fn a_note_that_fails_to_load_loses_its_old_links(cx: &mut TestAppContext) {
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "changed");
     create(cx, &notes, "d");
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
     fs.remove(Path::new("/vault/a.md"));
     gate.release();
     cx.run_until_parked();
@@ -583,6 +636,8 @@ fn a_failed_load_behind_a_queued_reload_keeps_the_note(cx: &mut TestAppContext) 
         links.read_with(cx, |links, _| links.queued.contains_key(&a)),
         "a is queued behind its own load"
     );
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
     fs.remove(Path::new("/vault/a.md"));
     first.release();
     cx.run_until_parked();
@@ -608,6 +663,8 @@ fn a_failed_load_behind_a_save_still_parsing_keeps_the_note(cx: &mut TestAppCont
         sync.indexed.insert(a, Mtime(SystemTime::UNIX_EPOCH));
         sync.next_seq(a);
     });
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
     fs.remove(Path::new("/vault/a.md"));
     gate.release();
     cx.run_until_parked();
@@ -977,6 +1034,8 @@ fn a_failed_load_changes_the_revision(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let before = revision(cx, &links);
 
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
     fs.remove(Path::new("/vault/a.md"));
     gate.release();
     cx.run_until_parked();

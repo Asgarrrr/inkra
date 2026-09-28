@@ -24,6 +24,8 @@ allow = [
     "Unicode-3.0",
     "bzip2-1.0.6",
     "MPL-2.0",
+    # notify, the file watcher (watcher spec, F1).
+    "CC0-1.0",
 ]
 
 [licenses.private]

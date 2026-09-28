@@ -11,15 +11,17 @@ bench = false
 
 [features]
 # Keeps `MemFs` out of release; the self dev-dependency enables it for tests.
-test-support = ["dep:futures"]
+test-support = []
 
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
 # Published crate, not Zed's fork; macOS method overridden in `trash_method` (create-rename-delete spec).
 trash = "5"
-# `MemFs::block_load` only: parking a load needs a real waker.
-futures = { workspace = true, optional = true }
+# `Fs::watch`'s channel, and `MemFs`'s gates.
+futures = { workspace = true }
+# 8.2, the stable line: 9.0 is a release candidate (watcher spec, F1).
+notify = "8.2"
 
 [dev-dependencies]
 inkra-vault = { path = ".", features = ["test-support"] }

@@ -1,18 +1,20 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::Path;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use gpui::{Entity, TestAppContext, prelude::*};
+use gpui::{Entity, Subscription, TestAppContext, prelude::*};
 use inkra_index::{NameQuery, match_names};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
 
 use crate::index::IndexSync;
-use crate::vault::NoteStore;
+use crate::vault::{ConflictPreserved, NoteStore};
 
 /// A vault of empty notes, `files` relative to `/vault`.
 pub(crate) fn vault(files: &[&str]) -> Arc<MemFs> {
@@ -76,6 +78,21 @@ pub(crate) async fn opened(
         .expect("the note opens");
     notes.update(cx, |notes, cx| notes.set_current(id, cx));
     buffer
+}
+
+/// The paths of every `ConflictPreserved` the store emits.
+pub(crate) fn conflicts(
+    notes: &Entity<NoteStore>,
+    cx: &mut TestAppContext,
+) -> (Rc<RefCell<Vec<PathBuf>>>, Subscription) {
+    let preserved = Rc::new(RefCell::new(Vec::new()));
+    let subscription = cx.update(|cx| {
+        let preserved = Rc::clone(&preserved);
+        cx.subscribe(notes, move |_, event: &ConflictPreserved, _| {
+            preserved.borrow_mut().push(event.path.clone());
+        })
+    });
+    (preserved, subscription)
 }
 
 /// Inserts `text` at the start; only the notify fires the autosave observer.

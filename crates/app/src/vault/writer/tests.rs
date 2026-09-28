@@ -33,6 +33,7 @@ fn a_later_write_wins_when_it_lands_second() {
         PathBuf::from("/vault/a.md"),
         "older".into(),
         1,
+        super::Folder::MustExist,
     );
     let newer = super::write_through(
         writer,
@@ -40,6 +41,7 @@ fn a_later_write_wins_when_it_lands_second() {
         PathBuf::from("/vault/a.md"),
         "newer".into(),
         2,
+        super::Folder::MustExist,
     );
     assert!(futures::executor::block_on(older).is_some_and(|r| r.is_ok()));
     assert!(futures::executor::block_on(newer).is_some_and(|r| r.is_ok()));
@@ -63,6 +65,7 @@ fn a_later_write_wins_when_it_lands_first() {
         PathBuf::from("/vault/a.md"),
         "newer".into(),
         2,
+        super::Folder::MustExist,
     );
     let older = super::write_through(
         writer,
@@ -70,6 +73,7 @@ fn a_later_write_wins_when_it_lands_first() {
         PathBuf::from("/vault/a.md"),
         "older".into(),
         1,
+        super::Folder::MustExist,
     );
     assert!(futures::executor::block_on(newer).is_some_and(|r| r.is_ok()));
 

@@ -13,7 +13,7 @@ use inkra_vault::{EntryId, Fs, Mtime};
 
 use super::IndexSync;
 use super::loading::Landed;
-use super::tests::{backlinks, create, found, indexed_vault};
+use super::tests::{backlinks, create, found, indexed_vault, rescan};
 use crate::test_support::{entry_id, scan_notes};
 use crate::vault::NoteStore;
 
@@ -113,13 +113,13 @@ fn land_at_once(
                 Arc::from(text),
                 Mtime(SystemTime::UNIX_EPOCH),
             ));
-            let built = links.built;
+            let note_sets = links.note_sets;
             links
                 .landed
                 .unbounded_send(Landed {
                     id,
                     seq,
-                    built,
+                    note_sets,
                     loaded,
                 })
                 .expect("drain listens");
@@ -263,6 +263,57 @@ fn a_load_failing_after_a_build_is_retried_at_the_same_path(cx: &mut TestAppCont
     assert_eq!(links.read_with(cx, |links, _| links.progress()), (4, 4));
 }
 
+/// As above, but only mtime changes apply during the load: none can have moved the note.
+#[gpui::test]
+fn a_load_failing_after_only_mtime_changes_forgets_the_note(cx: &mut TestAppContext) {
+    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]] old"), ("b.md", "")]);
+    cx.run_until_parked();
+    let (at_a, at_z) = (Path::new("/vault/a.md"), Path::new("/vault/z.md"));
+
+    let gate = fs.block_load("/vault/a.md");
+    fs.insert_file("/vault/a.md", "[[b]] new");
+    rescan(cx, &fs, &notes);
+    fs.insert_file("/vault/b.md", "");
+    rescan(cx, &fs, &notes);
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
+    futures::executor::block_on(fs.rename(at_a, at_z)).expect("rename away");
+    gate.release();
+    while cx.dispatcher.tick(true) {}
+    futures::executor::block_on(fs.rename(at_z, at_a)).expect("rename back");
+    cx.run_until_parked();
+
+    assert_eq!(found(cx, &links, "new"), []);
+    assert_eq!(found(cx, &links, "old"), [], "its links are dropped");
+    assert_eq!(backlinks(cx, &notes, &links, "b"), Vec::<String>::new());
+}
+
+/// Readable again at its old mtime, so only the rescan's retry of forgotten notes reads it.
+#[gpui::test]
+fn a_forgotten_note_is_reloaded_at_a_rescan_moving_another_notes_mtime(cx: &mut TestAppContext) {
+    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]] old"), ("b.md", "")]);
+    cx.run_until_parked();
+    let a = entry_id(&notes, cx, "a");
+    let (at_a, at_z) = (Path::new("/vault/a.md"), Path::new("/vault/z.md"));
+    let gate = fs.block_load("/vault/a.md");
+    fs.insert_file("/vault/a.md", "[[b]] new");
+    rescan(cx, &fs, &notes);
+    // Holds the batch this change starts, as its latency would: the vault still lists the note.
+    let _batch = fs.block_read_dir("/vault");
+    futures::executor::block_on(fs.rename(at_a, at_z)).expect("rename away");
+    gate.release();
+    while cx.dispatcher.tick(true) {}
+    futures::executor::block_on(fs.rename(at_z, at_a)).expect("rename back");
+    cx.run_until_parked();
+    assert_eq!(found(cx, &links, "new"), [], "forgotten");
+
+    fs.insert_file("/vault/b.md", "");
+    rescan(cx, &fs, &notes);
+
+    assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
+    assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
+}
+
 #[gpui::test]
 fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "old"), ("b.md", "")]);
@@ -284,4 +335,45 @@ fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppCo
 
     assert_eq!(fs.loads(Path::new("/vault/z.md")), 0);
     assert_eq!(found(cx, &links, "old"), [(a, "old".to_owned())]);
+}
+
+/// The watch's scoped scan lands while both loads are held: the removed note goes, the renamed one reloads.
+#[gpui::test]
+fn a_scoped_scan_landing_during_loads_leaves_the_index_consistent(cx: &mut TestAppContext) {
+    // Two cores, so both loads are in flight when the scan lands.
+    cx.executor().set_num_cpus(2);
+    let (fs, notes, links) = indexed_vault(
+        cx,
+        &[("a.md", "[[c]] old"), ("b.md", "[[c]] old"), ("c.md", "")],
+    );
+    cx.run_until_parked();
+    let b = entry_id(&notes, cx, "b");
+    let (at_a, at_b) = (Path::new("/vault/a.md"), Path::new("/vault/b.md"));
+
+    let gates = [fs.block_load(at_a), fs.block_load(at_b)];
+    fs.insert_file(at_a, "[[c]] alpha");
+    fs.insert_file(at_b, "[[c]] beta");
+    cx.run_until_parked();
+    assert_eq!(
+        (fs.loads(at_a), fs.loads(at_b)),
+        (2, 2),
+        "both reloads park"
+    );
+
+    fs.remove(at_a);
+    futures::executor::block_on(fs.rename(at_b, Path::new("/vault/z.md"))).expect("rename");
+    cx.run_until_parked();
+    assert_eq!(entry_id(&notes, cx, "z"), b, "the scan landed");
+    assert!(
+        links.read_with(cx, |links, _| links.is_building()),
+        "the loads are still held"
+    );
+    drop(gates);
+    cx.run_until_parked();
+
+    assert_eq!(found(cx, &links, "alpha"), []);
+    assert_eq!(found(cx, &links, "beta"), [(b, "[[c]] beta".to_owned())]);
+    assert_eq!(found(cx, &links, "old"), []);
+    assert_eq!(backlinks(cx, &notes, &links, "c"), ["z"]);
+    assert_eq!(links.read_with(cx, |links, _| links.progress()), (2, 2));
 }

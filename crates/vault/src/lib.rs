@@ -7,15 +7,18 @@ mod conflict;
 mod fs;
 mod path;
 mod real_fs;
+mod temp;
 mod vault;
+mod watch;
 
 #[cfg(feature = "test-support")]
 pub mod mem_fs;
 
 pub use fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError, Watcher,
     normalize_line_endings,
 };
 pub use path::{NameProblem, RelPath, check_name, note_file_name};
 pub use real_fs::RealFs;
-pub use vault::{Entry, EntryId, Job, Jobs, Serial, Vault, Walk};
+pub use vault::{Entry, EntryId, Job, Jobs, Reach, Serial, Vault, Walk};
+pub use watch::{Changed, PathEvent, Pending, Watch};

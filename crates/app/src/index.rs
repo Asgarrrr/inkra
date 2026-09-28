@@ -2,20 +2,22 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{AppContext as _, AsyncApp, Context, Entity, EventEmitter, Subscription, WeakEntity};
-use inkra_index::{NoteContent, NoteIndex, NoteSet};
-use inkra_vault::{Entry, EntryId, Fs, Kind, Mtime, Vault};
+use inkra_index::{NoteContent, NoteIndex};
+use inkra_vault::{Entry, EntryId, Fs, Mtime, Vault};
 
 use crate::timeline::{Step, Timeline, timed};
 use crate::vault::{NoteSaved, NoteStore};
 
+mod building;
+mod diff;
 mod loading;
 mod merging;
 mod watch;
 
+use building::Build;
 use loading::{Landed, Loading};
 pub(crate) use watch::{BUILDING_REFRESH, IndexWatch, Refresh};
 
@@ -24,36 +26,8 @@ pub(crate) struct NotesChanged;
 
 impl EventEmitter<NotesChanged> for IndexSync {}
 
-/// A build of the vault's notes, with the inputs of `apply_notes`'s diff, derived off the foreground.
-struct Built {
-    notes: NoteSet,
-    /// Every note's id and mtime, in vault order.
-    mtimes: Vec<(EntryId, Mtime)>,
-    live: HashSet<EntryId>,
-}
-
-impl Built {
-    fn new(entries: &[Entry]) -> Self {
-        let named = entries
-            .iter()
-            .map(|entry| {
-                let path = entry.path.as_path().to_string_lossy().into_owned();
-                (entry.id, path, entry.kind, entry.mtime)
-            })
-            .collect();
-        let mtimes: Vec<(EntryId, Mtime)> = entries
-            .iter()
-            .filter(|entry| entry.kind == Kind::Note)
-            .map(|entry| (entry.id, entry.mtime))
-            .collect();
-        let live = mtimes.iter().map(|(id, _)| *id).collect();
-        Self {
-            notes: NoteSet::build(named),
-            mtimes,
-            live,
-        }
-    }
-}
+#[cfg(test)]
+type Hold = futures::future::Shared<futures::channel::oneshot::Receiver<()>>;
 
 pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
@@ -70,10 +44,13 @@ pub(crate) struct IndexSync {
     queue: VecDeque<(EntryId, u64)>,
     /// The latest sequence queued per note; an older queue entry for it is skipped.
     queued: HashMap<EntryId, u64>,
-    /// Builds started; a build applies only if it is still the latest.
-    generation: u64,
-    /// The generation `index` holds; `None` before the first build applies.
-    built: Option<u64>,
+    /// Notes a failed load forgot; every apply queues them again, since an `Mtimes` change may not list them.
+    forgotten: HashSet<EntryId>,
+    build: Build,
+    /// The vault entries the last applied change was read from; `None` until the first build applies.
+    last: Option<Arc<[Entry]>>,
+    /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
+    note_sets: u64,
     /// At most one per core, each counted until the foreground applies it.
     loading: Vec<Loading>,
     /// Where a finished load goes; `drain` applies it on the foreground.
@@ -85,6 +62,11 @@ pub(crate) struct IndexSync {
     turns: usize,
     #[cfg(test)]
     merges: usize,
+    #[cfg(test)]
+    reconciles: usize,
+    /// A build waits for it before it starts, so a test can hold one in flight.
+    #[cfg(test)]
+    hold: Option<Hold>,
     /// The startup load's last turn left nothing building; cleared once the settle merge it asks
     /// for applies, or finds nothing to merge.
     settling: bool,
@@ -115,8 +97,10 @@ impl IndexSync {
             latest: HashMap::new(),
             queue: VecDeque::new(),
             queued: HashMap::new(),
-            generation: 0,
-            built: None,
+            forgotten: HashSet::new(),
+            build: Build::Idle,
+            last: None,
+            note_sets: 0,
             loading: Vec::new(),
             landed,
             #[cfg(test)]
@@ -125,6 +109,10 @@ impl IndexSync {
             turns: 0,
             #[cfg(test)]
             merges: 0,
+            #[cfg(test)]
+            reconciles: 0,
+            #[cfg(test)]
+            hold: None,
             settling: false,
             marked_indexed: false,
             _subscriptions: subscriptions,
@@ -169,7 +157,7 @@ impl IndexSync {
 
     /// Until the first build after the vault's full scan applies, there are no names to list.
     pub(crate) fn awaits_first_build(&self) -> bool {
-        self.vault.is_some() && self.built.is_none()
+        self.vault.is_some() && self.last.is_none()
     }
 
     fn next_seq(&mut self, id: EntryId) -> u64 {
@@ -182,104 +170,32 @@ impl IndexSync {
         self.latest.get(&id) == Some(&seq)
     }
 
-    /// Builds the notes off the foreground; `apply_notes` swaps them in.
-    fn reconcile(&mut self, cx: &mut Context<Self>) {
-        let Some(vault) = &self.vault else {
-            return;
-        };
-        // One build, after the full scan: the root pass alone would cost a build the next swap discards.
-        if !vault.read(cx).is_scanned() {
-            return;
-        }
-        let started = Instant::now();
-        let entries = vault.read(cx).shared_entries();
-        self.generation += 1;
-        let (generation, seq) = (self.generation, self.next_seq);
-        let building = cx.background_spawn(async move { Built::new(&entries) });
-        // Detached: it holds only a weak handle, so it ends when this entity does.
-        cx.spawn(async move |this, cx| {
-            let built = building.await;
-            Self::timed_turn(&this, cx, |this, cx| {
-                this.apply_notes(generation, seq, built, cx);
-            });
-        })
-        .detach();
-        Timeline::turn(started.elapsed(), cx);
-        // Before the first build applies `is_building` holds, so this marks nothing yet.
-        self.mark_indexed(cx);
-    }
-
-    /// Applies a build unless a newer one started, then queues each changed note; `seq` is the counter at its read.
-    fn apply_notes(&mut self, generation: u64, seq: u64, built: Built, cx: &mut Context<Self>) {
-        if generation != self.generation {
-            // As costly to free as the set a build replaces.
-            cx.background_spawn(async move { drop(built) }).detach();
-            return;
-        }
-        let Built {
-            notes,
-            mtimes,
-            live,
-        } = built;
-        self.built = Some(generation);
-        let previous = self.index.set_notes(notes);
-        self.revision += 1;
-        Timeline::mark(Step::NamesReady, cx);
-        // Freeing a 50k table takes about 9 ms, over the foreground budget.
-        cx.background_spawn(async move { drop(previous) }).detach();
-        cx.emit(NotesChanged);
-        self.indexed.retain(|id, _| live.contains(id));
-        self.latest.retain(|id, _| live.contains(id));
-        self.queued.retain(|id, _| live.contains(id));
-        // A load in flight for a note gone is not pending; it keeps its slot until it lands.
-        for load in &mut self.loading {
-            load.live &= live.contains(&load.id);
-        }
-        // Reserved for the notes not yet indexed, so no insert rehashes (open-first spec, O7).
-        let missing = mtimes.len().saturating_sub(self.indexed.len());
-        self.indexed.reserve(missing);
-        self.latest.reserve(missing);
-        self.queued.reserve(missing);
-        self.queue.reserve(missing);
-        for (id, mtime) in mtimes {
-            // A save since the build read the vault holds a newer mtime than the build's.
-            let current = self.indexed.get(&id).is_some_and(|&indexed| {
-                indexed == mtime || self.latest.get(&id).is_some_and(|&latest| latest > seq)
-            });
-            if !current {
-                self.indexed.insert(id, mtime);
-                self.queue_load(id);
-            }
-        }
-        cx.background_spawn(async move { drop(live) }).detach();
-        self.load_more(cx);
-        cx.notify();
-    }
-
     fn queue_load(&mut self, id: EntryId) {
         let seq = self.next_seq(id);
         self.queue.push_back((id, seq));
         self.queued.insert(id, seq);
     }
 
-    /// One timed foreground update and the word merge it made due, then `mark_indexed`; `None`
-    /// once this entity is gone.
-    fn timed_turn(
+    /// One timed foreground update and the word merge it made due, then `mark_indexed`; the
+    /// update's result, or `None` once this entity is gone.
+    fn timed_turn<R>(
         this: &WeakEntity<Self>,
         cx: &mut AsyncApp,
-        update: impl FnOnce(&mut Self, &mut Context<Self>),
-    ) -> Option<()> {
-        timed(cx, |cx| {
+        update: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
+    ) -> Option<R> {
+        let result = timed(cx, |cx| {
             this.update(cx, |this, cx| {
                 let building = this.is_building();
-                update(this, cx);
+                let result = update(this, cx);
                 // On the edge where the startup load ends, whichever turn ends it (a load or a rebuild).
                 this.settling |= building && !this.marked_indexed && !this.is_building();
                 this.merge_words(cx);
+                result
             })
         })
         .ok()?;
-        this.update(cx, Self::mark_indexed).ok()
+        this.update(cx, Self::mark_indexed).ok()?;
+        Some(result)
     }
 
     /// The first time nothing is left to load and the settle it asked for has applied, for the
@@ -323,6 +239,7 @@ impl IndexSync {
             return;
         }
         self.indexed.remove(&id);
+        self.forgotten.insert(id);
         self.index.remove(id);
         self.revision += 1;
         cx.notify();
@@ -333,6 +250,7 @@ impl IndexSync {
             return;
         }
         self.index.insert(id, content);
+        self.forgotten.remove(&id);
         self.revision += 1;
         // Not a note of the index yet (its build is still running): the next diff reloads it.
         if !self.index.is_indexed(id) {
@@ -365,3 +283,7 @@ mod scanning_tests;
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod words_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod diff_tests;

@@ -11,6 +11,7 @@ use super::test_helpers::paths;
 use super::*;
 use crate::fs::{DirEntry, Loaded, Saved, Stamp};
 use crate::mem_fs::MemFs;
+use crate::watch::Watch;
 
 const ROOT: &str = "/vault";
 
@@ -122,6 +123,10 @@ impl Fs for PanickingFs {
         self.inner.save(path, text, expected).await
     }
 
+    async fn create_parents(&self, path: &Path) -> Result<()> {
+        self.inner.create_parents(path).await
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         self.inner.create(path, kind).await
     }
@@ -132,6 +137,10 @@ impl Fs for PanickingFs {
 
     async fn trash(&self, path: &Path) -> Result<()> {
         self.inner.trash(path).await
+    }
+
+    fn watch(&self, root: &Path) -> Result<Watch> {
+        self.inner.watch(root)
     }
 }
 

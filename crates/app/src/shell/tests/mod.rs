@@ -18,9 +18,11 @@ mod backlinks;
 mod column;
 mod creating;
 mod following;
+mod gone;
 mod modal;
 mod open_first;
 mod quick_open;
+mod reload;
 mod renaming;
 mod trashing;
 

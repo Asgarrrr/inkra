@@ -16,7 +16,7 @@ uncertainty, for reasons given below.
 |---|---|---|---|
 | ~~Horizontal scroll and reveal~~ | **Closed 2026-09-23, by removal.** Soft wrap leaves no right edge to lose the caret past. | — | — |
 | ~~Soft wrap~~ | **Shipped 2026-09-23.** Its trigger was the one above: a pasted URL. | — | — |
-| One shape per keystroke | **Fired 2026-09-24**, see Measurements below: three full shapes per keystroke, two of them redundant. | 0.5–1 d | — |
+| One shape per keystroke | **Fired 2026-09-24**, see Measurements below: three full shapes per keystroke, two of them redundant. A reload adds one more on its frame: `restore_scroll` (`editor/reload.rs`) reshapes, then `request_layout`'s measure (`editor/element.rs`) shapes again; fold it into this item. | 0.5–1 d | — |
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-24: it costs above ~75 KB now, above ~200 KB once the redundant shapes go. | 2–3 d | One shape per keystroke |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 
@@ -92,10 +92,14 @@ ordered on that note's chain, so a rename cannot be overtaken by a write
 decided before it. Deleting a *folder* is the one part left out, with its own
 trigger.
 
-What the vault still leaves out — the file watcher, diff-based reload,
-serializing writes *across* notes, buffer eviction, reporting a failed open,
-and the native folder picker — is recorded with a trigger each in the Deferred
-table of `superpowers/specs/2026-09-20-inkra-vault-design.md`.
+The file watcher and diff-based reload landed on 2026-09-28: the vault follows
+the disk, a clean open note reloads, and a note deleted on disk stays open. See
+`superpowers/specs/2026-09-27-file-watcher-design.md`.
+
+What the vault still leaves out — serializing writes *across* notes, buffer
+eviction, reporting a failed open, and the native folder picker — is recorded
+with a trigger each in the Deferred table of
+`superpowers/specs/2026-09-20-inkra-vault-design.md`.
 
 The unnamed launch buffer has left that table. It is closed, by removal rather
 than by saving: a launch with no note builds no editor at all, and `AppShell`
@@ -106,9 +110,8 @@ and the other half, the folder picker, is still deferred.
 
 What conflict detection did **not** close is the clean note. A buffer with no
 unsaved edits never reaches a write, so it never reaches the check, and a note
-changed on disk keeps showing stale text until it is reopened. Fixing that needs
-the watcher, and acting on it needs diff-based reload, which needs anchored
-selections. See `superpowers/specs/2026-09-21-conflict-detection-design.md` for
+changed on disk kept showing stale text until it was reopened. The watcher
+closed that gap on 2026-09-28. See `superpowers/specs/2026-09-21-conflict-detection-design.md` for
 what the check covers, and for the two gaps it leaves open inside its own
 scope — the window between the stat and the rename, and two writes inside one
 timestamp granule that happen to share a length.
@@ -174,6 +177,31 @@ Two levers are identified and left, each with its trigger.
 |---|---|---|
 | Overlap loads with parsing: `LOADS_PER_CORE` 2, or free a load slot when its read lands rather than when the foreground applies it. The pipeline is latency-bound per slot (~450 µs a cycle, slice 7's profile); 1 per core was set in slice 5, before the word parse made a load heavier. Probably 20–40 % off indexing, not measured | Indexing a real vault is noticed, or search results arrive late after launch | 0.5 d, with the release timeline before and after |
 | The window start-up floor, ~125–160 ms with a one-note vault, against the 100 ms first-frame budget. The vault costs the first frame nothing since slice 6; the rest is gpui window creation, Metal and font loading | The user notices the launch | 1–2 d to profile gpui's start-up before any change |
+
+## Index and search: the 2026-09-27 audit
+
+The next quest, chosen by the user on 2026-09-27. An independent audit (advisor,
+Opus) compared `inkra-index` and the search specs with tantivy, Lucene,
+Meilisearch, charabia, git and Obsidian. Verdict: the word index is sound, a
+small tantivy tuned for sub-microsecond inserts, and nothing forces a rewrite.
+The risk is in what surrounds it. The file watcher leads, by the user's
+priority: a note changed while the app runs must show in the app.
+
+| Order | Item | Why | Fix |
+|---|---|---|---|
+| 1 | ~~Fast path in `IndexSync::reconcile`~~ | **Done 2026-09-27**: one build in flight, none for an mtime-only rescan, forgotten notes retried. See `superpowers/specs/2026-09-27-coalesced-reconcile-design.md` | — |
+| 2 | The file watcher | External edits stay invisible until a restart; a clean open note shows stale text (Vault, above) | **W1 done 2026-09-27**: the tree, quick open, search and backlinks follow the disk. **W2b done 2026-09-28**: a clean open note reloads silently. **W2c done 2026-09-28**: an open note deleted on disk stays open under a banner, typing recreates it under its id, and a restore brings it back. Done. See `superpowers/specs/2026-09-27-file-watcher-design.md` |
+| 3 | `⌘⇧F` semantics, before slice 10 | D4 folds case only and an NFC query misses NFD text, while `⌘P` finds `été` from `ete`. Two boxes that disagree on a match are a product bug | Search S1-folded text through an offset map back to the saved text, or prefilter by the word index and verify with `find_in` |
+| 4 | Ranking key 2 (`index/src/find/rank.rs:88-91`) | A raw occurrence sum: for `projet kubernetes`, 40 × `projet` and 1 × `kubernetes` beats 2 × and 8 × | Weight each term by IDF (the posting count `Lookup` already has) and normalize by note length. Store a per-ordinal length in the segment before any format is persisted |
+| 5 | ~~CJK and Thai words~~ | **Recorded 2026-09-27** in the smart-quick-open spec's Evolution table (branch `docs/cjk-limit`), with its trigger and the bigram fix | — |
+| 6 | Persisted index | Only a spec for now | Measure cold start first: the corpus stays resident, so a warm start still reads every file and saves only the parse, about 100 ms. If built: validate by `(mtime, size)` (the scan's `Entry` has no size yet), key by path plus stamp with inode for rename pairing only, embed a format version and a fold fingerprint so a Unicode table bump cannot silently miss notes, write the cache outside the vault |
+| 7 | `Sidebar::rebuild` walks every entry on each vault change | Measured 2026-09-28 (watcher branch review): 1.1–2.2 ms of foreground work per real vault change at 50,000 notes, even with folders collapsed, against the 0.1 ms target. An echo that changes nothing no longer reaches it | Rebuild only the rows under expanded folders, or apply the scan's changes to the tree as a delta; measure with the release probe the review used |
+
+Additive later, no rewrite: typo tolerance (FST or bounded edit distance at
+merge), NFKC folding, camelCase splitting, proximity re-ranking of the top K
+from the corpus. Semantic search is additive as a second index, but fuse its
+ranks with the lexical ones: a group below `Text` never shows under the
+100-row cap.
 
 ## Ordering
 

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_vault::{Fs, Job, Jobs, Mtime, RealFs, RelPath, Serial, Vault, Walk};
+use inkra_vault::{Fs, Job, Jobs, Mtime, Reach, RealFs, RelPath, Serial, Vault, Walk};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -79,6 +79,7 @@ fn walks(c: &mut Criterion) {
             || Walk {
                 read: vec![RelPath::root()],
                 found: listing.clone(),
+                reach: Reach::Partial,
             },
             |seed| block_on(Vault::walk_seeded(&RealFs, &root, seed, &threads)),
             BatchSize::LargeInput,
@@ -104,6 +105,11 @@ fn apply(c: &mut Criterion) {
             |walk| black_box(scanned.applied(walk)),
             criterion::BatchSize::LargeInput,
         );
+    });
+    // The scan task's test that an echo's walk changed nothing: two equal states, no shared `Arc`.
+    let again = scanned.applied(walk());
+    c.bench_function("unchanged eq nested 50k", |b| {
+        b.iter(|| black_box(again == scanned));
     });
     // A save outside a scan: the re-key's `retain` walks the whole identity map on the foreground.
     let note = scanned

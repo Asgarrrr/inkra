@@ -6,10 +6,12 @@
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::mpsc;
+use std::time::{Duration, Instant, SystemTime};
 
+use futures::StreamExt;
 use futures::executor::block_on;
-use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp};
+use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp, VaultError, Watch};
 
 /// A temp directory that removes itself.
 struct TempDir(PathBuf);
@@ -213,6 +215,27 @@ fn save_of_a_missing_note_recreates_it_and_preserves_nothing() {
 
     assert!(saved.preserved.is_none());
     assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+}
+
+/// A present note whose folder left must not recreate it; a gone note's write creates it first (watcher spec, F9).
+#[test]
+fn save_to_a_path_whose_folders_are_missing_fails_until_create_parents() {
+    let dir = TempDir::new("missing-folders");
+    let note = dir.0.join("f").join("g").join("note.md");
+
+    let Err(VaultError::Io { source, .. }) = block_on(RealFs.save(&note, "ours", absent())) else {
+        panic!("a missing folder must fail");
+    };
+    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+    assert!(names(&dir.0).is_empty(), "{:?}", names(&dir.0));
+
+    block_on(RealFs.create_parents(&note)).expect("create parents");
+    block_on(RealFs.create_parents(&note)).expect("again, over existing folders");
+    let saved = block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert!(saved.preserved.is_none());
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+    assert_eq!(names(&dir.0.join("f").join("g")), ["note.md"]);
 }
 
 #[test]
@@ -443,4 +466,59 @@ fn check_dir_accepts_a_folder_and_refuses_the_rest() {
         "a file"
     );
     assert!(block_on(RealFs.check_dir(&dir.0.join("missing"))).is_err());
+}
+
+/// The kind `walk_changed` reads as gone, and `MemFs` matches.
+#[test]
+fn read_dir_of_a_file_is_not_a_directory() {
+    let dir = TempDir::new("read-dir-file");
+    fs::write(dir.0.join("a.md"), "").expect("write");
+
+    let Err(VaultError::Io { source, .. }) = block_on(RealFs.read_dir(&dir.0.join("a.md"))) else {
+        panic!("a file is not a folder");
+    };
+    assert_eq!(source.kind(), std::io::ErrorKind::NotADirectory);
+}
+
+/// `FSEvents` reports resolved paths: the event strips against the canonical root, not the link.
+#[test]
+fn watch_through_a_symlink_reports_a_new_note_under_one_of_its_roots() {
+    let dir = TempDir::new("watch");
+    let real = dir.0.join("real");
+    fs::create_dir(&real).expect("create the watched folder");
+    let link = dir.0.join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let Watch {
+        mut events,
+        root,
+        resolved,
+        watcher,
+    } = RealFs.watch(&link).expect("watch");
+    // A plain thread, so the wait is a bounded `recv_timeout`, not a sleep.
+    let (forward, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Some(event) = block_on(events.next()) {
+            if forward.send(event).is_err() {
+                break;
+            }
+        }
+    });
+
+    fs::write(link.join("a.md"), "a").expect("write");
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let seen = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Ok(event) = received.recv_timeout(left) else {
+            panic!("no event for a.md within a second");
+        };
+        if [&root, &resolved]
+            .iter()
+            .any(|root| event.path.strip_prefix(root) == Ok(Path::new("a.md")))
+        {
+            break event;
+        }
+    };
+    assert!(!seen.rescan);
+    drop(watcher);
 }

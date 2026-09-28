@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff};
 
 use crate::selection::{Goal, Selection};
 
@@ -294,6 +294,27 @@ impl EditorState {
         true
     }
 
+    /// Follows a change made outside the editor, with Zed's biases: a caret lands after a
+    /// replacement, and a range never takes in text inserted at its edges.
+    pub fn map_through(&mut self, diff: &Diff) {
+        if self.selection.is_empty() {
+            let caret = diff.map(self.selection.start(), Bias::Right);
+            self.selection.collapse_to(caret, Goal::None);
+        } else {
+            let range = map_inward(diff, &self.selection.range());
+            self.selection = if range.is_empty() {
+                Selection::at(range.start)
+            } else {
+                Selection::new(range, self.selection.reversed())
+            };
+        }
+        self.marked_range = self
+            .marked_range
+            .as_ref()
+            .map(|marked| map_inward(diff, marked))
+            .filter(|marked| !marked.is_empty());
+    }
+
     /// Places the cursor on text that moved under it, and drops a composing region that no longer applies.
     fn settle_on(&mut self, buffer: &Buffer, offset: ByteOffset) {
         self.selection.collapse_to(buffer.clip(offset), Goal::None);
@@ -301,5 +322,13 @@ impl EditorState {
     }
 }
 
+/// Start `Right`, end `Left`: the range keeps its ends on their own text, and may cross.
+fn map_inward(diff: &Diff, range: &Range<ByteOffset>) -> Range<ByteOffset> {
+    diff.map(range.start, Bias::Right)..diff.map(range.end, Bias::Left)
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod map_tests;

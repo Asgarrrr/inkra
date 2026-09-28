@@ -3,12 +3,13 @@
 //!
 //! Unix-only: `FileIdentity` needs `dev`/`ino`, from the unix `MetadataExt`.
 
+mod watch;
+
 use std::fs;
 use std::io;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
@@ -17,6 +18,8 @@ use crate::fs::{
     DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
     normalize_line_endings,
 };
+use crate::temp::temp_path;
+use crate::watch::Watch;
 
 pub struct RealFs;
 
@@ -48,6 +51,35 @@ fn stamp_of(path: &Path, metadata: &fs::Metadata) -> Result<Stamp> {
     })
 }
 
+/// A child's row from its stat, or `None` for one `read_dir` does not list.
+fn listed(path: PathBuf, metadata: io::Result<fs::Metadata>) -> Result<Option<DirEntry>> {
+    let metadata = match metadata {
+        Ok(metadata) => metadata,
+        // Deleted since the listing: a race during churn, not a folder that fails.
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(io_error(&path, source)),
+    };
+    if metadata.is_symlink() {
+        return Ok(None);
+    }
+    let kind = if metadata.is_dir() {
+        Kind::Dir
+    } else if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    {
+        Kind::Note
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(DirEntry {
+        mtime: mtime_of(&path, &metadata)?,
+        identity: identity_of(&metadata),
+        path,
+        kind,
+    }))
+}
+
 #[async_trait]
 impl Fs for RealFs {
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>> {
@@ -67,29 +99,8 @@ impl Fs for RealFs {
             }
 
             // Does not follow the link, so a symlink loop cannot recurse here.
-            let metadata = fs::symlink_metadata(&entry_path)
-                .map_err(|source| io_error(&entry_path, source))?;
-            if metadata.is_symlink() {
-                continue;
-            }
-
-            let kind = if metadata.is_dir() {
-                Kind::Dir
-            } else if entry_path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-            {
-                Kind::Note
-            } else {
-                continue;
-            };
-
-            entries.push(DirEntry {
-                mtime: mtime_of(&entry_path, &metadata)?,
-                identity: identity_of(&metadata),
-                path: entry_path,
-                kind,
-            });
+            let metadata = fs::symlink_metadata(&entry_path);
+            entries.extend(listed(entry_path, metadata)?);
         }
         Ok(entries)
     }
@@ -156,6 +167,13 @@ impl Fs for RealFs {
         })
     }
 
+    async fn create_parents(&self, path: &Path) -> Result<()> {
+        let Some(parent) = path.parent() else {
+            return Ok(());
+        };
+        fs::create_dir_all(parent).map_err(|source| io_error(parent, source))
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         match kind {
             // O_EXCL: the kernel refuses an existing path atomically, closing
@@ -215,6 +233,11 @@ impl Fs for RealFs {
             path: absolute,
             source: io::Error::other(source),
         })
+    }
+
+    /// Registers `root` as given, as notify does; the canonical root is resolved once, here.
+    fn watch(&self, root: &Path) -> Result<Watch> {
+        watch::watch(root)
     }
 }
 
@@ -312,18 +335,6 @@ fn replace(path: &Path, text: &str, existing: Option<&fs::Metadata>) -> Result<(
     Ok(())
 }
 
-/// Unique per process and per call, so two concurrent saves can't collide.
-fn temp_path(path: &Path) -> PathBuf {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
-    let counter = NEXT.fetch_add(1, Ordering::Relaxed);
-    let pid = std::process::id();
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    // `.tmp`, so `read_dir`'s `*.md` filter hides a file left by a crash.
-    name.push(format!(".inkra-{pid}-{counter}.tmp"));
-    path.with_file_name(name)
-}
-
 /// Removes the temp file unless the rename claimed it.
 struct TempFile(Option<PathBuf>);
 
@@ -340,3 +351,6 @@ impl Drop for TempFile {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

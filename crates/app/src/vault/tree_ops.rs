@@ -1,58 +1,64 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use gpui::{AsyncApp, Context, Task, WeakEntity, prelude::*};
-use inkra_vault::{EntryId, Kind};
+use gpui::{App, AsyncApp, Context, Task, WeakEntity, prelude::*};
+use inkra_vault::{EntryId, Fs, Kind};
 
 use super::NoteStore;
+use super::store::Location;
+use super::writer::Writer;
 use super::{NoteClosed, RenameFailed, TrashFailed};
 
 impl NoteStore {
     /// Ordered on the note's chain: a write landing after the delete would
-    /// recreate the file.
+    /// recreate the file. A gone note closes, trashing only a file its own write put back (watcher spec, F9).
     pub(crate) fn trash(&mut self, id: EntryId, cx: &mut Context<Self>) -> Task<bool> {
         if id == EntryId::DETACHED {
             return Task::ready(false);
         }
-        if self
-            .vault
-            .as_ref()
-            .and_then(|v| v.read(cx).entry(id))
-            .is_none()
+        let gone = self.is_gone(id);
+        if !gone
+            && self
+                .vault
+                .as_ref()
+                .and_then(|v| v.read(cx).entry(id))
+                .is_none()
         {
             return Task::ready(false);
         }
-        if self.ops.get(&id).is_some_and(|ops| ops.trashing) {
+        let ops = self.ops.entry(id).or_default();
+        if ops.trashing {
             return Task::ready(false);
         }
-        // Preempted, not cancelled: cancelling would trash the note with
-        // the previous save's text, the only copy the user gets back.
-        self.schedule_save(id, Duration::ZERO, cx);
-
-        self.ops.entry(id).or_default().trashing = true;
+        ops.trashing = true;
+        if gone {
+            // Cancelled, not preempted: the write would recreate the file whose text the trash discards.
+            ops.cancel_pending();
+        } else {
+            // Preempted, not cancelled: cancelling would trash the note with
+            // the previous save's text, the only copy the user gets back.
+            self.schedule_save(id, Duration::ZERO, cx);
+        }
 
         let fs = Arc::clone(&self.fs);
         self.after_chain(id, cx, async move |this, cx| {
             // Resolved here, not at issue time: a delete queued behind a
             // rename must use the path after the move.
-            let Ok(Some(path)) =
-                this.update(cx, |this, cx| this.vault.as_ref()?.read(cx).absolute(id))
-            else {
-                let _ = this.update(cx, |this, cx| {
-                    if let Some(ops) = this.ops.get_mut(&id) {
-                        ops.trashing = false;
-                    }
-                    cx.emit(TrashFailed(id));
-                });
+            let Ok(target) = this.update(cx, |this, cx| this.trash_target(id, cx)) else {
                 return false;
             };
-            let removed = cx
-                .background_spawn(async move { fs.trash(&path).await })
-                .await;
+            let removed = match target {
+                Some(target) => cx
+                    .background_spawn(async move { target.trash(&*fs).await })
+                    .await
+                    .is_ok(),
+                None => true,
+            };
 
             this.update(cx, |this, cx| {
-                if removed.is_err() {
+                if !removed {
                     if let Some(ops) = this.ops.get_mut(&id) {
                         ops.trashing = false;
                     }
@@ -73,6 +79,19 @@ impl NoteStore {
             })
             .unwrap_or(false)
         })
+    }
+
+    /// `None`: nothing on disk is the note's. With no entry, only the file at a gone note's last path
+    /// may be: `trashing` stops its reclaim, so the vault may never see what the note's own save wrote.
+    fn trash_target(&self, id: EntryId, cx: &App) -> Option<TrashTarget> {
+        if let Some(path) = self.vault.as_ref()?.read(cx).absolute(id) {
+            return Some(TrashTarget::Entry(path));
+        }
+        let note = self.open.get(&id)?;
+        match &note.location {
+            Location::Gone(path) => Some(TrashTarget::LastWrite(path.clone(), note.writer())),
+            Location::Vault | Location::Detached(_) => None,
+        }
     }
 
     /// The id comes from `Fs::create`'s identity, never the path — a
@@ -179,7 +198,12 @@ impl NoteStore {
 
     /// Runs `op` after every operation already queued on the note's chain,
     /// and resolves to its result.
-    fn after_chain<Op>(&mut self, id: EntryId, cx: &mut Context<Self>, op: Op) -> Task<bool>
+    pub(super) fn after_chain<Op>(
+        &mut self,
+        id: EntryId,
+        cx: &mut Context<Self>,
+        op: Op,
+    ) -> Task<bool>
     where
         Op: AsyncFnOnce(WeakEntity<Self>, &mut AsyncApp) -> bool + 'static,
     {
@@ -194,5 +218,27 @@ impl NoteStore {
         }));
         cx.foreground_executor()
             .spawn(async move { wait.await == Ok(true) })
+    }
+}
+
+enum TrashTarget {
+    Entry(PathBuf),
+    /// Trashed only if the file there has the stamp its `Writer` expects: the note's last write or load.
+    LastWrite(PathBuf, Arc<Writer>),
+}
+
+impl TrashTarget {
+    async fn trash(self, fs: &dyn Fs) -> inkra_vault::Result<()> {
+        match self {
+            Self::Entry(path) => fs.trash(&path).await,
+            Self::LastWrite(path, writer) => {
+                let expected = writer.expected().await;
+                // A load, not a stat seam: trashing a gone note is rare and a note is small.
+                match fs.load(&path).await {
+                    Ok(loaded) if loaded.stamp == expected => fs.trash(&path).await,
+                    _ => Ok(()),
+                }
+            }
+        }
     }
 }

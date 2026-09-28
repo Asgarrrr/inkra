@@ -2,7 +2,7 @@ use std::path::Path;
 
 use futures::executor::block_on;
 
-use super::test_helpers::{paths, rel, scan};
+use super::test_helpers::{id_of, paths, rel, scan};
 use super::*;
 use crate::mem_fs::MemFs;
 
@@ -10,13 +10,6 @@ const ROOT: &str = "/vault";
 
 fn walk(fs: &MemFs, from: &str) -> Walk {
     block_on(Vault::walk(fs, Path::new(ROOT), &rel(from), &Serial)).expect("walk")
-}
-
-fn id_of(vault: &Vault, path: &str) -> Option<EntryId> {
-    vault
-        .entries()
-        .find(|e| e.path.as_path() == Path::new(path))
-        .map(|e| e.id)
 }
 
 #[test]
@@ -136,6 +129,7 @@ fn an_entry_goes_with_a_folder_the_walk_no_longer_found() {
     let root_only = Walk {
         read: vec![RelPath::root()],
         found: block_on(fs.read_dir(Path::new(ROOT))).expect("root"),
+        reach: Reach::Partial,
     };
     let vault = vault.applied(root_only);
 
@@ -164,6 +158,7 @@ fn a_root_pass_lists_the_root_level_and_keeps_nothing_below() {
     let root_only = Walk {
         read: vec![RelPath::root()],
         found: block_on(fs.read_dir(Path::new(ROOT))).expect("root"),
+        reach: Reach::Partial,
     };
 
     let vault = Vault::new(Path::new(ROOT)).applied(root_only);
@@ -301,11 +296,13 @@ fn a_reclaim_takes_its_id_from_an_identity_a_partial_walk_kept() {
     let path = Path::new("/vault/under/a.md");
     let loaded = block_on(fs.load(path)).expect("load");
     let saved = block_on(fs.save(path, "written", loaded.stamp)).expect("save");
+    // Moved before the walk: nothing takes over the id at `a.md`, and the walk mints the save's inode.
+    block_on(fs.rename(path, Path::new("/vault/under/b.md"))).expect("rename");
 
     vault = vault.applied(walk(&fs, "under"));
     assert!(vault.reidentify(ours, saved.identity, saved.stamp.mtime));
 
-    assert_eq!(id_of(&vault, "under/a.md"), Some(ours));
+    assert_eq!(id_of(&vault, "under/b.md"), Some(ours));
     assert_eq!(
         vault.id_for(loaded.identity),
         None,
@@ -324,9 +321,12 @@ fn reidentify_remaps_an_identity_a_partial_walk_kept_on_no_entry() {
     let path = Path::new("/vault/under/a.md");
     let loaded = block_on(fs.load(path)).expect("load");
     let saved = block_on(fs.save(path, "written", loaded.stamp)).expect("save");
+    let moved = Path::new("/vault/under/b.md");
+    block_on(fs.rename(path, moved)).expect("rename");
     vault = vault.applied(walk(&fs, "under"));
-    let minted = id_of(&vault, "under/a.md").expect("the saved inode, under a fresh id");
-    block_on(fs.rename(path, Path::new("/vault/outside/a.md"))).expect("rename");
+    let minted = id_of(&vault, "under/b.md").expect("the saved inode, under a fresh id");
+    assert_ne!(minted, ours);
+    block_on(fs.rename(moved, Path::new("/vault/outside/a.md"))).expect("rename");
     vault = vault.applied(walk(&fs, "under"));
     assert_eq!(vault.id_for(saved.identity), Some(minted));
 
@@ -356,9 +356,9 @@ fn a_root_walk_that_failed_a_folder_drops_the_identity_that_moved_into_it() {
     assert_ne!(moved, a, "the trade-off: unseen, it gets a fresh id");
 }
 
-/// A root pass reads the root: it drops the identities it did not see, as any root walk.
+/// A root pass alone is not whole: it keeps the identities it did not see (watcher spec, F5).
 #[test]
-fn a_root_pass_drops_the_identity_that_moved_into_a_folder() {
+fn a_root_pass_keeps_the_identity_that_moved_into_a_folder() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "");
     fs.insert_dir("/vault/f");
@@ -369,11 +369,11 @@ fn a_root_pass_drops_the_identity_that_moved_into_a_folder() {
     vault = vault.applied(Walk {
         read: vec![RelPath::root()],
         found: block_on(fs.read_dir(Path::new(ROOT))).expect("root"),
+        reach: Reach::Partial,
     });
     block_on(vault.rescan(&fs)).expect("rescan");
 
-    let moved = id_of(&vault, "f/a.md").expect("found by the full scan");
-    assert_ne!(moved, a);
+    assert_eq!(id_of(&vault, "f/a.md"), Some(a), "found by the full scan");
 }
 
 /// What a root pass did not read stays a live entry, so its identity stays with it.
@@ -390,6 +390,7 @@ fn a_root_pass_keeps_the_entries_and_identities_under_a_folder_it_did_not_read()
     let mut vault = vault.applied(Walk {
         read: vec![RelPath::root()],
         found: block_on(fs.read_dir(Path::new(ROOT))).expect("root"),
+        reach: Reach::Partial,
     });
     assert_eq!(id_of(&vault, "f/b.md"), Some(b));
     assert_eq!(vault.id_for(identity), Some(b));
@@ -422,4 +423,22 @@ fn a_reused_inode_gets_a_fresh_id_despite_a_folder_that_fails() {
         id_of(&vault, "locked/b.md").is_some(),
         "the folder that fails keeps its entry"
     );
+}
+
+/// O8 marks a vault scanned without reading it; only a whole walk records it read whole (watcher spec, F4).
+#[test]
+fn only_a_whole_walk_records_the_vault_read_whole_and_it_stays() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/f/a.md", "");
+    let root_pass = Walk {
+        read: vec![RelPath::root()],
+        found: block_on(fs.read_dir(Path::new(ROOT))).expect("root"),
+        reach: Reach::Partial,
+    };
+
+    let partial = Vault::new(Path::new(ROOT)).applied(root_pass.clone());
+    assert!(!partial.has_read_whole());
+    let whole = partial.applied(walk(&fs, ""));
+    assert!(whole.has_read_whole());
+    assert!(whole.applied(root_pass).has_read_whole());
 }

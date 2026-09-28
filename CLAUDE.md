@@ -115,6 +115,10 @@ Read the spec before changing its area:
   start on names and text, the word index, `find_notes`
 - `docs/superpowers/specs/2026-09-25-open-first-design.md` — opening before the
   scan, the scan worker, `Walk`/`applied`
+- `docs/superpowers/specs/2026-09-27-file-watcher-design.md` — the watcher:
+  watch, scoped rescans, reload, gone notes
+- `docs/superpowers/specs/2026-09-27-coalesced-reconcile-design.md` — `IndexSync`
+  builds, mtime fast path
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

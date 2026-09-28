@@ -10,6 +10,7 @@ publish.workspace = true
 bench = false
 
 [dependencies]
+similar = { version = "3", default-features = false, features = ["std"] }
 unicode-segmentation = { workspace = true }
 
 [lints]
@@ -21,4 +22,8 @@ criterion = { workspace = true }
 
 [[bench]]
 name = "buffer"
+harness = false
+
+[[bench]]
+name = "diff"
 harness = false

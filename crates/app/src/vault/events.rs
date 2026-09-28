@@ -45,3 +45,9 @@ impl EventEmitter<TrashFailed> for NoteStore {}
 pub(crate) struct RenameFailed(pub(crate) EntryId);
 
 impl EventEmitter<RenameFailed> for NoteStore {}
+
+/// The note's file left the vault, or came back (watcher spec, F9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GoneChanged(pub(crate) EntryId);
+
+impl EventEmitter<GoneChanged> for NoteStore {}

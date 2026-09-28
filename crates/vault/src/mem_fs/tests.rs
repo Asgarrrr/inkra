@@ -346,6 +346,7 @@ fn trash_of_a_missing_note_reports_an_error() {
 #[test]
 fn save_round_trips_and_load_normalizes_line_endings() {
     let fs = MemFs::new();
+    fs.insert_dir("/vault");
 
     // Not compared: no file exists yet to stat.
     let absent = Stamp {
@@ -367,6 +368,38 @@ fn save_round_trips_and_load_normalizes_line_endings() {
     );
 }
 
+/// As `RealFs`: a present note whose folder left must not recreate it; a gone note's write
+/// creates it first (watcher spec, F9).
+#[test]
+fn save_under_a_missing_folder_fails_until_create_parents() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    let absent = Stamp {
+        mtime: Mtime(SystemTime::UNIX_EPOCH),
+        size: 0,
+    };
+
+    let Err(VaultError::Io { source, .. }) =
+        block_on(fs.save(Path::new("/vault/f/a.md"), "ours", absent))
+    else {
+        panic!("a missing folder must fail");
+    };
+    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+    assert!(block_on(fs.check_dir(Path::new("/vault/f"))).is_err());
+    assert_eq!(fs.read_to_string(Path::new("/vault/f/a.md")), None);
+
+    let Ok(()) = block_on(fs.create_parents(Path::new("/vault/f/a.md"))) else {
+        panic!("create_parents must succeed");
+    };
+    let Ok(_) = block_on(fs.save(Path::new("/vault/f/a.md"), "ours", absent)) else {
+        panic!("save must succeed once the folder exists");
+    };
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/f/a.md")).as_deref(),
+        Some("ours")
+    );
+}
+
 #[test]
 fn read_dir_of_a_missing_folder_is_not_found() {
     let fs = MemFs::new();
@@ -376,6 +409,18 @@ fn read_dir_of_a_missing_folder_is_not_found() {
         panic!("a missing folder must fail");
     };
     assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+}
+
+/// As `RealFs`: a file where a folder was is not a missing folder.
+#[test]
+fn read_dir_of_a_file_is_not_a_directory() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "");
+
+    let Err(VaultError::Io { source, .. }) = block_on(fs.read_dir(Path::new("/vault/a.md"))) else {
+        panic!("a file is not a folder");
+    };
+    assert_eq!(source.kind(), std::io::ErrorKind::NotADirectory);
 }
 
 #[test]

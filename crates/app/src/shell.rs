@@ -12,7 +12,7 @@ use crate::index::IndexSync;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
 use crate::theme;
-use crate::vault::{NoteClosed, NoteStore, Save, SaveFailed};
+use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
 
 mod modal;
 
@@ -73,6 +73,12 @@ impl AppShell {
         .detach();
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
             eprintln!("save failed for {:?}", event.0);
+        })
+        .detach();
+        cx.subscribe(&notes, |shell, _notes, event: &GoneChanged, cx| {
+            if shell.showing == Some(event.0) {
+                cx.notify();
+            }
         })
         .detach();
         // Drop the view, not leave it: a buffer with no file is still typable
@@ -259,6 +265,22 @@ impl AppShell {
             .text_color(theme::placeholder_text())
             .children(lines.iter().map(|line| div().child(*line)))
     }
+
+    /// Over the note showing while it is gone from disk (watcher spec, F9).
+    fn render_gone_banner(&self, cx: &App) -> Option<impl IntoElement> {
+        let showing = self.showing?;
+        self.notes.read(cx).is_gone(showing).then(|| {
+            div()
+                .debug_selector(|| "gone-banner".into())
+                .flex_none()
+                .px_4()
+                .bg(theme::gone_banner_background())
+                .text_size(theme::UI_TEXT_SIZE)
+                .line_height(theme::UI_LINE_HEIGHT)
+                .text_color(theme::gone_banner_text())
+                .child("Deleted from disk. Typing restores it.")
+        })
+    }
 }
 
 impl Render for AppShell {
@@ -283,10 +305,19 @@ impl Render for AppShell {
                     .bg(theme::sidebar_background())
                     .child(self.sidebar.clone()),
             )
-            .child(div().flex_1().h_full().child(match &self.editor {
-                Some(editor) => editor.clone().into_any_element(),
-                None => self.render_empty(cx).into_any_element(),
-            }))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .children(self.render_gone_banner(cx))
+                    // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
+                    .child(div().flex_1().min_h_0().child(match &self.editor {
+                        Some(editor) => editor.clone().into_any_element(),
+                        None => self.render_empty(cx).into_any_element(),
+                    })),
+            )
             .children(self.editor.is_some().then(|| {
                 div()
                     .flex_none()
