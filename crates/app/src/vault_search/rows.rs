@@ -7,7 +7,7 @@ use inkra_index::{Hit, NoteHits, Searched};
 use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, RelPath};
 
-use crate::one_line::one_line;
+use crate::row_text::{LitText, PathText};
 
 pub(super) enum Row {
     /// Not selectable.
@@ -16,8 +16,7 @@ pub(super) enum Row {
 }
 
 pub(super) struct Header {
-    pub(super) name: SharedString,
-    pub(super) folder: SharedString,
+    pub(super) path: PathText,
     /// `{n}+` when the note gave more hits than listed.
     pub(super) count: SharedString,
     pub(super) label: SharedString,
@@ -34,9 +33,8 @@ pub(super) struct HitRow {
     pub(super) note: EntryId,
     pub(super) range: Range<ByteOffset>,
     pub(super) line: SharedString,
-    pub(super) context: SharedString,
-    /// The hit inside `context`.
-    pub(super) lit: Range<usize>,
+    /// The hit lit inside it.
+    pub(super) context: LitText,
     pub(super) label: SharedString,
 }
 
@@ -90,12 +88,8 @@ impl Results {
 
 impl Header {
     fn new(path: &RelPath, hits: usize, capped: bool) -> Self {
-        let name: SharedString = one_line(&path.display_name()).into_owned().into();
-        let folder = path
-            .as_path()
-            .parent()
-            .map(|folder| one_line(&folder.to_string_lossy()).into_owned())
-            .unwrap_or_default();
+        // Notes are all `.md`, so this cuts the extension only.
+        let path = PathText::new(&path.as_path().with_extension("").to_string_lossy(), &[]);
         let count: SharedString = if capped {
             format!("{hits}+").into()
         } else {
@@ -107,9 +101,8 @@ impl Header {
             "matches"
         };
         Self {
-            label: format!("{name}, {count} {matches}").into(),
-            name,
-            folder: folder.into(),
+            label: format!("{}, {count} {matches}", path.name.text()).into(),
+            path,
             count,
         }
     }
@@ -130,17 +123,14 @@ impl HitRow {
             context,
             context_match,
         } = hit;
-        // An indent is not part of what the hit says; the match itself is never whitespace.
-        let indent = (context.len() - context.trim_start().len()).min(context_match.start);
-        let context: SharedString = one_line(&context[indent..]).into_owned().into();
+        let context = LitText::context(&context, [context_match]);
         let line: SharedString = line.to_string().into();
         Self {
             note,
             range,
-            label: format!("line {line}: {context}").into(),
+            label: format!("line {line}: {}", context.text()).into(),
             line,
             context,
-            lit: context_match.start - indent..context_match.end - indent,
         }
     }
 }

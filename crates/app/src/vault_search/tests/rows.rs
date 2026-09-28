@@ -23,6 +23,25 @@ fn each_row_label_reads_as_its_row(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_header_splits_its_path_like_quick_open(cx: &mut TestAppContext) {
+    let fs = with_texts(&[("work/a\nb.md", "plan")]);
+    let mut opened = open(cx, &fs);
+
+    search(&mut opened, "p l a n");
+
+    let split = opened.picker.read_with(&opened.visual, |picker, _| {
+        match &picker.delegate.results.rows[0] {
+            Row::Header(header) => Some((
+                header.path.name.text().to_string(),
+                header.path.folder.text().to_string(),
+            )),
+            Row::Hit(_) => None,
+        }
+    });
+    assert_eq!(split, Some(("a b".to_owned(), "work".to_owned())));
+}
+
+#[gpui::test]
 fn the_hit_is_lit_in_its_context(cx: &mut TestAppContext) {
     let fs = with_texts(&[("a.md", "\t  we plan it")]);
     let mut opened = open(cx, &fs);
@@ -31,7 +50,7 @@ fn the_hit_is_lit_in_its_context(cx: &mut TestAppContext) {
 
     let lit = opened.picker.read_with(&opened.visual, |picker, _| {
         match &picker.delegate.results.rows[1] {
-            Row::Hit(hit) => hit.context[hit.lit.clone()].to_owned(),
+            Row::Hit(hit) => hit.context.text()[hit.context.ranges()[0].clone()].to_owned(),
             Row::Header(_) => String::new(),
         }
     });

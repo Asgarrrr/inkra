@@ -12,6 +12,7 @@ mod keymap;
 mod one_line;
 mod picker;
 mod quick_open;
+mod row_text;
 mod shell;
 mod sidebar;
 #[cfg(test)]

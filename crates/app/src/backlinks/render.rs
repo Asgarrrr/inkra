@@ -1,21 +1,12 @@
-use std::ops::Range;
-
 use gpui::{
-    Context, HighlightStyle, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    StatefulInteractiveElement, Styled, StyledText, Window, div,
+    Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, div,
 };
 
-use super::{BacklinksPanel, Occurrence, Row};
+use super::{BacklinksPanel, Row};
+use crate::row_text::styled;
 use crate::sidebar::NoteActivated;
 use crate::theme;
-
-pub(super) fn link_highlight(occurrence: &Occurrence) -> (Range<usize>, HighlightStyle) {
-    let style = HighlightStyle {
-        color: Some(theme::link_text().into()),
-        ..HighlightStyle::default()
-    };
-    (occurrence.link.clone(), style)
-}
 
 impl BacklinksPanel {
     fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
@@ -37,10 +28,9 @@ impl BacklinksPanel {
                     .child(row.name.clone()),
             )
             .children(row.occurrences.iter().map(|occurrence| {
-                div().text_color(theme::placeholder_text()).child(
-                    StyledText::new(occurrence.context.clone())
-                        .with_highlights([link_highlight(occurrence)]),
-                )
+                div()
+                    .text_color(theme::placeholder_text())
+                    .child(styled(&occurrence.context, theme::link_text().into()))
             }))
     }
 }

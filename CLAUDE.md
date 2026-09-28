@@ -127,6 +127,8 @@ Read the spec before changing its area:
   word start, the word-index prefilter, `word_prefix`
 - `docs/superpowers/specs/2026-09-28-ranking-idf-design.md` — key 2 of a text
   match: BM25, per-ordinal note lengths
+- `docs/superpowers/specs/2026-09-29-row-text-design.md` — `row_text`: lit
+  one-line row text, the path split, `name_row`
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

@@ -70,9 +70,14 @@ pub(super) fn listed(opened: &mut Opened) -> Vec<String> {
             .iter()
             .map(|row| match row {
                 Row::Header(header) => {
-                    format!("# {} {}({})", header.name, header.folder, header.count)
+                    format!(
+                        "# {} {}({})",
+                        header.path.name.text(),
+                        header.path.folder.text(),
+                        header.count
+                    )
                 }
-                Row::Hit(hit) => format!("{}: {}", hit.line, hit.context),
+                Row::Hit(hit) => format!("{}: {}", hit.line, hit.context.text()),
             })
             .collect()
     })

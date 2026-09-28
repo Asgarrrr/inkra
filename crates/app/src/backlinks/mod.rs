@@ -1,12 +1,11 @@
 //! The notes linking to the one showing, beside the editor.
 
-use std::ops::Range;
-
 use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
 use inkra_vault::EntryId;
 
 use crate::index::{BUILDING_REFRESH, IndexSync, IndexWatch, NotesChanged, Refresh};
 use crate::one_line::one_line;
+use crate::row_text::LitText;
 use crate::sidebar::NoteActivated;
 use crate::vault::NoteStore;
 
@@ -40,9 +39,8 @@ struct Row {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Occurrence {
-    context: SharedString,
-    /// The link inside `context`.
-    link: Range<usize>,
+    /// The link lit inside it.
+    context: LitText,
 }
 
 impl BacklinksPanel {
@@ -119,8 +117,7 @@ impl BacklinksPanel {
                         .links
                         .into_iter()
                         .map(|link| Occurrence {
-                            context: link.context.clone().into(),
-                            link: link.context_link.clone(),
+                            context: LitText::context(&link.context, [link.context_link.clone()]),
                         })
                         .collect(),
                 })
