@@ -99,10 +99,8 @@ pub fn run() {
                 let focused = window.update(cx, |view, window, cx| {
                     window.focus(&view.focus_handle(cx), cx);
                     cx.activate(true);
-                    // A next-frame callback runs before that frame's present, so the mark waits one more.
-                    window.on_next_frame(|window, _| {
-                        window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
-                    });
+                    // Marks the first draw's start, ~4.5 ms before its present: any later hook waits on AppKit.
+                    window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
                 });
                 if let Err(err) = focused {
                     eprintln!("failed to focus window: {err}");
