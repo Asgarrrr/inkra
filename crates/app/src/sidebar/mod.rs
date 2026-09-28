@@ -15,10 +15,14 @@ mod render;
 #[cfg(test)]
 mod tests;
 mod tree;
+mod visible;
+#[cfg(test)]
+mod visible_tests;
 
 use edit::EditState;
 #[cfg(any(test, feature = "shot"))]
 pub(crate) use render::row_center;
+use visible::Visible;
 
 actions!(sidebar, [Trash, SelectPrev, SelectNext, Rename]);
 
@@ -39,7 +43,7 @@ pub(crate) struct Sidebar {
     /// Not `NoteStore::current`: a row can be selected unopened.
     selected: Option<EntryId>,
     focus_handle: FocusHandle,
-    visible: Vec<Row>,
+    visible: Visible,
     editing: Option<EditState>,
     /// Load-bearing: `uniform_list` only renders the visible range, and an
     /// unrendered focus handle falls back to the root, swallowing keystrokes.
@@ -65,7 +69,7 @@ impl Sidebar {
             expanded: HashSet::new(),
             selected: None,
             focus_handle: cx.focus_handle(),
-            visible: Vec::new(),
+            visible: Visible::default(),
             editing: None,
             scroll: UniformListScrollHandle::default(),
             _vault_changed: watched,
