@@ -89,11 +89,11 @@ impl Vault {
 
     /// Whether some walk has read every folder: until then, a scoped read has no base (watcher spec, F4).
     #[must_use]
-    pub fn has_read_whole(&self) -> bool {
+    pub(crate) fn has_read_whole(&self) -> bool {
         self.state.read_whole
     }
 
-    pub fn mark_scanned(&mut self) {
+    pub(crate) fn mark_scanned(&mut self) {
         if !self.state.scanned {
             Arc::make_mut(&mut self.state).scanned = true;
         }
@@ -158,7 +158,7 @@ impl Vault {
 
     /// `reidentify` at a scan's swap. `in_place`: the live vault mapped `identity` to `id` when the re-key was queued.
     #[must_use]
-    pub fn replay_reidentify(
+    pub(crate) fn replay_reidentify(
         &mut self,
         id: EntryId,
         identity: FileIdentity,
@@ -336,7 +336,7 @@ fn sorted(rows: Vec<(Entry, FileIdentity)>) -> Vec<(Entry, FileIdentity)> {
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]

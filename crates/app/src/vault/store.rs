@@ -5,10 +5,9 @@ use std::time::{Duration, Instant};
 
 use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::{Buffer, Diff};
-use inkra_vault::{EntryId, Fs, Pending, Stamp, Vault};
+use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault};
 
 use super::ops::Ops;
-use super::scans::{Next, Scans};
 use super::writer::{Folder, Writer};
 use crate::buffer_events::Reloaded;
 
@@ -128,7 +127,7 @@ impl NoteStore {
             .as_ref()
             .is_some_and(|vault| !vault.read(cx).is_scanned())
         {
-            store.start_scan(Next::Batch(Pending::Everything), cx);
+            store.rescan_changed(Pending::Everything, cx);
         }
         store
     }

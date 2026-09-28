@@ -8,17 +8,13 @@ use crate::RelPath;
 use crate::fs::Watcher;
 use crate::temp::temp_path;
 
-struct Unwatched;
-
-impl Watcher for Unwatched {}
-
 /// A root reached through a symlink, as `/var` is on macOS.
 fn watch() -> Watch {
     Watch {
         events: mpsc::unbounded().1,
         root: PathBuf::from("/var/vault"),
         resolved: PathBuf::from("/private/var/vault"),
-        watcher: Box::new(Unwatched),
+        watcher: Watcher::new(()),
     }
 }
 

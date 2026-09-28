@@ -131,6 +131,9 @@ Read the spec before changing its area:
   one-line row text, the path split, `name_row`
 - `docs/superpowers/specs/2026-09-29-names-delete-design.md` — the name table
   `find` reads, why the fuzzy matcher is gone
+- `docs/superpowers/specs/2026-09-29-scan-session-design.md` — `Scans` in
+  `inkra-vault`: the re-key log, the swap's order, coalescing, `Watcher` as a
+  drop guard
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

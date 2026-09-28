@@ -396,9 +396,10 @@ What shipped, per decision:
 - **O1.** `Vault` holds one `Arc` of its state. `Vault::new`, `is_scanned`,
   `mark_scanned` and `shared_entries` are new; `scan` and `rescan` stay as
   wrappers, and `collect` and `apply` are gone (O1, Corrected).
-- **O2.** `NoteStore`'s scan worker lives in `crates/app/src/vault/scans.rs`.
-  Scans are serial, requests coalesce, and re-keys made during a scan replay
-  onto its result.
+- **O2.** The scan worker's rules live in `crates/vault/src/scans.rs`
+  (`Scans`, since the scan-session spec); `NoteStore` keeps spawning and
+  wiring in `crates/app/src/vault/scans.rs`. Scans are serial, requests
+  coalesce, and re-keys made during a scan replay onto its result.
 - **O3.** `Walk` and `Vault::applied`, in `crates/vault/src/vault/walk.rs` and
   `vault.rs`. A proptest oracle checks them against the old `apply`.
 - **O4.** The parallel walk, behind `pub trait Jobs`. `Serial` runs it for

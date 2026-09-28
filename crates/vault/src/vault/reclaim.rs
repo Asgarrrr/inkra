@@ -9,7 +9,7 @@ use crate::fs::Kind;
 impl Vault {
     /// The note at `path`; `None` for a folder, whatever its name.
     #[must_use]
-    pub fn id_at(&self, path: &RelPath) -> Option<EntryId> {
+    pub(crate) fn id_at(&self, path: &RelPath) -> Option<EntryId> {
         let query = Key {
             components: path.as_path().components().collect(),
             kind: Kind::Note,
@@ -26,7 +26,7 @@ impl Vault {
 
     /// Gives `other`'s note row, and its inode, the id `id`; refuses a folder, an absent row or a live `id`.
     #[must_use]
-    pub fn reclaim(&mut self, id: EntryId, other: EntryId) -> bool {
+    pub(crate) fn reclaim(&mut self, id: EntryId, other: EntryId) -> bool {
         if id == EntryId::DETACHED || self.state.by_id.contains_key(&id) {
             return false;
         }

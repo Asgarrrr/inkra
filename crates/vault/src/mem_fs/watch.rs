@@ -13,13 +13,6 @@ pub(super) struct Watching {
     sender: Weak<UnboundedSender<PathEvent>>,
 }
 
-/// Holds the sender: dropping it ends the stream, as dropping a notify watcher does.
-struct MemWatcher {
-    _sender: Arc<UnboundedSender<PathEvent>>,
-}
-
-impl Watcher for MemWatcher {}
-
 impl State {
     /// As `FSEvents`: one event per path a mutation touched, to every watch above it.
     pub(super) fn changed(&mut self, path: &Path) {
@@ -60,7 +53,8 @@ impl MemFs {
             events,
             root: root.to_path_buf(),
             resolved: root.to_path_buf(),
-            watcher: Box::new(MemWatcher { _sender: sender }),
+            // Holds the sender: dropping it ends the stream, as dropping a notify watcher does.
+            watcher: Watcher::new(sender),
         }
     }
 }
