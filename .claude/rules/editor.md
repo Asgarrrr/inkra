@@ -30,6 +30,11 @@ Layout:
 - An offset at a wrap belongs to the next row; End, clicks and up/down landing
   on the earlier row clamp to `Row::caret_end`. That is why the caret has no
   affinity bit. Row starts snap to grapheme boundaries.
+- The measure closure reuses `last_layout` when `DocumentLayout::is_shaped_from`
+  holds, so a keystroke shapes once (`editor/tests/shapes.rs`). An input that
+  changes the shaped text must join that check. Intrinsic-width queries shape at
+  the last width: a second width costs a whole shape. So the element needs an
+  ancestor that gives it a definite width, never a shrink-to-fit one.
 - The measure closure reports zero min-content width; the column there would
   become the flex minimum and overflow a narrow pane (`shell/tests/column.rs`).
 - `Selection::set_head` / `collapse_to` take a `Goal`; only vertical moves pass

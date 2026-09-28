@@ -16,6 +16,7 @@ mod margin;
 mod markdown;
 mod protocol;
 mod scroll;
+mod shapes;
 mod swap;
 mod wrap;
 

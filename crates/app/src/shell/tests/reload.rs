@@ -13,6 +13,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use crate::buffer_events::Reloaded;
+use crate::editor::layout::shape_count;
 use crate::keymap::key_bindings;
 use crate::shell::AppShell;
 use crate::test_support::{conflicts, entry_id};
@@ -145,6 +146,21 @@ fn a_reload_keeps_the_top_lines_text_at_the_top(cx: &mut TestAppContext) {
         view.read_with(cx, |view, _| view.offset_at_top()),
         ByteOffset(new.find("line 120\n").expect("line 120"))
     );
+}
+
+#[gpui::test]
+fn a_reload_while_scrolled_shapes_the_note_once(cx: &mut TestAppContext) {
+    let old = numbered("line", 200);
+    let (fs, window, _notes, _visual) = showing_a(cx, &old);
+    let view = editor(&window, cx);
+    let line_120 = ByteOffset(old.find("line 120\n").expect("line 120"));
+    view.update(cx, |view, cx| view.scroll_to_top(line_120, cx));
+    cx.run_until_parked();
+
+    let before = shape_count();
+    fs.insert_file(A, format!("{}{old}", numbered("new", 30)).as_str());
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 1);
 }
 
 /// Both in one update, as two reloads landing between two frames: a test context draws after each.
