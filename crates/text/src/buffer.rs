@@ -374,6 +374,22 @@ impl Buffer {
         ByteOffset(index)
     }
 
+    /// `clip`, then onto the grapheme boundary before (`Left`) or after (`Right`) it.
+    #[must_use]
+    pub fn clip_grapheme(&self, offset: ByteOffset, bias: Bias) -> ByteOffset {
+        let offset = self.clip(offset).0;
+        let len = self.text.len();
+        let mut cursor = GraphemeCursor::new(offset, len, true);
+        if cursor.is_boundary(&self.text, 0).unwrap_or(true) {
+            return ByteOffset(offset);
+        }
+        let snapped = match bias {
+            Bias::Left => cursor.prev_boundary(&self.text, 0).ok().flatten(),
+            Bias::Right => cursor.next_boundary(&self.text, 0).ok().flatten(),
+        };
+        ByteOffset(snapped.unwrap_or(offset))
+    }
+
     /// # Panics
     /// If `offset` is past the end or splits a char — a real `assert!`, since no slicing underneath would catch it in release.
     #[must_use]

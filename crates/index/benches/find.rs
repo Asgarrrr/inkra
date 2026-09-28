@@ -144,7 +144,7 @@ fn on_screen(
     })
 }
 
-/// `quick_open/search.rs`'s order up to the rows: the lookup, the split, the merge.
+/// `index::fan_out`'s order up to the rows: the lookup, the split, the merge.
 fn to_names(snapshot: &IndexSnapshot, query: &NoteQuery) -> Vec<NoteMatch> {
     split(snapshot, &lookup(snapshot, query), query, PIPELINE_RANGES)
 }

@@ -110,9 +110,9 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
-  search, `NoteIndex`/`IndexSync`, the picker and modal layer (vault search not yet built)
+  search, `NoteIndex`/`IndexSync`, the picker and modal layer
 - `docs/superpowers/specs/2026-09-28-vault-search-integration-design.md` — `⌘⇧F`
-  in the app: `Runs`, the delegate, `Hit.line`, `Searched::capped`, opening a hit
+  in the app: `Runs`, the delegate, `Hit.line`, hits grouped by note, opening a hit
 - `docs/superpowers/specs/2026-09-25-smart-quick-open-design.md` — `⌘P` by word
   start on names and text, the word index, `find_notes`
 - `docs/superpowers/specs/2026-09-25-open-first-design.md` — opening before the

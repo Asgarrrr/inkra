@@ -11,7 +11,7 @@ use gpui::{
 use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery, find_notes, merge_notes};
 use inkra_vault::EntryId;
 
-use crate::index::{IndexSync, NotesChanged, fan_out};
+use crate::index::{IndexSync, NotesChanged, SCANNING, fan_out};
 use crate::picker::runs::{Run, RunId, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate};
 use crate::sidebar::NoteActivated;
@@ -29,8 +29,6 @@ actions!(quick_open, [QuickOpen]);
 const LIMIT: usize = 100;
 /// After the names change, as Zed's file finder waits after a worktree update.
 pub(crate) const NOTES_CHANGED_REFRESH: Duration = Duration::from_millis(200);
-
-const SCANNING: &str = "Scanning the vault…";
 
 impl EventEmitter<NoteActivated> for Picker<QuickOpenDelegate> {}
 

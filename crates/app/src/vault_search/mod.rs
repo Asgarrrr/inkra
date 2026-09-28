@@ -12,7 +12,7 @@ use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Vault};
 
 use crate::count::thousands;
-use crate::index::{IndexSync, fan_out};
+use crate::index::{IndexSync, SCANNING, fan_out};
 use crate::picker::runs::{Run, RunId, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate};
 use crate::theme;
@@ -28,7 +28,7 @@ actions!(vault_search, [SearchVault]);
 /// Search spec D9: past it the footer asks for a narrower query.
 const LIMIT: usize = 1_000;
 
-/// A hit was confirmed. Slice 4 selects `range`; until then the shell opens the note at its top.
+/// A hit was confirmed; the shell opens its note with `range` selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HitActivated {
     pub(crate) note: EntryId,
@@ -152,7 +152,7 @@ impl PickerDelegate for VaultSearchDelegate {
         let links = self.links.read(cx);
         match self.answered {
             Answered::Blank => None,
-            Answered::Scanning => Some("Scanning the vault…".into()),
+            Answered::Scanning => Some(SCANNING.into()),
             // While loads land, a query no note matches yet may still match.
             Answered::Query if links.is_building() => {
                 let (loaded, total) = links.progress();

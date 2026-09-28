@@ -1,6 +1,6 @@
 # Vault search in the app (`⌘⇧F`)
 
-Date: 2026-09-28. Status: **reviewed**, before code.
+Date: 2026-09-28. Status: **shipped**, in four slices.
 
 Slice 6 of [`2026-09-24-search-design.md`](2026-09-24-search-design.md) (the
 search spec): the delegate, headers, `cmd-shift-f`, `HitActivated`,
@@ -185,7 +185,7 @@ and highlight runs. Every row is one `UI_LINE_HEIGHT` tall, so
 - **The footer.** `limit_reached` wins over "Indexing …": more loads can only
   add hits past the limit. No rows, no footer: "No matches in …" already
   says how far indexing is. The indexing footer is
-  `IndexSync::indexing_footer`, for both pickers, so `picker/` knows no index.
+  `IndexSync::indexing_footer`, for both pickers, so `picker/` holds no footer text.
 - **Shared with quick open.** `SEARCH_DEBOUNCE`, `Runs::settle` (a run that
   scans nothing), the test hold on scans (`Runs::scanning` returns what a scan
   awaits), and `index::fan_out`: the lookup, one scan per core-sized range,
@@ -249,6 +249,58 @@ shell cannot call it.
   after the first paint with a non-zero viewport: it calls `reveal_cursor`
   and notifies. The note shows at its top for one frame, then scrolls (D10).
 
+### As built (slice 4)
+
+- **No `show_hit`.** `show_note` and `open_note` take `at:
+  Option<Range<ByteOffset>>`; every other caller passes `None`. A
+  `show_hit` would repeat `show_note`'s showing test, its dropped activation
+  and its focus move.
+- **The note showing.** `select_range` runs through `cx.with_window`, before
+  the focus move and whether or not a picker is open: `HitActivated` is
+  delivered before the picker's `Dismissed`.
+- **`select_range`** snaps the start back and the end forward to grapheme
+  boundaries (`Buffer::clip_grapheme`, which clips first), then selects
+  through the `move_cursor` gate. The head, where the caret draws, is the
+  range's end. Selecting before the first layout shapes that layout with the
+  selection's elements revealed.
+- **A hit lands centred**, as Zed's project search jumps with
+  `Autoscroll::center()`. A caret move keeps the minimal reveal with its
+  three-line margin. The strategy is data: `Reveal::Minimal` or
+  `Reveal::Center`, carried by the request.
+- **`pending_reveal` is not a flag.** The reload's `restore_top` becomes
+  `scroll_to: Option<ScrollTo>`, `Top(TopLine)` or `Cursor(Reveal)`: one
+  slot for a scroll decided before its geometry exists, in `editor/scroll.rs`.
+  `restore_scroll` takes it in `render`, reshapes first (a reload may have
+  landed since the last paint shaped `last_layout`), then applies it.
+  `reveal_cursor` asks for `Cursor` itself when it has no geometry (no paint
+  yet, or a zero viewport), so no caller knows about the first paint.
+- **`request_scroll`** is the one way in, for a reveal and a reload alike. A
+  reveal replaces whatever waits: the user asked for it after the reload. A
+  reload's top line only fills an empty slot: a waiting one is already in the
+  text the next layout describes, and a waiting reveal wins (`map_through`
+  already moved the caret). While any request waits, the layout may predate
+  the text, so `reveal_cursor` does not scroll at once: it requests too.
+- **The frame after the first paint.** `paint` records `last_text_top`; when
+  that is the first since `open_buffer` and a `scroll_to` waits, it defers a
+  notify with `defer_in`. A notify during a draw marks no frame
+  (`invalidate_view` sets `dirty` only outside a draw phase). Only the first
+  paint asks, so a zero viewport waits for the next render, with no redraw
+  loop.
+- **Render, not prepaint.** Zed autoscrolls in `EditorElement::prepaint`
+  because its element owns its scroll. Here the parent `div` owns it and has
+  already offset its children when `TextElement::prepaint` runs, so a reveal
+  there also lands a frame late. `restore_scroll` already applied a reload's
+  scroll in `render`, before prepaint reads the offset; the reveal joins it.
+- **Shot.** `vault-search-opened`: `step`, first found on line 998 of a
+  1,130-line note, selected on the centred line.
+- **Known limit.** A hit carries offsets in the saved text. In a note with
+  unsaved edits it may select shifted text; the clip only keeps it valid.
+  Searching unsaved buffers is deferred (search spec).
+- **Deferred.** The note shows at its top for one frame, then scrolls, and
+  the first paint defers a notify for it. A `TextElement` that owns its
+  vertical scroll, as Zed's `EditorElement` does, would reveal in prepaint
+  and remove both. Recorded in `docs/roadmap.md`, Editor.
+
 ## Tests
 
 Headless `#[gpui::test]` against `MemFs`, each key with
@@ -286,7 +338,8 @@ Each merges alone with `check.sh` green.
    the shots. Confirming a hit opens its note, at the top.
 4. **Opening at the hit**: `HitActivated`, `show_hit`, `open_note` with a
    range, `select_range`, `pending_reveal`, their tests, the
-   `vault-search-opened` shot.
+   `vault-search-opened` shot. As built: no `show_hit` and no
+   `pending_reveal`; see S4.
 
 ## Deviations from Zed's Text Finder
 

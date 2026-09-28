@@ -1,7 +1,13 @@
+use std::sync::Arc;
+use std::time::Instant;
+
 use gpui::TestAppContext;
+use inkra_text::Buffer;
 
 use super::{at, dispatching, geometry};
+use crate::buffer_events::Reloaded;
 use crate::editor::actions::Down;
+use crate::editor::scroll::{Reveal, ScrollTo};
 
 /// `max_offset` is non-zero only for a tracked handle on a genuinely
 /// overflowing container, so it catches wiring, flex-shrink, and layout bugs alike.
@@ -361,6 +367,134 @@ fn an_edit_reshapes_before_the_next_paint(cx: &mut TestAppContext) {
                 2,
                 "the layout must describe the text the edit left, not the painted one"
             );
+        })
+        .unwrap();
+}
+
+/// A range selected in the turn that rebinds the buffer has no geometry to scroll by yet.
+#[gpui::test]
+fn a_range_selected_right_after_a_rebind_is_revealed_after_the_first_paint(
+    cx: &mut TestAppContext,
+) {
+    let (window, mut cx) = dispatching(cx, "short");
+    cx.run_until_parked();
+    let tall = gpui::AppContext::new(&mut cx, |_| Buffer::new(tall_document()));
+
+    // `line\n` is five bytes, so line 150 starts at 750.
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.open_buffer(tall, cx);
+            view.select_range(at(750)..at(754), window, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |view, _, _| {
+            assert_eq!(view.state.selection().range(), at(750)..at(754));
+            assert_eq!(
+                view.scroll_handle.offset().y,
+                geometry::offset_centering(150.)
+            );
+        })
+        .unwrap();
+}
+
+/// 150 lines of four bytes above line 10 of five: an unreshaped layout puts offset 650 on line
+/// 130, the new text on line 160. Scrolled first, so the reload asks for its top line too.
+fn scrolled_with_a_reload(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::WindowHandle<super::EditorView>,
+    gpui::VisualTestContext,
+    Arc<inkra_text::Diff>,
+) {
+    let (window, mut cx) = dispatching(cx, &tall_document());
+    cx.run_until_parked();
+    window
+        .update(&mut cx, |view, _, cx| view.scroll_to_top(at(500), cx))
+        .unwrap();
+    cx.run_until_parked();
+    let old = tall_document();
+    let new = format!("{}{old}", "new\n".repeat(150));
+    let diff = window
+        .update(&mut cx, |view, _, cx| {
+            view.buffer.update(cx, |buffer, _| {
+                let diff = Arc::new(inkra_text::diff(buffer.version(), &old, &new));
+                assert!(buffer.apply_diff(Instant::now(), &diff));
+                diff
+            })
+        })
+        .unwrap();
+    (window, cx, diff)
+}
+
+fn centred_on_line_160(
+    window: gpui::WindowHandle<super::EditorView>,
+    cx: &mut gpui::VisualTestContext,
+) {
+    window
+        .update(cx, |view, _, _| {
+            assert_eq!(view.cursor(), at(654));
+            assert_eq!(
+                view.scroll_handle.offset().y,
+                geometry::offset_centering(160.)
+            );
+        })
+        .unwrap();
+}
+
+/// The state between the first paint and its deferred render, when a reload lands there.
+#[gpui::test]
+fn a_reveal_waiting_through_a_reload_centres_by_the_new_text(cx: &mut TestAppContext) {
+    let (window, mut cx, diff) = scrolled_with_a_reload(cx);
+
+    window
+        .update(&mut cx, |view, _, cx| {
+            // In the text before the reload, which `on_buffer_reloaded` maps it from.
+            let buffer = view.buffer.read(cx);
+            view.state.move_to(buffer, at(50), false);
+            view.state.move_to(buffer, at(54), true);
+            view.scroll_to = Some(ScrollTo::Cursor(Reveal::Center));
+            let buffer = view.buffer.clone();
+            view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    centred_on_line_160(window, &mut cx);
+}
+
+/// A hit picked after a reload, before the render that restores its top line.
+#[gpui::test]
+fn a_hit_picked_while_a_reload_waits_centres_by_the_new_text(cx: &mut TestAppContext) {
+    let (window, mut cx, diff) = scrolled_with_a_reload(cx);
+
+    window
+        .update(&mut cx, |view, window, cx| {
+            let buffer = view.buffer.clone();
+            view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);
+            view.select_range(at(650)..at(654), window, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    centred_on_line_160(window, &mut cx);
+}
+
+/// A saved range may fall inside a cluster of the live text: `e` + U+0301, then a ZWJ family.
+#[gpui::test]
+fn a_selected_range_snaps_outward_to_graphemes(cx: &mut TestAppContext) {
+    let text = "cafe\u{301} \u{1F468}\u{200D}\u{1F469} x";
+    let (window, mut cx) = dispatching(cx, text);
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.select_range(at(5)..at(5), window, cx);
+            assert_eq!(view.state.selection().range(), at(3)..at(6));
+            view.select_range(at(9)..at(12), window, cx);
+            assert_eq!(view.state.selection().range(), at(7)..at(18));
         })
         .unwrap();
 }

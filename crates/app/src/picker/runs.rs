@@ -103,8 +103,7 @@ impl Runs {
         }
     }
 
-    /// The started run scans; a refresh until it applies is deferred. The scan awaits the
-    /// future returned first: ready at once, unless a test holds scans.
+    /// Refreshes wait until the started run applies; its scan awaits the returned future (tests hold it).
     pub(crate) fn scanning(&mut self, started: &Started) -> impl Future<Output = ()> + use<> {
         self.scan = Some(Scan {
             user: started.run.is_user(),

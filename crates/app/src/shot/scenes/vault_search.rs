@@ -99,3 +99,12 @@ pub(super) fn scanning(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.wait(PICKER_SETTLE);
     window
 }
+
+/// `step` is in `roadmap.md` only, from line 998: the note opens there, the word selected.
+pub(super) fn opened(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = open(stage, &notes());
+    stage.keys(window, "s t e p");
+    stage.wait(PICKER_SETTLE);
+    stage.keys(window, "enter");
+    window
+}

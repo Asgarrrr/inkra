@@ -13,8 +13,7 @@ use crate::words::{Lookup, NoteQuery};
 pub const HITS_PER_NOTE: usize = 100;
 
 /// The first `limit` word starts of the query's terms in `range`, grouped by note in vault
-/// order, from the notes holding every term. Pass the `lookup` of this `snapshot` and `query`. Empty when
-/// `cancel` is set, and without a hit when the query has no term.
+/// order. Pass the `lookup` of this `snapshot` and `query`. Empty once `cancel` is set or with no term.
 #[must_use]
 pub fn search(
     snapshot: &IndexSnapshot,
@@ -74,8 +73,7 @@ pub fn search(
     }
 }
 
-/// The first `room` hits in `text`, and one more when the walk read past them; `None` once
-/// `cancel` is set.
+/// The first `room` hits in `text`, plus one if more exist; `None` once `cancel` is set.
 fn locate(
     text: &str,
     terms: &Terms<'_>,

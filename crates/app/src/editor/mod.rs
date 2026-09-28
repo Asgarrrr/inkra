@@ -23,7 +23,7 @@ use inkra_text::{Buffer, ByteOffset};
 use crate::theme;
 use element::TextElement;
 use layout::DocumentLayout;
-use reload::TopLine;
+use scroll::{Reveal, ScrollTo};
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +48,8 @@ pub(crate) struct EditorView {
     /// `last_bounds` arrives already scrolled (`gpui/elements/div.rs:2027`), so
     /// no hit-test subtracts the offset.
     scroll_handle: ScrollHandle,
-    /// Set by a reload, taken by the next `render`.
-    restore_top: Option<TopLine>,
+    /// Set before the geometry it needs exists, taken by the next `render`.
+    scroll_to: Option<ScrollTo>,
     /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
     /// no test failure short of a two-view test, and leaves a reload's caret on the old text.
     _buffer: [Subscription; 2],
@@ -71,7 +71,7 @@ impl EditorView {
             last_bounds: None,
             last_text_top: None,
             scroll_handle: ScrollHandle::new(),
-            restore_top: None,
+            scroll_to: None,
             _buffer: subscriptions,
         };
         view.refresh_markdown(cx);
@@ -100,7 +100,7 @@ impl EditorView {
         self.last_bounds = None;
         self.last_text_top = None;
         self.scroll_handle = ScrollHandle::new();
-        self.restore_top = None;
+        self.scroll_to = None;
 
         cx.notify();
     }
@@ -115,6 +115,11 @@ impl EditorView {
     #[cfg(test)]
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
         &self.buffer
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selected(&self) -> std::ops::Range<ByteOffset> {
+        self.state.selection().range()
     }
 
     #[cfg(test)]
@@ -162,7 +167,7 @@ impl EditorView {
         // reads the buffer — a second lease panics at runtime.
         drop(buffer);
         self.reshape(window, cx);
-        self.reveal_cursor();
+        self.reveal_cursor(Reveal::Minimal);
         result
     }
 
@@ -173,11 +178,23 @@ impl EditorView {
             return;
         };
         let (style, wrap_width) = (last.style().clone(), last.wrap_width());
-        let marked = self.state.marked_range();
-        self.last_layout = Some(Rc::new(layout::shape_document(
-            self.buffer.read(cx),
+        let (selection, marked) = (self.state.selection().range(), self.state.marked_range());
+        let buffer = self.buffer.read(cx);
+        // A whole-document shape: skipped when the inputs still give this layout.
+        if last.is_shaped_from(
+            buffer,
             &self.markdown,
-            &self.state.selection().range(),
+            &selection,
+            marked.as_ref(),
+            &style,
+            wrap_width,
+        ) {
+            return;
+        }
+        self.last_layout = Some(Rc::new(layout::shape_document(
+            buffer,
+            &self.markdown,
+            &selection,
             marked.as_ref(),
             &style,
             wrap_width,

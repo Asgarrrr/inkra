@@ -261,6 +261,11 @@ const CATALOGUE: &[Scene] = &[
         shows: "cmd-shift-f before the vault's first scan ends: \"Scanning the vault…\"",
         open: vault_search::scanning,
     },
+    Scene {
+        name: "vault-search-opened",
+        shows: "enter on `step`, first found on line 998 of `roadmap.md`: the line centred, `step` selected",
+        open: vault_search::opened,
+    },
 ];
 
 pub(crate) fn catalogue() -> &'static [Scene] {

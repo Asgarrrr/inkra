@@ -1,9 +1,12 @@
+use std::ops::Range;
+
 use gpui::{Context, Window, point, px};
 use inkra_editor::{EditorState, Goal, LogicalMovement};
 use inkra_markdown::touched;
-use inkra_text::Buffer;
+use inkra_text::{Bias, Buffer, ByteOffset};
 
-use super::{EditorView, scroll};
+use super::EditorView;
+use super::scroll::{Reveal, ScrollTo};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Vertical {
@@ -25,6 +28,16 @@ impl EditorView {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut EditorState, &Buffer),
     ) {
+        self.move_cursor_revealing(Reveal::Minimal, window, cx, f);
+    }
+
+    fn move_cursor_revealing(
+        &mut self,
+        how: Reveal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut EditorState, &Buffer),
+    ) {
         let old = self.state.selection().range();
         f(&mut self.state, self.buffer.read(cx));
         let new = self.state.selection().range();
@@ -33,27 +46,41 @@ impl EditorView {
             self.reshape(window, cx);
         }
         cx.notify();
-        self.reveal_cursor();
+        self.reveal_cursor(how);
     }
 
-    /// Called from both gates, not the action handlers, which would forget it.
-    /// Must run here: from `TextElement::prepaint` it would land a frame late.
-    pub(super) fn reveal_cursor(&mut self) {
-        let (Some(text_top), Some(layout)) = (self.last_text_top, self.last_layout.as_ref()) else {
+    /// Snapped outward to graphemes: the range is in the saved text, which unsaved edits may move.
+    pub(crate) fn select_range(
+        &mut self,
+        range: Range<ByteOffset>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_revealing(Reveal::Center, window, cx, |state, buffer| {
+            state.move_to(buffer, buffer.clip_grapheme(range.start, Bias::Left), false);
+            state.move_to(buffer, buffer.clip_grapheme(range.end, Bias::Right), true);
+        });
+    }
+
+    /// From the gates, not the handlers; from `TextElement::prepaint` it would land a frame late.
+    pub(super) fn reveal_cursor(&mut self, how: Reveal) {
+        let viewport = self.scroll_handle.bounds();
+        // Bounds stay default() until the first prepaint; a waiting request means a stale layout.
+        let geometry = self
+            .last_text_top
+            .zip(self.last_layout.as_ref())
+            .filter(|_| viewport.size.height > px(0.) && self.scroll_to.is_none());
+        let Some((text_top, layout)) = geometry else {
+            self.request_scroll(ScrollTo::Cursor(how));
             return;
         };
-        let viewport = self.scroll_handle.bounds();
-        // Nothing prepainted yet: bounds stay default() until the first clamp.
-        if viewport.size.height <= px(0.) {
-            return;
-        }
 
         let row = layout.row_for_offset(self.cursor());
         let top = text_top + layout.top_for_row(row);
         let extent = top..top + layout.row_height(row);
         let viewport = viewport.top()..viewport.bottom();
 
-        if let Some(offset) = scroll::reveal(
+        if let Some(offset) = how.offset(
             extent,
             viewport,
             self.scroll_handle.offset().y,

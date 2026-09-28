@@ -9,6 +9,12 @@ Date: 2026-09-24. Status: **reviewed**, before code.
 > D4 is replaced; D7 and D9 lose the toggles; Testing, Evolution and Deferred
 > change as marked. `search` now takes `(&IndexSnapshot, &Lookup, range,
 > &NoteQuery, cancel, limit)`.
+>
+> **Amended 2026-09-28** by
+> [`2026-09-28-vault-search-integration-design.md`](2026-09-28-vault-search-integration-design.md):
+> `Searched` groups hits by note (`NoteHits { note, hits, capped }`), `Hit`
+> loses `note` and gains `line`, and a header shows `{n}+` only for a note cut
+> short: exactly 100 hits is not capped. Slice 6 is split in four.
 
 The application is "a vault of markdown files, links and backlinks, search,
 panes". Links shipped (`2026-09-24-links-and-backlinks-design.md`), and that
@@ -493,7 +499,8 @@ same API.
   chars. A consequence: a decomposed (NFD) query now also finds NFD text. The
   NFD limitation above stays for an NFC query over decomposed text.
 - `HITS_PER_NOTE` (100) is public, so vault search can show "100+" on a note
-  whose hits reached the cap.
+  whose hits reached the cap. (Amended: `NoteHits::capped` says it, see the
+  integration spec's S2.)
 - A hit's context is found inside its window first: the newline search reads
   at most 60 bytes before and 100 after, never the whole line. On a 10 MB note
   of one line, a common word went from 50.9 ms to 0.016 ms (Performance).
@@ -857,6 +864,11 @@ through `open_note(id, Option<Range<ByteOffset>>)`:
 - If the hit is in the note showing, the shell selects and reveals without
   rebinding, which would reset the caret and scroll, as `follow` already
   avoids (`crates/app/src/shell.rs`).
+
+> **As built.** The reveal runs in `render`, not prepaint, and centres the
+> hit, as Zed does. `pending_reveal` is the `ScrollTo::Cursor` of a slot
+> shared with the reload's top line, and both ends of the range snap to
+> graphemes. See the integration spec's "As built (slice 4)".
 
 > **Corrected.** The draft deferred the selection to the next layout. The
 > selection is an input to shaping, since conceals reveal around it, so the

@@ -231,12 +231,17 @@ impl Element for TextElement {
             window.paint_quad(cursor);
         }
 
-        self.editor.update(cx, |editor, _| {
+        self.editor.update(cx, |editor, cx| {
             editor.last_layout = Some(layout);
             editor.last_bounds = Some(bounds);
             // Read now: the scroll offset here is what translated this frame's
             // `bounds` (`elements/div.rs:2390`), so subtracting it gives the y at zero scroll.
-            editor.last_text_top = Some(bounds.origin.y - editor.scroll_handle.offset().y);
+            let text_top = bounds.origin.y - editor.scroll_handle.offset().y;
+            let first = editor.last_text_top.replace(text_top).is_none();
+            // Deferred: a notify during a draw marks no frame (`gpui/src/window.rs:171`).
+            if first && editor.scroll_to.is_some() {
+                cx.defer_in(window, |_, _, cx| cx.notify());
+            }
         });
     }
 }
