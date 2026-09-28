@@ -7,6 +7,7 @@ mod conflict;
 mod fs;
 mod path;
 mod real_fs;
+mod scans;
 mod temp;
 mod vault;
 mod watch;
@@ -20,5 +21,6 @@ pub use fs::{
 };
 pub use path::{NameProblem, RelPath, check_name, note_file_name};
 pub use real_fs::RealFs;
+pub use scans::{Claims, Listed, Scan, Scanned, Scans, Swapped};
 pub use vault::{Entry, EntryId, Job, Jobs, Reach, Serial, Vault, Walk};
 pub use watch::{Changed, PathEvent, Pending, Watch};

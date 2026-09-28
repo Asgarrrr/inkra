@@ -27,11 +27,9 @@ pub(super) fn watch(root: &Path) -> Result<Watch> {
         events,
         root: root.to_path_buf(),
         resolved,
-        watcher: Box::new(watcher),
+        watcher: Watcher::new(watcher),
     })
 }
-
-impl Watcher for notify::RecommendedWatcher {}
 
 fn watch_error(root: &Path, source: notify::Error) -> VaultError {
     io_error(root, io::Error::other(source))

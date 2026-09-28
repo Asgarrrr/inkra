@@ -79,11 +79,11 @@ pub struct Watch {
     pub events: UnboundedReceiver<PathEvent>,
     pub root: PathBuf,     // as configured
     pub resolved: PathBuf, // canonical (F3)
-    pub watcher: Box<dyn Watcher>,
+    pub watcher: Watcher,
 }
 
 pub struct PathEvent { pub path: PathBuf, pub rescan: bool }
-pub trait Watcher: Send + Sync {} // dropping it stops the watch
+pub struct Watcher { /* the platform watch */ } // dropping it stops the watch
 ```
 
 - **No event kinds.** Every consumer stats the path again (F3), as Zed's
@@ -114,9 +114,9 @@ initial scan, so no event falls between the scan's read and the watch.
 A task drains the receiver: it waits for one event, then for 100 ms
 (`WATCH_LATENCY`, Zed's `FS_WATCH_LATENCY`), then takes everything queued. It
 passes each event through F3's filter into a `Pending` (F4) and hands the batch
-to `Scans` (`NoteStore::rescan_changed`). Under `cfg(test)` the latency is
-zero, as Zed's fake: a test's events form one batch once it parks. The code is
-`app/src/vault/watch.rs`.
+to `Scans` (`NoteStore::rescan_changed`, then `inkra_vault::Scans::batch`).
+Under `cfg(test)` the latency is zero, as Zed's fake: a test's events form one
+batch once it parks. The code is `app/src/vault/watch.rs`.
 
 Deviation from Zed: the latency lives in the consumer, not in `Fs::watch` as in
 Zed (`fs.rs:171-178`). Only `app` reads a clock.
@@ -226,9 +226,9 @@ read.
 
 A pending folder that fails to read keeps its entries (open-first spec, "A
 folder that fails keeps its entries"). Unless the error is "not found" or "not
-a directory", the walk reports it (`Reach::Incomplete`), and
-`Scans::scan_ended` makes the next scan read `Everything`: a full scan, which
-retries the folder. This is bounded by construction. Only `walk_changed` sets
+a directory", the walk reports it (`Reach::Incomplete`), and `Scans::swap`
+(`crates/vault/src/scans.rs`) makes the next scan read `Everything`: a full
+scan, which retries the folder. This is bounded by construction. Only `walk_changed` sets
 `Incomplete`, and a full scan applies the open-first rule without asking again,
 so a folder that keeps failing costs one extra full scan.
 
@@ -325,14 +325,17 @@ Two terms, used verbatim below:
 - A **reload check** is the task F8 describes, queued on the note's `Ops`
   chain.
 
-**The swap detects, not an observer.** `NoteStore::swap` (`scans.rs:227-276`)
-is the only place an entry takes an mtime read from disk. The vault entity's
-other writers are `reidentify` (`scans.rs:129-135`), which writes our own
-save's mtime, and the failed-walk branch (`scans.rs:244-258`), which replays
-those re-keys only. An observer of the vault entity would fire for all three
-and would see no previous state to compare against. So `swap`, after the
-`mem::replace` (`scans.rs:268-272`) and before the previous state goes to the
-background, walks `self.open` and, for each note:
+**The swap detects, not an observer.** The swap (`Scans::swap` and
+`Scans::swap_root` in `crates/vault/src/scans.rs`, wired by `NoteStore::swap`
+in `crates/app/src/vault/scans.rs`) is the only place an entry takes an mtime
+read from disk. The vault entity's other writers are `Scans::reidentify` with
+no scan running, which writes our own save's mtime, and the failed-walk path
+(`fail` in `crates/vault/src/scans.rs`), which replays those re-keys only. An
+observer of the vault entity would fire for all three and would see no
+previous state to compare against. So the store, once the swap's
+`mem::replace` has returned the previous state (`Swapped::replaced`) and
+before that state goes to the background, walks `self.open` and, for each
+note:
 
 - `EntryId::DETACHED`: skipped. It has no entry; a note launched by path has no
   vault and no watch (`bootstrap.rs:30-50`, `store.rs:51-55`).
@@ -362,19 +365,20 @@ of every write queued before it. It proceeds in this order:
    `loaded.stamp == expected`.
 3. On to F8 with the loaded file.
 
-A failed load is logged, as a failed scan is (`scans.rs:243`), and the note
-keeps its text. A file deleted before the load shows as gone at the next swap
-(F9).
+A failed load is logged, as a failed scan is (`NoteStore::swapped`), and the
+note keeps its text. A file deleted before the load shows as gone at the
+next swap (F9).
 
 **Our own save's echo loads nothing.**
 
 - No scan runs during the save. `write` re-keys the live vault to the saved
-  mtime (`store.rs:331`, `scans.rs:129-135`) before the echo's scan takes its
+  mtime (`save.rs`, `Scans::reidentify`) before the echo's scan takes its
   base. The echo's swap finds the same mtime in both states and queues nothing.
   This is Zed's "identical `File`" (`buffer_store.rs:564-592`).
 - A scan runs during the save. The re-key is recorded and replayed onto the new
-  state only (`scans.rs:116-127`, `:262-264`), so the live state still holds
-  the old mtime and the swap queues a check. Step 2 finds the entry's mtime
+  state only (`Scans::reidentify`, then `replace` in
+  `crates/vault/src/scans.rs`), so the live state still holds the old mtime
+  and the swap queues a check. Step 2 finds the entry's mtime
   equal to the expected stamp's, which `write_through` set from the same
   `saved.stamp` (`writer.rs:50-53`), and stops before loading.
 

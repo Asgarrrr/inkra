@@ -1,6 +1,7 @@
 //! Async buys nothing on local disk — `RealFs` blocks inside the future — but
 //! it buys the shape: a remote backend later is a second `impl Fs`.
 
+use std::any::Any;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -70,7 +71,17 @@ pub enum VaultError {
 pub type Result<T> = std::result::Result<T, VaultError>;
 
 /// Dropping it stops the watch and ends its stream.
-pub trait Watcher: Send + Sync {}
+pub struct Watcher {
+    _held: Box<dyn Any + Send + Sync>,
+}
+
+impl Watcher {
+    pub(crate) fn new(held: impl Any + Send + Sync) -> Self {
+        Self {
+            _held: Box::new(held),
+        }
+    }
+}
 
 #[async_trait]
 pub trait Fs: Send + Sync {

@@ -11,7 +11,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Pending, RelPath};
 
 use crate::index::IndexSync;
-use crate::test_support::{edit, entry_id, named, opened, scan_notes, unscanned_notes, vault};
+use crate::test_support::{edit, entry_id, named, opened, scan_notes, vault};
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
 
@@ -178,34 +178,6 @@ fn a_rescan_event_runs_one_full_scan(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn batches_during_a_scan_cost_one_more_scan(cx: &mut TestAppContext) {
-    let fs = vault(&["f/a.md", "g/b.md"]);
-    let (notes, _links) = indexed(cx, &fs);
-    let folders = ["/vault", "/vault/f", "/vault/g"];
-    let listed = listings(&fs, &folders);
-
-    let gate = fs.block_read_dir("/vault");
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    for file in ["/vault/f/c.md", "/vault/f/d.md", "/vault/g/e.md"] {
-        fs.insert_file(file, "");
-        cx.run_until_parked();
-    }
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(
-        listings(&fs, &folders),
-        [listed[0] + 1, listed[1] + 2, listed[2] + 2],
-        "the held scan, then one scoped scan of both folders"
-    );
-    assert_eq!(
-        paths(&notes, cx),
-        ["f", "f/a.md", "f/c.md", "f/d.md", "g", "g/b.md", "g/e.md"]
-    );
-}
-
-#[gpui::test]
 fn dotfiles_and_our_temporary_files_start_no_scan(cx: &mut TestAppContext) {
     let fs = vault(&["f/a.md"]);
     let (_notes, _links) = indexed(cx, &fs);
@@ -224,74 +196,5 @@ fn dotfiles_and_our_temporary_files_start_no_scan(cx: &mut TestAppContext) {
         listings(&fs, &folders),
         [listed[0], listed[1] + 1],
         "the watch is live"
-    );
-}
-
-#[gpui::test]
-fn a_scoped_read_that_fails_is_picked_up_by_the_next_full_scan(cx: &mut TestAppContext) {
-    let fs = vault(&["a.md", "f/b.md", "g/c.md"]);
-    let (notes, _links) = indexed(cx, &fs);
-    let folders = ["/vault", "/vault/f", "/vault/g"];
-    let listed = listings(&fs, &folders);
-
-    fs.make_unreadable("/vault/f");
-    let full = fs.block_read_dir("/vault");
-    fs.insert_file("/vault/f/d.md", "");
-    cx.run_until_parked();
-    // `make_unreadable` holds one path: `f` reads again before the full scan does.
-    fs.make_unreadable("/nowhere");
-    full.release();
-    cx.run_until_parked();
-
-    assert_eq!(
-        listings(&fs, &folders),
-        [listed[0] + 1, listed[1] + 2, listed[2] + 1],
-        "the failed scoped read, then one full scan"
-    );
-    assert_eq!(
-        paths(&notes, cx),
-        ["f", "f/b.md", "f/d.md", "g", "g/c.md", "a.md"]
-    );
-}
-
-#[gpui::test]
-fn a_scoped_read_that_keeps_failing_costs_one_full_scan(cx: &mut TestAppContext) {
-    let fs = vault(&["a.md", "f/b.md", "g/c.md"]);
-    let (notes, _links) = indexed(cx, &fs);
-    let folders = ["/vault", "/vault/f", "/vault/g"];
-    let listed = listings(&fs, &folders);
-
-    fs.make_unreadable("/vault/f");
-    fs.insert_file("/vault/f/d.md", "");
-    cx.run_until_parked();
-
-    assert_eq!(
-        listings(&fs, &folders),
-        [listed[0] + 1, listed[1] + 2, listed[2] + 1],
-        "the failed scoped read, then one full scan that does not ask again"
-    );
-    assert_eq!(
-        paths(&notes, cx),
-        ["f", "f/b.md", "g", "g/c.md", "a.md"],
-        "`f` keeps its entries"
-    );
-}
-
-/// O8 marks a failed initial scan scanned, yet no walk read the vault whole: a batch reads it whole.
-#[gpui::test]
-fn a_batch_after_a_failed_initial_scan_reads_the_whole_vault(cx: &mut TestAppContext) {
-    let fs = vault(&["a.md", "f/b.md", "g/c.md"]);
-    fs.make_unreadable("/vault");
-    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    cx.run_until_parked();
-    assert!(paths(&notes, cx).is_empty());
-
-    fs.make_unreadable("/nowhere");
-    fs.insert_file("/vault/f/d.md", "");
-    cx.run_until_parked();
-
-    assert_eq!(
-        paths(&notes, cx),
-        ["f", "f/b.md", "f/d.md", "g", "g/c.md", "a.md"]
     );
 }

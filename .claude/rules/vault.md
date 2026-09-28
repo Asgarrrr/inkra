@@ -11,9 +11,9 @@ paths:
   new inode at a path keeps the path's id when the walk finds the old inode
   nowhere (an external atomic save), and gets a new one when it finds it
   elsewhere (watcher spec, F5). An open note gone from disk reclaims
-  the note file at its last path, unless that id is open (F9). The swap
-  reclaims before it replays a re-key, through `Vault::replay_reidentify`,
-  never `reidentify`.
+  the note file at its last path, unless that id is open (F9). The swap's
+  order (reclaim, replay, replace) is `inkra_vault::Scans`'s: the app calls
+  `Scans`, never the `Vault` primitives it assembles.
 - `NoteStore::current` is the note `⌘S` writes and must be the note on screen.
   Its only writers are `set_current` (right after `EditorView::open_buffer`, no
   `await` between) and the synchronous `adopt` at launch.

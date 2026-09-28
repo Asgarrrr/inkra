@@ -5,9 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
-use futures::channel::oneshot::Canceled;
 use gpui::{Entity, TestAppContext, prelude::*};
-use inkra_text::Buffer;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
@@ -102,69 +100,6 @@ fn a_create_during_the_initial_scan_keeps_its_id(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn three_requests_during_a_held_scan_cost_one_more_scan(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let listed = fs.read_dirs(Path::new("/vault"));
-
-    let gate = fs.block_read_dir("/vault");
-    let held = notes.update(cx, NoteStore::rescan);
-    cx.run_until_parked();
-    let mut waiting: Vec<_> = (0..3)
-        .map(|_| notes.update(cx, NoteStore::rescan))
-        .collect();
-    cx.run_until_parked();
-    for wait in &mut waiting {
-        assert_eq!(
-            wait.try_recv(),
-            Ok(None),
-            "answered only by a scan that started after it"
-        );
-    }
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(
-        fs.read_dirs(Path::new("/vault")),
-        listed + 2,
-        "the held scan, then one more"
-    );
-    assert!(held.await.is_ok());
-    for wait in waiting {
-        assert!(wait.await.is_ok());
-    }
-}
-
-#[gpui::test]
-async fn a_save_re_keyed_during_a_held_scan_is_found_by_the_next_save(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let a = entry_id(&notes, cx, "a");
-    let buffer = opened(&notes, cx, a).await;
-
-    // The walk reads the root after the save, so it sees the new inode.
-    let gate = fs.block_read_dir("/vault");
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    edit(&buffer, cx, "1");
-    cx.executor().advance_clock(AUTOSAVE_DELAY);
-    cx.run_until_parked();
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(ids(&notes, cx), [("a.md".to_owned(), a)]);
-    edit(&buffer, cx, "2");
-    cx.executor().advance_clock(AUTOSAVE_DELAY);
-    cx.run_until_parked();
-    assert_eq!(
-        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
-        Some("21alpha")
-    );
-}
-
-#[gpui::test]
 async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
     cx: &mut TestAppContext,
 ) {
@@ -215,40 +150,6 @@ async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
     );
 }
 
-/// `RealFs` saves a hard-linked note in place: the held walk read its inode before the save.
-#[gpui::test]
-async fn an_in_place_save_re_keyed_during_a_held_scan_keeps_the_saves_mtime(
-    cx: &mut TestAppContext,
-) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    fs.insert_dir("/vault/f");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let a = entry_id(&notes, cx, "a");
-
-    // The walk reads the root, then waits on `f`.
-    let gate = fs.block_read_dir("/vault/f");
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    // `MemFs::save` always moves the inode: the in-place write is `RealFs`'s for a hard link.
-    fs.insert_file("/vault/a.md", "beta");
-    let saved = fs
-        .load(Path::new("/vault/a.md"))
-        .await
-        .expect("the saved note loads");
-    notes.update(cx, |notes, cx| {
-        notes.reidentify(a, saved.identity, saved.stamp.mtime, cx);
-    });
-    gate.release();
-    cx.run_until_parked();
-
-    let mtime = notes.read_with(cx, |notes, cx| {
-        let vault = notes.vault().expect("a vault").read(cx);
-        vault.entry(a).map(|entry| entry.mtime)
-    });
-    assert_eq!(mtime, Some(saved.stamp.mtime));
-}
-
 #[gpui::test]
 fn a_folder_renamed_during_a_held_walk_keeps_its_notes_until_the_next_scan(
     cx: &mut TestAppContext,
@@ -279,67 +180,6 @@ fn a_folder_renamed_during_a_held_walk_keeps_its_notes_until_the_next_scan(
         ids(&notes, cx),
         [("g".to_owned(), f), ("g/n.md".to_owned(), n)]
     );
-}
-
-#[gpui::test]
-async fn a_failed_walk_answers_no_request_and_replays_its_re_keys_onto_the_live_vault(
-    cx: &mut TestAppContext,
-) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let a = entry_id(&notes, cx, "a");
-    let buffer = opened(&notes, cx, a).await;
-
-    let gate = fs.block_read_dir("/vault");
-    let held = notes.update(cx, NoteStore::rescan);
-    cx.run_until_parked();
-    edit(&buffer, cx, "1");
-    cx.executor().advance_clock(AUTOSAVE_DELAY);
-    cx.run_until_parked();
-    fs.make_unreadable("/vault");
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(held.now_or_never(), Some(Err(Canceled)));
-    let saved = fs
-        .load(Path::new("/vault/a.md"))
-        .await
-        .expect("the saved note loads")
-        .identity;
-    let mapped = notes.read_with(cx, |notes, cx| {
-        notes.vault().expect("a vault").read(cx).id_for(saved)
-    });
-    assert_eq!(mapped, Some(a));
-}
-
-/// The live vault minted the saved inode a fresh id; a failed walk's replay reclaims it.
-#[gpui::test]
-async fn a_failed_walk_that_replays_a_reclaim_notifies(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.new(|cx| IndexSync::new(&notes, cx));
-    let a = entry_id(&notes, cx, "a");
-    let buffer = opened(&notes, cx, a).await;
-
-    let saved = fs.block_after_save("/vault/a.md");
-    edit(&buffer, cx, "1");
-    cx.executor().advance_clock(AUTOSAVE_DELAY);
-    cx.run_until_parked();
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    let held = fs.block_read_dir("/vault");
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    saved.release();
-    cx.run_until_parked();
-    fs.make_unreadable("/vault");
-    held.release();
-    cx.run_until_parked();
-
-    assert_eq!(ids(&notes, cx), [("a.md".to_owned(), a)]);
-    assert_eq!(named(&links, cx, "a"), [a]);
 }
 
 #[gpui::test]
@@ -384,52 +224,6 @@ async fn a_save_during_the_initial_full_pass_keeps_its_note(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-async fn requests_during_the_initial_scan_cost_one_more_scan(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/f/b.md", "");
-    let gate = fs.block_read_dir("/vault/f");
-    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    cx.run_until_parked();
-    assert_eq!(
-        fs.read_dirs(Path::new("/vault")),
-        1,
-        "the root pass; the full pass continues its listing"
-    );
-
-    let waiting: Vec<_> = (0..3)
-        .map(|_| notes.update(cx, NoteStore::rescan))
-        .collect();
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(
-        fs.read_dirs(Path::new("/vault")),
-        2,
-        "one more full scan, no second root pass"
-    );
-    for wait in waiting {
-        assert!(wait.await.is_ok());
-    }
-}
-
-#[gpui::test]
-fn the_initial_scan_lists_the_root_once(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "");
-    fs.insert_file("/vault/f/b.md", "");
-    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    cx.run_until_parked();
-
-    assert_eq!(fs.read_dirs(Path::new("/vault")), 1);
-    assert_eq!(fs.read_dirs(Path::new("/vault/f")), 1);
-    let paths: Vec<String> = ids(&notes, cx).into_iter().map(|(path, _)| path).collect();
-    assert_eq!(paths, ["f", "f/b.md", "a.md"]);
-    assert!(notes.read_with(cx, |notes, cx| {
-        notes.vault().expect("a vault").read(cx).is_scanned()
-    }));
-}
-
-#[gpui::test]
 fn a_failed_root_pass_marks_no_root_step(cx: &mut TestAppContext) {
     cx.update(|cx| cx.set_global(Timeline::new(Instant::now())));
     let fs = Arc::new(MemFs::new());
@@ -444,33 +238,6 @@ fn a_failed_root_pass_marks_no_root_step(cx: &mut TestAppContext) {
         !line.contains("scanned -"),
         "O8: the failed full pass still turns scanned: {line}"
     );
-}
-
-#[gpui::test]
-fn a_failed_root_pass_leaves_the_vault_unscanned_until_the_full_pass(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "");
-    fs.make_unreadable("/vault");
-    let root_pass = fs.block_read_dir("/vault");
-    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    cx.run_until_parked();
-    let scanned = |cx: &mut TestAppContext| {
-        notes.read_with(cx, |notes, cx| {
-            notes.vault().expect("a vault").read(cx).is_scanned()
-        })
-    };
-
-    root_pass.release();
-    let full_pass = fs.block_read_dir("/vault");
-    cx.run_until_parked();
-    assert!(
-        !scanned(cx),
-        "O8 marks a failed full pass, not a failed root pass"
-    );
-
-    full_pass.release();
-    cx.run_until_parked();
-    assert!(scanned(cx));
 }
 
 #[gpui::test]
@@ -497,36 +264,4 @@ fn a_scan_reads_folders_on_several_jobs(cx: &mut TestAppContext) {
         "one job waits on a folder while another reads the next"
     );
     assert_eq!(scanned.now_or_never(), Some(Ok(())));
-}
-
-/// A note opened by path may lie inside the vault root: still no entry carries `DETACHED`.
-#[gpui::test]
-async fn a_detached_note_inside_the_vault_gives_no_entry_its_id(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "alpha");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let loaded = fs.load(Path::new("/vault/a.md")).await.expect("load");
-    let buffer = cx.new(|_| Buffer::new(loaded.text.clone()));
-    notes.update(cx, |notes, cx| {
-        notes.adopt(buffer.clone(), "/vault/a.md".into(), loaded.stamp, cx);
-    });
-
-    // The walk reads the root after the save, so the replayed re-key finds the new inode minted.
-    let gate = fs.block_read_dir("/vault");
-    drop(notes.update(cx, NoteStore::rescan));
-    cx.run_until_parked();
-    edit(&buffer, cx, "1");
-    notes.update(cx, NoteStore::save_current);
-    cx.run_until_parked();
-    gate.release();
-    cx.run_until_parked();
-    edit(&buffer, cx, "2");
-    notes.update(cx, NoteStore::save_current);
-    cx.run_until_parked();
-
-    let ids = ids(&notes, cx);
-    assert!(
-        ids.iter().all(|(_, id)| *id != EntryId::DETACHED),
-        "{ids:?}"
-    );
 }

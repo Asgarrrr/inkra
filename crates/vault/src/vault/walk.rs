@@ -185,7 +185,7 @@ impl Vault {
     }
 
     /// Reads `folders` alone, then walks the folders in them this vault does not hold (watcher spec, F5).
-    pub async fn walk_changed(
+    pub(crate) async fn walk_changed(
         &self,
         fs: &dyn Fs,
         folders: &BTreeSet<RelPath>,

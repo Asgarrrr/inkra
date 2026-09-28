@@ -27,7 +27,7 @@ pub struct Watch {
     pub root: PathBuf,
     /// `root`, canonical.
     pub resolved: PathBuf,
-    pub watcher: Box<dyn Watcher>,
+    pub watcher: Watcher,
 }
 
 /// An event that counts, relative to the vault root.
