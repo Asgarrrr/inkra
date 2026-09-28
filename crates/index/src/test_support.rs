@@ -154,9 +154,3 @@ pub(crate) fn indexed(texts: &[Option<&str>]) -> (Vec<EntryId>, NoteIndex) {
     }
     (ids, index)
 }
-
-/// A corpus of one note per text, in the given order; `None` is a note not loaded.
-pub(crate) fn corpus(texts: &[Option<&str>]) -> (Vec<EntryId>, CorpusSnapshot) {
-    let (ids, index) = indexed(texts);
-    (ids, index.corpus())
-}

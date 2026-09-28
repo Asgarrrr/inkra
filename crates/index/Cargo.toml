@@ -15,7 +15,6 @@ inkra-markdown = { workspace = true }
 inkra-text = { workspace = true }
 inkra-vault = { workspace = true }
 percent-encoding = "2.3"
-regex = "1.13"
 regex-syntax = "0.8.11"
 unicode-normalization = "0.1.25"
 unicode-segmentation = { workspace = true }
@@ -25,6 +24,7 @@ criterion = { workspace = true }
 futures = { workspace = true }
 inkra-vault = { workspace = true, features = ["test-support"] }
 proptest = { workspace = true }
+regex = "1.13"
 
 [lints]
 workspace = true

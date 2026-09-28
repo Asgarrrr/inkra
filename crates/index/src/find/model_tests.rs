@@ -4,111 +4,14 @@ use std::cmp::Reverse;
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::EntryId;
 use proptest::prelude::*;
 use proptest::sample::Index;
-use regex_syntax::is_word_character;
-use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::model_cases::{self, Case};
-use crate::key::strip_md;
-use crate::test_support::{entries, mtime, vault};
-use crate::words::{TERM_MAX_CHARS, bm25, cap, fold, idf};
-use crate::{
-    Group, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, find_notes, merge_notes,
-};
-
-struct Note {
-    id: EntryId,
-    path: String,
-    text: Option<String>,
-    modified: SystemTime,
-}
-
-struct Built {
-    index: NoteIndex,
-    notes: Vec<Note>,
-    query: NoteQuery,
-    expected: Vec<(EntryId, Group)>,
-}
-
-fn build(case: &Case) -> Built {
-    let refs: Vec<&str> = case.files.iter().map(String::as_str).collect();
-    let (_fs, vault) = vault(&refs);
-    let mut all = entries(&vault);
-    let mut notes = Vec::new();
-    for (id, path, kind, scanned) in &mut all {
-        if *kind != Kind::Note {
-            continue;
-        }
-        let k = notes.len() % 8;
-        *scanned = mtime(case.scanned[k]);
-        let loaded = case.loaded[k].clone();
-        notes.push(Note {
-            id: *id,
-            path: strip_md(path).nfc().collect(),
-            modified: loaded.as_ref().map_or(scanned.0, |(_, n)| mtime(*n).0),
-            text: loaded.map(|(text, _)| text),
-        });
-    }
-    let mut index = NoteIndex::default();
-    let _ = index.set_notes(NoteSet::build(all));
-    for (k, note) in notes.iter().enumerate() {
-        if let Some((text, n)) = &case.loaded[k % 8] {
-            index.insert(note.id, NoteContent::parse(text.as_str().into(), mtime(*n)));
-        }
-    }
-    if case.merged {
-        index.merge_all();
-    }
-    let showing = case.showing.map(|at| notes[at % notes.len()].id);
-    let recent: Vec<EntryId> = case
-        .recent
-        .iter()
-        .map(|at| notes[at % notes.len()].id)
-        .collect();
-    Built {
-        index,
-        query: NoteQuery::new(&case.query, showing, &recent),
-        expected: model(&notes, &case.query, showing, &recent),
-        notes,
-    }
-}
-
-/// Each word of `text` with its byte offset, raw and folded; words folding to nothing dropped.
-fn words(text: &str) -> Vec<(usize, &str, String)> {
-    let mut found = Vec::new();
-    let mut at = 0;
-    for word in text.split(|c: char| !is_word_character(c)) {
-        let folded = fold(word);
-        if !folded.is_empty() {
-            found.push((at, word, folded.into_owned()));
-        }
-        at += word.len();
-        at += text[at..].chars().next().map_or(0, char::len_utf8);
-    }
-    found
-}
-
-/// S1's words of a query under the 64-char cut: split, folded, capped, repeats kept.
-fn typed(query: &str) -> Vec<String> {
-    words(query)
-        .into_iter()
-        .map(|(_, _, folded)| cap(&folded, TERM_MAX_CHARS).to_owned())
-        .collect()
-}
-
-/// S1's terms: the typed words, distinct.
-fn terms(typed: &[String]) -> Vec<String> {
-    let mut terms: Vec<String> = Vec::new();
-    for term in typed {
-        if !terms.contains(term) {
-            terms.push(term.clone());
-        }
-    }
-    terms
-}
+use super::model_cases::{self, Built, Case, Note, build, split, terms, typed, words};
+use crate::words::{bm25, fold, idf};
+use crate::{Group, NoteMatch, find_notes, merge_notes};
 
 /// BM25's figures over the notes with words: how many, their mean length, each term's df.
 struct Corpus {
@@ -254,14 +157,6 @@ fn listed(found: &[NoteMatch]) -> Vec<(EntryId, Group)> {
     found.iter().map(|found| (found.id, found.group)).collect()
 }
 
-fn split(len: usize, cuts: &[Index]) -> Vec<std::ops::Range<usize>> {
-    let mut at: Vec<usize> = cuts.iter().map(|cut| cut.index(len + 1)).collect();
-    at.push(0);
-    at.push(len);
-    at.sort_unstable();
-    at.windows(2).map(|pair| pair[0]..pair[1]).collect()
-}
-
 /// Every grapheme start of `text`, and its end.
 fn bounds(text: &str) -> Vec<usize> {
     text.grapheme_indices(true)
@@ -307,12 +202,9 @@ pub(super) fn lists_what_the_model_lists(
     cuts: &[Index],
     limit: usize,
 ) -> Result<(), TestCaseError> {
-    let Built {
-        index,
-        query,
-        expected,
-        ..
-    } = build(case);
+    let built = build(case);
+    let expected = model(&built.notes, &case.query, built.showing, &built.recent);
+    let Built { index, query, .. } = built;
 
     let not_cancelled = AtomicBool::new(false);
     let snapshot = index.snapshot();

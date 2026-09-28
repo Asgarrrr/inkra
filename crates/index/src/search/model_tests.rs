@@ -1,345 +1,245 @@
-//! `search` against models that share nothing with it but `str`.
+//! `search` against a naive word-start model, and against `find_notes`: the two boxes agree.
 
+use std::ops::Range;
 use std::sync::atomic::AtomicBool;
 
+use inkra_text::ByteOffset;
+use inkra_vault::EntryId;
 use proptest::prelude::*;
-use regex::{Regex, RegexBuilder};
-use unicode_normalization::UnicodeNormalization;
+use proptest::sample::Index;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
 
-use crate::test_support::corpus;
-use crate::{HITS_PER_NOTE, Searched, TextQuery, search};
+use super::tests::searched;
+use crate::find::model_cases::{self, Built, Case, build, split, terms, typed, words};
+use crate::find::{boundaries, prefix};
+use crate::test_support::indexed;
+use crate::{Group, HITS_PER_NOTE, Hit, Searched, find_notes, merge_notes};
 
-const ASCII: &[&str] = &["a", "b", "A", "B", " ", "\n", "-", "ab"];
-const ANY: &[&str] = &[
-    "a", "e", "é", "e\u{301}", "É", "🎉", "\u{212A}", "k", "K", "ſ", "s", "S", " ", "\n", ".", "_",
-];
-
-fn text(alphabet: &'static [&'static str], len: usize) -> impl Strategy<Value = String> {
-    prop::collection::vec(prop::sample::select(alphabet), 0..len).prop_map(|parts| parts.concat())
+/// Whether every term starts a folded word of `text`; never for no term.
+fn holds(text: &str, terms: &[String]) -> bool {
+    let words = words(text);
+    !terms.is_empty()
+        && terms
+            .iter()
+            .all(|term| words.iter().any(|(_, _, word)| word.starts_with(term)))
 }
 
-fn texts(alphabet: &'static [&'static str]) -> impl Strategy<Value = Vec<Option<String>>> {
-    prop::collection::vec(prop::option::weighted(0.8, text(alphabet, 40)), 0..8)
+/// Each word a term starts, lit by `prefix` for the longest such term, touching ranges merged.
+fn model_hits(text: &str, terms: &[String]) -> Vec<Range<usize>> {
+    let bounds = boundaries(text);
+    let mut lit: Vec<Range<usize>> = Vec::new();
+    for (at, word, folded) in words(text) {
+        let Some(term) = terms
+            .iter()
+            .filter(|term| folded.starts_with(term.as_str()))
+            .max_by_key(|term| term.len())
+        else {
+            continue;
+        };
+        let range = prefix(text, &bounds, at..at + word.len(), term);
+        match lit.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => lit.push(range),
+        }
+    }
+    lit.truncate(HITS_PER_NOTE);
+    lit
 }
 
-/// `ANY`, plus a non-word alphanumeric, a lone mark, Greek, Cyrillic, CJK and punctuation.
-const SCRIPTS: &[&str] = &[
-    "a", "e", "é", "e\u{301}", "É", "🎉", "\u{212A}", "k", "K", "ſ", "s", "S", " ", "\n", ".", "_",
-    "½", "\u{301}", "σ", "ς", "Σ", "ά", "е", "Е", "ё", "的", ",", "-",
-];
+/// The model's hits over `texts` in order, and the `Searched` it predicts under `limit`.
+fn model(texts: &[(EntryId, Option<&str>)], query: &str, limit: usize) -> Searched {
+    let terms = terms(&typed(query));
+    let mut all: Vec<(EntryId, Range<usize>)> = Vec::new();
+    for (id, text) in texts {
+        if let Some(text) = text
+            && holds(text, &terms)
+        {
+            all.extend(model_hits(text, &terms).into_iter().map(|r| (*id, r)));
+        }
+    }
+    let limit_reached = all.len() >= limit;
+    all.truncate(limit);
+    Searched {
+        hits: all
+            .into_iter()
+            .map(|(note, range)| {
+                let Some((_, Some(text))) = texts.iter().find(|(id, _)| *id == note) else {
+                    panic!("a hit is in a loaded note");
+                };
+                Hit::new(note, text, ByteOffset(range.start)..ByteOffset(range.end))
+            })
+            .collect(),
+        limit_reached,
+    }
+}
 
-/// The v1 matcher: the escaped literal with `\b` at each word-char edge, in each form.
-fn reference(needle: &str, sensitive: bool, word: bool) -> Option<Regex> {
-    fn literal(text: &str, word: bool) -> String {
-        use regex_syntax::is_word_character as w;
-        let mut pattern = regex::escape(text);
-        if word && text.chars().next().is_some_and(w) {
-            pattern.insert_str(0, r"\b");
-        }
-        if word && text.chars().next_back().is_some_and(w) {
-            pattern.push_str(r"\b");
-        }
-        pattern
-    }
-    if needle.trim().is_empty() {
-        return None;
-    }
-    let nfc: String = needle.nfc().collect();
-    let pattern = if needle == nfc {
-        literal(&nfc, word)
-    } else {
-        format!("(?:{})|(?:{})", literal(needle, word), literal(&nfc, word))
+/// What a drawn case exercised, so the oracle is not vacuous.
+#[derive(Default)]
+struct Drawn {
+    matched: usize,
+    missed: usize,
+    text_rows: usize,
+    /// Notes the prefilter rejects while holding some terms, not all.
+    partial: usize,
+}
+
+/// Hits and notes equal the model's, and `find_notes` agrees.
+fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseError> {
+    let Built {
+        index,
+        notes,
+        query,
+        ..
+    } = build(case);
+    let snapshot = index.snapshot();
+    let cancel = AtomicBool::new(false);
+    let texts: Vec<(EntryId, Option<&str>)> = notes
+        .iter()
+        .map(|note| (note.id, note.text.as_deref()))
+        .collect();
+
+    let found = searched(&snapshot, 0..notes.len(), &case.query, &cancel, usize::MAX);
+    prop_assert_eq!(&found, &model(&texts, &case.query, usize::MAX));
+
+    let parts = split(notes.len(), cuts)
+        .into_iter()
+        .map(|range| searched(&snapshot, range, &case.query, &cancel, limit))
+        .collect();
+    prop_assert_eq!(
+        Searched::merge(parts, limit),
+        model(&texts, &case.query, limit)
+    );
+
+    let mut hit: Vec<EntryId> = found.hits.iter().map(|hit| hit.note).collect();
+    hit.dedup();
+    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
+        panic!("not cancelled");
     };
-    RegexBuilder::new(&pattern)
-        .case_insensitive(!sensitive)
-        .build()
-        .ok()
+    let kept = find_notes(
+        &snapshot,
+        &lookup,
+        0..notes.len(),
+        &query,
+        &cancel,
+        usize::MAX,
+    );
+    let rows = merge_notes(&snapshot, vec![kept], &query, usize::MAX);
+    for row in &rows {
+        prop_assert!(
+            row.group != Group::Text || hit.contains(&row.id),
+            "a text row without a hit"
+        );
+    }
+    for id in &hit {
+        prop_assert!(rows.iter().any(|row| row.id == *id), "a hit without a row");
+    }
+    let terms = terms(&typed(&case.query));
+    let loaded: Vec<&str> = texts.iter().filter_map(|(_, text)| *text).collect();
+    let searchable = if terms.is_empty() { 0 } else { loaded.len() };
+    let partial = loaded
+        .iter()
+        .filter(|text| {
+            let words = words(text);
+            let holds = |term: &String| words.iter().any(|(_, _, word)| word.starts_with(term));
+            terms.iter().any(holds) && !terms.iter().all(holds)
+        })
+        .count();
+    Ok(Drawn {
+        matched: hit.len(),
+        missed: searchable - hit.len(),
+        text_rows: rows.iter().filter(|row| row.group == Group::Text).count(),
+        partial,
+    })
+}
+
+/// Cases whose query is often cut from loaded texts: from a word start it matches, from inside
+/// a word it tests the word-start rule; two cuts from two notes often split the notes.
+fn case() -> impl Strategy<Value = Case> {
+    let cut = || (any::<Index>(), any::<Index>(), 1..8_usize);
+    let cuts = prop::collection::vec(cut(), 1..3);
+    (model_cases::case(), prop::option::weighted(0.8, cuts)).prop_map(|(mut case, cuts)| {
+        let texts: Vec<&str> = case
+            .loaded
+            .iter()
+            .take(case.files.len())
+            .flatten()
+            .map(|(text, _)| text.as_str())
+            .filter(|text| !text.is_empty())
+            .collect();
+        if let Some(cuts) = cuts
+            && !texts.is_empty()
+        {
+            let cut = |(note, at, chars): &(Index, Index, usize)| {
+                let text = texts[note.index(texts.len())];
+                let starts: Vec<usize> = text.char_indices().map(|(at, _)| at).collect();
+                text[starts[at.index(starts.len())]..]
+                    .chars()
+                    .take(*chars)
+                    .collect::<String>()
+            };
+            case.query = cuts.iter().map(cut).collect::<Vec<_>>().join(" ");
+        }
+        case
+    })
 }
 
 const WORDY: &[&str] = &[
-    "a", "a", "a", "-", "é", "e\u{301}", "_", "½", " ", "\n", "🎉", "1", "\u{301}",
+    "a", "a", "a", "-", "é", "e\u{301}", "_", "½", " ", "\n", "🎉", "1", "\u{301}", "A", "ab",
 ];
 
-/// Leftmost-first matches, as a regex alternation: at each char, the first needle that matches.
-fn scan(text: &str, match_at: impl Fn(usize) -> Option<usize>) -> Vec<std::ops::Range<usize>> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    while at < text.len() {
-        if let Some(end) = match_at(at) {
-            out.push(at..end);
-            at = end;
-        } else {
-            at += text[at..].chars().next().map_or(1, char::len_utf8);
-        }
-    }
-    out
-}
-
-/// Whether `text[at..end]`, a match of `needle`, has a boundary at each word-char edge.
-fn edges(text: &str, at: usize, end: usize, needle: &str, word: bool) -> bool {
-    use regex_syntax::is_word_character as w;
-    let first = needle.chars().next().is_some_and(w);
-    let last = needle.chars().next_back().is_some_and(w);
-    (!word || !first || !text[..at].chars().next_back().is_some_and(w))
-        && (!word || !last || !text[end..].chars().next().is_some_and(w))
-}
-
-fn scan_model(text: &str, needles: &[&str], word: bool) -> Vec<std::ops::Range<usize>> {
-    scan(text, |at| {
-        needles.iter().find_map(|needle| {
-            let end = at + needle.len();
-            (text[at..].starts_with(needle) && edges(text, at, end, needle, word)).then_some(end)
-        })
-    })
-}
-
-const FOLDY: &[&str] = &[
-    "a", "A", "ß", "ẞ", "σ", "ς", "Σ", "İ", "i", "I", "ı", "ǅ", "ǆ", "Ǆ", "\u{212A}", "k", "K",
-    "ſ", "s", "S", "é", "É", "e\u{301}", " ", "-", "µ", "μ", "Μ", "Å", "å", "\u{212B}",
-];
-
-fn find(parent: &mut [u32], mut x: u32) -> u32 {
-    while parent[x as usize] != x {
-        parent[x as usize] = parent[parent[x as usize] as usize];
-        x = parent[x as usize];
-    }
-    x
-}
-
-/// The simple case-fold class of `c`: the union of one-char lower and upper mappings, minus
-/// the Turkic dotted and dotless `i`, which simple folding keeps apart.
-fn fold_key(c: char) -> u32 {
-    const MAX: u32 = 0x0010_FFFF;
-    static ROOTS: std::sync::LazyLock<Vec<u32>> = std::sync::LazyLock::new(|| {
-        let mut parent: Vec<u32> = (0..=MAX).collect();
-        for x in (0..=MAX).filter_map(char::from_u32) {
-            for mapped in [
-                x.to_lowercase().collect::<Vec<_>>(),
-                x.to_uppercase().collect(),
-            ] {
-                if let [one] = mapped[..]
-                    && ![x, one].iter().any(|c| matches!(c, 'ı' | 'İ'))
-                {
-                    let (a, b) = (find(&mut parent, x as u32), find(&mut parent, one as u32));
-                    parent[a.max(b) as usize] = a.min(b);
-                }
-            }
-        }
-        (0..=MAX).map(|x| find(&mut parent, x)).collect()
-    });
-    ROOTS[c as usize]
-}
-
-fn fold_model(text: &str, needles: &[&str], word: bool) -> Vec<std::ops::Range<usize>> {
-    scan(text, |at| {
-        needles.iter().find_map(|needle| {
-            let mut chars = text[at..].char_indices();
-            let end = needle
-                .chars()
-                .all(|want| {
-                    chars
-                        .next()
-                        .is_some_and(|(_, c)| fold_key(c) == fold_key(want))
-                })
-                .then(|| at + chars.offset());
-            end.filter(|&end| edges(text, at, end, needle, word))
-        })
-    })
+fn text(len: usize) -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(WORDY), 0..len).prop_map(|parts| parts.concat())
 }
 
 proptest! {
     #[test]
-    fn find_in_equals_the_v1_regex(
-        (needle, text) in prop_oneof![
-            text(SCRIPTS, 4),
-            // Its edge recurs inside it, so a valid match can start inside a rejected one.
-            (prop::sample::select(SCRIPTS), text(SCRIPTS, 2))
-                .prop_map(|(edge, inner)| format!("{edge}{inner}{edge}")),
-        ]
-        .prop_flat_map(|needle| {
-            let part = prop_oneof![
-                3 => prop::sample::select(SCRIPTS).prop_map(str::to_owned),
-                1 => Just(needle.clone()),
-                // The needle then its own tail: a valid match inside a rejected one.
-                2 => Just(format!(
-                    "a{needle}{}",
-                    &needle[needle.chars().next().map_or(0, char::len_utf8)..]
-                )),
-            ];
-            (Just(needle), prop::collection::vec(part, 0..30).prop_map(|parts| parts.concat()))
-        }),
-        sensitive in any::<bool>(),
-        word in any::<bool>(),
-        limit in 0usize..12,
+    fn the_two_boxes_agree(
+        case in case(),
+        cuts in prop::collection::vec(any::<Index>(), 0..3),
+        limit in 0..10_usize,
     ) {
-        let query = TextQuery::new(&needle, sensitive, word);
-        let v1 = reference(&needle, sensitive, word);
-        prop_assert_eq!(query.is_some(), v1.is_some());
-        let (Some(query), Some(v1)) = (query, v1) else {
-            return Ok(());
-        };
-        let got: Vec<_> = query.find_in(&text, limit).into_iter().map(|r| r.start.0..r.end.0).collect();
-        let expected: Vec<_> = v1.find_iter(&text).take(limit).map(|m| m.range()).collect();
-        prop_assert_eq!(got, expected, "{:?} in {:?}", needle, text);
+        agrees(&case, &cuts, limit)?;
     }
 
     #[test]
-    fn insensitive_hits_equal_a_simple_fold_model(
-        text in text(FOLDY, 30),
-        needle in text(FOLDY, 3),
-        word in any::<bool>(),
+    fn hits_equal_the_model_past_the_per_note_cap(
+        texts in prop::collection::vec(prop::option::weighted(0.8, text(400)), 0..5),
+        query in text(4),
+        limit in 0..400_usize,
     ) {
-        let Some(query) = TextQuery::new(&needle, false, word) else {
-            return Ok(());
-        };
-        let nfc: String = needle.nfc().collect();
-        let got: Vec<_> = query.find_in(&text, usize::MAX).into_iter().map(|r| r.start.0..r.end.0).collect();
-        prop_assert_eq!(got, fold_model(&text, &[&needle, &nfc], word), "{:?} in {:?}", needle, text);
-    }
-
-    #[test]
-    fn sensitive_hits_equal_a_scan_model_past_the_per_note_cap(
-        texts in prop::collection::vec(prop::option::weighted(0.8, text(WORDY, 400)), 0..5),
-        needle in text(WORDY, 4),
-        word in any::<bool>(),
-        limit in 0usize..400,
-    ) {
-        let Some(query) = TextQuery::new(&needle, true, word) else {
-            return Ok(());
-        };
-        let nfc: String = needle.nfc().collect();
         let refs: Vec<Option<&str>> = texts.iter().map(Option::as_deref).collect();
-        let (ids, corpus) = corpus(&refs);
-        let mut expected = Vec::new();
-        for (id, text) in ids.iter().zip(&texts) {
-            let Some(text) = text else { continue };
-            expected.extend(scan_model(text, &[&needle, &nfc], word).into_iter().take(HITS_PER_NOTE).map(|r| (*id, r)));
-        }
-        let reached = expected.len() >= limit;
-        expected.truncate(limit);
-        let found = search(&corpus, 0..corpus.len(), &query, &AtomicBool::new(false), limit);
-        let got: Vec<_> = found.hits.iter().map(|hit| (hit.note, hit.range.start.0..hit.range.end.0)).collect();
-        prop_assert_eq!(got, expected);
-        prop_assert_eq!(found.limit_reached, reached);
-    }
-
-    #[test]
-    fn ascii_hits_equal_match_indices(
-        texts in texts(ASCII),
-        needle in text(&["a", "b", "A", "B", " ", "-"], 4),
-        sensitive in any::<bool>(),
-        limit in 0usize..30,
-    ) {
-        let Some(query) = TextQuery::new(&needle, sensitive, false) else {
-            prop_assert!(needle.trim().is_empty());
-            return Ok(());
-        };
-        let fold = |s: &str| if sensitive { s.to_owned() } else { s.to_ascii_lowercase() };
-        let refs: Vec<Option<&str>> = texts.iter().map(Option::as_deref).collect();
-        let (ids, corpus) = corpus(&refs);
-        let mut expected = Vec::new();
-        for (id, text) in ids.iter().zip(&texts) {
-            let Some(text) = text else { continue };
-            let text = fold(text);
-            expected.extend(
-                text.match_indices(&fold(&needle)).take(HITS_PER_NOTE).map(|(at, s)| (*id, at..at + s.len())),
-            );
-        }
-        let reached = expected.len() >= limit;
-        expected.truncate(limit);
-        let found = search(&corpus, 0..corpus.len(), &query, &AtomicBool::new(false), limit);
-        let got: Vec<_> = found.hits.iter().map(|hit| (hit.note, hit.range.start.0..hit.range.end.0)).collect();
-        prop_assert_eq!(got, expected);
-        prop_assert_eq!(found.limit_reached, reached);
-    }
-
-    #[test]
-    fn every_hit_is_on_char_boundaries_inside_its_context(
-        texts in texts(ANY),
-        needle in text(ANY, 5),
-        sensitive in any::<bool>(),
-        word in any::<bool>(),
-    ) {
-        let Some(query) = TextQuery::new(&needle, sensitive, word) else {
-            return Ok(());
-        };
-        check_hits(&texts, &query)?;
-    }
-
-    #[test]
-    fn a_query_over_160_bytes_keeps_the_invariants(
-        head in text(ANY, 20),
-        tail in text(ANY, 20),
-        planted in any::<bool>(),
-        sensitive in any::<bool>(),
-        word in any::<bool>(),
-    ) {
-        let needle = format!("{}{head}", "é".repeat(81));
-        // The query is NFC and the text is not normalized (D4), so plant the NFC form.
-        let nfc: String = needle.nfc().collect();
-        let body = if planted { format!("{head}{nfc}{tail}") } else { format!("{head}{tail}") };
-        let Some(query) = TextQuery::new(&needle, sensitive, word) else {
-            panic!("a 162-byte query compiles");
-        };
-        let found = check_hits(&[Some(body)], &query)?;
-        if planted && !word {
-            prop_assert!(!found.hits.is_empty());
-        }
-    }
-
-    #[test]
-    fn merge_over_any_split_equals_one_range(
-        texts in texts(ANY),
-        needle in text(ANY, 3),
-        cuts in prop::collection::vec(0usize..9, 0..4),
-        limit in 0usize..12,
-    ) {
-        let Some(query) = TextQuery::new(&needle, false, false) else {
-            return Ok(());
-        };
-        let refs: Vec<Option<&str>> = texts.iter().map(Option::as_deref).collect();
-        let (_, corpus) = corpus(&refs);
-        let mut cuts: Vec<usize> = cuts.into_iter().map(|cut| cut.min(corpus.len())).collect();
-        cuts.push(0);
-        cuts.push(corpus.len());
-        cuts.sort_unstable();
-        let cancel = AtomicBool::new(false);
-        let parts = cuts
-            .windows(2)
-            .map(|w| search(&corpus, w[0]..w[1], &query, &cancel, limit))
-            .collect();
-        prop_assert_eq!(
-            Searched::merge(parts, limit),
-            search(&corpus, 0..corpus.len(), &query, &cancel, limit)
-        );
+        let (ids, index) = indexed(&refs);
+        let found = searched(&index.snapshot(), 0..ids.len(), &query, &AtomicBool::new(false), limit);
+        let texts: Vec<(EntryId, Option<&str>)> = ids.into_iter().zip(refs).collect();
+        prop_assert_eq!(found, model(&texts, &query, limit));
     }
 }
 
-fn check_hits(texts: &[Option<String>], query: &TextQuery) -> Result<Searched, TestCaseError> {
-    let refs: Vec<Option<&str>> = texts.iter().map(Option::as_deref).collect();
-    let (ids, corpus) = corpus(&refs);
-    let found = search(
-        &corpus,
-        0..corpus.len(),
-        query,
-        &AtomicBool::new(false),
-        usize::MAX,
-    );
-    for hit in &found.hits {
-        let Some(at) = ids.iter().position(|id| *id == hit.note) else {
-            return Err(TestCaseError::fail("a hit names a note of the corpus"));
+#[test]
+fn the_drawn_cases_hold_notes_matched_and_notes_missed() {
+    let mut runner = TestRunner::deterministic();
+    let mut total = Drawn::default();
+    for _ in 0..256 {
+        let Ok(case) = case().new_tree(&mut runner) else {
+            panic!("the strategy draws a case");
         };
-        let Some(text) = &texts[at] else {
-            return Err(TestCaseError::fail("a hit is in a loaded note"));
+        let Ok(drawn) = agrees(&case.current(), &[], usize::MAX) else {
+            panic!("the property holds");
         };
-        let (start, end) = (hit.range.start.0, hit.range.end.0);
-        prop_assert!(start < end);
-        prop_assert!(text.is_char_boundary(start) && text.is_char_boundary(end));
-        prop_assert_eq!(&hit.context[hit.context_match.clone()], &text[start..end]);
-        prop_assert!(text.contains(&hit.context));
-        prop_assert!(hit.context.len() <= end - start + 160);
-        let matched = &text[start..end];
-        prop_assert_eq!(hit.context.contains('\n'), matched.contains('\n'));
+        total.matched += drawn.matched;
+        total.missed += drawn.missed;
+        total.text_rows += drawn.text_rows;
+        total.partial += drawn.partial;
     }
-    Ok(found)
+    let Drawn {
+        matched,
+        missed,
+        text_rows,
+        partial,
+    } = total;
+    assert!(matched >= 50, "{matched} notes matched");
+    assert!(missed >= 50, "{missed} notes missed");
+    assert!(text_rows >= 40, "{text_rows} text rows");
+    assert!(partial >= 30, "{partial} notes holding some terms");
 }

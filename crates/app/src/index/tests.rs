@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::FutureExt as _;
 use futures::channel::oneshot;
 use gpui::{App, AppContext as _, Entity, TestAppContext};
-use inkra_index::{NameQuery, NoteContent, NoteQuery, TermHit, TextQuery, match_names, search};
+use inkra_index::{NameQuery, NoteContent, NoteQuery, TermHit, match_names, search};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
@@ -111,20 +111,23 @@ pub(super) fn create(cx: &mut TestAppContext, notes: &Entity<NoteStore>, name: &
     cx.run_until_parked();
 }
 
-/// The notes whose saved text contains `text`, with the hit's context.
+/// Each word start of `text`'s terms in the notes holding them all, with the hit's context.
 pub(super) fn found(
     cx: &mut TestAppContext,
     links: &Entity<IndexSync>,
     text: &str,
 ) -> Vec<(EntryId, String)> {
     links.read_with(cx, |links, _| {
-        let corpus = links.index().corpus();
-        let query = TextQuery::new(text, false, false).expect("a query");
+        let snapshot = links.index().snapshot();
+        let query = NoteQuery::new(text, None, &[]);
+        let cancel = AtomicBool::new(false);
+        let lookup = snapshot.lookup(&query, &cancel).expect("not cancelled");
         search(
-            &corpus,
-            0..corpus.len(),
+            &snapshot,
+            &lookup,
+            0..links.index().names().len(),
             &query,
-            &AtomicBool::new(false),
+            &cancel,
             100,
         )
         .hits
@@ -829,20 +832,10 @@ fn snapshot(
                     .expect("not cancelled")
             })
             .collect();
-        let query = TextQuery::new("[[", false, false).expect("a query");
-        // Every text here is one line of links under 60 bytes, so a hit's context is the text.
-        let mut texts: HashMap<EntryId, String> = HashMap::new();
-        for hit in search(
-            &corpus,
-            0..corpus.len(),
-            &query,
-            &AtomicBool::new(false),
-            1_000,
-        )
-        .hits
-        {
-            texts.entry(hit.note).or_insert(hit.context);
-        }
+        let mut texts: HashMap<EntryId, String> = (0..corpus.len())
+            .filter_map(|order| corpus.text(order))
+            .map(|(id, text)| (id, text.to_owned()))
+            .collect();
         let rows = ids
             .into_iter()
             .map(|(id, path)| {

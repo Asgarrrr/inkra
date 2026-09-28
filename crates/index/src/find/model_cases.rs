@@ -3,8 +3,16 @@
 use proptest::prelude::*;
 use proptest::sample::Index;
 
+use std::time::SystemTime;
+
+use inkra_vault::{EntryId, Kind};
+use regex_syntax::is_word_character;
+use unicode_normalization::UnicodeNormalization;
+
 use crate::key::strip_md;
-use crate::test_support::PARTS;
+use crate::test_support::{PARTS, entries, mtime, vault};
+use crate::words::{TERM_MAX_CHARS, cap, fold};
+use crate::{NoteContent, NoteIndex, NoteQuery, NoteSet};
 
 /// No `\n` or `.` (file-name rules); a skin tone modifier and U+0600 add grapheme edges.
 fn component() -> impl Strategy<Value = String> {
@@ -41,22 +49,22 @@ fn query() -> impl Strategy<Value = String> {
 
 /// A vault and what the index is told of it; mtimes in `0..3` seconds, so they tie often.
 #[derive(Debug, Clone)]
-pub(super) struct Case {
-    pub(super) files: Vec<String>,
+pub(crate) struct Case {
+    pub(crate) files: Vec<String>,
     /// Per note in vault order (cycled): the scanned mtime.
-    pub(super) scanned: Vec<u64>,
+    pub(crate) scanned: Vec<u64>,
     /// Per note in vault order (cycled): the loaded text and its mtime, or not loaded.
-    pub(super) loaded: Vec<Option<(String, u64)>>,
-    pub(super) query: String,
+    pub(crate) loaded: Vec<Option<(String, u64)>>,
+    pub(crate) query: String,
     /// Notes by vault order, modulo the note count.
-    pub(super) showing: Option<usize>,
-    pub(super) recent: Vec<usize>,
+    pub(crate) showing: Option<usize>,
+    pub(crate) recent: Vec<usize>,
     /// Merge every fresh note into the segment before the snapshot.
-    pub(super) merged: bool,
+    pub(crate) merged: bool,
 }
 
 /// A quarter type a stem next to a rival adding a word: only the exact name orders them.
-pub(super) fn case() -> impl Strategy<Value = Case> {
+pub(crate) fn case() -> impl Strategy<Value = Case> {
     (
         files(),
         prop::collection::vec(0..3_u64, 8),
@@ -100,4 +108,107 @@ pub(super) fn case() -> impl Strategy<Value = Case> {
                 }
             },
         )
+}
+
+pub(crate) struct Note {
+    pub(crate) id: EntryId,
+    /// NFC, `.md` stripped.
+    pub(crate) path: String,
+    pub(crate) text: Option<String>,
+    pub(crate) modified: SystemTime,
+}
+
+/// A case's index, its notes in vault order, and its query.
+pub(crate) struct Built {
+    pub(crate) index: NoteIndex,
+    pub(crate) notes: Vec<Note>,
+    pub(crate) query: NoteQuery,
+    pub(crate) showing: Option<EntryId>,
+    pub(crate) recent: Vec<EntryId>,
+}
+
+pub(crate) fn build(case: &Case) -> Built {
+    let refs: Vec<&str> = case.files.iter().map(String::as_str).collect();
+    let (_fs, vault) = vault(&refs);
+    let mut all = entries(&vault);
+    let mut notes = Vec::new();
+    for (id, path, kind, scanned) in &mut all {
+        if *kind != Kind::Note {
+            continue;
+        }
+        let k = notes.len() % 8;
+        *scanned = mtime(case.scanned[k]);
+        let loaded = case.loaded[k].clone();
+        notes.push(Note {
+            id: *id,
+            path: strip_md(path).nfc().collect(),
+            modified: loaded.as_ref().map_or(scanned.0, |(_, n)| mtime(*n).0),
+            text: loaded.map(|(text, _)| text),
+        });
+    }
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(NoteSet::build(all));
+    for (k, note) in notes.iter().enumerate() {
+        if let Some((text, n)) = &case.loaded[k % 8] {
+            index.insert(note.id, NoteContent::parse(text.as_str().into(), mtime(*n)));
+        }
+    }
+    if case.merged {
+        index.merge_all();
+    }
+    let showing = case.showing.map(|at| notes[at % notes.len()].id);
+    let recent: Vec<EntryId> = case
+        .recent
+        .iter()
+        .map(|at| notes[at % notes.len()].id)
+        .collect();
+    Built {
+        index,
+        query: NoteQuery::new(&case.query, showing, &recent),
+        notes,
+        showing,
+        recent,
+    }
+}
+
+/// Each word of `text` with its byte offset, raw and folded; words folding to nothing dropped.
+pub(crate) fn words(text: &str) -> Vec<(usize, &str, String)> {
+    let mut found = Vec::new();
+    let mut at = 0;
+    for word in text.split(|c: char| !is_word_character(c)) {
+        let folded = fold(word);
+        if !folded.is_empty() {
+            found.push((at, word, folded.into_owned()));
+        }
+        at += word.len();
+        at += text[at..].chars().next().map_or(0, char::len_utf8);
+    }
+    found
+}
+
+/// S1's words of a query under the 64-char cut: split, folded, capped, repeats kept.
+pub(crate) fn typed(query: &str) -> Vec<String> {
+    words(query)
+        .into_iter()
+        .map(|(_, _, folded)| cap(&folded, TERM_MAX_CHARS).to_owned())
+        .collect()
+}
+
+/// S1's terms: the typed words, distinct.
+pub(crate) fn terms(typed: &[String]) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for term in typed {
+        if !terms.contains(term) {
+            terms.push(term.clone());
+        }
+    }
+    terms
+}
+
+pub(crate) fn split(len: usize, cuts: &[Index]) -> Vec<std::ops::Range<usize>> {
+    let mut at: Vec<usize> = cuts.iter().map(|cut| cut.index(len + 1)).collect();
+    at.push(0);
+    at.push(len);
+    at.sort_unstable();
+    at.windows(2).map(|pair| pair[0]..pair[1]).collect()
 }

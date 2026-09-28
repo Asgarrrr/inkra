@@ -1,8 +1,12 @@
 use std::ops::Range;
 
-use super::highlight::{boundaries, prefix};
+use proptest::prelude::*;
+
+use super::highlight::{boundaries, prefix, word_prefix};
 use super::tests::{find, with_names};
 use crate::NoteMatch;
+use crate::test_support::PARTS;
+use crate::words::{fold, word_spans};
 
 fn lit(found: &NoteMatch) -> Vec<&str> {
     found
@@ -76,5 +80,41 @@ fn prefix_is_the_shortest_grapheme_run_folding_to_the_term() {
             expected,
             "{text:?} {word:?} {term:?}"
         );
+        assert_eq!(
+            word_prefix(text, word.clone(), term),
+            expected,
+            "{text:?} {word:?} {term:?}"
+        );
+    }
+}
+
+fn text() -> impl Strategy<Value = String> {
+    let parts: Vec<&str> = PARTS
+        .iter()
+        .copied()
+        .chain(["\u{1F3FB}", "\u{600}"])
+        .collect();
+    prop::collection::vec(prop::sample::select(parts), 0..12).prop_map(|parts| parts.concat())
+}
+
+proptest! {
+    #[test]
+    fn word_prefix_equals_prefix_over_the_whole_text(text in text()) {
+        let bounds = boundaries(&text);
+        for (at, word) in word_spans(&text) {
+            let span = at..at + word.len();
+            let folded = fold(word);
+            let terms = folded
+                .char_indices()
+                .map(|(end, c)| &folded[..end + c.len_utf8()])
+                .chain(["zz"]);
+            for term in terms {
+                prop_assert_eq!(
+                    word_prefix(&text, span.clone(), term),
+                    prefix(&text, &bounds, span.clone(), term),
+                    "{:?} {:?} {:?}", text, span, term
+                );
+            }
+        }
     }
 }

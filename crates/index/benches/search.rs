@@ -6,7 +6,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NoteContent, NoteIndex, NoteSet, TextQuery, search};
+use inkra_index::{
+    IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Searched, search,
+};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Mtime, Vault};
 
@@ -99,7 +101,25 @@ fn index() -> (NoteIndex, u64, (EntryId, Arc<str>)) {
     let Some(last) = last else {
         panic!("the vault holds {NOTES} notes");
     };
+    settle(&mut index);
     (index, u64::try_from(total).unwrap_or(u64::MAX), last)
+}
+
+/// Merges every fresh note's words, as the app does once loads calm down.
+fn settle(index: &mut NoteIndex) {
+    while let Some(merge) = index.words_merge(MergeWhen::Settle) {
+        let _ = index.words_apply(merge.run());
+    }
+    assert!(index.words_settled(), "the words are merged");
+}
+
+/// One keystroke on one core: the lookup, then `search` over every note.
+fn keystroke(snapshot: &IndexSnapshot, query: &NoteQuery, cancel: &AtomicBool) -> Searched {
+    let Some(lookup) = snapshot.lookup(query, cancel) else {
+        panic!("not cancelled");
+    };
+    let all = snapshot.chunks(1).into_iter().next().unwrap_or_default();
+    search(snapshot, &lookup, all, query, cancel, LIMIT)
 }
 
 fn bench_search(c: &mut Criterion) {
@@ -112,35 +132,30 @@ fn bench_search(c: &mut Criterion) {
     );
 
     let cancel = AtomicBool::new(false);
+    let snapshot = index.snapshot();
     let mut group = c.benchmark_group("search/50k notes");
     group.throughput(Throughput::Bytes(total));
     group.sample_size(10);
-    for (case, needle, whole_word) in [
-        ("rare word", "zanzibar", false),
-        ("common word", "projet", false),
-        ("1 char, hits the cap", "e", false),
-        ("frequent prefix, no match", "projetzz", false),
-        ("whole word, frequent 1-char substring, no hit", "é", true),
-        ("whole word, common word", "réunion", true),
-        ("whole word, 1-char ASCII substring, no hit", "e", true),
-        ("whole word, rare word, full scan", "zanzibar", true),
-        ("whole word, s x6 fold variants, no hit", "ssssss", true),
-        ("whole word, k s k fold variants, no hit", "ksksks", true),
-        ("fold variants, no hit", "ssssssks", false),
-        ("whole word, 'e e', no hit", "e e", true),
-        ("whole word, 'es', no hit", "es", true),
-        ("whole word, 'a', no hit", "a", true),
-        ("whole word, 'é' then space, no hit", "é ", true),
+    for (case, needle) in [
+        ("rare word", "zanzibar"),
+        ("common word", "projet"),
+        ("1 char, hits the cap", "e"),
+        ("frequent prefix, no match", "projetzz"),
+        ("folded word", "ete"),
+        ("1 accented char", "é"),
+        ("accented word", "réunion"),
+        ("two words", "projet réunion"),
+        ("1 char twice", "e e"),
     ] {
-        let Some(query) = TextQuery::new(needle, false, whole_word) else {
-            panic!("`{needle}` is a query");
-        };
-        group.bench_function(case, |b| {
-            b.iter(|| black_box(search(&corpus, 0..corpus.len(), &query, &cancel, LIMIT)));
+        let query = NoteQuery::new(needle, None, &[]);
+        let hits = keystroke(&snapshot, &query, &cancel).hits.len();
+        group.bench_function(format!("{case}, {needle:?}, {hits} hits"), |b| {
+            b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
         });
     }
     group.finish();
     drop(corpus);
+    drop(snapshot);
 
     let mut group = c.benchmark_group("snapshot/50k notes");
     group.bench_function("corpus()", |b| b.iter(|| black_box(index.corpus())));
@@ -161,12 +176,14 @@ fn bench_search(c: &mut Criterion) {
     group.finish();
 }
 
-/// `copies` notes sharing `bytes` of prose, with a line break every `line` bytes, or none.
+/// `copies` notes sharing `bytes` of prose then `tail`, with a line break every `line` bytes,
+/// or none.
 fn long_notes(
     words: &[&str],
     bytes: usize,
     line: Option<usize>,
     copies: usize,
+    tail: &str,
 ) -> (NoteIndex, u64) {
     let fs = MemFs::new();
     for copy in 0..copies {
@@ -203,11 +220,13 @@ fn long_notes(
             text.push(' ');
         }
     }
+    text.push_str(tail);
     let total = u64::try_from(text.len() * copies).unwrap_or(u64::MAX);
     let text: Arc<str> = text.into();
     for id in ids {
         index.insert(id, NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)));
     }
+    settle(&mut index);
     (index, total)
 }
 
@@ -221,18 +240,28 @@ fn bench_long_line(c: &mut Criterion) {
         ("ten 1 MB notes, lines of 80 bytes", Some(80), 1 << 20, 10),
         ("ten 1 MB notes, one line each", None, 1 << 20, 10),
     ] {
-        let (index, total) = long_notes(WORDS, bytes, line, copies);
-        let corpus = index.corpus();
+        let (index, total) = long_notes(WORDS, bytes, line, copies, "");
+        let snapshot = index.snapshot();
         group.throughput(Throughput::Bytes(total));
         for needle in ["projet", "zanzibar"] {
-            let Some(query) = TextQuery::new(needle, false, false) else {
-                panic!("`{needle}` is a query");
-            };
+            let query = NoteQuery::new(needle, None, &[]);
             group.bench_function(format!("{case}, {needle}"), |b| {
-                b.iter(|| black_box(search(&corpus, 0..corpus.len(), &query, &cancel, LIMIT)));
+                b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
             });
         }
     }
+    // The index lists the note, so the walk reads nearly all of it for one hit.
+    let (index, total) = long_notes(WORDS, 10 << 20, Some(80), 1, "zanzibar.\n");
+    let snapshot = index.snapshot();
+    let query = NoteQuery::new("zanzibar", None, &[]);
+    assert_eq!(keystroke(&snapshot, &query, &cancel).hits.len(), 1);
+    group.throughput(Throughput::Bytes(total));
+    group.bench_function(
+        "one 10 MB note, lines of 80 bytes, zanzibar once at its end",
+        |b| {
+            b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+        },
+    );
     group.finish();
 }
 
@@ -285,31 +314,20 @@ fn bench_scripts(c: &mut Criterion) {
     let cancel = AtomicBool::new(false);
     let mut group = c.benchmark_group("scripts, 10 MB, lines of 80 bytes");
     group.sample_size(10);
-    for (script, words, cases) in [
-        (
-            "cyrillic",
-            CYRILLIC,
-            &[("е", true), ("о", true), ("ет", true), ("зzz", false)][..],
-        ),
-        ("greek", GREEK, &[("σ", true), ("α", true), ("ο", true)][..]),
-        ("cjk", CJK, &[("的", true), ("项", true), ("会", true)][..]),
+    for (script, words, needles) in [
+        ("cyrillic", CYRILLIC, &["е", "о", "ет", "зzz"][..]),
+        ("greek", GREEK, &["σ", "α", "ο"][..]),
+        ("cjk", CJK, &["的", "项", "会"][..]),
     ] {
-        let (index, total) = long_notes(words, 10 << 20, Some(80), 1);
-        let corpus = index.corpus();
+        let (index, total) = long_notes(words, 10 << 20, Some(80), 1, "");
+        let snapshot = index.snapshot();
         group.throughput(Throughput::Bytes(total));
-        for &(needle, whole_word) in cases {
-            let Some(query) = TextQuery::new(needle, false, whole_word) else {
-                panic!("`{needle}` is a query");
-            };
-            let hits = search(&corpus, 0..corpus.len(), &query, &cancel, LIMIT)
-                .hits
-                .len();
-            group.bench_function(
-                format!("{script}, {needle}, word {whole_word}, {hits} hits"),
-                |b| {
-                    b.iter(|| black_box(search(&corpus, 0..corpus.len(), &query, &cancel, LIMIT)));
-                },
-            );
+        for &needle in needles {
+            let query = NoteQuery::new(needle, None, &[]);
+            let hits = keystroke(&snapshot, &query, &cancel).hits.len();
+            group.bench_function(format!("{script}, {needle}, {hits} hits"), |b| {
+                b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+            });
         }
     }
     group.finish();

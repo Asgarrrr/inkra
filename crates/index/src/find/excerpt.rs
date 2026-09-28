@@ -1,18 +1,17 @@
-use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::highlight::{boundaries, light, prefix};
 use super::plain::{LINE_BYTES, Plain};
 use super::preview::preview;
+use super::terms::{Terms, each_word};
 use super::{Group, NoteMatch};
 use crate::index::IndexSnapshot;
 use crate::window::around;
-use crate::words::{NoteQuery, WORD_MAX_CHARS, cap, fold, word_spans};
+use crate::words::{NoteQuery, WORD_MAX_CHARS, cap};
 
 /// A text row whose first match lies past this has no excerpt: finding it reads every byte before.
 pub(super) const EXCERPT_SCAN_BYTES: usize = 1 << 20;
-pub(super) const CANCEL_EVERY: usize = 64 << 10;
 
 /// The second line of a quick-open row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,47 +43,6 @@ pub fn excerpt(
         )
     } else {
         around_match(text, &Terms::new(query), cancel)
-    }
-}
-
-pub(super) struct Terms<'q> {
-    pub(super) terms: &'q [Box<str>],
-    /// Indexed by a lowercase ASCII byte.
-    pub(super) starts: [bool; 128],
-}
-
-impl<'q> Terms<'q> {
-    pub(super) fn new(query: &'q NoteQuery) -> Self {
-        let mut starts = [false; 128];
-        for term in query.terms() {
-            if let Some(&first) = term.as_bytes().first()
-                && let Some(start) = starts.get_mut(usize::from(first))
-            {
-                *start = true;
-            }
-        }
-        Self {
-            terms: query.terms(),
-            starts,
-        }
-    }
-
-    fn matching<'w>(&self, word: &'w str) -> impl Iterator<Item = &'q str> + use<'q, 'w> {
-        // An ASCII word folds to its lowercase, so its first byte rules out most words unfolded.
-        let skipped = word.is_ascii()
-            && word
-                .as_bytes()
-                .first()
-                .is_some_and(|&first| !self.starts[usize::from(first.to_ascii_lowercase())]);
-        let folded: Option<Cow<'w, str>> = (!skipped).then(|| fold(word));
-        self.terms
-            .iter()
-            .filter(move |term| {
-                folded
-                    .as_deref()
-                    .is_some_and(|word| word.starts_with(&***term))
-            })
-            .map(|term| &**term)
     }
 }
 
@@ -142,46 +100,4 @@ fn line_around(text: &str, window: &Range<usize>) -> Range<usize> {
         .find('\n')
         .map_or(after, |at| window.end + at);
     start..end
-}
-
-/// Stops before a word at the bound `each` last returned; `None` once `cancel` is set.
-pub(super) fn each_word(
-    text: &str,
-    cancel: &AtomicBool,
-    mut each: impl FnMut(Range<usize>) -> usize,
-) -> Option<()> {
-    let mut until = usize::MAX;
-    // A word running into a block's end may go on in the next block.
-    let mut open: Option<Range<usize>> = None;
-    let mut from = 0;
-    while from < text.len() && (from < until || open.is_some()) {
-        if cancel.load(Ordering::Relaxed) {
-            return None;
-        }
-        let to = text.ceil_char_boundary(from + CANCEL_EVERY);
-        for (at, word) in word_spans(&text[from..to]) {
-            let word = from + at..from + at + word.len();
-            let word = match open.take() {
-                Some(head) if head.end == word.start => head.start..word.end,
-                Some(head) => {
-                    until = each(head);
-                    word
-                }
-                None => word,
-            };
-            if word.start >= until {
-                return Some(());
-            }
-            if word.end == to {
-                open = Some(word);
-            } else {
-                until = each(word);
-            }
-        }
-        from = to;
-    }
-    if let Some(word) = open {
-        each(word);
-    }
-    Some(())
 }

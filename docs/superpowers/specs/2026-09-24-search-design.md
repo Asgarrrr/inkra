@@ -2,6 +2,14 @@
 
 Date: 2026-09-24. Status: **reviewed**, before code.
 
+> **Amended 2026-09-28** by
+> [`2026-09-28-search-word-start-design.md`](2026-09-28-search-word-start-design.md):
+> vault search matches word starts after quick open's fold, and reads only the
+> notes the word index lists. `TextQuery`, `find_in` and both toggles are gone.
+> D4 is replaced; D7 and D9 lose the toggles; Testing, Evolution and Deferred
+> change as marked. `search` now takes `(&IndexSnapshot, &Lookup, range,
+> &NoteQuery, cancel, limit)`.
+
 The application is "a vault of markdown files, links and backlinks, search,
 panes". Links shipped (`2026-09-24-links-and-backlinks-design.md`), and that
 spec reserved full-text search for `inkra-index`, fed by the same loads as
@@ -241,7 +249,7 @@ pub fn match_names(names: &NamesSnapshot, range: Range<usize>, query: &NameQuery
                    cancel: &AtomicBool, limit: usize) -> Vec<NameMatch>;
 pub fn merge_names(chunks: Vec<Vec<NameMatch>>, limit: usize) -> Vec<NameMatch>;
 
-// search
+// search (superseded 2026-09-28: no TextQuery, find_in or CorpusSnapshot::chunks; see below)
 pub struct TextQuery;           // TextQuery::new(text, case_sensitive, whole_word) -> Option<TextQuery>
 impl TextQuery { pub fn find_in(&self, text: &str, limit: usize) -> Vec<Range<ByteOffset>>; }
 pub struct Hit { pub note: EntryId, pub range: Range<ByteOffset>,
@@ -252,6 +260,11 @@ pub fn search(corpus: &CorpusSnapshot, range: Range<usize>, query: &TextQuery,
               cancel: &AtomicBool, limit: usize) -> Searched;
 impl Searched { pub fn merge(chunks: Vec<Searched>, limit: usize) -> Searched; }
 ```
+
+> **Superseded 2026-09-28** (word-start spec, S3): `search(snapshot:
+> &IndexSnapshot, lookup: &Lookup, range: Range<usize>, query: &NoteQuery,
+> cancel: &AtomicBool, limit: usize) -> Searched`, over `IndexSnapshot::chunks`.
+> `TextQuery`, `find_in` and `CorpusSnapshot::chunks` are gone.
 
 `inkra-index` has no executor and reads no clock. `app` asks a snapshot for
 `chunks(n)`, runs each range on gpui's background executor, and calls the
@@ -268,6 +281,8 @@ excerpt, as `SourceLink` does (`crates/index/src/source.rs:19-25`), so no row
 reads the corpus. `find_in` is public because two deferred features need it
 on a single text (Find in note, search in unsaved buffers), and because the
 "no resident text" lever runs it in `app` over loaded candidates.
+(Superseded 2026-09-28: `find_in` is deleted; each of those features decides
+its match rule in its own spec, per the word-start spec, S6.)
 
 ### D2. The name matcher
 
@@ -405,6 +420,9 @@ adds a large dependency with its own invalidation. It stays a lever.
   header (the two counts, 16 bytes). A shared `Arc<str>` counts once per slot.
 
 ### D4. The text matcher
+
+> **Replaced 2026-09-28** by S1 to S6 of the word-start spec. The text below
+> records the v1 literal matcher as slice 4 built it.
 
 `TextQuery::new` NFC-normalizes the query and compiles the escaped literal
 once per keystroke to a `regex::Regex`. It returns `None` for an empty query
@@ -615,14 +633,14 @@ the focused `NameField` already binds `enter` and `escape`
 | `up`, `down` | `Picker` | move the selection |
 | `enter` | `NameField` → `Confirmed` | the picker confirms the selected row |
 | `escape` | `NameField` → `Cancelled` | the picker dismisses |
-| `alt-cmd-c` | `VaultSearch` | toggle case sensitivity |
-| `alt-cmd-w` | `VaultSearch` | toggle whole word |
 
 The picker subscribes to `Confirmed` and `Cancelled`, as the sidebar does
 (`crates/app/src/sidebar/edit.rs:152-155`). The picker's root adds the
-delegate's key context, `QuickOpen` or `VaultSearch`, so the toggles exist only
-in vault search. A later picker key must not collide with a `NameField`
+delegate's key context, `QuickOpen` or `VaultSearch`. A later picker key must not collide with a `NameField`
 binding. A click confirms a row.
+
+> **Amended 2026-09-28.** No case or whole-word toggle, so no `alt-cmd-c` or
+> `alt-cmd-w` (word-start spec, S1).
 
 > **Corrected.** The draft bound `enter` and `escape` in `Picker`. Those
 > bindings could never fire under the field's.
@@ -761,7 +779,7 @@ does:
 | `cmd-p` | `QuickOpen` |
 | `cmd-shift-f` | `SearchVault` |
 
-None of `cmd-p`, `cmd-shift-f`, `alt-cmd-c` or `alt-cmd-w` is bound today
+Neither `cmd-p` nor `cmd-shift-f` is bound today
 (`crates/app/src/keymap.rs`).
 
 ### D9. Rows and states
@@ -782,7 +800,8 @@ Every row is one line, so `uniform_list` can measure from row 0.
 > excerpt or the note's first line (smart quick open spec, S4, S5). Every row of
 > a picker still has one height, the delegate's `row_height`.
 
-The field's trailer shows the two toggles, `Aa` and `W`, each lit when on.
+> **Amended 2026-09-28.** The field has no trailer: the `Aa` and `W` toggles
+> are gone (word-start spec, S1).
 
 | State | Quick open | Vault search |
 |---|---|---|
@@ -1148,7 +1167,11 @@ person typing in a release build, so slice 3 claims no end-to-end figure.
   - Whole word: `été` matches in `l'été,`, not in `étés`; a query starting
     with punctuation.
   - An NFC query over NFD text finds nothing (D4).
-- **The differential oracle.** The v1 `find_in` (escaped regex, no prefilter)
+- **Two boxes agree** (amended 2026-09-28, replacing the differential oracle
+  below): for one snapshot and one query, `search` hits exactly the notes whose
+  every term starts a word of the saved text, each with the model's ranges, and
+  agrees with `find_notes`' `Text` rows (word-start spec, Tests).
+- ~~**The differential oracle.**~~ The v1 `find_in` (escaped regex, no prefilter)
   is kept as a test-only reference once a lever replaces it. Every later
   `search` must return identical hits in identical order, for all four flag
   combinations, over Unicode text. This, with the benches, is the contract
@@ -1162,7 +1185,7 @@ person typing in a release build, so slice 3 claims no end-to-end figure.
   build is dropped.
 - **The picker**, headless:
   - `cmd-p` and `cmd-shift-f` open it; each picker's own key dismisses it.
-  - `up`, `down`, `enter`, `escape`, `alt-cmd-c` and `alt-cmd-w` each do what
+  - `up`, `down`, `enter` and `escape` each do what
     D7 says, with a `simulate_keystrokes` test each.
   - `up` and `down` skip headers.
   - A stale result is dropped.
@@ -1172,7 +1195,7 @@ person typing in a release build, so slice 3 claims no end-to-end figure.
   - From the tree, `cmd-p` then `escape` leaves the tree focused.
   - Trashing a listed note removes its row.
   - A hit far down a long note opens with the range selected and visible.
-- **Shots**: quick open with results, vault search with headers and toggles,
+- **Shots**: quick open with results, vault search with headers,
   and each state of D9's table.
 - **Mutants**: `cargo mutants` on `inkra-index` after slices 1, 2, 4 and 5.
 
@@ -1194,7 +1217,7 @@ Each slice merges alone with `check.sh` green, and records its bench figures.
    here if the bench needs it.
 5. **The corpus feed**: `NoteIndex::insert` takes the text, `IndexSync` passes
    it on load and save. The startup figure is recorded.
-6. **Vault search**: the delegate, headers, toggles, `cmd-shift-f`,
+6. **Vault search**: the delegate, headers, `cmd-shift-f`,
    `HitActivated`, `open_note` with a range, `pending_reveal`, the key tests,
    the shots.
 
@@ -1205,16 +1228,16 @@ differential oracle, and is justified by a bench figure before and after.
 
 | Lever | Trigger | What changes |
 |---|---|---|
-| Bigram prefilter (fff) | A `search` case over its per-core budget, or a slow real vault | `Corpus` keeps a bitset per bigram of case-folded text; `search` skips notes that lack one. About 30 MB at 50,000 notes, per fff |
-| Whole-word check in Rust | Shipped in slice 4 for a non-ASCII edge (D4): `é` −12 %, Greek, Cyrillic, CJK −13 to −68 %. Measured and rejected for an ASCII edge: the plain literal plus Rust edges took 494 to 510 ms on whole word `e` against 337. A `(?-u:\b)` candidate pass with a Unicode recheck is sound only for ASCII edges: `e` 306 against 341 ms, `réunion` 75 against 189 ms. Trigger: an ASCII-edge whole-word case over budget | Inside `find_in` (D4) |
-| `memchr::memmem` fast path | A profile shows `regex` in the case-sensitive path. regex already runs a single literal through its own `memchr`-based prefilter, so the gain is probably small | Inside `find_in` |
+| ~~Bigram prefilter (fff)~~ Superseded 2026-09-28 by the word-index prefilter (word-start spec, S3) | A `search` case over its per-core budget, or a slow real vault | `Corpus` keeps a bitset per bigram of case-folded text; `search` skips notes that lack one. About 30 MB at 50,000 notes, per fff |
+| ~~Whole-word check in Rust~~ Superseded 2026-09-28: no whole-word toggle | Shipped in slice 4 for a non-ASCII edge (D4): `é` −12 %, Greek, Cyrillic, CJK −13 to −68 %. Measured and rejected for an ASCII edge: the plain literal plus Rust edges took 494 to 510 ms on whole word `e` against 337. A `(?-u:\b)` candidate pass with a Unicode recheck is sound only for ASCII edges: `e` 306 against 341 ms, `réunion` 75 against 189 ms. Trigger: an ASCII-edge whole-word case over budget | Inside `find_in` (D4) |
+| ~~`memchr::memmem` fast path~~ Superseded 2026-09-28: no literal matcher | A profile shows `regex` in the case-sensitive path. regex already runs a single literal through its own `memchr`-based prefilter, so the gain is probably small | Inside `find_in` |
 | Balanced chunks | Ranges finish far apart in the end-to-end log | `chunks` splits by bytes, not by count |
 | Parallel quick open | Shipped in slice 3: `ete` over 50,000 long stems takes 31 ms on one core and 9.02 ms on 10 threads (Performance, slice 3) | `app` passes `num_cpus` to `NamesSnapshot::chunks`, runs one range per core, and calls `merge_names` |
 | Sparse DP | `names` over 16 ms per core after parallel quick open | `fill` visits only the columns where the query char matches. The dense `fill` stays as a test-only differential oracle |
 | Compact candidates | A names memory figure over ~50 MB on a real vault | A candidate stores `exact` only, with a sparse `base` for the accented chars, and merges `chars` and `bonus` into one allocation. About 22 to 37 MB at 50,000 notes today |
 | Streaming results | First results over 100 ms on a real vault | The delegate appends each range's hits in vault order once every earlier range is done, as the Text Finder does; keeps the selection across batches |
 | Compressed text (e.g. lz4) | `heap_bytes` over 300 MB on a real vault | `Corpus` stores compressed blocks; `search` decompresses candidates. Best after the prefilter |
-| No resident text | Memory still too high after compression | `Corpus` keeps the prefilter only. **Changes the API**: `CorpusSnapshot::candidates(range, &TextQuery)` lists notes, `app` loads them through `Fs` and calls `find_in`. Needs the prefilter first, as fff shows |
+| No resident text | Memory still too high after compression | Amended 2026-09-28: the word index lists the candidates, and only they are read. `app` would load them through `Fs` and run the word-start walk over them. **Changes the API** |
 | Parallel startup loads | Shipped in slice 5: the release app went from 5.5–10.2 s to 1.2–1.6 s at 50,000 notes (Performance, "Startup") | `IndexSync` keeps one load per core in flight, one read per note, and applies landed loads until 4 ms pass, at least one per turn |
 | `next_load` scans the queue | A foreground turn over 8 ms whose profile shows `next_load` | A set of the notes in flight for `next_load`'s check, and held-back entries parked beside the queue until their load lands, instead of rescanning them on each call. Today at most one entry per load in flight is held back, so a call costs O(cores²) |
 | Vault entries as `Arc<[Entry]>` | A file watcher lands, or a foreground step over 8 ms | `Vault` shares its entries; `reconcile` becomes an `Arc` clone, and the build returns the mtime list for the diff |
@@ -1229,12 +1252,12 @@ differential oracle, and is justified by a bench figure before and after.
 |---|---|---|
 | Persisted frecency | The MRU forgets across restarts and a user misses it | fff's decay (`dbs/frecency.rs:373-418`), stored with the vault state |
 | Typo tolerance | A user misses a note by a typo | `frizbee` 0.13 (MIT) or a bounded edit distance per term |
-| Regex queries | The user asks | `TextQuery` already compiles to a regex; the question is UI and errors |
-| `path:`, `tag:`, `-exclude` | The user asks | A small query parser in front of `TextQuery` |
-| Accent folding and NFD in note text (`ete` finds `été`) | The user asks | Folds text and query; hit offsets need a map back to the saved text |
+| Regex queries | The user asks | Needs its own spec (2026-09-28): a regex is not a word start, so it would break the word-start spec's invariant |
+| `path:`, `tag:`, `-exclude` | The user asks | A small query parser in front of ~~`TextQuery`~~ `NoteQuery` (superseded 2026-09-28, word-start spec) |
+| ~~Accent folding and NFD in note text (`ete` finds `été`)~~ | **Done 2026-09-28** | Word-start spec: the fold of `⌘P`, hits lit on the saved text |
 | Relevance ranking of content hits | Vault order is not useful | Notes whose name matches first is the cheap step |
-| Find in note (`⌘F`) | The user asks | `find_in` over the buffer; Zed splits the buffer into chunks (`editor/src/items.rs:2010-2087`) |
-| Search in unsaved buffers | Two seconds of lag is observed | Links spec, D5; `find_in` over open buffers |
+| Find in note (`⌘F`) | The user asks | ~~`find_in` over the buffer~~ Superseded 2026-09-28: `find_in` is deleted and its own spec decides the rule (word-start spec, S6); Zed splits the buffer into chunks (`editor/src/items.rs:2010-2087`) |
+| Search in unsaved buffers | Two seconds of lag is observed | Links spec, D5; ~~`find_in` over open buffers~~ superseded 2026-09-28: the word-start walk over open buffers (word-start spec) |
 | Unlinked mentions | The user asks | A `search` for each note's name |
 | `[[` completion | Links spec, Deferred | Reuses `match_names` |
 | Backlinks open at their line | Links spec, Deferred | Reuses `open_note` with a range |
