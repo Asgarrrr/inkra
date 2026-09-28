@@ -88,7 +88,7 @@ impl NoteIndex {
         previous
     }
 
-    /// The quick-open candidates of the last `set_notes`. Cloning is an `Arc` bump.
+    /// Each note's name of the last `set_notes`, as `find` reads it. Cloning is an `Arc` bump.
     #[must_use]
     pub fn names(&self) -> NamesSnapshot {
         self.names.clone()

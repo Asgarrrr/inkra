@@ -1,20 +1,6 @@
 //! Path generators shared by the `names` and `find` benches.
 
-const KINDS: &[&str] = &["Meeting", "Call", "Lunch", "Review", "Workshop"];
-const PEOPLE: &[&str] = &[
-    "Hélène", "Marc", "Zoé", "Jérôme", "Anaïs", "Paul", "Léa", "Thomas",
-];
-const TOPICS: &[&str] = &[
-    "the budget",
-    "the roadmap",
-    "l'été",
-    "la réunion",
-    "the design",
-    "l'équipe",
-    "la santé",
-    "the trip",
-];
-pub(crate) const WORDS: &[&str] = &[
+const WORDS: &[&str] = &[
     "projet",
     "réunion",
     "été",
@@ -59,14 +45,4 @@ pub(crate) fn folders(lcg: &mut Lcg, depth: usize) -> String {
         .map(|_| WORDS[lcg.next(WORDS.len())])
         .collect::<Vec<_>>()
         .join("/")
-}
-
-/// About 56 chars: two or three folders, then "Meeting with Zoé about the roadmap 12".
-pub(crate) fn long_stem(lcg: &mut Lcg, note: usize) -> String {
-    let depth = 2 + lcg.next(2);
-    let folders = folders(lcg, depth);
-    let kind = KINDS[lcg.next(KINDS.len())];
-    let person = PEOPLE[lcg.next(PEOPLE.len())];
-    let topic = TOPICS[lcg.next(TOPICS.len())];
-    format!("{folders}/{kind} with {person} about {topic} {note}.md")
 }

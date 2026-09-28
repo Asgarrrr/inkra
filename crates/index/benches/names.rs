@@ -4,22 +4,18 @@ mod paths;
 use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{
-    NameMatch, NameQuery, NamesSnapshot, NoteContent, NoteIndex, NoteSet, match_names, merge_names,
-};
+use inkra_index::{NoteContent, NoteIndex, NoteSet};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Kind, Mtime, Vault};
-use paths::{Lcg, WORDS, folders, long_stem};
+use paths::{Lcg, folders};
 
 const NOTES: usize = 50_000;
-const LIMIT: usize = 100;
 /// Built once: a `MemFs` scan of this vault takes minutes.
 static ENTRIES: LazyLock<Vec<(EntryId, String, Kind, Mtime)>> = LazyLock::new(entries);
 
@@ -28,8 +24,7 @@ fn entries() -> Vec<(EntryId, String, Kind, Mtime)> {
     let mut lcg = Lcg(7);
     for note in 0..NOTES {
         let depth = 3 + lcg.next(3);
-        let parts: Vec<&str> = (0..depth).map(|_| WORDS[lcg.next(WORDS.len())]).collect();
-        fs.insert_file(format!("/vault/{} {note}.md", parts.join("/")), "");
+        fs.insert_file(format!("/vault/{} {note}.md", folders(&mut lcg, depth)), "");
     }
     let Ok(vault) = block_on(Vault::scan(&fs, Path::new("/vault"))) else {
         panic!("a MemFs scan cannot fail");
@@ -45,34 +40,6 @@ fn entries() -> Vec<(EntryId, String, Kind, Mtime)> {
             )
         })
         .collect()
-}
-
-/// Generated notes without a scan: matching reads only the paths, and a `MemFs` scan of
-/// these trees would take far longer than the bench.
-fn generated(path: impl Fn(&mut Lcg, usize) -> String) -> Vec<(EntryId, String, Kind, Mtime)> {
-    let mut lcg = Lcg(11);
-    (0..NOTES)
-        .map(|note| {
-            (
-                EntryId::DETACHED,
-                path(&mut lcg, note),
-                Kind::Note,
-                Mtime(UNIX_EPOCH),
-            )
-        })
-        .collect()
-}
-
-fn long_stems() -> Vec<(EntryId, String, Kind, Mtime)> {
-    generated(long_stem)
-}
-
-/// 7 to 9 components: 6 to 8 folders, then a stem `<word> <n>`.
-fn deep() -> Vec<(EntryId, String, Kind, Mtime)> {
-    generated(|lcg, note| {
-        let depth = 7 + lcg.next(3);
-        format!("{} {note}.md", folders(lcg, depth))
-    })
 }
 
 fn bench_build(c: &mut Criterion) {
@@ -205,105 +172,5 @@ fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     }
 }
 
-fn bench_cases(c: &mut Criterion, vault: &str, names: &NamesSnapshot, cases: &[(&str, String)]) {
-    let cancel = AtomicBool::new(false);
-    for (case, text) in cases {
-        let query = NameQuery::new(text, None, &[]);
-        c.bench_function(&format!("match_names/50k {vault}, {case}"), |b| {
-            b.iter(|| black_box(match_names(names, 0..names.len(), &query, &cancel, LIMIT)));
-        });
-    }
-}
-
-fn bench_match(c: &mut Criterion) {
-    let names = NoteSet::build(ENTRIES.clone()).names();
-    let distinct: String = "aeinrstlou"
-        .chars()
-        .flat_map(|a| "aeinrstlou".chars().map(move |b| format!("{a}{b} ")))
-        .collect::<String>()
-        .chars()
-        .take(300)
-        .collect();
-    let cases: Vec<(&str, String)> = vec![
-        ("1 char", "p".into()),
-        ("3 chars", "pln".into()),
-        ("8 chars", "projplan".into()),
-        ("two terms", "plan jour".into()),
-        ("unaccented over accented", "ete".into()),
-        ("e e e e e e e e", "e e e e e e e e".into()),
-        ("300 chars of `e `", "e ".repeat(150)),
-        ("300 chars of distinct terms", distinct),
-    ];
-    bench_cases(c, "base", &names, &cases);
-
-    let recent: Vec<EntryId> = ENTRIES
-        .iter()
-        .filter(|(_, _, kind, _)| *kind == Kind::Note)
-        .step_by(2_500)
-        .map(|(id, ..)| *id)
-        .take(20)
-        .collect();
-    let query = NameQuery::new("", None, &recent);
-    let cancel = AtomicBool::new(false);
-    c.bench_function(
-        "match_names/50k base, empty query with a 20-note MRU",
-        |b| {
-            b.iter(|| black_box(match_names(&names, 0..names.len(), &query, &cancel, LIMIT)));
-        },
-    );
-}
-
-fn bench_realistic(c: &mut Criterion) {
-    let cases: Vec<(&str, String)> = vec![
-        ("ete", "ete".into()),
-        ("pln", "pln".into()),
-        ("two terms", "plan jour".into()),
-        ("aeiou", "aeiou".into()),
-    ];
-    let names = NoteSet::build(long_stems()).names();
-    bench_cases(c, "long stems", &names, &cases);
-    let names = NoteSet::build(deep()).names();
-    bench_cases(c, "deep", &names, &cases);
-}
-
-/// The quick-open delegate's split: one range per thread, then the merge.
-fn parallel(names: &NamesSnapshot, query: &NameQuery, threads: usize) -> Vec<NameMatch> {
-    let cancel = &AtomicBool::new(false);
-    let found = std::thread::scope(|scope| {
-        let scans: Vec<_> = names
-            .chunks(threads)
-            .into_iter()
-            .map(|range| scope.spawn(move || match_names(names, range, query, cancel, LIMIT)))
-            .collect();
-        scans
-            .into_iter()
-            .map(|scan| scan.join().unwrap_or_default())
-            .collect()
-    });
-    merge_names(found, LIMIT)
-}
-
-fn bench_parallel(c: &mut Criterion) {
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-    let mut group = c.benchmark_group(format!("parallel, {threads} threads"));
-    for (vault, entries) in [("long stems", long_stems()), ("deep", deep())] {
-        let names = NoteSet::build(entries).names();
-        for text in ["ete", "aeiou", "pln"] {
-            let query = NameQuery::new(text, None, &[]);
-            group.bench_function(format!("{vault} {text}"), |b| {
-                b.iter(|| black_box(parallel(&names, &query, threads)));
-            });
-        }
-    }
-    group.finish();
-}
-
-criterion_group!(
-    benches,
-    bench_build,
-    bench_set_notes,
-    bench_match,
-    bench_realistic,
-    bench_parallel
-);
+criterion_group!(benches, bench_build, bench_set_notes);
 criterion_main!(benches);

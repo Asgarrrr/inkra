@@ -1,32 +1,17 @@
-use std::sync::atomic::AtomicBool;
-
-use inkra_vault::EntryId;
-
 use super::NoteSet;
 use crate::test_support::{entries, vault};
-use crate::{NameQuery, match_names};
 
-/// Every candidate's path, in MRU order, which `entries()` order gives.
+/// Every name's path, by position.
 fn paths(files: &[&str]) -> Vec<String> {
     let (_fs, vault) = vault(files);
-    let all = entries(&vault);
-    let recent: Vec<EntryId> = all.iter().map(|(id, ..)| *id).collect();
-    let names = NoteSet::build(all).names();
-    let query = NameQuery::new("", None, &recent);
-    match_names(
-        &names,
-        0..names.len(),
-        &query,
-        &AtomicBool::new(false),
-        usize::MAX,
-    )
-    .into_iter()
-    .map(|found| found.path.to_string())
-    .collect()
+    let names = NoteSet::build(entries(&vault)).names;
+    (0..names.len())
+        .map(|order| names.path(order).to_string())
+        .collect()
 }
 
 #[test]
-fn notes_are_candidates_in_vault_order_and_folders_are_not() {
+fn names_are_in_vault_order_and_folders_are_not() {
     assert_eq!(paths(&["b.md", "a/c.md"]), ["a/c", "b"]);
 }
 
@@ -45,25 +30,20 @@ fn a_snapshot_splits_into_ranges_over_its_notes() {
     let files: Vec<String> = (0..10).map(|n| format!("n{n}.md")).collect();
     let files: Vec<&str> = files.iter().map(String::as_str).collect();
     let (_fs, vault) = vault(&files);
-    let names = NoteSet::build(entries(&vault)).names();
+    let names = NoteSet::build(entries(&vault)).names;
     assert_eq!(names.len(), 10);
     assert!(!names.is_empty());
     assert_eq!(names.chunks(3), [0..3, 3..6, 6..10]);
-    assert!(NoteSet::build(Vec::new()).names().chunks(4).is_empty());
-    assert!(NoteSet::build(Vec::new()).names().is_empty());
+    assert!(NoteSet::build(Vec::new()).names.chunks(4).is_empty());
+    assert!(NoteSet::build(Vec::new()).names.is_empty());
 }
 
 #[test]
-fn a_candidate_index_is_its_note_order() {
+fn a_name_position_is_its_note_order() {
     let (_fs, vault) = vault(&["b.md", "a/c.md", "a/d.md", "e.md"]);
-    let all = entries(&vault);
-    let recent: Vec<EntryId> = all.iter().map(|(id, ..)| *id).collect();
-    let set = NoteSet::build(all);
-    let names = set.names();
-    let query = NameQuery::new("", None, &recent);
-    assert_eq!(names.len(), 4);
-    for at in 0..names.len() {
-        let found = match_names(&names, at..at + 1, &query, &AtomicBool::new(false), 1);
-        assert_eq!(set.notes.order(found[0].id), at, "candidate {at}");
+    let set = NoteSet::build(entries(&vault));
+    assert_eq!(set.names.len(), 4);
+    for at in 0..set.names.len() {
+        assert_eq!(set.notes.order(set.names.id(at)), at, "name {at}");
     }
 }
