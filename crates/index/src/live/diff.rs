@@ -1,12 +1,12 @@
 use inkra_vault::{Entry, EntryId, Kind, Mtime};
 
-use super::building::Built;
+use super::builds::Layout;
 
 /// What changed in the vault since the entries the index last applied, derived off the foreground.
 pub(super) enum Change {
     /// The same notes, at the same paths, in the same order: the notes whose mtime moved.
     Mtimes(Vec<(EntryId, Mtime)>),
-    Layout(Box<Built>),
+    Layout(Box<Layout>),
 }
 
 impl Change {
@@ -14,7 +14,7 @@ impl Change {
     pub(super) fn between(last: Option<&[Entry]>, entries: &[Entry]) -> Self {
         match last.and_then(|last| moved_mtimes(last, entries)) {
             Some(moved) => Self::Mtimes(moved),
-            None => Self::Layout(Box::new(Built::new(entries))),
+            None => Self::Layout(Box::new(Layout::new(entries))),
         }
     }
 }

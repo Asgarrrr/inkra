@@ -44,10 +44,6 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 #
 # Equivalent only while `LOADS_PER_CORE` is 1; revisit if it changes.
 #
-# Equivalent. `next_load` never starts a second load for a note already in
-# flight, and each seq is minted once, so the id alone and the seq alone each
-# find the same `Loading` entry.
-#
 # Unobservable. The apply budget is wall time: a turn whose elapsed time equals
 # the budget exactly cannot be staged in a test.
 #
@@ -68,7 +64,6 @@ exclude_re = [
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
     "^crates/app/src/field\\.rs:[0-9]+:[0-9]+: replace \\+ with - in <impl Element for FieldElement>::prepaint$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace \\* with / in IndexSync::load_more$",
-    "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in IndexSync::apply_landed$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
     "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",

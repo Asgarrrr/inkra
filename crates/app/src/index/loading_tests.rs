@@ -108,20 +108,12 @@ fn land_at_once(
     links.update(cx, |links, _| {
         links.apply_budget = Some(budget);
         for id in ids {
-            let seq = links.next_seq(id);
-            let loaded = Ok(NoteContent::parse(
-                Arc::from(text),
-                Mtime(SystemTime::UNIX_EPOCH),
-            ));
-            let note_sets = links.note_sets;
+            let mtime = Mtime(SystemTime::UNIX_EPOCH);
+            let ticket = links.live.saved(id, mtime);
+            let loaded = Ok(NoteContent::parse(Arc::from(text), mtime));
             links
                 .landed
-                .unbounded_send(Landed {
-                    id,
-                    seq,
-                    note_sets,
-                    loaded,
-                })
+                .unbounded_send(Landed { ticket, loaded })
                 .expect("drain listens");
         }
         links.turns
@@ -328,7 +320,7 @@ fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppCo
     drop(renamed);
     // What `saved` does before its parse lands: the save, not a reload, brings the text.
     links.update(cx, |sync, _| {
-        sync.next_seq(a);
+        let _parsing = sync.live.saved(a, Mtime(SystemTime::UNIX_EPOCH));
     });
     gate.release();
     cx.run_until_parked();

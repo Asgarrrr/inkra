@@ -1,16 +1,16 @@
-//! The snapshot comparison `reconcile` runs off the foreground (coalesced-reconcile spec, R2).
+//! The snapshot comparison a `BuildJob` runs off the foreground (coalesced-reconcile spec, R2).
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
-use inkra_index::{NoteIndex, NoteQuery};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Entry, EntryId, Mtime, RelPath, Vault};
 use proptest::prelude::*;
 
 use super::diff::{Change, notes};
-use crate::test_support::quick_open;
+use crate::{NoteIndex, NoteMatch, NoteQuery, find_notes, merge_notes};
 
 /// Notes in two folders beside an empty one, as a scan lists them.
 fn snapshot() -> Vec<Entry> {
@@ -151,6 +151,14 @@ fn edited(edits: &[Edit]) -> (Vec<Entry>, Vec<Entry>) {
     (last, entries)
 }
 
+fn quick_open(index: &NoteIndex, query: &NoteQuery, at: usize) -> Vec<NoteMatch> {
+    let snapshot = index.snapshot();
+    let cancel = AtomicBool::new(false);
+    let lookup = snapshot.lookup(query, &cancel).expect("not cancelled");
+    let kept = find_notes(&snapshot, &lookup, at..at + 1, query, &cancel, 1);
+    merge_notes(&snapshot, vec![kept], query, 1)
+}
+
 /// The `(id, path)` at each position of the names a build of `entries` makes.
 fn names(entries: &[Entry]) -> Vec<(EntryId, String)> {
     let Change::Layout(built) = Change::between(None, entries) else {
@@ -162,7 +170,7 @@ fn names(entries: &[Entry]) -> Vec<(EntryId, String)> {
     // An empty query lists exactly its recent notes, so one position at a time reads the order.
     let query = NoteQuery::new("", None, &every);
     (0..index.names().len())
-        .flat_map(|at| quick_open(&index, &query, at..at + 1, 1))
+        .flat_map(|at| quick_open(&index, &query, at))
         .map(|found| (found.id, found.path.to_string()))
         .collect()
 }

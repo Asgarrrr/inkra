@@ -143,6 +143,10 @@ the split threshold, so slice B first moved `Built`, `Build`, `reconcile` and
 `apply_notes` into `index/building.rs` as a pure move; the dispatch on `Change`
 lives there. `index.rs` is about 290 lines. No API is added to `inkra-vault` or `inkra-index`.
 
+Since 2026-09-29 the comparison, `Build` and the apply live in
+`crates/index/src/live/{diff,builds}.rs`, behind `inkra_index::LiveIndex`
+(index scheduler spec); `IndexSync` keeps the spawns.
+
 ## Testing
 
 Written before the code. Each of the first two fails on `main`.
@@ -241,5 +245,5 @@ notifies nobody (watcher spec, F6 and Performance).
 | Incremental layout change (one create or rename without a full `NoteSet::build`) | A rescan with a layout change shows in the timeline once the watcher lands | Needs `NoteSet` to take a delta; `names` is a sorted snapshot today |
 | Producer-side change sets, Zed's `UpdatedEntriesSet` (`worktree.rs:4040`) | The file watcher: its event batches already know the changed paths, and the buffer reload is a second consumer | `Vault::applied` returns `(path, id, change)` beside the new vault; `diff.rs` goes, and `forgotten` may too |
 | ~~Derive dirtiness instead of `Build::Dirty`~~ | **Closed 2026-09-28.** `Build::Dirty` stays. Since the watcher, a swap that changes nothing replaces the entries without notifying (watcher spec, F6), as a save's `reidentify` already did, so `!Arc::ptr_eq(last, vault.shared_entries())` would read each echo and each save as a change. The enum is exact, and Testing 1 holds it | Zed's `Buffer::reparse` (`language/src/buffer.rs:1926-1995`) re-runs when `version.changed_since(parsed)`; its version moves only on an edit, which our `Arc` does not give |
-| Test-only fields in one `#[cfg(test)] probe: Probe` | The next test-only field | `apply_budget`, `turns`, `merges`, `reconciles`, `hold`; about 30 mechanical test edits |
+| Test-only fields in one `#[cfg(test)] probe: Probe` | The next test-only field | `apply_budget`, `turns`, `hold`; `merges` and `reconciles` went with the index scheduler spec (2026-09-29) |
 | Split `index/tests.rs` (1,032 lines) | The next test added to it | Helpers (`indexed_vault`, `hold_builds`, `rescan`, `create`) to a shared test module; `./scripts/test-names.sh` before and after |
