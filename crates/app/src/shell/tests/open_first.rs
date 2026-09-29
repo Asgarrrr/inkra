@@ -11,7 +11,7 @@ use inkra_vault::{Fs, Vault};
 
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
-use crate::quick_open::NOTES_CHANGED_REFRESH;
+use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::shell::AppShell;
 use crate::test_support::vault;
 

@@ -4,16 +4,18 @@ mod corpus;
 mod paths;
 
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::UNIX_EPOCH;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use futures::executor::block_on;
 use inkra_index::{
-    Excerpt, Group, IndexSnapshot, Lookup, MergeWhen, NoteContent, NoteIndex, NoteMatch, NoteQuery,
-    NoteSet, excerpt, find_notes, merge_notes,
+    Excerpt, Group, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteMatch, NoteQuery,
+    NoteSet, excerpt,
 };
-use inkra_vault::{EntryId, Kind, Mtime};
+use inkra_vault::{EntryId, Job, Jobs, Kind, Mtime, Serial};
 
 use corpus::{Corpus, NOTE_IDS, NOTES, contents};
 use paths::{Lcg, folders};
@@ -95,47 +97,44 @@ fn cases(corpus: Corpus) -> Vec<(String, NoteQuery)> {
     cases
 }
 
-fn lookup(snapshot: &IndexSnapshot, query: &NoteQuery) -> Lookup {
-    let Some(lookup) = snapshot.lookup(query, &AtomicBool::new(false)) else {
-        panic!("not cancelled");
-    };
-    lookup
+/// `ranges` jobs drained by `THREADS` threads.
+struct Threads {
+    ranges: usize,
 }
 
-fn split(
-    snapshot: &IndexSnapshot,
-    lookup: &Lookup,
-    query: &NoteQuery,
-    ranges: usize,
-) -> Vec<NoteMatch> {
-    let cancel = &AtomicBool::new(false);
-    let ranges = &snapshot.chunks(ranges);
-    let next = &AtomicUsize::new(0);
-    let found = thread::scope(|scope| {
-        let workers: Vec<_> = (0..THREADS)
-            .map(|_| {
-                scope.spawn(move || {
-                    let mut found = Vec::new();
-                    while let Some(range) = ranges.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        found.push(find_notes(
-                            snapshot,
-                            lookup,
-                            range.clone(),
-                            query,
-                            cancel,
-                            LIMIT,
-                        ));
-                    }
-                    found
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|worker| worker.join().unwrap_or_default())
-            .collect()
-    });
-    merge_notes(snapshot, found, query, LIMIT)
+impl Jobs for Threads {
+    fn parallelism(&self) -> usize {
+        self.ranges
+    }
+
+    fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a> {
+        Box::pin(async move {
+            let queue = &Mutex::new(jobs.into_iter());
+            let next = || queue.lock().unwrap_or_else(PoisonError::into_inner).next();
+            thread::scope(|scope| {
+                for _ in 0..THREADS {
+                    scope.spawn(|| {
+                        while let Some(job) = next() {
+                            block_on(job);
+                        }
+                    });
+                }
+            });
+        })
+    }
+}
+
+/// `find_notes` on `jobs`.
+fn find(snapshot: &IndexSnapshot, query: &NoteQuery, jobs: &dyn Jobs) -> Vec<NoteMatch> {
+    let Some(found) = block_on(snapshot.find_notes(query, LIMIT, jobs, &AtomicBool::new(false)))
+    else {
+        panic!("not cancelled");
+    };
+    found
+}
+
+fn split(snapshot: &IndexSnapshot, query: &NoteQuery, ranges: usize) -> Vec<NoteMatch> {
+    find(snapshot, query, &Threads { ranges })
 }
 
 fn excerpts(
@@ -169,9 +168,9 @@ fn on_screen(
     })
 }
 
-/// `index::fan_out`'s order up to the rows: the lookup, the split, the merge.
+/// Up to the rows: the lookup, the split, the merge.
 fn to_names(snapshot: &IndexSnapshot, query: &NoteQuery) -> Vec<NoteMatch> {
-    split(snapshot, &lookup(snapshot, query), query, PIPELINE_RANGES)
+    split(snapshot, query, PIPELINE_RANGES)
 }
 
 /// Then `quick_open/list.rs`'s: the excerpts of the rows on screen.
@@ -180,7 +179,7 @@ fn to_excerpts(snapshot: &IndexSnapshot, query: &NoteQuery) -> Vec<Option<Excerp
 }
 
 fn report(corpus: Corpus, case: &str, snapshot: &IndexSnapshot, query: &NoteQuery) {
-    let rows = split(snapshot, &lookup(snapshot, query), query, PIPELINE_RANGES);
+    let rows = split(snapshot, query, PIPELINE_RANGES);
     let count = |group| rows.iter().filter(|found| found.group == group).count();
     let lines = excerpts(snapshot, &rows, query).iter().flatten().count();
     eprintln!(
@@ -196,8 +195,6 @@ fn report(corpus: Corpus, case: &str, snapshot: &IndexSnapshot, query: &NoteQuer
 fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
     let snapshot = indexed(corpus);
     let cases = cases(corpus);
-    let all = 0..NOTES;
-    let cancel = AtomicBool::new(false);
     for (case, query) in &cases {
         report(corpus, case, &snapshot, query);
     }
@@ -205,11 +202,7 @@ fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
     let mut group = c.benchmark_group(format!("find_notes, {}, one core", corpus.name()));
     for (case, query) in &cases {
         group.bench_function(case, |b| {
-            b.iter(|| {
-                let lookup = lookup(&snapshot, query);
-                let kept = find_notes(&snapshot, &lookup, all.clone(), query, &cancel, LIMIT);
-                black_box(merge_notes(&snapshot, vec![kept], query, LIMIT))
-            });
+            b.iter(|| black_box(find(&snapshot, query, &Serial)));
         });
     }
     group.finish();
@@ -221,10 +214,7 @@ fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
         ));
         for (case, query) in &cases {
             group.bench_function(case, |b| {
-                b.iter(|| {
-                    let lookup = lookup(&snapshot, query);
-                    black_box(split(&snapshot, &lookup, query, per_thread * THREADS))
-                });
+                b.iter(|| black_box(split(&snapshot, query, per_thread * THREADS)));
             });
         }
         group.finish();
@@ -232,7 +222,7 @@ fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
 
     let mut group = c.benchmark_group(format!("excerpt, {}, top {LIMIT} rows", corpus.name()));
     for (case, query) in &cases {
-        let rows = split(&snapshot, &lookup(&snapshot, query), query, PIPELINE_RANGES);
+        let rows = split(&snapshot, query, PIPELINE_RANGES);
         group.bench_function(case, |b| {
             b.iter(|| black_box(excerpts(&snapshot, &rows, query)));
         });
@@ -299,15 +289,7 @@ fn bench_adversarial(c: &mut Criterion) {
     let mut group = c.benchmark_group("excerpt, adversarial");
     for (case, text, _) in &notes {
         let query = NoteQuery::new(text, None, &[]);
-        let kept = find_notes(
-            &snapshot,
-            &lookup(&snapshot, &query),
-            0..notes.len(),
-            &query,
-            &cancel,
-            LIMIT,
-        );
-        let rows = merge_notes(&snapshot, vec![kept], &query, LIMIT);
+        let rows = find(&snapshot, &query, &Serial);
         let [found] = rows.as_slice() else {
             panic!("{case}: one row, found {}", rows.len());
         };

@@ -15,7 +15,7 @@ pub const HITS_PER_NOTE: usize = 100;
 /// The first `limit` word starts of the query's terms in `range`, grouped by note in vault
 /// order. Pass the `lookup` of this `snapshot` and `query`. Empty once `cancel` is set or with no term.
 #[must_use]
-pub fn search(
+pub(crate) fn search_in(
     snapshot: &IndexSnapshot,
     lookup: &Lookup,
     range: Range<usize>,

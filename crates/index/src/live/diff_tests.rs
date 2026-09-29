@@ -10,7 +10,8 @@ use inkra_vault::{Entry, EntryId, Mtime, RelPath, Vault};
 use proptest::prelude::*;
 
 use super::diff::{Change, notes};
-use crate::{NoteIndex, NoteMatch, NoteQuery, find_notes, merge_notes};
+use crate::find::{find_in, merge_found};
+use crate::{NoteIndex, NoteMatch, NoteQuery};
 
 /// Notes in two folders beside an empty one, as a scan lists them.
 fn snapshot() -> Vec<Entry> {
@@ -155,8 +156,8 @@ fn quick_open(index: &NoteIndex, query: &NoteQuery, at: usize) -> Vec<NoteMatch>
     let snapshot = index.snapshot();
     let cancel = AtomicBool::new(false);
     let lookup = snapshot.lookup(query, &cancel).expect("not cancelled");
-    let kept = find_notes(&snapshot, &lookup, at..at + 1, query, &cancel, 1);
-    merge_notes(&snapshot, vec![kept], query, 1)
+    let kept = find_in(&snapshot, &lookup, at..at + 1, query, &cancel, 1);
+    merge_found(&snapshot, vec![kept], query, 1)
 }
 
 /// The `(id, path)` at each position of the names a build of `entries` makes.

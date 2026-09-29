@@ -19,7 +19,7 @@ pub use excerpt::{Excerpt, excerpt};
 #[cfg(test)]
 pub(crate) use highlight::{boundaries, prefix};
 pub(crate) use highlight::{light, word_prefix};
-pub use run::{find_notes, merge_notes};
+pub(crate) use run::{find_in, merge_found};
 pub(crate) use terms::{Terms, each_word};
 
 /// Where a note's terms matched; the groups list in this order.
@@ -44,9 +44,9 @@ pub struct NoteMatch {
     rank: Rank,
 }
 
-/// A note `find_notes` kept; `merge_notes` builds the `NoteMatch` of the ones it lists.
+/// A note `find_in` kept; `merge_found` builds the `NoteMatch` of the ones it lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ranked(Rank);
+pub(crate) struct Ranked(Rank);
 
 #[cfg(test)]
 mod excerpt_tests;

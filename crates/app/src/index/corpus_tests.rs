@@ -1,34 +1,19 @@
 //! The corpus `IndexSync` keeps: each note's saved text, under its id, across vault changes.
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 
 use gpui::{Entity, TestAppContext};
-use inkra_index::{NoteQuery, find_notes, merge_notes};
+use inkra_index::NoteQuery;
 use inkra_vault::EntryId;
 
 use super::IndexSync;
 use super::tests::{create, found, indexed_vault, saved_edit};
-use crate::test_support::entry_id;
+use crate::test_support::{entry_id, quick_open};
 
 fn ranked(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec<EntryId> {
     links.read_with(cx, |links, _| {
-        let index = links.index();
         let query = NoteQuery::new(text, None, &[]);
-        let not_cancelled = AtomicBool::new(false);
-        let snapshot = index.snapshot();
-        let lookup = snapshot
-            .lookup(&query, &not_cancelled)
-            .expect("not cancelled");
-        let kept = find_notes(
-            &snapshot,
-            &lookup,
-            0..index.names().len(),
-            &query,
-            &not_cancelled,
-            usize::MAX,
-        );
-        merge_notes(&snapshot, vec![kept], &query, usize::MAX)
+        quick_open(links.index(), &query, usize::MAX)
             .into_iter()
             .map(|found| found.id)
             .collect()

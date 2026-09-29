@@ -1,18 +1,18 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::cell::RefCell;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use futures::executor::block_on;
 use gpui::{Entity, Subscription, TestAppContext, prelude::*};
-use inkra_index::{Group, NoteIndex, NoteMatch, NoteQuery, find_notes, merge_notes};
+use inkra_index::{Group, NoteIndex, NoteMatch, NoteQuery};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::{EntryId, Fs, Serial, Vault};
 
 use crate::index::IndexSync;
 use crate::vault::{ConflictPreserved, NoteStore};
@@ -113,7 +113,7 @@ pub(crate) fn named(
     links.read_with(cx, |links, _| {
         let index = links.index();
         let query = NoteQuery::new(query, None, &[]);
-        quick_open(index, &query, 0..index.names().len(), 10)
+        quick_open(index, &query, 10)
             .into_iter()
             .filter(|found| found.group == Group::Name)
             .map(|found| found.id)
@@ -121,16 +121,9 @@ pub(crate) fn named(
     })
 }
 
-/// Quick open's matches for `query` over the notes at `range`, best first.
-pub(crate) fn quick_open(
-    index: &NoteIndex,
-    query: &NoteQuery,
-    range: Range<usize>,
-    limit: usize,
-) -> Vec<NoteMatch> {
+/// Quick open's matches for `query`, best first.
+pub(crate) fn quick_open(index: &NoteIndex, query: &NoteQuery, limit: usize) -> Vec<NoteMatch> {
     let snapshot = index.snapshot();
-    let cancel = AtomicBool::new(false);
-    let lookup = snapshot.lookup(query, &cancel).expect("not cancelled");
-    let kept = find_notes(&snapshot, &lookup, range, query, &cancel, limit);
-    merge_notes(&snapshot, vec![kept], query, limit)
+    block_on(snapshot.find_notes(query, limit, &Serial, &AtomicBool::new(false)))
+        .expect("not cancelled")
 }

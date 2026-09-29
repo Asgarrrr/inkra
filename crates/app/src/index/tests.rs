@@ -8,11 +8,12 @@ use std::time::{Instant, SystemTime};
 
 use futures::FutureExt as _;
 use futures::channel::oneshot;
+use futures::executor::block_on;
 use gpui::{AppContext as _, Entity, Subscription, TestAppContext};
-use inkra_index::{NoteQuery, TermHit, search};
+use inkra_index::{NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp};
 
 use super::{IndexSync, NotesChanged};
 use crate::test_support::{entry_id, named, scan_notes};
@@ -135,22 +136,15 @@ pub(super) fn found(
         let snapshot = links.index().snapshot();
         let query = NoteQuery::new(text, None, &[]);
         let cancel = AtomicBool::new(false);
-        let lookup = snapshot.lookup(&query, &cancel).expect("not cancelled");
-        search(
-            &snapshot,
-            &lookup,
-            0..links.index().names().len(),
-            &query,
-            &cancel,
-            100,
-        )
-        .notes
-        .into_iter()
-        .flat_map(|group| {
-            let note = group.note;
-            group.hits.into_iter().map(move |hit| (note, hit.context))
-        })
-        .collect()
+        block_on(snapshot.search(&query, 100, &Serial, &cancel))
+            .expect("not cancelled")
+            .notes
+            .into_iter()
+            .flat_map(|group| {
+                let note = group.note;
+                group.hits.into_iter().map(move |hit| (note, hit.context))
+            })
+            .collect()
     })
 }
 

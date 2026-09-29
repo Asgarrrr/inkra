@@ -2,8 +2,9 @@ use std::ops::Range;
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use inkra_index::{NoteContent, NoteIndex, NoteQuery, NoteSet, excerpt, find_notes, merge_notes};
-use inkra_vault::{EntryId, Kind, Mtime};
+use futures::executor::block_on;
+use inkra_index::{NoteContent, NoteIndex, NoteQuery, NoteSet, excerpt};
+use inkra_vault::{EntryId, Kind, Mtime, Serial};
 
 use crate::quick_open::list::Row;
 
@@ -23,18 +24,8 @@ fn rows(path: &str, text: &str, query: &str) -> Vec<Row> {
     let snapshot = index.snapshot();
     let query = NoteQuery::new(query, None, &[]);
     let cancel = AtomicBool::new(false);
-    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
-        return Vec::new();
-    };
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        0..index.names().len(),
-        &query,
-        &cancel,
-        1,
-    );
-    merge_notes(&snapshot, vec![kept], &query, 1)
+    block_on(snapshot.find_notes(&query, 1, &Serial, &cancel))
+        .unwrap_or_default()
         .into_iter()
         .map(|found| {
             let excerpt = excerpt(&snapshot, &found, &query, &cancel);

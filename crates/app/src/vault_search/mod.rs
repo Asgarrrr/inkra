@@ -1,22 +1,22 @@
 //! `⌘⇧F`: the word starts of every term across the vault's text, a header per note.
 
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
     Subscription, Task, actions, div,
 };
-use inkra_index::{NoteQuery, Searched, search};
+use inkra_index::{IndexSnapshot, NoteQuery, Searched};
 use inkra_text::ByteOffset;
-use inkra_vault::{EntryId, Vault};
+use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
-use crate::index::{IndexSync, SCANNING, fan_out};
-use crate::picker::runs::{Run, RunId, Runs, SEARCH_DEBOUNCE};
+use crate::index::{IndexSync, SCANNING};
+use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
 use crate::theme;
-use rows::{Results, Row};
+use rows::{HitKey, Results, Row};
 
 mod render;
 mod rows;
@@ -78,44 +78,9 @@ impl VaultSearchDelegate {
     }
 
     /// No rows and no run behind them: the scanning state, an empty field, a field with no term.
-    fn answer(
-        &mut self,
-        id: RunId,
-        answered: Answered,
-        cx: &mut Context<Picker<Self>>,
-    ) -> Task<()> {
+    fn answer(&mut self, answered: Answered) {
         self.results = Results::default();
         self.answered = answered;
-        Runs::settle(id, cx)
-    }
-
-    fn apply(
-        picker: &mut Picker<Self>,
-        id: RunId,
-        run: Run,
-        searched: Searched,
-        cx: &mut Context<Picker<Self>>,
-    ) {
-        if !picker.delegate.runs.is_current(id) {
-            return;
-        }
-        let user = run.is_user();
-        // Read now, not when the refresh started: the user may have moved meanwhile.
-        let kept = picker
-            .selected()
-            .filter(|_| !user)
-            .and_then(|ix| picker.delegate.results.key(ix));
-        let this = &mut picker.delegate;
-        let vault = this.vault.read(cx);
-        this.results = Results::new(searched, |note| vault.entry(note).map(|entry| &entry.path));
-        this.answered = Answered::Query;
-        match kept.and_then(|kept| picker.delegate.results.position(kept)) {
-            Some(ix) => picker.matches_refreshed(ix, cx),
-            // A new query, or the kept hit is gone: the first hit, scrolled to.
-            None => picker.matches_updated(0, cx),
-        }
-        // After the rows land: an `enter` waiting on them confirms, and that clears the mark.
-        Runs::landed(picker, cx);
     }
 
     fn footer(&self, cx: &App) -> Option<SharedString> {
@@ -129,9 +94,54 @@ impl VaultSearchDelegate {
     }
 }
 
-impl AsMut<Runs> for VaultSearchDelegate {
-    fn as_mut(&mut self) -> &mut Runs {
+impl IndexDelegate for VaultSearchDelegate {
+    type Found = Searched;
+    type Key = HitKey;
+
+    fn runs(&mut self) -> &mut Runs {
         &mut self.runs
+    }
+
+    fn sync(&self) -> &Entity<IndexSync> {
+        &self.links
+    }
+
+    fn scanning(&mut self) {
+        self.answer(Answered::Scanning);
+    }
+
+    fn query(&mut self, text: &str, _: Run) -> Option<NoteQuery> {
+        if text.is_empty() {
+            self.answer(Answered::Blank);
+            return None;
+        }
+        let query = NoteQuery::new(text, None, &[]);
+        if query.is_empty() {
+            self.answer(Answered::NoTerm);
+            return None;
+        }
+        Some(query)
+    }
+
+    async fn search(
+        snapshot: &IndexSnapshot,
+        query: &NoteQuery,
+        jobs: &dyn Jobs,
+        cancel: &AtomicBool,
+    ) -> Option<Searched> {
+        snapshot.search(query, LIMIT, jobs, cancel).await
+    }
+
+    fn show(&mut self, landed: Landed<Searched>, cx: &mut Context<Picker<Self>>) {
+        let vault = self.vault.read(cx);
+        self.results = Results::new(landed.found, |note| {
+            vault.entry(note).map(|entry| &entry.path)
+        });
+        self.answered = Answered::Query;
+    }
+
+    fn key(&self, ix: usize) -> Option<HitKey> {
+        self.results.key(ix)
     }
 }
 
@@ -178,53 +188,10 @@ impl PickerDelegate for VaultSearchDelegate {
     }
 
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
-        let started = self.runs.start(self.links.read(cx));
-        let (id, run) = (started.id, started.run);
-        if self.links.read(cx).awaits_first_build() {
-            // The first build's notify refreshes the query.
-            return self.answer(id, Answered::Scanning, cx);
-        }
-        if query.is_empty() {
-            return self.answer(id, Answered::Blank, cx);
-        }
-        let query = Arc::new(NoteQuery::new(query, None, &[]));
-        if query.is_empty() {
-            // `search` cannot tell, since its caller takes the lookup (word-start spec).
-            return self.answer(id, Answered::NoTerm, cx);
-        }
-        let wait = match run {
-            Run::Search => started.behind_user.then_some(SEARCH_DEBOUNCE),
-            Run::Refresh | Run::Notify => None,
-        };
-        let released = self.runs.scanning(&started);
-        let snapshot = self.links.read(cx).index().snapshot();
-        let executor = cx.background_executor().clone();
-        cx.spawn(async move |picker, cx| {
-            if let Some(wait) = wait {
-                cx.background_executor().timer(wait).await;
-            }
-            released.await;
-            let searched = fan_out(
-                executor,
-                snapshot,
-                query,
-                started.cancel,
-                |snapshot, lookup, range, query, cancel| {
-                    search(snapshot, lookup, range, query, cancel, LIMIT)
-                },
-                |_, found, _| Searched::merge(found, LIMIT),
-            );
-            let Some(searched) = searched.await else {
-                return;
-            };
-            let _ = picker.update(cx, |picker, cx| {
-                Self::apply(picker, id, run, searched, cx);
-            });
-        })
+        Runs::update_matches(self, query, cx)
     }
 
     fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
-        self.runs.confirmed();
         if let Some(Row::Hit(hit)) = self.results.rows.get(ix) {
             cx.emit(HitActivated {
                 note: hit.note,

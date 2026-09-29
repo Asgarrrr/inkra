@@ -49,7 +49,7 @@ pub struct Searched {
 impl Searched {
     /// Joins the ranges' results in range order; equals one `search` over their union.
     #[must_use]
-    pub fn merge(chunks: Vec<Searched>, limit: usize) -> Searched {
+    pub(crate) fn merge(chunks: Vec<Searched>, limit: usize) -> Searched {
         // The ranges are disjoint and in order, so one note's group sits in one chunk.
         let mut notes = Vec::new();
         let mut room = limit;

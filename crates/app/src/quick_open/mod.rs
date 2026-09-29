@@ -2,17 +2,17 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
     Subscription, Task, actions, div,
 };
-use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery, find_notes, merge_notes};
-use inkra_vault::EntryId;
+use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
+use inkra_vault::{EntryId, Jobs};
 
-use crate::index::{IndexSync, NotesChanged, SCANNING, fan_out};
-use crate::picker::runs::{Run, RunId, Runs, SEARCH_DEBOUNCE};
+use crate::index::{IndexSync, NotesChanged, SCANNING};
+use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
 use crate::sidebar::NoteActivated;
 use crate::theme;
@@ -27,8 +27,6 @@ actions!(quick_open, [QuickOpen]);
 
 /// Zed's file finder lists 100 too.
 const LIMIT: usize = 100;
-/// After the names change, as Zed's file finder waits after a worktree update.
-pub(crate) const NOTES_CHANGED_REFRESH: Duration = Duration::from_millis(200);
 
 impl EventEmitter<NoteActivated> for Picker<QuickOpenDelegate> {}
 
@@ -58,16 +56,6 @@ enum Answered {
     /// An empty query: the recent notes.
     Recent,
     Query,
-}
-
-/// One run of `update_matches`, applied once its matches arrive.
-struct Search {
-    id: RunId,
-    run: Run,
-    answers: Answered,
-    started: Instant,
-    snapshot: IndexSnapshot,
-    query: Arc<NoteQuery>,
 }
 
 impl QuickOpenDelegate {
@@ -108,64 +96,77 @@ impl QuickOpenDelegate {
         }
     }
 
-    fn apply(
-        picker: &mut Picker<Self>,
-        search: Search,
-        found: Vec<NoteMatch>,
-        cx: &mut Context<Picker<Self>>,
-    ) {
-        let Search {
-            id,
-            run,
-            answers,
-            started,
-            snapshot,
-            query,
-        } = search;
-        if !picker.delegate.runs.is_current(id) {
-            return;
-        }
-        let user = run.is_user();
-        // Read now, not when the names changed: the user may have moved during the wait.
-        let kept = picker
-            .selected()
-            .filter(|_| !user)
-            .and_then(|ix| picker.delegate.list.rows.get(ix))
-            .map(|row| row.found.id)
-            .and_then(|kept| found.iter().position(|found| found.id == kept));
-        let this = &mut picker.delegate;
-        this.answered = answers;
-        this.list.replace(id, snapshot, query, found, !user);
-        match kept {
-            Some(ix) => picker.matches_refreshed(ix, cx),
-            // A new query, or the kept note is gone: the first row, scrolled to.
-            None => picker.matches_updated(0, cx),
-        }
-        if user {
-            #[cfg(test)]
-            {
-                picker.delegate.logged += 1;
-            }
-            if cfg!(not(debug_assertions)) {
-                eprintln!(
-                    "quick open: {} matches, {:?} from the edit",
-                    picker.delegate.list.rows.len(),
-                    started.elapsed()
-                );
-            }
-        }
-        // Read after the rows land: an `enter` waiting on them confirms, and that clears the mark.
-        Runs::landed(picker, cx);
-    }
-
     fn footer(&self, cx: &App) -> Option<SharedString> {
         self.links.read(cx).indexing_footer()
     }
 }
 
-impl AsMut<Runs> for QuickOpenDelegate {
-    fn as_mut(&mut self) -> &mut Runs {
+impl IndexDelegate for QuickOpenDelegate {
+    type Found = Vec<NoteMatch>;
+    type Key = EntryId;
+
+    fn runs(&mut self) -> &mut Runs {
         &mut self.runs
+    }
+
+    fn sync(&self) -> &Entity<IndexSync> {
+        &self.links
+    }
+
+    fn scanning(&mut self) {
+        self.answered = Answered::Scanning;
+        self.list.clear();
+    }
+
+    fn query(&mut self, text: &str, run: Run) -> Option<NoteQuery> {
+        if run.is_user() {
+            self.list.cancel();
+        }
+        Some(NoteQuery::new(text, self.showing, &self.recent))
+    }
+
+    async fn search(
+        snapshot: &IndexSnapshot,
+        query: &NoteQuery,
+        jobs: &dyn Jobs,
+        cancel: &AtomicBool,
+    ) -> Option<Vec<NoteMatch>> {
+        snapshot.find_notes(query, LIMIT, jobs, cancel).await
+    }
+
+    fn show(&mut self, landed: Landed<Vec<NoteMatch>>, _: &mut Context<Picker<Self>>) {
+        let Landed {
+            id,
+            run,
+            begun,
+            snapshot,
+            query,
+            found,
+        } = landed;
+        self.answered = if query.is_empty() {
+            Answered::Recent
+        } else {
+            Answered::Query
+        };
+        self.list
+            .replace(id, snapshot, query, found, !run.is_user());
+        if run.is_user() {
+            #[cfg(test)]
+            {
+                self.logged += 1;
+            }
+            if cfg!(not(debug_assertions)) {
+                eprintln!(
+                    "quick open: {} matches, {:?} from the edit",
+                    self.list.rows.len(),
+                    begun.elapsed()
+                );
+            }
+        }
+    }
+
+    fn key(&self, ix: usize) -> Option<EntryId> {
+        self.list.rows.get(ix).map(|row| row.found.id)
     }
 }
 
@@ -201,64 +202,10 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
-        let started = self.runs.start(self.links.read(cx));
-        let (id, run) = (started.id, started.run);
-        if run.is_user() {
-            self.list.cancel();
-        }
-        let snapshot = self.links.read(cx).index().snapshot();
-        let query = Arc::new(NoteQuery::new(query, self.showing, &self.recent));
-        if self.links.read(cx).awaits_first_build() {
-            // Nothing to list yet; `NotesChanged` re-runs the query once the first build applies.
-            self.answered = Answered::Scanning;
-            self.list.replace(id, snapshot, query, Vec::new(), false);
-            return Runs::settle(id, cx);
-        }
-        let wait = match run {
-            Run::Refresh => Some(NOTES_CHANGED_REFRESH),
-            Run::Search => started.behind_user.then_some(SEARCH_DEBOUNCE),
-            Run::Notify => None,
-        };
-        let released = self.runs.scanning(&started);
-        let search = Search {
-            id,
-            run,
-            answers: if query.is_empty() {
-                Answered::Recent
-            } else {
-                Answered::Query
-            },
-            started: Instant::now(),
-            snapshot: snapshot.clone(),
-            query: Arc::clone(&query),
-        };
-        let executor = cx.background_executor().clone();
-        cx.spawn(async move |picker, cx| {
-            if let Some(wait) = wait {
-                cx.background_executor().timer(wait).await;
-            }
-            released.await;
-            let found = fan_out(
-                executor,
-                snapshot,
-                query,
-                started.cancel,
-                |snapshot, lookup, range, query, cancel| {
-                    find_notes(snapshot, lookup, range, query, cancel, LIMIT)
-                },
-                |snapshot, found, query| merge_notes(snapshot, found, query, LIMIT),
-            );
-            let Some(found) = found.await else {
-                return;
-            };
-            let _ = picker.update(cx, |picker, cx| {
-                Self::apply(picker, search, found, cx);
-            });
-        })
+        Runs::update_matches(self, query, cx)
     }
 
     fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
-        self.runs.confirmed();
         if let Some(row) = self.list.rows.get(ix) {
             cx.emit(NoteActivated(row.found.id));
         }

@@ -1,15 +1,16 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use gpui::{AppContext as _, Entity, Focusable, TestAppContext, VisualTestContext};
-use inkra_index::Searched;
+use inkra_index::{NoteQuery, Searched};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
+use super::VaultSearchDelegate;
 use super::rows::Row;
-use super::{Run, VaultSearchDelegate};
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
-use crate::picker::runs::SEARCH_DEBOUNCE;
+use crate::picker::runs::{Landed, Run, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::test_support::scan_notes;
 use crate::vault::NoteStore;
@@ -163,8 +164,15 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
     search(&mut opened, "p l a n");
 
     opened.picker.update(&mut opened.visual, |picker, cx| {
-        let stale = picker.delegate.runs.id().previous();
-        VaultSearchDelegate::apply(picker, stale, Run::Search, Searched::default(), cx);
+        let landed = Landed {
+            id: picker.delegate.runs.id().previous(),
+            run: Run::Search,
+            begun: Instant::now(),
+            snapshot: picker.delegate.links.read(cx).index().snapshot(),
+            query: Arc::new(NoteQuery::new("", None, &[])),
+            found: Searched::default(),
+        };
+        Runs::apply(picker, landed, cx);
     });
 
     assert_eq!(listed(&mut opened), ["# a (1)", "1: plan"]);

@@ -1,6 +1,7 @@
 //! Inkra: a note editor on GPUI. A library with two entry points, `run` and
 //! `shot`, so every view stays `pub(crate)` instead of widening the public surface.
 
+mod background;
 mod backlinks;
 mod bootstrap;
 mod buffer_events;

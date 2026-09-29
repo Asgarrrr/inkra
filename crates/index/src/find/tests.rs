@@ -1,10 +1,12 @@
 use std::sync::atomic::AtomicBool;
 
-use inkra_vault::{EntryId, Vault};
+use futures::executor::block_on;
+use inkra_vault::{EntryId, Serial, Vault};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::find::find_in;
 use crate::test_support::{id, mtime, note_set, vault};
-use crate::{Group, NoteContent, NoteIndex, NoteMatch, NoteQuery, find_notes, merge_notes};
+use crate::{Group, NoteContent, NoteIndex, NoteMatch, NoteQuery};
 
 /// Texts load at `mtime(0)`, so mtimes tie unless a test sets them.
 fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
@@ -29,20 +31,8 @@ pub(super) fn with_names(files: &[&str]) -> (Vault, NoteIndex) {
 }
 
 fn run(index: &NoteIndex, query: &NoteQuery, cancel: bool, limit: usize) -> Vec<NoteMatch> {
-    let snapshot = index.snapshot();
     let cancel = AtomicBool::new(cancel);
-    let Some(lookup) = snapshot.lookup(query, &cancel) else {
-        return Vec::new();
-    };
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        0..index.names().len(),
-        query,
-        &cancel,
-        limit,
-    );
-    merge_notes(&snapshot, vec![kept], query, limit)
+    block_on(index.snapshot().find_notes(query, limit, &Serial, &cancel)).unwrap_or_default()
 }
 
 pub(super) fn find(index: &NoteIndex, text: &str) -> Vec<NoteMatch> {
@@ -296,7 +286,7 @@ fn a_cancelled_search_lists_nothing() {
     let Some(lookup) = snapshot.lookup(&query, &AtomicBool::new(false)) else {
         panic!("not cancelled");
     };
-    let found = find_notes(
+    let found = find_in(
         &snapshot,
         &lookup,
         0..index.names().len(),
@@ -320,27 +310,6 @@ fn a_note_not_loaded_is_found_by_its_name_only() {
     let (_vault, index) = with_texts(&[("plan.md", None), ("other.md", None)]);
     assert_eq!(groups(&find(&index, "plan")), [("plan", Group::Name)]);
     assert_eq!(paths(&find(&index, "plan other")), Vec::<&str>::new());
-}
-
-#[test]
-fn merging_the_snapshot_s_chunks_equals_one_range() {
-    let files: Vec<String> = (0..40).map(|n| format!("f{}/plan {n}.md", n % 7)).collect();
-    let files: Vec<&str> = files.iter().map(String::as_str).collect();
-    let (_vault, index) = with_names(&files);
-    let query = NoteQuery::new("plan 3", None, &[]);
-    let whole = run(&index, &query, false, 5);
-    assert_eq!(whole.len(), 5);
-    let snapshot = index.snapshot();
-    let cancel = AtomicBool::new(false);
-    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
-        panic!("not cancelled");
-    };
-    let parts = snapshot
-        .chunks(4)
-        .into_iter()
-        .map(|range| find_notes(&snapshot, &lookup, range, &query, &cancel, 5))
-        .collect();
-    assert_eq!(merge_notes(&snapshot, parts, &query, 5), whole);
 }
 
 #[test]

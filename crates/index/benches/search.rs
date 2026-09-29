@@ -6,11 +6,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{
-    IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Searched, search,
-};
+use inkra_index::{IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Searched};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Serial, Vault};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -115,11 +113,10 @@ fn settle(index: &mut NoteIndex) {
 
 /// One keystroke on one core: the lookup, then `search` over every note.
 fn keystroke(snapshot: &IndexSnapshot, query: &NoteQuery, cancel: &AtomicBool) -> Searched {
-    let Some(lookup) = snapshot.lookup(query, cancel) else {
+    let Some(found) = block_on(snapshot.search(query, LIMIT, &Serial, cancel)) else {
         panic!("not cancelled");
     };
-    let all = snapshot.chunks(1).into_iter().next().unwrap_or_default();
-    search(snapshot, &lookup, all, query, cancel, LIMIT)
+    found
 }
 
 fn hit_count(found: &Searched) -> usize {

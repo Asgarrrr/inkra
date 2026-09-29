@@ -1,14 +1,17 @@
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
 use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
-use crate::{CorpusSnapshot, NoteContent, NoteIndex, NoteSet, Target};
+use crate::{
+    CorpusSnapshot, IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Target,
+};
 
 pub(crate) const ROOT: &str = "/vault";
 
@@ -153,4 +156,17 @@ pub(crate) fn indexed(texts: &[Option<&str>]) -> (Vec<EntryId>, NoteIndex) {
         }
     }
     (ids, index)
+}
+
+/// `find_notes` over the whole vault, on one job.
+pub(crate) fn find_all(
+    snapshot: &IndexSnapshot,
+    query: &NoteQuery,
+    limit: usize,
+) -> Vec<NoteMatch> {
+    let found = block_on(snapshot.find_notes(query, limit, &Serial, &AtomicBool::new(false)));
+    let Some(found) = found else {
+        panic!("not cancelled");
+    };
+    found
 }

@@ -7,9 +7,10 @@ use inkra_index::NoteQuery;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
-use super::{Answered, NOTES_CHANGED_REFRESH, QuickOpenDelegate, Run, SEARCH_DEBOUNCE, Search};
+use super::QuickOpenDelegate;
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
+use crate::picker::runs::{Landed, NOTES_CHANGED_REFRESH, Run, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::test_support::{entry_id, scan_notes, unscanned_notes, vault};
 use crate::vault::NoteStore;
@@ -212,16 +213,15 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
     opened.visual.simulate_keystrokes("p");
 
     opened.picker.update(&mut opened.visual, |picker, cx| {
-        let stale = picker.delegate.runs.id().previous();
-        let search = Search {
-            id: stale,
+        let landed = Landed {
+            id: picker.delegate.runs.id().previous(),
             run: Run::Search,
-            answers: Answered::Query,
-            started: Instant::now(),
+            begun: Instant::now(),
             snapshot: picker.delegate.links.read(cx).index().snapshot(),
             query: Arc::new(NoteQuery::new("", None, &[])),
+            found: Vec::new(),
         };
-        QuickOpenDelegate::apply(picker, search, Vec::new(), cx);
+        Runs::apply(picker, landed, cx);
     });
 
     assert_eq!(listed(&mut opened), ["plan"]);

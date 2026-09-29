@@ -63,6 +63,12 @@ impl List {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
+    /// No rows; the excerpts in flight will not land.
+    pub(super) fn clear(&mut self) {
+        self.cancel();
+        self.rows.clear();
+    }
+
     pub(super) fn new(snapshot: IndexSnapshot, query: Arc<NoteQuery>) -> Self {
         Self {
             id: RunId::default(),

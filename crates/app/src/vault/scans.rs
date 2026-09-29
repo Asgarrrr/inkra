@@ -3,31 +3,14 @@
 use std::sync::Arc;
 
 use futures::channel::oneshot;
-use gpui::{BackgroundExecutor, Context, Entity, Priority, prelude::*};
+use gpui::{Context, Entity, Priority, prelude::*};
 use inkra_vault::{
-    Claims, EntryId, FileIdentity, Job, Jobs, Listed, Mtime, Pending, Scan, Scanned, Scans,
-    Swapped, Vault,
+    Claims, EntryId, FileIdentity, Listed, Mtime, Pending, Scan, Scanned, Scans, Swapped, Vault,
 };
 
 use super::NoteStore;
+use crate::background::Background;
 use crate::timeline::{Step, Timeline, timed};
-
-/// The walk's jobs on the background threads, at low priority as Zed's scanner.
-struct Background(BackgroundExecutor);
-
-impl Jobs for Background {
-    fn parallelism(&self) -> usize {
-        self.0.num_cpus()
-    }
-
-    fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a> {
-        Box::pin(self.0.scoped_priority(Priority::Low, move |scope| {
-            for job in jobs {
-                scope.spawn(job);
-            }
-        }))
-    }
-}
 
 impl NoteStore {
     /// Resolves once a scan that started after this call has swapped in; dropped if its walk fails.
@@ -73,7 +56,10 @@ impl NoteStore {
             return;
         };
         let fs = Arc::clone(&self.fs);
-        let jobs = Background(cx.background_executor().clone());
+        let jobs = Background {
+            executor: cx.background_executor().clone(),
+            priority: Priority::Low,
+        };
         // Detached: a store dropped mid-scan lets the walk finish, then its updates find nothing.
         cx.spawn(async move |this, cx| {
             if scan.is_initial() {

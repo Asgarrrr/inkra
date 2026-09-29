@@ -16,13 +16,13 @@ use crate::timeline::{Step, Timeline, timed};
 use crate::vault::{NoteSaved, NoteStore};
 
 mod building;
-mod fan_out;
 mod loading;
 mod watch;
 
-pub(crate) use fan_out::fan_out;
 use loading::Landed;
-pub(crate) use watch::{BUILDING_REFRESH, IndexWatch, Refresh};
+#[cfg(test)]
+pub(crate) use watch::BUILDING_REFRESH;
+pub(crate) use watch::IndexWatch;
 
 /// A picker's empty text before the first build.
 pub(crate) const SCANNING: &str = "Scanning the vault…";

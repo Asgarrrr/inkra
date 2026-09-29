@@ -13,7 +13,8 @@ use super::{Opened, cancel_flag, footer, listed, open, search, with_texts};
 use crate::index::{BUILDING_REFRESH, IndexSync};
 use crate::keymap::key_bindings;
 use crate::picker::Picker;
-use crate::quick_open::{NOTES_CHANGED_REFRESH, QuickOpenDelegate};
+use crate::picker::runs::NOTES_CHANGED_REFRESH;
+use crate::quick_open::QuickOpenDelegate;
 use crate::sidebar::NoteActivated;
 use crate::test_support::{entry_id, unscanned_notes, vault};
 
