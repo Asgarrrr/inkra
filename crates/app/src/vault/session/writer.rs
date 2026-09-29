@@ -5,13 +5,13 @@ use inkra_vault::{Fs, Saved, Stamp};
 
 /// Two writers exist momentarily (the periodic chain and the quit flush);
 /// the sequence orders them, since the lock has no fairness guarantee.
-pub(super) struct Writer {
+pub(in crate::vault) struct Writer {
     /// No foreground code may hold this guard, or shutdown spins until its timeout.
     state: futures::lock::Mutex<WriterState>,
 }
 
 impl Writer {
-    pub(super) fn new(stamp: Stamp) -> Self {
+    pub(in crate::vault) fn new(stamp: Stamp) -> Self {
         Self {
             state: futures::lock::Mutex::new(WriterState {
                 // Below every minted sequence, so the first write is never
@@ -23,7 +23,7 @@ impl Writer {
     }
 
     /// The stamp the next save hands `Fs::save`: that of the file the buffer last matched.
-    pub(super) async fn expected(&self) -> Stamp {
+    pub(in crate::vault) async fn expected(&self) -> Stamp {
         self.state.lock().await.stamp
     }
 
@@ -42,14 +42,14 @@ struct WriterState {
 }
 
 /// Only a gone note recreates its folder: a present note's folder that left fails the save.
-pub(super) enum Folder {
+pub(in crate::vault) enum Folder {
     MustExist,
     Create,
 }
 
 /// `None` means overtaken, not failed — the caller must not report it and
 /// must not advance `saved_version`.
-pub(super) async fn write_through(
+pub(in crate::vault) async fn write_through(
     writer: Arc<Writer>,
     fs: Arc<dyn Fs>,
     path: PathBuf,

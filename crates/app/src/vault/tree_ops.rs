@@ -1,49 +1,27 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures::channel::oneshot;
-use gpui::{App, AsyncApp, Context, Task, WeakEntity, prelude::*};
+use gpui::{App, Context, Task, prelude::*};
 use inkra_vault::{EntryId, Fs, Kind};
 
 use super::NoteStore;
-use super::store::Location;
-use super::writer::Writer;
+use super::session::{Lifecycle, PendingSave, Writer};
 use super::{NoteClosed, RenameFailed, TrashFailed};
 
 impl NoteStore {
     /// Ordered on the note's chain: a write landing after the delete would
     /// recreate the file. A gone note closes, trashing only a file its own write put back (watcher spec, F9).
     pub(crate) fn trash(&mut self, id: EntryId, cx: &mut Context<Self>) -> Task<bool> {
-        if id == EntryId::DETACHED {
+        let has_entry = self
+            .vault
+            .as_ref()
+            .is_some_and(|vault| vault.read(cx).entry(id).is_some());
+        let Some(pending) = self.sessions.update(id, |life| life.begin_trash(has_entry)) else {
             return Task::ready(false);
-        }
-        let gone = self.is_gone(id);
-        if !gone
-            && self
-                .vault
-                .as_ref()
-                .and_then(|v| v.read(cx).entry(id))
-                .is_none()
-        {
-            return Task::ready(false);
-        }
-        let ops = self.ops.entry(id).or_default();
-        if ops.trashing {
-            return Task::ready(false);
-        }
-        ops.trashing = true;
-        if gone {
-            // Cancelled, not preempted: the write would recreate the file whose text the trash discards.
-            ops.cancel_pending();
-        } else {
-            // Preempted, not cancelled: cancelling would trash the note with
-            // the previous save's text, the only copy the user gets back.
-            self.schedule_save(id, Duration::ZERO, cx);
-        }
+        };
 
         let fs = Arc::clone(&self.fs);
-        self.after_chain(id, cx, async move |this, cx| {
+        self.queue(id, pending, cx, async move |this, cx| {
             // Resolved here, not at issue time: a delete queued behind a
             // rename must use the path after the move.
             let Ok(target) = this.update(cx, |this, cx| this.trash_target(id, cx)) else {
@@ -59,16 +37,13 @@ impl NoteStore {
 
             this.update(cx, |this, cx| {
                 if !removed {
-                    if let Some(ops) = this.ops.get_mut(&id) {
-                        ops.trashing = false;
-                    }
+                    this.sessions.update(id, Lifecycle::trash_failed);
                     cx.emit(TrashFailed(id));
                     return false;
                 }
                 // Closed only once the file is actually gone: an
                 // optimistic close on a failed delete strands the buffer.
-                this.open.remove(&id);
-                this.observers.remove(&id);
+                drop(this.sessions.update(id, Lifecycle::trash_done));
                 if this.current == Some(id) {
                     this.current = None;
                 }
@@ -82,16 +57,13 @@ impl NoteStore {
     }
 
     /// `None`: nothing on disk is the note's. With no entry, only the file at a gone note's last path
-    /// may be: `trashing` stops its reclaim, so the vault may never see what the note's own save wrote.
+    /// may be: a trashing note claims nothing at a swap, so the vault may never see what the note's own save wrote.
     fn trash_target(&self, id: EntryId, cx: &App) -> Option<TrashTarget> {
         if let Some(path) = self.vault.as_ref()?.read(cx).absolute(id) {
             return Some(TrashTarget::Entry(path));
         }
-        let note = self.open.get(&id)?;
-        match &note.location {
-            Location::Gone(path) => Some(TrashTarget::LastWrite(path.clone(), note.writer())),
-            Location::Vault | Location::Detached(_) => None,
-        }
+        let (path, note) = self.sessions.get(id)?.life.last_write()?;
+        Some(TrashTarget::LastWrite(path.clone(), note.writer()))
     }
 
     /// The id comes from `Fs::create`'s identity, never the path — a
@@ -157,11 +129,9 @@ impl NoteStore {
         if self.vault.is_none() {
             return Task::ready(false);
         }
-        self.schedule_save(id, Duration::ZERO, cx);
-
         let name = name.to_owned();
         let fs = Arc::clone(&self.fs);
-        self.after_chain(id, cx, async move |this, cx| {
+        self.queue(id, PendingSave::Write, cx, async move |this, cx| {
             // Resolved here, not at issue time: an operation queued behind
             // a rename must act on the moved name.
             let Ok(Some((from, to))) = this.update(cx, |this, cx| {
@@ -194,30 +164,6 @@ impl NoteStore {
             let _ = this.update(cx, |_, cx| cx.notify());
             true
         })
-    }
-
-    /// Runs `op` after every operation already queued on the note's chain,
-    /// and resolves to its result.
-    pub(super) fn after_chain<Op>(
-        &mut self,
-        id: EntryId,
-        cx: &mut Context<Self>,
-        op: Op,
-    ) -> Task<bool>
-    where
-        Op: AsyncFnOnce(WeakEntity<Self>, &mut AsyncApp) -> bool + 'static,
-    {
-        let ops = self.ops.entry(id).or_default();
-        let previous = ops.chain.take();
-        let (done, wait) = oneshot::channel();
-        ops.chain = Some(cx.spawn(async move |this, cx| {
-            if let Some(previous) = previous {
-                previous.await;
-            }
-            let _ = done.send(op(this, cx).await);
-        }));
-        cx.foreground_executor()
-            .spawn(async move { wait.await == Ok(true) })
     }
 }
 

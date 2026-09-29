@@ -113,6 +113,26 @@ fn typing_does_not_write_before_the_delay_elapses(cx: &mut TestAppContext) {
     );
 }
 
+/// The second keystroke joins the pending save: replacing it would drop its cancel, which writes at once.
+#[gpui::test]
+fn a_second_keystroke_does_not_write_before_the_delay(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "before");
+
+    let (mut visual, _notes) = open_shell(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    visual.simulate_input("X");
+    cx.run_until_parked();
+    visual.simulate_input("Y");
+    cx.executor().advance_clock(AUTOSAVE_DELAY / 2);
+    cx.run_until_parked();
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("before"),
+        "both keystrokes wait for the first one's deadline"
+    );
+}
+
 #[gpui::test]
 fn continuous_typing_writes_once_per_interval(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

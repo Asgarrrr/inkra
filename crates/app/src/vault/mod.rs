@@ -4,15 +4,13 @@
 use gpui::actions;
 
 mod events;
-mod gone;
-mod ops;
 mod reload;
 mod save;
 mod scans;
+mod session;
 mod store;
 mod tree_ops;
 mod watch;
-mod writer;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

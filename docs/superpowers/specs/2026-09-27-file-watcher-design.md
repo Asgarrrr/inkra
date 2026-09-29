@@ -351,14 +351,14 @@ it. It compares two vault states, not the expected stamp: that stamp sits
 behind the `Writer`'s async lock, which no foreground code may hold
 (`writer.rs:9`). The exact comparison happens on the chain.
 
-**The check is ordered on the chain.** `swap` queues it with `after_chain`
-(`tree_ops.rs:180-197`), behind every operation already queued on the note. A
+**The check is ordered on the chain.** `swap` queues it with `NoteStore::queue`
+and `PendingSave::Keep` (`session/queue.rs`), behind every operation already queued on the note. A
 write runs whole inside its chain task, through its final update
 (`store.rs:285-349`). So the check sees the expected stamp and `saved_version`
 of every write queued before it. It proceeds in this order:
 
-1. Foreground, one update. Stop if the note is closed, `ops.trashing` is set
-   (`tree_ops.rs:26-33`), the note is dirty (`is_dirty`, `store.rs:101-105`), or
+1. Foreground, one update. Stop if the note is not `Lifecycle::Open` (closed,
+   or `Trashing`; `session/lifecycle.rs`, `is_open`), the note is dirty (`is_dirty`, `store.rs:101-105`), or
    `vault.absolute(id)` is `None`. Else take the path and the entry's mtime.
 2. Background. Read the expected stamp (`Writer::expected`). Stop if the entry's
    mtime (taken in step 1) equals the expected stamp's mtime. Else `fs.load(path)`. Stop if the load fails, or if
@@ -755,7 +755,7 @@ found gone; W2c adds no observer.
    `mem::replace`. It visits each open note other than `DETACHED` with no
    entry in the new state, in `EntryId` order, so the outcome does not depend
    on `HashMap` order. For each, it takes the last path: the path of
-   `Location::Gone`, else `live.absolute(id)`. A note with `ops.trashing` set is
+   `Location::Gone`, else `live.absolute(id)`. A `Lifecycle::Trashing` note is
    skipped (below, "Trashing a gone note").
    - `Vault::id_at(&RelPath) -> Option<EntryId>` runs one binary search on
      the sorted entries (O(log n)), with the query keyed as `Kind::Note`.
@@ -780,9 +780,9 @@ found gone; W2c adds no observer.
 2. **Detect**, F7's pass after the `mem::replace`, per open note:
    - No entry: gone. If not gone yet, the location becomes
      `Gone(previous.absolute(id))`, the last vault path. With no path in the
-     previous state either, the note is not marked gone. A note with
-     `ops.trashing` set is skipped: our own trash closes it (`tree_ops.rs`,
-     `trash`). No reload check: a gone note never reaches F8.
+     previous state either, the note is not marked gone. A
+     `Lifecycle::Trashing` note is skipped: our own trash closes it
+     (`Lifecycle::swapped`, `session/lifecycle.rs`). No reload check: a gone note never reaches F8.
    - An entry, and the note gone: the location becomes `Vault`. The previous
      state had no entry for the id, so F7 queues a reload check, as for any
      note whose entry is new.
@@ -863,7 +863,7 @@ restored bytes beside it (conflict path).
 only when it is dirty, so an untouched gone note writes nothing. It stays in
 `open`, unreachable from the tree, and a later file at its path is reclaimed
 for it. The quit flush writes a dirty gone note to its last path; it still skips
-a note with `ops.trashing` set.
+a `Lifecycle::Trashing` note.
 
 **Trashing a gone note.** `trash`'s postcondition is "the note is not in
 `open`". Before W2c, `trash` returned `false` silently when the vault held no
@@ -882,7 +882,7 @@ is discarded: the confirmation already says it will be lost. Details:
     whose file leaves while its trash waits on the preempted write reaches
     the step with no entry; reusing the issue-time `gone` (false) emitted
     `TrashFailed` and left the note open. Its location stays `Vault`, since
-    F7's pass skips a note with `ops.trashing` set, so nothing on disk is
+    F7's pass skips a `Lifecycle::Trashing` note, so nothing on disk is
     its file. The issue-time `gone` only chooses between cancelling and
     preempting the pending autosave.
 - A gone note is not preempted with `schedule_save(id, ZERO)`: that would
@@ -892,7 +892,7 @@ is discarded: the confirmation already says it will be lost. Details:
 - A write already running lands first and recreates the file. If the swap's
   replay gives it the note's id before the close runs, the close trashes it
   as usual. If not, the vault holds no entry for it: the swap has not run
-  yet, or its reclaim skipped the note, since `ops.trashing` is set.
+  yet, or its reclaim skipped the note, since it is `Lifecycle::Trashing`.
 - **Corrected in the final W2c review:** the close then left that file on
   disk, and it came back as a new note. Now the step, after the chain so
   that every write has landed, loads the file at the last path through

@@ -5,34 +5,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
-use futures::channel::oneshot;
 use gpui::{App, Context, prelude::*};
 use inkra_vault::EntryId;
 
-use super::store::{Location, OpenNote};
-use super::writer::write_through;
+use super::session::{Location, write_through};
 use super::{ConflictPreserved, NoteSaved, NoteStore, SaveFailed};
 
 impl NoteStore {
     pub(super) fn schedule_save(&mut self, id: EntryId, delay: Duration, cx: &mut Context<Self>) {
-        if !self.open.contains_key(&id) {
+        if self.sessions.note(id).is_none() {
             return;
         }
-        let ops = self.ops.entry(id).or_default();
-        if delay.is_zero() {
-            ops.cancel_pending();
-        } else if ops.scheduled {
+        let Some(cancelled) = self.sessions.arm(id, delay) else {
             return;
-        }
-
-        let (cancel, cancelled) = oneshot::channel();
-        ops.cancel = Some(cancel);
-        ops.scheduled = !delay.is_zero();
-        // Taken, not dropped: replacing the slot outright would cancel an
-        // operation already queued behind it.
-        let previous = ops.chain.take();
-
-        self.ops.entry(id).or_default().chain = Some(cx.spawn(async move |this, cx| {
+        };
+        self.link(id, cx, async move |previous, this, cx| {
             let timer = cx.background_executor().timer(delay).fuse();
             if let Some(previous) = previous {
                 previous.await;
@@ -45,16 +32,12 @@ impl NoteStore {
             }
             // Before the write, not after, so a mid-write edit queues the
             // next write instead of being lost.
-            let reopened = this.update(cx, |this, _| {
-                if let Some(ops) = this.ops.get_mut(&id) {
-                    ops.scheduled = false;
-                }
-            });
+            let reopened = this.update(cx, |this, _| this.sessions.timer_passed(id));
             if reopened.is_err() {
                 return;
             }
             Self::write(id, this, cx).await;
-        }));
+        });
     }
 
     pub(crate) fn save_current(&mut self, cx: &mut Context<Self>) {
@@ -67,23 +50,21 @@ impl NoteStore {
     /// borrowed, so a later borrow here would panic.
     pub(super) fn flush_all(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
         let dirty: Vec<_> = self
-            .open
-            .iter()
-            .filter_map(|(id, note)| {
-                let buffer = note.buffer.read(cx);
-                if buffer.version() == note.saved_version {
-                    return None;
-                }
-                // Skips a note mid-trash: this flush can't join its chain,
-                // so writing here would recreate the file being deleted.
-                if self.ops.get(id).is_some_and(|ops| ops.trashing) {
+            .sessions
+            .live()
+            // Skips a note mid-trash: this flush can't join its chain,
+            // so writing here would recreate the file being deleted.
+            .filter(|(_, session)| session.life.is_open())
+            .filter_map(|(id, session)| {
+                let (location, note) = session.life.bound_at()?;
+                if !note.is_dirty(cx) {
                     return None;
                 }
                 Some((
-                    Arc::clone(&note.writer),
-                    self.write_path(*id, note, cx)?,
-                    Arc::from(buffer.text()),
-                    note.folder(),
+                    note.writer(),
+                    self.write_path(id, location, cx)?,
+                    note.snapshot(cx).0,
+                    location.folder(),
                 ))
             })
             .collect();
@@ -109,8 +90,8 @@ impl NoteStore {
         }
     }
 
-    fn write_path(&self, id: EntryId, note: &OpenNote, cx: &App) -> Option<PathBuf> {
-        match &note.location {
+    fn write_path(&self, id: EntryId, location: &Location, cx: &App) -> Option<PathBuf> {
+        match location {
             Location::Vault => self.vault.as_ref()?.read(cx).absolute(id),
             Location::Detached(path) | Location::Gone(path) => Some(path.clone()),
         }
@@ -119,21 +100,14 @@ impl NoteStore {
     async fn write(id: EntryId, this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp) {
         let Ok(Some((fs, writer, path, text, version, seq, folder))) =
             this.update(cx, |this, cx| {
-                let note = this.open.get(&id)?;
-                // `update`, never `as_mut`: the latter notifies on drop even
-                // though `finalize_transaction` changes no text.
-                let (text, version) = note.buffer.update(cx, |buffer, _| {
-                    buffer.finalize_transaction();
-                    (Arc::<str>::from(buffer.text()), buffer.version())
-                });
-                if version == note.saved_version {
-                    return None;
-                }
-                let Some(path) = this.write_path(id, note, cx) else {
+                let life = &this.sessions.get(id)?.life;
+                let (location, note) = life.bound_at()?;
+                let (text, version) = note.unsaved(cx)?;
+                let Some(path) = this.write_path(id, location, cx) else {
                     cx.emit(SaveFailed(id));
                     return None;
                 };
-                let (writer, folder) = (Arc::clone(&note.writer), note.folder());
+                let (writer, folder) = (note.writer(), location.folder());
                 let fs = Arc::clone(&this.fs);
                 let seq = this.next_seq();
                 Some((fs, writer, path, text, version, seq, folder))
@@ -161,8 +135,8 @@ impl NoteStore {
                 cx.emit(SaveFailed(id));
                 return;
             };
-            if let Some(note) = this.open.get_mut(&id) {
-                note.saved_version = version;
+            if let Some(note) = this.sessions.note_mut(id) {
+                note.landed(version);
             }
             // An atomic save moves the inode: without the re-key the id orphans on the next rescan.
             this.reidentify(id, saved.identity, saved.stamp.mtime, cx);

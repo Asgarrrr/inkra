@@ -17,14 +17,20 @@ paths:
 - `NoteStore::current` is the note `⌘S` writes and must be the note on screen.
   Its only writers are `set_current` (right after `EditorView::open_buffer`, no
   `await` between) and the synchronous `adopt` at launch.
-- Every filesystem operation on one note is ordered on its `Ops` chain. Do not
-  order moves by `Writer`'s sequence: a write pending when a delete is issued
-  carries the higher sequence.
-- A note being trashed is preempted (`schedule_save(id, Duration::ZERO)`), never
-  cancelled through `Ops::cancel_pending`, which would kill its autosave and
-  trash the previous save's text. A gone note is the exception: it has no file,
-  and its preempted write would recreate one, so its autosave is cancelled.
-- The quit flush cannot chain; `Ops::trashing` is what it skips.
+- Every filesystem operation on one note is ordered on its chain
+  (`session::Queue`), queued through `NoteStore::queue` with a `PendingSave`.
+  Do not order moves by `Writer`'s sequence: a write pending when a delete is
+  issued carries the higher sequence.
+- A note being trashed or renamed is preempted (`PendingSave::Write`), never
+  cancelled, which would kill its autosave and trash the previous save's text.
+  A gone note is the exception: it has no file, and its preempted write would
+  recreate one, so `Lifecycle::begin_trash` answers `PendingSave::Drop`.
+- Only `Sessions::update` changes whether a lifecycle binds a note, which keeps
+  the live set; `Sessions::swapped` moves a bound note's `Location`. The swap,
+  the claims and the quit flush walk that set, never every session. The quit flush cannot chain; a `Lifecycle::Trashing` note is what it
+  skips.
+- `saved_version` moves only in `OpenNote::landed` and `did_reload`, whose
+  `Adopt` is the one caller of `Writer::adopt` (note-session spec).
 - Compare `Stamp` with `!=`, never an ordering; it never includes the identity,
   which our own atomic save changes.
 - No write destroys bytes it did not put there: `Fs::save` preserves the current
