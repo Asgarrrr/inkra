@@ -9,6 +9,7 @@ use gpui::{
 use crate::one_line::one_line;
 use crate::theme;
 
+use super::rows::Item;
 use super::{EditState, INDENT_BASE, INDENT_STEP, Row, Sidebar};
 
 impl Sidebar {
@@ -43,11 +44,10 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Vec<Div> {
         range
-            .map(|ix| {
-                let Some(row) = self.row_at(ix) else {
-                    return self.editing.as_ref().map_or_else(div, Self::render_field);
-                };
-                self.render_row(&row, cx)
+            .map(|item| match self.rows.item(item) {
+                Some(Item::Row(row)) => self.render_row(&self.rows.visible().row(row), cx),
+                Some(Item::Field(edit)) => Self::render_field(edit),
+                None => div(),
             })
             .collect()
     }

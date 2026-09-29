@@ -9,11 +9,8 @@ use crate::field::{Cancelled, Confirmed, NameField};
 use super::{Rename, Sidebar, Trash};
 
 pub(super) struct EditState {
-    /// `None` while creating: this is what tells the two gestures apart.
-    pub(super) target: Option<EntryId>,
     parent: Option<EntryId>,
     kind: Kind,
-    pub(super) at: usize,
     pub(super) depth: usize,
     pub(super) field: Entity<NameField>,
     /// Must not disappear silently on a refusal — Zed's own confirm does that.
@@ -57,20 +54,21 @@ fn file_name_of(entry: &Entry) -> String {
 impl Sidebar {
     /// Trashing takes the file as it is on disk; the editor's newer text is not recoverable.
     pub(super) fn trash(&mut self, _: &Trash, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing.is_some() {
+        if self.rows.edit().is_some() {
             return;
         }
         let Some(id) = self.selected else {
             return;
         };
-        let Some(at) = self.visible.index_of(id) else {
+        let visible = self.rows.visible();
+        let Some(at) = visible.index_of(id) else {
             return;
         };
         // Folders are not deletable yet: one gesture would take every note inside.
-        if self.visible.entry(at).kind == Kind::Dir {
+        if visible.entry(at).kind == Kind::Dir {
             return;
         }
-        let row = self.visible.row(at);
+        let row = visible.row(at);
 
         let message = format!("Move \u{201c}{}\u{201d} to the Trash?", row.name);
         let detail = self
@@ -86,7 +84,7 @@ impl Sidebar {
             cx,
         );
 
-        let next = self.after_deleting(id);
+        let next = visible.neighbour(id);
         cx.spawn(async move |sidebar, cx| {
             if answer.await != Ok(0) {
                 return;
@@ -115,33 +113,36 @@ impl Sidebar {
     }
 
     pub(super) fn open_create(&mut self, kind: Kind, cx: &mut Context<Self>) -> Entity<NameField> {
-        let placement = self.insertion_point(cx);
-        self.open_edit(None, placement, kind, "", cx)
+        let (parent, item, depth) = self.insertion_point(cx);
+        let edit = Self::edit_state(parent, kind, depth, "", cx);
+        let field = edit.field.clone();
+        self.rows.insert(item, edit);
+        self.show_field(item, cx);
+        field
     }
 
-    fn open_edit(
-        &mut self,
-        target: Option<EntryId>,
-        (parent, at, depth): (Option<EntryId>, usize, usize),
+    fn edit_state(
+        parent: Option<EntryId>,
         kind: Kind,
+        depth: usize,
         initial: &str,
         cx: &mut Context<Self>,
-    ) -> Entity<NameField> {
+    ) -> EditState {
         let (field, subscriptions) = Self::open_field(initial, cx);
-        self.editing = Some(EditState {
-            target,
+        EditState {
             parent,
             kind,
-            at,
             depth,
-            field: field.clone(),
+            field,
             rejected: None,
             _subscriptions: subscriptions,
-        });
+        }
+    }
+
+    fn show_field(&self, item: usize, cx: &mut Context<Self>) {
         // Load-bearing, not polish — see `Sidebar::scroll`'s field doc.
-        self.scroll.scroll_to_item(at, ScrollStrategy::Center);
+        self.scroll.scroll_to_item(item, ScrollStrategy::Center);
         cx.notify();
-        field
     }
 
     pub(super) fn open_field(
@@ -154,7 +155,7 @@ impl Sidebar {
             sidebar.confirm(&event.0, cx);
         });
         let cancelled = cx.subscribe(&field, |sidebar, _, _: &Cancelled, cx| {
-            sidebar.editing = None;
+            sidebar.rows.close();
             cx.notify();
         });
         (field, [confirmed, cancelled])
@@ -167,24 +168,30 @@ impl Sidebar {
     }
 
     pub(super) fn open_rename(&mut self, cx: &mut Context<Self>) -> Option<Entity<NameField>> {
-        if self.editing.is_some() {
+        if self.rows.edit().is_some() {
             return None;
         }
         let id = self.selected?;
-        let at = self.visible.index_of(id)?;
-        let row = self.visible.row(at);
-        let parent = self.visible.parent_of(at);
-        Some(self.open_edit(Some(id), (parent, at, row.depth), row.kind, &row.name, cx))
+        let visible = self.rows.visible();
+        let at = visible.index_of(id)?;
+        let row = visible.row(at);
+        let parent = visible.parent_of(at);
+        let edit = Self::edit_state(parent, row.kind, row.depth, &row.name, cx);
+        let field = edit.field.clone();
+        let item = self.rows.replace(id, edit)?;
+        self.show_field(item, cx);
+        Some(field)
     }
 
     pub(super) fn insertion_point(
         &mut self,
         cx: &mut Context<Self>,
     ) -> (Option<EntryId>, usize, usize) {
-        let Some(selected) = self.selected.and_then(|id| self.visible.index_of(id)) else {
-            return (None, self.visible.len(), 0);
+        let visible = self.rows.visible();
+        let Some(selected) = self.selected.and_then(|id| visible.index_of(id)) else {
+            return (None, visible.len(), 0);
         };
-        let entry = self.visible.entry(selected);
+        let entry = visible.entry(selected);
         let (id, depth) = (entry.id, entry.path.depth());
         if entry.kind == Kind::Dir {
             if !self.expanded.contains(&id) {
@@ -192,18 +199,18 @@ impl Sidebar {
             }
             return (Some(id), selected + 1, depth + 1);
         }
-        (self.visible.parent_of(selected), selected + 1, depth)
+        (visible.parent_of(selected), selected + 1, depth)
     }
 
     /// A refused name leaves the field open with the reason under it.
     fn confirm(&mut self, name: &str, cx: &mut Context<Self>) {
-        let Some(edit) = self.editing.as_ref() else {
+        let Some(edit) = self.rows.edit() else {
             return;
         };
-        let (target, parent, kind) = (edit.target, edit.parent, edit.kind);
+        let (target, parent, kind) = (self.rows.target(), edit.parent, edit.kind);
         // Before `check_name`: a note made outside the app may hold a name it now refuses.
         if self.is_current_name(target, name, cx) {
-            self.editing = None;
+            self.rows.close();
             cx.notify();
             return;
         }
@@ -215,14 +222,14 @@ impl Sidebar {
                     .then_some(Rejection::Duplicate)
             });
         if let Some(rejected) = rejected {
-            if let Some(edit) = self.editing.as_mut() {
+            if let Some(edit) = self.rows.edit_mut() {
                 edit.rejected = Some(rejected);
             }
             cx.notify();
             return;
         }
 
-        self.editing = None;
+        self.rows.close();
         let name = name.to_owned();
         if let Some(id) = target {
             self.notes

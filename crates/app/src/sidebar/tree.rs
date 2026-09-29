@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 use gpui::{Context, ScrollStrategy, Window};
@@ -13,22 +12,10 @@ impl Sidebar {
             .read(cx)
             .vault()
             .map_or_else(|| Arc::from([]), |vault| vault.read(cx).shared_entries());
-        let target = self.editing.as_ref().and_then(|edit| edit.target);
-        let target_at = self.visible.rewalk(entries, &self.expanded, target);
         // The field must end up on a row the list still draws: an unrendered
         // row is in no dispatch node, so gpui silently swallows every keystroke.
-        if let Some(edit) = self.editing.as_mut() {
-            let at = match edit.target {
-                Some(_) => target_at,
-                None => Some(edit.at.min(self.visible.len())),
-            };
-            match at {
-                Some(at) => {
-                    edit.at = at;
-                    self.scroll.scroll_to_item(at, ScrollStrategy::Center);
-                }
-                None => self.editing = None,
-            }
+        if let Some(item) = self.rows.rewalk(entries, &self.expanded) {
+            self.scroll.scroll_to_item(item, ScrollStrategy::Center);
         }
         cx.notify();
     }
@@ -53,28 +40,14 @@ impl Sidebar {
     /// the selection out from under the field. `trash` and `rename` carry
     /// the same guard.
     fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if self.editing.is_some() || self.visible.is_empty() {
+        if self.rows.edit().is_some() {
             return;
         }
-        let last = self.visible.len() - 1;
-        let next = match self.selected.and_then(|id| self.visible.index_of(id)) {
-            Some(index) => index.saturating_add_signed(delta).min(last),
-            None if delta > 0 => 0,
-            None => last,
+        let Some(next) = self.rows.visible().step(self.selected, delta) else {
+            return;
         };
-        self.selected = Some(self.visible.entry(next).id);
+        self.selected = Some(next);
         cx.notify();
-    }
-
-    /// Must be computed before the delete: afterwards, `id`'s row no longer exists.
-    pub(super) fn after_deleting(&self, id: EntryId) -> Option<EntryId> {
-        let index = self.visible.index_of(id)?;
-        let neighbour = if index + 1 < self.visible.len() {
-            index + 1
-        } else {
-            index.checked_sub(1)?
-        };
-        Some(self.visible.entry(neighbour).id)
     }
 
     pub(super) fn select_prev(
@@ -95,27 +68,8 @@ impl Sidebar {
         self.step(1, cx);
     }
 
-    /// A create occupies an index of its own; a rename replaces its row —
-    /// otherwise renaming would show the old name and the field at once.
-    pub(super) fn row_at(&self, ix: usize) -> Option<Row> {
-        let listed = match self.editing.as_ref() {
-            None => ix,
-            Some(edit) if edit.target.is_some() => (ix != edit.at).then_some(ix)?,
-            Some(edit) => match ix.cmp(&edit.at) {
-                Ordering::Less => ix,
-                Ordering::Equal => return None,
-                Ordering::Greater => ix - 1,
-            },
-        };
-        (listed < self.visible.len()).then(|| self.visible.row(listed))
-    }
-
     /// `pub(crate)` for the rename test in `shell.rs`, which asserts the count does not move.
-    pub(crate) fn row_count(&self) -> usize {
-        let inserting = self
-            .editing
-            .as_ref()
-            .is_some_and(|edit| edit.target.is_none());
-        self.visible.len() + usize::from(inserting)
+    pub(crate) fn item_count(&self) -> usize {
+        self.rows.item_count()
     }
 }

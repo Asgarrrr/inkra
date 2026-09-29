@@ -54,7 +54,7 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index"]
 # Unobservable. The timeline line goes to stderr only; `||` prints it on every
 # mark in release and whenever the line is due in a test, and no test reads stderr.
 #
-# Equivalent. `step` takes only 1 or -1 (`select_next`, `select_prev`), so
+# Equivalent. `Visible::step` takes only 1 or -1 (`select_next`, `select_prev`), so
 # `delta >= 0` and `delta > 0` agree on every call.
 #
 # Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
@@ -71,6 +71,6 @@ exclude_re = [
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in IndexSync::apply_landed$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
-    "^crates/app/src/sidebar/tree\\.rs:[0-9]+:[0-9]+: replace > with >= in Sidebar::step$",
+    "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",
     "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
 ]

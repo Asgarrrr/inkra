@@ -12,6 +12,9 @@ use crate::vault::NoteStore;
 
 mod edit;
 mod render;
+mod rows;
+#[cfg(test)]
+mod rows_tests;
 #[cfg(test)]
 mod tests;
 mod tree;
@@ -22,7 +25,7 @@ mod visible_tests;
 use edit::EditState;
 #[cfg(any(test, feature = "shot"))]
 pub(crate) use render::row_center;
-use visible::Visible;
+use rows::Rows;
 
 actions!(sidebar, [Trash, SelectPrev, SelectNext, Rename]);
 
@@ -43,8 +46,7 @@ pub(crate) struct Sidebar {
     /// Not `NoteStore::current`: a row can be selected unopened.
     selected: Option<EntryId>,
     focus_handle: FocusHandle,
-    visible: Visible,
-    editing: Option<EditState>,
+    rows: Rows<EditState>,
     /// Load-bearing: `uniform_list` only renders the visible range, and an
     /// unrendered focus handle falls back to the root, swallowing keystrokes.
     scroll: UniformListScrollHandle,
@@ -69,8 +71,7 @@ impl Sidebar {
             expanded: HashSet::new(),
             selected: None,
             focus_handle: cx.focus_handle(),
-            visible: Visible::default(),
-            editing: None,
+            rows: Rows::default(),
             scroll: UniformListScrollHandle::default(),
             _vault_changed: watched,
         };
@@ -100,7 +101,7 @@ impl Render for Sidebar {
             .child(
                 uniform_list(
                     "vault-tree",
-                    self.row_count(),
+                    self.item_count(),
                     cx.processor(Self::render_rows),
                 )
                 // `w_full`: `ListSizingBehavior::Auto` otherwise paints nothing (`elements/list.rs:192-193`).
@@ -109,8 +110,8 @@ impl Render for Sidebar {
                 .track_scroll(&self.scroll),
             )
             .children(
-                self.editing
-                    .as_ref()
+                self.rows
+                    .edit()
                     .and_then(|edit| edit.rejected)
                     .map(|rejected| {
                         div()
