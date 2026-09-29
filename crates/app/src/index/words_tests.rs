@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 use gpui::{AppContext as _, Entity, TestAppContext};
-use inkra_index::{NoteContent, NoteQuery, TermHit};
+use inkra_index::{NoteQuery, TermHit};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime};
+use inkra_vault::{EntryId, Fs, Kind};
 
 use super::IndexSync;
 use super::tests::{create, indexed_vault, saved_edit};
@@ -109,19 +109,11 @@ fn a_startup_load_past_the_merge_policy_merges_and_answers_as_a_fresh_build(
         .collect();
     let (_fs, notes, links) = indexed_vault(cx, &files);
     cx.run_until_parked();
-    assert!(
-        links.read_with(cx, |links, _| links.merges) > 0,
-        "a merge applied"
-    );
-    let (settled, settling, words) = links.read_with(cx, |links, _| {
+    let (settled, words) = links.read_with(cx, |links, _| {
         let index = links.index();
-        (
-            index.words_settled(),
-            links.settling,
-            index.words().heap_bytes(),
-        )
+        (index.words_settled(), index.words().heap_bytes())
     });
-    assert!(settled && !settling, "the load's settle applied");
+    assert!(settled, "the load's merges and settle applied");
     let line = cx.read(|cx| cx.global::<Timeline>().line());
     assert!(line.contains(&format!("words {words} bytes")), "{line}");
 
@@ -162,16 +154,11 @@ fn a_startup_load_below_the_merge_policy_settles_before_it_is_marked_indexed(
     let (_fs, _notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "beta")]);
     cx.run_until_parked();
 
-    let (settled, merges, words) = links.read_with(cx, |links, _| {
+    let (settled, words) = links.read_with(cx, |links, _| {
         let index = links.index();
-        (
-            index.words_settled(),
-            links.merges,
-            index.words().heap_bytes(),
-        )
+        (index.words_settled(), index.words().heap_bytes())
     });
     assert!(settled, "nothing fresh once the loads end");
-    assert_eq!(merges, 1);
     // Marked before the merge applied, the line would hold the fresh notes' bytes instead.
     let line = cx.read(|cx| cx.global::<Timeline>().line());
     assert!(line.contains(&format!("words {words} bytes")), "{line}");
@@ -201,17 +188,11 @@ fn a_startup_load_ending_in_a_rebuild_settles_before_it_is_marked_indexed(cx: &m
     gate.release();
     cx.run_until_parked();
 
-    let (merges, settling, settled, words) = links.read_with(cx, |links, _| {
+    let (settled, words) = links.read_with(cx, |links, _| {
         let index = links.index();
-        (
-            links.merges,
-            links.settling,
-            index.words_settled(),
-            index.words().heap_bytes(),
-        )
+        (index.words_settled(), index.words().heap_bytes())
     });
-    assert_eq!(merges, 1);
-    assert!(settled && !settling, "the rebuild's settle applied");
+    assert!(settled, "the rebuild's settle applied");
     let line = cx.read(|cx| cx.global::<Timeline>().line());
     assert!(line.contains("(1 notes, corpus "), "{line}");
     assert!(line.contains(&format!("words {words} bytes")), "{line}");
@@ -221,15 +202,13 @@ fn a_startup_load_ending_in_a_rebuild_settles_before_it_is_marked_indexed(cx: &m
 async fn a_save_after_the_load_settles_waits_in_fresh_for_the_policy(cx: &mut TestAppContext) {
     let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "")]);
     cx.run_until_parked();
-    assert_eq!(links.read_with(cx, |links, _| links.merges), 1);
+    assert!(links.read_with(cx, |links, _| links.index().words_settled()));
 
     saved_edit(cx, &notes, "b", "saved").await;
     cx.run_until_parked();
 
-    let (merges, settled) =
-        links.read_with(cx, |links, _| (links.merges, links.index().words_settled()));
-    assert_eq!(merges, 1, "a save starts no merge below the policy");
-    assert!(!settled, "the saved note is fresh");
+    let settled = links.read_with(cx, |links, _| links.index().words_settled());
+    assert!(!settled, "a save starts no merge below the policy");
     let b = entry_id(&notes, cx, "b");
     assert_eq!(
         looked_up(cx, &links, &[b], "saved"),
@@ -261,71 +240,16 @@ const PAST_THE_DEAD_SHARE: &[(&str, &str)] = &[
 ];
 
 #[gpui::test]
-async fn a_save_during_the_settle_waits_in_fresh_and_indexed_is_still_marked(
-    cx: &mut TestAppContext,
-) {
-    let (_fs, notes, links) = indexed_vault(cx, PAST_THE_DEAD_SHARE);
-    cx.run_until_parked();
-    saved_edit(cx, &notes, "b", "saved").await;
-    let a = entry_id(&notes, cx, "a");
-    cx.update(|cx| cx.set_global(Timeline::new(Instant::now())));
-
-    links.update(cx, |links, cx| {
-        links.merges = 0;
-        links.marked_indexed = false;
-        links.settling = true;
-        links.merge_words(cx);
-        let seq = links.next_seq(a);
-        links.apply(
-            a,
-            seq,
-            NoteContent::parse("during".into(), Mtime(SystemTime::UNIX_EPOCH)),
-            cx,
-        );
-    });
-    cx.run_until_parked();
-
-    let (merges, settling, settled, words) = links.read_with(cx, |links, _| {
-        let index = links.index();
-        (
-            links.merges,
-            links.settling,
-            index.words_settled(),
-            index.words().heap_bytes(),
-        )
-    });
-    assert_eq!(merges, 1, "the settle's apply ends the settle");
-    assert!(!settling);
-    assert!(!settled, "the save during the settle waits in fresh");
-    let line = cx.read(|cx| cx.global::<Timeline>().line());
-    assert!(line.contains(&format!("words {words} bytes")), "{line}");
-    assert_eq!(
-        looked_up(cx, &links, &[a], "during"),
-        [(
-            a,
-            TermHit {
-                count: 1,
-                whole: true
-            }
-        )]
-    );
-}
-
-#[gpui::test]
 fn a_reload_after_indexed_starts_no_settle(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, PAST_THE_DEAD_SHARE);
     cx.run_until_parked();
-    assert_eq!(links.read_with(cx, |links, _| links.merges), 1);
+    assert!(links.read_with(cx, |links, _| links.index().words_settled()));
 
     fs.insert_file("/vault/a.md", "changed");
     create(cx, &notes, "new");
 
-    let (merges, settling, settled) = links.read_with(cx, |links, _| {
-        (links.merges, links.settling, links.index().words_settled())
-    });
-    assert_eq!(merges, 1, "a reload waits for the policy");
-    assert!(!settling);
-    assert!(!settled, "the reloaded note is fresh");
+    let settled = links.read_with(cx, |links, _| links.index().words_settled());
+    assert!(!settled, "a reload waits for the policy");
     let a = entry_id(&notes, cx, "a");
     assert_eq!(
         looked_up(cx, &links, &[a], "changed"),

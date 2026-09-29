@@ -6,8 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui::TestAppContext;
 use inkra_vault::{Mtime, Stamp};
 
-use super::Build;
-use super::tests::{hold_builds, indexed_vault, rescan};
+use super::tests::{hold_builds, indexed_vault, notes_changed, rescan};
 use crate::test_support::entry_id;
 use crate::timeline::Timeline;
 use crate::vault::NoteSaved;
@@ -49,12 +48,13 @@ fn a_vault_with_no_notes_is_indexed_once_its_build_applies(cx: &mut TestAppConte
 #[gpui::test]
 fn a_vault_with_no_notes_applies_one_build(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("image.png", "")]);
+    let (changed, _subscription) = notes_changed(cx, &links);
     cx.run_until_parked();
     assert!(!links.read_with(cx, |links, _| links.awaits_first_build()));
 
     rescan(cx, &fs, &notes);
 
-    assert_eq!(links.read_with(cx, |links, _| links.note_sets), 1);
+    assert_eq!(changed.get(), 1);
 }
 
 #[gpui::test]
@@ -81,22 +81,14 @@ fn a_saves_turn_counts_in_the_longest_turn(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_rescans_own_turn_counts_in_the_longest_turn(cx: &mut TestAppContext) {
-    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
+    let (_fs, notes, _links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
     cx.update(|cx| cx.set_global(Timeline::new(Instant::now())));
 
-    let reconciles = links.read_with(cx, |links, _| links.reconciles);
+    // The build it starts applies only once the test parks.
     let vault = notes.read_with(cx, |notes, _| notes.vault().expect("a vault").clone());
     vault.update(cx, |_, cx| cx.notify());
 
-    links.read_with(cx, |links, _| {
-        assert_eq!(links.build, Build::Running, "the build has not applied");
-        assert_eq!(
-            links.reconciles,
-            reconciles + 1,
-            "the notify started one build"
-        );
-    });
     assert!(cx.read(|cx| cx.global::<Timeline>().longest_turn()) > Duration::ZERO);
     cx.run_until_parked();
 }
@@ -123,17 +115,11 @@ fn a_startup_load_ending_in_a_dirty_rebuild_settles_before_it_is_marked_indexed(
     release.send(()).expect("the build waits");
     cx.run_until_parked();
 
-    let (merges, settling, settled, words) = links.read_with(cx, |links, _| {
+    let (settled, words) = links.read_with(cx, |links, _| {
         let index = links.index();
-        (
-            links.merges,
-            links.settling,
-            index.words_settled(),
-            index.words().heap_bytes(),
-        )
+        (index.words_settled(), index.words().heap_bytes())
     });
-    assert_eq!(merges, 1);
-    assert!(settled && !settling, "the rebuild's settle applied");
+    assert!(settled, "the rebuild's settle applied");
     let line = cx.read(|cx| cx.global::<Timeline>().line());
     assert!(line.contains(&format!("words {words} bytes")), "{line}");
     gate.release();

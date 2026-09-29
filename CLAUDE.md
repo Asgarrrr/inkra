@@ -64,6 +64,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
   - resolving links, backlinks, search → `index`; it reads no file
+  - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
@@ -121,6 +122,8 @@ Read the spec before changing its area:
   watch, scoped rescans, reload, gone notes
 - `docs/superpowers/specs/2026-09-27-coalesced-reconcile-design.md` — `IndexSync`
   builds, mtime fast path
+- `docs/superpowers/specs/2026-09-29-index-scheduler-design.md` — `LiveIndex`:
+  loads, supersede, own-save echo, the startup settle; `IndexSync` spawns
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
 - `docs/superpowers/specs/2026-09-29-sidebar-rows-design.md` — `Rows`: the
