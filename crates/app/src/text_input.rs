@@ -117,8 +117,25 @@ impl TextInput {
     }
 
     /// Already scrolled when the host scrolls: gpui translates the element's bounds.
+    #[cfg(test)]
     pub(crate) fn last_bounds(&self) -> Option<Bounds<Pixels>> {
         self.last_bounds
+    }
+
+    /// The layout and a window point in its coordinates. `last_bounds` is already
+    /// scrolled, so no caller subtracts the offset.
+    pub(crate) fn hit_test(
+        &self,
+        position: Point<Pixels>,
+    ) -> Option<(&DocumentLayout, Point<Pixels>)> {
+        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
+        Some((layout, position - bounds.origin))
+    }
+
+    /// The offset nearest a window point; `None` before the first draw.
+    pub(crate) fn offset_at(&self, position: Point<Pixels>) -> Option<ByteOffset> {
+        let (layout, local) = self.hit_test(position)?;
+        Some(layout.offset_for_position(local))
     }
 
     /// A reshape outside a draw; the draw itself stores through `paint`.
@@ -291,9 +308,7 @@ pub(crate) trait InputHost: Render + Sized {
         cx: &mut Context<Self>,
     ) -> Option<usize> {
         let input = self.input();
-        let bounds = input.last_bounds?;
-        let layout = input.last_layout.as_ref()?;
-        let offset = layout.offset_for_position(position - bounds.origin);
+        let offset = input.offset_at(position)?;
         let buffer = input.buffer.read(cx);
         Some(buffer.to_utf16(buffer.clip(offset)).0)
     }

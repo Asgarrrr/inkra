@@ -1,11 +1,12 @@
 use std::ops::Range;
 
-use gpui::{Context, Window, point, px};
+use gpui::{Context, Pixels, Window, px};
 use inkra_editor::{Goal, LogicalMovement};
 use inkra_text::{Bias, ByteOffset};
 
 use super::EditorView;
-use super::scroll::{Reveal, ScrollTo};
+use super::layout::DocumentLayout;
+use super::viewport::Reveal;
 use crate::text_input::InputHost;
 
 #[derive(Debug, Clone, Copy)]
@@ -30,35 +31,6 @@ impl EditorView {
         self.reveal_cursor(Reveal::Center);
     }
 
-    /// From the gates, not the handlers; from `TextElement::prepaint` it would land a frame late.
-    pub(super) fn reveal_cursor(&mut self, how: Reveal) {
-        let viewport = self.scroll_handle.bounds();
-        // Bounds stay default() until the first prepaint; a waiting request means a stale layout.
-        let geometry = self
-            .last_text_top
-            .zip(self.input.last_layout())
-            .filter(|_| viewport.size.height > px(0.) && self.scroll_to.is_none());
-        let Some((text_top, layout)) = geometry else {
-            self.request_scroll(ScrollTo::Cursor(how));
-            return;
-        };
-
-        let row = layout.row_for_offset(self.cursor());
-        let top = text_top + layout.top_for_row(row);
-        let extent = top..top + layout.row_height(row);
-        let viewport = viewport.top()..viewport.bottom();
-
-        if let Some(offset) = how.offset(
-            extent,
-            viewport,
-            self.scroll_handle.offset().y,
-            layout.body_row_height(),
-        ) {
-            self.scroll_handle
-                .set_offset(point(self.scroll_handle.offset().x, offset));
-        }
-    }
-
     pub(super) fn move_vertically(
         &mut self,
         window: &mut Window,
@@ -69,30 +41,8 @@ impl EditorView {
         let Some(layout) = self.input.last_layout() else {
             return;
         };
-        let cursor = self.cursor();
-        let row = layout.row_for_offset(cursor);
-
-        // Reused verbatim: re-widens a run of downs after a short row (x is
-        // from the row's start, so it means the same on every row).
-        let goal_x = match self.input.state().selection().goal() {
-            Goal::Column(x) => px(x),
-            Goal::None => layout.x_for_offset(cursor),
-        };
-
-        let step = |row: usize| match direction {
-            Vertical::Up => row.checked_sub(1),
-            Vertical::Down => (row + 1 < layout.row_count()).then_some(row + 1),
-        };
-        let mut target = step(row);
-        while let Some(candidate) = target
-            && !layout.holds_caret(candidate)
-        {
-            target = step(candidate);
-        }
-        let target = target.map(|row| layout.offset_on_row(row, goal_x));
-
-        if let Some(offset) = target {
-            let goal = Goal::Column(f32::from(goal_x));
+        let goal = self.input.state().selection().goal();
+        if let Some((offset, goal)) = vertical(layout.as_ref(), self.cursor(), goal, direction) {
             self.move_cursor(window, cx, |state, buffer| {
                 state.move_vertically(buffer, offset, extend, goal);
             });
@@ -109,3 +59,65 @@ impl EditorView {
         });
     }
 }
+
+/// What `vertical` reads from a layout.
+pub(super) trait CaretRows {
+    fn row_count(&self) -> usize;
+    fn row_for_offset(&self, offset: ByteOffset) -> usize;
+    fn holds_caret(&self, row: usize) -> bool;
+    fn x_for_offset(&self, offset: ByteOffset) -> Pixels;
+    fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset;
+}
+
+impl CaretRows for DocumentLayout {
+    fn row_count(&self) -> usize {
+        self.row_count()
+    }
+
+    fn row_for_offset(&self, offset: ByteOffset) -> usize {
+        self.row_for_offset(offset)
+    }
+
+    fn holds_caret(&self, row: usize) -> bool {
+        self.holds_caret(row)
+    }
+
+    fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
+        self.x_for_offset(offset)
+    }
+
+    fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
+        self.offset_on_row(row, x)
+    }
+}
+
+/// The offset and goal one caret row up or down; `None` past the first or last row.
+pub(super) fn vertical(
+    rows: &impl CaretRows,
+    cursor: ByteOffset,
+    goal: Goal,
+    direction: Vertical,
+) -> Option<(ByteOffset, Goal)> {
+    // Reused verbatim: re-widens a run of downs after a short row (x is
+    // from the row's start, so it means the same on every row).
+    let goal_x = match goal {
+        Goal::Column(x) => px(x),
+        Goal::None => rows.x_for_offset(cursor),
+    };
+    let step = |row: usize| match direction {
+        Vertical::Up => row.checked_sub(1),
+        Vertical::Down => (row + 1 < rows.row_count()).then_some(row + 1),
+    };
+    let mut target = step(rows.row_for_offset(cursor))?;
+    while !rows.holds_caret(target) {
+        target = step(target)?;
+    }
+    Some((
+        rows.offset_on_row(target, goal_x),
+        Goal::Column(f32::from(goal_x)),
+    ))
+}
+
+#[cfg(test)]
+#[cfg_attr(test, allow(clippy::unwrap_used))]
+mod tests;

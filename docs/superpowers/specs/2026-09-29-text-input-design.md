@@ -232,6 +232,10 @@ Hooks, per host:
   `move_vertically` stays: it is multiline only. `TextElement` keeps its
   measure, stash and inset, and its prepaint and paint tail become
   `Quads::new` and `text_input::paint`, then its own `last_text_top` write.
+  Superseded by `2026-09-29-editor-geometry-design.md`: `scroll.rs` is now
+  `viewport.rs`, `scroll_to` is now `Viewport`, `request_scroll` is
+  `Viewport::request`, `last_text_top` is `Viewport`'s private `text_top`,
+  written only by `Viewport::painted` (G1).
 - **E2. `editor/actions.rs`.** Keeps `Up`, `Down`, `SelectUp`, `SelectDown`,
   `DocStart`, `DocEnd`, `Newline`, `Copy`, `Cut`, `Paste`, `Undo`, `Redo`,
   `FollowLink` and their handlers, all multiline only.
@@ -369,6 +373,9 @@ Deviations from the plan above, each with its reason:
   result is the same: both reveals read the same geometry, the last offset
   set wins, and without geometry a `Center` request replaces the `Minimal`
   one (`request_scroll`).
+  Superseded by `2026-09-29-editor-geometry-design.md`: `scroll.rs` is now
+  `viewport.rs`, `scroll_to` is now `Viewport`, `request_scroll` is
+  `Viewport::request`.
 - **The two proposed dispatch tests were not added.** The Context claim that
   the editor has no `ctrl-a`, `ctrl-e`, `cmd-left` or `cmd-right` test was
   wrong: `editor/tests/wrap.rs` has `cmd_left_is_home`, `cmd_right_is_end`,

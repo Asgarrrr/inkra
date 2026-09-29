@@ -211,7 +211,7 @@ fn the_reveal_margin_stays_in_body_lines_on_a_heading(cx: &mut TestAppContext) {
             // Goal x 0 lands after `# `: the body never maps into the marker (D12).
             assert_eq!(view.cursor(), at(122));
             let expected = VIEWPORT - MARGIN - (TEXT_TOP + 60. * LINE_HEIGHT + H1);
-            assert_eq!(view.scroll_handle.offset().y, px(expected));
+            assert_eq!(view.viewport.handle().offset().y, px(expected));
         })
         .unwrap();
 }

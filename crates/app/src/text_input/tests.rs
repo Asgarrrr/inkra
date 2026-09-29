@@ -6,7 +6,7 @@ use gpui::{
     Styled, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
-use inkra_text::Buffer;
+use inkra_text::{Buffer, ByteOffset};
 
 use super::{InputAdapter, InputHost};
 use crate::editor::EditorView;
@@ -216,4 +216,21 @@ fn the_ime_rectangle_hit_tests_back_to_its_range(cx: &mut TestAppContext) {
         let end = input.character_index_for_point(point(rect.right() - inside, y), window, cx);
         assert_eq!((start, end), (Some(1), Some(3)));
     });
+}
+
+/// `last_bounds` is already scrolled: a hit test that subtracted the offset again would land far below.
+#[gpui::test]
+fn a_hit_test_while_scrolled_uses_the_painted_bounds(cx: &mut TestAppContext) {
+    let (view, mut visual) = editor(cx, &"line\n".repeat(300));
+    let line_120 = ByteOffset(120 * "line\n".len());
+    view.update(&mut visual, |view, cx| view.scroll_to_top(line_120, cx));
+    visual.run_until_parked();
+
+    let half_a_line = px(14.);
+    let hit = view.read_with(&visual, |view, _| {
+        let (layout, local) = view.input().hit_test(point(px(0.), half_a_line))?;
+        Some(layout.offset_for_position(local))
+    });
+
+    assert_eq!(hit, Some(line_120));
 }

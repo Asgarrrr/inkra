@@ -4,20 +4,20 @@ pub(crate) mod layout;
 mod motion;
 mod mouse;
 mod reload;
-mod scroll;
 #[cfg(test)]
 mod tests;
+mod viewport;
 
 use std::ops::Range;
 use std::rc::Rc;
 
-#[cfg(test)]
-use gpui::Bounds;
 use gpui::{
     App, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    MouseButton, ParentElement, Pixels, Render, ScrollHandle, StatefulInteractiveElement, Styled,
-    Subscription, Window, div,
+    MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window,
+    div,
 };
+#[cfg(test)]
+use gpui::{Bounds, Pixels};
 use inkra_editor::Selection;
 use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Buffer, ByteOffset};
@@ -25,7 +25,7 @@ use inkra_text::{Buffer, ByteOffset};
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
 use element::TextElement;
-use scroll::{Reveal, ScrollTo};
+use viewport::{Reveal, Viewport};
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,14 +39,7 @@ pub(crate) struct EditorView {
     /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
     parsed_at: Option<u64>,
     is_selecting: bool,
-    /// Text top at zero scroll, as of the last paint. Never re-derive it from
-    /// `last_bounds` and a live `offset()`: that counts the scroll twice.
-    last_text_top: Option<Pixels>,
-    /// `last_bounds` arrives already scrolled (`gpui/elements/div.rs:2027`), so
-    /// no hit-test subtracts the offset.
-    scroll_handle: ScrollHandle,
-    /// Set before the geometry it needs exists, taken by the next `render`.
-    scroll_to: Option<ScrollTo>,
+    viewport: Viewport,
     /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
     /// no test failure short of a two-view test, and leaves a reload's caret on the old text.
     _buffer: [Subscription; 2],
@@ -62,9 +55,7 @@ impl EditorView {
             markdown: Markdown::default(),
             parsed_at: None,
             is_selecting: false,
-            last_text_top: None,
-            scroll_handle: ScrollHandle::new(),
-            scroll_to: None,
+            viewport: Viewport::default(),
             _buffer: subscriptions,
         };
         view.refresh_markdown(cx);
@@ -87,9 +78,7 @@ impl EditorView {
         self.refresh_markdown(cx);
 
         self.is_selecting = false;
-        self.last_text_top = None;
-        self.scroll_handle = ScrollHandle::new();
-        self.scroll_to = None;
+        self.viewport = Viewport::default();
 
         cx.notify();
     }
@@ -142,6 +131,38 @@ impl EditorView {
         self.input.last_bounds()
     }
 
+    #[cfg(test)]
+    fn drawn_layout(&self) -> &layout::DocumentLayout {
+        let Some(layout) = self.input.last_layout() else {
+            panic!("the editor has not been drawn");
+        };
+        layout
+    }
+
+    /// Scrolls so the row holding `offset` starts at the viewport's top; takes effect at the next draw.
+    #[cfg(test)]
+    pub(crate) fn scroll_to_top(&mut self, offset: ByteOffset, cx: &mut Context<Self>) {
+        self.viewport.scroll_row_to_top(self.drawn_layout(), offset);
+        cx.notify();
+    }
+
+    /// The offset at the viewport's top-left, read from the last layout.
+    #[cfg(test)]
+    pub(crate) fn offset_at_top(&self) -> ByteOffset {
+        self.viewport.offset_at_top(self.drawn_layout())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_y(&self) -> Pixels {
+        self.viewport.handle().offset().y
+    }
+
+    /// Whether the caret's whole row lies inside the viewport, read from the last layout.
+    #[cfg(test)]
+    pub(crate) fn caret_in_view(&self) -> bool {
+        self.viewport.shows_row(self.drawn_layout(), self.cursor())
+    }
+
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // First: the observer only runs when effects flush, after this reshape.
         self.refresh_markdown(cx);
@@ -177,6 +198,24 @@ impl EditorView {
 
     pub(crate) fn cursor(&self) -> ByteOffset {
         self.input.cursor()
+    }
+
+    fn reveal_cursor(&mut self, how: Reveal) {
+        let cursor = self.cursor();
+        let layout = self.input.last_layout().map(Rc::as_ref);
+        self.viewport.reveal(layout, cursor, how);
+    }
+
+    /// From `render`, before prepaint reads the offset, else the scroll lands a frame late.
+    fn restore_scroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(to) = self.viewport.take_pending() else {
+            return;
+        };
+        // A reload may have landed since the last paint shaped `last_layout`.
+        self.reshape(window, cx);
+        let cursor = self.cursor();
+        let layout = self.input.last_layout().map(Rc::as_ref);
+        self.viewport.apply(to, layout, cursor);
     }
 }
 
@@ -244,7 +283,7 @@ impl Render for EditorView {
             .items_center()
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.scroll_handle)
+            .track_scroll(self.viewport.handle())
             .bg(theme::editor_background())
             .text_color(theme::editor_text())
             .text_size(theme::BODY_TEXT_SIZE)

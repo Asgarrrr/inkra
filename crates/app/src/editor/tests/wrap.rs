@@ -168,7 +168,7 @@ fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestApp
             assert_eq!(layout.row_for_offset(view.cursor()), 41);
             let row_bottom = PADDING + LINE_HEIGHT * 42.;
             let expected = VIEWPORT - MARGIN - row_bottom;
-            assert_eq!(view.scroll_handle.offset().y, px(expected));
+            assert_eq!(view.viewport.handle().offset().y, px(expected));
         })
         .unwrap();
 }
@@ -198,7 +198,7 @@ fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
             #[allow(clippy::cast_precision_loss)]
             let row_bottom = PADDING + LINE_HEIGHT * (row as f32 + 1.);
             let expected = VIEWPORT - MARGIN - row_bottom;
-            assert_eq!(view.scroll_handle.offset().y, px(expected));
+            assert_eq!(view.viewport.handle().offset().y, px(expected));
         })
         .unwrap();
 }

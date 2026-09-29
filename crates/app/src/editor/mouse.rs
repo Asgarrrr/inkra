@@ -1,22 +1,15 @@
 use gpui::{App, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, px};
 use inkra_markdown::{Link, links};
-use inkra_text::ByteOffset;
 
 use super::{EditorView, LinkFollowed};
 use crate::text_input::InputHost;
 
 impl EditorView {
-    fn position_for_point(&self, position: Point<Pixels>) -> Option<ByteOffset> {
-        let (bounds, layout) = (self.input.last_bounds()?, self.input.last_layout()?);
-        Some(layout.offset_for_position(position - bounds.origin))
-    }
-
     /// The innermost link whose drawn span holds the pointer. Not `link_at` on the click's
     /// offset: that is the nearest boundary, which past a line's end, beside a link, or inside
     /// its hidden syntax lands on the link's edge.
     fn link_under(&self, position: Point<Pixels>, cx: &App) -> Option<Link> {
-        let (bounds, layout) = (self.input.last_bounds()?, self.input.last_layout()?);
-        let local = position - bounds.origin;
+        let (layout, local) = self.input.hit_test(position)?;
         if local.y < px(0.) || local.y >= layout.height() {
             return None;
         }
@@ -41,7 +34,7 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         window.focus(self.input.focus_handle(), cx);
-        let Some(offset) = self.position_for_point(event.position) else {
+        let Some(offset) = self.input.offset_at(event.position) else {
             self.is_selecting = true;
             return;
         };
@@ -68,7 +61,7 @@ impl EditorView {
         if !self.is_selecting {
             return;
         }
-        let Some(offset) = self.position_for_point(event.position) else {
+        let Some(offset) = self.input.offset_at(event.position) else {
             return;
         };
         self.move_cursor(window, cx, |state, buffer| {
