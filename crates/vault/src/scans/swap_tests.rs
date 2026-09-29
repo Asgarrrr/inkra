@@ -130,6 +130,26 @@ fn an_in_place_save_re_keyed_during_a_scan_keeps_the_saves_mtime() {
 }
 
 #[test]
+fn two_saves_re_keyed_during_one_scan_keep_the_second_saves_mtime() {
+    let fs = vault(&["a.md"]);
+    let mut live = scan(&fs);
+    let a = id_of(&live, "a.md").expect("scanned");
+    let mut scans = Scans::default();
+
+    let (_, running) = scans.request(&live);
+    let first = save(&fs, "a.md");
+    rekey(&mut scans, &mut live, a, &first);
+    // The walk sees only the first save; the second lands after it read the folder.
+    let scanned = walked(running.expect("started"), &fs);
+    let second = save(&fs, "a.md");
+    rekey(&mut scans, &mut live, a, &second);
+    scans.swap(&mut live, scanned, &Claims::default());
+
+    assert_eq!(live.id_for(second.identity), Some(a));
+    assert_eq!(live.entry(a).expect("kept").mtime, second.stamp.mtime);
+}
+
+#[test]
 fn a_failed_walk_answers_no_request_and_replays_its_re_keys_onto_the_live_vault() {
     let fs = vault(&["a.md"]);
     let mut live = scan(&fs);
