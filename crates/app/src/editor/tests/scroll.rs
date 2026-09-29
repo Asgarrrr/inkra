@@ -7,7 +7,7 @@ use inkra_text::Buffer;
 use super::{at, dispatching, geometry};
 use crate::buffer_events::Reloaded;
 use crate::editor::actions::Down;
-use crate::editor::scroll::{Reveal, ScrollTo};
+use crate::editor::viewport::{Reveal, ScrollTo};
 
 /// `max_offset` is non-zero only for a tracked handle on a genuinely
 /// overflowing container, so it catches wiring, flex-shrink, and layout bugs alike.
@@ -19,7 +19,7 @@ fn a_document_taller_than_the_window_has_room_to_scroll(cx: &mut TestAppContext)
     window
         .update(&mut cx, |view, _, _| {
             assert!(
-                view.scroll_handle.max_offset().y > gpui::px(0.),
+                view.viewport.handle().max_offset().y > gpui::px(0.),
                 "a 201-line document reported no room to scroll"
             );
         })
@@ -33,7 +33,7 @@ fn a_document_that_fits_has_no_room_to_scroll(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.scroll_handle.max_offset().y, gpui::px(0.));
+            assert_eq!(view.viewport.handle().max_offset().y, gpui::px(0.));
         })
         .unwrap();
 }
@@ -52,7 +52,7 @@ fn reaching_the_end_of_a_tall_document_scrolls_it_into_view(cx: &mut TestAppCont
     cx.simulate_keystrokes("cmd-down");
     window
         .update(&mut cx, |view, _, cx| {
-            let offset = view.scroll_handle.offset().y;
+            let offset = view.viewport.handle().offset().y;
             assert!(offset < gpui::px(0.), "a 201-line document did not scroll");
 
             #[allow(clippy::cast_precision_loss)]
@@ -74,14 +74,14 @@ fn returning_to_the_start_scrolls_back_to_the_top(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-down");
     window
         .update(&mut cx, |view, _, _| {
-            assert!(view.scroll_handle.offset().y < gpui::px(0.));
+            assert!(view.viewport.handle().offset().y < gpui::px(0.));
         })
         .unwrap();
 
     cx.simulate_keystrokes("cmd-up");
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.scroll_handle.offset().y, gpui::px(0.));
+            assert_eq!(view.viewport.handle().offset().y, gpui::px(0.));
         })
         .unwrap();
 }
@@ -105,7 +105,7 @@ fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext)
                 40
             );
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_showing_from_below(40.)
             );
         })
@@ -130,7 +130,7 @@ fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAp
                 41
             );
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_showing_from_below(41.)
             );
         })
@@ -138,7 +138,7 @@ fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAp
 }
 
 /// Falsifies deriving the unscrolled top on demand as `last_bounds.origin.y -
-/// scroll_handle.offset().y`: the second move's `last_bounds` predates the
+/// viewport.handle().offset().y`: the second move's `last_bounds` predates the
 /// first move's `set_offset`, so that formula would scroll twice as far.
 #[gpui::test]
 fn two_moves_before_a_repaint_scroll_once_each(cx: &mut TestAppContext) {
@@ -164,7 +164,7 @@ fn two_moves_before_a_repaint_scroll_once_each(cx: &mut TestAppContext) {
                 42
             );
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_showing_from_below(42.)
             );
         })
@@ -186,7 +186,7 @@ fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             assert!(
-                view.scroll_handle.offset().y < gpui::px(0.),
+                view.viewport.handle().offset().y < gpui::px(0.),
                 "the wheel event did not scroll the document"
             );
         })
@@ -195,7 +195,7 @@ fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
     cx.simulate_input("x");
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.scroll_handle.offset().y, gpui::px(0.));
+            assert_eq!(view.viewport.handle().offset().y, gpui::px(0.));
         })
         .unwrap();
 }
@@ -214,7 +214,7 @@ fn extending_a_selection_reveals_its_head(cx: &mut TestAppContext) {
         .update(&mut cx, |view, _, _| {
             assert_eq!(view.input.state().selection().range().start, at(0));
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_showing_from_below(40.)
             );
         })
@@ -232,7 +232,7 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(view.input.buffer().read(cx).line_count(), 1);
-            assert_eq!(view.scroll_handle.offset().y, gpui::px(0.));
+            assert_eq!(view.viewport.handle().offset().y, gpui::px(0.));
         })
         .unwrap();
 
@@ -241,7 +241,7 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
         .update(&mut cx, |view, _, cx| {
             #[allow(clippy::cast_precision_loss)]
             let line = view.input.buffer().read(cx).line_for_offset(view.cursor()) as f32;
-            let offset = view.scroll_handle.offset().y;
+            let offset = view.viewport.handle().offset().y;
             assert!(offset < gpui::px(0.), "the undo did not scroll back down");
             assert!(
                 geometry::line_is_visible(line, offset),
@@ -252,7 +252,7 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
         .unwrap();
 }
 
-/// `position_for_point` resolves against `last_bounds`, which is already
+/// `TextInput::hit_test` resolves against `last_bounds`, which is already
 /// scroll-translated, while the click event's position is plain window space
 /// — the one path where a coordinate-space mistake hides.
 #[gpui::test]
@@ -262,7 +262,7 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
 
     cx.simulate_keystrokes("cmd-down");
     let scrolled = window
-        .update(&mut cx, |view, _, _| view.scroll_handle.offset().y)
+        .update(&mut cx, |view, _, _| view.viewport.handle().offset().y)
         .unwrap();
     assert!(scrolled < gpui::px(0.));
 
@@ -277,7 +277,7 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
                 expected
             );
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 scrolled,
                 "clicking a visible line scrolled the document"
             );
@@ -297,12 +297,12 @@ fn revealing_never_scrolls_horizontally(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             assert!(
-                view.scroll_handle.offset().y < gpui::px(0.),
+                view.viewport.handle().offset().y < gpui::px(0.),
                 "the document did not scroll vertically, so x was never written"
             );
-            assert_eq!(view.scroll_handle.offset().x, gpui::px(0.));
+            assert_eq!(view.viewport.handle().offset().x, gpui::px(0.));
             assert_eq!(
-                view.scroll_handle.max_offset().x,
+                view.viewport.handle().max_offset().x,
                 gpui::px(0.),
                 "a line overflowed"
             );
@@ -402,7 +402,7 @@ fn a_range_selected_right_after_a_rebind_is_revealed_after_the_first_paint(
         .update(&mut cx, |view, _, _| {
             assert_eq!(view.input.state().selection().range(), at(750)..at(754));
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_centering(150.)
             );
         })
@@ -446,7 +446,7 @@ fn centred_on_line_160(
         .update(cx, |view, _, _| {
             assert_eq!(view.cursor(), at(654));
             assert_eq!(
-                view.scroll_handle.offset().y,
+                view.viewport.handle().offset().y,
                 geometry::offset_centering(160.)
             );
         })
@@ -465,7 +465,7 @@ fn a_reveal_waiting_through_a_reload_centres_by_the_new_text(cx: &mut TestAppCon
             let buffer = buffer.read(cx);
             view.input.state_mut().move_to(buffer, at(50), false);
             view.input.state_mut().move_to(buffer, at(54), true);
-            view.scroll_to = Some(ScrollTo::Cursor(Reveal::Center));
+            view.viewport.request(ScrollTo::Cursor(Reveal::Center));
             let buffer = view.input.buffer().clone();
             view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);
         })

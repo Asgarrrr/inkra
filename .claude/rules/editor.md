@@ -30,8 +30,12 @@ are `InputHost`'s, and new actions go through them:
 - `InputAdapter` stands in for gpui's `ElementInputHandler`: a protocol call
   gpui adds to `InputHandler` needs forwarding there, or it silently takes the
   trait default.
-- A scroll decided before its geometry exists goes through `request_scroll`
-  into `scroll_to`, which `render` applies; never a second field.
+- The editor's scroll geometry is `Viewport`'s (`editor/viewport.rs`). A
+  scroll decided before its geometry exists goes through `Viewport::request`,
+  which `render` applies; never a second field. `open_buffer` resets it by
+  value, `Viewport::default()`.
+- A window point becomes an offset only through `TextInput::hit_test`:
+  `last_bounds` is already scrolled, so no caller subtracts the offset.
 - `copy` takes no gate: `as_mut` notifies unconditionally and would schedule an
   autosave for a `⌘C`.
 

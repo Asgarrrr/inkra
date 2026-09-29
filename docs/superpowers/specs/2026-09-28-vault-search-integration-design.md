@@ -287,6 +287,9 @@ shell cannot call it.
   text the next layout describes, and a waiting reveal wins (`map_through`
   already moved the caret). While any request waits, the layout may predate
   the text, so `reveal_cursor` does not scroll at once: it requests too.
+  Superseded by `2026-09-29-editor-geometry-design.md`: `scroll.rs` is now
+  `viewport.rs`, `scroll_to` is now `Viewport`, `request_scroll` is
+  `Viewport::request`.
 - **The frame after the first paint.** `paint` records `last_text_top`; when
   that is the first since `open_buffer` and a `scroll_to` waits, it defers a
   notify with `defer_in`. A notify during a draw marks no frame

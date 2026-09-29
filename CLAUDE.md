@@ -137,6 +137,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-29-query-run-design.md` — one query entry
   in `inkra-index` (`find_notes`/`search` with `Jobs`), `IndexDelegate`, `Runs`
   owning the run, `IndexWatch::observe`
+- `docs/superpowers/specs/2026-09-29-editor-geometry-design.md` — `Viewport`:
+  the text top, the scroll request, a reload's top line; `vertical`, `hit_test`
 - `docs/superpowers/specs/2026-09-29-row-text-design.md` — `row_text`: lit
   one-line row text, the path split, `name_row`
 - `docs/superpowers/specs/2026-09-29-names-delete-design.md` — the name table
