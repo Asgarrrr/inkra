@@ -7,12 +7,12 @@ use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
-use super::{activate, editor, open_vault, showing, tree_focused};
+use super::{activate, editor, no_vault, open_vault, showing, tree_focused};
 use crate::keymap::key_bindings;
-use crate::picker::Picker;
 use crate::picker::runs::SEARCH_DEBOUNCE;
+use crate::picker::{Picker, PickerDelegate};
 use crate::quick_open::QuickOpenDelegate;
-use crate::shell::{AppShell, NoteStore};
+use crate::shell::AppShell;
 use crate::test_support::entry_id;
 use crate::vault_search::{HitActivated, VaultSearchDelegate};
 
@@ -44,14 +44,9 @@ fn shown_in(
     (window, visual, ids)
 }
 
-fn modal_is<P: 'static>(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+fn modal_is<D: PickerDelegate>(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
     window
-        .update(cx, |shell, _, _| {
-            shell
-                .modal
-                .as_ref()
-                .is_some_and(|modal| modal.view().clone().downcast::<P>().is_ok())
-        })
+        .update(cx, |shell, _, _| shell.modal_is::<D>())
         .expect("the shell is open")
 }
 
@@ -79,7 +74,7 @@ fn cmd_shift_f_opens_vault_search_and_again_closes_it(cx: &mut TestAppContext) {
     let (window, mut visual, _) = shown(cx);
 
     visual.simulate_keystrokes("cmd-shift-f");
-    assert!(modal_is::<Picker<VaultSearchDelegate>>(window, &mut visual));
+    assert!(modal_is::<VaultSearchDelegate>(window, &mut visual));
 
     visual.simulate_keystrokes("cmd-shift-f");
     assert!(!has_modal(window, &mut visual));
@@ -90,11 +85,11 @@ fn cmd_shift_f_opens_vault_search_and_again_closes_it(cx: &mut TestAppContext) {
 fn cmd_shift_f_replaces_quick_open(cx: &mut TestAppContext) {
     let (window, mut visual, _) = shown(cx);
     visual.simulate_keystrokes("cmd-p");
-    assert!(modal_is::<Picker<QuickOpenDelegate>>(window, &mut visual));
+    assert!(modal_is::<QuickOpenDelegate>(window, &mut visual));
 
     visual.simulate_keystrokes("cmd-shift-f");
 
-    assert!(modal_is::<Picker<VaultSearchDelegate>>(window, &mut visual));
+    assert!(modal_is::<VaultSearchDelegate>(window, &mut visual));
     visual.simulate_keystrokes("escape");
     assert!(
         editor_focused(window, &mut visual),
@@ -104,17 +99,7 @@ fn cmd_shift_f_replaces_quick_open(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn cmd_shift_f_does_nothing_without_a_vault(cx: &mut TestAppContext) {
-    cx.update(|cx| cx.bind_keys(key_bindings()));
-    let notes = cx.update(|cx| {
-        gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
-    });
-    let window = cx.add_window(move |_, cx| AppShell::new(None, notes, cx));
-    window
-        .update(cx, |shell, window, cx| {
-            window.focus(&shell.focus_handle(cx), cx);
-        })
-        .expect("the shell is open");
-    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    let (window, mut visual) = no_vault(cx);
 
     visual.simulate_keystrokes("cmd-shift-f");
 
@@ -191,12 +176,7 @@ fn vault_search(
     cx: &mut VisualTestContext,
 ) -> Entity<Picker<VaultSearchDelegate>> {
     window
-        .update(cx, |shell, _, _| {
-            shell
-                .modal
-                .as_ref()
-                .and_then(|modal| modal.view().clone().downcast().ok())
-        })
+        .update(cx, |shell, _, _| shell.modal_picker())
         .expect("the shell is open")
         .expect("vault search is open")
 }

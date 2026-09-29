@@ -19,7 +19,7 @@ mod words;
 
 pub use content::NoteContent;
 pub use corpus::CorpusSnapshot;
-pub use find::{Excerpt, Group, NoteMatch, excerpt};
+pub use find::{Excerpt, Group, NoteMatch, excerpt, word_starts};
 pub use index::{Backlink, IndexSnapshot, NoteIndex};
 pub use live::LiveIndex;
 pub use names::NamesSnapshot;

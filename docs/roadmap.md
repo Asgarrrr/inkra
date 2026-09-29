@@ -179,6 +179,15 @@ future work lands" table of
 `superpowers/specs/2026-09-20-modular-architecture-design.md`. Not repeated
 here, so the two cannot drift.
 
+- A note activation that lands after a rename field opened (from the tree's
+  `enter`, or the palette's `Rename` while a load is held) takes focus from the
+  field; the field stays open and keys go to the note. Fix by data: record the
+  focus at activation, and move it on landing only if it has not moved since,
+  keeping quick open's dismiss-lands-on-the-note. **Trigger:** a load slower
+  than a keystroke (a network or synced vault, or a note large enough that
+  `open_note` takes over ~100 ms), or the first report of a name typed into a
+  note.
+
 ## Startup performance
 
 Paused on 2026-09-26 by the user: slices 5–7 took the first frame from
