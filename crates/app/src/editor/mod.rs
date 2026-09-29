@@ -90,21 +90,6 @@ impl EditorView {
         ]
     }
 
-    #[cfg(test)]
-    pub(crate) fn buffer(&self) -> &Entity<Buffer> {
-        self.input.buffer()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn selected(&self) -> std::ops::Range<ByteOffset> {
-        self.input.state().selection().range()
-    }
-
-    #[cfg(test)]
-    fn spans(&self) -> &[inkra_markdown::Span] {
-        &self.markdown.spans
-    }
-
     fn markdown(&self) -> &Markdown {
         &self.markdown
     }
@@ -124,43 +109,6 @@ impl EditorView {
     fn on_buffer_changed(&mut self, _: Entity<Buffer>, cx: &mut Context<Self>) {
         self.refresh_markdown(cx);
         cx.notify();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn text_bounds(&self) -> Option<Bounds<Pixels>> {
-        self.input.last_bounds()
-    }
-
-    #[cfg(test)]
-    fn drawn_layout(&self) -> &layout::DocumentLayout {
-        let Some(layout) = self.input.last_layout() else {
-            panic!("the editor has not been drawn");
-        };
-        layout
-    }
-
-    /// Scrolls so the row holding `offset` starts at the viewport's top; takes effect at the next draw.
-    #[cfg(test)]
-    pub(crate) fn scroll_to_top(&mut self, offset: ByteOffset, cx: &mut Context<Self>) {
-        self.viewport.scroll_row_to_top(self.drawn_layout(), offset);
-        cx.notify();
-    }
-
-    /// The offset at the viewport's top-left, read from the last layout.
-    #[cfg(test)]
-    pub(crate) fn offset_at_top(&self) -> ByteOffset {
-        self.viewport.offset_at_top(self.drawn_layout())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn scroll_y(&self) -> Pixels {
-        self.viewport.handle().offset().y
-    }
-
-    /// Whether the caret's whole row lies inside the viewport, read from the last layout.
-    #[cfg(test)]
-    pub(crate) fn caret_in_view(&self) -> bool {
-        self.viewport.shows_row(self.drawn_layout(), self.cursor())
     }
 
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -216,6 +164,52 @@ impl EditorView {
         let cursor = self.cursor();
         let layout = self.input.last_layout().map(Rc::as_ref);
         self.viewport.apply(to, layout, cursor);
+    }
+}
+
+#[cfg(test)]
+impl EditorView {
+    pub(crate) fn buffer(&self) -> &Entity<Buffer> {
+        self.input.buffer()
+    }
+
+    pub(crate) fn selected(&self) -> std::ops::Range<ByteOffset> {
+        self.input.state().selection().range()
+    }
+
+    fn spans(&self) -> &[inkra_markdown::Span] {
+        &self.markdown.spans
+    }
+
+    pub(crate) fn text_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.input.last_bounds()
+    }
+
+    fn drawn_layout(&self) -> &layout::DocumentLayout {
+        let Some(layout) = self.input.last_layout() else {
+            panic!("the editor has not been drawn");
+        };
+        layout
+    }
+
+    /// Scrolls so the row holding `offset` starts at the viewport's top; takes effect at the next draw.
+    pub(crate) fn scroll_to_top(&mut self, offset: ByteOffset, cx: &mut Context<Self>) {
+        self.viewport.scroll_row_to_top(self.drawn_layout(), offset);
+        cx.notify();
+    }
+
+    /// The offset at the viewport's top-left, read from the last layout.
+    pub(crate) fn offset_at_top(&self) -> ByteOffset {
+        self.viewport.offset_at_top(self.drawn_layout())
+    }
+
+    pub(crate) fn scroll_y(&self) -> Pixels {
+        self.viewport.handle().offset().y
+    }
+
+    /// Whether the caret's whole row lies inside the viewport, read from the last layout.
+    pub(crate) fn caret_in_view(&self) -> bool {
+        self.viewport.shows_row(self.drawn_layout(), self.cursor())
     }
 }
 
