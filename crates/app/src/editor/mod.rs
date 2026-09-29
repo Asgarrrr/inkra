@@ -1,6 +1,5 @@
 pub(crate) mod actions;
 mod element;
-mod input;
 pub(crate) mod layout;
 mod motion;
 mod mouse;
@@ -9,20 +8,23 @@ mod scroll;
 #[cfg(test)]
 mod tests;
 
+use std::ops::Range;
 use std::rc::Rc;
 
+#[cfg(test)]
+use gpui::Bounds;
 use gpui::{
-    App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
-    StatefulInteractiveElement, Styled, Subscription, Window, div,
+    App, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    MouseButton, ParentElement, Pixels, Render, ScrollHandle, StatefulInteractiveElement, Styled,
+    Subscription, Window, div,
 };
-use inkra_editor::{EditorState, Selection};
-use inkra_markdown::{Link, Markdown};
+use inkra_editor::Selection;
+use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Buffer, ByteOffset};
 
+use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
 use element::TextElement;
-use layout::DocumentLayout;
 use scroll::{Reveal, ScrollTo};
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.
@@ -32,16 +34,11 @@ pub(crate) struct LinkFollowed(pub(crate) Link);
 impl EventEmitter<LinkFollowed> for EditorView {}
 
 pub(crate) struct EditorView {
-    buffer: Entity<Buffer>,
-    state: EditorState,
+    input: TextInput,
     markdown: Markdown,
     /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
     parsed_at: Option<u64>,
-    focus_handle: FocusHandle,
     is_selecting: bool,
-    /// Shared with the frame's measure, which reuses it when its inputs still hold.
-    last_layout: Option<Rc<DocumentLayout>>,
-    last_bounds: Option<Bounds<Pixels>>,
     /// Text top at zero scroll, as of the last paint. Never re-derive it from
     /// `last_bounds` and a live `offset()`: that counts the scroll twice.
     last_text_top: Option<Pixels>,
@@ -61,14 +58,10 @@ impl EditorView {
         let subscriptions = Self::watch_buffer(&buffer, cx);
 
         let mut view = Self {
-            buffer,
-            state: EditorState::new(Selection::at(end)),
+            input: TextInput::new(buffer, Selection::at(end), Mode::Multiline, cx),
             markdown: Markdown::default(),
             parsed_at: None,
-            focus_handle: cx.focus_handle(),
             is_selecting: false,
-            last_layout: None,
-            last_bounds: None,
             last_text_top: None,
             scroll_handle: ScrollHandle::new(),
             scroll_to: None,
@@ -87,17 +80,13 @@ impl EditorView {
     pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
         // Rebuilt: the old `Subscription`s would observe the closed note.
         self._buffer = Self::watch_buffer(&buffer, cx);
-        self.buffer = buffer;
+        // Clears the caret and the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.input.rebind(buffer);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
         self.refresh_markdown(cx);
 
-        self.state = EditorState::new(Selection::at(ByteOffset(0)));
         self.is_selecting = false;
-
-        // Cleared, not kept: `reveal_cursor` would scroll by the old note's geometry.
-        self.last_layout = None;
-        self.last_bounds = None;
         self.last_text_top = None;
         self.scroll_handle = ScrollHandle::new();
         self.scroll_to = None;
@@ -114,12 +103,12 @@ impl EditorView {
 
     #[cfg(test)]
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
-        &self.buffer
+        self.input.buffer()
     }
 
     #[cfg(test)]
     pub(crate) fn selected(&self) -> std::ops::Range<ByteOffset> {
-        self.state.selection().range()
+        self.input.state().selection().range()
     }
 
     #[cfg(test)]
@@ -133,7 +122,7 @@ impl EditorView {
 
     /// Parses only when the buffer moved since the last parse; a caret move costs nothing.
     fn refresh_markdown(&mut self, cx: &App) {
-        let buffer = self.buffer.read(cx);
+        let buffer = self.input.buffer().read(cx);
         let version = buffer.version();
         if self.parsed_at == Some(version) {
             return;
@@ -150,36 +139,19 @@ impl EditorView {
 
     #[cfg(test)]
     pub(crate) fn text_bounds(&self) -> Option<Bounds<Pixels>> {
-        self.last_bounds
-    }
-
-    /// The single path that mutates the buffer, via `as_mut`'s drop-notify.
-    /// `copy` reads via `buffer.read` instead, so `⌘C` cannot mark a clean note dirty.
-    fn edit_buffer<R>(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut EditorState, &mut Buffer) -> R,
-    ) -> R {
-        let mut buffer = self.buffer.as_mut(cx);
-        let result = f(&mut self.state, &mut buffer);
-        // Load-bearing: the lease must not outlive the reshape below, which
-        // reads the buffer — a second lease panics at runtime.
-        drop(buffer);
-        self.reshape(window, cx);
-        self.reveal_cursor(Reveal::Minimal);
-        result
+        self.input.last_bounds()
     }
 
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // First: the observer only runs when effects flush, after this reshape.
         self.refresh_markdown(cx);
-        let Some(last) = self.last_layout.as_ref() else {
+        let Some(last) = self.input.last_layout() else {
             return;
         };
         let (style, wrap_width) = (last.style().clone(), last.wrap_width());
-        let (selection, marked) = (self.state.selection().range(), self.state.marked_range());
-        let buffer = self.buffer.read(cx);
+        let state = self.input.state();
+        let (selection, marked) = (state.selection().range(), state.marked_range());
+        let buffer = self.input.buffer().read(cx);
         // A whole-document shape: skipped when the inputs still give this layout.
         if last.is_shaped_from(
             buffer,
@@ -191,7 +163,7 @@ impl EditorView {
         ) {
             return;
         }
-        self.last_layout = Some(Rc::new(layout::shape_document(
+        let layout = Rc::new(layout::shape_document(
             buffer,
             &self.markdown,
             &selection,
@@ -199,55 +171,64 @@ impl EditorView {
             &style,
             wrap_width,
             window,
-        )));
-    }
-
-    /// The buffer's observers must not fire for these: an autosave or a vault
-    /// reload subscribes to real edits, not caret moves.
-    fn update_state(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorState)) {
-        f(&mut self.state);
-        cx.notify();
+        ));
+        self.input.set_layout(layout);
     }
 
     pub(crate) fn cursor(&self) -> ByteOffset {
-        self.state.cursor()
+        self.input.cursor()
+    }
+}
+
+impl InputHost for EditorView {
+    fn input(&self) -> &TextInput {
+        &self.input
+    }
+
+    fn input_mut(&mut self) -> &mut TextInput {
+        &mut self.input
+    }
+
+    /// Reshapes with the style stored in the layout: outside a draw, `window.text_style()` is gpui's default.
+    fn after_edit(&mut self, _: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.reshape(window, cx);
+        self.reveal_cursor(Reveal::Minimal);
+    }
+
+    /// Reshapes when the move reveals or hides an element, so the layout is never stale (spec D7).
+    fn after_move(&mut self, old: Range<ByteOffset>, window: &mut Window, cx: &mut Context<Self>) {
+        let new = self.input.state().selection().range();
+        let conceals = &self.markdown.conceals;
+        if !touched(conceals, &old).eq(touched(conceals, &new)) {
+            self.reshape(window, cx);
+        }
+        self.reveal_cursor(Reveal::Minimal);
     }
 }
 
 impl Focusable for EditorView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+        self.input.focus_handle().clone()
     }
 }
 
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         self.restore_scroll(window, cx);
-        div()
+        text_input::on_actions(div(), cx)
             .id("editor")
-            .key_context("EditorView")
+            .key_context(TextInput::key_context(text_input::EDITOR_CONTEXT))
             .role(gpui::Role::MultilineTextInput)
             .aria_label("Document")
-            .track_focus(&self.focus_handle)
+            .track_focus(self.input.focus_handle())
             .cursor(CursorStyle::IBeam)
-            .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::delete))
-            .on_action(cx.listener(Self::left))
-            .on_action(cx.listener(Self::right))
-            .on_action(cx.listener(Self::select_left))
-            .on_action(cx.listener(Self::select_right))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
             .on_action(cx.listener(Self::select_up))
             .on_action(cx.listener(Self::select_down))
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::home))
-            .on_action(cx.listener(Self::end))
-            .on_action(cx.listener(Self::line_start))
-            .on_action(cx.listener(Self::line_end))
             .on_action(cx.listener(Self::doc_start))
             .on_action(cx.listener(Self::doc_end))
             .on_action(cx.listener(Self::newline))

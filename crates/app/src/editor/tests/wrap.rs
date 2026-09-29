@@ -1,11 +1,12 @@
 //! Headless glyphs all advance by the same amount, so a row holds a fixed
 //! number of chars and every break below is computable; fixtures keep clear of a break landing exactly on the column's edge.
 
-use gpui::{ClipboardItem, EntityInputHandler, Pixels, TestAppContext, px, size};
+use gpui::{ClipboardItem, Pixels, TestAppContext, px, size};
 
 use super::geometry::{HEADING_MARGIN, LINE_HEIGHT, MARGIN, PADDING, VIEWPORT};
 use super::{at, dispatching};
 use crate::editor::EditorView;
+use crate::text_input::InputHost;
 
 const WINDOW_WIDTH: f32 = 1920.;
 
@@ -20,7 +21,7 @@ fn two_rows() -> String {
 }
 
 fn column_width(view: &EditorView) -> Pixels {
-    view.last_bounds.unwrap().size.width
+    view.input.last_bounds().unwrap().size.width
 }
 
 #[gpui::test]
@@ -30,10 +31,13 @@ fn a_line_longer_than_the_column_takes_two_rows(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_count(), 2);
             assert_eq!(layout.top_for_row(1), px(LINE_HEIGHT));
-            assert_eq!(view.last_bounds.unwrap().size.height, px(2. * LINE_HEIGHT));
+            assert_eq!(
+                view.input.last_bounds().unwrap().size.height,
+                px(2. * LINE_HEIGHT)
+            );
         })
         .unwrap();
 }
@@ -46,14 +50,14 @@ fn the_column_is_seventy_ch_and_centred(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, window, _| {
-            let style = view.last_layout.as_ref().unwrap().style().clone();
+            let style = view.input.last_layout().unwrap().style().clone();
             let column = crate::editor::element::column_width(&style, window);
-            let bounds = view.last_bounds.unwrap();
+            let bounds = view.input.last_bounds().unwrap();
             assert_eq!(bounds.size.width, column);
             let pane = px(WINDOW_WIDTH - 2. * PADDING);
             assert_eq!(bounds.origin.x, px(PADDING) + (pane - column) / 2.);
 
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             #[allow(clippy::cast_precision_loss)]
             let rows = layout.row_count() as f32;
             assert_eq!(bounds.size.height, px(LINE_HEIGHT) * rows);
@@ -70,12 +74,12 @@ fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             assert_eq!(column_width(view), px(400. - 2. * PADDING - HEADING_MARGIN));
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert!(layout.row_count() > 1, "68 chars cannot fit 292 px");
             #[allow(clippy::cast_precision_loss)]
             let rows = layout.row_count() as f32;
             assert_eq!(
-                view.last_bounds.unwrap().size.height,
+                view.input.last_bounds().unwrap().size.height,
                 px(LINE_HEIGHT) * rows
             );
         })
@@ -89,7 +93,7 @@ fn a_caret_at_a_wrap_paints_at_the_start_of_the_next_row(cx: &mut TestAppContext
 
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_for_offset(at(68)), 1);
             assert_eq!(
                 layout.position_for_offset(at(68)),
@@ -156,10 +160,10 @@ fn an_edit_that_wraps_reveals_the_new_row_before_the_next_paint(cx: &mut TestApp
 
     window
         .update(&mut cx, |view, window, cx| {
-            assert_eq!(view.last_layout.as_ref().unwrap().row_count(), 41);
+            assert_eq!(view.input.last_layout().unwrap().row_count(), 41);
             view.replace_text_in_range(None, "bb", window, cx);
 
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_count(), 42, "the edit wrapped the last line");
             assert_eq!(layout.row_for_offset(view.cursor()), 41);
             let row_bottom = PADDING + LINE_HEIGHT * 42.;
@@ -188,7 +192,7 @@ fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             let row = layout.row_for_offset(view.cursor());
             assert!(row > 61, "the URL wrapped onto rows past line 60");
             #[allow(clippy::cast_precision_loss)]
@@ -211,8 +215,8 @@ fn a_row_never_starts_inside_a_grapheme(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, cx| {
-            let buffer = view.buffer.read(cx);
-            let layout = view.last_layout.as_ref().unwrap();
+            let buffer = view.input.buffer().read(cx);
+            let layout = view.input.last_layout().unwrap();
             assert!(layout.row_count() > 1);
             for row in 0..layout.row_count() {
                 let start = layout.offset_on_row(row, px(0.));
@@ -238,8 +242,8 @@ fn every_offset_round_trips_through_its_position(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, cx| {
-            let buffer = view.buffer.read(cx);
-            let layout = view.last_layout.as_ref().unwrap();
+            let buffer = view.input.buffer().read(cx);
+            let layout = view.input.last_layout().unwrap();
             assert!(layout.row_count() >= 5, "both lines wrapped");
             let mut offset = at(0);
             loop {
@@ -266,7 +270,7 @@ fn a_click_past_a_wrapped_row_stays_on_it(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             assert_eq!(view.cursor(), at(67));
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_for_offset(view.cursor()), 0);
         })
         .unwrap();
@@ -279,7 +283,7 @@ fn a_selection_paints_one_quad_per_row(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             let quads = layout.selection_quads(&(at(0)..at(103)));
             assert_eq!(quads.len(), 3);
 
@@ -304,10 +308,10 @@ fn ime_bounds_follow_the_row(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, window, cx| {
-            let element = view.last_bounds.unwrap();
+            let element = view.input.last_bounds().unwrap();
             let bounds = view.bounds_for_range(70..72, element, window, cx).unwrap();
             assert_eq!(bounds.origin.y, element.origin.y + px(LINE_HEIGHT));
-            let two_chars = view.last_layout.as_ref().unwrap().x_for_offset(at(2));
+            let two_chars = view.input.last_layout().unwrap().x_for_offset(at(2));
             assert_eq!(bounds.origin.x, element.origin.x + two_chars);
         })
         .unwrap();
@@ -370,7 +374,7 @@ fn up_steps_over_a_row_with_no_caret_position(cx: &mut TestAppContext) {
 
     let rows = window
         .update(&mut cx, |view, _, _| {
-            view.last_layout.as_ref().unwrap().row_count()
+            view.input.last_layout().unwrap().row_count()
         })
         .unwrap();
     for _ in 0..rows {

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use gpui::{Entity, EntityInputHandler, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_text::ByteOffset;
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
@@ -20,6 +20,7 @@ use crate::test_support::{conflicts, entry_id};
 use crate::vault::{AUTOSAVE_DELAY, NoteStore};
 
 use super::{activate, editor, open_vault};
+use crate::text_input::InputHost;
 
 const A: &str = "/vault/a.md";
 

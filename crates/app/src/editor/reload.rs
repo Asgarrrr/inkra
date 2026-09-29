@@ -43,7 +43,7 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         let diff = &event.0;
-        self.state.map_through(diff);
+        self.input.map_through(diff);
         if let Some(top) = self.top_line() {
             self.request_scroll(ScrollTo::Top(top));
         }
@@ -57,7 +57,7 @@ impl EditorView {
         if offset == px(0.) {
             return None;
         }
-        let layout = self.last_layout.as_ref()?;
+        let layout = self.input.last_layout()?;
         let y = self.viewport_top()? - offset;
         let row = layout.row_for_offset(layout.offset_for_position(point(px(0.), y)));
         Some(TopLine {
@@ -73,7 +73,7 @@ impl EditorView {
 
     /// Puts `top` back at the viewport's top; the layout must describe the current text.
     pub(super) fn restore_top(&mut self, top: &TopLine) {
-        let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
+        let (Some(layout), Some(viewport_top)) = (self.input.last_layout(), self.viewport_top())
         else {
             return;
         };
@@ -88,7 +88,7 @@ impl EditorView {
 impl EditorView {
     /// Scrolls so the row holding `offset` starts at the viewport's top; takes effect at the next draw.
     pub(crate) fn scroll_to_top(&mut self, offset: ByteOffset, cx: &mut Context<Self>) {
-        let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
+        let (Some(layout), Some(viewport_top)) = (self.input.last_layout(), self.viewport_top())
         else {
             panic!("the editor has not been drawn");
         };
@@ -100,7 +100,7 @@ impl EditorView {
 
     /// The offset at the viewport's top-left, read from the last layout.
     pub(crate) fn offset_at_top(&self) -> ByteOffset {
-        let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
+        let (Some(layout), Some(viewport_top)) = (self.input.last_layout(), self.viewport_top())
         else {
             panic!("the editor has not been drawn");
         };
@@ -114,7 +114,7 @@ impl EditorView {
 
     /// Whether the caret's whole row lies inside the viewport, read from the last layout.
     pub(crate) fn caret_in_view(&self) -> bool {
-        let (Some(layout), Some(viewport_top)) = (self.last_layout.as_ref(), self.viewport_top())
+        let (Some(layout), Some(viewport_top)) = (self.input.last_layout(), self.viewport_top())
         else {
             panic!("the editor has not been drawn");
         };

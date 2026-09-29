@@ -15,7 +15,7 @@ fn every_heading_marker_fits_the_margin(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, window, _| {
-            let style = view.last_layout.as_ref().unwrap().style().clone();
+            let style = view.input.last_layout().unwrap().style().clone();
             assert_eq!(margin_width(&style, window), px(HEADING_MARGIN));
             for level in 1..=6 {
                 let marker = format!("{} ", "#".repeat(usize::from(level)));
@@ -45,7 +45,7 @@ fn text_in_pane(cx: &mut TestAppContext, extra: f32) -> (f32, Bounds<Pixels>) {
     cx.run_until_parked();
     let column = window
         .update(&mut cx, |view, window, _| {
-            let style = view.last_layout.as_ref().unwrap().style().clone();
+            let style = view.input.last_layout().unwrap().style().clone();
             f32::from(column_width(&style, window))
         })
         .unwrap();
@@ -92,7 +92,7 @@ fn a_pane_narrower_than_the_margin_leaves_the_text_no_width(cx: &mut TestAppCont
             let bounds = view.text_bounds().unwrap();
             assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
             assert_eq!(bounds.size.width, px(0.));
-            assert_eq!(view.last_layout.as_ref().unwrap().row_count(), 3);
+            assert_eq!(view.input.last_layout().unwrap().row_count(), 3);
         })
         .unwrap();
 }
@@ -104,7 +104,7 @@ fn a_click_at_the_text_left_edge_lands_at_the_line_start(cx: &mut TestAppContext
     cx.run_until_parked();
     let column = window
         .update(&mut cx, |view, window, _| {
-            let style = view.last_layout.as_ref().unwrap().style().clone();
+            let style = view.input.last_layout().unwrap().style().clone();
             column_width(&style, window)
         })
         .unwrap();

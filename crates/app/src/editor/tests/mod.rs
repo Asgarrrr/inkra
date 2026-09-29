@@ -44,7 +44,9 @@ pub(super) fn dispatching(
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
     let window = window_on(cx, buffer);
     window
-        .update(cx, |view, window, cx| window.focus(&view.focus_handle, cx))
+        .update(cx, |view, window, cx| {
+            window.focus(view.input.focus_handle(), cx);
+        })
         .unwrap();
     let visual = VisualTestContext::from_window(window.into(), cx);
     (window, visual)

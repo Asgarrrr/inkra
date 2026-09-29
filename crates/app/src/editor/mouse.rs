@@ -3,10 +3,11 @@ use inkra_markdown::{Link, links};
 use inkra_text::ByteOffset;
 
 use super::{EditorView, LinkFollowed};
+use crate::text_input::InputHost;
 
 impl EditorView {
     fn position_for_point(&self, position: Point<Pixels>) -> Option<ByteOffset> {
-        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
+        let (bounds, layout) = (self.input.last_bounds()?, self.input.last_layout()?);
         Some(layout.offset_for_position(position - bounds.origin))
     }
 
@@ -14,7 +15,7 @@ impl EditorView {
     /// offset: that is the nearest boundary, which past a line's end, beside a link, or inside
     /// its hidden syntax lands on the link's edge.
     fn link_under(&self, position: Point<Pixels>, cx: &App) -> Option<Link> {
-        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
+        let (bounds, layout) = (self.input.last_bounds()?, self.input.last_layout()?);
         let local = position - bounds.origin;
         if local.y < px(0.) || local.y >= layout.height() {
             return None;
@@ -27,7 +28,7 @@ impl EditorView {
                 && (row > first || local.x >= layout.x_for_offset(start))
                 && (row < last || local.x < layout.x_for_offset(end))
         };
-        links(self.buffer.read(cx).text())
+        links(self.input.buffer().read(cx).text())
             .into_iter()
             .filter(spans)
             .min_by_key(|link| link.range.end.0 - link.range.start.0)
@@ -39,7 +40,7 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.focus(&self.focus_handle, cx);
+        window.focus(self.input.focus_handle(), cx);
         let Some(offset) = self.position_for_point(event.position) else {
             self.is_selecting = true;
             return;

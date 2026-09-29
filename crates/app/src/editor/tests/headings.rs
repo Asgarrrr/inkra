@@ -1,9 +1,10 @@
 //! Row geometry around headings. Headless glyphs advance `0.6 × font_size`, so an H1 row holds 37 chars of the 756 px column.
 
-use gpui::{EntityInputHandler, TestAppContext, point, px};
+use gpui::{TestAppContext, point, px};
 
 use super::geometry::{H1_LINE_HEIGHT as H1, LINE_HEIGHT, MARGIN, TEXT_TOP, VIEWPORT};
 use super::{at, dispatching};
+use crate::text_input::InputHost;
 
 const H2: f32 = 36.;
 const H3: f32 = 30.;
@@ -14,12 +15,15 @@ fn an_atx_heading_row_is_taller_than_body(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_height(0), px(H1));
             assert_eq!(layout.row_height(1), px(LINE_HEIGHT));
             assert_eq!(layout.top_for_row(1), px(H1));
             assert_eq!(layout.height(), px(H1 + LINE_HEIGHT));
-            assert_eq!(view.last_bounds.unwrap().size.height, px(H1 + LINE_HEIGHT));
+            assert_eq!(
+                view.input.last_bounds().unwrap().size.height,
+                px(H1 + LINE_HEIGHT)
+            );
         })
         .unwrap();
 }
@@ -30,7 +34,7 @@ fn each_level_takes_its_own_height(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             let heights: Vec<_> = (0..5).map(|row| layout.row_height(row)).collect();
             assert_eq!(heights, [LINE_HEIGHT, H1, H2, H3, LINE_HEIGHT].map(px));
         })
@@ -43,7 +47,7 @@ fn a_setext_underline_keeps_body_height(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             let tops: Vec<_> = (0..3).map(|row| layout.top_for_row(row)).collect();
             assert_eq!(tops, [0., H1, H1 + LINE_HEIGHT].map(px));
         })
@@ -58,7 +62,7 @@ fn a_wrapped_heading_steps_its_rows_by_its_own_height(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_count(), 3);
             let tops: Vec<_> = (0..=3).map(|row| layout.top_for_row(row)).collect();
             assert_eq!(tops, [0., H1, 2. * H1, 2. * H1 + LINE_HEIGHT].map(px));
@@ -74,7 +78,7 @@ fn a_heading_starts_at_zero_at_its_own_size_in_both_states(cx: &mut TestAppConte
     let xs = |cx: &mut gpui::VisualTestContext| {
         window
             .update(cx, |view, _, _| {
-                let layout = view.last_layout.as_ref().unwrap();
+                let layout = view.input.last_layout().unwrap();
                 [2, 3, 5].map(|offset| f32::from(layout.x_for_offset(at(offset))))
             })
             .unwrap()
@@ -96,7 +100,7 @@ fn a_click_below_a_heading_lands_on_the_row_under_it(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert!(layout.offset_for_position(point(px(0.), px(H1 - 1.))) <= at(3));
             assert_eq!(
                 layout.offset_for_position(point(px(0.), px(H1 + 1.))),
@@ -112,7 +116,7 @@ fn the_caret_is_as_tall_as_its_row(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.caret_bounds(at(1)).size.height, px(H1));
             let body = layout.caret_bounds(at(5));
             assert_eq!(body.size.height, px(LINE_HEIGHT));
@@ -127,7 +131,7 @@ fn the_ime_rectangle_on_a_heading_is_as_tall_as_its_row(cx: &mut TestAppContext)
     cx.run_until_parked();
     window
         .update(&mut cx, |view, window, cx| {
-            let origin = view.last_bounds.unwrap();
+            let origin = view.input.last_bounds().unwrap();
             let bounds = view.bounds_for_range(2..4, origin, window, cx).unwrap();
             assert_eq!(bounds.size.height, px(H1));
         })
@@ -141,7 +145,7 @@ fn a_selection_quad_is_as_tall_as_its_own_row(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-a");
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             let quads = layout.selection_quads(&(at(0)..at(8)));
             let heights: Vec<_> = quads.iter().map(|quad| quad.bounds.size.height).collect();
             assert_eq!(heights, [px(H1), px(LINE_HEIGHT)]);
@@ -176,7 +180,7 @@ fn typing_a_hash_grows_the_line_and_undo_shrinks_it(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_height(0), px(H1));
             assert_eq!(layout.top_for_row(1), px(H1));
         })
@@ -185,7 +189,7 @@ fn typing_a_hash_grows_the_line_and_undo_shrinks_it(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert_eq!(layout.row_height(0), px(LINE_HEIGHT));
         })
         .unwrap();

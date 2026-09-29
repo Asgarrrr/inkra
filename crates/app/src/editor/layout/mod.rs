@@ -67,8 +67,8 @@ struct Row {
     start_x: Pixels,
 }
 
-/// Every pixel↔offset conversion, shared by the editor and `NameField`'s
-/// [`shape_document`]. Works in rows, not lines, since a wrapped line paints on several.
+/// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
+/// lines, since a wrapped line paints on several.
 pub(crate) struct DocumentLayout {
     lines: Vec<LineLayout>,
     row_count: usize,
@@ -214,6 +214,7 @@ impl DocumentLayout {
         Self::x_on_row(line, within, offset)
     }
 
+    #[cfg(test)]
     pub(crate) fn position_for_offset(&self, offset: ByteOffset) -> Point<Pixels> {
         point(
             self.x_for_offset(offset),
@@ -273,7 +274,7 @@ impl DocumentLayout {
         self.row_for_offset(*self.row_bounds(row).start()) == row
     }
 
-    pub(super) fn range_bounds(&self, range: &Range<ByteOffset>) -> Bounds<Pixels> {
+    pub(crate) fn range_bounds(&self, range: &Range<ByteOffset>) -> Bounds<Pixels> {
         let row = self.row_for_offset(range.start);
         let (line, within) = self.locate(row);
         // max(range.start): a stale layout can put range.start past the
@@ -291,7 +292,7 @@ impl DocumentLayout {
 
     /// One quad per row touched. Four cases: a one-row selection is both first
     /// and last, and a row ending in a wrap gets no [`NEWLINE_STUB`] gap since a wrap isn't a character.
-    pub(super) fn selection_quads(&self, selection: &Range<ByteOffset>) -> Vec<PaintQuad> {
+    pub(crate) fn selection_quads(&self, selection: &Range<ByteOffset>) -> Vec<PaintQuad> {
         let first = self.row_for_offset(selection.start);
         let last = self.row_for_offset(selection.end);
 

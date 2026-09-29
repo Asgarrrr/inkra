@@ -18,7 +18,7 @@ fn copy_and_paste_round_trip_through_the_clipboard(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-down cmd-v");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "abcabc");
+            assert_eq!(view.input.buffer().read(cx).text(), "abcabc");
         })
         .unwrap();
 }
@@ -30,7 +30,7 @@ fn cut_takes_the_whole_line_and_pastes_back_as_one(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-up cmd-x");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "def");
+            assert_eq!(view.input.buffer().read(cx).text(), "def");
         })
         .unwrap();
     assert_eq!(
@@ -41,7 +41,7 @@ fn cut_takes_the_whole_line_and_pastes_back_as_one(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-down cmd-v");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "abc\ndef");
+            assert_eq!(view.input.buffer().read(cx).text(), "abc\ndef");
         })
         .unwrap();
 }
@@ -55,7 +55,7 @@ fn pasting_windows_text_inserts_lf_only(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "a\nb\nc");
+            assert_eq!(view.input.buffer().read(cx).text(), "a\nb\nc");
         })
         .unwrap();
 }
@@ -71,7 +71,7 @@ fn pasting_nothing_changes_nothing_and_splits_no_typing_run(cx: &mut TestAppCont
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(
-                view.buffer.read(cx).text(),
+                view.input.buffer().read(cx).text(),
                 "",
                 "no clipboard item: both keystrokes were one undo step"
             );
@@ -86,7 +86,7 @@ fn pasting_nothing_changes_nothing_and_splits_no_typing_run(cx: &mut TestAppCont
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(
-                view.buffer.read(cx).text(),
+                view.input.buffer().read(cx).text(),
                 "",
                 "an empty item: both keystrokes were one undo step"
             );
@@ -107,7 +107,7 @@ fn a_foreign_line_marker_pastes_as_an_ordinary_span(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(
-                view.buffer.read(cx).text(),
+                view.input.buffer().read(cx).text(),
                 "aXY\nbc",
                 "inserted at the caret, not above the line"
             );
@@ -129,7 +129,7 @@ fn copying_notifies_no_observer_and_leaves_the_version_alone(cx: &mut TestAppCon
             let guard = cx.observe(view.buffer(), move |_, _, _| {
                 counter.fetch_add(1, Ordering::SeqCst);
             });
-            (view.buffer.read(cx).version(), guard)
+            (view.input.buffer().read(cx).version(), guard)
         })
         .unwrap();
 
@@ -138,7 +138,7 @@ fn copying_notifies_no_observer_and_leaves_the_version_alone(cx: &mut TestAppCon
 
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).version(), version);
+            assert_eq!(view.input.buffer().read(cx).version(), version);
         })
         .unwrap();
     assert_eq!(

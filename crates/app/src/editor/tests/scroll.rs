@@ -56,7 +56,7 @@ fn reaching_the_end_of_a_tall_document_scrolls_it_into_view(cx: &mut TestAppCont
             assert!(offset < gpui::px(0.), "a 201-line document did not scroll");
 
             #[allow(clippy::cast_precision_loss)]
-            let last = view.buffer.read(cx).line_count() as f32 - 1.;
+            let last = view.input.buffer().read(cx).line_count() as f32 - 1.;
             assert!(
                 geometry::line_is_visible(last, offset),
                 "the last line is at {:?}, outside the viewport",
@@ -100,7 +100,10 @@ fn revealing_a_line_from_below_leaves_a_margin_under_it(cx: &mut TestAppContext)
 
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).line_for_offset(view.cursor()), 40);
+            assert_eq!(
+                view.input.buffer().read(cx).line_for_offset(view.cursor()),
+                40
+            );
             assert_eq!(
                 view.scroll_handle.offset().y,
                 geometry::offset_showing_from_below(40.)
@@ -122,7 +125,10 @@ fn a_newline_at_the_bottom_edge_scrolls_the_caret_back_into_view(cx: &mut TestAp
 
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).line_for_offset(view.cursor()), 41);
+            assert_eq!(
+                view.input.buffer().read(cx).line_for_offset(view.cursor()),
+                41
+            );
             assert_eq!(
                 view.scroll_handle.offset().y,
                 geometry::offset_showing_from_below(41.)
@@ -153,7 +159,10 @@ fn two_moves_before_a_repaint_scroll_once_each(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).line_for_offset(view.cursor()), 42);
+            assert_eq!(
+                view.input.buffer().read(cx).line_for_offset(view.cursor()),
+                42
+            );
             assert_eq!(
                 view.scroll_handle.offset().y,
                 geometry::offset_showing_from_below(42.)
@@ -203,7 +212,7 @@ fn extending_a_selection_reveals_its_head(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.state.selection().range().start, at(0));
+            assert_eq!(view.input.state().selection().range().start, at(0));
             assert_eq!(
                 view.scroll_handle.offset().y,
                 geometry::offset_showing_from_below(40.)
@@ -222,7 +231,7 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
     cx.simulate_keystrokes("cmd-down cmd-a backspace");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).line_count(), 1);
+            assert_eq!(view.input.buffer().read(cx).line_count(), 1);
             assert_eq!(view.scroll_handle.offset().y, gpui::px(0.));
         })
         .unwrap();
@@ -231,7 +240,7 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
     window
         .update(&mut cx, |view, _, cx| {
             #[allow(clippy::cast_precision_loss)]
-            let line = view.buffer.read(cx).line_for_offset(view.cursor()) as f32;
+            let line = view.input.buffer().read(cx).line_for_offset(view.cursor()) as f32;
             let offset = view.scroll_handle.offset().y;
             assert!(offset < gpui::px(0.), "the undo did not scroll back down");
             assert!(
@@ -264,7 +273,7 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(
-                view.buffer.read(cx).line_for_offset(view.cursor()),
+                view.input.buffer().read(cx).line_for_offset(view.cursor()),
                 expected
             );
             assert_eq!(
@@ -319,7 +328,7 @@ fn a_click_lands_on_the_line_it_points_at(cx: &mut TestAppContext) {
     );
     window
         .update(&mut cx, |view, _, cx| {
-            let buffer = view.buffer.read(cx);
+            let buffer = view.input.buffer().read(cx);
             assert_eq!(buffer.line_for_offset(view.cursor()), 2);
         })
         .unwrap();
@@ -345,7 +354,7 @@ fn a_click_below_the_last_line_clamps_to_it(cx: &mut TestAppContext) {
     );
     window
         .update(&mut cx, |view, _, cx| {
-            let buffer = view.buffer.read(cx);
+            let buffer = view.input.buffer().read(cx);
             assert_eq!(buffer.line_for_offset(view.cursor()), 1);
             assert_eq!(view.cursor(), buffer.len());
         })
@@ -360,10 +369,10 @@ fn an_edit_reshapes_before_the_next_paint(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, window, cx| {
-            assert_eq!(view.last_layout.as_ref().unwrap().row_count(), 1);
+            assert_eq!(view.input.last_layout().unwrap().row_count(), 1);
             view.newline(&crate::editor::actions::Newline, window, cx);
             assert_eq!(
-                view.last_layout.as_ref().unwrap().row_count(),
+                view.input.last_layout().unwrap().row_count(),
                 2,
                 "the layout must describe the text the edit left, not the painted one"
             );
@@ -391,7 +400,7 @@ fn a_range_selected_right_after_a_rebind_is_revealed_after_the_first_paint(
 
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.state.selection().range(), at(750)..at(754));
+            assert_eq!(view.input.state().selection().range(), at(750)..at(754));
             assert_eq!(
                 view.scroll_handle.offset().y,
                 geometry::offset_centering(150.)
@@ -419,7 +428,7 @@ fn scrolled_with_a_reload(
     let new = format!("{}{old}", "new\n".repeat(150));
     let diff = window
         .update(&mut cx, |view, _, cx| {
-            view.buffer.update(cx, |buffer, _| {
+            view.input.buffer().update(cx, |buffer, _| {
                 let diff = Arc::new(inkra_text::diff(buffer.version(), &old, &new));
                 assert!(buffer.apply_diff(Instant::now(), &diff));
                 diff
@@ -452,11 +461,12 @@ fn a_reveal_waiting_through_a_reload_centres_by_the_new_text(cx: &mut TestAppCon
     window
         .update(&mut cx, |view, _, cx| {
             // In the text before the reload, which `on_buffer_reloaded` maps it from.
-            let buffer = view.buffer.read(cx);
-            view.state.move_to(buffer, at(50), false);
-            view.state.move_to(buffer, at(54), true);
+            let buffer = view.input.buffer().clone();
+            let buffer = buffer.read(cx);
+            view.input.state_mut().move_to(buffer, at(50), false);
+            view.input.state_mut().move_to(buffer, at(54), true);
             view.scroll_to = Some(ScrollTo::Cursor(Reveal::Center));
-            let buffer = view.buffer.clone();
+            let buffer = view.input.buffer().clone();
             view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);
         })
         .unwrap();
@@ -472,7 +482,7 @@ fn a_hit_picked_while_a_reload_waits_centres_by_the_new_text(cx: &mut TestAppCon
 
     window
         .update(&mut cx, |view, window, cx| {
-            let buffer = view.buffer.clone();
+            let buffer = view.input.buffer().clone();
             view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);
             view.select_range(at(650)..at(654), window, cx);
         })
@@ -492,9 +502,9 @@ fn a_selected_range_snaps_outward_to_graphemes(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, window, cx| {
             view.select_range(at(5)..at(5), window, cx);
-            assert_eq!(view.state.selection().range(), at(3)..at(6));
+            assert_eq!(view.input.state().selection().range(), at(3)..at(6));
             view.select_range(at(9)..at(12), window, cx);
-            assert_eq!(view.state.selection().range(), at(7)..at(18));
+            assert_eq!(view.input.state().selection().range(), at(7)..at(18));
         })
         .unwrap();
 }

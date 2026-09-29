@@ -5,6 +5,7 @@ use inkra_markdown::parse;
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{dispatching, window_on, with_editor};
+use crate::text_input::InputHost;
 
 #[gpui::test]
 fn a_note_is_styled_before_any_keystroke(cx: &mut TestAppContext) {
@@ -21,7 +22,7 @@ fn typing_refreshes_the_spans_and_undo_restores_them(cx: &mut TestAppContext) {
     cx.simulate_input("*");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "*b*");
+            assert_eq!(view.input.buffer().read(cx).text(), "*b*");
             assert_eq!(view.spans(), parse("*b*").spans.as_slice());
         })
         .unwrap();

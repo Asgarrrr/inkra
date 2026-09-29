@@ -3,35 +3,14 @@ use std::time::Instant;
 use gpui::{ClipboardItem, Context, Window, actions};
 use inkra_editor::{Copied, LogicalMovement};
 
-use super::motion::{RowEdge, Vertical};
+use super::motion::Vertical;
 use super::{EditorView, LinkFollowed};
+use crate::text_input::InputHost;
 
 actions!(
     editor,
     [
-        Backspace,
-        Copy,
-        Cut,
-        Delete,
-        Left,
-        Paste,
-        Right,
-        SelectLeft,
-        SelectRight,
-        Up,
-        Down,
-        SelectUp,
-        SelectDown,
-        SelectAll,
-        Home,
-        End,
-        LineStart,
-        LineEnd,
-        DocStart,
-        DocEnd,
-        Newline,
-        Undo,
-        Redo,
+        Copy, Cut, Paste, Up, Down, SelectUp, SelectDown, DocStart, DocEnd, Newline, Undo, Redo,
         FollowLink,
     ]
 );
@@ -63,15 +42,10 @@ fn from_clipboard(item: &ClipboardItem) -> Option<Copied> {
 }
 
 impl EditorView {
-    pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        self.edit_buffer(window, cx, |state, buffer| state.backspace(buffer, now));
-    }
-
     /// The one action taking no gate: `edit_buffer`'s `as_mut` notifies
     /// unconditionally, which would schedule an autosave for a keystroke that changed nothing.
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        let copied = self.state.copy(self.buffer.read(cx));
+        let copied = self.input.state().copy(self.input.buffer().read(cx));
         cx.write_to_clipboard(to_clipboard(copied));
     }
 
@@ -88,45 +62,6 @@ impl EditorView {
         let now = Instant::now();
         self.edit_buffer(window, cx, |state, buffer| {
             state.paste(buffer, now, &copied);
-        });
-    }
-
-    pub(super) fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        self.edit_buffer(window, cx, |state, buffer| state.delete(buffer, now));
-    }
-
-    pub(super) fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::Left, false);
-        });
-    }
-
-    pub(super) fn right(&mut self, _: &Right, window: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::Right, false);
-        });
-    }
-
-    pub(super) fn select_left(
-        &mut self,
-        _: &SelectLeft,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::Left, true);
-        });
-    }
-
-    pub(super) fn select_right(
-        &mut self,
-        _: &SelectRight,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::Right, true);
         });
     }
 
@@ -151,40 +86,6 @@ impl EditorView {
         self.move_vertically(window, cx, Vertical::Down, true);
     }
 
-    pub(super) fn select_all(
-        &mut self,
-        _: &SelectAll,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.move_cursor(window, cx, inkra_editor::EditorState::select_all);
-    }
-
-    pub(super) fn home(&mut self, _: &Home, window: &mut Window, cx: &mut Context<Self>) {
-        self.move_to_row_edge(window, cx, RowEdge::Start);
-    }
-
-    pub(super) fn end(&mut self, _: &End, window: &mut Window, cx: &mut Context<Self>) {
-        self.move_to_row_edge(window, cx, RowEdge::End);
-    }
-
-    pub(super) fn line_start(
-        &mut self,
-        _: &LineStart,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::LineStart, false);
-        });
-    }
-
-    pub(super) fn line_end(&mut self, _: &LineEnd, window: &mut Window, cx: &mut Context<Self>) {
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::LineEnd, false);
-        });
-    }
-
     pub(super) fn doc_start(&mut self, _: &DocStart, window: &mut Window, cx: &mut Context<Self>) {
         self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::DocStart, false);
@@ -204,7 +105,7 @@ impl EditorView {
 
     /// Follows at the selection's head; the view never resolves, the shell does.
     pub(super) fn follow_link(&mut self, _: &FollowLink, _: &mut Window, cx: &mut Context<Self>) {
-        let text = self.buffer.read(cx).text();
+        let text = self.input.buffer().read(cx).text();
         if let Some(link) = inkra_markdown::link_at(text, self.cursor()) {
             cx.emit(LinkFollowed(link));
         }
