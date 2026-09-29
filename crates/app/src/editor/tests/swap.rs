@@ -2,11 +2,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use gpui::{Entity, EntityInputHandler, TestAppContext, prelude::*};
+use gpui::{Entity, TestAppContext, prelude::*};
 use inkra_text::Buffer;
 
 use super::{at, window_on};
 use crate::editor::EditorView;
+use crate::text_input::InputHost;
 
 /// Observes the *second view*, not the buffer: the buffer would notify either
 /// way, so this would pass even with the repaint subscription deleted.
@@ -34,7 +35,7 @@ fn a_second_view_repaints_when_the_first_one_edits(cx: &mut TestAppContext) {
     );
     watching
         .update(cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "abcZ");
+            assert_eq!(view.input.buffer().read(cx).text(), "abcZ");
         })
         .unwrap();
 }
@@ -78,17 +79,20 @@ fn a_swap_resets_the_caret_and_any_ime_composition(cx: &mut TestAppContext) {
     let editor = cx.update(|cx| cx.new(|cx| EditorView::new(first, cx)));
 
     editor.update(cx, |view, cx| {
-        view.state.set_marked_range(Some(at(0)..at(2)));
+        view.input.state_mut().set_marked_range(Some(at(0)..at(2)));
         view.open_buffer(second, cx);
     });
 
     editor.update(cx, |view, _| {
         assert_eq!(view.cursor(), at(0), "a note opens at the top");
         assert_eq!(
-            view.state.marked_range(),
+            view.input.state().marked_range(),
             None,
             "an in-flight composition must not survive into another document"
         );
-        assert!(view.last_layout.is_none(), "stale geometry must be cleared");
+        assert!(
+            view.input.last_layout().is_none(),
+            "stale geometry must be cleared"
+        );
     });
 }

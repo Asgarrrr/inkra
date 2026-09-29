@@ -1,12 +1,12 @@
 use std::ops::Range;
 
 use gpui::{Context, Window, point, px};
-use inkra_editor::{EditorState, Goal, LogicalMovement};
-use inkra_markdown::touched;
-use inkra_text::{Bias, Buffer, ByteOffset};
+use inkra_editor::{Goal, LogicalMovement};
+use inkra_text::{Bias, ByteOffset};
 
 use super::EditorView;
 use super::scroll::{Reveal, ScrollTo};
+use crate::text_input::InputHost;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Vertical {
@@ -14,41 +14,7 @@ pub(super) enum Vertical {
     Down,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum RowEdge {
-    Start,
-    End,
-}
-
 impl EditorView {
-    /// Reshapes when the move reveals or hides an element, so `last_layout` is never stale (spec D7).
-    pub(super) fn move_cursor(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut EditorState, &Buffer),
-    ) {
-        self.move_cursor_revealing(Reveal::Minimal, window, cx, f);
-    }
-
-    fn move_cursor_revealing(
-        &mut self,
-        how: Reveal,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut EditorState, &Buffer),
-    ) {
-        let old = self.state.selection().range();
-        f(&mut self.state, self.buffer.read(cx));
-        let new = self.state.selection().range();
-        let conceals = &self.markdown.conceals;
-        if !touched(conceals, &old).eq(touched(conceals, &new)) {
-            self.reshape(window, cx);
-        }
-        cx.notify();
-        self.reveal_cursor(how);
-    }
-
     /// Snapped outward to graphemes: the range is in the saved text, which unsaved edits may move.
     pub(crate) fn select_range(
         &mut self,
@@ -56,10 +22,12 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_cursor_revealing(Reveal::Center, window, cx, |state, buffer| {
+        self.move_cursor(window, cx, |state, buffer| {
             state.move_to(buffer, buffer.clip_grapheme(range.start, Bias::Left), false);
             state.move_to(buffer, buffer.clip_grapheme(range.end, Bias::Right), true);
         });
+        // Over the gate's minimal reveal: the last reveal decides the offset, before any paint.
+        self.reveal_cursor(Reveal::Center);
     }
 
     /// From the gates, not the handlers; from `TextElement::prepaint` it would land a frame late.
@@ -68,7 +36,7 @@ impl EditorView {
         // Bounds stay default() until the first prepaint; a waiting request means a stale layout.
         let geometry = self
             .last_text_top
-            .zip(self.last_layout.as_ref())
+            .zip(self.input.last_layout())
             .filter(|_| viewport.size.height > px(0.) && self.scroll_to.is_none());
         let Some((text_top, layout)) = geometry else {
             self.request_scroll(ScrollTo::Cursor(how));
@@ -98,7 +66,7 @@ impl EditorView {
         direction: Vertical,
         extend: bool,
     ) {
-        let Some(layout) = self.last_layout.as_ref() else {
+        let Some(layout) = self.input.last_layout() else {
             return;
         };
         let cursor = self.cursor();
@@ -106,7 +74,7 @@ impl EditorView {
 
         // Reused verbatim: re-widens a run of downs after a short row (x is
         // from the row's start, so it means the same on every row).
-        let goal_x = match self.state.selection().goal() {
+        let goal_x = match self.input.state().selection().goal() {
             Goal::Column(x) => px(x),
             Goal::None => layout.x_for_offset(cursor),
         };
@@ -138,25 +106,6 @@ impl EditorView {
         };
         self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, movement, extend);
-        });
-    }
-
-    pub(super) fn move_to_row_edge(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        edge: RowEdge,
-    ) {
-        let Some(layout) = self.last_layout.as_ref() else {
-            return;
-        };
-        let row = layout.row_bounds(layout.row_for_offset(self.cursor()));
-        let target = match edge {
-            RowEdge::Start => *row.start(),
-            RowEdge::End => *row.end(),
-        };
-        self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, target, false);
         });
     }
 }

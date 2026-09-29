@@ -17,6 +17,7 @@ mod shell;
 mod sidebar;
 #[cfg(test)]
 mod test_support;
+mod text_input;
 mod theme;
 mod timeline;
 mod vault;

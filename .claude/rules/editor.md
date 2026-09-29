@@ -2,24 +2,34 @@
 paths:
   - "crates/app/src/editor/**"
   - "crates/app/src/field.rs"
+  - "crates/app/src/text_input.rs"
+  - "crates/app/src/text_input/**"
   - "crates/editor/**"
 ---
 
 # Editor view
 
-`EditorView` has four gates; new actions go through them:
+`EditorView` and `NameField` host one `TextInput` (`text_input.rs`); the gates
+are `InputHost`'s, and new actions go through them:
 
 - `edit_buffer` — the only path that mutates text. It leases with `as_mut`
-  (notifies on drop), then reshapes with the style stored in `DocumentLayout`
-  before revealing the caret: outside a draw, `window.text_style()` is gpui's
-  default.
-- `move_cursor` — caret moves; reads the buffer, notifies the view, and
-  reshapes only when the move changes which markdown elements the selection
-  touches, so `reveal_cursor` scrolls by the revealed layout.
-- `update_state` — `EditorState` changes that must not look like a text change
-  (`unmark_text`).
-- `open_buffer` — the only path that rebinds the buffer. Never swap text through
+  (notifies on drop), drops the lease, then calls `after_edit`. The editor's
+  reshapes with the style stored in `DocumentLayout` before revealing the
+  caret: outside a draw, `window.text_style()` is gpui's default.
+- `move_cursor` — caret moves; reads the buffer, notifies the view, then
+  `after_move`. The editor's reshapes only when the move changes which
+  markdown elements the selection touches, so `reveal_cursor` scrolls by the
+  revealed layout.
+- `unmark_text` — the one `EditorState` change that is not a text change; no
+  hook runs.
+- `open_buffer` — the only path that rebinds the buffer (`TextInput::rebind`). Never swap text through
   `edit_buffer`: it would land on the previous note's undo stack.
+- A key both hosts need binds once, in `TextInput`, with its handler in
+  `text_input/actions.rs`; a host binds only its own keys
+  (`keymap/tests.rs` fails on a key bound in both).
+- `InputAdapter` stands in for gpui's `ElementInputHandler`: a protocol call
+  gpui adds to `InputHandler` needs forwarding there, or it silently takes the
+  trait default.
 - A scroll decided before its geometry exists goes through `request_scroll`
   into `scroll_to`, which `render` applies; never a second field.
 - `copy` takes no gate: `as_mut` notifies unconditionally and would schedule an

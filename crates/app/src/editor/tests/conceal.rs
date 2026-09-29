@@ -1,9 +1,10 @@
 use gpui::TestAppContext;
 
 use super::{at, dispatching};
+use crate::text_input::InputHost;
 
 fn shown(view: &crate::editor::EditorView, line: usize) -> String {
-    view.last_layout.as_ref().unwrap().shown(line).to_string()
+    view.input.last_layout().unwrap().shown(line).to_string()
 }
 
 #[gpui::test]
@@ -81,7 +82,7 @@ fn select_all_reveals_everything(cx: &mut TestAppContext) {
             assert_eq!(shown(view, 0), "a **b** c");
             // A heading's `# ` hangs left of the text instead (live-preview spec, D12).
             assert_eq!(shown(view, 1), "T");
-            let layout = view.last_layout.as_ref().unwrap();
+            let layout = view.input.last_layout().unwrap();
             assert!(layout.x_for_offset(at(10)) < gpui::px(0.));
         })
         .unwrap();
@@ -124,7 +125,7 @@ fn typing_inside_revealed_bold_keeps_it_revealed(cx: &mut TestAppContext) {
     cx.simulate_input("z");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "a **bz** c\nx");
+            assert_eq!(view.input.buffer().read(cx).text(), "a **bz** c\nx");
             assert_eq!(shown(view, 0), "a **bz** c");
         })
         .unwrap();

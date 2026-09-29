@@ -132,6 +132,8 @@ Read the spec before changing its area:
   word start, the word-index prefilter, `word_prefix`
 - `docs/superpowers/specs/2026-09-28-ranking-idf-design.md` — key 2 of a text
   match: BM25, per-ordinal note lengths
+- `docs/superpowers/specs/2026-09-29-text-input-design.md` — `TextInput`, the
+  core `EditorView` and `NameField` share: gates, protocol, one binding set
 - `docs/superpowers/specs/2026-09-29-row-text-design.md` — `row_text`: lit
   one-line row text, the path split, `name_row`
 - `docs/superpowers/specs/2026-09-29-names-delete-design.md` — the name table

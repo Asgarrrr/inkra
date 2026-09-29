@@ -34,10 +34,10 @@ fn point_at(
 ) -> gpui::Point<gpui::Pixels> {
     window
         .update(cx, |view, _, _| {
-            let origin = view.last_bounds.unwrap().origin;
+            let origin = view.input.last_bounds().unwrap().origin;
             let at = view
-                .last_layout
-                .as_ref()
+                .input
+                .last_layout()
                 .unwrap()
                 .position_for_offset(at(offset));
             origin + at + point(px(2.), px(8.))
@@ -62,7 +62,7 @@ fn cmd_enter_inside_a_link_follows_it(cx: &mut TestAppContext) {
     assert_eq!(caret(&window, &mut cx), 5, "following moves no caret");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), TEXT);
+            assert_eq!(view.input.buffer().read(cx).text(), TEXT);
         })
         .unwrap();
 }
@@ -78,7 +78,7 @@ fn cmd_enter_outside_a_link_does_nothing(cx: &mut TestAppContext) {
     assert!(seen.borrow().is_empty());
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), TEXT, "no newline");
+            assert_eq!(view.input.buffer().read(cx).text(), TEXT, "no newline");
         })
         .unwrap();
 }
@@ -176,8 +176,8 @@ fn a_cmd_click_on_a_links_last_drawn_glyph_follows_it(cx: &mut TestAppContext) {
     let (seen, _guard) = followed(&window, &mut cx);
     let (left, right, top) = window
         .update(&mut cx, |view, _, _| {
-            let layout = view.last_layout.as_ref().unwrap();
-            let origin = view.last_bounds.unwrap().origin;
+            let layout = view.input.last_layout().unwrap();
+            let origin = view.input.last_bounds().unwrap().origin;
             (
                 origin.x + layout.x_for_offset(at(5)),
                 origin.x + layout.x_for_offset(at(6)),

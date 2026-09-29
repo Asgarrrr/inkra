@@ -9,7 +9,7 @@ fn typing_and_deleting_reach_the_buffer_through_dispatch(cx: &mut TestAppContext
     cx.simulate_input("héllo");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "héllo");
+            assert_eq!(view.input.buffer().read(cx).text(), "héllo");
             assert_eq!(view.cursor(), at(6));
         })
         .unwrap();
@@ -17,8 +17,8 @@ fn typing_and_deleting_reach_the_buffer_through_dispatch(cx: &mut TestAppContext
     cx.simulate_keystrokes("backspace shift-left");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "héll");
-            assert_eq!(view.state.selection().range(), at(4)..at(5));
+            assert_eq!(view.input.buffer().read(cx).text(), "héll");
+            assert_eq!(view.input.state().selection().range(), at(4)..at(5));
         })
         .unwrap();
 }
@@ -30,7 +30,7 @@ fn a_typing_run_undoes_in_one_step_through_dispatch(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-z");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "");
+            assert_eq!(view.input.buffer().read(cx).text(), "");
         })
         .unwrap();
 }
@@ -62,16 +62,16 @@ fn every_movement_binding_dispatches(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("shift-left");
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.state.selection().range(), at(2)..at(3));
-            assert!(view.state.selection().reversed());
+            assert_eq!(view.input.state().selection().range(), at(2)..at(3));
+            assert!(view.input.state().selection().reversed());
         })
         .unwrap();
 
     cx.simulate_keystrokes("home shift-right");
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.state.selection().range(), at(0)..at(1));
-            assert!(!view.state.selection().reversed());
+            assert_eq!(view.input.state().selection().range(), at(0)..at(1));
+            assert!(!view.input.state().selection().reversed());
         })
         .unwrap();
 
@@ -79,8 +79,8 @@ fn every_movement_binding_dispatches(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(
-                view.state.selection().range(),
-                at(0)..view.buffer.read(cx).len()
+                view.input.state().selection().range(),
+                at(0)..view.input.buffer().read(cx).len()
             );
         })
         .unwrap();
@@ -93,21 +93,21 @@ fn the_delete_and_redo_bindings_dispatch(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("home delete");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "bc");
+            assert_eq!(view.input.buffer().read(cx).text(), "bc");
         })
         .unwrap();
 
     cx.simulate_keystrokes("cmd-z");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "abc");
+            assert_eq!(view.input.buffer().read(cx).text(), "abc");
         })
         .unwrap();
 
     cx.simulate_keystrokes("cmd-shift-z");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "bc");
+            assert_eq!(view.input.buffer().read(cx).text(), "bc");
         })
         .unwrap();
 }
@@ -173,7 +173,7 @@ fn an_edit_between_two_vertical_moves_resets_the_goal(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("down");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "aaaa\naaXY\naaaa");
+            assert_eq!(view.input.buffer().read(cx).text(), "aaaa\naaXY\naaaa");
             assert_eq!(view.cursor(), at(14));
         })
         .unwrap();
@@ -197,7 +197,7 @@ fn vertical_moves_past_either_end_run_to_the_document_ends(cx: &mut TestAppConte
     cx.simulate_keystrokes("cmd-down left down");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.cursor(), view.buffer.read(cx).len());
+            assert_eq!(view.cursor(), view.input.buffer().read(cx).len());
         })
         .unwrap();
 }
@@ -210,15 +210,15 @@ fn shift_up_and_shift_down_extend_across_lines(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-up shift-down");
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(view.state.selection().range(), at(0)..at(5));
-            assert!(!view.state.selection().reversed());
+            assert_eq!(view.input.state().selection().range(), at(0)..at(5));
+            assert!(!view.input.state().selection().reversed());
         })
         .unwrap();
 
     cx.simulate_keystrokes("shift-up");
     window
         .update(&mut cx, |view, _, _| {
-            assert!(view.state.selection().is_empty());
+            assert!(view.input.state().selection().is_empty());
             assert_eq!(view.cursor(), at(0));
         })
         .unwrap();
@@ -232,8 +232,8 @@ fn enter_inserts_exactly_one_newline(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "\n");
-            assert_eq!(view.buffer.read(cx).line_count(), 2);
+            assert_eq!(view.input.buffer().read(cx).text(), "\n");
+            assert_eq!(view.input.buffer().read(cx).line_count(), 2);
             assert_eq!(view.cursor(), at(1));
         })
         .unwrap();
@@ -247,7 +247,7 @@ fn a_typing_run_broken_by_enter_still_undoes_as_one_step(cx: &mut TestAppContext
     cx.simulate_input("cd");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "ab\ncd");
+            assert_eq!(view.input.buffer().read(cx).text(), "ab\ncd");
         })
         .unwrap();
 
@@ -256,7 +256,7 @@ fn a_typing_run_broken_by_enter_still_undoes_as_one_step(cx: &mut TestAppContext
     cx.simulate_keystrokes("cmd-z");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.buffer.read(cx).text(), "");
+            assert_eq!(view.input.buffer().read(cx).text(), "");
         })
         .unwrap();
 }
@@ -273,7 +273,7 @@ fn home_and_end_bind_to_the_line_ends_and_cmd_arrows_to_the_document(cx: &mut Te
     cx.simulate_keystrokes("cmd-down");
     window
         .update(&mut cx, |view, _, cx| {
-            assert_eq!(view.cursor(), view.buffer.read(cx).len());
+            assert_eq!(view.cursor(), view.input.buffer().read(cx).len());
         })
         .unwrap();
 
@@ -293,6 +293,6 @@ fn undoing_with_an_empty_history_leaves_the_text_alone(cx: &mut TestAppContext) 
     with_editor(cx, "abc", |view, window, cx| {
         view.undo(&Undo, window, cx);
         view.redo(&Redo, window, cx);
-        assert_eq!(view.buffer.read(cx).text(), "abc");
+        assert_eq!(view.input.buffer().read(cx).text(), "abc");
     });
 }

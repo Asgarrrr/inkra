@@ -4,24 +4,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
-    PaintQuad, Pixels, Point, Style, TextStyle, Window, fill, point, prelude::*, px, relative,
-    size,
+    App, AvailableSpace, Bounds, ElementId, Entity, GlobalElementId, LayoutId, Pixels, Style,
+    TextStyle, Window, point, prelude::*, px, relative, size,
 };
 use inkra_markdown::Styles;
 
 use super::EditorView;
 use super::layout::{DocumentLayout, shape_document};
+use crate::text_input::{self, Prepainted, Quads};
 use crate::theme;
 
 pub(super) struct TextElement {
     pub(super) editor: Entity<EditorView>,
-}
-
-pub(super) struct PrepaintState {
-    layout: Option<Rc<DocumentLayout>>,
-    selection: Vec<PaintQuad>,
-    cursor: Option<PaintQuad>,
 }
 
 impl IntoElement for TextElement {
@@ -38,7 +32,7 @@ type Stash = Rc<RefCell<Vec<Rc<DocumentLayout>>>>;
 
 impl Element for TextElement {
     type RequestLayoutState = (Stash, Inset);
-    type PrepaintState = PrepaintState;
+    type PrepaintState = Prepainted;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -99,8 +93,8 @@ impl Element for TextElement {
                 let text = definite.map_or_else(
                     || {
                         editor
-                            .last_layout
-                            .as_ref()
+                            .input
+                            .last_layout()
                             .and_then(|layout| layout.wrap_width())
                             .unwrap_or_else(|| inset.text_width(widest))
                     },
@@ -113,10 +107,10 @@ impl Element for TextElement {
                 {
                     return size(reported, layout.height());
                 }
-                let buffer = editor.buffer.read(cx);
-                let selection = editor.state.selection().range();
-                let marked = editor.state.marked_range();
-                let layout = match editor.last_layout.as_ref().filter(|layout| {
+                let buffer = editor.input.buffer().read(cx);
+                let selection = editor.input.state().selection().range();
+                let marked = editor.input.state().marked_range();
+                let layout = match editor.input.last_layout().filter(|layout| {
                     layout.is_shaped_from(
                         buffer,
                         editor.markdown(),
@@ -159,12 +153,12 @@ impl Element for TextElement {
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
             eprintln!("no layout measured at width {}", bounds.size.width);
             let editor = self.editor.read(cx);
-            let marked = editor.state.marked_range();
+            let marked = editor.input.state().marked_range();
             let style = window.text_style();
             Rc::new(shape_document(
-                editor.buffer.read(cx),
+                editor.input.buffer().read(cx),
                 editor.markdown(),
-                &editor.state.selection().range(),
+                &editor.input.state().selection().range(),
                 marked.as_ref(),
                 &style,
                 Some(bounds.size.width),
@@ -172,30 +166,9 @@ impl Element for TextElement {
             ))
         });
 
-        let editor = self.editor.read(cx);
-        let selection = editor.state.selection().range();
-        let cursor = editor.cursor();
-        let (selection, cursor) = if selection.is_empty() {
-            let caret = layout.caret_bounds(cursor);
-            let quad = fill(
-                Bounds::new(bounds.origin + caret.origin, caret.size),
-                theme::cursor(),
-            );
-            (Vec::new(), Some(quad))
-        } else {
-            let quads = layout
-                .selection_quads(&selection)
-                .into_iter()
-                .map(|quad| translate(quad, bounds.origin))
-                .collect();
-            (quads, None)
-        };
-
-        PrepaintState {
-            layout: Some(layout),
-            selection,
-            cursor,
-        }
+        let selection = self.editor.read(cx).input.state().selection().range();
+        let quads = Quads::new(&layout, &selection, bounds.origin);
+        Some((layout, quads))
     }
 
     fn paint(
@@ -209,31 +182,12 @@ impl Element for TextElement {
         cx: &mut App,
     ) {
         let bounds = inset.text_bounds(bounds);
-        let focus_handle = self.editor.read(cx).focus_handle.clone();
-        window.handle_input(
-            &focus_handle,
-            ElementInputHandler::new(bounds, self.editor.clone()),
-            cx,
-        );
-
-        for quad in prepaint.selection.drain(..) {
-            window.paint_quad(quad);
-        }
-
-        let Some(layout) = prepaint.layout.take() else {
+        let Some((layout, quads)) = prepaint.take() else {
             return;
         };
-        layout.paint(bounds.origin, window, cx);
-
-        if focus_handle.is_focused(window)
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+        text_input::paint(&self.editor, layout, quads, bounds, window, cx);
 
         self.editor.update(cx, |editor, cx| {
-            editor.last_layout = Some(layout);
-            editor.last_bounds = Some(bounds);
             // Read now: the scroll offset here is what translated this frame's
             // `bounds` (`elements/div.rs:2390`), so subtracting it gives the y at zero scroll.
             let text_top = bounds.origin.y - editor.scroll_handle.offset().y;
@@ -308,9 +262,4 @@ impl Inset {
             size(self.text_width(element.size.width), element.size.height),
         )
     }
-}
-
-fn translate(mut quad: PaintQuad, origin: Point<Pixels>) -> PaintQuad {
-    quad.bounds.origin += origin;
-    quad
 }

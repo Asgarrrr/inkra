@@ -5,38 +5,45 @@ use gpui::KeyBinding;
 
 use crate::Quit;
 use crate::editor::actions::{
-    Backspace, Copy, Cut, Delete, DocEnd, DocStart, Down, End, FollowLink, Home, Left, LineEnd,
-    LineStart, Newline, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight,
-    SelectUp, Undo, Up,
+    Copy, Cut, DocEnd, DocStart, Down, FollowLink, Newline, Paste, Redo, SelectDown, SelectUp,
+    Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
 use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
+use crate::text_input;
+use crate::text_input::actions::{
+    Backspace, Delete, End, Home, Left, LineEnd, LineStart, Right, SelectAll, SelectLeft,
+    SelectRight,
+};
 use crate::vault::Save;
 use crate::vault_search::SearchVault;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
-    let editor = Some("EditorView");
-    let field = Some("NameField");
+    let input = Some(text_input::CONTEXT);
+    let editor = Some(text_input::EDITOR_CONTEXT);
+    let field = Some(text_input::FIELD_CONTEXT);
     vec![
-        KeyBinding::new("backspace", Backspace, editor),
-        KeyBinding::new("delete", Delete, editor),
-        KeyBinding::new("left", Left, editor),
-        KeyBinding::new("right", Right, editor),
-        KeyBinding::new("shift-left", SelectLeft, editor),
-        KeyBinding::new("shift-right", SelectRight, editor),
+        // Once, for every text input. `home` and `cmd-left` stop at the row's edge,
+        // `ctrl-a` at the logical line's, as in Zed and Cocoa.
+        KeyBinding::new("backspace", Backspace, input),
+        KeyBinding::new("delete", Delete, input),
+        KeyBinding::new("left", Left, input),
+        KeyBinding::new("right", Right, input),
+        KeyBinding::new("shift-left", SelectLeft, input),
+        KeyBinding::new("shift-right", SelectRight, input),
+        KeyBinding::new("cmd-a", SelectAll, input),
+        KeyBinding::new("home", Home, input),
+        KeyBinding::new("end", End, input),
+        KeyBinding::new("cmd-left", Home, input),
+        KeyBinding::new("cmd-right", End, input),
+        KeyBinding::new("ctrl-a", LineStart, input),
+        KeyBinding::new("ctrl-e", LineEnd, input),
         KeyBinding::new("up", Up, editor),
         KeyBinding::new("down", Down, editor),
         KeyBinding::new("shift-up", SelectUp, editor),
         KeyBinding::new("shift-down", SelectDown, editor),
-        KeyBinding::new("cmd-a", SelectAll, editor),
-        KeyBinding::new("home", Home, editor),
-        KeyBinding::new("end", End, editor),
-        KeyBinding::new("cmd-left", Home, editor),
-        KeyBinding::new("cmd-right", End, editor),
-        KeyBinding::new("ctrl-a", LineStart, editor),
-        KeyBinding::new("ctrl-e", LineEnd, editor),
         KeyBinding::new("cmd-up", DocStart, editor),
         KeyBinding::new("cmd-down", DocEnd, editor),
         KeyBinding::new("enter", Newline, editor),
@@ -53,23 +60,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // `enter` and `escape` stay the field's: the deepest context wins, so a `Picker` binding would never fire.
         KeyBinding::new("up", picker::SelectPrev, Some("Picker")),
         KeyBinding::new("down", picker::SelectNext, Some("Picker")),
-        // NameField repeats the editor's movement/deletion bindings since it
-        // can't inherit them; `enter` confirms here, inserts a newline in the editor.
+        // `enter` confirms here and inserts a newline in the editor.
         KeyBinding::new("enter", Confirm, field),
         KeyBinding::new("escape", Cancel, field),
-        KeyBinding::new("backspace", Backspace, field),
-        KeyBinding::new("delete", Delete, field),
-        KeyBinding::new("left", Left, field),
-        KeyBinding::new("right", Right, field),
-        KeyBinding::new("shift-left", SelectLeft, field),
-        KeyBinding::new("shift-right", SelectRight, field),
-        KeyBinding::new("home", Home, field),
-        KeyBinding::new("end", End, field),
-        KeyBinding::new("cmd-left", Home, field),
-        KeyBinding::new("cmd-right", End, field),
-        KeyBinding::new("ctrl-a", Home, field),
-        KeyBinding::new("ctrl-e", End, field),
-        KeyBinding::new("cmd-a", SelectAll, field),
         // Scoped to `AppShell`, not `Sidebar`, so it fires with the editor
         // focused too — making a note is window-wide, like `cmd-s`.
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
@@ -80,3 +73,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

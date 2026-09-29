@@ -46,7 +46,7 @@ fn a_write_outside_the_gates_reaches_the_next_paint(cx: &mut TestAppContext) {
 
     window
         .update(cx, |view, _, _| {
-            assert_eq!(view.last_layout.as_ref().unwrap().shown(0), "bc");
+            assert_eq!(view.input.last_layout().unwrap().shown(0), "bc");
         })
         .unwrap();
 }
@@ -59,8 +59,8 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
 
     window
         .update(&mut cx, |view, _, cx| {
-            let buffer = view.buffer.read(cx);
-            let layout = view.last_layout.as_ref().unwrap();
+            let buffer = view.input.buffer().read(cx);
+            let layout = view.input.last_layout().unwrap();
             let (style, width) = (layout.style().clone(), layout.wrap_width());
             let reused = |selection: Range<ByteOffset>, marked: Option<Range<ByteOffset>>| {
                 layout.is_shaped_from(

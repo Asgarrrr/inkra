@@ -20,6 +20,7 @@ uncertainty, for reasons given below.
 | Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-28: it costs above ~290 KB. | 2–3 d | — |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 | `TextElement` owns its vertical scroll, Zed-style, and reveals in prepaint. Removes the one frame a note opened at a search hit shows at its top, and the deferred notify of its first paint (`superpowers/specs/2026-09-28-vault-search-integration-design.md`, As built, slice 4) | The flash at the top is noticed, or a third kind of scroll request arrives | 1–2 d | — |
+| Clipboard and undo in `NameField` (`cmd-c`, `cmd-x`, `cmd-v`, `cmd-z`, `cmd-shift-z`). Since `TextInput` (`superpowers/specs/2026-09-29-text-input-design.md`), a move of their bindings from `EditorView` to `TextInput` and of their handlers to `text_input/actions.rs` | Someone reaches for them in a name field | 0.5 d | — |
 
 ### Soft wrap and horizontal scroll
 
