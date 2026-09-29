@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gpui::{AsyncApp, Context, Entity, WeakEntity, prelude::*};
 use inkra_vault::{EntryId, Vault};
 
-use super::store::Location;
+use super::session::PendingSave;
 use super::{GoneChanged, NoteStore};
 
 impl NoteStore {
@@ -17,51 +17,37 @@ impl NoteStore {
         cx: &mut Context<Self>,
     ) {
         let live = vault.read(cx);
-        let mut changed = Vec::new();
-        let mut flipped = Vec::new();
-        for (&id, note) in &mut self.open {
-            if id == EntryId::DETACHED {
-                continue;
-            }
-            let Some(entry) = live.entry(id) else {
-                // Our own trash closes the note; it is never gone.
-                if note.is_gone() || self.ops.get(&id).is_some_and(|ops| ops.trashing) {
-                    continue;
-                }
-                if let Some(path) = previous.absolute(id) {
-                    note.location = Location::Gone(path);
-                    flipped.push(id);
-                }
-                continue;
-            };
-            if note.is_gone() {
-                note.location = Location::Vault;
-                flipped.push(id);
-            }
-            if previous
-                .entry(id)
-                .is_none_or(|before| before.mtime != entry.mtime)
-            {
-                changed.push(id);
-            }
+        let swaps = self.sessions.swapped(
+            |id| {
+                let before = previous.entry(id).map(|entry| entry.mtime);
+                (live.entry(id).map(|entry| entry.mtime), before)
+            },
+            |id| previous.absolute(id),
+        );
+        for (id, _) in swaps.iter().filter(|(_, swap)| swap.flipped) {
+            cx.emit(GoneChanged(*id));
         }
-        for id in flipped {
-            cx.emit(GoneChanged(id));
-        }
-        for id in changed {
+        for id in swaps
+            .iter()
+            .filter(|(_, swap)| swap.reload)
+            .map(|(id, _)| *id)
+        {
             // Behind every operation queued on the note, so it sees their stamp and `saved_version`.
-            drop(self.after_chain(id, cx, async move |this, cx| {
-                Self::reload(id, this, cx).await.is_some()
-            }));
+            drop(
+                self.queue(id, PendingSave::Keep, cx, async move |this, cx| {
+                    Self::reload(id, this, cx).await.is_some()
+                }),
+            );
         }
     }
 
-    /// Every foreground step looks the note up afresh and stops if it left `open`.
+    /// Every foreground step looks the note up afresh and stops if it closed.
     async fn reload(id: EntryId, this: WeakEntity<Self>, cx: &mut AsyncApp) -> Option<()> {
         let (fs, writer, path, mtime) = this
             .update(cx, |this, cx| {
-                let note = this.open.get(&id)?;
-                if this.ops.get(&id).is_some_and(|ops| ops.trashing) || this.is_dirty(id, cx) {
+                let life = &this.sessions.get(id)?.life;
+                let note = life.bound()?;
+                if !life.is_open() || note.is_dirty(cx) {
                     return None;
                 }
                 let vault = this.vault.as_ref()?.read(cx);
@@ -89,8 +75,8 @@ impl NoteStore {
 
         let (text, version) = this
             .update(cx, |this, cx| {
-                let note = this.open.get(&id)?;
-                if this.is_dirty(id, cx) {
+                let note = this.sessions.note(id)?;
+                if note.is_dirty(cx) {
                     return None;
                 }
                 Some(note.snapshot(cx))
@@ -109,13 +95,12 @@ impl NoteStore {
             let _ = held.await;
         }
 
-        let writer = this
-            .update(cx, |this, cx| this.open.get_mut(&id)?.did_reload(&diff, cx))
+        let adopt = this
+            .update(cx, |this, cx| {
+                this.sessions.note_mut(id)?.did_reload(&diff, stamp, cx)
+            })
             .ok()??;
-
-        // After the apply: adopted before a refused one, the next save would drop theirs unpreserved.
-        cx.background_spawn(async move { writer.adopt(stamp).await })
-            .await;
+        cx.background_spawn(adopt.run()).await;
         Some(())
     }
 

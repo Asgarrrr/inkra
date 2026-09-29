@@ -139,7 +139,7 @@ impl NoteStore {
         swap: impl FnOnce(&mut Scans, &mut Vault, &Claims) -> (Swapped, T),
         cx: &mut Context<Self>,
     ) -> (Swapped, T) {
-        let claims = self.claims();
+        let claims = self.sessions.claims();
         let scans = &mut self.scans;
         vault.update(cx, |live, cx| {
             let (swapped, rest) = swap(scans, live, &claims);

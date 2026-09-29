@@ -18,6 +18,7 @@ mod quit;
 mod reload;
 mod rescan;
 mod scans;
+mod sessions;
 mod trash;
 mod watch;
 

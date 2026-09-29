@@ -52,11 +52,13 @@ fn version(buffer: &Entity<Buffer>, cx: &mut TestAppContext) -> u64 {
 }
 
 fn saved_version(notes: &Entity<NoteStore>, cx: &mut TestAppContext, id: EntryId) -> u64 {
-    notes.read_with(cx, |notes, _| notes.open[&id].saved_version())
+    notes.read_with(cx, |notes, _| {
+        notes.sessions.note(id).unwrap().saved_version()
+    })
 }
 
 fn expected(notes: &Entity<NoteStore>, cx: &mut TestAppContext, id: EntryId) -> Stamp {
-    let writer = notes.read_with(cx, |notes, _| notes.open[&id].writer());
+    let writer = notes.read_with(cx, |notes, _| notes.sessions.note(id).unwrap().writer());
     futures::executor::block_on(writer.expected())
 }
 
@@ -152,7 +154,7 @@ async fn a_reload_schedules_no_autosave(cx: &mut TestAppContext) {
 
     assert_eq!(text(&buffer, cx), "theirs");
     assert_eq!(reloaded.get(), 1);
-    assert!(!notes.read_with(cx, |notes, _| notes.ops[&a].scheduled));
+    assert!(!notes.read_with(cx, |notes, _| notes.sessions.is_scheduled(a)));
 }
 
 #[gpui::test]

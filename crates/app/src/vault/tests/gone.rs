@@ -1,7 +1,7 @@
 //! A note deleted on disk stays open, gone; typing brings it back under its id (watcher spec, F9).
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use inkra_vault::{EntryId, Fs};
 use crate::buffer_events::Reloaded;
 use crate::index::IndexSync;
 use crate::test_support::{conflicts, edit, entry_id, named, opened, scan_notes};
-use crate::vault::store::{AUTOSAVE_DELAY, Location};
+use crate::vault::store::AUTOSAVE_DELAY;
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, SaveFailed, TrashFailed};
 
 const A: &str = "/vault/f/a.md";
@@ -98,8 +98,15 @@ async fn a_clean_note_deleted_on_disk_stays_open_and_gone(cx: &mut TestAppContex
     assert_eq!(reloaded.get(), 0);
     assert_eq!(*events.borrow(), [GoneChanged(a)]);
     notes.read_with(cx, |notes, _| {
-        assert!(
-            matches!(&notes.open[&a].location, Location::Gone(path) if path == Path::new(A)),
+        assert_eq!(
+            notes
+                .sessions
+                .get(a)
+                .unwrap()
+                .life
+                .gone_path()
+                .map(PathBuf::as_path),
+            Some(Path::new(A)),
             "its last vault path"
         );
     });
