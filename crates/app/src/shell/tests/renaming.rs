@@ -170,12 +170,12 @@ fn renaming_replaces_the_row_rather_than_adding_one(cx: &mut TestAppContext) {
     let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
     let mut visual = tree_focused(cx, window, &sidebar);
 
-    let before = sidebar.read_with(cx, |sidebar, _| sidebar.row_count());
+    let before = sidebar.read_with(cx, |sidebar, _| sidebar.item_count());
     visual.simulate_keystrokes("down enter");
     visual.run_until_parked();
 
     assert_eq!(
-        sidebar.read_with(cx, |sidebar, _| sidebar.row_count()),
+        sidebar.read_with(cx, |sidebar, _| sidebar.item_count()),
         before
     );
 }

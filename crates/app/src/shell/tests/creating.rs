@@ -232,3 +232,25 @@ fn a_note_created_beside_a_selected_note_lands_in_its_folder(cx: &mut TestAppCon
         vault_names(&notes, cx)
     );
 }
+
+/// Opening scrolls the list to the field: an undrawn field swallows every keystroke.
+#[gpui::test]
+fn a_field_opened_far_below_the_drawn_rows_takes_keystrokes(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    // Zero-padded so the comparator's lexical order is the numeric one.
+    for ix in 0..200 {
+        fs.insert_file(format!("/vault/note-{ix:03}.md"), "text");
+    }
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+    let last = entry_id(&notes, cx, "note-199");
+    sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last, cx));
+    visual.run_until_parked();
+
+    visual.simulate_keystrokes("cmd-n");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("z enter");
+    visual.run_until_parked();
+
+    assert!(vault_names(&notes, cx).contains(&"z.md".to_owned()));
+}

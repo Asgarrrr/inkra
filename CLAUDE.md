@@ -123,6 +123,8 @@ Read the spec before changing its area:
   builds, mtime fast path
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
+- `docs/superpowers/specs/2026-09-29-sidebar-rows-design.md` — `Rows`: the
+  name field's slot, item vs row indices, `neighbour` and `step`
 - `docs/superpowers/specs/2026-09-28-search-word-start-design.md` — `⌘⇧F` by
   word start, the word-index prefilter, `word_prefix`
 - `docs/superpowers/specs/2026-09-28-ranking-idf-design.md` — key 2 of a text

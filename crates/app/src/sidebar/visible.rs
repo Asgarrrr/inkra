@@ -66,10 +66,6 @@ impl Visible {
         self.positions.len()
     }
 
-    pub(super) fn is_empty(&self) -> bool {
-        self.positions.is_empty()
-    }
-
     /// Panics past the end: `ix` is a row index, not an entry position.
     pub(super) fn entry(&self, ix: usize) -> &Entry {
         &self.entries[self.positions[ix]]
@@ -90,6 +86,29 @@ impl Visible {
         self.positions
             .iter()
             .position(|&position| self.entries[position].id == id)
+    }
+
+    /// The row that takes `id`'s place when it leaves: below, else above.
+    /// Call before removing the row: after removal this returns `None`.
+    pub(super) fn neighbour(&self, id: EntryId) -> Option<EntryId> {
+        let ix = self.index_of(id)?;
+        let neighbour = if ix + 1 < self.len() {
+            ix + 1
+        } else {
+            ix.checked_sub(1)?
+        };
+        Some(self.entry(neighbour).id)
+    }
+
+    /// One step from `from`; no selection enters at the first or last row.
+    pub(super) fn step(&self, from: Option<EntryId>, delta: isize) -> Option<EntryId> {
+        let last = self.len().checked_sub(1)?;
+        let next = match from.and_then(|id| self.index_of(id)) {
+            Some(ix) => ix.saturating_add_signed(delta).min(last),
+            None if delta > 0 => 0,
+            None => last,
+        };
+        Some(self.entry(next).id)
     }
 
     /// The folder holding the row at `ix`: a folder's subtree follows it, so it is above.

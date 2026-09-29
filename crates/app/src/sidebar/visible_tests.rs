@@ -144,3 +144,53 @@ fn a_parent_is_the_folder_holding_the_row() {
     let (a, b) = (Some(id(&vault, "A")), Some(id(&vault, "A/B")));
     assert_eq!(parents, [None, a, b, a], "A/, B/, n, m");
 }
+
+fn flat(names: &[&str]) -> (Vault, Visible) {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    for name in names {
+        fs.insert_file(format!("/vault/{name}.md"), "text");
+    }
+    let vault = scanned(&fs);
+    let mut visible = Visible::default();
+    visible.rewalk(vault.shared_entries(), &HashSet::new(), None);
+    (vault, visible)
+}
+
+#[test]
+fn a_leaving_row_hands_its_place_to_the_row_below_else_above() {
+    let (vault, visible) = flat(&["a", "b", "c"]);
+    let [a, b, c] = ["a.md", "b.md", "c.md"].map(|name| id(&vault, name));
+    assert_eq!(visible.neighbour(b), Some(c));
+    assert_eq!(visible.neighbour(a), Some(b));
+    assert_eq!(visible.neighbour(c), Some(b));
+
+    let (lone_vault, lone) = flat(&["a"]);
+    assert_eq!(lone.neighbour(id(&lone_vault, "a.md")), None);
+    assert_eq!(visible.neighbour(EntryId::DETACHED), None, "an unknown id");
+}
+
+#[test]
+fn a_step_enters_at_an_end_and_clamps_at_both() {
+    let (vault, visible) = flat(&["a", "b", "c"]);
+    let [a, b, c] = ["a.md", "b.md", "c.md"].map(|name| id(&vault, name));
+    assert_eq!(
+        visible.step(None, 1),
+        Some(a),
+        "down enters at the first row"
+    );
+    assert_eq!(visible.step(None, -1), Some(c), "up enters at the last row");
+    assert_eq!(visible.step(Some(a), 1), Some(b));
+    assert_eq!(visible.step(Some(b), -1), Some(a));
+    assert_eq!(visible.step(Some(a), -1), Some(a));
+    assert_eq!(visible.step(Some(c), 1), Some(c));
+    assert_eq!(
+        visible.step(Some(EntryId::DETACHED), 1),
+        Some(a),
+        "no row enters too"
+    );
+
+    let (_, empty) = flat(&[]);
+    assert_eq!(empty.step(None, 1), None);
+    assert_eq!(empty.step(Some(a), -1), None);
+}

@@ -16,6 +16,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use super::edit::Rejection;
+use super::rows::Item;
 use super::{Kind, NoteActivated, Row, Sidebar, row_center};
 use crate::test_support::opened;
 use crate::vault::NoteStore;
@@ -28,27 +29,27 @@ impl Sidebar {
     }
 
     #[cfg(test)]
-    pub(crate) fn field_row(&self) -> usize {
-        self.editing.as_ref().map_or(0, |edit| edit.at)
+    pub(crate) fn field_item(&self) -> usize {
+        self.rows.field_item().unwrap_or(0)
     }
 
     #[cfg(test)]
     pub(crate) fn is_editing(&self) -> bool {
-        self.editing.is_some()
+        self.rows.edit().is_some()
     }
 
     #[cfg(test)]
     pub(crate) fn field_is_focused(&self, window: &gpui::Window, cx: &gpui::App) -> bool {
-        self.editing
-            .as_ref()
+        self.rows
+            .edit()
             .is_some_and(|edit| edit.field.focus_handle(cx).is_focused(window))
     }
 
     /// Asserts the sentence, not the variant: that is what catches a rejection reported with the wrong reason.
     #[cfg(test)]
     pub(crate) fn rejection_message(&self) -> Option<&'static str> {
-        self.editing
-            .as_ref()
+        self.rows
+            .edit()
             .and_then(|edit| edit.rejected)
             .map(Rejection::message)
     }
@@ -58,21 +59,31 @@ impl Sidebar {
         self.selected
     }
 
-    fn rows(&self) -> Vec<Row> {
-        (0..self.visible.len())
-            .map(|ix| self.visible.row(ix))
-            .collect()
+    fn visible_rows(&self) -> Vec<Row> {
+        let visible = self.rows.visible();
+        (0..visible.len()).map(|ix| visible.row(ix)).collect()
+    }
+
+    /// The row an item draws; `None` for the field.
+    fn row_at(&self, item: usize) -> Option<Row> {
+        match self.rows.item(item)? {
+            Item::Row(row) => Some(self.rows.visible().row(row)),
+            Item::Field(_) => None,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn row_names(&self) -> Vec<String> {
-        self.rows().into_iter().map(|row| row.name).collect()
+        self.visible_rows()
+            .into_iter()
+            .map(|row| row.name)
+            .collect()
     }
 
     #[cfg(test)]
     pub(crate) fn toggle_named(&mut self, name: &str, cx: &mut Context<Self>) {
         let id = self
-            .rows()
+            .visible_rows()
             .into_iter()
             .find(|row| row.name == name)
             .map(|row| row.id)
@@ -149,7 +160,7 @@ fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
         sidebar.select_for_test(b.id, cx);
         sidebar.open_rename(cx);
     });
-    assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.field_row()), 1);
+    assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.field_item()), 1);
 
     // Sorts first, so the swap moves `b` down a row.
     let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "0", cx));
@@ -162,11 +173,8 @@ fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
     assert_eq!(labels(&sidebar, cx), ["0", "a", "b"]);
     sidebar.read_with(cx, |sidebar, _| {
         assert!(sidebar.is_editing());
-        assert_eq!(
-            sidebar.editing.as_ref().and_then(|edit| edit.target),
-            Some(b.id)
-        );
-        assert_eq!(sidebar.field_row(), 2);
+        assert_eq!(sidebar.rows.target(), Some(b.id));
+        assert_eq!(sidebar.field_item(), 2);
     });
 }
 
@@ -195,7 +203,7 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
 
     assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
     assert!(
-        sidebar.read_with(cx, |sidebar, _| sidebar.field_row() < sidebar.row_count()),
+        sidebar.read_with(cx, |sidebar, _| sidebar.field_item() < sidebar.item_count()),
         "the field's row has to be one the list draws"
     );
 }
@@ -207,7 +215,10 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "alpha");
     let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.visible.len()), 1);
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rows.visible().len()),
+        1
+    );
 
     fs.insert_file("/vault/a (conflict 1970-01-01 00-00-01Z).md", "theirs");
     let vault = notes
@@ -219,7 +230,7 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     });
 
     assert_eq!(
-        sidebar.read_with(cx, |sidebar, _| sidebar.visible.len()),
+        sidebar.read_with(cx, |sidebar, _| sidebar.rows.visible().len()),
         2,
         "the sidebar must observe the vault, not only its own toggles"
     );
@@ -241,7 +252,9 @@ fn watch(
 
 /// Trailing `/` on directories: `Projects` and `Projects.md` are otherwise indistinguishable.
 fn labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
-    sidebar.update(cx, |sidebar, _| sidebar.rows().iter().map(label).collect())
+    sidebar.update(cx, |sidebar, _| {
+        sidebar.visible_rows().iter().map(label).collect()
+    })
 }
 
 fn label(row: &Row) -> String {
@@ -254,7 +267,7 @@ fn label(row: &Row) -> String {
 fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, cx| {
         sidebar
-            .rows()
+            .visible_rows()
             .iter()
             .map(|row| sidebar.row_label(row, cx))
             .collect()
@@ -264,7 +277,7 @@ fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String>
 fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row {
     sidebar.update(cx, |sidebar, _| {
         sidebar
-            .rows()
+            .visible_rows()
             .into_iter()
             .find(|row| label(row) == wanted)
             .expect("the row is visible")
@@ -450,7 +463,7 @@ fn the_rows_below_a_create_field_shift_down_by_one(cx: &mut TestAppContext) {
     });
 
     let rows: Vec<Option<String>> = sidebar.read_with(cx, |sidebar, _| {
-        (0..sidebar.row_count())
+        (0..sidebar.item_count())
             .map(|ix| sidebar.row_at(ix).map(|row| row.name))
             .collect()
     });
