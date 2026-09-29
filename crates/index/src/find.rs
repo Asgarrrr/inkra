@@ -2,6 +2,7 @@
 
 mod excerpt;
 mod highlight;
+mod label;
 mod plain;
 mod preview;
 mod rank;
@@ -19,6 +20,7 @@ pub use excerpt::{Excerpt, excerpt};
 #[cfg(test)]
 pub(crate) use highlight::{boundaries, prefix};
 pub(crate) use highlight::{light, word_prefix};
+pub use label::word_starts;
 pub(crate) use run::{find_in, merge_found};
 pub(crate) use terms::{Terms, each_word};
 
@@ -52,6 +54,8 @@ pub(crate) struct Ranked(Rank);
 mod excerpt_tests;
 #[cfg(test)]
 mod highlight_tests;
+#[cfg(test)]
+mod label_tests;
 #[cfg(test)]
 mod markup_tests;
 #[cfg(test)]

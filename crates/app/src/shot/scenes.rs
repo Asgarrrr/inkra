@@ -1,5 +1,6 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
+mod command_palette;
 mod gone;
 mod quick_open;
 mod reload;
@@ -265,6 +266,11 @@ const CATALOGUE: &[Scene] = &[
         name: "vault-search-opened",
         shows: "enter on `step`, first found on line 998 of `roadmap.md`: the line centred, `step` selected",
         open: vault_search::opened,
+    },
+    Scene {
+        name: "command-palette",
+        shows: "cmd-shift-p over the editor, n typed: every command with a word starting n, lit, its key right and dimmed",
+        open: command_palette::open,
     },
 ];
 

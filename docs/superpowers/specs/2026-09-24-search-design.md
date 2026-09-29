@@ -776,7 +776,8 @@ the pending activation of any other note: the pick is the user's last word.
 **Focus after the note showing closes.** `NoteClosed` moves focus to the
 shell's handle when the dropped editor held it; a dropped view's handle
 reaches no action. On dismiss, a stored handle not drawn in the last frame
-falls back to the shell's handle, as the one of a trashed note's editor.
+falls back to `Focusable::focus_handle`: the editor, else the root, as the one
+of a trashed note's editor.
 
 A row confirms on click, not on mouse down, as Zed's.
 

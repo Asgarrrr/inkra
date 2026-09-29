@@ -29,11 +29,6 @@ impl Modal {
     pub(super) fn restore_to(&mut self, focus: FocusHandle) {
         self.restore = Some(focus);
     }
-
-    #[cfg(test)]
-    pub(super) fn view(&self) -> &AnyView {
-        &self.view
-    }
 }
 
 impl AppShell {
@@ -44,12 +39,12 @@ impl AppShell {
         cx: &mut Context<Self>,
         delegate: impl FnOnce(&mut Context<Picker<D>>) -> D,
     ) -> Option<Entity<Picker<D>>> {
+        if self.modal_is::<D>() {
+            self.dismiss_modal(window, cx);
+            return None;
+        }
         let mut restore = window.focused(cx);
         if let Some(modal) = &self.modal {
-            if modal.view.clone().downcast::<Picker<D>>().is_ok() {
-                self.dismiss_modal(window, cx);
-                return None;
-            }
             restore.clone_from(&modal.restore);
         }
         let picker = cx.new(|cx| {
@@ -93,20 +88,32 @@ impl AppShell {
         }
     }
 
+    pub(super) fn modal_picker<D: PickerDelegate>(&self) -> Option<Entity<Picker<D>>> {
+        self.modal.as_ref()?.view.clone().downcast().ok()
+    }
+
+    pub(super) fn modal_is<D: PickerDelegate>(&self) -> bool {
+        self.modal_picker::<D>().is_some()
+    }
+
     /// Focus goes back only if the picker still holds it: a click elsewhere already moved it.
     pub(super) fn dismiss_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(modal) = self.modal.take() else {
             return;
         };
         if modal.focus.is_focused(window) {
-            // The root contains every handle drawn last frame; a view dropped since is not among them.
             let restore = modal
                 .restore
-                .filter(|restore| self.focus_handle.contains(restore, window))
+                .filter(|restore| self.draws(restore, window))
                 .unwrap_or_else(|| self.focus_handle(cx));
             window.focus(&restore, cx);
         }
         cx.notify();
+    }
+
+    /// Whether the last frame drew `handle`: focus on a dropped view's handle reaches no action.
+    pub(super) fn draws(&self, handle: &FocusHandle, window: &Window) -> bool {
+        self.focus_handle.contains(handle, window)
     }
 
     /// Both layers occlude: gpui's hit test stops only at an occluding hitbox (`gpui/src/window.rs:1106-1123`).

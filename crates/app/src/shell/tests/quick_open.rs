@@ -5,9 +5,9 @@ use gpui::{Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
 
-use super::{activate, editor, open_vault, showing, tree_focused};
+use super::{activate, editor, no_vault, open_vault, showing, tree_focused};
 use crate::keymap::key_bindings;
-use crate::shell::{AppShell, NoteStore, RECENT, remember};
+use crate::shell::{AppShell, RECENT, remember};
 use crate::test_support::entry_id;
 
 /// Three notes shown in turn, so the MRU is c, b, a and c is showing.
@@ -61,17 +61,7 @@ fn cmd_p_opens_quick_open_and_cmd_p_again_closes_it(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn cmd_p_does_nothing_without_a_vault(cx: &mut TestAppContext) {
-    cx.update(|cx| cx.bind_keys(key_bindings()));
-    let notes = cx.update(|cx| {
-        gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
-    });
-    let window = cx.add_window(move |_, cx| AppShell::new(None, notes, cx));
-    window
-        .update(cx, |shell, window, cx| {
-            window.focus(&shell.focus_handle(cx), cx);
-        })
-        .expect("the shell is open");
-    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    let (window, mut visual) = no_vault(cx);
 
     visual.simulate_keystrokes("cmd-p");
 

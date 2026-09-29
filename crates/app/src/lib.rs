@@ -5,6 +5,7 @@ mod background;
 mod backlinks;
 mod bootstrap;
 mod buffer_events;
+mod command_palette;
 mod count;
 mod editor;
 mod field;

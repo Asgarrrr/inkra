@@ -19,18 +19,19 @@ use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod modal;
+mod palette;
 
 use modal::Modal;
 
 const SIDEBAR_WIDTH: Pixels = px(220.);
 const BACKLINKS_WIDTH: Pixels = px(260.);
-/// The quick-open MRU (spec D6).
+/// The quick-open MRU (search spec D6) and the palette's recent commands (palette spec D3).
 const RECENT: usize = 20;
 
 /// Newest first, no repeat, at most `RECENT`.
-fn remember(recent: &mut Vec<EntryId>, id: EntryId) {
-    recent.retain(|&seen| seen != id);
-    recent.insert(0, id);
+fn remember<T: PartialEq>(recent: &mut Vec<T>, item: T) {
+    recent.retain(|seen| *seen != item);
+    recent.insert(0, item);
     recent.truncate(RECENT);
 }
 
@@ -52,6 +53,8 @@ pub(crate) struct AppShell {
     modal: Option<Modal>,
     /// The notes shown, newest first; see `remember`.
     recent: Vec<EntryId>,
+    /// The commands run from the palette, by action name, newest first.
+    recent_commands: Vec<&'static str>,
 }
 
 impl AppShell {
@@ -115,6 +118,7 @@ impl AppShell {
             activation: None,
             modal: None,
             recent: Vec::new(),
+            recent_commands: Vec::new(),
         }
     }
 
@@ -319,6 +323,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::new_folder))
             .on_action(cx.listener(Self::quick_open))
             .on_action(cx.listener(Self::search_vault))
+            .on_action(cx.listener(Self::command_palette))
             .flex()
             .flex_row()
             .size_full()

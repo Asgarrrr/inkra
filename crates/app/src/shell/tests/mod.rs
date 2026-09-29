@@ -7,7 +7,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::keymap::key_bindings;
-use crate::picker::{Picker, PickerDelegate as _};
+use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
@@ -16,6 +16,7 @@ use super::{AppShell, EditorView, NoteActivated, NoteStore, Sidebar};
 mod activation;
 mod backlinks;
 mod column;
+mod command_palette;
 mod creating;
 mod following;
 mod gone;
@@ -37,15 +38,20 @@ impl AppShell {
             .update(cx, |sidebar, cx| sidebar.toggle_named(name, cx));
     }
 
+    /// The open palette's row labels; `None` when it is not open.
+    pub(crate) fn palette_names(&self, cx: &gpui::App) -> Option<Vec<String>> {
+        let picker = self.modal_picker::<crate::command_palette::CommandPaletteDelegate>()?;
+        let delegate = &picker.read(cx).delegate;
+        Some(
+            (0..delegate.match_count())
+                .map(|ix| delegate.row_label(ix).to_string())
+                .collect(),
+        )
+    }
+
     /// The open quick-open picker's empty text and match count; `None` when it is not open.
     pub(crate) fn quick_open_state(&self, cx: &gpui::App) -> Option<(Option<String>, usize)> {
-        let picker = self
-            .modal
-            .as_ref()?
-            .view()
-            .clone()
-            .downcast::<Picker<QuickOpenDelegate>>()
-            .ok()?;
+        let picker = self.modal_picker::<QuickOpenDelegate>()?;
         let delegate = &picker.read(cx).delegate;
         Some((
             delegate.empty_text(cx).map(String::from),
@@ -126,6 +132,24 @@ pub(super) fn tree_focused(
         .expect("the shell is open");
     visual.run_until_parked();
     visual
+}
+
+/// No vault, keys bound, the shell's root focused and drawn.
+pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, VisualTestContext) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let notes = cx.update(|cx| {
+        gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
+    });
+    let window = cx.add_window(move |_, cx| AppShell::new(None, notes, cx));
+    let visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    window
+        .update(cx, |shell, window, cx| {
+            window.focus(&gpui::Focusable::focus_handle(shell, cx), cx);
+        })
+        .expect("the shell is open");
+    visual.run_until_parked();
+    (window, visual)
 }
 
 pub(super) fn vault_names(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Vec<String> {
