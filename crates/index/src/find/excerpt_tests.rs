@@ -5,8 +5,8 @@ use proptest::prelude::*;
 
 use super::excerpt::{EXCERPT_SCAN_BYTES, around_match};
 use super::terms::{Terms, each_word};
-use crate::test_support::{PARTS, id, load, note_set, rename, vault};
-use crate::{Excerpt, NoteIndex, NoteMatch, NoteQuery, excerpt, find_notes, merge_notes};
+use crate::test_support::{PARTS, find_all, id, load, note_set, rename, vault};
+use crate::{Excerpt, NoteIndex, NoteMatch, NoteQuery, excerpt};
 
 pub(super) fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
     let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
@@ -22,20 +22,7 @@ pub(super) fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
 }
 
 pub(super) fn found(index: &NoteIndex, query: &NoteQuery) -> NoteMatch {
-    let snapshot = index.snapshot();
-    let cancel = AtomicBool::new(false);
-    let Some(lookup) = snapshot.lookup(query, &cancel) else {
-        panic!("not cancelled");
-    };
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        0..index.names().len(),
-        query,
-        &cancel,
-        usize::MAX,
-    );
-    let mut found = merge_notes(&snapshot, vec![kept], query, usize::MAX);
+    let mut found = find_all(&index.snapshot(), query, usize::MAX);
     assert_eq!(found.len(), 1, "one note found");
     found.remove(0)
 }
@@ -221,20 +208,7 @@ fn a_set_cancel_gives_none() {
     let (vault, index) = with_texts(&[("plan.md", Some("plan")), ("n.md", Some("a plan"))]);
     let query = NoteQuery::new("plan", None, &[]);
     let row = |name| {
-        let snapshot = index.snapshot();
-        let cancel = AtomicBool::new(false);
-        let Some(lookup) = snapshot.lookup(&query, &cancel) else {
-            panic!("not cancelled");
-        };
-        let kept = find_notes(
-            &snapshot,
-            &lookup,
-            0..index.names().len(),
-            &query,
-            &cancel,
-            9,
-        );
-        let all = merge_notes(&snapshot, vec![kept], &query, 9);
+        let all = find_all(&index.snapshot(), &query, 9);
         let Some(found) = all.into_iter().find(|found| found.id == id(&vault, name)) else {
             panic!("{name} found");
         };

@@ -10,9 +10,9 @@ use crate::words::{Lookup, NoteQuery};
 
 const CANCEL_EVERY: usize = 1024;
 
-/// The best `limit` notes of `range`, for `merge_notes` to order. Empty when `cancel` is set.
+/// The best `limit` notes of `range`, for `merge_found` to order. Empty when `cancel` is set.
 #[must_use]
-pub fn find_notes(
+pub(crate) fn find_in(
     snapshot: &IndexSnapshot,
     lookup: &Lookup,
     range: Range<usize>,
@@ -39,9 +39,9 @@ pub fn find_notes(
     kept.into_iter().map(Ranked).collect()
 }
 
-/// Best first, equal to one range over the union; pass the `snapshot` and `query` `find_notes` read.
+/// Best first, equal to one range over the union; pass the `snapshot` and `query` `find_in` read.
 #[must_use]
-pub fn merge_notes(
+pub(crate) fn merge_found(
     snapshot: &IndexSnapshot,
     chunks: Vec<Vec<Ranked>>,
     query: &NoteQuery,

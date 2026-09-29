@@ -24,7 +24,7 @@ pub(super) struct Header {
 
 /// What a refresh keeps selected: the hit, not its row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct HitKey {
+pub(crate) struct HitKey {
     note: EntryId,
     start: ByteOffset,
 }
@@ -77,12 +77,6 @@ impl Results {
             Row::Hit(hit) => Some(hit.key()),
             Row::Header(_) => None,
         }
-    }
-
-    pub(super) fn position(&self, key: HitKey) -> Option<usize> {
-        self.rows
-            .iter()
-            .position(|row| matches!(row, Row::Hit(hit) if hit.key() == key))
     }
 }
 

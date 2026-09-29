@@ -157,7 +157,7 @@ fn rows_appear_while_the_index_is_still_building(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(panel.read_with(cx, |panel, _| panel.building));
 
-    cx.executor().advance_clock(super::BUILDING_REFRESH);
+    cx.executor().advance_clock(crate::index::BUILDING_REFRESH);
     cx.run_until_parked();
 
     assert_eq!(

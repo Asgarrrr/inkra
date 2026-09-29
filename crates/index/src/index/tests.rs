@@ -1,10 +1,8 @@
-use std::sync::atomic::AtomicBool;
-
 use inkra_markdown::links;
 
 use super::NoteIndex;
-use crate::test_support::{entries, id, load, note_set, rename, texts, vault};
-use crate::{Group, NoteQuery, Resolution, find_notes, merge_notes};
+use crate::test_support::{entries, find_all, id, load, note_set, rename, texts, vault};
+use crate::{Group, NoteQuery, Resolution};
 
 /// Each backlink as (source path, the linked text of each occurrence).
 fn backlinks(
@@ -292,21 +290,8 @@ fn an_insert_after_its_note_left_leaves_no_links_and_no_text() {
 
 /// The paths of the notes whose name matches `query`.
 fn names(index: &NoteIndex, query: &str) -> Vec<String> {
-    let snapshot = index.snapshot();
     let query = NoteQuery::new(query, None, &[]);
-    let cancel = AtomicBool::new(false);
-    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
-        panic!("not cancelled");
-    };
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        0..index.names().len(),
-        &query,
-        &cancel,
-        10,
-    );
-    merge_notes(&snapshot, vec![kept], &query, 10)
+    find_all(&index.snapshot(), &query, 10)
         .into_iter()
         .filter(|found| found.group == Group::Name)
         .map(|found| found.path.to_string())

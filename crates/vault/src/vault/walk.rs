@@ -36,9 +36,9 @@ pub enum Reach {
 
 pub type Job<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
-/// Runs a walk's jobs to completion: the app on its background threads, a test inline.
+/// Runs jobs to completion, a walk's or a query's: the app on its background threads, a test inline.
 pub trait Jobs: Sync {
-    /// How many jobs a walk starts.
+    /// How many jobs to start.
     fn parallelism(&self) -> usize;
     fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a>;
 }

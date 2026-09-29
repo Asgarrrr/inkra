@@ -3,7 +3,7 @@
 use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
 use inkra_vault::EntryId;
 
-use crate::index::{BUILDING_REFRESH, IndexSync, IndexWatch, NotesChanged, Refresh};
+use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
 use crate::row_text::LitText;
 use crate::sidebar::NoteActivated;
@@ -51,7 +51,7 @@ impl BacklinksPanel {
     ) -> Self {
         // On a build applying, not on the vault's notify, so names and rows come from one table.
         let subscriptions = vec![
-            cx.observe(&links, |panel, _, cx| panel.refresh(cx)),
+            IndexWatch::observe(&links, cx, |panel| &mut panel.watch, Self::rebuild),
             cx.subscribe(&links, |panel, _, _: &NotesChanged, cx| panel.rebuild(cx)),
         ];
         Self {
@@ -75,18 +75,6 @@ impl BacklinksPanel {
     pub(crate) fn set_note(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
         self.note = note;
         self.rebuild(cx);
-    }
-
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        // `NotesChanged` already rebuilt for the notify that follows it.
-        match self.watch.on_notify(self.links.read(cx)) {
-            Refresh::Skip => {}
-            Refresh::Now => self.rebuild(cx),
-            Refresh::Later => self.watch.throttle(cx.spawn(async move |panel, cx| {
-                cx.background_executor().timer(BUILDING_REFRESH).await;
-                let _ = panel.update(cx, Self::rebuild);
-            })),
-        }
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {

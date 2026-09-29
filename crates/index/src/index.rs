@@ -256,7 +256,7 @@ impl NoteIndex {
     }
 }
 
-/// Taken at one moment for `find_notes`, `merge_notes` and `excerpt`; a clone bumps three `Arc`s.
+/// Taken at one moment for `find_notes`, `search` and `excerpt`; a clone bumps three `Arc`s.
 #[derive(Clone)]
 pub struct IndexSnapshot {
     names: NamesSnapshot,
@@ -267,13 +267,13 @@ pub struct IndexSnapshot {
 impl IndexSnapshot {
     /// Each term's notes, as `WordsSnapshot::lookup` gives them; `None` if cancelled.
     #[must_use]
-    pub fn lookup(&self, query: &NoteQuery, cancel: &AtomicBool) -> Option<Lookup> {
+    pub(crate) fn lookup(&self, query: &NoteQuery, cancel: &AtomicBool) -> Option<Lookup> {
         self.words.lookup(query, cancel)
     }
 
-    /// Ranges to search in parallel; `merge_notes` over their results equals one range.
+    /// Ranges to search in parallel; `merge_found` over their results equals one range.
     #[must_use]
-    pub fn chunks(&self, n: usize) -> Vec<Range<usize>> {
+    pub(crate) fn chunks(&self, n: usize) -> Vec<Range<usize>> {
         self.names.chunks(n)
     }
 

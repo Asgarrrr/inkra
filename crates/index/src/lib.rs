@@ -8,6 +8,7 @@ pub mod live;
 mod names;
 mod note_set;
 mod notes;
+mod query;
 mod search;
 mod source;
 mod target;
@@ -18,13 +19,13 @@ mod words;
 
 pub use content::NoteContent;
 pub use corpus::CorpusSnapshot;
-pub use find::{Excerpt, Group, NoteMatch, Ranked, excerpt, find_notes, merge_notes};
+pub use find::{Excerpt, Group, NoteMatch, excerpt};
 pub use index::{Backlink, IndexSnapshot, NoteIndex};
 pub use live::LiveIndex;
 pub use names::NamesSnapshot;
 pub use note_set::NoteSet;
 pub use notes::Resolution;
-pub use search::{HITS_PER_NOTE, Hit, NoteHits, Searched, search};
+pub use search::{HITS_PER_NOTE, Hit, NoteHits, Searched};
 pub use source::{Source, SourceLink};
 pub use target::{Style, Target};
 pub use words::{

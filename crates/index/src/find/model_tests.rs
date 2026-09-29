@@ -10,8 +10,10 @@ use proptest::sample::Index;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::model_cases::{self, Built, Case, Note, build, split, terms, typed, words};
+use super::{find_in, merge_found};
+use crate::test_support::find_all;
 use crate::words::{bm25, fold, idf};
-use crate::{Group, NoteMatch, find_notes, merge_notes};
+use crate::{Group, NoteMatch};
 
 /// BM25's figures over the notes with words: how many, their mean length, each term's df.
 struct Corpus {
@@ -211,23 +213,14 @@ pub(super) fn lists_what_the_model_lists(
     let Some(lookup) = snapshot.lookup(&query, &not_cancelled) else {
         panic!("not cancelled");
     };
-    let all = 0..index.names().len();
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        all.clone(),
-        &query,
-        &not_cancelled,
-        usize::MAX,
-    );
-    let found = merge_notes(&snapshot, vec![kept], &query, usize::MAX);
+    let found = find_all(&snapshot, &query, usize::MAX);
     prop_assert_eq!(listed(&found), expected.clone());
 
-    let chunks = split(all.len(), cuts)
+    let chunks = split(index.names().len(), cuts)
         .into_iter()
-        .map(|range| find_notes(&snapshot, &lookup, range, &query, &not_cancelled, limit))
+        .map(|range| find_in(&snapshot, &lookup, range, &query, &not_cancelled, limit))
         .collect();
-    let merged = merge_notes(&snapshot, chunks, &query, limit);
+    let merged = merge_found(&snapshot, chunks, &query, limit);
     prop_assert_eq!(
         listed(&merged),
         expected[..limit.min(expected.len())].to_vec()
@@ -245,14 +238,7 @@ pub(super) fn highlights_are_word_prefixes(case: &Case) -> Result<(), TestCaseEr
         ..
     } = build(case);
     let terms = terms(&typed(&case.query));
-    let not_cancelled = AtomicBool::new(false);
-    let snapshot = index.snapshot();
-    let Some(lookup) = snapshot.lookup(&query, &not_cancelled) else {
-        panic!("not cancelled");
-    };
-    let all = 0..index.names().len();
-    let kept = find_notes(&snapshot, &lookup, all, &query, &not_cancelled, usize::MAX);
-    let found = merge_notes(&snapshot, vec![kept], &query, usize::MAX);
+    let found = find_all(&index.snapshot(), &query, usize::MAX);
     for row in &found {
         let Some(note) = notes.iter().find(|note| note.id == row.id) else {
             panic!("a listed note is a note");

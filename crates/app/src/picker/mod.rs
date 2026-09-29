@@ -61,6 +61,8 @@ pub(crate) struct Picker<D: PickerDelegate> {
     awaiting_matches: bool,
     /// `enter` landed while `awaiting_matches`: confirm once the rows answer the current query.
     confirm_on_update: bool,
+    /// A row was confirmed: the picker is dismissing, so a deferred refresh has nothing to refresh.
+    confirmed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -93,6 +95,7 @@ impl<D: PickerDelegate> Picker<D> {
             pending: None,
             awaiting_matches: false,
             confirm_on_update: false,
+            confirmed: false,
             _subscriptions: subscriptions,
         };
         picker.refresh(cx);
@@ -197,6 +200,7 @@ impl<D: PickerDelegate> Picker<D> {
         let Some(ix) = self.selected else {
             return;
         };
+        self.confirmed = true;
         self.delegate.confirm(ix, cx);
         cx.emit(Dismissed);
     }

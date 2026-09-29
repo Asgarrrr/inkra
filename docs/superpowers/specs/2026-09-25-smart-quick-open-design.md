@@ -317,6 +317,9 @@ replaced twice before it shipped:
 ### S3. `find_notes`
 
 **Corrected in slice 8:** the block shows the API slice 8 built.
+Amended 2026-09-29: the one-range `find_notes`, `merge_notes`, `Ranked`, `lookup`
+and `chunks` are crate-private; the public entry is `IndexSnapshot::find_notes(query,
+limit, jobs, cancel)`. See [`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
 
 ```rust
 pub struct NoteQuery;       // NoteQuery::new(text, showing: Option<EntryId>, recent: &[EntryId])
@@ -586,7 +589,9 @@ debounce and the `NotesChanged` refresh (search spec D7, D8) do not.
 for `[[` link completion (search spec, Deferred), where subsequence matching
 suits short targets.~~ Amended 2026-09-29: the matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `fee89d1` or start from Zed's `fuzzy`.
 
-**Built in slice 8 (S5).**
+**Built in slice 8 (S5).** Amended 2026-09-29: the lookup, split and merge run
+inside `IndexSnapshot::find_notes`, and `Runs` drives the run; see
+[`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
 
 - `update_matches` takes the names, corpus and words in one borrow of the index,
   then runs off the foreground: `lookup` on one task (`None`: cancelled),

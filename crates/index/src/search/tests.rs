@@ -3,8 +3,9 @@ use std::sync::atomic::AtomicBool;
 
 use inkra_vault::EntryId;
 
+use super::search_in;
 use crate::test_support::{indexed, load};
-use crate::{HITS_PER_NOTE, Hit, IndexSnapshot, NoteIndex, NoteQuery, Searched, search};
+use crate::{HITS_PER_NOTE, Hit, IndexSnapshot, NoteIndex, NoteQuery, Searched};
 
 /// `search` over `range` of `snapshot`, the lookup taken with no flag set.
 pub(super) fn searched(
@@ -18,7 +19,7 @@ pub(super) fn searched(
     let Some(lookup) = snapshot.lookup(&query, &AtomicBool::new(false)) else {
         panic!("not cancelled");
     };
-    search(snapshot, &lookup, range, &query, cancel, limit)
+    search_in(snapshot, &lookup, range, &query, cancel, limit)
 }
 
 fn run(texts: &[Option<&str>], text: &str, limit: usize) -> Searched {
@@ -234,23 +235,6 @@ fn a_range_searches_only_its_notes() {
     let found = searched(&index.snapshot(), 1..2, "a", &AtomicBool::new(false), 10);
     let notes: Vec<_> = hits(&found).map(|(note, _)| note).collect();
     assert_eq!(notes, [ids[1]]);
-}
-
-#[test]
-fn merge_concatenates_in_range_order_and_truncates() {
-    let (_, index) = indexed(&[Some("a a"), Some("a a"), Some("a a")]);
-    let snapshot = index.snapshot();
-    let cancel = AtomicBool::new(false);
-    let parts: Vec<Searched> = snapshot
-        .chunks(3)
-        .into_iter()
-        .map(|range| searched(&snapshot, range, "a", &cancel, 5))
-        .collect();
-    assert_eq!(
-        Searched::merge(parts, 5),
-        searched(&snapshot, 0..3, "a", &cancel, 5)
-    );
-    assert_eq!(Searched::merge(Vec::new(), 5), Searched::default());
 }
 
 #[test]

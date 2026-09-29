@@ -13,8 +13,8 @@ use proptest::test_runner::TestRunner;
 use super::tests::searched;
 use crate::find::model_cases::{self, Built, Case, build, split, terms, typed, words};
 use crate::find::{boundaries, prefix};
-use crate::test_support::indexed;
-use crate::{Group, HITS_PER_NOTE, Hit, NoteHits, Searched, find_notes, merge_notes};
+use crate::test_support::{find_all, indexed};
+use crate::{Group, HITS_PER_NOTE, Hit, NoteHits, Searched};
 
 /// Whether every term starts a folded word of `text`; never for no term.
 fn holds(text: &str, terms: &[String]) -> bool {
@@ -119,18 +119,7 @@ fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseEr
     );
 
     let hit: Vec<EntryId> = found.notes.iter().map(|group| group.note).collect();
-    let Some(lookup) = snapshot.lookup(&query, &cancel) else {
-        panic!("not cancelled");
-    };
-    let kept = find_notes(
-        &snapshot,
-        &lookup,
-        0..notes.len(),
-        &query,
-        &cancel,
-        usize::MAX,
-    );
-    let rows = merge_notes(&snapshot, vec![kept], &query, usize::MAX);
+    let rows = find_all(&snapshot, &query, usize::MAX);
     for row in &rows {
         prop_assert!(
             row.group != Group::Text || hit.contains(&row.id),

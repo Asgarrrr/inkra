@@ -57,6 +57,10 @@ checks a result, `confirmed` drops a pending re-run. The scan in flight is
 `D: PickerDelegate + AsMut<Runs>`: a std trait, so no one-implementer trait.
 The tests changed only where a moved field is read, through `delegate.runs`.
 
+Amended 2026-09-29: `Runs` now owns the whole run through the `IndexDelegate`
+trait (`Runs::update_matches`, `Runs::apply`); `AsMut<Runs>` and `confirmed`
+are gone, replaced by `Picker::confirmed`. See [`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
+
 ## S2. `inkra-index`: the line and the per-note cap
 
 ### `Hit.line`
@@ -190,6 +194,9 @@ and highlight runs. Every row is one `UI_LINE_HEIGHT` tall, so
   scans nothing), the test hold on scans (`Runs::scanning` returns what a scan
   awaits), and `index::fan_out`: the lookup, one scan per core-sized range,
   the merge and the cancel check, generic over the scan and the merge.
+  Amended 2026-09-29: `index::fan_out` is gone; `IndexSnapshot::search` and
+  `find_notes` run the lookup, the split and the merge inside `inkra-index`,
+  and `Runs` drives the rest. See [`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
 - **Revealing a selection.** The picker scrolls the unselectable rows right
   before the selected one into view with it, so `up` onto a note's first hit
   shows its header too.
