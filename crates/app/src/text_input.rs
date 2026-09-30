@@ -81,11 +81,10 @@ impl TextInput {
         }
     }
 
-    /// Only `EditorView::open_buffer` calls this: the selection and the layout
-    /// describe the old buffer, so they go with it and the caret starts at 0.
-    pub(crate) fn rebind(&mut self, buffer: Entity<Buffer>) {
+    /// Only `EditorView::open_buffer` calls this; it clips `selection` to `buffer` first.
+    pub(crate) fn rebind(&mut self, buffer: Entity<Buffer>, selection: Selection) {
         self.buffer = buffer;
-        self.state = EditorState::new(Selection::at(ByteOffset(0)));
+        self.state = EditorState::new(selection);
         self.last_layout = None;
         self.last_bounds = None;
     }

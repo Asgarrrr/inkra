@@ -1,25 +1,18 @@
-use std::ops::Range;
-
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, Styled, Task, Window, div, px,
-};
-use inkra_index::Resolution;
-use inkra_markdown::Link;
-use inkra_text::ByteOffset;
+use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Pixels, Task, Window, px};
 use inkra_vault::{EntryId, Kind};
 
 use crate::backlinks::BacklinksPanel;
-use crate::editor::{EditorView, LinkFollowed};
+use crate::editor::EditorView;
 use crate::index::IndexSync;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
-use crate::theme;
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
+mod activation;
 mod modal;
 mod palette;
+mod render;
 
 use modal::Modal;
 
@@ -122,90 +115,6 @@ impl AppShell {
         }
     }
 
-    /// Bind, select, focus and `set_current` run with no `await` between them, so
-    /// nothing can observe one without the others.
-    fn open_note(&mut self, id: EntryId, at: Option<Range<ByteOffset>>, cx: &mut Context<Self>) {
-        let notes = self.notes.clone();
-        let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
-        self.activation = Some(cx.spawn(async move |shell, cx| {
-            let Some(buffer) = opened.await else { return };
-            let _ = shell.update_in(cx, |shell, window, cx| {
-                let editor = if let Some(editor) = &shell.editor {
-                    editor.update(cx, |editor, cx| editor.open_buffer(buffer, cx));
-                    editor.clone()
-                } else {
-                    let editor = cx.new(|cx| EditorView::new(buffer, cx));
-                    Self::follow_links_of(&editor, cx);
-                    shell.editor = Some(editor.clone());
-                    editor
-                };
-                if let Some(range) = at {
-                    editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
-                }
-                let focus = shell.focus_handle(cx);
-                // The picker keeps the keys typed into it; dismissing it lands on the note.
-                match &mut shell.modal {
-                    Some(modal) => modal.restore_to(focus),
-                    None => window.focus(&focus, cx),
-                }
-                shell.set_showing(Some(id), cx);
-                notes.update(cx, |notes, cx| notes.set_current(id, cx));
-            });
-        }));
-    }
-
-    /// Opens `id` unless it is showing: reopening would reset its caret, scroll and undo stack.
-    /// Either way it is the last pick, so a slower activation of another note must not land after it.
-    fn show_note(&mut self, id: EntryId, at: Option<Range<ByteOffset>>, cx: &mut Context<Self>) {
-        if self.showing == Some(id) {
-            self.activation = None;
-            if let (Some(range), Some(editor)) = (at, &self.editor) {
-                cx.with_window(cx.entity_id(), |window, cx| {
-                    editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
-                });
-            }
-            // Focus lands on the note, as `open_note` moves it for another note.
-            let focus = self.focus_handle(cx);
-            match &mut self.modal {
-                Some(modal) => modal.restore_to(focus),
-                None => {
-                    cx.with_window(cx.entity_id(), |window, cx| window.focus(&focus, cx));
-                }
-            }
-        } else {
-            self.open_note(id, at, cx);
-        }
-    }
-
-    /// The one place `showing` changes, so the backlinks panel cannot lag it.
-    fn set_showing(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
-        self.showing = note;
-        if let Some(id) = note {
-            remember(&mut self.recent, id);
-        }
-        self.backlinks
-            .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
-    }
-
-    /// Detached, like the shell's other subscriptions: the editor is created once and rebound
-    /// after, so it lives as long as the shell.
-    fn follow_links_of(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
-        cx.subscribe(editor, |shell, _, event: &LinkFollowed, cx| {
-            shell.follow(&event.0, cx);
-        })
-        .detach();
-    }
-
-    /// Resolved against the note showing; a detached note resolves only URLs.
-    fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
-        let source = self.showing.unwrap_or(EntryId::DETACHED);
-        match self.links.read(cx).index().resolve_link(source, link) {
-            Resolution::Note(id) => self.show_note(id, None, cx),
-            Resolution::External(url) => cx.open_url(&url),
-            Resolution::Unresolved | Resolution::SelfLink => {}
-        }
-    }
-
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
         self.notes.update(cx, NoteStore::save_current);
     }
@@ -267,95 +176,6 @@ impl Focusable for AppShell {
             || self.focus_handle.clone(),
             |editor| editor.focus_handle(cx),
         )
-    }
-}
-
-impl AppShell {
-    fn render_empty(&self, cx: &App) -> impl IntoElement {
-        let lines: &[&str] = if self.notes.read(cx).vault().is_some() {
-            &["Select a note."]
-        } else {
-            &[
-                "No vault is open.",
-                "Restart with a folder path to open one.",
-            ]
-        };
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .items_center()
-            .justify_center()
-            // Without this the window default shows through; check.sh renders nothing, so only a shot catches it.
-            .bg(theme::editor_background())
-            .text_size(theme::UI_TEXT_SIZE)
-            .line_height(theme::UI_LINE_HEIGHT)
-            .text_color(theme::placeholder_text())
-            .children(lines.iter().map(|line| div().child(*line)))
-    }
-
-    /// Over the note showing while it is gone from disk (watcher spec, F9).
-    fn render_gone_banner(&self, cx: &App) -> Option<impl IntoElement> {
-        let showing = self.showing?;
-        self.notes.read(cx).is_gone(showing).then(|| {
-            div()
-                .debug_selector(|| "gone-banner".into())
-                .flex_none()
-                .px_4()
-                .bg(theme::gone_banner_background())
-                .text_size(theme::UI_TEXT_SIZE)
-                .line_height(theme::UI_LINE_HEIGHT)
-                .text_color(theme::gone_banner_text())
-                .child("Deleted from disk. Typing restores it.")
-        })
-    }
-}
-
-impl Render for AppShell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
-            .key_context("AppShell")
-            // Load-bearing: with no editor, focus lives on `self.focus_handle`; untracked, `cmd-s` is unreachable (gpui/src/window.rs:6244-6251).
-            .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::save))
-            .on_action(cx.listener(Self::new_note))
-            .on_action(cx.listener(Self::new_folder))
-            .on_action(cx.listener(Self::quick_open))
-            .on_action(cx.listener(Self::search_vault))
-            .on_action(cx.listener(Self::command_palette))
-            .flex()
-            .flex_row()
-            .size_full()
-            .child(
-                div()
-                    .flex_none()
-                    .w(SIDEBAR_WIDTH)
-                    .h_full()
-                    .bg(theme::sidebar_background())
-                    .child(self.sidebar.clone()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .children(self.render_gone_banner(cx))
-                    // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
-                    .child(div().flex_1().min_h_0().child(match &self.editor {
-                        Some(editor) => editor.clone().into_any_element(),
-                        None => self.render_empty(cx).into_any_element(),
-                    })),
-            )
-            .children(self.editor.is_some().then(|| {
-                div()
-                    .flex_none()
-                    .w(BACKLINKS_WIDTH)
-                    .h_full()
-                    .child(self.backlinks.clone())
-            }))
-            .children(self.render_modal(cx))
     }
 }
 

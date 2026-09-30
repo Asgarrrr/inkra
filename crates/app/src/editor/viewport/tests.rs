@@ -64,14 +64,27 @@ fn a_top_line_never_replaces_a_waiting_reveal() {
 }
 
 #[test]
-fn only_the_first_paint_with_a_waiting_scroll_asks_for_a_frame() {
-    let mut waiting = Viewport::default();
-    waiting.request(ScrollTo::Cursor(Reveal::Minimal));
-    assert!(waiting.painted(px(16.)));
-    assert!(!waiting.painted(px(16.)), "a redraw loop");
+fn a_capture_reads_a_waiting_top_line() {
+    let mut viewport = Viewport::default();
+    viewport.request(top(50));
 
-    let mut idle = Viewport::default();
-    assert!(!idle.painted(px(16.)));
+    assert_eq!(viewport.capture(None, ByteOffset(7)), top_line(50));
+}
+
+#[test]
+fn a_capture_behind_a_waiting_reveal_puts_the_caret_on_top() {
+    let mut viewport = Viewport::default();
+    viewport.request(ScrollTo::Cursor(Reveal::Center));
+
+    assert_eq!(viewport.capture(None, ByteOffset(7)), top_line(7));
+}
+
+#[test]
+fn an_unscrolled_capture_is_the_note_top() {
+    assert_eq!(
+        Viewport::default().capture(None, ByteOffset(7)),
+        TopLine::default()
+    );
 }
 
 /// Inserts a ten-byte line at 0: an offset past it moves by ten.

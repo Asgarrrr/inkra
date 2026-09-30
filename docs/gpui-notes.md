@@ -81,6 +81,12 @@ does not transfer — `EditorElement` autoscrolls inside its own `prepaint`
 (`editor/src/element.rs:8728-8755`) and can do so because it owns its layout and
 re-takes its snapshot in place.
 
+The one exception is an only child. `TextElement` is the scroll `div`'s only
+child, so its prepaint writes the offset for the next frame and shifts its own
+paint origin by the pixel-snapped difference: this frame paints where the next
+one will (tabs spec, As built (S0)). A sibling would still paint with the old
+offset, so the exception holds only while the element is alone in the `div`.
+
 Other facts worth not rediscovering:
 
 - **The offset is negative when scrolled down** (`elements/div.rs:4391-4393`).

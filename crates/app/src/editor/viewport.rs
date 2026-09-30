@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{Pixels, ScrollHandle, point, px};
-use inkra_text::{Bias, ByteOffset, Diff};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff};
 
 use super::layout::DocumentLayout;
 
@@ -31,10 +31,10 @@ impl Reveal {
     }
 }
 
-/// A scroll decided before the geometry it needs; `render` applies it.
+/// A scroll decided before the geometry it needs; `resolve` applies it in prepaint.
 #[derive(Debug, PartialEq)]
 pub(super) enum ScrollTo {
-    /// A reload's top line, back at the top once the new text is laid out.
+    /// A reload's or a restored view's top line, back at the top once the text is laid out.
     Top(TopLine),
     Cursor(Reveal),
 }
@@ -50,9 +50,9 @@ impl ScrollTo {
 }
 
 /// The text at the viewport's top, to put back there once the new text is laid out.
-#[derive(Debug, PartialEq)]
-pub(super) struct TopLine {
-    /// The start of the top row.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct TopLine {
+    /// The top row's start, or the caret while a reveal waits.
     offset: ByteOffset,
     /// How far the viewport's top sits below that row's top.
     below: Pixels,
@@ -65,14 +65,38 @@ impl TopLine {
             ..self
         }
     }
+
+    pub(super) fn clipped(self, buffer: &Buffer) -> Self {
+        Self {
+            offset: buffer.clip_grapheme(self.offset, Bias::Left),
+            ..self
+        }
+    }
+
+    pub(super) fn at(offset: ByteOffset) -> Self {
+        Self {
+            offset,
+            below: px(0.),
+        }
+    }
+}
+
+#[cfg(test)]
+impl TopLine {
+    pub(super) fn offset(&self) -> ByteOffset {
+        self.offset
+    }
+
+    pub(super) fn below(&self) -> Pixels {
+        self.below
+    }
 }
 
 #[derive(Default)]
 pub(super) struct Viewport {
     /// Its `bounds` and `offset` are the viewport's; the parent `div` scrolls, not the element.
     handle: ScrollHandle,
-    /// Text top at zero scroll, as of the last paint. Never re-derived from `last_bounds` and
-    /// a live offset: that counts the scroll twice.
+    /// Text top at zero scroll, written only by `resolve`; `last_bounds` plus the offset would count the scroll twice.
     text_top: Option<Pixels>,
     pending: Option<ScrollTo>,
 }
@@ -82,12 +106,24 @@ impl Viewport {
         &self.handle
     }
 
-    /// From `paint`, with the painted (scrolled) text origin. True on the first paint while
-    /// a scroll waits: the caller defers a notify for the next frame.
-    pub(super) fn painted(&mut self, text_origin_y: Pixels) -> bool {
-        // The offset now is what translated this frame's origin (`elements/div.rs:2390`).
-        let text_top = text_origin_y - self.handle.offset().y;
-        self.text_top.replace(text_top).is_none() && self.pending.is_some()
+    /// From prepaint, against this frame's measured layout; returns how far the offset moved.
+    pub(super) fn resolve(
+        &mut self,
+        text_origin_y: Pixels,
+        layout: &DocumentLayout,
+        cursor: ByteOffset,
+    ) -> Pixels {
+        // The offset now is what translated this frame's origin (`elements/div.rs:2027`).
+        let before = self.handle.offset().y;
+        self.text_top = Some(text_origin_y - before);
+        let Some(to) = self.pending.take() else {
+            return px(0.);
+        };
+        self.apply(&to, Some(layout), cursor);
+        // This frame's clamp already ran; unclamped, the next one would jump.
+        let after = self.handle.offset().y.max(-self.handle.max_offset().y);
+        self.set_y(after);
+        after - before
     }
 
     /// A reveal replaces any request; a reload's top line only fills an empty slot.
@@ -97,12 +133,13 @@ impl Viewport {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn take_pending(&mut self) -> Option<ScrollTo> {
         self.pending.take()
     }
 
-    /// Scrolls now when the geometry is current, else requests. From the gates, not
-    /// prepaint: from prepaint it would land a frame late.
+    /// Scrolls now when the geometry is current, else requests, and `resolve` applies the
+    /// request against the next frame's layout.
     pub(super) fn reveal(
         &mut self,
         layout: Option<&DocumentLayout>,
@@ -135,16 +172,20 @@ impl Viewport {
         }
     }
 
-    /// `layout` must describe the current text: the caller reshapes first.
-    pub(super) fn apply(
-        &mut self,
-        to: ScrollTo,
-        layout: Option<&DocumentLayout>,
-        cursor: ByteOffset,
-    ) {
+    /// `layout` must describe the current text.
+    fn apply(&mut self, to: &ScrollTo, layout: Option<&DocumentLayout>, cursor: ByteOffset) {
         match to {
-            ScrollTo::Top(top) => self.restore_top(layout, &top),
-            ScrollTo::Cursor(how) => self.reveal(layout, cursor, how),
+            ScrollTo::Top(top) => self.restore_top(layout, top),
+            ScrollTo::Cursor(how) => self.reveal(layout, cursor, *how),
+        }
+    }
+
+    /// What a capture keeps: a waiting request first, since the drawn frame predates it.
+    pub(super) fn capture(&self, layout: Option<&DocumentLayout>, cursor: ByteOffset) -> TopLine {
+        match &self.pending {
+            Some(ScrollTo::Top(top)) => *top,
+            Some(ScrollTo::Cursor(_)) => TopLine::at(cursor),
+            None => self.top_line(layout).unwrap_or_default(),
         }
     }
 
@@ -181,8 +222,10 @@ impl Viewport {
         let (Some(layout), Some(viewport_top)) = (layout, self.viewport_top()) else {
             return;
         };
-        let row_top = layout.top_for_row(layout.row_for_offset(top.offset));
-        let y = viewport_top - (row_top + top.below);
+        let row = layout.row_for_offset(top.offset);
+        // Within its own row: one that got shorter (a heading now body text) would overshoot into the next.
+        let below = top.below.min(layout.row_height(row));
+        let y = viewport_top - (layout.top_for_row(row) + below);
         self.set_y(y.min(px(0.)));
     }
 

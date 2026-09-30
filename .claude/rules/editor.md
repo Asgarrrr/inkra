@@ -32,8 +32,10 @@ are `InputHost`'s, and new actions go through them:
   trait default.
 - The editor's scroll geometry is `Viewport`'s (`editor/viewport.rs`). A
   scroll decided before its geometry exists goes through `Viewport::request`,
-  which `render` applies; never a second field. `open_buffer` resets it by
-  value, `Viewport::default()`.
+  which `TextElement`'s prepaint resolves against the frame's layout; never a
+  second field. `open_buffer` resets it by value, `Viewport::default()`.
+- `open_buffer` takes an `Option<ViewState>` and restores it without a reveal;
+  `view_state()` reads a waiting scroll request before the drawn frame.
 - A window point becomes an offset only through `TextInput::hit_test`:
   `last_bounds` is already scrolled, so no caller subtracts the offset.
 - `copy` takes no gate: `as_mut` notifies unconditionally and would schedule an

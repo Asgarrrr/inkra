@@ -39,7 +39,7 @@ fn typing_refreshes_the_spans_and_undo_restores_them(cx: &mut TestAppContext) {
 fn opening_another_note_replaces_the_spans(cx: &mut TestAppContext) {
     let other = cx.update(|cx| cx.new(|_| Buffer::new("# T")));
     with_editor(cx, "**b**", move |view, _, cx| {
-        view.open_buffer(other, cx);
+        view.open_buffer(other, None, cx);
         assert_eq!(view.spans(), parse("# T").spans.as_slice());
     });
 }
