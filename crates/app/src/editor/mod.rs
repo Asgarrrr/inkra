@@ -20,18 +20,40 @@ use gpui::{
 use gpui::{Bounds, Pixels};
 use inkra_editor::Selection;
 use inkra_markdown::{Link, Markdown, touched};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::{Bias, Buffer, ByteOffset};
 
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
 use element::TextElement;
-use viewport::{Reveal, Viewport};
+use viewport::{Reveal, ScrollTo, Viewport};
+
+pub(crate) use viewport::TopLine;
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinkFollowed(pub(crate) Link);
 
 impl EventEmitter<LinkFollowed> for EditorView {}
+
+/// What a tab puts back on its note: the selection and the text on top (tabs spec, A2).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ViewState {
+    pub(crate) selection: Selection,
+    pub(crate) top: TopLine,
+}
+
+impl ViewState {
+    /// Onto `buffer`'s graphemes, tail then head, so direction and goal survive.
+    fn clipped(self, buffer: &Buffer) -> Self {
+        let clip = |offset| buffer.clip_grapheme(offset, Bias::Left);
+        let mut selection = Selection::at(clip(self.selection.tail()));
+        selection.set_head(clip(self.selection.head()), self.selection.goal());
+        Self {
+            selection,
+            top: self.top.clipped(buffer),
+        }
+    }
+}
 
 pub(crate) struct EditorView {
     input: TextInput,
@@ -68,17 +90,30 @@ impl EditorView {
         clippy::used_underscore_binding,
         reason = "resubscribing is the point of the gate"
     )]
-    pub(crate) fn open_buffer(&mut self, buffer: Entity<Buffer>, cx: &mut Context<Self>) {
+    pub(crate) fn open_buffer(
+        &mut self,
+        buffer: Entity<Buffer>,
+        view: Option<ViewState>,
+        cx: &mut Context<Self>,
+    ) {
+        let view = view.map(|view| view.clipped(buffer.read(cx)));
         // Rebuilt: the old `Subscription`s would observe the closed note.
         self._buffer = Self::watch_buffer(&buffer, cx);
-        // Clears the caret and the layout too: `reveal_cursor` would scroll by the old note's geometry.
-        self.input.rebind(buffer);
+        let (selection, top) = view.map_or((Selection::at(ByteOffset(0)), None), |view| {
+            (view.selection, Some(view.top))
+        });
+        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.input.rebind(buffer, selection);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
         self.refresh_markdown(cx);
 
         self.is_selecting = false;
         self.viewport = Viewport::default();
+        // Never a reveal: the restored top line is where the reader left it.
+        if let Some(top) = top {
+            self.viewport.request(ScrollTo::Top(top));
+        }
 
         cx.notify();
     }
@@ -148,22 +183,24 @@ impl EditorView {
         self.input.cursor()
     }
 
+    /// Reads a waiting scroll request before the drawn frame, so two switches in one frame keep it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "tabs S1 captures the leaving tab (tabs spec, A3)")
+    )]
+    pub(crate) fn view_state(&self) -> ViewState {
+        ViewState {
+            selection: self.input.state().selection().clone(),
+            top: self
+                .viewport
+                .capture(self.input.last_layout().map(Rc::as_ref), self.cursor()),
+        }
+    }
+
     fn reveal_cursor(&mut self, how: Reveal) {
         let cursor = self.cursor();
         let layout = self.input.last_layout().map(Rc::as_ref);
         self.viewport.reveal(layout, cursor, how);
-    }
-
-    /// From `render`, before prepaint reads the offset, else the scroll lands a frame late.
-    fn restore_scroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(to) = self.viewport.take_pending() else {
-            return;
-        };
-        // A reload may have landed since the last paint shaped `last_layout`.
-        self.reshape(window, cx);
-        let cursor = self.cursor();
-        let layout = self.input.last_layout().map(Rc::as_ref);
-        self.viewport.apply(to, layout, cursor);
     }
 }
 
@@ -246,8 +283,9 @@ impl Focusable for EditorView {
 }
 
 impl Render for EditorView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
-        self.restore_scroll(window, cx);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        // A reload applied without a buffer notify would otherwise shape stale spans.
+        self.refresh_markdown(cx);
         text_input::on_actions(div(), cx)
             .id("editor")
             .key_context(TextInput::key_context(text_input::EDITOR_CONTEXT))
@@ -283,6 +321,7 @@ impl Render for EditorView {
             .text_size(theme::BODY_TEXT_SIZE)
             .line_height(theme::BODY_LINE_HEIGHT)
             .p_4()
+            // The only child: its prepaint moves this div's offset and shifts only itself.
             .child(TextElement {
                 editor: cx.entity(),
             })

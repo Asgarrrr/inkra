@@ -4,7 +4,7 @@ use std::time::Instant;
 use gpui::TestAppContext;
 use inkra_text::Buffer;
 
-use super::{at, dispatching, geometry};
+use super::{TALL, at, dispatching, geometry, notified_after_paint, tall_document};
 use crate::buffer_events::Reloaded;
 use crate::editor::actions::Down;
 use crate::editor::viewport::{Reveal, ScrollTo};
@@ -36,12 +36,6 @@ fn a_document_that_fits_has_no_room_to_scroll(cx: &mut TestAppContext) {
             assert_eq!(view.viewport.handle().max_offset().y, gpui::px(0.));
         })
         .unwrap();
-}
-
-const TALL: usize = 200;
-
-fn tall_document() -> String {
-    "line\n".repeat(TALL)
 }
 
 #[gpui::test]
@@ -382,17 +376,17 @@ fn an_edit_reshapes_before_the_next_paint(cx: &mut TestAppContext) {
 
 /// A range selected in the turn that rebinds the buffer has no geometry to scroll by yet.
 #[gpui::test]
-fn a_range_selected_right_after_a_rebind_is_revealed_after_the_first_paint(
-    cx: &mut TestAppContext,
-) {
+fn a_range_selected_right_after_a_rebind_is_revealed_on_the_first_paint(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "short");
     cx.run_until_parked();
     let tall = gpui::AppContext::new(&mut cx, |_| Buffer::new(tall_document()));
+    let editor = window.update(&mut cx, |_, _, cx| cx.entity()).unwrap();
+    let (_subscription, notified) = notified_after_paint(&editor, &mut cx);
 
     // `line\n` is five bytes, so line 150 starts at 750.
     window
         .update(&mut cx, |view, window, cx| {
-            view.open_buffer(tall, cx);
+            view.open_buffer(tall, None, cx);
             view.select_range(at(750)..at(754), window, cx);
         })
         .unwrap();
@@ -404,6 +398,14 @@ fn a_range_selected_right_after_a_rebind_is_revealed_after_the_first_paint(
             assert_eq!(
                 view.viewport.handle().offset().y,
                 geometry::offset_centering(150.)
+            );
+            assert!(
+                !notified.get(),
+                "a notify after a paint drew a second frame"
+            );
+            assert_eq!(
+                view.text_bounds().unwrap().top(),
+                geometry::top_of_line(0., geometry::offset_centering(150.))
             );
         })
         .unwrap();

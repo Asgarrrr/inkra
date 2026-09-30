@@ -79,7 +79,7 @@ Deviations:
   owns its scroll: roadmap item "`TextElement` owns its vertical scroll",
   out of scope.
 - **The request is applied in `render`, not prepaint.** Same reason; see the
-  vault-search spec, As built (slice 4).
+  vault-search spec, As built (slice 4). Superseded by tabs S0: `Viewport::resolve`, in prepaint.
 - **A reload's top line only fills an empty slot.** Zed's request replaces
   always. Ours keeps the existing policy.
 - **Reset by value.** Zed builds a new `Editor` per buffer. We replace the
@@ -173,14 +173,15 @@ pub(super) fn vertical(rows: &impl CaretRows, cursor: ByteOffset, goal: Goal, di
   derives from `text_top` and the live offset, in one `viewport_top`.
   It is `pub(super)` for one reason: `EditorView`'s `#[cfg(test)]` helpers
   read it. No production caller outside `Viewport` does. Nothing derives it
-  from `last_bounds`.
+  from `last_bounds`. Superseded by tabs S0: only `resolve` writes it (P1).
 - **G2.** `reveal` scrolls at once only with a text top, a layout, a viewport
   taller than zero and no waiting request. Otherwise it requests
   `Cursor(how)`. A waiting request means the layout may predate the text.
 - **G3.** `request`: `Cursor` replaces any request; `Top` fills only an
   empty slot.
 - **G4.** `render` takes the request, reshapes, then applies it. The reshape
-  stays in `EditorView`: it needs the `Window` and the markdown.
+  stays in `EditorView`: it needs the `Window` and the markdown. Superseded by
+  tabs S0: `resolve` applies it against the frame's measured layout (P2).
 - **G5.** `open_buffer` sets `self.viewport = Viewport::default()` and calls
   `TextInput::rebind`. No field is cleared by hand.
 - **G6.** The gates still reveal: `after_edit` reshapes, then reveals;
@@ -209,7 +210,7 @@ pub(super) fn vertical(rows: &impl CaretRows, cursor: ByteOffset, goal: Goal, di
   `track_scroll(self.viewport.handle())`. `reveal_cursor` stays as a
   one-line wrapper: three callers.
 - **V3. `editor/element.rs`.** `paint` calls `editor.viewport.painted(..)`
-  and defers the notify when it returns true.
+  and defers the notify when it returns true. Superseded by tabs S0: no `painted`, no notify.
 - **V4. `editor/reload.rs`.** Keeps `on_buffer_reloaded`: `map_through`,
   then `viewport.reloaded(diff, layout)`, then notify.
 - **H1. `text_input.rs`.** `hit_test`. `character_index_for_point` uses it.
@@ -310,7 +311,8 @@ and after the last step. They must match byte for byte.
 - **The roadmap item.** A `TextElement` that owns its scroll would take the
   `Viewport` into its prepaint: `text_top` and the deferred notify then go,
   and `take_pending` moves from `render` to prepaint. This refactor puts
-  everything that move touches in one type, so it gets easier.
+  everything that move touches in one type, so it gets easier. Superseded by
+  tabs S0, which moved the request into prepaint without the element owning its scroll.
 
 ## Plan
 

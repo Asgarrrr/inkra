@@ -639,7 +639,8 @@ threading one through `bootstrap::root`). So the work is split:
   through `clamp_scroll_position` (`gpui/src/elements/div.rs:2390-2391`,
   clamp at `:2475-2480`). So the first frame that shows the new text shows it
   at the kept position; from `prepaint` it would land a frame late (the
-  `reveal_cursor` rule in `.claude/rules/editor.md`).
+  `reveal_cursor` rule in `.claude/rules/editor.md`). Superseded by tabs S0:
+  prepaint resolves it and shifts the element's paint.
 - The restored offset is a request; the div's clamp may tighten it. The
   visible result is the mapped row, or the nearest row the shrunk content
   allows.

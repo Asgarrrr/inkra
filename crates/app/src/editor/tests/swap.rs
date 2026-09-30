@@ -56,7 +56,7 @@ fn editing_after_a_swap_still_notifies(cx: &mut TestAppContext) {
         })
     });
 
-    editor.update(cx, |view, cx| view.open_buffer(second.clone(), cx));
+    editor.update(cx, |view, cx| view.open_buffer(second.clone(), None, cx));
     cx.run_until_parked();
     let before = notified.load(Ordering::SeqCst);
 
@@ -80,7 +80,7 @@ fn a_swap_resets_the_caret_and_any_ime_composition(cx: &mut TestAppContext) {
 
     editor.update(cx, |view, cx| {
         view.input.state_mut().set_marked_range(Some(at(0)..at(2)));
-        view.open_buffer(second, cx);
+        view.open_buffer(second, None, cx);
     });
 
     editor.update(cx, |view, _| {

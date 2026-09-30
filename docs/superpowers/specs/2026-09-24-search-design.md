@@ -863,7 +863,7 @@ through `open_note(id, Option<Range<ByteOffset>>)`:
   consumed after the first paint with a non-zero viewport. It calls
   `reveal_cursor` and notifies. The note shows at its top for one frame, then
   scrolls. Zed reveals in prepaint instead; recorded here as the alternative
-  if the jump is noticed.
+  if the jump is noticed. Superseded by tabs S0: the reveal resolves in prepaint.
 - If the hit is in the note showing, the shell selects and reveals without
   rebinding, which would reset the caret and scroll, as `follow` already
   avoids (`crates/app/src/shell.rs`).

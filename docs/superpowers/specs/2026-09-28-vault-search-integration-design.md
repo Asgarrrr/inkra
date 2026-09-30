@@ -255,6 +255,7 @@ shell cannot call it.
   so `reveal_cursor` cannot run before the first paint. The flag is consumed
   after the first paint with a non-zero viewport: it calls `reveal_cursor`
   and notifies. The note shows at its top for one frame, then scrolls (D10).
+  Superseded by tabs S0: the request resolves in `TextElement::prepaint`.
 
 ### As built (slice 4)
 
@@ -295,12 +296,13 @@ shell cannot call it.
   notify with `defer_in`. A notify during a draw marks no frame
   (`invalidate_view` sets `dirty` only outside a draw phase). Only the first
   paint asks, so a zero viewport waits for the next render, with no redraw
-  loop.
+  loop. Superseded by tabs S0: no notify from a draw; prepaint resolves.
 - **Render, not prepaint.** Zed autoscrolls in `EditorElement::prepaint`
   because its element owns its scroll. Here the parent `div` owns it and has
   already offset its children when `TextElement::prepaint` runs, so a reveal
   there also lands a frame late. `restore_scroll` already applied a reload's
   scroll in `render`, before prepaint reads the offset; the reveal joins it.
+  Superseded by tabs S0: prepaint resolves and shifts the element's own paint.
 - **Shot.** `vault-search-opened`: `step`, first found on line 998 of a
   1,130-line note, selected on the centred line.
 - **Known limit.** A hit carries offsets in the saved text. In a note with
@@ -309,7 +311,8 @@ shell cannot call it.
 - **Deferred.** The note shows at its top for one frame, then scrolls, and
   the first paint defers a notify for it. A `TextElement` that owns its
   vertical scroll, as Zed's `EditorElement` does, would reveal in prepaint
-  and remove both. Recorded in `docs/roadmap.md`, Editor.
+  and remove both. Recorded in `docs/roadmap.md`, Editor. Superseded by
+  tabs S0, which removes both without the element owning its scroll.
 
 ## Tests
 

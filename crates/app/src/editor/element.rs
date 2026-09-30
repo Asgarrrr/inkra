@@ -32,7 +32,7 @@ type Stash = Rc<RefCell<Vec<Rc<DocumentLayout>>>>;
 
 impl Element for TextElement {
     type RequestLayoutState = (Stash, Inset);
-    type PrepaintState = Prepainted;
+    type PrepaintState = EditorPrepaint;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -147,11 +147,11 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let bounds = inset.text_bounds(bounds);
-        let layout = take_measured(stash, bounds.size.width).unwrap_or_else(|| {
+        let mut text = inset.text_bounds(bounds);
+        let layout = take_measured(stash, text.size.width).unwrap_or_else(|| {
             // One frame stale height; corrects next frame. gpui's own `Text`
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
-            eprintln!("no layout measured at width {}", bounds.size.width);
+            eprintln!("no layout measured at width {}", text.size.width);
             let editor = self.editor.read(cx);
             let marked = editor.input.state().marked_range();
             let style = window.text_style();
@@ -161,39 +161,49 @@ impl Element for TextElement {
                 &editor.input.state().selection().range(),
                 marked.as_ref(),
                 &style,
-                Some(bounds.size.width),
+                Some(text.size.width),
                 window,
             ))
         });
 
+        let applied = window.element_offset().y;
+        let moved = self.editor.update(cx, |editor, _| {
+            let cursor = editor.cursor();
+            editor.viewport.resolve(text.origin.y, &layout, cursor)
+        });
+        // `layout_bounds` snaps the element offset (`window.rs:5107`); so does the shift.
+        text.origin.y += window.pixel_snap(applied + moved) - window.pixel_snap(applied);
+
         let selection = self.editor.read(cx).input.state().selection().range();
-        let quads = Quads::new(&layout, &selection, bounds.origin);
-        Some((layout, quads))
+        let quads = Quads::new(&layout, &selection, text.origin);
+        EditorPrepaint {
+            painted: Some((layout, quads)),
+            text,
+        }
     }
 
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        (_, inset): &mut Self::RequestLayoutState,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let bounds = inset.text_bounds(bounds);
-        let Some((layout, quads)) = prepaint.take() else {
+        let Some((layout, quads)) = prepaint.painted.take() else {
             return;
         };
-        text_input::paint(&self.editor, layout, quads, bounds, window, cx);
-
-        self.editor.update(cx, |editor, cx| {
-            // Deferred: a notify during a draw marks no frame (`gpui/src/window.rs:171`).
-            if editor.viewport.painted(bounds.origin.y) {
-                cx.defer_in(window, |_, _, cx| cx.notify());
-            }
-        });
+        // The shifted bounds, not the parameter: hit tests and the IME read them until the next paint.
+        text_input::paint(&self.editor, layout, quads, prepaint.text, window, cx);
     }
+}
+
+pub(super) struct EditorPrepaint {
+    painted: Prepainted,
+    /// Shifted by the offset prepaint resolved, so paint places the text where the next frame will.
+    text: Bounds<Pixels>,
 }
 
 /// The measured layout nearest the element's width — not equal, since bounds

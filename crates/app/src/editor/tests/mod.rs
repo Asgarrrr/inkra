@@ -1,6 +1,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-use gpui::{Context, Entity, TestAppContext, VisualTestContext, Window, prelude::*};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use gpui::{Context, Entity, Subscription, TestAppContext, VisualTestContext, Window, prelude::*};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::EditorView;
@@ -15,6 +18,7 @@ mod headings;
 mod margin;
 mod markdown;
 mod protocol;
+mod restore;
 mod scroll;
 mod shapes;
 mod swap;
@@ -50,6 +54,29 @@ pub(super) fn dispatching(
         .unwrap();
     let visual = VisualTestContext::from_window(window.into(), cx);
     (window, visual)
+}
+
+/// Set by a notify once the editor was painted: a draw asking for a second frame.
+pub(super) fn notified_after_paint(
+    editor: &Entity<EditorView>,
+    cx: &mut VisualTestContext,
+) -> (Subscription, Rc<Cell<bool>>) {
+    let flag = Rc::new(Cell::new(false));
+    let set = Rc::clone(&flag);
+    let subscription = cx.update(|_, cx| {
+        cx.observe(editor, move |editor, cx| {
+            if editor.read(cx).input.last_bounds().is_some() {
+                set.set(true);
+            }
+        })
+    });
+    (subscription, flag)
+}
+
+pub(super) const TALL: usize = 200;
+
+pub(super) fn tall_document() -> String {
+    "line\n".repeat(TALL)
 }
 
 pub(super) fn at(offset: usize) -> ByteOffset {
