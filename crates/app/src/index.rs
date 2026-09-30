@@ -7,7 +7,7 @@ use gpui::{
     AppContext as _, AsyncApp, Context, Entity, EventEmitter, Priority, SharedString, Subscription,
     WeakEntity,
 };
-use inkra_index::live::{Merged, Ticket, TurnEnd};
+use inkra_index::live::{Merged, Status, Ticket, TurnEnd};
 use inkra_index::{LiveIndex, NoteContent, NoteIndex};
 use inkra_vault::{Fs, Vault};
 
@@ -26,6 +26,21 @@ pub(crate) use watch::IndexWatch;
 
 /// A picker's empty text before the first build.
 pub(crate) const SCANNING: &str = "Scanning the vault…";
+
+/// A picker's footer, "Indexing 1,204 of 50,000 notes", while `Indexing`; else `None`.
+pub(crate) fn indexing_footer(status: Status) -> Option<SharedString> {
+    let Status::Indexing { loaded, total } = status else {
+        return None;
+    };
+    Some(
+        format!(
+            "Indexing {} of {} notes",
+            thousands(loaded),
+            thousands(total)
+        )
+        .into(),
+    )
+}
 
 /// A build applied: note names and link resolution may have changed.
 pub(crate) struct NotesChanged;
@@ -99,32 +114,12 @@ impl IndexSync {
         self.live.index()
     }
 
-    /// `(loaded, total)`: the notes of the last build, less those queued or loading.
-    pub(crate) fn progress(&self) -> (usize, usize) {
-        self.live.progress()
-    }
-
-    /// True before the first build applies or while loads are pending; a rebuild alone is not.
-    pub(crate) fn is_building(&self) -> bool {
-        self.vault.is_some() && self.live.is_building()
-    }
-
-    /// A picker's footer while the notes' texts load; before the first build its empty text says it is scanning.
-    pub(crate) fn indexing_footer(&self) -> Option<SharedString> {
-        (self.is_building() && !self.awaits_first_build()).then(|| {
-            let (loaded, total) = self.progress();
-            format!(
-                "Indexing {} of {} notes",
-                thousands(loaded),
-                thousands(total)
-            )
-            .into()
-        })
-    }
-
-    /// Until the first build after the vault's full scan applies, there are no names to list.
-    pub(crate) fn awaits_first_build(&self) -> bool {
-        self.vault.is_some() && self.live.awaits_first_build()
+    /// `Ready` without a vault: nothing will ever load.
+    pub(crate) fn status(&self) -> Status {
+        match self.vault {
+            Some(_) => self.live.status(),
+            None => Status::Ready,
+        }
     }
 
     /// One timed foreground update and the word merge it made due, then the `Indexed` mark; the

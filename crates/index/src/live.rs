@@ -23,6 +23,24 @@ use builds::Build;
 use loads::Loading;
 use startup::Startup;
 
+/// What the index can answer now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// No build has applied: there are no names to list.
+    Scanning,
+    /// The last build's notes less those queued or loading; `loaded < total`.
+    Indexing { loaded: usize, total: usize },
+    /// Every note of the last build is loaded; a rebuild in flight does not count.
+    Ready,
+}
+
+impl Status {
+    #[must_use]
+    pub fn is_ready(self) -> bool {
+        self == Self::Ready
+    }
+}
+
 /// A `NoteIndex` kept current: which notes to load, which load is superseded, when the words merge.
 #[derive(Default)]
 pub struct LiveIndex {
@@ -56,7 +74,7 @@ impl LiveIndex {
 
     /// `(loaded, total)`: the notes of the last build, less those queued or loading.
     #[must_use]
-    pub fn progress(&self) -> (usize, usize) {
+    pub(crate) fn progress(&self) -> (usize, usize) {
         let total = self.index.names().len();
         // A note loading and queued again is one note pending.
         let loading = self
@@ -68,17 +86,30 @@ impl LiveIndex {
         (total.saturating_sub(pending), total)
     }
 
+    /// The index's state now; `Scanning` never comes back once a build applies.
+    #[must_use]
+    pub fn status(&self) -> Status {
+        if self.awaits_first_build() {
+            return Status::Scanning;
+        }
+        let (loaded, total) = self.progress();
+        if loaded < total {
+            Status::Indexing { loaded, total }
+        } else {
+            Status::Ready
+        }
+    }
+
     /// Until the first build applies, there are no names to list.
     #[must_use]
-    pub fn awaits_first_build(&self) -> bool {
+    fn awaits_first_build(&self) -> bool {
         self.last.is_none()
     }
 
     /// True before the first build applies or while loads are pending; a rebuild alone is not.
     #[must_use]
-    pub fn is_building(&self) -> bool {
-        let (loaded, total) = self.progress();
-        self.awaits_first_build() || loaded < total
+    fn is_building(&self) -> bool {
+        !self.status().is_ready()
     }
 }
 

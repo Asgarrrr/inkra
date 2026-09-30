@@ -7,7 +7,7 @@ use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Mtime, Vault, VaultError};
 
-use super::{Applied, LiveIndex, Load, Ticket, TurnEnd};
+use super::{Applied, LiveIndex, Load, Status, Ticket, TurnEnd};
 use crate::NoteContent;
 use crate::test_support::{ROOT, id, texts};
 
@@ -207,6 +207,34 @@ fn a_vault_with_no_notes_applies_one_layout_and_stops_building() {
     assert!(!h.live.awaits_first_build());
     assert!(!h.live.is_building());
     assert!(!h.build().layout, "empty against empty moves nothing");
+}
+
+#[test]
+fn status_goes_scanning_indexing_ready() {
+    let mut h = Harness::new(&[("a.md", ""), ("b.md", "")]);
+    assert_eq!(h.live.status(), Status::Scanning);
+
+    let _ = h.build();
+    let (a, b) = (h.start(), h.start());
+    assert_eq!(
+        h.live.status(),
+        Status::Indexing {
+            loaded: 0,
+            total: 2
+        }
+    );
+
+    h.land(&a);
+    assert_eq!(
+        h.live.status(),
+        Status::Indexing {
+            loaded: 1,
+            total: 2
+        }
+    );
+
+    h.land(&b);
+    assert_eq!(h.live.status(), Status::Ready);
 }
 
 #[test]

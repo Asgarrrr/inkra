@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use futures::FutureExt as _;
+use futures::channel::oneshot;
 use gpui::TestAppContext;
 use inkra_vault::Fs;
 
@@ -126,4 +128,39 @@ fn the_picker_says_scanning_then_lists_after_the_first_build(cx: &mut TestAppCon
         listed(&mut opened),
         ["# b f(1)", "1: plan", "# a (1)", "1: plan"]
     );
+}
+
+#[gpui::test]
+fn the_scanning_text_holds_until_the_first_rows_land(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let fs = with_texts(&[("a.md", "plan"), ("f/b.md", "plan")]);
+    let gate = fs.block_read_dir("/vault/f");
+    // Keeps the index loading after the first build, so its refresh waits `BUILDING_REFRESH`.
+    let _a = fs.block_load("/vault/a.md");
+    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut opened = open_over(cx, notes);
+    opened.visual.simulate_keystrokes("p l a n");
+
+    gate.release();
+    opened.visual.run_until_parked();
+    assert_eq!(
+        empty_text(&mut opened).as_deref(),
+        Some("Scanning the vault…"),
+        "built, but no run has landed"
+    );
+
+    let (release, hold) = oneshot::channel::<()>();
+    opened.picker.update(&mut opened.visual, |picker, _| {
+        picker.delegate.runs.hold(Some(hold.shared()));
+    });
+    advance(&mut opened, BUILDING_REFRESH);
+    assert_eq!(
+        empty_text(&mut opened).as_deref(),
+        Some("Scanning the vault…"),
+        "a run started, but has not landed"
+    );
+
+    let _ = release.send(());
+    opened.visual.run_until_parked();
+    assert_eq!(listed(&mut opened), ["# b f(1)", "1: plan"]);
 }

@@ -4,10 +4,11 @@ use std::path::Path;
 
 use gpui::{Entity, TestAppContext};
 use inkra_index::NoteQuery;
+use inkra_index::live::Status;
 use inkra_vault::EntryId;
 
 use super::IndexSync;
-use super::tests::{create, found, indexed_vault, saved_edit};
+use super::tests::{create, found, indexed_vault, saved_edit, status};
 use crate::test_support::{entry_id, quick_open};
 
 fn ranked(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec<EntryId> {
@@ -79,7 +80,7 @@ fn an_outside_edit_replaces_the_text_at_the_next_rescan(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn progress_and_the_corpus_agree_once_indexing_ends(cx: &mut TestAppContext) {
+fn status_and_the_corpus_agree_once_indexing_ends(cx: &mut TestAppContext) {
     let files: Vec<(String, String)> = (0..12)
         .map(|n| (format!("n{n:02}.md"), format!("text {n}")))
         .collect();
@@ -90,7 +91,11 @@ fn progress_and_the_corpus_agree_once_indexing_ends(cx: &mut TestAppContext) {
     let (_fs, _notes, links) = indexed_vault(cx, &files);
     cx.run_until_parked();
 
-    assert_eq!(links.read_with(cx, |links, _| links.progress()), (12, 12));
+    assert_eq!(status(cx, &links), Status::Ready);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().names().len()),
+        12
+    );
     assert_eq!(
         links.read_with(cx, |links, _| links.index().corpus().len()),
         12

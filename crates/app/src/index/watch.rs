@@ -51,7 +51,7 @@ impl IndexWatch {
     }
 
     fn on_notify(&self, sync: &IndexSync) -> Refresh {
-        let building = sync.is_building();
+        let building = !sync.status().is_ready();
         if self.seen == Some((sync.revision(), building)) {
             Refresh::Skip
         } else if !building {
@@ -65,7 +65,7 @@ impl IndexWatch {
 
     pub(crate) fn seen(&mut self, sync: &IndexSync) {
         self.throttled = None;
-        self.seen = Some((sync.revision(), sync.is_building()));
+        self.seen = Some((sync.revision(), !sync.status().is_ready()));
     }
 
     fn throttle(&mut self, task: Task<()>) {

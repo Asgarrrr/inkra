@@ -7,12 +7,13 @@ use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
     Subscription, Task, actions, div,
 };
+use inkra_index::live::Status;
 use inkra_index::{IndexSnapshot, NoteQuery, Searched};
 use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
-use crate::index::{IndexSync, SCANNING};
+use crate::index::{IndexSync, SCANNING, indexing_footer};
 use crate::open::Open;
 use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
@@ -54,8 +55,6 @@ pub(crate) struct VaultSearchDelegate {
 enum Answered {
     /// An empty field, or no result yet: nothing to say.
     Blank,
-    /// The vault's first scan and build have not applied: there is no text to search.
-    Scanning,
     /// The field holds no term, so no note can match.
     NoTerm,
     Query,
@@ -79,7 +78,7 @@ impl VaultSearchDelegate {
         }
     }
 
-    /// No rows and no run behind them: the scanning state, an empty field, a field with no term.
+    /// No rows and no run behind them: an empty field, a field with no term.
     fn answer(&mut self, answered: Answered) {
         self.results = Results::default();
         self.answered = answered;
@@ -92,7 +91,7 @@ impl VaultSearchDelegate {
         if self.results.limit_reached {
             return Some(format!("{}+ results; refine the query", thousands(LIMIT)).into());
         }
-        self.links.read(cx).indexing_footer()
+        indexing_footer(self.links.read(cx).status())
     }
 }
 
@@ -106,10 +105,6 @@ impl IndexDelegate for VaultSearchDelegate {
 
     fn sync(&self) -> &Entity<IndexSync> {
         &self.links
-    }
-
-    fn scanning(&mut self) {
-        self.answer(Answered::Scanning);
     }
 
     fn query(&mut self, text: &str, _: Run) -> Option<NoteQuery> {
@@ -161,23 +156,24 @@ impl PickerDelegate for VaultSearchDelegate {
     }
 
     fn empty_text(&self, cx: &App) -> Option<SharedString> {
-        let links = self.links.read(cx);
+        if self.runs.scanning() {
+            return Some(SCANNING.into());
+        }
         match self.answered {
             Answered::Blank => None,
-            Answered::Scanning => Some(SCANNING.into()),
             // While loads land, a query no note matches yet may still match.
-            Answered::Query if links.is_building() => {
-                let (loaded, total) = links.progress();
-                Some(
+            Answered::Query => match self.links.read(cx).status() {
+                Status::Indexing { loaded, total } => Some(
                     format!(
                         "No matches in {} of {} notes indexed so far",
                         thousands(loaded),
                         thousands(total)
                     )
                     .into(),
-                )
-            }
-            Answered::NoTerm | Answered::Query => Some("No matches".into()),
+                ),
+                Status::Scanning | Status::Ready => Some("No matches".into()),
+            },
+            Answered::NoTerm => Some("No matches".into()),
         }
     }
 

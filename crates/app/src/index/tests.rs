@@ -10,6 +10,7 @@ use futures::FutureExt as _;
 use futures::channel::oneshot;
 use futures::executor::block_on;
 use gpui::{AppContext as _, Entity, Subscription, TestAppContext};
+use inkra_index::live::Status;
 use inkra_index::{NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
@@ -126,6 +127,14 @@ pub(super) fn notes_changed(
     (count, subscription)
 }
 
+pub(super) fn status(cx: &mut TestAppContext, links: &Entity<IndexSync>) -> Status {
+    links.read_with(cx, |links, _| links.status())
+}
+
+pub(super) fn indexing(loaded: usize, total: usize) -> Status {
+    Status::Indexing { loaded, total }
+}
+
 /// Each word start of `text`'s terms in the notes holding them all, with the hit's context.
 pub(super) fn found(
     cx: &mut TestAppContext,
@@ -154,11 +163,11 @@ fn startup_indexes_every_note(cx: &mut TestAppContext) {
         cx,
         &[("a.md", "[[b]]"), ("b.md", ""), ("c.md", "[[b]] and [[B]]")],
     );
-    assert!(links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Scanning);
 
     cx.run_until_parked();
 
-    assert!(!links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a", "c"]);
 }
 
@@ -205,21 +214,21 @@ fn a_build_landing_behind_the_vault_applies_then_rebuilds(cx: &mut TestAppContex
 }
 
 #[gpui::test]
-fn progress_counts_the_notes_loaded(cx: &mut TestAppContext) {
+fn status_goes_scanning_indexing_ready_as_notes_load(cx: &mut TestAppContext) {
     let (fs, _notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", ""), ("c.md", "")]);
-    let progress = |cx: &mut TestAppContext| links.read_with(cx, |links, _| links.progress());
-    assert_eq!(progress(cx), (0, 0), "before the build");
-    assert!(links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Scanning);
 
     let gate = fs.block_load("/vault/a.md");
     cx.run_until_parked();
-    assert_eq!(progress(cx), (2, 3), "a is loading, b and c are loaded");
-    assert!(links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(
+        status(cx, &links),
+        indexing(2, 3),
+        "a is loading, b and c are loaded"
+    );
 
     gate.release();
     cx.run_until_parked();
-    assert_eq!(progress(cx), (3, 3));
-    assert!(!links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Ready);
 }
 
 #[gpui::test]
@@ -231,7 +240,7 @@ fn a_rebuild_alone_is_not_building(cx: &mut TestAppContext) {
     let sink = Arc::clone(&seen);
     let _subscription = cx.update(|cx| {
         cx.observe(&links, move |links, cx| {
-            let building = links.read(cx).is_building();
+            let building = !links.read(cx).status().is_ready();
             sink.lock().expect("unpoisoned").push(building);
         })
     });
@@ -422,10 +431,7 @@ fn a_load_finishing_after_a_newer_write_is_dropped(cx: &mut TestAppContext) {
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "[[stale]]");
     create(cx, &notes, "d");
-    assert!(
-        links.read_with(cx, |links, _| links.is_building()),
-        "the load is parked"
-    );
+    assert!(!status(cx, &links).is_ready(), "the load is parked");
 
     notes.update(cx, |_, cx| {
         cx.emit(NoteSaved {
@@ -472,10 +478,7 @@ fn a_load_finishing_after_a_trash_leaves_no_text(cx: &mut TestAppContext) {
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "changed");
     create(cx, &notes, "c");
-    assert!(
-        links.read_with(cx, |links, _| links.is_building()),
-        "the load is parked"
-    );
+    assert!(!status(cx, &links).is_ready(), "the load is parked");
     let a = entry_id(&notes, cx, "a");
     let trashed = notes.update(cx, |notes, cx| notes.trash(a, cx));
     cx.run_until_parked();
@@ -554,6 +557,15 @@ async fn a_write_emits_the_text_it_wrote(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_store_without_a_vault_is_ready(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new()) as Arc<dyn Fs>;
+    let notes = cx.update(|cx| cx.new(|cx| NoteStore::new(fs, None, cx)));
+    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+
+    assert_eq!(status(cx, &links), Status::Ready);
+}
+
+#[gpui::test]
 fn a_detached_note_emits_nothing(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/loose.md", "");
@@ -590,15 +602,14 @@ fn a_detached_note_emits_nothing(cx: &mut TestAppContext) {
         Some("[[x]]")
     );
     assert_eq!(*seen.lock().expect("unpoisoned"), 0);
-    assert!(!links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Ready);
 }
 
 #[gpui::test]
 fn a_load_in_flight_for_a_note_gone_is_not_counted_as_pending(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
-    let progress = |cx: &mut TestAppContext| links.read_with(cx, |links, _| links.progress());
-    assert_eq!(progress(cx), (2, 2));
+    assert_eq!(status(cx, &links), Status::Ready);
 
     // Edited outside the app, then read by the rescan a rename runs; the load parks.
     let gate = fs.block_load("/vault/a.md");
@@ -607,17 +618,21 @@ fn a_load_in_flight_for_a_note_gone_is_not_counted_as_pending(cx: &mut TestAppCo
     let renamed = notes.update(cx, |notes, cx| notes.rename(b, "c", cx));
     cx.run_until_parked();
     drop(renamed);
-    assert_eq!(progress(cx), (1, 2), "a is loading, c is loaded");
+    assert_eq!(
+        status(cx, &links),
+        indexing(1, 2),
+        "a is loading, c is loaded"
+    );
 
     let a = entry_id(&notes, cx, "a");
     let trashed = notes.update(cx, |notes, cx| notes.trash(a, cx));
     cx.run_until_parked();
     drop(trashed);
 
-    assert_eq!(progress(cx), (1, 1), "c, the only note, is loaded");
-    assert!(
-        !links.read_with(cx, |links, _| links.is_building()),
-        "nothing in the vault is left to load"
+    assert_eq!(
+        status(cx, &links),
+        Status::Ready,
+        "c, the only note, is loaded"
     );
     gate.release();
     cx.run_until_parked();
@@ -629,24 +644,27 @@ fn a_note_reloading_during_its_load_counts_once(cx: &mut TestAppContext) {
     cx.executor().set_num_cpus(1);
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
-    let progress = |cx: &mut TestAppContext| links.read_with(cx, |links, _| links.progress());
 
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "[[c]]");
     create(cx, &notes, "c");
-    assert_eq!(progress(cx), (1, 3), "a is loading, c is queued behind it");
+    assert_eq!(
+        status(cx, &links),
+        indexing(1, 3),
+        "a is loading, c is queued behind it"
+    );
 
     fs.insert_file("/vault/a.md", "[[b]]");
     create(cx, &notes, "d");
     assert_eq!(
-        progress(cx),
-        (1, 4),
+        status(cx, &links),
+        indexing(1, 4),
         "a is loading and queued again, c and d are queued"
     );
 
     gate.release();
     cx.run_until_parked();
-    assert_eq!(progress(cx), (4, 4));
+    assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
     assert_eq!(backlinks(cx, &notes, &links, "c"), Vec::<String>::new());
 }
@@ -799,9 +817,7 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
     cx.run_until_parked();
 
     assert_eq!(snapshot(cx, &notes, &links), snapshot(cx, &notes, &fresh));
-    let (loaded, total) = links.read_with(cx, |links, _| links.progress());
-    assert_eq!(loaded, total);
-    assert!(!links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(
         links.read_with(cx, |links, _| links.index().names().len()),
         fresh.read_with(cx, |fresh, _| fresh.index().names().len())
