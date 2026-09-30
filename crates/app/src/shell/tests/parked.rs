@@ -1,5 +1,4 @@
-//! An inactive tab's view kept as anchors: an edit, an undo, a reload or a trash elsewhere
-//! moves it with its text or drops it (tabs spec, A2).
+//! An inactive tab's view kept as anchors: edits, undo, reload or trash elsewhere move or drop it (tabs spec, A2).
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -52,7 +51,7 @@ fn an_edit_and_its_undo_in_another_tab_move_a_parked_caret_with_its_text(cx: &mu
     check(&window, &mut cx);
 }
 
-/// Replaces S1's clip-on-return test: the selection keeps the text left of it, not an end.
+/// The selection keeps the text left of it, not an end.
 #[gpui::test]
 fn a_parked_selection_partly_deleted_in_another_tab_keeps_its_remaining_text(
     cx: &mut TestAppContext,
@@ -143,7 +142,6 @@ fn closing_an_inactive_tab_unparks_it(cx: &mut TestAppContext) {
 
 const A: &str = "/vault/a.md";
 
-/// `line 0` to `line 199`, one per line.
 fn numbered() -> String {
     (0..200).fold(String::new(), |mut text, n| {
         let _ = writeln!(text, "line {n}");

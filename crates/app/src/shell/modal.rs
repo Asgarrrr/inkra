@@ -29,6 +29,10 @@ impl Modal {
     pub(super) fn restore_to(&mut self, focus: FocusHandle) {
         self.restore = Some(focus);
     }
+
+    pub(super) fn restores(&self, focus: &FocusHandle) -> bool {
+        self.restore.as_ref() == Some(focus)
+    }
 }
 
 impl AppShell {

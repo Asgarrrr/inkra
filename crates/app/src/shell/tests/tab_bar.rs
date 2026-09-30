@@ -71,7 +71,7 @@ fn single_file_mode_titles_the_tab_with_the_file_name(cx: &mut TestAppContext) {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| root(fs as Arc<dyn Fs>, launch, cx),
+                |window, cx| root(fs as Arc<dyn Fs>, launch, window, cx),
             )
         })
         .unwrap();
@@ -229,8 +229,7 @@ fn a_tab_activated_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext) 
     );
 }
 
-/// Closing a tab left of the active one shifts it left; the bar must scroll it back into view.
-/// The × of a tab scrolled out of the bar cannot be clicked, so this calls its handler.
+/// Closing a tab left of the active one shifts it; the bar must scroll it back into view.
 #[gpui::test]
 fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);

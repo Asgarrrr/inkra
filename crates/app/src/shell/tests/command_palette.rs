@@ -110,8 +110,7 @@ fn the_rename_field_lists_its_commands_not_its_keys(cx: &mut TestAppContext) {
     assert_eq!(vault_names(&notes, &mut visual), ["b.md", "z.md"]);
 }
 
-/// A note landing while the palette is open must not move the command off the tree it was listed
-/// for, nor the tree's cursor off the row the user arrowed to after the open began.
+/// A note landing under the palette must move neither the command's tree nor the cursor the user arrowed.
 #[gpui::test]
 fn a_command_runs_where_it_was_listed_though_a_note_lands(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

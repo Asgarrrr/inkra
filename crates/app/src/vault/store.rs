@@ -73,8 +73,9 @@ impl NoteStore {
         self.vault.as_ref()
     }
 
+    /// `None` for a note being trashed, as `open_note`: no view binds it.
     pub(crate) fn buffer_for(&self, id: EntryId) -> Option<&Entity<Buffer>> {
-        self.sessions.note(id).map(OpenNote::buffer)
+        openable(&self.sessions.get(id)?.life)
     }
 
     pub(crate) fn current(&self) -> Option<EntryId> {
@@ -117,7 +118,7 @@ impl NoteStore {
         if let Some(session) = self.sessions.get(id)
             && session.life.bound().is_some()
         {
-            return Task::ready(openable(&session.life));
+            return Task::ready(openable(&session.life).cloned());
         }
 
         let Some(vault) = self.vault.clone() else {
@@ -144,7 +145,7 @@ impl NoteStore {
                 }
                 this.sessions
                     .get(id)
-                    .and_then(|session| openable(&session.life))
+                    .and_then(|session| openable(&session.life).cloned())
             })
             .ok()
             .flatten()
@@ -210,9 +211,9 @@ impl NoteStore {
 }
 
 /// A trashing note still binds its buffer; no opener lands on it.
-fn openable(life: &Lifecycle<OpenNote>) -> Option<Entity<Buffer>> {
+fn openable(life: &Lifecycle<OpenNote>) -> Option<&Entity<Buffer>> {
     match life {
-        Lifecycle::Open(_, note) => Some(note.buffer().clone()),
+        Lifecycle::Open(_, note) => Some(note.buffer()),
         Lifecycle::Closed | Lifecycle::Trashing(_) => None,
     }
 }

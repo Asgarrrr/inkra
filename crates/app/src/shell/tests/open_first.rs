@@ -31,7 +31,14 @@ fn unscanned(
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| root(fs, Launch::Vault(Vault::new(Path::new("/vault"))), cx),
+                |window, cx| {
+                    root(
+                        fs,
+                        Launch::Vault(Vault::new(Path::new("/vault"))),
+                        window,
+                        cx,
+                    )
+                },
             )
         })
         .expect("open the window");

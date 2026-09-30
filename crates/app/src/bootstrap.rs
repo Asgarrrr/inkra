@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, WindowBounds, WindowOptions, px,
-    size,
+    App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, Window, WindowBounds,
+    WindowOptions, px, size,
 };
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
@@ -30,7 +30,12 @@ pub(crate) enum Launch {
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
 /// runner gets the same composition the real window gets.
-pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<AppShell> {
+pub(crate) fn root(
+    fs: Arc<dyn Fs>,
+    launched: Launch,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<AppShell> {
     let (note, vault) = match launched {
         Launch::Nothing => (None, None),
         Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),
@@ -50,7 +55,7 @@ pub(crate) fn root(fs: Arc<dyn Fs>, launched: Launch, cx: &mut App) -> Entity<Ap
         }
         store
     });
-    cx.new(|cx| AppShell::new(editor, notes, cx))
+    cx.new(|cx| AppShell::new(editor, notes, window, cx))
 }
 
 /// Deliberately blocking: a failure should exit rather than flash an empty window.
@@ -91,7 +96,7 @@ pub fn run() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| root(Arc::new(RealFs), launched, cx),
+            |window, cx| root(Arc::new(RealFs), launched, window, cx),
         );
 
         match window {

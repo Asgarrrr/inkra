@@ -62,8 +62,7 @@ fn each_tab_keeps_its_own_history(cx: &mut TestAppContext) {
     check(&window, &mut cx);
 }
 
-/// Tab 1 holds `a` behind and `b` ahead: a switch that pushed onto the tab left would clear
-/// forward, and one that pushed onto the tab arriving would put `c` behind `a`.
+/// A switch pushing onto the tab left would clear forward; onto the tab arriving, put `c` behind `a`.
 #[gpui::test]
 fn a_tab_switch_pushes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, c, _]) = four_notes(cx);

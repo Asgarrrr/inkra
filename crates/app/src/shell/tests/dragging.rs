@@ -45,7 +45,6 @@ fn abc(
     (fs, window, cx, [a, b, c, d])
 }
 
-/// Red before the drag listeners exist: it proves the helper too.
 #[gpui::test]
 fn dragging_a_tab_onto_a_later_one_puts_it_after(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, c, _]) = abc(cx);
@@ -146,8 +145,7 @@ fn a_drag_under_a_picker_moves_nothing(cx: &mut TestAppContext) {
     check(&window, &mut cx);
 }
 
-/// R6. Tab 0 is `a`, narrower than "New tab": without the scroll, tab 19 sits left of the edge.
-/// Tab 0 is scrolled out of the bar, so this calls the drop's handler.
+/// R6: without the scroll, tab 19 sits left of the edge; tab 0 is off the bar, so this calls the drop's handler.
 #[gpui::test]
 fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
@@ -182,8 +180,7 @@ fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppCont
     check(&window, &mut cx);
 }
 
-/// A drag clears every pending press (gpui `div.rs:2234-2243`), so the ×'s click never fires; the
-/// tab's drop onto itself moves nothing.
+/// A drag clears every pending press (gpui `div.rs:2234-2243`), so the ×'s click never fires.
 #[gpui::test]
 fn a_drag_started_on_the_x_and_released_on_it_closes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, c, _]) = abc(cx);

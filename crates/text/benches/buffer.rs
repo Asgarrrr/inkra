@@ -98,7 +98,7 @@ fn bench_insert(c: &mut Criterion) {
     group.finish();
 }
 
-/// A tab switch parks three anchors and later forgets them; `Buffer` keeps every slot (tabs S2).
+/// A tab switch parks three anchors and later forgets them; `Buffer` keeps every slot.
 fn bench_insert_after_parks(c: &mut Criterion) {
     let now = Instant::now();
     let mut group = c.benchmark_group("buffer_insert_after_parks");

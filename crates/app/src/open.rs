@@ -10,7 +10,6 @@ pub(crate) enum Open {
 }
 
 impl Open {
-    /// `⌘`-click opens in a new tab.
     pub(crate) fn from_click(modifiers: Modifiers) -> Self {
         if modifiers.secondary() {
             Self::NewTab

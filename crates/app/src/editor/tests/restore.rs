@@ -129,7 +129,6 @@ fn a_reversed_selection_keeps_its_direction_and_goal(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &"a line of text\n".repeat(10));
     cx.run_until_parked();
     let (first, other) = two_notes(window, &mut cx);
-    // Line 5, column 6.
     window
         .update(&mut cx, |view, window, cx| {
             view.select_range(at(81)..at(81), window, cx);
@@ -175,7 +174,6 @@ fn a_rebind_drops_a_composition_and_keeps_its_text(cx: &mut TestAppContext) {
         .unwrap();
 }
 
-/// Switching away again before the restored frame is drawn.
 #[gpui::test]
 fn two_captures_in_one_frame_read_the_waiting_request(cx: &mut TestAppContext) {
     let (window, mut cx) = scrolled(cx);
