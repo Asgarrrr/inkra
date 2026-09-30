@@ -32,108 +32,57 @@ Apple M5 Pro, 48 GB, macOS 26.5. Inkra 0.1.0 (commit `698daa8`), Obsidian
 1.12.7, 2026-09-30. Warm rows: median of 5 runs. Memory is Activity Monitor's
 figure (`phys_footprint`, summed over every process of the app), in MiB.
 
-```mermaid
----
-config:
-  themeVariables:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
-    xyChart:
-      backgroundColor: "#2f3440"
-      titleColor: "#e5e7eb"
-      xAxisLabelColor: "#d1d5db"
-      yAxisLabelColor: "#d1d5db"
-      xAxisTitleColor: "#d1d5db"
-      yAxisTitleColor: "#d1d5db"
-      xAxisLineColor: "#4b5563"
-      yAxisLineColor: "#4b5563"
-      xAxisTickColor: "#4b5563"
-      yAxisTickColor: "#4b5563"
-      plotColorPalette: "#93c5d3, #6b7a8f"
----
-xychart-beta horizontal
-    title "Window on screen, warm (lower is better)"
-    x-axis ["Inkra 500 · 159 ms", "Obsidian 500 · 424 ms", "Inkra 5k · 150 ms", "Obsidian 5k · 444 ms", "Inkra 50k · 154 ms", "Obsidian 50k · 426 ms"]
-    y-axis "ms" 0 --> 500
-    bar [159, 0, 150, 0, 154, 0]
-    bar [0, 424, 0, 444, 0, 426]
-```
+```text
+              Window on screen, warm (lower is better)
+              █ Inkra   ▒ Obsidian
 
-```mermaid
----
-config:
-  themeVariables:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
-    xyChart:
-      backgroundColor: "#2f3440"
-      titleColor: "#e5e7eb"
-      xAxisLabelColor: "#d1d5db"
-      yAxisLabelColor: "#d1d5db"
-      xAxisTitleColor: "#d1d5db"
-      yAxisTitleColor: "#d1d5db"
-      xAxisLineColor: "#4b5563"
-      yAxisLineColor: "#4b5563"
-      xAxisTickColor: "#4b5563"
-      yAxisTickColor: "#4b5563"
-      plotColorPalette: "#93c5d3, #6b7a8f"
----
-xychart-beta horizontal
-    title "Memory at idle, warm (lower is better)"
-    x-axis ["Inkra 500 · 50 MiB", "Obsidian 500 · 222 MiB", "Inkra 5k · 106 MiB", "Obsidian 5k · 340 MiB", "Inkra 50k · 465 MiB", "Obsidian 50k · 909 MiB"]
-    y-axis "MiB" 0 --> 1000
-    bar [50, 0, 106, 0, 465, 0]
-    bar [0, 222, 0, 340, 0, 909]
-```
+   Inkra 500 ┤████████████████ 159          ·         ·         ·
+Obsidian 500 ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 424    ·
+    Inkra 5k ┤███████████████ 150 ·         ·         ·         ·
+ Obsidian 5k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 444  ·
+   Inkra 50k ┤███████████████ 154 ·         ·         ·         ·
+Obsidian 50k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 426   ·
+             └┬─────────┬─────────┬─────────┬─────────┬─────────┬
+              0        100       200       300       400       500  ms
 
-```mermaid
----
-config:
-  themeVariables:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
-    xyChart:
-      backgroundColor: "#2f3440"
-      titleColor: "#e5e7eb"
-      xAxisLabelColor: "#d1d5db"
-      yAxisLabelColor: "#d1d5db"
-      xAxisTitleColor: "#d1d5db"
-      yAxisTitleColor: "#d1d5db"
-      xAxisLineColor: "#4b5563"
-      yAxisLineColor: "#4b5563"
-      xAxisTickColor: "#4b5563"
-      yAxisTickColor: "#4b5563"
-      plotColorPalette: "#93c5d3, #6b7a8f"
----
-xychart-beta horizontal
-    title "CPU until idle, first open (lower is better)"
-    x-axis ["Inkra 500 · 0.29 s", "Obsidian 500 · 2.52 s", "Inkra 5k · 1.58 s", "Obsidian 5k · 14.98 s", "Inkra 50k · 15.02 s", "Obsidian 50k · 161.43 s"]
-    y-axis "s" 0 --> 170
-    bar [0.29, 0, 1.58, 0, 15.02, 0]
-    bar [0, 2.52, 0, 14.98, 0, 161.43]
-```
 
-```mermaid
----
-config:
-  themeVariables:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
-    xyChart:
-      backgroundColor: "#2f3440"
-      titleColor: "#e5e7eb"
-      xAxisLabelColor: "#d1d5db"
-      yAxisLabelColor: "#d1d5db"
-      xAxisTitleColor: "#d1d5db"
-      yAxisTitleColor: "#d1d5db"
-      xAxisLineColor: "#4b5563"
-      yAxisLineColor: "#4b5563"
-      xAxisTickColor: "#4b5563"
-      yAxisTickColor: "#4b5563"
-      plotColorPalette: "#93c5d3, #6b7a8f"
----
-xychart-beta horizontal
-    title "CPU until idle, warm (lower is better)"
-    x-axis ["Inkra 500 · 0.28 s", "Obsidian 500 · 0.99 s", "Inkra 5k · 1.74 s", "Obsidian 5k · 1.49 s", "Inkra 50k · 19.58 s", "Obsidian 50k · 7.87 s"]
-    y-axis "s" 0 --> 20
-    bar [0.28, 0, 1.74, 0, 19.58, 0]
-    bar [0, 0.99, 0, 1.49, 0, 7.87]
+              Memory at idle, warm (lower is better)
+              █ Inkra   ▒ Obsidian
+
+   Inkra 500 ┤██ 50     ·         ·         ·         ·         ·
+Obsidian 500 ┤▒▒▒▒▒▒▒▒▒▒▒ 222     ·         ·         ·         ·
+    Inkra 5k ┤█████ 106 ·         ·         ·         ·         ·
+ Obsidian 5k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 340         ·         ·         ·
+   Inkra 50k ┤███████████████████████ 465   ·         ·         ·
+Obsidian 50k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 909 ·
+             └┬─────────┬─────────┬─────────┬─────────┬─────────┬
+              0        200       400       600       800      1000  MiB
+
+
+              CPU until idle, first open (lower is better)
+              █ Inkra   ▒ Obsidian
+
+   Inkra 500 ┤█ 0.29    ·         ·         ·         ·         ·
+Obsidian 500 ┤▒ 2.52    ·         ·         ·         ·         ·
+    Inkra 5k ┤█ 1.58    ·         ·         ·         ·         ·
+ Obsidian 5k ┤▒▒▒▒ 14.98          ·         ·         ·         ·
+   Inkra 50k ┤████ 15.02          ·         ·         ·         ·
+Obsidian 50k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 161.43   ·
+             └┬─────────┬─────────┬─────────┬─────────┬─────────┬
+              0        40        80        120       160       200  s
+
+
+              CPU until idle, warm (lower is better)
+              █ Inkra   ▒ Obsidian
+
+   Inkra 500 ┤█ 0.28    ·         ·         ·         ·         ·
+Obsidian 500 ┤▒▒ 0.99   ·         ·         ·         ·         ·
+    Inkra 5k ┤████ 1.74 ·         ·         ·         ·         ·
+ Obsidian 5k ┤▒▒▒▒ 1.49 ·         ·         ·         ·         ·
+   Inkra 50k ┤█████████████████████████████████████████████████ 19.58
+Obsidian 50k ┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 7.87     ·         ·         ·
+             └┬─────────┬─────────┬─────────┬─────────┬─────────┬
+              0         4         8        12        16        20  s
 ```
 
 | Notes | App | Open | Window on screen (ms) | Busy until idle (s) | CPU until idle (s) | Memory at idle (MiB) | Processes |
