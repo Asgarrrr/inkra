@@ -267,6 +267,11 @@ impl Fs for MemFs {
         Ok(())
     }
 
+    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
+        self.insert_file(path, text);
+        Ok(())
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         let mut state = self.state();
         if state.uncreatable.contains(path) {

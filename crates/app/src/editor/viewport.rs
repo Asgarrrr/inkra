@@ -99,22 +99,30 @@ pub(super) struct ParkedTop {
 impl ParkedTop {
     /// `below` is kept: restoring bounds it by the row's height in the new layout.
     pub(super) fn unpark(self, buffer: &mut Buffer) -> TopLine {
-        let offset = buffer.resolve(self.offset);
+        let top = self.peek(buffer);
         buffer.forget(self.offset);
+        top
+    }
+
+    /// As `unpark`, forgetting nothing.
+    pub(super) fn peek(&self, buffer: &Buffer) -> TopLine {
         TopLine {
-            offset,
+            offset: buffer.resolve(self.offset),
             below: self.below,
         }
     }
 }
 
-#[cfg(test)]
 impl TopLine {
-    pub(super) fn offset(&self) -> ByteOffset {
+    pub(crate) fn new(offset: ByteOffset, below: Pixels) -> Self {
+        Self { offset, below }
+    }
+
+    pub(crate) fn offset(&self) -> ByteOffset {
         self.offset
     }
 
-    pub(super) fn below(&self) -> Pixels {
+    pub(crate) fn below(&self) -> Pixels {
         self.below
     }
 }

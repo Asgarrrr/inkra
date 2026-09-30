@@ -12,6 +12,7 @@ use inkra_vault::{Fs, Vault};
 use crate::Quit;
 use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
+use crate::restore::{SavedTab, Session};
 use crate::shell::AppShell;
 
 const VAULT_ROOT: &str = "/vault";
@@ -61,7 +62,7 @@ impl Stage {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
         self.fs = Some(Arc::clone(&fs));
-        self.open(fs, Launch::Vault(scanned))
+        self.open(fs, Launch::Vault(scanned, None))
     }
 
     /// A change outside the app to a file of the vault `open_vault` opened.
@@ -96,7 +97,7 @@ impl Stage {
             .push(fs.block_load(PathBuf::from(VAULT_ROOT).join(held)));
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
-        self.open(fs, Launch::Vault(scanned))
+        self.open(fs, Launch::Vault(scanned, None))
     }
 
     /// A vault the store scans behind the first frame; the walk is held at `held`, so the shot shows the root level only.
@@ -111,7 +112,27 @@ impl Stage {
         }
         self.gates
             .push(fs.block_read_dir(PathBuf::from(VAULT_ROOT).join(held)));
-        self.open(fs, Launch::Vault(Vault::new(Path::new(VAULT_ROOT))))
+        self.open(fs, Launch::Vault(Vault::new(Path::new(VAULT_ROOT)), None))
+    }
+
+    /// A vault launch whose session file holds `tabs`, `active` among them; the restore lands before the shot.
+    pub(crate) fn open_restored(
+        &mut self,
+        files: &[(&str, &str)],
+        tabs: Vec<SavedTab>,
+        active: usize,
+    ) -> WindowHandle<AppShell> {
+        let fs = Arc::new(MemFs::new());
+        for (path, text) in files {
+            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
+        }
+        let session = PathBuf::from("/support/session.json");
+        let text = Session::new(VAULT_ROOT.into(), active, tabs)
+            .encode()
+            .unwrap_or_else(|error| panic!("encode the session: {error}"));
+        fs.insert_file(session.clone(), text);
+        let vault = Vault::new(Path::new(VAULT_ROOT));
+        self.open(fs, Launch::Vault(vault, Some(session)))
     }
 
     /// The one door to a window: every scene gets `WINDOW_SIZE`, never a literal of its own.

@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,6 +13,7 @@ use inkra_vault::{Fs, RealFs, Stamp, Vault};
 use crate::Quit;
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
+use crate::restore::session_file;
 use crate::shell::AppShell;
 use crate::timeline::{Step, Timeline};
 use crate::vault::NoteStore;
@@ -24,8 +26,8 @@ pub(crate) enum Launch {
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
     Note(PathBuf, String, Stamp),
-    /// Not scanned yet: the store scans it behind the first frame.
-    Vault(Vault),
+    /// Scanned behind the first frame; the session file, if the app keeps one.
+    Vault(Vault, Option<PathBuf>),
 }
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
@@ -36,10 +38,10 @@ pub(crate) fn root(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    let (note, vault) = match launched {
-        Launch::Nothing => (None, None),
-        Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None),
-        Launch::Vault(vault) => (None, Some(vault)),
+    let (note, vault, session) = match launched {
+        Launch::Nothing => (None, None, None),
+        Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None, None),
+        Launch::Vault(vault, session) => (None, Some(vault), session),
     };
     let opened = note.map(|(path, text, stamp)| {
         let buffer = cx.new(|_| Buffer::new(text));
@@ -55,7 +57,13 @@ pub(crate) fn root(
         }
         store
     });
-    cx.new(|cx| AppShell::new(editor, notes, window, cx))
+    cx.new(|cx| AppShell::new(editor, notes, session, window, cx))
+}
+
+/// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
+fn vault_root(path: &Path) -> io::Result<PathBuf> {
+    // `absolute` keeps a trailing slash; rebuilding from components drops it.
+    Ok(std::path::absolute(path)?.components().collect())
 }
 
 /// Deliberately blocking: a failure should exit rather than flash an empty window.
@@ -66,9 +74,11 @@ fn launch() -> Result<Launch, String> {
     };
     let path = PathBuf::from(argument);
     if path.is_dir() {
+        let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
-        futures::executor::block_on(RealFs.check_dir(&path)).map_err(|error| format!("{error}"))?;
-        return Ok(Launch::Vault(Vault::new(&path)));
+        futures::executor::block_on(RealFs.check_dir(&root)).map_err(|error| format!("{error}"))?;
+        let session = std::env::var_os("HOME").map(|home| session_file(Path::new(&home), &root));
+        return Ok(Launch::Vault(Vault::new(&root), session));
     }
     futures::executor::block_on(RealFs.load(&path))
         .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
@@ -118,3 +128,7 @@ pub fn run() {
         }
     });
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

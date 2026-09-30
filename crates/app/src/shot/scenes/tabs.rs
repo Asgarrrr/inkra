@@ -1,6 +1,7 @@
 use gpui::{WindowHandle, point};
 
 use super::{LINKED, SIDEBAR_X};
+use crate::restore::{SavedTab, SavedView};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 use crate::sidebar::row_center;
@@ -18,5 +19,28 @@ pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     let (from, to) = (stage.tab_center(window, 0), stage.tab_center(window, 2));
     stage.drag_holding(window, from, to);
+    window
+}
+
+fn saved(note: &str, tail: usize, head: usize) -> SavedTab {
+    SavedTab {
+        note: Some(note.to_owned()),
+        view: Some(SavedView {
+            tail,
+            head,
+            top: 0,
+            below: 0.,
+        }),
+    }
+}
+
+pub(super) fn restored(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let tabs = vec![
+        saved("index.md", 2, 2),
+        saved("reading.md", 0, 14),
+        saved("today.md", 8, 8),
+    ];
+    let window = stage.open_restored(LINKED, tabs, 1);
+    stage.focus(window);
     window
 }

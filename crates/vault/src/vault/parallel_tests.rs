@@ -127,6 +127,10 @@ impl Fs for PanickingFs {
         self.inner.create_parents(path).await
     }
 
+    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
+        self.inner.replace(path, text).await
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         self.inner.create(path, kind).await
     }

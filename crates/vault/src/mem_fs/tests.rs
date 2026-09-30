@@ -511,3 +511,19 @@ fn check_dir_refuses_a_missing_or_unreadable_folder() {
     assert!(block_on(fs.check_dir(Path::new("/vault/f"))).is_err());
     assert_eq!(fs.read_dirs(Path::new("/vault/f")), 0, "it lists nothing");
 }
+
+#[test]
+fn replace_creates_missing_folders_and_overwrites() {
+    let fs = MemFs::new();
+    let path = Path::new("/support/sessions/a.json");
+
+    let Ok(()) = block_on(fs.replace(path, "one")) else {
+        panic!("replace must succeed under missing folders");
+    };
+    let Ok(()) = block_on(fs.replace(path, "two")) else {
+        panic!("replace must succeed over an existing file");
+    };
+
+    assert_eq!(fs.read_to_string(path).as_deref(), Some("two"));
+    assert!(block_on(fs.check_dir(Path::new("/support/sessions"))).is_ok());
+}

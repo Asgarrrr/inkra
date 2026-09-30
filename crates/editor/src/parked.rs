@@ -28,12 +28,22 @@ impl ParkedSelection {
     /// If `buffer` is not the one `park` anchored in.
     #[must_use]
     pub fn unpark(self, buffer: &mut Buffer) -> Selection {
-        let range = buffer.resolve(self.start)..buffer.resolve(self.end);
+        let selection = self.peek(buffer);
         buffer.forget(self.start);
         buffer.forget(self.end);
+        selection
+    }
+
+    /// As `unpark`, forgetting nothing: the selection stays parked.
+    ///
+    /// # Panics
+    /// If `buffer` is not the one `park` anchored in.
+    #[must_use]
+    pub fn peek(&self, buffer: &Buffer) -> Selection {
+        let range = buffer.resolve(self.start)..buffer.resolve(self.end);
         // The version alone is not enough: an undo can restore it with an anchor moved.
         if buffer.version() == self.version && range == self.captured.range() {
-            self.captured
+            self.captured.clone()
         } else {
             Selection::settled(range, self.captured.reversed())
         }

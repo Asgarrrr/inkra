@@ -15,7 +15,8 @@ paths:
   `render_empty` fills the slot. `set_shown` is its one writer. A note leaves
   the tabs only on `NoteClosed`; `TrashFailed` rebinds a `Trashing` tab.
 - Every tab action dismisses the picker first (`dismiss_modal`).
-- Park only in the `leaving` closure of `Tabs::insert` and `Tabs::activate`;
+- Park only in the `leaving` closure of `Tabs::insert` and `Tabs::activate`,
+  and in `land_restore` (`shell/session.rs`), which parks each restored inactive tab;
   `close`, `commit`, `back` and `forward` keep the plain `capture`: back and
   forward keep the tab active, so they never park. Unpark every place
   `activate` and `close` return (`arrive`) and every closed id; a place `back`
@@ -60,3 +61,9 @@ paths:
   it.
 - A chrome row states its `UI_LINE_HEIGHT` and takes no height of its own, so it
   cannot clip its text.
+- The restore lands in `Restore`'s `Landing`, never in `activation`: a user open
+  replaces `activation` and must not cancel it. It applies only while the user
+  holds nothing (one tab, `Shown::Empty`, no `activation`, no closed tab). It
+  loads every restored note first: every tab's note has a buffer until `NoteClosed`.
+- The session has one writer, `write_session` (its `SessionWriter`), gated on
+  `Restore::Done`; arm it with `save_session_later`, never write from elsewhere.

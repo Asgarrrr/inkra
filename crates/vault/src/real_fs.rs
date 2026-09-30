@@ -174,6 +174,11 @@ impl Fs for RealFs {
         fs::create_dir_all(parent).map_err(|source| io_error(parent, source))
     }
 
+    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
+        self.create_parents(path).await?;
+        replace(path, text, None)
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         match kind {
             // O_EXCL: the kernel refuses an existing path atomically, closing

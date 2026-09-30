@@ -89,7 +89,7 @@ impl Vault {
 
     /// Whether some walk has read every folder: until then, a scoped read has no base (watcher spec, F4).
     #[must_use]
-    pub(crate) fn has_read_whole(&self) -> bool {
+    pub fn has_read_whole(&self) -> bool {
         self.state.read_whole
     }
 

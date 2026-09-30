@@ -15,8 +15,8 @@ pub(crate) struct ParkedView {
 }
 
 impl ParkedView {
-    /// Clips first: a waiting top line may lie past an edit that bypassed the editor.
-    fn new(buffer: Entity<Buffer>, view: ViewState, cx: &mut App) -> Self {
+    /// Clips first: a waiting top line may lie past an edit that bypassed the editor, or a saved view past a shorter file.
+    pub(crate) fn new(buffer: Entity<Buffer>, view: ViewState, cx: &mut App) -> Self {
         let view = view.clipped(buffer.read(cx));
         // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
         let (selection, top) = buffer.update(cx, |buffer, _| {
@@ -43,6 +43,15 @@ impl ParkedView {
             selection: selection.unpark(buffer),
             top: top.unpark(buffer),
         })
+    }
+
+    /// As `unpark`, forgetting nothing: the view stays parked.
+    pub(crate) fn peek(&self, cx: &App) -> ViewState {
+        let buffer = self.buffer.read(cx);
+        ViewState {
+            selection: self.selection.peek(buffer),
+            top: self.top.peek(buffer),
+        }
     }
 }
 

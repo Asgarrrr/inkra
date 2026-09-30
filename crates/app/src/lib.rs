@@ -15,6 +15,7 @@ mod one_line;
 mod open;
 mod picker;
 mod quick_open;
+mod restore;
 mod row_text;
 mod shell;
 mod sidebar;
