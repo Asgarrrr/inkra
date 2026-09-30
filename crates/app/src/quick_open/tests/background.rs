@@ -1,15 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
 
 use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point, px};
 
 use super::refresh::{advance, hold_scans, notify, runs, selected};
-use super::{Opened, cancel_flag, listed, open, search};
+use super::{Opened, listed, open, search};
 use crate::index::BUILDING_REFRESH;
 use crate::open::NoteActivated;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
-use crate::picker::runs::Scan;
 use crate::test_support::{entry_id, vault};
 use crate::theme;
 
@@ -17,12 +15,6 @@ fn logged(opened: &mut Opened) -> usize {
     opened
         .picker
         .read_with(&opened.visual, |picker, _| picker.delegate.logged)
-}
-
-fn scan(opened: &mut Opened) -> Option<Scan> {
-    opened
-        .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.runs.scan())
 }
 
 fn plans() -> Vec<String> {
@@ -68,31 +60,6 @@ fn enter_during_a_background_refresh_confirms_the_row_shown_at_once(cx: &mut Tes
         *activated.borrow(),
         [a],
         "the refresh landing confirms nothing"
-    );
-}
-
-#[gpui::test]
-fn a_keystroke_cancels_a_background_refresh_and_waits_no_debounce(cx: &mut TestAppContext) {
-    let fs = vault(&["plan.md", "pluto.md", "other.md"]);
-    let _indexing = fs.block_load("/vault/other.md");
-    let mut opened = open(cx, &fs, None, &[]);
-    let _release = hold_scans(&mut opened);
-    let before = runs(&mut opened);
-    refresh_in_background(&mut opened);
-    assert_eq!(runs(&mut opened), before + 1, "a refresh is in flight");
-    let refresh = cancel_flag(&mut opened);
-    // The refresh stays held; the keystroke's scan does not.
-    opened.picker.update(&mut opened.visual, |picker, _| {
-        picker.delegate.runs.hold(None);
-    });
-
-    opened.visual.simulate_keystrokes("p");
-
-    assert!(refresh.load(Ordering::Relaxed), "the keystroke cancels it");
-    assert_eq!(
-        listed(&mut opened),
-        ["pluto", "plan"],
-        "no clock advanced: no debounce"
     );
 }
 
@@ -174,43 +141,5 @@ fn a_refresh_that_drops_the_kept_note_selects_and_reveals_the_first_row(cx: &mut
     assert!(
         opened.visual.debug_bounds("picker-row-0").is_some(),
         "scrolled to"
-    );
-}
-
-#[gpui::test]
-fn a_keystroke_cancels_a_stale_background_refresh_and_no_rerun_follows(cx: &mut TestAppContext) {
-    let fs = vault(&["plan.md", "pluto.md", "other.md"]);
-    let _indexing = fs.block_load("/vault/other.md");
-    let mut opened = open(cx, &fs, None, &[]);
-    let _release = hold_scans(&mut opened);
-    let before = runs(&mut opened);
-    refresh_in_background(&mut opened);
-    refresh_in_background(&mut opened);
-    assert_eq!(
-        scan(&mut opened),
-        Some(Scan {
-            user: false,
-            rerun: true
-        })
-    );
-    assert_eq!(runs(&mut opened), before + 1, "the second refresh waits");
-    let refresh = cancel_flag(&mut opened);
-    opened.picker.update(&mut opened.visual, |picker, _| {
-        picker.delegate.runs.hold(None);
-    });
-
-    opened.visual.simulate_keystrokes("p");
-
-    assert!(refresh.load(Ordering::Relaxed), "the keystroke cancels it");
-    assert_eq!(
-        listed(&mut opened),
-        ["pluto", "plan"],
-        "without the debounce"
-    );
-    advance(&mut opened, NOTES_CHANGED_REFRESH);
-    assert_eq!(
-        runs(&mut opened),
-        before + 2,
-        "the keystroke's scan read the newest index: no re-run"
     );
 }

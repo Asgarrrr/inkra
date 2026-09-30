@@ -1,6 +1,6 @@
 # Runs' ledger: supersede and re-run rules without a window
 
-Status: **proposed** (2026-09-30). A refactor: behaviour stays identical.
+Status: **built 2026-09-30.** A refactor: behaviour stays identical.
 
 ## Problem
 
@@ -220,7 +220,7 @@ slice, not a rebase:
 
 The order is fixed: the picker-owns-landing spec assumes the `Ledger` and
 mirrors this section in its own Merge order. This spec deletes
-`RunId::previous` and vault search's `a_stale_result_is_dropped` (slice 3);
+`RunId::previous` and vault search's `a_stale_result_is_dropped` (slice 2);
 picker-owns-landing does not delete them again.
 
 ### `Runs::scanning` stays in the driver
@@ -329,22 +329,21 @@ removed name appears in the table above.
 
 Each slice merges alone with `./scripts/check.sh` green.
 
-1. **`Ledger` owns supersede.** Write `ledger/tests.rs` red: the start,
-   drop, wait and stale-id cases. Add `ledger.rs` with `Run`, `RunId`,
+1. **`Ledger` owns the run state.** Write `ledger/tests.rs` red: the
+   start, drop, wait and stale-id cases, and the refresh, rerun and
+   landing tests and the proptest. Add `ledger.rs` with `Run`, `RunId`,
    `Scan`, `Started`, the durations, `start`, `begin_scan`, `is_current`,
-   `Drop`. `Runs` holds a `Ledger`; `update_matches` reads `Started::wait`.
-   The re-exports keep every delegate and test import; `Scan` stays
-   `pub(crate)`. `Runs`' test accessors keep their names and callers: the
-   fields they read now live in a child module, which its parent cannot
-   see, so `Ledger` gets three scaffold accessors,
-   `#[cfg(test)] pub(super) fn {cancel_flag, id, scan}`, the
-   `sidebar/edit.rs` pattern. The fields stay private and only `ledger.rs`
-   writes them. `started` stays a `Runs` field. No integration test
-   changes: all green is the oracle. About 160 lines.
-2. **`Ledger` owns D7.** Write the refresh, rerun, landing tests and the
-   proptest red. Add `refresh` and `landed`; `refresh_or_defer` and
-   `Runs::landed` call them and no longer touch the fields. About 130 lines.
-3. **The test hooks shrink.** `begun` replaces `started`; the remaining
+   `refresh`, `landed`, `Drop`. `Runs` holds a `Ledger`; `update_matches`
+   reads `Started::wait`; `refresh_or_defer` and `Runs::landed` call
+   `refresh` and `landed` and no longer touch the fields. The re-exports
+   keep every delegate and test import; `Scan` stays `pub(crate)`. `Runs`'
+   test accessors keep their names and callers: `Ledger` gets three
+   scaffold accessors, `#[cfg(test)] pub(super) fn {cancel_flag, id,
+   scan}`, the `sidebar/edit.rs` pattern. The fields stay private and only
+   `ledger.rs` writes them from this slice on. `started` stays a `Runs`
+   field. No integration test changes: all green is the oracle. About 290
+   lines.
+2. **The test hooks shrink.** `begun` replaces `started`; the remaining
    integration tests move onto it; the five tests in the table die;
    `Runs::{cancel_flag, id, scan}`, the three `Ledger` scaffold accessors,
    `RunId::previous` and the `cancel_flag` helper in `quick_open/tests.rs`
@@ -364,9 +363,9 @@ slice listed under Merge order.
 - **An Interface conflict with picker-owns-landing.** Bounded by Merge order:
   `landed` has the same shape in both orders, and only `is_current` and one
   stale test depend on the order.
-- **The scaffold accessors outlive slice 3.** They are `cfg(test)` and
-  listed by name in slice 3's deletions; `test-names.sh` does not catch
-  them, so the reviewer greps `ledger.rs` for `cfg(test)` at slice 3.
+- **The scaffold accessors outlive slice 2.** They are `cfg(test)` and
+  listed by name in slice 2's deletions; `test-names.sh` does not catch
+  them, so the reviewer greps `ledger.rs` for `cfg(test)` at slice 2.
 - **Coverage loss from the deleted tests.** Each deleted test's rule has a
   unit test, and each deleted wiring path has a kept test. Vault search keeps
   no D7 test of its own: it reaches D7 only through the generic driver and
@@ -404,7 +403,7 @@ checked against the code and picker-owns-landing's spec.
 - **RED-2 (major): slice 1 could not compile.** Fixed. Confirmed: a parent
   module cannot read a child module's private fields. Slice 1 now adds three
   `#[cfg(test)] pub(super)` scaffold accessors on `Ledger` (the
-  `sidebar/edit.rs` pattern), and slice 3 deletes them by name. The fields
+  `sidebar/edit.rs` pattern), and slice 2 deletes them by name. The fields
   stay private.
 - **RED-3 (minor): the mutation command omitted `--test-package inkra-app`.**
   Fixed, with the reason inline.
@@ -435,3 +434,4 @@ re-run through `Ledger::refresh` explicitly; Merge order drops the "picker
 first" fallback, since picker-owns-landing now assumes the `Ledger`; new
 section: `Runs::scanning` (index-status-once) stays in the driver, not the
 `Ledger`.
+- Implementation (2026-09-30): slices 1 and 2 merged. As written, slice 1 left `refresh_or_defer` and `Runs::landed` writing `scan` and `next`, which a private child-module field forbids; merging keeps "only `ledger.rs` writes the run state" true from the first commit, and every test still starts red. Old slice 3 is now slice 2.

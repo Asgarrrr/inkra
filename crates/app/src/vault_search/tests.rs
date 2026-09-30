@@ -1,8 +1,6 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::{AppContext as _, Entity, Focusable, TestAppContext, VisualTestContext};
-use inkra_index::{NoteQuery, Searched};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
@@ -10,7 +8,7 @@ use super::VaultSearchDelegate;
 use super::rows::Row;
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
-use crate::picker::runs::{Landed, Run, Runs, SEARCH_DEBOUNCE};
+use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::test_support::scan_notes;
 use crate::vault::NoteStore;
@@ -111,9 +109,9 @@ pub(super) fn footer(opened: &mut Opened) -> Option<String> {
 }
 
 pub(super) fn scans(opened: &mut Opened) -> usize {
-    opened
-        .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.runs.started())
+    opened.picker.read_with(&opened.visual, |picker, _| {
+        picker.delegate.runs.begun().len()
+    })
 }
 
 /// Types `keys` and lets a debounced search answer.
@@ -155,27 +153,6 @@ fn typing_lists_a_header_then_the_hits_of_each_note(cx: &mut TestAppContext) {
         "the first hit, not its header"
     );
     assert_eq!(footer(&mut opened), None);
-}
-
-#[gpui::test]
-fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
-    let fs = with_texts(&[("a.md", "plan")]);
-    let mut opened = open(cx, &fs);
-    search(&mut opened, "p l a n");
-
-    opened.picker.update(&mut opened.visual, |picker, cx| {
-        let landed = Landed {
-            id: picker.delegate.runs.id().previous(),
-            run: Run::Search,
-            begun: Instant::now(),
-            snapshot: picker.delegate.links.read(cx).index().snapshot(),
-            query: Arc::new(NoteQuery::new("", None, &[])),
-            found: Searched::default(),
-        };
-        Runs::apply(picker, landed, cx);
-    });
-
-    assert_eq!(listed(&mut opened), ["# a (1)", "1: plan"]);
 }
 
 #[gpui::test]

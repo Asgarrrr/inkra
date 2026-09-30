@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpui::{AppContext as _, Focusable, TestAppContext};
 use inkra_vault::{Fs, Kind};
 
-use super::{Opened, cancel_flag, footer, listed, open, search, with_texts};
+use super::{Opened, footer, last_scan, listed, open, search, with_texts};
 use crate::index::{BUILDING_REFRESH, IndexSync};
 use crate::keymap::key_bindings;
 use crate::open::NoteActivated;
@@ -28,9 +28,9 @@ pub(super) fn hold_scans(opened: &mut Opened) -> oneshot::Sender<()> {
 }
 
 pub(super) fn runs(opened: &mut Opened) -> usize {
-    opened
-        .picker
-        .read_with(&opened.visual, |picker, _| picker.delegate.runs.started())
+    opened.picker.read_with(&opened.visual, |picker, _| {
+        picker.delegate.runs.begun().len()
+    })
 }
 
 pub(super) fn selected(opened: &mut Opened) -> Option<usize> {
@@ -58,7 +58,7 @@ fn ten_notifies_during_a_scan_cause_no_cancel_and_one_rerun(cx: &mut TestAppCont
     let mut opened = open(cx, &fs, None, &[]);
     let release = hold_scans(&mut opened);
     opened.visual.simulate_keystrokes("p");
-    let cancel = cancel_flag(&mut opened);
+    let cancel = last_scan(&mut opened);
     let before = runs(&mut opened);
 
     for _ in 0..10 {
@@ -79,7 +79,7 @@ fn a_keystroke_during_the_scan_cancels_it(cx: &mut TestAppContext) {
     let mut opened = open(cx, &fs, None, &[]);
     let release = hold_scans(&mut opened);
     opened.visual.simulate_keystrokes("p");
-    let first = cancel_flag(&mut opened);
+    let first = last_scan(&mut opened);
     notify(&mut opened);
 
     opened.visual.simulate_keystrokes("l a");
@@ -170,7 +170,7 @@ fn notes_changed_during_a_scan_reruns_once(cx: &mut TestAppContext) {
     let mut opened = open(cx, &fs, None, &[]);
     let release = hold_scans(&mut opened);
     opened.visual.simulate_keystrokes("p");
-    let cancel = cancel_flag(&mut opened);
+    let cancel = last_scan(&mut opened);
     let before = runs(&mut opened);
 
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
@@ -266,7 +266,7 @@ fn a_build_during_the_first_scan_does_not_cancel_it(cx: &mut TestAppContext) {
         before + 1,
         "the first names start a scan"
     );
-    let cancel = cancel_flag(&mut opened);
+    let cancel = last_scan(&mut opened);
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
         notes.create(None, Kind::Note, "plan c", cx)
     });
