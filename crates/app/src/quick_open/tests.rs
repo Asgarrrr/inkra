@@ -10,7 +10,7 @@ use inkra_vault::{EntryId, Fs, Kind};
 use super::QuickOpenDelegate;
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
-use crate::picker::runs::{Landed, NOTES_CHANGED_REFRESH, Run, Runs, SEARCH_DEBOUNCE};
+use crate::picker::runs::{Landed, NOTES_CHANGED_REFRESH, Run, RunId, Runs, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::test_support::{entry_id, scan_notes, unscanned_notes, vault};
 use crate::vault::NoteStore;
@@ -74,9 +74,11 @@ fn empty_text(opened: &mut Opened) -> Option<String> {
     })
 }
 
-fn cancel_flag(opened: &mut Opened) -> Arc<AtomicBool> {
+/// The cancel flag the newest scan received.
+fn last_scan(opened: &mut Opened) -> Arc<AtomicBool> {
     opened.picker.read_with(&opened.visual, |picker, _| {
-        picker.delegate.runs.cancel_flag()
+        let begun = picker.delegate.runs.begun().last().cloned();
+        begun.unwrap_or_else(|| panic!("a scan began"))
     })
 }
 
@@ -214,7 +216,7 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
 
     opened.picker.update(&mut opened.visual, |picker, cx| {
         let landed = Landed {
-            id: picker.delegate.runs.id().previous(),
+            id: RunId::default(),
             run: Run::Search,
             begun: Instant::now(),
             snapshot: picker.delegate.links.read(cx).index().snapshot(),
@@ -228,23 +230,11 @@ fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_new_query_cancels_the_scan_before_it(cx: &mut TestAppContext) {
-    let fs = vault(&["plan.md"]);
-    let mut opened = open(cx, &fs, None, &[]);
-    let first = cancel_flag(&mut opened);
-
-    opened.visual.simulate_keystrokes("p");
-
-    let second = cancel_flag(&mut opened);
-    assert!(first.load(Ordering::Relaxed));
-    assert!(!second.load(Ordering::Relaxed));
-}
-
-#[gpui::test]
 fn dropping_the_picker_cancels_its_scan(cx: &mut TestAppContext) {
     let fs = vault(&["plan.md"]);
     let mut opened = open(cx, &fs, None, &[]);
-    let cancel = cancel_flag(&mut opened);
+    let cancel = last_scan(&mut opened);
+    assert!(!cancel.load(Ordering::Relaxed), "the scan is live");
 
     opened.visual.update(|window, _| window.remove_window());
     drop(opened.picker);

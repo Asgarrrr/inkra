@@ -323,7 +323,7 @@ Existing tests:
   `matches_updated(1)`.
 - **Die.** Quick open's `a_stale_result_is_dropped`: the path it calls no
   longer exists. Vault search's copy and `RunId::previous` are already gone
-  with runs-testable's slice 3. The `is_current` assertion in
+  with runs-testable's slice 2. The `is_current` assertion in
   `a_start_cancels_the_run_before_and_supersedes_it` (`ledger/tests.rs`)
   goes with `Ledger::is_current`; the test keeps its cancel-flag asserts.
 - **Oracles, unchanged.** `enter_while_a_query_is_pending_confirms_its_first_row`,

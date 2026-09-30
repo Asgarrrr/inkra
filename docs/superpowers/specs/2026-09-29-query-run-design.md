@@ -102,6 +102,11 @@ equals one range"), and that invariant is the index's. There it is under
 
 ### `inkra-app`: `Runs` drives a picker over the index
 
+Superseded in part by `2026-09-30-runs-testable-design.md`: the run state
+and its rules (`start`, `begin_scan`, `refresh`, `landed`) live in `Ledger`,
+`picker/runs/ledger.rs`; `Scan` is private to it, and `Runs::begun` replaces
+the test counters and `cancel_flag`.
+
 `picker/runs.rs` gains one trait, with two implementers (quick open and vault
 search):
 
