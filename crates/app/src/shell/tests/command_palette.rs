@@ -110,7 +110,8 @@ fn the_rename_field_lists_its_commands_not_its_keys(cx: &mut TestAppContext) {
     assert_eq!(vault_names(&notes, &mut visual), ["b.md", "z.md"]);
 }
 
-/// A note landing while the palette is open must not move the command off the tree it was listed for.
+/// A note landing while the palette is open must not move the command off the tree it was listed
+/// for, nor the tree's cursor off the row the user arrowed to after the open began.
 #[gpui::test]
 fn a_command_runs_where_it_was_listed_though_a_note_lands(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -118,10 +119,10 @@ fn a_command_runs_where_it_was_listed_though_a_note_lands(cx: &mut TestAppContex
     activate(&sidebar, cx, a);
     cx.run_until_parked();
     let mut visual = tree_focused(cx, window, &sidebar);
-    visual.simulate_keystrokes("down");
-    visual.run_until_parked();
     let gate = fs.block_load("/vault/b.md");
     activate(&sidebar, &mut visual, b);
+    visual.run_until_parked();
+    visual.simulate_keystrokes("down up");
     visual.run_until_parked();
     visual.simulate_keystrokes("cmd-shift-p");
     visual.run_until_parked();
@@ -182,6 +183,18 @@ fn new_tab_ranks_new_tab_first_with_a_note_showing(cx: &mut TestAppContext) {
         (2, Some(&None)),
         "\"New tab\" ran"
     );
+}
+
+#[gpui::test]
+fn the_palette_lists_go_back_and_go_forward_with_their_keys(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p g o space b a");
+    visual.run_until_parked();
+    assert_eq!(listed(window, &mut visual), ["Go back, ⌘["]);
+
+    visual.simulate_keystrokes("cmd-shift-p cmd-shift-p g o space f o");
+    visual.run_until_parked();
+    assert_eq!(listed(window, &mut visual), ["Go forward, ⌘]"]);
 }
 
 #[gpui::test]

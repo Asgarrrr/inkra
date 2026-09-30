@@ -357,6 +357,8 @@ Lever for S4:
 |---|---|
 | `Tabs` keeps no place for the active tab: `leave_active` writes it, `activate` takes it. This removes T1's pair (`bound.note` and `active_place().note`) and the stale `view` of the active tab | S4 reshapes `commit` and `leave_active` for the back stack |
 
+Done in S4 (As built, S4).
+
 ## As built (S2)
 
 Plan: `docs/superpowers/plans/2026-09-29-tabs-s2.md`. Built as planned, with
@@ -479,6 +481,98 @@ these facts and deviations:
   focus, and `follow` dropping `open` each fail one. The tab-switch test fails
   only with both the drop and the source check removed.
 
+## As built (S4)
+
+Plan: `docs/superpowers/plans/2026-09-29-tabs-s4.md`, with its binding red/blue
+section. Built as planned, with these facts and deviations:
+
+- **The S1 lever landed first, as a pure refactor.** `Tabs` holds no place for
+  the active tab (H8): `Tab::place()` is `None` exactly for it, and `showing()`
+  is its note. `leave_active` stays the one caller of `leaving`. It returns
+  the tab left and the place, and each op puts the place where it belongs: in
+  the tab left (`insert`, `activate`), in `Closed.place`, on back (`commit`),
+  or on the other stack (`back`, `forward`). `commit` lost its `place`
+  argument. `forget` returns nothing; `forget_note` reads `showing()` first.
+- **T1 is retired, not renamed.** It compared `bound.note` with the active
+  tab's stored place, which is gone. The shell tests' `check` asserts H8
+  instead.
+- **The fresh last tab holds `Some(P::default())`**, so `Closed.shown` takes
+  its place through one `take()` that panics on a broken H8, for both paths.
+- **The trait.** `Place: Default`, with one associated
+  `Note: Copy + Eq` and `note() -> Option<Note>`. The app's `Place`
+  (`Note = EntryId`) and the proptest `Fake` implement it. `forget` takes a
+  note, not a predicate.
+- **Three deviations from Zed's `NavHistory`.**
+  - Per tab, not per pane (Deviations from Zed).
+  - Adjacent duplicates only. A push onto a top on the same note replaces the
+    top; Zed removes every entry at that location. `a, b, a` stays, as in a
+    browser.
+  - Plain offsets, not anchors. An entry is clipped at restore; A2 keeps
+    stacks plain, so anchors stay bounded by the number of tabs.
+    `a_history_entry_whose_text_shrank_clips_on_return` pins it.
+- **T4's third no-op case.** `⌘[` or `⌘]` with no entry on another note
+  changes nothing on screen, so a pending open still lands. When a place
+  arrives, `show_place` drops `activation`, as every switch does.
+- **One walk for both directions.** `back` and `forward` share a private
+  `walk` with a `fn` selector (`type Walk<P>`). It pops before `leaving` runs,
+  since the app's `leaving` seals an undo group.
+- **The sidebar opens through `open`.** A click on the note showing takes
+  `show_note`'s same-note branch: nothing loads, nothing is pushed, forward
+  stays, and the editor takes focus.
+- **The highlight rule: a compare-and-set (after review).** Tree gestures
+  write `Sidebar::selected` at once: a click on any row, the arrows, a create,
+  the trash neighbour. Each of them goes through `Sidebar::select`, which
+  bumps a private generation, `cursor`. `set_showing(Some(id))` calls
+  `Sidebar::follow(id, since)`, which moves `selected` to `id` only while the
+  generation is still `since`. A synchronous tab op (switch, back, forward,
+  close, `⌘T`, `NoteClosed`) reads `since` in its own update, so it always
+  moves the highlight. An async landing (`open_note`, `open_in_new_tab`)
+  captures `since` when it spawns and passes it through `land` and `bind`. So
+  a landing never undoes a cursor the user moved after the open began: a tree
+  command would act on that row. `set_showing(None)` leaves `selected`, so a
+  tree trash keeps the neighbour it moved to, and `follow` does nothing while
+  a name is typed. There is no reveal (Deferred). This closes S1's known gap.
+  It replaces the plan's red/blue item 1: with a click writing nothing, an
+  arrow pressed during a pending open was overwritten by the landing.
+- **Test adjustments.**
+  - Four tests passed when first run, each a guard.
+    `a_tab_switch_pushes_nothing` gives tab 1 a note behind and a note ahead
+    before the switches: it fails if a switch clears the forward of the tab
+    left, or pushes onto the tab arriving (both checked by injecting the
+    bug). `back_with_nothing_behind_keeps_a_pending_open` fails if a back with
+    nothing behind drops `activation`.
+    `a_tab_emptied_by_a_trash_goes_back_to_its_last_note` needs no pruning.
+    `a_sidebar_click_on_the_note_showing_focuses_the_editor` is a guard by
+    plan.
+  - `a_jump_inside_the_note_showing_pushes_nothing` jumps inside `a` after
+    `⌘[`, with `b` ahead: a push would clear forward, and it fails when the
+    same-note path goes through `open_note`. The pop loop hides a push on the
+    back stack, so forward is the only witness. It calls `open` through the
+    shell's entity: inside a window update, `show_note`'s `with_window`
+    returns `None`.
+  - `a_superseded_activation_leaves_the_sidebar_selection_on_the_note_showing`
+    clicks a blocked row in an empty tab, then switches to the tab on `b`: the
+    synchronous switch moves the highlight over the pending click.
+  - `cmd_backspace_asks_before_trashing_the_selected_note` drops its `down`:
+    the landing of `a` selects it, so `down` would move to `b`.
+    `a_command_runs_where_it_was_listed_though_a_note_lands` keeps its
+    pre-S4 expectation (`a` renamed); its arrows (`down up`) now come after
+    the open of `b` began, since an arrow before it is overwritten by design.
+  - `a_landing_keeps_a_tree_cursor_moved_since_its_open_began` is the review's
+    scenario; `a_click_on_a_note_row_selects_it_at_once` pins the synchronous
+    write. The selection tests live in `shell/tests/sidebar_selection.rs`.
+  - The model's `op()` strategy weights commits and walks, so stacks grow
+    deep enough to walk. `view_of` moved to the shared shell test helpers.
+- **Mutants.** `cargo mutants -p inkra-tabs --test-package inkra-tabs`: 65
+  mutants after review, 48 caught, 17 unviable, none missed, no exclusion
+  added.
+
+Lever, with its trigger:
+
+| Lever | Trigger |
+|---|---|
+| Make H8 unrepresentable: a zipper (tabs left of the active one, the active tab with no place, tabs right of it), so no `Option` place and no H8 panic | A third H8 panic site, or H8 failing in a proptest |
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the
@@ -500,3 +594,6 @@ these facts and deviations:
 | Close others / close to the right, pinned tabs | The tab bar is regularly crowded |
 | Anchor slot reuse in `Buffer` | A profile shows `shift_anchors` in an edit |
 | Evicting a note no tab or history references from `NoteStore` | Memory measured to grow with notes visited |
+| Reveal the note showing in the tree: expand its folders, scroll to it | A user loses a nested note in the tree |
+| Anchors for back and forward entries | Back lands off its text after an edit elsewhere |
+| Mouse buttons 4 and 5, and swipe, for back and forward | A user asks |

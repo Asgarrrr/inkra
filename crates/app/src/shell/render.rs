@@ -67,6 +67,8 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::activate_nth_tab))
             .on_action(cx.listener(Self::activate_last_tab))
+            .on_action(cx.listener(Self::go_back))
+            .on_action(cx.listener(Self::go_forward))
             .flex()
             .flex_row()
             .size_full()

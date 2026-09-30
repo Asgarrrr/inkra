@@ -14,7 +14,15 @@ use crate::vault::NoteStore;
 
 actions!(
     tabs,
-    [NewTab, CloseTab, NextTab, PreviousTab, ActivateLastTab]
+    [
+        NewTab,
+        CloseTab,
+        NextTab,
+        PreviousTab,
+        ActivateLastTab,
+        GoBack,
+        GoForward
+    ]
 );
 
 /// `⌘1`–`⌘8`; the palette leaves it out, since it cannot be built without its index.
@@ -27,6 +35,14 @@ pub(crate) struct ActivateTab(pub(crate) usize);
 pub(super) struct Place {
     pub(super) note: Option<EntryId>,
     pub(super) view: Option<ViewState>,
+}
+
+impl inkra_tabs::Place for Place {
+    type Note = EntryId;
+
+    fn note(&self) -> Option<EntryId> {
+        self.note
+    }
 }
 
 /// The place being left; `Tabs` calls this only when the active tab really is left.
@@ -54,9 +70,8 @@ impl AppShell {
     pub(super) fn new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
         let (at, left) = (self.tabs.active_index() + 1, self.tabs.active());
-        self.tabs.insert(at, Place::default(), || {
-            park(&mut self.parked, left, self.bound.as_ref(), cx)
-        });
+        self.tabs
+            .insert(at, || park(&mut self.parked, left, self.bound.as_ref(), cx));
         self.show_place(Place::default(), window, cx);
         self.keep_active_tab_visible();
     }
@@ -69,7 +84,7 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let source = self.tabs.active();
+        let (source, since) = (self.tabs.active(), self.tree_cursor(cx));
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
         self.activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
@@ -78,14 +93,10 @@ impl AppShell {
                 if shell.tabs.active() != source {
                     return;
                 }
-                let place = Place {
-                    note: Some(id),
-                    view: None,
-                };
-                shell.tabs.insert(shell.tabs.active_index() + 1, place, || {
+                shell.tabs.insert(shell.tabs.active_index() + 1, || {
                     park(&mut shell.parked, source, shell.bound.as_ref(), cx)
                 });
-                shell.land(id, buffer, at, window, cx);
+                shell.land(id, buffer, at, since, window, cx);
                 shell.keep_active_tab_visible();
                 cx.notify();
             });
@@ -173,10 +184,38 @@ impl AppShell {
         self.keep_active_tab_visible();
     }
 
+    pub(super) fn go_back(&mut self, _: &GoBack, window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_modal(window, cx);
+        let showing = self.showing();
+        // Captured, not parked: the tab stays active, and the stack keeps plain offsets (A2).
+        let arriving = self.tabs.back(showing, || capture(self.bound.as_ref(), cx));
+        if let Some(place) = arriving {
+            self.show_place(place, window, cx);
+        }
+    }
+
+    pub(super) fn go_forward(
+        &mut self,
+        _: &GoForward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dismiss_modal(window, cx);
+        let showing = self.showing();
+        let arriving = self
+            .tabs
+            .forward(showing, || capture(self.bound.as_ref(), cx));
+        if let Some(place) = arriving {
+            self.show_place(place, window, cx);
+        }
+    }
+
     /// Empties every tab on `id` and drops its parked views; returns whether the active tab was one.
     pub(super) fn forget_note(&mut self, id: EntryId) -> bool {
+        let active = self.showing() == Some(id);
         self.parked.drop_note(id);
-        self.tabs.forget(|place| place.note == Some(id))
+        self.tabs.forget(id);
+        active
     }
 
     /// The place `Tabs` hands back, with the view its tab parked, resolved now.
@@ -193,18 +232,19 @@ impl AppShell {
     /// One update sets the editor, `showing` and `current`, so none is seen without the others.
     fn show_place(&mut self, place: Place, window: &mut Window, cx: &mut Context<Self>) {
         self.activation = None;
+        let since = self.tree_cursor(cx);
         let loaded = place
             .note
             .and_then(|id| Some((id, self.notes.read(cx).buffer_for(id)?.clone())));
         if let Some((id, buffer)) = loaded {
-            self.bind(id, buffer, place.view, cx);
+            self.bind(id, buffer, place.view, since, cx);
         } else {
             // Unreachable while nothing evicts a note; forgetting beats a panic.
             if let Some(id) = place.note {
                 let _ = self.forget_note(id);
             }
             self.unfocus_editor(window, cx);
-            self.set_showing(None, cx);
+            self.set_showing(None, since, cx);
             self.notes.update(cx, NoteStore::clear_current);
         }
         if let Some(focus) = self.land_focus(cx) {

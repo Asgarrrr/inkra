@@ -91,7 +91,7 @@ impl Sidebar {
             }
             let _ = sidebar.update(cx, |sidebar, cx| {
                 // Moved before the delete resolves, so selection never points at a row on its way out.
-                sidebar.selected = next;
+                sidebar.select(next);
                 sidebar
                     .notes
                     .update(cx, |notes, cx| notes.trash(id, cx))
@@ -242,7 +242,7 @@ impl Sidebar {
             cx.spawn(async move |sidebar, cx| {
                 let Some(id) = created.await else { return };
                 let _ = sidebar.update(cx, |sidebar, cx| {
-                    sidebar.selected = Some(id);
+                    sidebar.select(Some(id));
                     cx.notify();
                 });
             })

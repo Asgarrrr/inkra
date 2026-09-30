@@ -195,7 +195,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs",
-        shows: "four tabs over the note column: `index` active and lit, `reading`, `New tab` twice; sidebar and backlinks at full height",
+        shows: "four tabs over the note column: `index` active and lit, `reading`, `New tab` twice; `index` highlighted in the sidebar; sidebar and backlinks at full height",
         open: tabs::bar,
     },
     Scene {

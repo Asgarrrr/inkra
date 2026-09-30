@@ -73,6 +73,21 @@ fn cmd_brace_right_and_left_switch_tabs(cx: &mut TestAppContext) {
     assert_eq!(showing(&window, &mut cx), Some(b));
 }
 
+/// `[` is no letter, so macOS keeps it with `cmd` (`gpui_macos` events.rs:440-481).
+#[gpui::test]
+fn cmd_bracket_left_and_right_go_back_and_forward(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    open(&window, &mut cx, b);
+
+    cx.simulate_keystrokes("cmd-[");
+    assert_eq!(showing(&window, &mut cx), Some(a));
+    assert_eq!(text_shown(&window, &mut cx), "alpha");
+    cx.simulate_keystrokes("cmd-]");
+    assert_eq!(showing(&window, &mut cx), Some(b));
+    assert_eq!(text_shown(&window, &mut cx), "beta");
+}
+
 /// Tabs `[a, empty, b]`, used empty, b, a: the MRU picks `b`, a neighbour the empty tab.
 #[gpui::test]
 fn cmd_w_closes_the_active_tab_and_activates_the_most_recent(cx: &mut TestAppContext) {

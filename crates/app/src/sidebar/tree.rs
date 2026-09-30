@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::{Context, ScrollStrategy, Window};
 use inkra_vault::{EntryId, Kind};
 
-use super::{Row, SelectNext, SelectPrev, Sidebar};
+use super::{Cursor, Row, SelectNext, SelectPrev, Sidebar};
 use crate::open::{NoteActivated, Open};
 
 impl Sidebar {
@@ -33,12 +33,31 @@ impl Sidebar {
         if self.rows.edit().is_some() {
             return;
         }
-        self.selected = Some(row.id);
+        self.select(Some(row.id));
         if row.kind == Kind::Dir {
             self.toggle(row.id, cx);
             return;
         }
         cx.emit(NoteActivated { note: row.id, open });
+    }
+
+    /// Every tree write of `selected`: a landing begun before it must not undo it (`follow`).
+    pub(super) fn select(&mut self, id: Option<EntryId>) {
+        self.selected = id;
+        self.cursor.0 += 1;
+    }
+
+    pub(crate) fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+
+    /// Moves `selected` to the note showing, unless the tree wrote it since `since` or a name is typed.
+    pub(crate) fn follow(&mut self, id: EntryId, since: Cursor, cx: &mut Context<Self>) {
+        if self.rows.edit().is_some() || self.cursor != since || self.selected == Some(id) {
+            return;
+        }
+        self.selected = Some(id);
+        cx.notify();
     }
 
     /// Guarded while a name is typed, or an arrow key bubbles up and moves
@@ -51,7 +70,7 @@ impl Sidebar {
         let Some(next) = self.rows.visible().step(self.selected, delta) else {
             return;
         };
-        self.selected = Some(next);
+        self.select(Some(next));
         cx.notify();
     }
 

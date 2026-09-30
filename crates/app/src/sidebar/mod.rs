@@ -42,6 +42,8 @@ pub(crate) struct Sidebar {
     expanded: HashSet<EntryId>,
     /// Not `NoteStore::current`: a row can be selected unopened.
     selected: Option<EntryId>,
+    /// Bumped by every tree write of `selected` (`select`), never by `follow`.
+    cursor: Cursor,
     focus_handle: FocusHandle,
     rows: Rows<EditState>,
     /// Load-bearing: `uniform_list` only renders the visible range, and an
@@ -50,6 +52,10 @@ pub(crate) struct Sidebar {
     /// Never read; dropping a `Subscription` cancels it.
     _vault_changed: Option<Subscription>,
 }
+
+/// The tree's write generation when an open began; `follow` moves `selected` only if it still holds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Cursor(u64);
 
 #[derive(Clone)]
 struct Row {
@@ -67,6 +73,7 @@ impl Sidebar {
             notes,
             expanded: HashSet::new(),
             selected: None,
+            cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
             rows: Rows::default(),
             scroll: UniformListScrollHandle::default(),

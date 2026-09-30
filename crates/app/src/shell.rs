@@ -7,9 +7,9 @@ use inkra_vault::{EntryId, Kind};
 use crate::backlinks::BacklinksPanel;
 use crate::editor::EditorView;
 use crate::index::IndexSync;
-use crate::open::{NoteActivated, Open};
+use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
-use crate::sidebar::{NewFolder, NewNote, Sidebar};
+use crate::sidebar::{Cursor, NewFolder, NewNote, Sidebar};
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
@@ -26,7 +26,9 @@ use modal::Modal;
 use parked::Parked;
 use tabs::Place;
 
-pub(crate) use tabs::{ActivateLastTab, ActivateTab, CloseTab, NewTab, NextTab, PreviousTab};
+pub(crate) use tabs::{
+    ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
+};
 
 const SIDEBAR_WIDTH: Pixels = px(220.);
 const BACKLINKS_WIDTH: Pixels = px(260.);
@@ -88,14 +90,9 @@ impl AppShell {
         if let Some(editor) = &editor {
             Self::follow_links_of(editor, cx);
         }
-        // `Here` stays on `open_note` until the sidebar opens through `show_note` (tabs S4).
-        cx.subscribe(
-            &sidebar,
-            |shell, _sidebar, event: &NoteActivated, cx| match event.open {
-                Open::Here => shell.open_note(event.note, None, cx),
-                Open::NewTab => shell.open_in_new_tab(event.note, None, cx),
-            },
-        )
+        cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
+            shell.open(event.note, None, event.open, cx);
+        })
         .detach();
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
             eprintln!("save failed for {:?}", event.0);
@@ -116,7 +113,8 @@ impl AppShell {
                 cx.with_window(cx.entity_id(), |window, cx| {
                     shell.unfocus_editor(window, cx);
                 });
-                shell.set_showing(None, cx);
+                let since = shell.tree_cursor(cx);
+                shell.set_showing(None, since, cx);
             }
             cx.notify();
         })
@@ -125,16 +123,13 @@ impl AppShell {
         if let Some(vault) = notes.read(cx).vault().cloned() {
             cx.observe(&vault, |_, _, cx| cx.notify()).detach();
         }
-        let first = Place {
-            note: notes.read(cx).current(),
-            view: None,
-        };
+        let first = notes.read(cx).current();
         Self {
             // `root` adopts the note it launches with, so its editor comes with `current`.
             bound: editor
-                .zip(first.note)
+                .zip(first)
                 .map(|(editor, note)| Bound { note, editor }),
-            tabs: Tabs::new(first),
+            tabs: Tabs::new(),
             parked: Parked::default(),
             tab_scroll: ScrollHandle::new(),
             notes,
@@ -152,6 +147,11 @@ impl AppShell {
     /// The active tab's note (Decision 8's `showing`).
     pub(super) fn showing(&self) -> Option<EntryId> {
         self.bound.as_ref().map(|bound| bound.note)
+    }
+
+    /// Read when an open or a tab op begins; a synchronous op reads it in its own update.
+    pub(super) fn tree_cursor(&self, cx: &App) -> Cursor {
+        self.sidebar.read(cx).cursor()
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
