@@ -136,6 +136,43 @@ fn a_first_reload_maps_its_own_top_line() {
     assert_eq!(viewport.take_pending(), Some(top(60)));
 }
 
+/// A top line on "one", nine pixels into its row, parked before `old` becomes `new`.
+fn parked_through(old: &str, new: &str) -> (TopLine, TopLine) {
+    let top = TopLine {
+        offset: ByteOffset(5),
+        below: px(9.),
+    };
+    let mut buffer = Buffer::new(old);
+    let parked = top.park(&mut buffer);
+    let diff = inkra_text::diff(buffer.version(), old, new);
+    assert!(buffer.apply_diff(std::time::Instant::now(), &diff));
+    (parked.unpark(&mut buffer), top.mapped(&diff))
+}
+
+#[test]
+fn a_parked_top_line_follows_a_diff_as_mapped_does() {
+    let old = "zero\none\ntwo\n";
+    for new in ["new\nzero\none\ntwo\n", "zero\nONE\ntwo\n"] {
+        let (unparked, mapped) = parked_through(old, new);
+        assert_eq!(unparked, mapped, "{new:?}");
+    }
+
+    let (unparked, mapped) = parked_through(old, "zero\ntwo\n");
+    assert_eq!(unparked, mapped);
+    assert_eq!(unparked.offset(), ByteOffset(5), "the deleted row's start");
+    assert_eq!(unparked.below(), px(9.));
+}
+
+#[test]
+#[should_panic(expected = "not live")]
+fn a_parked_top_line_forgets_its_anchor() {
+    let mut buffer = Buffer::new("one\ntwo\n");
+    let parked = TopLine::at(ByteOffset(4)).park(&mut buffer);
+    let anchor = parked.offset;
+    let _ = parked.unpark(&mut buffer);
+    let _ = buffer.resolve(anchor);
+}
+
 #[test]
 fn a_visible_line_does_not_scroll() {
     assert_eq!(minimal(line(5.), viewport(), px(0.), px(LINE)), None);

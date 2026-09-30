@@ -9,69 +9,14 @@ use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
-use super::{ab_focused, activate, editor, open, shell_focused, showing, tab_notes};
+use super::{
+    ab_focused, activate, at, check, editor, open, scroll_to, select, showing, tab_notes,
+    tall_notes, text_of, trash,
+};
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
 use crate::shell::{AppShell, NextTab};
-use crate::test_support;
 use crate::text_input::InputHost;
-
-fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
-}
-
-fn select(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, range: Range<usize>) {
-    window
-        .update(cx, |shell, window, cx| {
-            let editor = shell.editor().cloned().expect("a note is showing");
-            editor.update(cx, |editor, cx| {
-                editor.select_range(at(range.start)..at(range.end), window, cx);
-            });
-        })
-        .unwrap();
-    cx.run_until_parked();
-}
-
-fn text_of(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) -> String {
-    window
-        .update(cx, |shell, _, cx| {
-            let notes = shell.notes.read(cx);
-            notes.buffer_for(id).unwrap().read(cx).text().to_owned()
-        })
-        .unwrap()
-}
-
-/// T1 and T3; T2 holds by construction (`Bound`).
-fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
-    window
-        .update(cx, |shell, _, cx| {
-            assert_eq!(shell.showing(), shell.tabs.active_place().note, "T1");
-            assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
-        })
-        .unwrap();
-}
-
-fn tall_notes(
-    cx: &mut TestAppContext,
-) -> (WindowHandle<AppShell>, VisualTestContext, EntryId, EntryId) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/vault/a.md", "line\n".repeat(200));
-    fs.insert_file("/vault/b.md", "line\n".repeat(200));
-    let (window, notes, mut cx) = shell_focused(cx, &fs);
-    let a = test_support::entry_id(&notes, &mut cx, "a");
-    let b = test_support::entry_id(&notes, &mut cx, "b");
-    (window, cx, a, b)
-}
-
-fn scroll_to(
-    window: &WindowHandle<AppShell>,
-    cx: &mut TestAppContext,
-    offset: usize,
-) -> ByteOffset {
-    editor(window, cx).update(cx, |editor, cx| editor.scroll_to_top(at(offset), cx));
-    cx.run_until_parked();
-    editor(window, cx).update(cx, |editor, _| editor.offset_at_top())
-}
 
 fn view_of(
     window: &WindowHandle<AppShell>,
@@ -408,15 +353,6 @@ fn cmd_1_on_the_active_tab_seals_nothing(cx: &mut TestAppContext) {
     assert_eq!(text_of(&window, &mut cx, a), "alpha");
 }
 
-fn trash(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) {
-    let notes = window
-        .update(cx, |shell, _, _| shell.notes.clone())
-        .unwrap();
-    let trashed = notes.update(cx, |notes, cx| notes.trash(id, cx));
-    cx.run_until_parked();
-    assert!(futures::executor::block_on(trashed), "the trash succeeded");
-}
-
 #[gpui::test]
 fn trashing_a_note_empties_every_tab_showing_it(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, b) = ab_focused(cx);
@@ -542,28 +478,4 @@ fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestA
     cx.run_until_parked();
 
     assert_eq!(view_of(&window, &mut cx), (at(610)..at(612), top));
-}
-
-/// Plain offsets until S2's anchors: the other tab emptied the note, so the caret clips.
-#[gpui::test]
-fn a_stale_view_in_another_tab_on_the_same_note_clips_on_return(cx: &mut TestAppContext) {
-    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    open(&window, &mut cx, a);
-    assert_eq!(
-        editor(&window, &mut cx).update(&mut cx, |editor, _| editor.cursor()),
-        at(5)
-    );
-    cx.simulate_keystrokes("cmd-t");
-    open(&window, &mut cx, a);
-    cx.simulate_keystrokes("cmd-a backspace");
-    assert_eq!(text_of(&window, &mut cx, a), "");
-
-    cx.simulate_keystrokes("ctrl-tab");
-    cx.run_until_parked();
-
-    assert_eq!(tab_notes(&window, &mut cx).1, 0);
-    assert_eq!(
-        editor(&window, &mut cx).update(&mut cx, |editor, _| editor.cursor()),
-        at(0)
-    );
 }

@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{Pixels, ScrollHandle, point, px};
-use inkra_text::{Bias, Buffer, ByteOffset, Diff};
+use inkra_text::{Anchor, Bias, Buffer, ByteOffset, Diff};
 
 use super::layout::DocumentLayout;
 
@@ -77,6 +77,33 @@ impl TopLine {
         Self {
             offset,
             below: px(0.),
+        }
+    }
+
+    /// `Left`, as `mapped`: the offset must be a char boundary within `buffer`.
+    pub(super) fn park(self, buffer: &mut Buffer) -> ParkedTop {
+        ParkedTop {
+            offset: buffer.anchor(self.offset, Bias::Left),
+            below: self.below,
+        }
+    }
+}
+
+/// A `TopLine` kept as an anchor while its view is not showing.
+#[derive(Debug)]
+pub(super) struct ParkedTop {
+    offset: Anchor,
+    below: Pixels,
+}
+
+impl ParkedTop {
+    /// `below` is kept: restoring bounds it by the row's height in the new layout.
+    pub(super) fn unpark(self, buffer: &mut Buffer) -> TopLine {
+        let offset = buffer.resolve(self.offset);
+        buffer.forget(self.offset);
+        TopLine {
+            offset,
+            below: self.below,
         }
     }
 }

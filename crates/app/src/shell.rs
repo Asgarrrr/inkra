@@ -15,12 +15,14 @@ use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 mod activation;
 mod modal;
 mod palette;
+mod parked;
 mod render;
 mod tab_bar;
 mod tabs;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
+use parked::Parked;
 use tabs::Place;
 
 pub(crate) use tabs::{ActivateLastTab, ActivateTab, CloseTab, NewTab, NextTab, PreviousTab};
@@ -53,6 +55,8 @@ pub(crate) struct AppShell {
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
     tabs: Tabs<Place>,
+    /// The views of inactive tabs showing a note; changed only by `park`, `unpark` and `drop_note`.
+    parked: Parked,
     /// The bar's horizontal scroll, moved to the active tab on every switch.
     tab_scroll: ScrollHandle,
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
@@ -100,7 +104,7 @@ impl AppShell {
         // Drop the view, not leave it: a buffer with no file is still typable
         // and every keystroke would be lost.
         cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
-            if shell.tabs.forget(|place| place.note == Some(event.0)) {
+            if shell.forget_note(event.0) {
                 cx.with_window(cx.entity_id(), |window, cx| {
                     shell.unfocus_editor(window, cx);
                 });
@@ -123,6 +127,7 @@ impl AppShell {
                 .zip(first.note)
                 .map(|(editor, note)| Bound { note, editor }),
             tabs: Tabs::new(first),
+            parked: Parked::default(),
             tab_scroll: ScrollHandle::new(),
             notes,
             sidebar,

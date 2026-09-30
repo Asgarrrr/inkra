@@ -13,6 +13,10 @@ paths:
   until a note opens, so nothing untracked can be typed into; an empty tab has
   no editor either. `render_empty` fills the slot. `set_showing` is its one writer.
 - Every tab action dismisses the picker first (`dismiss_modal`).
+- Park only in the `leaving` closure of `Tabs::insert` and `Tabs::activate`;
+  `close` and `commit` keep the plain `capture`. Unpark every place `Tabs`
+  returns (`arrive`) and every closed id. Drop a note's entries with
+  `forget_note`, never `tabs.forget` alone. `Tabs` holds no view (I2).
 - An action holds its window leased: `cx.with_window` returns `None` inside it,
   so tab code takes `&mut Window` (`unfocus_editor`). A subscription fired by
   a tab action runs after the lease ends, so `with_window` works there.

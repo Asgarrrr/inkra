@@ -48,6 +48,16 @@ impl Selection {
         }
     }
 
+    /// A caret at `range.start` when `range` is empty or crossed, as two ends biased inward leave it.
+    #[must_use]
+    pub(crate) fn settled(range: Range<ByteOffset>, reversed: bool) -> Self {
+        if range.is_empty() {
+            Self::at(range.start)
+        } else {
+            Self::new(range, reversed)
+        }
+    }
+
     #[must_use]
     pub fn range(&self) -> Range<ByteOffset> {
         self.range.clone()

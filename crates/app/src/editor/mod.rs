@@ -3,6 +3,7 @@ mod element;
 pub(crate) mod layout;
 mod motion;
 mod mouse;
+mod parked;
 mod reload;
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,7 @@ use crate::theme;
 use element::TextElement;
 use viewport::{Reveal, ScrollTo, Viewport};
 
+pub(crate) use parked::ParkedView;
 pub(crate) use viewport::TopLine;
 
 /// A link the user asked to follow, with ⌘-click or ⌘↵.

@@ -357,6 +357,77 @@ Lever for S4:
 |---|---|
 | `Tabs` keeps no place for the active tab: `leave_active` writes it, `activate` takes it. This removes T1's pair (`bound.note` and `active_place().note`) and the stale `view` of the active tab | S4 reshapes `commit` and `leave_active` for the back stack |
 
+## As built (S2)
+
+Plan: `docs/superpowers/plans/2026-09-29-tabs-s2.md`. Built as planned, with
+these facts and deviations:
+
+- **The table has three mutations.** `park` and `unpark` are its writers.
+  `drop_note`, through the shell's `forget_note`, is the third: on
+  `NoteClosed` it removes every entry of the note and forgets no anchor,
+  because the buffer is gone. One note can be parked under several tabs, so it
+  `retain`s, never a single `remove`.
+- **The goal rule.** `unpark` returns the parked `Selection`, goal included,
+  only when `Buffer::version` is the version at park and the resolved range is
+  the parked range. The version alone is not enough: an undo can restore the
+  version with an anchor moved. Otherwise the selection is what `map_through`
+  gives, with `Goal::None`. `Selection::settled` is the piece the two share.
+- **I2 holds.** `Tabs` stores no view for any tab: `park` returns
+  `Place { note, view: None }`, and `commit` overwrites the value `leaving`
+  wrote. The shell tests' `check` asserts I1 and I2 after every step.
+- **The S5 hand-off.** Closing an inactive tab unparks it and discards the
+  view. S5 passes that view to the closed-stack entry as plain offsets.
+- **The replaced S1 test.**
+  `a_stale_view_in_another_tab_on_the_same_note_clips_on_return` is gone.
+  `a_parked_selection_partly_deleted_in_another_tab_keeps_its_remaining_text`
+  replaces it, and fails on S1's code.
+- **`forget_note` landed with the table (task 3), not with the reload tests
+  (task 4).** Extending `check` with I1 turned two S1 trash tests red, so the
+  commit that adds `check`'s I1 also adds `forget_note`. Task 4 adds only
+  tests; its trash tests fail when `drop_note` is removed.
+- **The two-tabs reload test uses different carets.** With one caret for both
+  tabs, a tab that came back with no view kept the other tab's caret and
+  passed. Line 50 in the active tab and line 120 in the parked one make both
+  mappings visible.
+- **The sequence proptest draws every char once.** The chars come from a
+  shuffled pool of distinct punctuation and symbols, ASCII and multibyte, with
+  one newline. Each char is then its own token, so `diff` reproduces the
+  literal edit. `prop_assume!` stays as a guard: at most 5 rejects in 3000
+  cases.
+- **The task-2 commit carried two `expect(dead_code)` tripwires**, on
+  `EditorView::park` and `ParkedView::unpark`, as S0 did. The shell calls both
+  in task 3, which removes them.
+- **Shared shell test helpers** (`check`, `select`, `text_of`, `tall_notes`,
+  `scroll_to`, `trash`, `at`) moved to `shell/tests/mod.rs`.
+- **Two tests guard S1 behaviour and were not red first.**
+  `a_switch_with_no_edit_keeps_a_reversed_selection_and_its_goal` and
+  `park_seals_the_undo_group` pass on S1's code. They fail if parking drops
+  the goal or skips the undo seal.
+- **After review.** `a_gone_then_restored_note_moves_its_parked_view` passed
+  at once: a guard, and it fails when `arrive` drops the unparked view.
+  `closing_the_last_tab_leaves_nothing_parked` is gone. The last tab is
+  active, so it has no entry. The close's own `unpark` would also hide a leak
+  from its `leaving` closure. So its second step could not fail, and
+  `closing_the_active_tab_shows_the_next_tab_with_its_moved_caret` covers its
+  first.
+- **`cargo mutants -f` without `-p` is ignored** while `.cargo/mutants.toml`
+  sets `examine_globs`: it listed all 1687 mutants. The editor run used
+  `-F '^crates/editor/src/(parked|selection|state)\.rs:'`, then
+  `-p inkra-editor` for the whole crate. The app run's `-p inkra-app -f` works
+  as written.
+
+The bench (`cargo bench -p inkra-text -- --quick`, not a gate): one insert
+200 bytes before the end of a 10 KB document (233 lines).
+
+| Case | Time |
+|---|---|
+| `buffer_insert_after_parks/0` | 272 ns |
+| `buffer_insert_after_parks/1000` (3000 forgotten slots) | 977 ns |
+| `buffer_insert_char/end/1000` (43 KB), for scale | 1.09 µs |
+
+A thousand switches on one note add about 0.7 µs to a keystroke. "Anchor slot
+reuse" stays Deferred.
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the

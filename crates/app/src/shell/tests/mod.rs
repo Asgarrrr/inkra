@@ -1,8 +1,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
@@ -22,6 +24,7 @@ mod following;
 mod gone;
 mod modal;
 mod open_first;
+mod parked;
 mod quick_open;
 mod reload;
 mod renaming;
@@ -212,6 +215,10 @@ pub(super) fn open(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id:
     cx.run_until_parked();
 }
 
+pub(super) fn at(offset: usize) -> ByteOffset {
+    ByteOffset(offset)
+}
+
 /// Each tab's note, and the active tab's index.
 pub(super) fn tab_notes(
     window: &WindowHandle<AppShell>,
@@ -223,4 +230,87 @@ pub(super) fn tab_notes(
             (notes, shell.tabs.active_index())
         })
         .expect("the shell is open")
+}
+
+pub(super) fn select(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+    range: Range<usize>,
+) {
+    window
+        .update(cx, |shell, window, cx| {
+            let editor = shell.editor().cloned().expect("a note is showing");
+            editor.update(cx, |editor, cx| {
+                editor.select_range(ByteOffset(range.start)..ByteOffset(range.end), window, cx);
+            });
+        })
+        .unwrap();
+    cx.run_until_parked();
+}
+
+pub(super) fn text_of(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+    id: EntryId,
+) -> String {
+    window
+        .update(cx, |shell, _, cx| {
+            let notes = shell.notes.read(cx);
+            notes.buffer_for(id).unwrap().read(cx).text().to_owned()
+        })
+        .unwrap()
+}
+
+/// T1, T3, and tabs S2's I1 and I2; T2 holds by construction (`Bound`).
+pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
+    window
+        .update(cx, |shell, _, cx| {
+            assert_eq!(shell.showing(), shell.tabs.active_place().note, "T1");
+            assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
+            let inactive_notes = shell
+                .tabs
+                .iter()
+                .filter(|tab| tab.id() != shell.tabs.active() && tab.place().note.is_some())
+                .map(inkra_tabs::Tab::id)
+                .collect();
+            assert_eq!(shell.parked.tabs(), inactive_notes, "I1");
+            assert!(
+                shell.tabs.iter().all(|tab| tab.place().view.is_none()),
+                "I2"
+            );
+        })
+        .unwrap();
+}
+
+pub(super) fn tall_notes(
+    cx: &mut TestAppContext,
+) -> (WindowHandle<AppShell>, VisualTestContext, EntryId, EntryId) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "line\n".repeat(200));
+    fs.insert_file("/vault/b.md", "line\n".repeat(200));
+    let (window, notes, mut cx) = shell_focused(cx, &fs);
+    let a = test_support::entry_id(&notes, &mut cx, "a");
+    let b = test_support::entry_id(&notes, &mut cx, "b");
+    (window, cx, a, b)
+}
+
+pub(super) fn scroll_to(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+    offset: usize,
+) -> ByteOffset {
+    editor(window, cx).update(cx, |editor, cx| {
+        editor.scroll_to_top(ByteOffset(offset), cx);
+    });
+    cx.run_until_parked();
+    editor(window, cx).update(cx, |editor, _| editor.offset_at_top())
+}
+
+pub(super) fn trash(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) {
+    let notes = window
+        .update(cx, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let trashed = notes.update(cx, |notes, cx| notes.trash(id, cx));
+    cx.run_until_parked();
+    assert!(futures::executor::block_on(trashed), "the trash succeeded");
 }
