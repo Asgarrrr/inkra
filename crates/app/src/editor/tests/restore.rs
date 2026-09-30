@@ -1,5 +1,7 @@
-//! A view captured with `view_state()` and restored by `open_buffer` (tabs spec, A2 and A3).
+//! A view captured with `view_state()` or `capture`, restored by `open_buffer` or `restore` (tabs spec, A2 and A3).
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -332,4 +334,131 @@ fn a_restored_top_line_stops_at_the_end_of_a_row_that_got_shorter(cx: &mut TestA
         px(0.),
         "the next line must start at the top, not be cut"
     );
+}
+
+fn capture_sealing(window: WindowHandle<EditorView>, cx: &mut VisualTestContext) -> ViewState {
+    window.update(cx, |view, _, cx| view.capture(cx)).unwrap()
+}
+
+fn text(window: WindowHandle<EditorView>, cx: &mut VisualTestContext) -> String {
+    window
+        .update(cx, |view, _, cx| view.buffer().read(cx).text().to_owned())
+        .unwrap()
+}
+
+#[gpui::test]
+fn a_capture_seals_the_undo_group(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "");
+    cx.simulate_input("x");
+    capture_sealing(window, &mut cx);
+    cx.simulate_input("y");
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text(window, &mut cx), "x");
+}
+
+/// A buffer notify is what schedules an autosave.
+#[gpui::test]
+fn a_capture_of_a_clean_note_leaves_it_clean(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "note");
+    cx.run_until_parked();
+    let buffer = window
+        .update(&mut cx, |view, _, _| view.buffer().clone())
+        .unwrap();
+    let notified = Rc::new(Cell::new(false));
+    let set = Rc::clone(&notified);
+    let _subscription = cx.update(|_, cx| cx.observe(&buffer, move |_, _| set.set(true)));
+
+    capture_sealing(window, &mut cx);
+    cx.run_until_parked();
+
+    assert!(!notified.get(), "the capture notified the buffer");
+}
+
+#[gpui::test]
+fn restore_on_the_same_buffer_keeps_its_parse(cx: &mut TestAppContext) {
+    let (window, mut cx) = scrolled(cx);
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.select_range(at(610)..at(612), window, cx);
+        })
+        .unwrap();
+
+    let view = capture_sealing(window, &mut cx);
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.select_range(at(5)..at(5), window, cx);
+            view.scroll_to_top(at(0), cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |editor, _, cx| {
+            let parsed_at = editor.parsed_at;
+            // No notify: a reparse inside `restore` is the only thing that would read it.
+            editor
+                .buffer()
+                .update(cx, |buffer, _| buffer.insert(at(1000), "x"));
+            editor.restore(view.clone(), cx);
+            assert_eq!(editor.parsed_at, parsed_at, "restore reparsed");
+            assert_eq!(editor.view_state(), view);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |editor, _, _| {
+            assert_eq!(editor.selected(), at(610)..at(612));
+            assert_eq!(editor.offset_at_top(), view.top.offset());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn restore_drops_a_composition_and_keeps_its_text(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "ab");
+    cx.run_until_parked();
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.replace_and_mark_text_in_range(None, "か", Some(1..1), window, cx);
+        })
+        .unwrap();
+    let view = capture_sealing(window, &mut cx);
+
+    window
+        .update(&mut cx, |editor, _, cx| {
+            editor.restore(view.clone(), cx);
+            assert_eq!(editor.input.state().marked_range(), None);
+            assert_eq!(editor.input.state().selection(), &view.selection);
+        })
+        .unwrap();
+    assert_eq!(text(window, &mut cx), "abか");
+}
+
+/// `e` + U+0301 is one grapheme at 3..6; the note ends at 8.
+#[gpui::test]
+fn a_view_restored_onto_a_shorter_note_is_clipped(cx: &mut TestAppContext) {
+    let (window, mut cx) = scrolled(cx);
+    let mut selection = Selection::at(at(700));
+    selection.set_head(at(5), Goal::Column(3.));
+    let view = ViewState {
+        selection,
+        top: TopLine::at(at(600)),
+    };
+
+    window
+        .update(&mut cx, |editor, _, cx| {
+            // Shortened as another tab on this note would: before the view comes back.
+            editor.buffer().update(cx, |buffer, cx| {
+                buffer.transact(|buffer| buffer.replace(at(0)..buffer.len(), "cafe\u{301} x"));
+                cx.notify();
+            });
+            editor.restore(view, cx);
+            let restored = editor.view_state();
+            assert_eq!(restored.selection.range(), at(3)..at(8));
+            assert!(restored.selection.reversed());
+            assert_eq!(restored.top.offset(), at(8));
+        })
+        .unwrap();
+    cx.run_until_parked();
 }

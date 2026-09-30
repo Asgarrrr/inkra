@@ -37,7 +37,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
   and the no-gpui-below-app check. Green is the definition of done.
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown -p inkra-index`.
+- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown -p inkra-index -p inkra-tabs`.
   **Never `cargo fmt --all`**: it rewrites the vendored gpui source. A new
   workspace member joins this list and `check.sh`'s in the same change.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
@@ -45,7 +45,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - run: `cargo run -p inkra-app [path]`
 - tests moved: `./scripts/test-names.sh` — diff before and after splitting a
   file; a forgotten `mod` line drops tests and still compiles green.
-- mutants: `cargo mutants` after changing `text`, `editor`, `markdown` or `index` logic.
+- mutants: `cargo mutants` after changing `text`, `editor`, `markdown`, `index` or `tabs` logic.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
   `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
@@ -58,13 +58,15 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   beside the chain: `app` depends on it, it depends on no workspace crate.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
-- `text`, `editor`, `vault`, `markdown` and `index` have no gpui dependency; `check.sh`
+  `inkra-tabs` depends on no workspace crate; `app` depends on it.
+- `text`, `editor`, `vault`, `markdown`, `index` and `tabs` have no gpui dependency; `check.sh`
   enforces it and a new crate below `app` joins that check.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
+  - which tab is active, what a close activates → `tabs`; what a place holds → `app`
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`

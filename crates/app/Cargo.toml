@@ -25,6 +25,7 @@ inkra-editor = { workspace = true }
 inkra-vault = { workspace = true }
 inkra-markdown = { workspace = true }
 inkra-index = { workspace = true }
+inkra-tabs = { workspace = true }
 # `block_on` before a gpui executor exists; `mpsc` and `oneshot` channels, `lock::Mutex`, `select_biased!`, `join_all`.
 futures = { workspace = true }
 # Wrap snapping per line; `Buffer`'s grapheme steps scan the whole document.

@@ -2704,6 +2704,7 @@ dependencies = [
  "inkra-editor",
  "inkra-index",
  "inkra-markdown",
+ "inkra-tabs",
  "inkra-text",
  "inkra-vault",
  "proptest 1.11.0",
@@ -2744,6 +2745,13 @@ dependencies = [
  "inkra-text",
  "proptest 1.11.0",
  "pulldown-cmark",
+]
+
+[[package]]
+name = "inkra-tabs"
+version = "0.1.0"
+dependencies = [
+ "proptest 1.11.0",
 ]
 
 [[package]]
