@@ -132,6 +132,8 @@ Read the spec before changing its area:
   builds, mtime fast path
 - `docs/superpowers/specs/2026-09-29-index-scheduler-design.md` — `LiveIndex`:
   loads, supersede, own-save echo, the startup settle; `IndexSync` spawns
+- `docs/superpowers/specs/2026-09-30-index-turn-effects-design.md` —
+  `LiveIndex::turn`: `Turn`, `Effects`, the turn's end, `revision`, when `IndexSync` notifies
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
 - `docs/superpowers/specs/2026-09-29-sidebar-rows-design.md` — `Rows`: the

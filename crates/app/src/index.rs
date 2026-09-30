@@ -1,18 +1,16 @@
 //! Keeps a `NoteIndex` current: fed by the vault's scans and by our own writes.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
-use gpui::{
-    AppContext as _, AsyncApp, Context, Entity, EventEmitter, Priority, SharedString, Subscription,
-    WeakEntity,
-};
-use inkra_index::live::{Merged, Status, Ticket, TurnEnd};
+use gpui::{AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription};
+use inkra_index::live::{Effects, Status, Turn};
 use inkra_index::{LiveIndex, NoteContent, NoteIndex};
 use inkra_vault::{Fs, Vault};
 
 use crate::count::thousands;
-use crate::timeline::{Step, Timeline, timed};
+use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
 mod building;
@@ -54,8 +52,9 @@ pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
     vault: Option<Entity<Vault>>,
     live: LiveIndex,
-    /// Bumped on each change to the index, so a reader can skip a notify that changed nothing it reads.
-    revision: u64,
+    /// `simulate_load`'s loads, added to the index's revision.
+    #[cfg(test)]
+    simulated_loads: u64,
     /// Where a finished load goes; `drain` applies it on the foreground.
     landed: UnboundedSender<Landed>,
     /// Replaces `APPLY_BUDGET`; zero makes each turn apply one load.
@@ -84,8 +83,9 @@ impl IndexSync {
         let mut sync = Self {
             fs,
             vault,
-            live: LiveIndex::default(),
-            revision: 0,
+            live: LiveIndex::new(cx.background_executor().num_cpus() * loading::LOADS_PER_CORE),
+            #[cfg(test)]
+            simulated_loads: 0,
             landed,
             #[cfg(test)]
             apply_budget: None,
@@ -99,14 +99,19 @@ impl IndexSync {
         sync
     }
 
+    // Readers only delegate to `live` or read `vault`, so D5's `Seen` check covers them.
     pub(crate) fn revision(&self) -> u64 {
-        self.revision
+        #[cfg(not(test))]
+        let simulated = 0;
+        #[cfg(test)]
+        let simulated = self.simulated_loads;
+        self.live.revision() + simulated
     }
 
     /// A load applying: the index changed, and every reader is notified.
     #[cfg(test)]
     pub(crate) fn simulate_load(&mut self, cx: &mut Context<Self>) {
-        self.revision += 1;
+        self.simulated_loads += 1;
         cx.notify();
     }
 
@@ -122,29 +127,55 @@ impl IndexSync {
         }
     }
 
-    /// One timed foreground update and the word merge it made due, then the `Indexed` mark; the
-    /// update's result, or `None` once this entity is gone.
-    fn timed_turn<R>(
-        this: &WeakEntity<Self>,
-        cx: &mut AsyncApp,
-        update: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
+    /// Runs one timed turn and its effects; `None` without a vault.
+    fn turn<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        inputs: impl FnOnce(&mut Turn<'_>) -> R,
     ) -> Option<R> {
-        let (result, indexed) = timed(cx, |cx| {
-            this.update(cx, |this, cx| {
-                let result = update(this, cx);
-                (result, this.end_turn(cx))
-            })
-        })
-        .ok()?;
+        let vault = self.vault.as_ref()?;
+        let started = Instant::now();
+        let (result, effects) = self.live.turn(vault.read(cx), inputs);
+        let indexed = effects.indexed;
+        self.run(effects, cx);
+        Timeline::turn(started.elapsed(), cx);
         if indexed {
-            this.update(cx, Self::mark_indexed).ok()?;
+            self.mark_indexed(cx);
         }
         Some(result)
     }
 
-    /// Starts the merge the turn made due; whether the startup load was reported indexed.
-    fn end_turn(&mut self, cx: &mut Context<Self>) -> bool {
-        let TurnEnd { merge, indexed } = self.live.end_turn();
+    /// Runs a turn's effects; the `Indexed` mark stays with `turn`, outside the timing.
+    fn run(&mut self, effects: Effects, cx: &mut Context<Self>) {
+        let Effects {
+            loads,
+            build,
+            merge,
+            retired,
+            layout,
+            notify,
+            indexed: _,
+        } = effects;
+        for load in loads {
+            self.spawn_load(load, cx);
+        }
+        if let Some(job) = build {
+            #[cfg(test)]
+            let hold = self.hold.clone();
+            let building = cx.background_spawn(async move {
+                #[cfg(test)]
+                if let Some(hold) = hold {
+                    let _ = hold.await;
+                }
+                job.run()
+            });
+            // Detached, holding a weak handle: a result landing after this entity is gone is dropped.
+            cx.spawn(async move |this, cx| {
+                let built = building.await;
+                let _ = this.update(cx, |this, cx| this.turn(cx, |turn| turn.built(built)));
+            })
+            .detach();
+        }
         if let Some(merge) = merge {
             // Low: a query's scan goes first.
             let running = cx
@@ -153,18 +184,21 @@ impl IndexSync {
             // Detached, holding a weak handle: a result landing after this entity is gone is dropped.
             cx.spawn(async move |this, cx| {
                 let merged = running.await;
-                Self::timed_turn(&this, cx, |this, cx| this.apply_merge(merged, cx));
+                let _ = this.update(cx, |this, cx| this.turn(cx, |turn| turn.merged(merged)));
             })
             .detach();
         }
-        indexed
-    }
-
-    /// Notifies no reader, since a merge changes no answer.
-    fn apply_merge(&mut self, merged: Merged, cx: &mut Context<Self>) {
-        let retired = self.live.merged(merged);
-        // Freeing a 50k-note segment would take milliseconds of the turn.
-        cx.background_spawn(async move { drop(retired) }).detach();
+        if let Some(retired) = retired {
+            // Freeing a 50k table takes about 9 ms, over the foreground budget.
+            cx.background_spawn(async move { drop(retired) }).detach();
+        }
+        if layout {
+            Timeline::mark(Step::NamesReady, cx);
+            cx.emit(NotesChanged);
+        }
+        if notify {
+            cx.notify();
+        }
     }
 
     /// The startup timeline's mark, once nothing is left to load and the settle has applied.
@@ -182,34 +216,19 @@ impl IndexSync {
 
     /// Never queued: a write needs no load and must not wait behind the startup queue.
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
-        if self.vault.is_none() {
+        let (id, modified) = (event.id, event.stamp.mtime);
+        let Some(ticket) = self.turn(cx, |turn| turn.saved(id, modified)) else {
             return;
-        }
-        let ticket = self.live.saved(event.id, event.stamp.mtime);
+        };
         let text = Arc::clone(&event.text);
-        let modified = event.stamp.mtime;
         let parsed = cx.background_spawn(async move { NoteContent::parse(text, modified) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
-            Self::timed_turn(&this, cx, |this, cx| this.land(ticket, Ok(content), cx));
+            let _ = this.update(cx, |this, cx| {
+                this.turn(cx, |turn| turn.landed(ticket, Ok(content)))
+            });
         })
         .detach();
-    }
-
-    /// A load or a save's parse landed; readers are notified when the index changed.
-    fn land(
-        &mut self,
-        ticket: Ticket,
-        loaded: inkra_vault::Result<NoteContent>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(vault) = &self.vault else {
-            return;
-        };
-        if self.live.landed(ticket, loaded, vault.read(cx)) {
-            self.revision += 1;
-            cx.notify();
-        }
     }
 }
 

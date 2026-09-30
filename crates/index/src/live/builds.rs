@@ -10,6 +10,7 @@ use inkra_vault::{Entry, EntryId, Mtime, Vault};
 use super::LiveIndex;
 use super::diff::{Change, notes};
 use crate::note_set::NoteSet;
+use crate::words::RetiredWords;
 
 /// One build at a time: an input during it marks it `Dirty` rather than starting another.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,19 +45,22 @@ pub(super) struct Layout {
     live: HashSet<EntryId>,
 }
 
-pub struct Applied {
-    /// The vault changed while the build ran: call `start_build` again.
-    pub dirty: bool,
+pub(super) struct Applied {
+    /// The vault changed while the build ran: the turn's end starts another.
+    pub(super) dirty: bool,
     /// The note set changed: names and link resolution may differ.
-    pub layout: bool,
-    pub retired: Retired,
+    pub(super) layout: bool,
+    pub(super) retired: Retired,
 }
 
-/// The previous note set, entries and live set; free them off the foreground.
+/// The previous note set, entries and live set, and the words a merge replaced; free them off
+/// the foreground.
+#[derive(Default)]
 #[must_use = "free it off the foreground"]
 pub struct Retired {
-    _last: Option<Arc<[Entry]>>,
-    _notes: Option<(NoteSet, HashSet<EntryId>)>,
+    last: Option<Arc<[Entry]>>,
+    notes: Option<(NoteSet, HashSet<EntryId>)>,
+    words: Option<RetiredWords>,
 }
 
 impl BuildJob {
@@ -67,6 +71,17 @@ impl BuildJob {
             change: Change::between(self.last.as_deref(), &self.entries),
             entries: self.entries,
         }
+    }
+}
+
+impl Retired {
+    /// With the words a merge replaced.
+    pub(super) fn with_words(self, words: Option<RetiredWords>) -> Self {
+        Self { words, ..self }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.last.is_none() && self.notes.is_none() && self.words.is_none()
     }
 }
 
@@ -94,7 +109,7 @@ impl Layout {
 impl LiveIndex {
     /// Vault entries changed. `None` while a build runs; that build's apply then returns `dirty`.
     #[must_use]
-    pub fn start_build(&mut self, entries: Arc<[Entry]>) -> Option<BuildJob> {
+    pub(super) fn start_build(&mut self, entries: Arc<[Entry]>) -> Option<BuildJob> {
         // Dropping the build in flight instead would starve the index under a stream of changes.
         if self.build != Build::Idle {
             self.build = Build::Dirty;
@@ -109,7 +124,7 @@ impl LiveIndex {
     }
 
     /// Applies a build and queues each changed note; `vault` is the live one, to retry forgotten notes.
-    pub fn apply_build(&mut self, built: Built, vault: &Vault) -> Applied {
+    pub(super) fn apply_build(&mut self, built: Built, vault: &Vault) -> Applied {
         let Built {
             seq,
             entries,
@@ -129,8 +144,9 @@ impl LiveIndex {
             dirty,
             layout: retired_notes.is_some(),
             retired: Retired {
-                _last: last,
-                _notes: retired_notes,
+                last,
+                notes: retired_notes,
+                words: None,
             },
         }
     }
@@ -143,6 +159,7 @@ impl LiveIndex {
             live,
         } = layout;
         self.note_sets += 1;
+        self.revision += 1;
         let previous = self.index.set_notes(notes);
         self.indexed.retain(|id, _| live.contains(id));
         self.latest.retain(|id, _| live.contains(id));

@@ -28,10 +28,10 @@ pub struct Merged {
     settle: bool,
 }
 
-pub struct TurnEnd {
-    pub merge: Option<Merge>,
+pub(super) struct TurnEnd {
+    pub(super) merge: Option<Merge>,
     /// True once: the startup load ended and its settle applied.
-    pub indexed: bool,
+    pub(super) indexed: bool,
 }
 
 impl Merge {
@@ -47,7 +47,7 @@ impl Merge {
 impl LiveIndex {
     /// After every foreground turn: steps the startup, and starts a due merge or the settle.
     #[must_use]
-    pub fn end_turn(&mut self) -> TurnEnd {
+    pub(super) fn end_turn(&mut self) -> TurnEnd {
         // `is_building` changes only inside a turn, so this is the turn the load ended in.
         if self.startup == Startup::Loading && !self.is_building() {
             self.startup = Startup::Settling;
@@ -80,7 +80,7 @@ impl LiveIndex {
 
     /// Swaps a merge in; a settle's apply ends the settle. Changes no answer, so notifies no reader.
     #[must_use = "free the retired words off the foreground"]
-    pub fn merged(&mut self, merged: Merged) -> RetiredWords {
+    pub(super) fn merged(&mut self, merged: Merged) -> RetiredWords {
         if merged.settle {
             self.startup = Startup::Settled;
         }

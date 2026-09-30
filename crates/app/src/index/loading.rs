@@ -22,43 +22,35 @@ pub(super) struct Landed {
 }
 
 impl IndexSync {
-    pub(super) fn load_more(&mut self, cx: &mut Context<Self>) {
-        let Some(vault) = &self.vault else {
-            return;
-        };
-        let slots = cx.background_executor().num_cpus() * LOADS_PER_CORE;
-        while let Some(Load { ticket, path }) = self.live.next_load(vault.read(cx), slots) {
-            let fs = Arc::clone(&self.fs);
-            let landed = self.landed.clone();
-            // Low, as Zed's scanner: a query's scan goes first.
-            cx.background_executor()
-                .spawn_with_priority(Priority::Low, async move {
-                    let loaded = fs
-                        .load(&path)
-                        .await
-                        .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp.mtime));
-                    // Closed only once this entity is gone, and then nobody waits for it.
-                    let _ = landed.unbounded_send(Landed { ticket, loaded });
-                })
-                .detach();
-        }
-    }
-
     pub(super) async fn drain(
         this: WeakEntity<Self>,
         mut arrivals: UnboundedReceiver<Landed>,
         cx: &mut AsyncApp,
     ) {
         while let Some(first) = arrivals.next().await {
-            let alive = Self::timed_turn(&this, cx, |this, cx| {
-                this.apply_landed(first, &mut arrivals, cx);
-            });
-            if alive.is_none() {
+            let alive = this.update(cx, |this, cx| this.apply_landed(first, &mut arrivals, cx));
+            if alive.is_err() {
                 return;
             }
             // Loads that landed meanwhile would otherwise keep this turn going past its budget.
             yield_now().await;
         }
+    }
+
+    pub(super) fn spawn_load(&self, Load { ticket, path }: Load, cx: &mut Context<Self>) {
+        let fs = Arc::clone(&self.fs);
+        let landed = self.landed.clone();
+        // Low, as Zed's scanner: a query's scan goes first.
+        cx.background_executor()
+            .spawn_with_priority(Priority::Low, async move {
+                let loaded = fs
+                    .load(&path)
+                    .await
+                    .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp.mtime));
+                // Closed only once this entity is gone, and then nobody waits for it.
+                let _ = landed.unbounded_send(Landed { ticket, loaded });
+            })
+            .detach();
     }
 
     /// One note's apply is never split, so the heaviest note bounds a turn; `longest_turn` shows it.
@@ -72,22 +64,22 @@ impl IndexSync {
         let budget = APPLY_BUDGET;
         #[cfg(test)]
         let budget = self.apply_budget.unwrap_or(APPLY_BUDGET);
-        let started = Instant::now();
-        let mut next = Some(first);
-        while let Some(Landed { ticket, loaded }) = next {
-            self.land(ticket, loaded, cx);
-            next = if started.elapsed() < budget {
-                arrivals.try_recv().ok()
-            } else {
-                None
-            };
-        }
         #[cfg(test)]
         {
             self.turns += 1;
         }
-        self.load_more(cx);
-        cx.notify();
+        self.turn(cx, |turn| {
+            let started = Instant::now();
+            let mut next = Some(first);
+            while let Some(Landed { ticket, loaded }) = next {
+                turn.landed(ticket, loaded);
+                next = if started.elapsed() < budget {
+                    arrivals.try_recv().ok()
+                } else {
+                    None
+                };
+            }
+        });
     }
 }
 

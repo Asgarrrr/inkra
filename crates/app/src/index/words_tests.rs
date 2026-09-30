@@ -1,15 +1,13 @@
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{Entity, TestAppContext};
 use inkra_index::{NoteQuery, TermHit};
-use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Kind};
 
 use super::IndexSync;
 use super::tests::{create, indexed_vault, saved_edit, status};
-use crate::test_support::{entry_id, scan_notes};
+use crate::test_support::entry_id;
 use crate::timeline::Timeline;
 
 /// The notes of `ids` holding a word that starts with `term`, with their `TermHit`.
@@ -158,40 +156,6 @@ fn a_startup_load_below_the_merge_policy_settles_before_it_is_marked_indexed(
     assert!(settled, "nothing fresh once the loads end");
     // Marked before the merge applied, the line would hold the fresh notes' bytes instead.
     let line = cx.read(|cx| cx.global::<Timeline>().line());
-    assert!(line.contains(&format!("words {words} bytes")), "{line}");
-}
-
-#[gpui::test]
-fn a_startup_load_ending_in_a_rebuild_settles_before_it_is_marked_indexed(cx: &mut TestAppContext) {
-    // One core: `a` lands, `b`'s load is held and `c` waits behind it.
-    cx.executor().set_num_cpus(1);
-    cx.update(|cx| cx.set_global(Timeline::new(Instant::now())));
-    let fs = Arc::new(MemFs::new());
-    for (name, text) in [("a.md", "alpha"), ("b.md", "beta"), ("c.md", "gamma")] {
-        fs.insert_file(format!("/vault/{name}"), text);
-    }
-    let gate = fs.block_load("/vault/b.md");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-    cx.run_until_parked();
-    assert!(!status(cx, &links).is_ready());
-
-    let (b, c) = (entry_id(&notes, cx, "b"), entry_id(&notes, cx, "c"));
-    for id in [b, c] {
-        let trashed = notes.update(cx, |notes, cx| notes.trash(id, cx));
-        cx.run_until_parked();
-        drop(trashed);
-    }
-    gate.release();
-    cx.run_until_parked();
-
-    let (settled, words) = links.read_with(cx, |links, _| {
-        let index = links.index();
-        (index.words_settled(), index.words().heap_bytes())
-    });
-    assert!(settled, "the rebuild's settle applied");
-    let line = cx.read(|cx| cx.global::<Timeline>().line());
-    assert!(line.contains("(1 notes, corpus "), "{line}");
     assert!(line.contains(&format!("words {words} bytes")), "{line}");
 }
 

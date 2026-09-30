@@ -221,7 +221,7 @@ fn turn<R>(
 
 /// Spawns each job with its hand-back, drops `retired` off the foreground,
 /// marks `NamesReady` and emits `NotesChanged` on `layout`, notifies on `notify`.
-fn run(&mut self, effects: Effects, cx: &mut Context<Self>) -> bool;
+fn run(&mut self, effects: Effects, cx: &mut Context<Self>);
 ```
 
 Each hand-back is a spawned task that calls `this.update(cx, |this, cx|
@@ -260,7 +260,9 @@ lands its slice 2 after this spec (its Overlap section).
 - **T1. No input outside a turn, no turn without its end.** `Turn` has no
   public constructor; `turn` ends it after the closure returns. L7's
   premise, "`is_building` changes only inside a turn", stops being a proof
-  obligation on the caller: there is no other way in.
+  obligation on the caller: there is no other way in. The steps stay
+  `pub(super)`, so the guarantee holds outside `live`; `live`'s own
+  white-box tests still reach them (slice 5).
 - **T2. The slots refill every turn.** No caller can forget it.
 - **T3. One place starts a build.** `vault_changed` and a dirty apply both
   go through D3's gate, and `build` is an `Option`: at most one job per turn,
@@ -310,11 +312,16 @@ New tests (`live/turn_tests.rs`):
 | `a_save_minted_with_a_free_slot_refills_it` | the same test passes vacuously: with a queued note and a free slot, the mint's turn returns that note's load, so the empty-`Effects` case above is a real assertion |
 
 `live/model_tests.rs` executes `Effects` instead of calling steps. Its ops
-become: vault edits, `VaultChanged`, `RunBuild`, `Read(at)` (a pending load
-reads its file), `Land(at)`, `Fail(at)`, `Save`, `LandSave(at)` and a new
-`RunMerge(at)`. One new check after every turn: D5's `Seen` equality when
-`notify` is false. Two new checks after draining: `index().words_settled()`,
-and `indexed` was reported exactly once over the run. The merge and settle
+become: vault edits, `VaultChanged`, `RunBuild`, `Land(at)`, `Fail(at)`,
+`Save`, `LandSave(at)` and a new `RunMerge` (at most one merge runs). Every
+load reads its file in the turn that returned it, as `StartLoad` did: a
+separate `Read` op lets renames land another note's text under the
+loading id, the race the scheduler spec defers ("A load's read checked
+against its note"). One new check after every turn: D5's `Seen` equality
+when `notify` is false. One new check after draining: `indexed` was
+reported exactly once over the run. `words_settled()` is not checked: once
+startup is `Done` only due merges run, so a save during the settle stays
+fresh by design (`a_save_during_the_settle_stays_fresh_and_indexed_is_reported`). The merge and settle
 paths enter the random interleavings for the first time.
 
 App tests:
@@ -359,29 +366,40 @@ then the change.
    build rows, and the executor in `Harness`, which only those tests use yet.
    Change: `LiveIndex::new(slots)`, `LiveIndex::turn`, `Turn`, `Effects` with
    `loads`, `merge`, `retired`, `layout`, `notify`, `indexed`, D2 steps 1, 2
-   and 4, and T5's `Retired`. `Turn::built` reports `dirty` through a
-   temporary `Effects.dirty: bool`. The old steps stay public and
+   and 4, and T5's `Retired`. `Turn::built` returns `dirty` as a temporary
+   `bool` (as built: not an `Effects.dirty` field, since a fourth `bool` on
+   `Effects` trips clippy's pedantic `struct_excessive_bools`). The old steps stay public and
    `IndexSync` still calls them: no shim is written, the two entries coexist
    for one commit. About 140 lines.
 3. **`IndexSync` runs turns.** Change: `IndexSync::turn` and `run` replace
    `timed_turn`, `end_turn`, `load_more`, `apply_merge` and `land`; it runs
-   `Effects.dirty` as today. The old steps become `pub(super)`, so only
+   the `dirty` that `Turn::built` returns, as today. The old steps become `pub(super)`, so only
    `live`'s own tests still reach them. Delete the two `loading_tests`
    duplicates. About 90 lines.
 4. **The rebuild is an effect.** Tests: the build rows of
    `turn_tests.rs`, and the pure dirty-settle test. Change: D2 step 3, D3;
-   `Effects.dirty` becomes `Effects.build`; `reconcile` shrinks to
-   `self.turn(cx, Turn::vault_changed)`. Delete
+   `Turn::built`'s `bool` becomes `Effects.build`; `reconcile` shrinks to
+   `self.turn(cx, Turn::vault_changed)` (as built: a typed closure, since the
+   path binds one `Turn` lifetime and fails the higher-ranked bound, and clippy
+   rewrites an untyped closure into the path). Delete
    `a_build_landing_behind_the_vault_applies_then_rebuilds` and the two app
    dirty-settle tests. About 110 lines.
 5. **The pure tests run effects.** Rewrite `live/tests.rs` and
    `live/startup_tests.rs` from the steps onto the executor; names and
    assertions stay. No production line changes, so the scheduler spec's
    "Faults injected" table is injected before and after this commit and must
-   fail the same tests. The steps lose `pub(super)`. About 150 lines.
+   fail the same tests. About 150 lines. (As built: the steps keep
+   `pub(super)`. `turn.rs` is a sibling of `builds.rs`, `loads.rs` and
+   `startup.rs` and calls them, so a private step would not compile there.
+   Three white-box tests call steps outside a turn on purpose, since no turn
+   produces their scenario: `a_save_minted_with_a_free_slot_refills_it`
+   builds without a turn's refill, `a_second_build_in_one_turn_is_refused`
+   feeds two independent builds into one turn, and `model_tests.rs` starts
+   loads by hand until slice 6.)
 6. **The model runs effects.** Rewrite `live/model_tests.rs` onto the
-   executor, add `RunMerge`, D5's `Seen` check after every turn, and the two
-   drain checks. Inject D2's three step faults, T5's, and a `notify` that
+   executor, add `RunMerge`, D5's `Seen` check after every turn, and the
+   `indexed`-once drain check. Drop `.cargo/mutants.toml` exclusions that
+   name functions this spec deleted (`load_more`; check `apply_landed`). Inject D2's three step faults, T5's, and a `notify` that
    ignores `progress`; record which tests fail in "As built". Update the
    scheduler spec's "Ordering" section to point here, add this spec to
    `CLAUDE.md`'s docs list. Run `cargo mutants` on `inkra-index`; zero
@@ -398,7 +416,10 @@ the scheduler spec's: on the 50,000-note vault of
 `crates/app/examples/startup_vault.rs`, release, the launch line's `longest
 turn` stays under 8 ms and within noise of `main`, three runs each; first
 frame stays under 100 ms. Spawning happens inside the timed turn, as the
-loads' spawns do today.
+loads' spawns do today. As built, `longest turn` no longer includes gpui's
+effect flush: `main` timed the whole `AsyncApp` update, so its figure also
+counts the `notify` observers and the `NotesChanged` subscribers. Read the
+comparison with `main` with that gap in mind.
 
 Before the scan ends, D3 turns each vault notify into a full turn where
 `reconcile` returned after one check. The vault notifies once per swap
@@ -476,3 +497,45 @@ index-status-once lands first; the getter block lists `status` in place of
 `progress`, `awaits_first_build` and `is_building`; D5's argument and
 `Seen` read `status`; the Out of scope "if it lands first" bullet is folded
 into Merge order.
+- Implementation (2026-09-30), slice 6: the model reads each load in its own turn (no `Read(at)`), and drops the `words_settled` drain check; both contradicted the deferred rename race and two startup tests. `RunMerge` takes no index.
+
+## As built
+
+**Slice 6.** The model runs every input in a turn through the harness and
+reads each load in the turn that returned it, so `Land` and `Fail` pick among
+reads already taken. `RunMerge` runs the one pending merge. `.cargo/mutants.toml`
+drops the `load_more` exclusion: the `num_cpus * LOADS_PER_CORE` product now
+sits in `IndexSync::new`, which cargo-mutants does not mutate, so no exclusion
+replaces it. The `apply_landed` exclusion stays: its budget comparison is
+unchanged.
+
+**Faults injected** in `LiveIndex::turn` and `Turn::built`, each against
+`live::` only:
+
+| Fault | Failing tests |
+|---|---|
+| D2 step 1 skipped: no refill | 33, among them every test that lands a load and the model |
+| D2 step 2 skipped: no `end_turn` | 13: all seven `startup_tests`, `a_stale_ticket_a_merge_and_a_mint_…`, four `turn_tests`, and the model (`indexed` reported 0 times) |
+| D2 step 3 skipped: a dirty apply reruns nothing | `a_dirty_rebuild_ending_the_load_…`, `a_build_asked_while_one_runs_…`, `a_build_landing_behind_the_vault_applies`, `a_dirty_build_returns_its_rerun_…`, the model (answers differ from a fresh build) |
+| T5: `retired` always `Some` | `a_save_minted_in_its_own_turn_…`, `an_idle_turn_retires_nothing`, `a_vault_change_before_the_scan_does_no_work` |
+| `notify` ignores `progress` | `an_mtimes_apply_notifies_through_progress_alone`, the model (`Seen` changed on a turn that did not notify) |
+
+**Mutants.** On `inkra-index`: the spec's diff (`--in-diff` from `7635f6f`),
+31 mutants, 26 caught, 5 unviable, 0 missed; every mutant under
+`crates/index/src/live`, 121, 104 caught, 17 unviable, 0 missed; the rest of
+the crate, 959, 728 caught, 186 unviable, 0 missed, 45 timeouts. Every
+timeout is in `find/`, `source.rs` or `words/`, which this spec does not
+touch; they were not examined here. The machine ran other builds (load 20
+to 40) against the 20 s auto timeout.
+
+**Performance.** Release, the 50,000-note nested vault, runs alternated with
+`fc742d8` (this branch's `main`), six each, on a machine shared with other
+builds (load 24 to 44). Both binaries carried a probe that timed each
+`reconcile` before `is_scanned`. Longest turn: 2.6–3.1 ms after, 2.5–2.7 ms
+before. Indexed: 1.18–1.57 s after, 1.25–1.33 s before. First frame:
+114–169 ms after, 110–146 ms before, over 100 ms on both under this load; the
+first run of each pair was the slower one in either order. Turns before
+`is_scanned`: 2 in every run on both. Their sum: 8–41 µs after, 0.1–0.2 µs
+before; the largest one 38 µs, under 8 ms. The sum grows by tens of
+microseconds, far below the launch line's run-to-run noise of tens of
+milliseconds.

@@ -7,7 +7,7 @@ use gpui::TestAppContext;
 use inkra_index::live::Status;
 use inkra_vault::{Mtime, Stamp};
 
-use super::tests::{hold_builds, indexed_vault, indexing, notes_changed, rescan, status};
+use super::tests::{indexed_vault, notes_changed, rescan, status};
 use crate::test_support::entry_id;
 use crate::timeline::Timeline;
 use crate::vault::NoteSaved;
@@ -91,38 +91,5 @@ fn a_rescans_own_turn_counts_in_the_longest_turn(cx: &mut TestAppContext) {
     vault.update(cx, |_, cx| cx.notify());
 
     assert!(cx.read(|cx| cx.global::<Timeline>().longest_turn()) > Duration::ZERO);
-    cx.run_until_parked();
-}
-
-/// The rebuild a notify during the last build asks for starts after that build's turn has set `settling`.
-#[gpui::test]
-fn a_startup_load_ending_in_a_dirty_rebuild_settles_before_it_is_marked_indexed(
-    cx: &mut TestAppContext,
-) {
-    cx.update(|cx| cx.set_global(Timeline::new(Instant::now())));
-    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "beta")]);
-    let gate = fs.block_load("/vault/b.md");
-    cx.run_until_parked();
-    assert_eq!(status(cx, &links), indexing(1, 2));
-    let release = hold_builds(cx, &links);
-
-    // The rebuild drops `b`, the last note loading; the notify while it is held makes it dirty.
-    let b = entry_id(&notes, cx, "b");
-    let trashed = notes.update(cx, |notes, cx| notes.trash(b, cx));
-    cx.run_until_parked();
-    drop(trashed);
-    let vault = notes.read_with(cx, |notes, _| notes.vault().expect("a vault").clone());
-    vault.update(cx, |_, cx| cx.notify());
-    release.send(()).expect("the build waits");
-    cx.run_until_parked();
-
-    let (settled, words) = links.read_with(cx, |links, _| {
-        let index = links.index();
-        (index.words_settled(), index.words().heap_bytes())
-    });
-    assert!(settled, "the rebuild's settle applied");
-    let line = cx.read(|cx| cx.global::<Timeline>().line());
-    assert!(line.contains(&format!("words {words} bytes")), "{line}");
-    gate.release();
     cx.run_until_parked();
 }
