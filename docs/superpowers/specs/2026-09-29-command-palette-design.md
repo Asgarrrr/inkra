@@ -119,6 +119,13 @@ file.
 Order, for any query: recent commands first, newest first, then the rest by
 `name`. The list is sorted once at open; a query filters it in place.
 
+**Deviation (tabs S3).** The user decided "recent, then alphabetical". S3 adds
+one key between the two: after the recent commands, a match that starts at the
+name's first word sorts before a match that starts later. Without it, `new tab`
+with a note showing listed "Follow link in new tab" above "New tab", so `↩` ran
+the wrong command. `update_matches` applies the key with a stable sort, so the
+recent commands keep their order and each group stays alphabetical.
+
 `update_matches` sets the rows synchronously, then calls `matches_updated(0)`
 through `App::defer` on the picker's weak handle. The delegate holds only
 `&mut self` while `Picker` is borrowed, so it cannot call the picker directly.

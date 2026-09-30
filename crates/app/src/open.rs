@@ -1,0 +1,28 @@
+//! Where an opener shows its note: the active tab or a new one (tabs spec, A5).
+
+use gpui::Modifiers;
+use inkra_vault::EntryId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Open {
+    Here,
+    NewTab,
+}
+
+impl Open {
+    /// `⌘`-click opens in a new tab.
+    pub(crate) fn from_click(modifiers: Modifiers) -> Self {
+        if modifiers.secondary() {
+            Self::NewTab
+        } else {
+            Self::Here
+        }
+    }
+}
+
+/// A struct, not an enum: `EventEmitter<E>` needs one type per event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoteActivated {
+    pub(crate) note: EntryId,
+    pub(crate) open: Open,
+}

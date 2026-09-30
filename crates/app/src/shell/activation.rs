@@ -11,6 +11,7 @@ use inkra_vault::EntryId;
 use super::tabs::{Place, capture};
 use super::{AppShell, Bound, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
+use crate::open::Open;
 
 impl AppShell {
     /// Commits into the tab active when it started, or nowhere; bind, select, focus and
@@ -30,22 +31,48 @@ impl AppShell {
                     note: Some(id),
                     view: None,
                 };
-                // Backed today by dropping `activation` on every tab op that changes the active tab; load-bearing once S3 opens into other tabs.
+                // Backed by dropping `activation` on every op that changes the active tab (T4): no load targets an inactive tab.
                 if !shell
                     .tabs
                     .commit(tab, place, || capture(shell.bound.as_ref(), cx))
                 {
                     return;
                 }
-                let editor = shell.bind(id, buffer, None, cx);
-                if let Some(range) = at {
-                    editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
-                }
-                if let Some(focus) = shell.land_focus(cx) {
-                    window.focus(&focus, cx);
-                }
+                shell.land(id, buffer, at, window, cx);
             });
         }));
+    }
+
+    /// A loaded note into the active tab: bind, select `at`, focus.
+    pub(super) fn land(
+        &mut self,
+        id: EntryId,
+        buffer: Entity<Buffer>,
+        at: Option<Range<ByteOffset>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = self.bind(id, buffer, None, cx);
+        if let Some(range) = at {
+            editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
+        }
+        if let Some(focus) = self.land_focus(cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
+    /// The one entry for an opener that carries a target.
+    pub(super) fn open(
+        &mut self,
+        id: EntryId,
+        at: Option<Range<ByteOffset>>,
+        open: Open,
+        cx: &mut Context<Self>,
+    ) {
+        match open {
+            Open::Here => self.show_note(id, at, cx),
+            Open::NewTab => self.open_in_new_tab(id, at, cx),
+        }
     }
 
     /// Opens `id` unless it is showing, which only selects `at` and takes focus, synchronously.
@@ -99,16 +126,16 @@ impl AppShell {
     /// after, so it lives as long as the shell.
     pub(super) fn follow_links_of(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
         cx.subscribe(editor, |shell, _, event: &LinkFollowed, cx| {
-            shell.follow(&event.0, cx);
+            shell.follow(&event.link, event.open, cx);
         })
         .detach();
     }
 
-    /// Resolved against the note showing; a detached note resolves only URLs.
-    pub(super) fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
+    /// Resolved against the note showing, before any tab changes; a detached note resolves only URLs.
+    pub(super) fn follow(&mut self, link: &Link, open: Open, cx: &mut Context<Self>) {
         let source = self.showing().unwrap_or(EntryId::DETACHED);
         match self.links.read(cx).index().resolve_link(source, link) {
-            Resolution::Note(id) => self.show_note(id, None, cx),
+            Resolution::Note(id) => self.open(id, None, open, cx),
             Resolution::External(url) => cx.open_url(&url),
             Resolution::Unresolved | Resolution::SelfLink => {}
         }

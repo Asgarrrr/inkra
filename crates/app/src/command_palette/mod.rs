@@ -10,6 +10,7 @@ use gpui::{
 };
 use inkra_index::{NoteQuery, word_starts};
 
+use crate::open::Open;
 use crate::picker::{Picker, PickerDelegate};
 use crate::row_text::{LitText, styled};
 use crate::theme;
@@ -70,18 +71,24 @@ impl PickerDelegate for CommandPaletteDelegate {
 
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
         let query = NoteQuery::new(query, None, &[]);
-        self.rows = self
+        let mut rows: Vec<(bool, Row)> = self
             .commands
             .iter()
             .enumerate()
             .filter_map(|(ix, command)| {
                 let lit = word_starts(&query, &command.name)?;
-                Some(Row {
+                let later =
+                    !command.recent && !lit.is_empty() && !lit.iter().any(|range| range.start == 0);
+                let row = Row {
                     command: ix,
                     name: LitText::line(&command.name, lit),
-                })
+                };
+                Some((later, row))
             })
             .collect();
+        // Stable: recent keeps its order and each group stays alphabetical (palette spec, D3).
+        rows.sort_by_key(|(later, _)| *later);
+        self.rows = rows.into_iter().map(|(_, row)| row).collect();
         // The picker is borrowed here; `App::defer` lands in this flush, before any draw or key.
         let picker = cx.weak_entity();
         cx.defer(move |cx| {
@@ -92,7 +99,8 @@ impl PickerDelegate for CommandPaletteDelegate {
         Task::ready(())
     }
 
-    fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
+    /// `open` does not apply: `⌘↵` runs the command, as `enter`.
+    fn confirm(&mut self, ix: usize, _: Open, cx: &mut Context<Picker<Self>>) {
         if let Some(Row { command, .. }) = self.rows.get(ix) {
             cx.emit(CommandChosen(self.commands[*command].action.boxed_clone()));
         }

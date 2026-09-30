@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::{Picker, PickerDelegate};
+use crate::open::Open;
 use crate::theme;
 
 /// Each query answers after this, so a test can type twice before the first answer.
@@ -18,7 +19,7 @@ pub(crate) const DELAY: Duration = Duration::from_millis(10);
 pub(crate) struct Letters<const KIND: u8 = 0> {
     all: Vec<&'static str>,
     rows: Vec<&'static str>,
-    pub(crate) confirmed: Rc<RefCell<Vec<&'static str>>>,
+    pub(crate) confirmed: Rc<RefCell<Vec<(&'static str, Open)>>>,
     /// Every query whose result reached the picker, in order.
     pub(crate) applied: Rc<RefCell<Vec<String>>>,
     pub(crate) footer: Option<&'static str>,
@@ -82,9 +83,9 @@ impl<const KIND: u8> PickerDelegate for Letters<KIND> {
         })
     }
 
-    fn confirm(&mut self, ix: usize, _: &mut Context<Picker<Self>>) {
+    fn confirm(&mut self, ix: usize, open: Open, _: &mut Context<Picker<Self>>) {
         if let Some(row) = self.rows.get(ix) {
-            self.confirmed.borrow_mut().push(row);
+            self.confirmed.borrow_mut().push((row, open));
         }
     }
 

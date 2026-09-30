@@ -2,6 +2,7 @@ use gpui::{App, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, P
 use inkra_markdown::{Link, links};
 
 use super::{EditorView, LinkFollowed};
+use crate::open::Open;
 use crate::text_input::InputHost;
 
 impl EditorView {
@@ -42,7 +43,13 @@ impl EditorView {
         if event.modifiers.platform
             && let Some(link) = self.link_under(event.position, cx)
         {
-            cx.emit(LinkFollowed(link));
+            // `⇧` adds the new tab: a mouse event keeps it, only a key's character clears it.
+            let open = if event.modifiers.shift {
+                Open::NewTab
+            } else {
+                Open::Here
+            };
+            cx.emit(LinkFollowed { link, open });
             return;
         }
         self.is_selecting = true;

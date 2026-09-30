@@ -27,7 +27,12 @@ paths:
   move happen in one `update_in`, with no `await` between them.
 - A widget that opens a note emits `NoteActivated`; it never holds an
   `Entity<EditorView>`. The emit is indirect because a synchronous callback would
-  re-lease the `Sidebar`.
+  re-lease the `Sidebar`. `NoteActivated` and `Open { Here, NewTab }` live in
+  `open.rs`; every opener carries an `Open`, and `AppShell::open` routes it.
+- A new-tab open (`open_in_new_tab`) inserts its tab when the note lands, in the
+  one `activation` slot, and parks the tab left through `insert`'s closure. It
+  lands only while the tab it started from is active. The sidebar's `Here`
+  stays on `open_note` until S4.
 - Every binding names a context (only `cmd-q` does not). A new focusable view
   inherits nothing and must bind every key it needs, as `NameField` does.
 - A binding goes where its handler is reachable from the focused leaf: window-wide

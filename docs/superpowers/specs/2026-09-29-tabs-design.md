@@ -428,6 +428,57 @@ The bench (`cargo bench -p inkra-text -- --quick`, not a gate): one insert
 A thousand switches on one note add about 0.7 µs to a keystroke. "Anchor slot
 reuse" stays Deferred.
 
+## As built (S3)
+
+Plan: `docs/superpowers/plans/2026-09-29-tabs-s3.md`. Built as planned, with
+these facts and deviations:
+
+- **The new tab is inserted when its note lands.** `open_in_new_tab` spawns
+  the load into the one `activation` slot. The landing checks that the source
+  tab is still active, then inserts `Place { note, view: None }` at
+  `active_index() + 1`, parks the tab left through `insert`'s closure, binds,
+  selects `at`, focuses and scrolls the tab into the bar, in one `update_in`.
+  Opening into an empty tab first would drop the editor for a frame, and a
+  second quick `⌘`-click's `show_place` would cancel the first open and leave
+  its tab empty for good.
+- **One pending open.** `Here` and `NewTab` share `activation`: the last pick
+  wins, and every op that changes the active tab cancels it (T4). A trash that
+  empties the active tab now drops `activation` too, in the `NoteClosed`
+  subscription. The landing's source check is backed by that drop, as
+  `commit`'s is: removing it breaks no test.
+- **A new tab on the note showing duplicates its view.** `bind`'s same-note
+  branch keeps the editor's caret and top line, and the tab left parks the
+  same view. Another note starts at its top.
+- **`SecondaryConfirm`, after Zed's `menu::SecondaryConfirm`.** `⌘↵` in a
+  picker is `picker::SecondaryConfirm`, bound in the `Picker` context.
+  `PickerDelegate::confirm` takes an `Open`, and `confirm_on_update` is an
+  `Option<Open>`. The palette ignores `open`: `⌘↵` runs the command.
+- **`⌘`-click on a picker row opens in a new tab**, as Zed's row click passes
+  `modifiers().secondary()`. This is an addition to the Keys table.
+- **Where each click reads `⌘`.** A sidebar row, a backlink row and a link act
+  at mouse-down and read the press's modifiers. A picker row acts at mouse-up
+  and reads the release's. The plan placed backlinks at mouse-up; they already
+  acted at mouse-down, and S3 keeps that.
+- **No open lands on a note being trashed.** `NoteStore::open_note` returns
+  `None` unless the lifecycle is `Open`, on the fast path and after a load.
+  Before S3, a `Here` open landed on a `Trashing(Some(_))` note.
+- **A sidebar click during a rename does nothing.** `Sidebar::activate`
+  returns early while the name field is open, as `step` does. The field still
+  loses the keys: the tree's tracked focus takes them on any press inside it.
+- **Middle click** closes the tab under the pointer through `close_tab`. The ×
+  has no aux listener, so a middle click on it closes its tab.
+- **A palette sort key (after review).** With a note showing, `new tab` listed
+  "Follow link in new tab" above "New tab", and `↩` ran it. The palette now
+  sorts a match at the name's first word before a later match, between
+  "recent" and "alphabetical" (command-palette spec, D3). A recent command
+  still lists first.
+- **`Open::from_click` reads `Modifiers::secondary`**, `⌘` on macOS, as Zed's
+  row click does.
+- **Test adjustments.** Four tests passed when first run, each a
+  guard: a `⌘`-click on a folder that emits an open, a landing that does not
+  focus, and `follow` dropping `open` each fail one. The tab-switch test fails
+  only with both the drop and the source check removed.
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the

@@ -3,10 +3,12 @@ use std::ops::Range;
 #[cfg(any(test, feature = "shot"))]
 use gpui::Pixels;
 use gpui::{
-    App, Context, Div, InteractiveElement, MouseButton, ParentElement, Styled, Window, div,
+    App, Context, Div, InteractiveElement, MouseButton, MouseDownEvent, ParentElement, Styled,
+    Window, div,
 };
 
 use crate::one_line::one_line;
+use crate::open::Open;
 use crate::theme;
 
 use super::rows::Item;
@@ -79,10 +81,11 @@ impl Sidebar {
                 .bg(background)
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |sidebar, _event, window, cx| {
+                    cx.listener(move |sidebar, event: &MouseDownEvent, window, cx| {
                         // Focus first, so the tree's bindings resolve from the next keystroke.
                         window.focus(&sidebar.focus_handle, cx);
-                        sidebar.activate(&row, cx);
+                        // The press's modifiers: the row acts at mouse-down, a picker row at the release.
+                        sidebar.activate(&row, Open::from_click(event.modifiers), cx);
                     }),
                 )
                 .child(label)

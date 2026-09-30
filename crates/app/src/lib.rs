@@ -12,6 +12,7 @@ mod field;
 mod index;
 mod keymap;
 mod one_line;
+mod open;
 mod picker;
 mod quick_open;
 mod row_text;

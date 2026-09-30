@@ -5,13 +5,26 @@ use inkra_editor::{Copied, LogicalMovement};
 
 use super::motion::Vertical;
 use super::{EditorView, LinkFollowed};
+use crate::open::Open;
 use crate::text_input::InputHost;
 
 actions!(
     editor,
     [
-        Copy, Cut, Paste, Up, Down, SelectUp, SelectDown, DocStart, DocEnd, Newline, Undo, Redo,
+        Copy,
+        Cut,
+        Paste,
+        Up,
+        Down,
+        SelectUp,
+        SelectDown,
+        DocStart,
+        DocEnd,
+        Newline,
+        Undo,
+        Redo,
         FollowLink,
+        FollowLinkInNewTab,
     ]
 );
 
@@ -103,11 +116,24 @@ impl EditorView {
         self.edit_buffer(window, cx, |state, buffer| state.insert(buffer, now, "\n"));
     }
 
-    /// Follows at the selection's head; the view never resolves, the shell does.
     pub(super) fn follow_link(&mut self, _: &FollowLink, _: &mut Window, cx: &mut Context<Self>) {
+        self.follow_at_cursor(Open::Here, cx);
+    }
+
+    pub(super) fn follow_link_in_new_tab(
+        &mut self,
+        _: &FollowLinkInNewTab,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_at_cursor(Open::NewTab, cx);
+    }
+
+    /// Follows at the selection's head; the view never resolves, the shell does.
+    fn follow_at_cursor(&mut self, open: Open, cx: &mut Context<Self>) {
         let text = self.input.buffer().read(cx).text();
         if let Some(link) = inkra_markdown::link_at(text, self.cursor()) {
-            cx.emit(LinkFollowed(link));
+            cx.emit(LinkFollowed { link, open });
         }
     }
 

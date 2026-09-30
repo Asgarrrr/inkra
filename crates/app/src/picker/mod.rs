@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use crate::field::{Cancelled, Confirmed, Edited, NameField};
+use crate::open::Open;
 
 #[cfg(test)]
 pub(crate) mod letters;
@@ -16,7 +17,7 @@ pub(crate) mod runs;
 #[cfg(test)]
 mod tests;
 
-actions!(picker, [SelectPrev, SelectNext]);
+actions!(picker, [SelectPrev, SelectNext, SecondaryConfirm]);
 
 /// The picker is done: a row was confirmed, it was cancelled, or it lost focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +37,8 @@ pub(crate) trait PickerDelegate: Sized + 'static {
     fn is_selectable(&self, ix: usize) -> bool;
     /// The picker holds the task, so the next query drops it.
     fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()>;
-    fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>);
+    /// `open` is where the pick shows: `⌘↵` and a `⌘`-click ask for a new tab.
+    fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>);
     /// Exactly `row_height` tall: `uniform_list` measures every row from row 0.
     fn render_row(&self, ix: usize, selected: bool, cx: &mut Context<Picker<Self>>) -> AnyElement;
     /// The row's plain text, its accessible label.
@@ -59,8 +61,8 @@ pub(crate) struct Picker<D: PickerDelegate> {
     pending: Option<Task<()>>,
     /// Until the delegate calls `matches_updated` or `matches_refreshed`, the rows answer an older query.
     awaiting_matches: bool,
-    /// `enter` landed while `awaiting_matches`: confirm once the rows answer the current query.
-    confirm_on_update: bool,
+    /// `enter` or `⌘↵` landed while `awaiting_matches`: confirm once the rows answer the current query.
+    confirm_on_update: Option<Open>,
     /// A row was confirmed: the picker is dismissing, so a deferred refresh has nothing to refresh.
     confirmed: bool,
     _subscriptions: Vec<Subscription>,
@@ -76,7 +78,7 @@ impl<D: PickerDelegate> Picker<D> {
                 picker.refresh(cx);
             }),
             cx.subscribe(&field, |picker, _, _: &Confirmed, cx| {
-                picker.confirm(cx);
+                picker.confirm(Open::Here, cx);
             }),
             cx.subscribe(&field, |_, _, _: &Cancelled, cx| cx.emit(Dismissed)),
             // Switching to another app blurs the field; that is not a dismiss.
@@ -94,7 +96,7 @@ impl<D: PickerDelegate> Picker<D> {
             scroll: UniformListScrollHandle::new(),
             pending: None,
             awaiting_matches: false,
-            confirm_on_update: false,
+            confirm_on_update: None,
             confirmed: false,
             _subscriptions: subscriptions,
         };
@@ -147,8 +149,8 @@ impl<D: PickerDelegate> Picker<D> {
     fn matches_landed(&mut self, cx: &mut Context<Self>) {
         self.awaiting_matches = false;
         cx.notify();
-        if std::mem::take(&mut self.confirm_on_update) {
-            self.confirm_selected(cx);
+        if let Some(open) = self.confirm_on_update.take() {
+            self.confirm_selected(open, cx);
         }
     }
 
@@ -187,28 +189,33 @@ impl<D: PickerDelegate> Picker<D> {
         }
     }
 
+    /// As Zed's `menu::SecondaryConfirm`: `⌘↵` confirms into a new tab.
+    fn secondary_confirm(&mut self, _: &SecondaryConfirm, _: &mut Window, cx: &mut Context<Self>) {
+        self.confirm(Open::NewTab, cx);
+    }
+
     /// As Zed's `confirm_on_update`: `enter` typed right after a key confirms that key's result.
-    fn confirm(&mut self, cx: &mut Context<Self>) {
+    fn confirm(&mut self, open: Open, cx: &mut Context<Self>) {
         if self.awaiting_matches {
-            self.confirm_on_update = true;
+            self.confirm_on_update = Some(open);
         } else {
-            self.confirm_selected(cx);
+            self.confirm_selected(open, cx);
         }
     }
 
-    fn confirm_selected(&mut self, cx: &mut Context<Self>) {
+    fn confirm_selected(&mut self, open: Open, cx: &mut Context<Self>) {
         let Some(ix) = self.selected else {
             return;
         };
         self.confirmed = true;
-        self.delegate.confirm(ix, cx);
+        self.delegate.confirm(ix, open, cx);
         cx.emit(Dismissed);
     }
 
-    fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
+    fn click(&mut self, ix: usize, open: Open, cx: &mut Context<Self>) {
         if self.delegate.is_selectable(ix) {
             self.selected = Some(ix);
-            self.confirm_selected(cx);
+            self.confirm_selected(open, cx);
         }
     }
 }

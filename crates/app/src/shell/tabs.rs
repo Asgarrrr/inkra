@@ -1,7 +1,10 @@
 //! Tabs over the one editor: a switch captures the view left and binds the place arriving (tabs spec, A3).
 
+use std::ops::Range;
+
 use gpui::{App, Context, Window, actions};
 use inkra_tabs::{Closed, Direction, TabId};
+use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 
 use super::parked::Parked;
@@ -56,6 +59,37 @@ impl AppShell {
         });
         self.show_place(Place::default(), window, cx);
         self.keep_active_tab_visible();
+    }
+
+    /// Inserted when the note lands, not before: an empty tab first would drop the editor, and a
+    /// second open's `show_place` would cancel the first, leaving its tab empty.
+    pub(super) fn open_in_new_tab(
+        &mut self,
+        id: EntryId,
+        at: Option<Range<ByteOffset>>,
+        cx: &mut Context<Self>,
+    ) {
+        let source = self.tabs.active();
+        let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
+        self.activation = Some(cx.spawn(async move |shell, cx| {
+            let Some(buffer) = opened.await else { return };
+            let _ = shell.update_in(cx, |shell, window, cx| {
+                // Backed by dropping `activation` on every op that changes the active tab (T4).
+                if shell.tabs.active() != source {
+                    return;
+                }
+                let place = Place {
+                    note: Some(id),
+                    view: None,
+                };
+                shell.tabs.insert(shell.tabs.active_index() + 1, place, || {
+                    park(&mut shell.parked, source, shell.bound.as_ref(), cx)
+                });
+                shell.land(id, buffer, at, window, cx);
+                shell.keep_active_tab_visible();
+                cx.notify();
+            });
+        }));
     }
 
     pub(super) fn close_active_tab(

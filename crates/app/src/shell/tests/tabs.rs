@@ -479,3 +479,24 @@ fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestA
 
     assert_eq!(view_of(&window, &mut cx), (at(610)..at(612), top));
 }
+
+/// `close_tab` leaves through `capture`, which seals the undo group; the tab shown is on the
+/// same note, so no save of a note left seals it instead.
+#[gpui::test]
+fn closing_a_tab_onto_the_same_note_seals_its_undo_group(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    window
+        .update(&mut cx, |shell, _, cx| shell.open_in_new_tab(a, None, cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.simulate_input("x");
+    let typed = text_of(&window, &mut cx, a);
+
+    cx.simulate_keystrokes("cmd-w");
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    cx.simulate_input("y");
+    cx.simulate_keystrokes("cmd-z");
+
+    assert_eq!(text_of(&window, &mut cx, a), typed);
+}

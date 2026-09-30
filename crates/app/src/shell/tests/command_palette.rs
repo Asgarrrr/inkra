@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 
-use super::{activate, editor, no_vault, showing, tree_focused, two_notes, vault_names};
+use super::{activate, editor, no_vault, showing, tab_notes, tree_focused, two_notes, vault_names};
 use crate::Quit;
 use crate::shell::{AppShell, NoteStore};
 use crate::sidebar::Sidebar;
@@ -162,6 +162,41 @@ fn choosing_new_note_creates_a_note(cx: &mut TestAppContext) {
     assert_eq!(
         vault_names(&notes, &mut visual),
         ["a.md", "b.md", "plan.md"]
+    );
+}
+
+/// "Follow link in new tab" matches too, and sorts first by name; its match starts later.
+#[gpui::test]
+fn new_tab_ranks_new_tab_first_with_a_note_showing(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p n e w space t a b");
+    visual.run_until_parked();
+    assert!(has(&listed(window, &mut visual), "Follow link in new tab"));
+
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+
+    let tabs = tab_notes(&window, &mut visual).0;
+    assert_eq!(
+        (tabs.len(), tabs.get(1)),
+        (2, Some(&None)),
+        "\"New tab\" ran"
+    );
+}
+
+#[gpui::test]
+fn a_recent_command_stays_first_though_its_match_starts_later(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p f o l l o w space n e w enter");
+    visual.run_until_parked();
+
+    visual.simulate_keystrokes("cmd-shift-p n e w space t a b");
+    visual.run_until_parked();
+
+    let names = listed(window, &mut visual);
+    assert_eq!(
+        names.iter().map(|label| name(label)).collect::<Vec<_>>(),
+        ["Follow link in new tab", "New tab"]
     );
 }
 

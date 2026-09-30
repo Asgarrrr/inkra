@@ -203,3 +203,35 @@ async fn a_note_whose_delete_failed_still_autosaves(cx: &mut TestAppContext) {
         "autosave must survive a delete that did not happen"
     );
 }
+
+/// A trashing note still binds its buffer (`Trashing(Some)`); an opener must not land on it.
+#[gpui::test]
+async fn opening_a_note_does_not_land_on_one_already_trashing(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (store, _a, b) = two_notes(cx, &fs);
+
+    opened(&store, cx, b).await;
+    let trashed = store.update(cx, |store, cx| store.trash(b, cx));
+    let reopened = store.update(cx, |store, cx| store.open_note(b, cx)).await;
+
+    assert!(reopened.is_none(), "a note being trashed does not open");
+    assert!(trashed.await);
+}
+
+/// The load lands into `Trashing(Some)` (the merge the gone-note writer needs); no opener gets it.
+#[gpui::test]
+async fn a_load_landing_during_a_trash_does_not_open(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (store, _a, b) = two_notes(cx, &fs);
+    let gate = fs.block_load("/vault/b.md");
+    let opening = store.update(cx, |store, cx| store.open_note(b, cx));
+    let trashed = store.update(cx, |store, cx| store.trash(b, cx));
+
+    gate.release();
+
+    assert!(
+        opening.await.is_none(),
+        "a note being trashed does not open"
+    );
+    assert!(trashed.await);
+}

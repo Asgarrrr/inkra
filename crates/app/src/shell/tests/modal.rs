@@ -6,6 +6,7 @@ use gpui::{
 use inkra_vault::mem_fs::MemFs;
 
 use super::{activate, editor, showing, tree_focused, two_notes};
+use crate::open::Open;
 use crate::picker::Picker;
 use crate::picker::letters::{DELAY, Letters};
 use crate::shell::{AppShell, SIDEBAR_WIDTH};
@@ -159,7 +160,7 @@ fn a_click_on_a_picker_row_does_not_reach_the_editor(cx: &mut TestAppContext) {
 
     assert_eq!(
         picker.read_with(&visual, |p, _| p.delegate.confirmed.borrow().clone()),
-        ["beet"]
+        [("beet", Open::Here)]
     );
     assert_eq!(
         editor(&window, cx).update(cx, |editor, _| editor.cursor()),

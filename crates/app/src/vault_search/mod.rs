@@ -13,6 +13,7 @@ use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
 use crate::index::{IndexSync, SCANNING};
+use crate::open::Open;
 use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
 use crate::theme;
@@ -33,6 +34,7 @@ const LIMIT: usize = 1_000;
 pub(crate) struct HitActivated {
     pub(crate) note: EntryId,
     pub(crate) range: Range<ByteOffset>,
+    pub(crate) open: Open,
 }
 
 impl EventEmitter<HitActivated> for Picker<VaultSearchDelegate> {}
@@ -191,11 +193,12 @@ impl PickerDelegate for VaultSearchDelegate {
         Runs::update_matches(self, query, cx)
     }
 
-    fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
+    fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>) {
         if let Some(Row::Hit(hit)) = self.results.rows.get(ix) {
             cx.emit(HitActivated {
                 note: hit.note,
                 range: hit.range.clone(),
+                open,
             });
         }
     }

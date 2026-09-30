@@ -188,6 +188,10 @@ here, so the two cannot drift.
   than a keystroke (a network or synced vault, or a note large enough that
   `open_note` takes over ~100 ms), or the first report of a name typed into a
   note.
+- A click elsewhere during a rename leaves the name field open without focus:
+  commit or cancel on blur. This predates tabs: gpui's `track_focus` on the
+  tree takes the focus on any press inside it. **Trigger:** the first report
+  of a name field left open.
 
 ## Startup performance
 

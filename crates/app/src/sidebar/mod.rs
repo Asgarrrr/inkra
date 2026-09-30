@@ -7,6 +7,7 @@ use gpui::{
 };
 use inkra_vault::{EntryId, Kind};
 
+use crate::open::NoteActivated;
 use crate::theme;
 use crate::vault::NoteStore;
 
@@ -33,10 +34,6 @@ actions!(vault_tree, [NewNote, NewFolder]);
 
 const INDENT_BASE: Pixels = px(8.);
 const INDENT_STEP: Pixels = px(12.);
-
-/// A struct, not an enum: `EventEmitter<E>` needs one type per event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NoteActivated(pub(crate) EntryId);
 
 impl EventEmitter<NoteActivated> for Sidebar {}
 

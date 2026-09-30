@@ -13,7 +13,8 @@ use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
-use super::{AppShell, EditorView, NoteActivated, NoteStore, Sidebar};
+use super::{AppShell, EditorView, NoteStore, Sidebar};
+use crate::open::{NoteActivated, Open};
 
 mod activation;
 mod backlinks;
@@ -23,6 +24,7 @@ mod creating;
 mod following;
 mod gone;
 mod modal;
+mod open;
 mod open_first;
 mod parked;
 mod quick_open;
@@ -118,7 +120,12 @@ pub(super) fn two_notes(
 }
 
 pub(super) fn activate(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, id: EntryId) {
-    sidebar.update(cx, |_, cx| cx.emit(NoteActivated(id)));
+    sidebar.update(cx, |_, cx| {
+        cx.emit(NoteActivated {
+            note: id,
+            open: Open::Here,
+        });
+    });
 }
 
 /// Must draw the sidebar before focusing it: `track_focus` only registers on render.
