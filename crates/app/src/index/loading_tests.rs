@@ -19,28 +19,6 @@ use crate::test_support::{entry_id, scan_notes};
 use crate::vault::NoteStore;
 
 #[gpui::test]
-fn a_note_queued_twice_is_loaded_once(cx: &mut TestAppContext) {
-    // One core, so `a`'s parked load holds the queue and `b`'s first entry is superseded unread.
-    cx.executor().set_num_cpus(1);
-    let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", ""), ("c.md", "")]);
-    cx.run_until_parked();
-    let b = Path::new("/vault/b.md");
-    assert_eq!(fs.loads(b), 1);
-
-    let gate = fs.block_load("/vault/a.md");
-    fs.insert_file("/vault/a.md", "a");
-    fs.insert_file("/vault/b.md", "[[a]]");
-    create(cx, &notes, "d");
-    fs.insert_file("/vault/b.md", "[[c]]");
-    create(cx, &notes, "e");
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(fs.loads(b), 2, "the first queue entry for b was superseded");
-    assert_eq!(backlinks(cx, &notes, &links, "c"), ["b"]);
-}
-
-#[gpui::test]
 fn at_most_one_load_per_core_runs_at_once(cx: &mut TestAppContext) {
     cx.executor().set_num_cpus(2);
     let fs = Arc::new(MemFs::new());
@@ -108,11 +86,13 @@ fn land_at_once(
     budget: Duration,
 ) -> usize {
     let ids: Vec<EntryId> = names.iter().map(|name| entry_id(notes, cx, name)).collect();
-    links.update(cx, |links, _| {
+    links.update(cx, |links, cx| {
         links.apply_budget = Some(budget);
         for id in ids {
             let mtime = Mtime(SystemTime::UNIX_EPOCH);
-            let ticket = links.live.saved(id, mtime);
+            let ticket = links
+                .turn(cx, |turn| turn.saved(id, mtime))
+                .expect("a vault");
             let loaded = Ok(NoteContent::parse(Arc::from(text), mtime));
             links
                 .landed
@@ -174,47 +154,6 @@ fn a_turn_applies_every_landed_load_within_its_budget(cx: &mut TestAppContext) {
         "one turn applies all three"
     );
     assert_eq!(found(cx, &links, "landed").len(), 3);
-}
-
-#[gpui::test]
-fn a_note_queued_while_it_loads_waits_for_its_load(cx: &mut TestAppContext) {
-    let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
-    cx.run_until_parked();
-    let a = Path::new("/vault/a.md");
-
-    let gate = fs.block_load("/vault/a.md");
-    fs.insert_file("/vault/a.md", "[[c]]");
-    create(cx, &notes, "c");
-    assert_eq!(
-        status(cx, &links),
-        indexing(2, 3),
-        "a is loading, c is loaded"
-    );
-    let reads = fs.loads(a);
-
-    // Free slots remain, yet a's new entry waits: one read per note at a time.
-    fs.insert_file("/vault/a.md", "[[b]]");
-    create(cx, &notes, "d");
-    assert_eq!(
-        fs.loads(a),
-        reads,
-        "no second read of a while one is in flight"
-    );
-    assert_eq!(
-        status(cx, &links),
-        indexing(3, 4),
-        "a is loading and queued, and counts once"
-    );
-
-    gate.release();
-    cx.run_until_parked();
-    assert_eq!(
-        fs.loads(a),
-        reads + 1,
-        "the queued entry loads once the first lands"
-    );
-    assert_eq!(status(cx, &links), Status::Ready);
-    assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
 }
 
 #[gpui::test]
@@ -333,8 +272,8 @@ fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppCo
     cx.run_until_parked();
     drop(renamed);
     // What `saved` does before its parse lands: the save, not a reload, brings the text.
-    links.update(cx, |sync, _| {
-        let _parsing = sync.live.saved(a, Mtime(SystemTime::UNIX_EPOCH));
+    links.update(cx, |sync, cx| {
+        let _parsing = sync.turn(cx, |turn| turn.saved(a, Mtime(SystemTime::UNIX_EPOCH)));
     });
     gate.release();
     cx.run_until_parked();

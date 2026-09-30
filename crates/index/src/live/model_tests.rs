@@ -1,5 +1,5 @@
-//! Random interleavings of vault changes, builds held across them, saves and loads landing in
-//! any order: the index ends as a fresh build of the final vault answers.
+//! Random interleavings of vault changes, builds held across them, saves, loads and merges
+//! landing in any order: the index ends as a fresh build of the final vault answers.
 
 use std::collections::HashSet;
 
@@ -8,8 +8,8 @@ use inkra_vault::{EntryId, Fs, Kind};
 use proptest::prelude::*;
 
 use super::diff::notes;
-use super::tests::{Harness, failure};
-use super::{BuildJob, LiveIndex, Status, Ticket};
+use super::tests::{Harness, Pending, failure};
+use super::{LiveIndex, Status, Ticket, Turn};
 use crate::NoteContent;
 use crate::test_support::{ROOT, texts};
 
@@ -24,14 +24,15 @@ enum Op {
     Create(usize),
     Rename(usize, usize),
     Trash(usize),
-    StartBuild,
-    ApplyBuild,
-    StartLoad,
+    /// The vault's notify, in its own turn.
+    VaultChanged,
+    RunBuild,
     Land(usize),
     Fail(usize),
     /// A save: the file is written, and its parse lands later.
     Save(usize, usize),
     LandSave(usize),
+    RunMerge,
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -41,38 +42,79 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (0..NAMES.len()).prop_map(Op::Create),
         1 => (any.clone(), 0..NAMES.len()).prop_map(|(at, name)| Op::Rename(at, name)),
         1 => any.clone().prop_map(Op::Trash),
-        2 => Just(Op::StartBuild),
-        2 => Just(Op::ApplyBuild),
-        3 => Just(Op::StartLoad),
+        2 => Just(Op::VaultChanged),
+        2 => Just(Op::RunBuild),
         3 => any.clone().prop_map(Op::Land),
         1 => any.clone().prop_map(Op::Fail),
         1 => (any.clone(), 0..TEXTS.len()).prop_map(|(at, text)| Op::Save(at, text)),
         1 => any.prop_map(Op::LandSave),
+        1 => Just(Op::RunMerge),
     ]
 }
 
-/// The harness and the work in flight: at most one build, any loads and save parses.
+/// The harness, the jobs its turns returned, and the reads and parses waiting to land.
 struct Model {
     h: Harness,
-    build: Option<BuildJob>,
-    /// Each read when its load started: a read landing after a rename swapped two paths would
-    /// hold the other note's text, a race the scheduler does not guard (spec, As built).
+    /// Each read in the turn its load was returned: a read landing after a rename swapped two
+    /// paths would hold the other note's text, a race the scheduler does not guard (spec, As built).
     loads: Vec<(Ticket, inkra_vault::Result<NoteContent>)>,
     saves: Vec<(Ticket, NoteContent)>,
+    /// Turns that reported `indexed`.
+    indexed: usize,
+}
+
+/// Every getter of `LiveIndex`: a turn that does not notify leaves it as it was (D5).
+#[derive(Debug, PartialEq)]
+struct Seen {
+    revision: u64,
+    progress: (usize, usize),
+    status: Status,
+    answers: Vec<Answer>,
+}
+
+impl Seen {
+    fn of(h: &Harness) -> Self {
+        Self {
+            revision: h.live.revision(),
+            progress: h.live.progress(),
+            status: h.live.status(),
+            answers: answers(h),
+        }
+    }
 }
 
 impl Model {
     fn new() -> Self {
         Self {
-            h: Harness::new(&[
-                ("a.md", "[[b]]"),
-                ("b.md", "[[c]] [[a]]"),
-                ("d/e.md", "[[a]]"),
-            ]),
-            build: None,
+            h: Harness::with_slots(
+                &[
+                    ("a.md", "[[b]]"),
+                    ("b.md", "[[c]] [[a]]"),
+                    ("d/e.md", "[[a]]"),
+                ],
+                SLOTS,
+            ),
             loads: Vec::new(),
             saves: Vec::new(),
+            indexed: 0,
         }
+    }
+
+    /// Runs one turn, reading its loads and keeping its other jobs pending; a turn that does not
+    /// notify changes no getter.
+    fn turn<R>(&mut self, inputs: impl FnOnce(&mut Turn<'_>) -> R) -> Result<R, TestCaseError> {
+        let before = Seen::of(&self.h);
+        let (result, effects) = self.h.turn(inputs);
+        drop(effects.retired);
+        for load in std::mem::take(&mut self.h.pending.loads) {
+            let read = self.h.read(&load);
+            self.loads.push((load.ticket, read));
+        }
+        self.indexed += usize::from(effects.indexed);
+        if !effects.notify {
+            prop_assert_eq!(before, Seen::of(&self.h), "a turn that did not notify");
+        }
+        Ok(result)
     }
 
     /// The vault's notes, in vault order, with their absolute paths.
@@ -90,56 +132,49 @@ impl Model {
         (!notes.is_empty()).then(|| notes[at % notes.len()].clone())
     }
 
-    fn start_build(&mut self) {
-        let job = self.h.live.start_build(self.h.vault.shared_entries());
-        if let Some(job) = job {
-            assert!(self.build.is_none(), "one build at a time");
-            self.build = Some(job);
-        }
+    fn vault_changed(&mut self) -> Result<(), TestCaseError> {
+        // Typed, or clippy asks for the path `Turn::vault_changed`, which binds one lifetime and fails the bound.
+        self.turn(|t: &mut Turn<'_>| t.vault_changed())
     }
 
-    fn apply_build(&mut self) -> bool {
-        let Some(job) = self.build.take() else {
-            return false;
+    fn run_build(&mut self) -> Result<bool, TestCaseError> {
+        let Some(job) = self.h.pending.build.take() else {
+            return Ok(false);
         };
-        let applied = self.h.live.apply_build(job.run(), &self.h.vault);
-        drop(applied.retired);
-        // As `IndexSync` does: a change during the build asks for another.
-        if applied.dirty {
-            self.start_build();
-        }
-        true
+        let built = job.run();
+        self.turn(|t| t.built(built))?;
+        Ok(true)
     }
 
-    fn start_load(&mut self) -> bool {
-        let Some(load) = self.h.next(SLOTS) else {
-            return false;
-        };
-        let read = self.h.read(&load);
-        self.loads.push((load.ticket, read));
-        true
-    }
-
-    fn land(&mut self, at: usize, fail: bool) -> bool {
+    fn land(&mut self, at: usize, fail: bool) -> Result<bool, TestCaseError> {
         if self.loads.is_empty() {
-            return false;
+            return Ok(false);
         }
         let (ticket, read) = self.loads.remove(at % self.loads.len());
         let loaded = if fail { Err(failure()) } else { read };
-        self.h.live.landed(ticket, loaded, &self.h.vault);
-        true
+        self.turn(|t| t.landed(ticket, loaded))?;
+        Ok(true)
     }
 
-    fn land_save(&mut self, at: usize) -> bool {
+    fn land_save(&mut self, at: usize) -> Result<bool, TestCaseError> {
         if self.saves.is_empty() {
-            return false;
+            return Ok(false);
         }
         let (ticket, content) = self.saves.remove(at % self.saves.len());
-        self.h.live.landed(ticket, Ok(content), &self.h.vault);
-        true
+        self.turn(|t| t.landed(ticket, Ok(content)))?;
+        Ok(true)
     }
 
-    fn run(&mut self, op: &Op) {
+    fn run_merge(&mut self) -> Result<bool, TestCaseError> {
+        let Some(merge) = self.h.pending.merge.take() else {
+            return Ok(false);
+        };
+        let merged = merge.run();
+        self.turn(|t| t.merged(merged))?;
+        Ok(true)
+    }
+
+    fn run(&mut self, op: &Op) -> Result<(), TestCaseError> {
         match *op {
             Op::Write(at, text) => {
                 if let Some((_, path)) = self.note(at) {
@@ -166,18 +201,15 @@ impl Model {
                     self.h.rescan();
                 }
             }
-            Op::StartBuild => self.start_build(),
-            Op::ApplyBuild => {
-                self.apply_build();
-            }
-            Op::StartLoad => {
-                self.start_load();
+            Op::VaultChanged => self.vault_changed()?,
+            Op::RunBuild => {
+                self.run_build()?;
             }
             Op::Land(at) => {
-                self.land(at, false);
+                self.land(at, false)?;
             }
             Op::Fail(at) => {
-                self.land(at, true);
+                self.land(at, true)?;
             }
             Op::Save(at, text) => {
                 if let Some((id, path)) = self.note(at) {
@@ -187,15 +219,19 @@ impl Model {
                     let Some(mtime) = self.h.vault.entry(id).map(|entry| entry.mtime) else {
                         panic!("a saved note stays listed");
                     };
-                    let ticket = self.h.live.saved(id, mtime);
+                    let ticket = self.turn(|t| t.saved(id, mtime))?;
                     self.saves
                         .push((ticket, NoteContent::parse(TEXTS[text].into(), mtime)));
                 }
             }
             Op::LandSave(at) => {
-                self.land_save(at);
+                self.land_save(at)?;
+            }
+            Op::RunMerge => {
+                self.run_merge()?;
             }
         }
+        Ok(())
     }
 
     /// No more loads than slots, and every pending note a note of the applied build.
@@ -248,17 +284,18 @@ impl Model {
         Ok(())
     }
 
-    /// Runs every build, parse and load in flight, then a last build, until nothing is left;
-    /// false when that takes more steps than the vault can need, as a build that stays dirty would.
-    fn drain(&mut self) -> bool {
-        self.start_build();
+    /// A last vault change, then every job its turns return, until none is left; false when that
+    /// takes more steps than the vault can need, as a build that stays dirty would.
+    fn drain(&mut self) -> Result<bool, TestCaseError> {
+        self.vault_changed()?;
         for _ in 0..1_000 {
-            let busy = self.apply_build() | self.land(0, false) | self.land_save(0);
-            if !busy && !self.start_load() {
-                return true;
+            let busy =
+                self.run_build()? | self.land(0, false)? | self.land_save(0)? | self.run_merge()?;
+            if !busy {
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 }
 
@@ -294,18 +331,20 @@ proptest! {
     ) {
         let mut model = Model::new();
         for op in &ops {
-            model.run(op);
+            model.run(op)?;
             model.check()?;
         }
-        prop_assert!(model.drain(), "the index settles");
+        prop_assert!(model.drain()?, "the index settles");
         model.check()?;
+        prop_assert_eq!(model.indexed, 1, "indexed is reported once");
 
         let mut fresh = Harness {
             fs: std::mem::take(&mut model.h.fs),
             vault: model.h.vault.clone(),
-            live: LiveIndex::default(),
+            live: LiveIndex::new(SLOTS),
+            pending: Pending::default(),
         };
-        fresh.build();
+        let _ = fresh.built();
         fresh.load_all();
 
         prop_assert!(!model.h.live.is_building());

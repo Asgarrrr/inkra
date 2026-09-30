@@ -1,27 +1,16 @@
-//! L7: the startup settle and the one `indexed` report, stepped by `end_turn`.
+//! L7: the startup settle and the one `indexed` report, stepped by each turn's end.
 
+use super::Merge;
 use super::tests::Harness;
-use super::{Merge, TurnEnd};
 
-/// Lands every queued load, one turn each; the merges the turns started, and whether one reported `indexed`.
+/// Lands every pending load, one turn each; the merges the turns started, not run, and whether one reported `indexed`.
 fn load_all_in_turns(h: &mut Harness) -> (Vec<Merge>, bool) {
     let (mut merges, mut indexed) = (Vec::new(), false);
-    while let Some(load) = h.next(usize::MAX) {
-        h.land(&load);
-        let TurnEnd {
-            merge,
-            indexed: now,
-        } = h.turn();
-        merges.extend(merge);
-        indexed |= now;
+    while !h.pending.loads.is_empty() {
+        indexed |= h.land_pending(0).indexed;
+        merges.extend(h.pending.merge.take());
     }
     (merges, indexed)
-}
-
-/// Applies `merge` in its own turn.
-fn merged(h: &mut Harness, merge: Merge) -> TurnEnd {
-    drop(h.live.merged(merge.run()));
-    h.turn()
 }
 
 fn settle(h: &mut Harness) -> Merge {
@@ -37,46 +26,48 @@ fn settle(h: &mut Harness) -> Merge {
 #[test]
 fn the_load_ending_settles_then_reports_indexed_once() {
     let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "beta")]);
-    let _ = h.build();
-    let first = h.turn();
+    let first = h.built();
     assert!(
-        first.merge.is_none() && !first.indexed,
+        h.pending.merge.is_none() && !first.indexed,
         "the loads are queued"
     );
     let merge = settle(&mut h);
 
-    let end = merged(&mut h, merge);
+    let end = h.merged(merge);
 
     assert!(end.indexed);
     assert!(h.live.index().words_settled());
-    let later = h.turn();
-    assert!(later.merge.is_none() && !later.indexed, "reported once");
+    let later = h.idle_turn();
+    assert!(h.pending.merge.is_none() && !later.indexed, "reported once");
 }
 
 #[test]
 fn a_settle_with_nothing_to_merge_reports_indexed_in_that_turn() {
     let mut h = Harness::new(&[("image.png", "")]);
-    let _ = h.build();
 
-    let end = h.turn();
+    let end = h.built();
 
-    assert!(end.merge.is_none());
+    assert!(h.pending.merge.is_none());
     assert!(end.indexed);
 }
 
 #[test]
 fn a_save_during_the_settle_stays_fresh_and_indexed_is_reported() {
     let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "")]);
-    let _ = h.build();
+    let _ = h.built();
     let merge = settle(&mut h);
     let a = h.id("a.md");
-    let ticket = h.live.saved(a, crate::test_support::mtime(9));
     let during = crate::NoteContent::parse("during".into(), crate::test_support::mtime(9));
-    h.live.landed(ticket, Ok(during), &h.vault);
-    let end = h.turn();
-    assert!(end.merge.is_none() && !end.indexed, "the settle still runs");
+    let ((), end) = h.turn(|t| {
+        let ticket = t.saved(a, crate::test_support::mtime(9));
+        t.landed(ticket, Ok(during));
+    });
+    assert!(
+        h.pending.merge.is_none() && !end.indexed,
+        "the settle still runs"
+    );
 
-    let end = merged(&mut h, merge);
+    let end = h.merged(merge);
 
     assert!(end.indexed, "the settle's apply ends the settle");
     assert!(!h.live.index().words_settled(), "the save waits in fresh");
@@ -85,19 +76,22 @@ fn a_save_during_the_settle_stays_fresh_and_indexed_is_reported() {
 #[test]
 fn building_again_before_indexed_settles_again() {
     let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "beta")]);
-    let _ = h.build();
+    let _ = h.built();
     let merge = settle(&mut h);
     h.fs.insert_file(super::tests::path("c.md"), "gamma");
     h.rescan();
-    let _ = h.build();
+    let _ = h.built();
     assert!(h.live.is_building());
 
-    let end = merged(&mut h, merge);
+    let end = h.merged(merge);
     assert!(!end.indexed, "c is loading");
-    assert!(end.merge.is_none(), "one fresh note is below the policy");
+    assert!(
+        h.pending.merge.is_none(),
+        "one fresh note is below the policy"
+    );
 
     let merge = settle(&mut h);
-    assert!(merged(&mut h, merge).indexed);
+    assert!(h.merged(merge).indexed);
 }
 
 #[test]
@@ -107,13 +101,13 @@ fn a_reload_after_indexed_starts_no_settle() {
     let mut files = vec![("a.md", "alpha"), ("b.md", "")];
     files.extend(fillers.iter().map(|file| (file.as_str(), "filler")));
     let mut h = Harness::new(&files);
-    let _ = h.build();
+    let _ = h.built();
     let merge = settle(&mut h);
-    assert!(merged(&mut h, merge).indexed);
+    assert!(h.merged(merge).indexed);
 
     h.fs.insert_file(super::tests::path("a.md"), "changed");
     h.rescan();
-    let _ = h.build();
+    let _ = h.built();
     let (merges, indexed) = load_all_in_turns(&mut h);
 
     assert!(merges.is_empty(), "a reload waits for the policy");
@@ -134,12 +128,12 @@ fn a_load_past_the_policy_starts_a_due_merge() {
         .map(|(file, text)| (file.as_str(), text.as_str()))
         .collect();
     let mut h = Harness::new(&files);
-    let _ = h.build();
+    let _ = h.built();
 
     let mut due = None;
-    while let Some(load) = h.next(usize::MAX) {
-        h.land(&load);
-        if let Some(merge) = h.turn().merge {
+    while !h.pending.loads.is_empty() {
+        let _ = h.land_pending(0);
+        if let Some(merge) = h.pending.merge.take() {
             due = Some(merge);
             break;
         }
@@ -149,6 +143,30 @@ fn a_load_past_the_policy_starts_a_due_merge() {
         panic!("a merge came due");
     };
     assert!(h.live.is_building(), "due before the loads end");
-    let end = merged(&mut h, merge);
+    let end = h.merged(merge);
     assert!(!end.indexed, "a due merge is no settle");
+}
+
+#[test]
+fn a_dirty_rebuild_ending_the_load_settles_before_indexed() {
+    let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let _ = h.built();
+    let _ = h.land_pending(0);
+    assert!(h.live.is_building(), "b is loading");
+    // The build drops b, the last note loading; a change while it runs makes it dirty.
+    h.remove("b.md");
+    let _ = h.vault_changed();
+    let _ = h.vault_changed();
+
+    let applied = h.run_build();
+
+    assert!(!applied.indexed, "not before the settle");
+    assert!(
+        h.pending.merge.is_some(),
+        "the settle starts beside the rerun"
+    );
+    assert!(h.pending.build.is_some(), "the rerun");
+    assert!(h.run_merge().indexed);
+    assert!(h.live.index().words_settled());
+    assert!(!h.run_build().indexed, "reported once");
 }

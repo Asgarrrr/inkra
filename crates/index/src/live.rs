@@ -14,14 +14,16 @@ mod builds;
 mod diff;
 mod loads;
 mod startup;
+mod turn;
 
-pub use builds::{Applied, BuildJob, Built, Retired};
+pub use builds::{BuildJob, Built, Retired};
 pub use loads::{Load, Ticket};
-pub use startup::{Merge, Merged, TurnEnd};
+pub use startup::{Merge, Merged};
+pub use turn::{Effects, Turn};
 
-use builds::Build;
+use builds::{Applied, Build};
 use loads::Loading;
-use startup::Startup;
+use startup::{Startup, TurnEnd};
 
 /// What the index can answer now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +44,6 @@ impl Status {
 }
 
 /// A `NoteIndex` kept current: which notes to load, which load is superseded, when the words merge.
-#[derive(Default)]
 pub struct LiveIndex {
     index: NoteIndex,
     /// The mtime each note was indexed at, or is queued to be.
@@ -63,13 +64,48 @@ pub struct LiveIndex {
     last: Option<Arc<[Entry]>>,
     /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
     note_sets: u64,
+    revision: u64,
     startup: Startup,
+    /// How many loads may run at once.
+    slots: usize,
 }
 
+// A getter added to this `impl` joins `Seen` in `live/model_tests.rs`, or D5's check misses it.
 impl LiveIndex {
+    /// `slots`: how many loads may run at once.
+    ///
+    /// # Panics
+    /// If `slots` is 0: no note would ever load.
+    #[must_use]
+    pub fn new(slots: usize) -> Self {
+        assert!(slots > 0, "a live index needs a load slot");
+        Self {
+            index: NoteIndex::default(),
+            indexed: HashMap::new(),
+            next_seq: 0,
+            latest: HashMap::new(),
+            queue: VecDeque::new(),
+            queued: HashMap::new(),
+            forgotten: HashSet::new(),
+            loading: Vec::new(),
+            build: Build::default(),
+            last: None,
+            note_sets: 0,
+            revision: 0,
+            startup: Startup::default(),
+            slots,
+        }
+    }
+
     #[must_use]
     pub fn index(&self) -> &NoteIndex {
         &self.index
+    }
+
+    /// Moves when an answer may differ: a layout applied, a note's content inserted or forgotten.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// `(loaded, total)`: the notes of the last build, less those queued or loading.
@@ -118,6 +154,9 @@ mod tests;
 
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+mod turn_tests;
 
 #[cfg(test)]
 mod model_tests;

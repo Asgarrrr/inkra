@@ -187,32 +187,6 @@ fn the_notes_are_built_off_the_foreground_and_follow_a_rescan(cx: &mut TestAppCo
     assert_eq!(named(&links, cx, "new"), [entry_id(&notes, cx, "new")]);
 }
 
-/// Every build applies; notifies during one start a single rebuild after it.
-#[gpui::test]
-fn a_build_landing_behind_the_vault_applies_then_rebuilds(cx: &mut TestAppContext) {
-    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]]"), ("b.md", "")]);
-    cx.run_until_parked();
-    let (changed, _subscription) = notes_changed(cx, &links);
-    let first = hold_builds(cx, &links);
-    create(cx, &notes, "c");
-    let second = hold_builds(cx, &links);
-    create(cx, &notes, "d");
-
-    first.send(()).expect("the build waits");
-    cx.run_until_parked();
-
-    assert_eq!(named(&links, cx, "c"), [entry_id(&notes, cx, "c")]);
-    assert!(named(&links, cx, "d").is_empty(), "read before d");
-    assert_eq!(changed.get(), 1);
-
-    second.send(()).expect("the rebuild waits");
-    cx.run_until_parked();
-
-    assert_eq!(named(&links, cx, "d"), [entry_id(&notes, cx, "d")]);
-    assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
-    assert_eq!(changed.get(), 2);
-}
-
 #[gpui::test]
 fn status_goes_scanning_indexing_ready_as_notes_load(cx: &mut TestAppContext) {
     let (fs, _notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", ""), ("c.md", "")]);
@@ -822,41 +796,4 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
         links.read_with(cx, |links, _| links.index().names().len()),
         fresh.read_with(cx, |fresh, _| fresh.index().names().len())
     );
-}
-
-fn revision(cx: &mut TestAppContext, links: &Entity<IndexSync>) -> u64 {
-    links.read_with(cx, |links, _| links.revision())
-}
-
-#[gpui::test]
-fn a_build_applying_changes_the_revision_once(cx: &mut TestAppContext) {
-    let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]]"), ("b.md", "")]);
-    cx.run_until_parked();
-    let before = revision(cx, &links);
-
-    let a = entry_id(&notes, cx, "a");
-    let renamed = notes.update(cx, |notes, cx| notes.rename(a, "z", cx));
-    cx.run_until_parked();
-    drop(renamed);
-
-    assert_eq!(revision(cx, &links), before + 1, "one build, no load");
-}
-
-#[gpui::test]
-fn a_failed_load_changes_the_revision(cx: &mut TestAppContext) {
-    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "[[b]]"), ("b.md", "")]);
-    cx.run_until_parked();
-    let gate = fs.block_load("/vault/a.md");
-    fs.insert_file("/vault/a.md", "changed");
-    create(cx, &notes, "d");
-    cx.run_until_parked();
-    let before = revision(cx, &links);
-
-    // Holds the batch this change starts, as its latency would: the vault still lists the note.
-    let _batch = fs.block_read_dir("/vault");
-    fs.remove(Path::new("/vault/a.md"));
-    gate.release();
-    cx.run_until_parked();
-
-    assert_eq!(revision(cx, &links), before + 1, "a's forget");
 }

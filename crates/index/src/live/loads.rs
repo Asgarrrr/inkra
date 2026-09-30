@@ -34,7 +34,7 @@ pub(super) struct Loading {
 impl LiveIndex {
     /// A note saved: `mtime` is the one indexed, and the parse of its text applies through `landed`.
     #[must_use]
-    pub fn saved(&mut self, id: EntryId, mtime: Mtime) -> Ticket {
+    pub(super) fn saved(&mut self, id: EntryId, mtime: Mtime) -> Ticket {
         let seq = self.next_seq(id);
         self.indexed.insert(id, mtime);
         self.ticket(id, seq)
@@ -42,7 +42,7 @@ impl LiveIndex {
 
     /// The next queued note, while fewer than `slots` load; `vault` is the live one, to find its path.
     #[must_use]
-    pub fn next_load(&mut self, vault: &Vault, slots: usize) -> Option<Load> {
+    pub(super) fn next_load(&mut self, vault: &Vault, slots: usize) -> Option<Load> {
         if self.loading.len() >= slots {
             return None;
         }
@@ -80,7 +80,7 @@ impl LiveIndex {
     }
 
     /// A load or a save's parse landed; true when the index changed. `vault` is the live one.
-    pub fn landed(
+    pub(super) fn landed(
         &mut self,
         ticket: Ticket,
         loaded: inkra_vault::Result<NoteContent>,
@@ -130,6 +130,7 @@ impl LiveIndex {
             return false;
         }
         self.index.insert(id, content);
+        self.revision += 1;
         self.forgotten.remove(&id);
         // Not a note of the index yet (its build is still running): the next build reloads it.
         if !self.index.is_indexed(id) {
@@ -158,6 +159,7 @@ impl LiveIndex {
         self.indexed.remove(&id);
         self.forgotten.insert(id);
         self.index.remove(id);
+        self.revision += 1;
         true
     }
 }

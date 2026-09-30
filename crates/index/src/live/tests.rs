@@ -1,13 +1,12 @@
 //! `LiveIndex` driven by hand: each input, and each race between them.
 
-use std::iter;
 use std::path::{Path, PathBuf};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Mtime, Vault, VaultError};
 
-use super::{Applied, LiveIndex, Load, Status, Ticket, TurnEnd};
+use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
 use crate::NoteContent;
 use crate::test_support::{ROOT, id, texts};
 
@@ -18,11 +17,24 @@ pub(super) struct Harness {
     pub(super) fs: MemFs,
     pub(super) vault: Vault,
     pub(super) live: LiveIndex,
+    pub(super) pending: Pending,
+}
+
+/// The jobs `Harness::turn` kept, not run yet.
+#[derive(Default)]
+pub(super) struct Pending {
+    pub(super) loads: Vec<Load>,
+    pub(super) build: Option<BuildJob>,
+    pub(super) merge: Option<Merge>,
 }
 
 impl Harness {
     /// A scanned vault holding `files` with their texts; nothing is built yet.
     pub(super) fn new(files: &[(&str, &str)]) -> Self {
+        Self::with_slots(files, SLOTS)
+    }
+
+    pub(super) fn with_slots(files: &[(&str, &str)], slots: usize) -> Self {
         let fs = MemFs::new();
         fs.insert_dir(ROOT);
         for (file, text) in files {
@@ -34,14 +46,19 @@ impl Harness {
         Self {
             fs,
             vault,
-            live: LiveIndex::default(),
+            live: LiveIndex::new(slots),
+            pending: Pending::default(),
         }
     }
 
-    /// Built and every note loaded.
-    fn loaded(files: &[(&str, &str)]) -> Self {
-        let mut harness = Self::new(files);
-        harness.build();
+    /// Built and every note loaded, each in its own turn; the settle's merge is pending.
+    pub(super) fn loaded(files: &[(&str, &str)]) -> Self {
+        Self::loaded_with_slots(files, SLOTS)
+    }
+
+    fn loaded_with_slots(files: &[(&str, &str)], slots: usize) -> Self {
+        let mut harness = Self::with_slots(files, slots);
+        let _ = harness.built();
         harness.load_all();
         harness
     }
@@ -53,32 +70,20 @@ impl Harness {
     }
 
     /// Written outside the app, then rescanned.
-    fn write(&mut self, file: &str, text: &str) {
+    pub(super) fn write(&mut self, file: &str, text: &str) {
         self.fs.insert_file(path(file), text);
         self.rescan();
     }
 
-    fn remove(&mut self, file: &str) {
+    pub(super) fn remove(&mut self, file: &str) {
         self.fs.remove(&path(file));
         self.rescan();
     }
 
-    pub(super) fn build(&mut self) -> Applied {
-        let Some(job) = self.live.start_build(self.vault.shared_entries()) else {
-            panic!("no build runs");
-        };
-        self.live.apply_build(job.run(), &self.vault)
-    }
-
-    pub(super) fn next(&mut self, slots: usize) -> Option<Load> {
-        self.live.next_load(&self.vault, slots)
-    }
-
+    /// The first pending load, taken to land by hand.
     fn start(&mut self) -> Load {
-        let Some(load) = self.next(SLOTS) else {
-            panic!("a note is queued");
-        };
-        load
+        assert!(!self.pending.loads.is_empty(), "a note is queued");
+        self.pending.loads.remove(0)
     }
 
     pub(super) fn read(&self, load: &Load) -> inkra_vault::Result<NoteContent> {
@@ -86,19 +91,27 @@ impl Harness {
             .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp.mtime))
     }
 
+    /// Lands `loaded` in its own turn; true when an answer moved.
+    fn landed(&mut self, ticket: Ticket, loaded: inkra_vault::Result<NoteContent>) -> bool {
+        let revision = self.live.revision();
+        let _ = self.turn(|t| t.landed(ticket, loaded));
+        self.live.revision() != revision
+    }
+
     /// Reads the file now and lands the result.
-    pub(super) fn land(&mut self, load: &Load) -> bool {
+    fn land(&mut self, load: &Load) -> bool {
         let loaded = self.read(load);
-        self.live.landed(load.ticket, loaded, &self.vault)
+        self.landed(load.ticket, loaded)
     }
 
     fn fail(&mut self, ticket: Ticket) -> bool {
-        self.live.landed(ticket, Err(failure()), &self.vault)
+        self.landed(ticket, Err(failure()))
     }
 
+    /// Lands every pending load, each in its own turn, until none is left.
     pub(super) fn load_all(&mut self) {
-        while let Some(load) = self.next(SLOTS) {
-            self.land(&load);
+        while !self.pending.loads.is_empty() {
+            let _ = self.land_pending(0);
         }
     }
 
@@ -106,13 +119,14 @@ impl Harness {
     fn saving(&mut self, file: &str, text: &str) -> (Ticket, NoteContent) {
         self.fs.insert_file(path(file), text);
         let mtime = self.mtime_on_disk(file);
-        let ticket = self.live.saved(self.id(file), mtime);
+        let id = self.id(file);
+        let (ticket, _) = self.turn(|t| t.saved(id, mtime));
         (ticket, NoteContent::parse(text.into(), mtime))
     }
 
     fn save(&mut self, file: &str, text: &str) {
         let (ticket, content) = self.saving(file, text);
-        self.live.landed(ticket, Ok(content), &self.vault);
+        self.landed(ticket, Ok(content));
     }
 
     /// Read from the folder listing, so `MemFs::loads` counts no load.
@@ -147,13 +161,84 @@ impl Harness {
         self.fs.loads(&path(file))
     }
 
-    pub(super) fn turn(&mut self) -> TurnEnd {
-        self.live.end_turn()
+    /// Runs one turn; its loads are copied to `pending`, its build and merge move there.
+    pub(super) fn turn<R>(&mut self, inputs: impl FnOnce(&mut Turn<'_>) -> R) -> (R, Effects) {
+        let (result, mut effects) = self.live.turn(&self.vault, inputs);
+        let copies = effects.loads.iter().map(|load| Load {
+            ticket: load.ticket,
+            path: load.path.clone(),
+        });
+        self.pending.loads.extend(copies);
+        if let Some(build) = effects.build.take() {
+            assert!(
+                self.pending.build.replace(build).is_none(),
+                "one build runs (L6)"
+            );
+        }
+        if let Some(merge) = effects.merge.take() {
+            assert!(
+                self.pending.merge.replace(merge).is_none(),
+                "one merge runs"
+            );
+        }
+        (result, effects)
+    }
+
+    /// A vault change in its own turn, then its build diffs the vault now and applies in another.
+    pub(super) fn built(&mut self) -> Effects {
+        assert!(self.pending.build.is_none(), "no build runs");
+        let _ = self.vault_changed();
+        self.run_build()
+    }
+
+    /// A vault change in its own turn.
+    pub(super) fn vault_changed(&mut self) -> Effects {
+        // Typed, or clippy asks for the path `Turn::vault_changed`, which binds one lifetime and fails the bound.
+        self.turn(|t: &mut Turn<'_>| t.vault_changed()).1
+    }
+
+    /// Runs the pending build and applies it in its own turn.
+    pub(super) fn run_build(&mut self) -> Effects {
+        let Some(job) = self.pending.build.take() else {
+            panic!("a build is pending");
+        };
+        let built = job.run();
+        self.turn(|t| t.built(built)).1
+    }
+
+    /// Reads the pending load `at` now and lands it in its own turn.
+    pub(super) fn land_pending(&mut self, at: usize) -> Effects {
+        let load = self.pending.loads.remove(at);
+        let loaded = self.read(&load);
+        self.turn(|t| t.landed(load.ticket, loaded)).1
+    }
+
+    /// Runs the pending merge and applies it in its own turn.
+    pub(super) fn run_merge(&mut self) -> Effects {
+        let Some(merge) = self.pending.merge.take() else {
+            panic!("a merge is pending");
+        };
+        self.merged(merge)
+    }
+
+    /// Runs `merge` and applies it in its own turn.
+    pub(super) fn merged(&mut self, merge: Merge) -> Effects {
+        let merged = merge.run();
+        self.turn(|t| t.merged(merged)).1
+    }
+
+    /// A turn with no input.
+    pub(super) fn idle_turn(&mut self) -> Effects {
+        self.turn(|_| ()).1
     }
 }
 
 pub(super) fn path(file: &str) -> PathBuf {
     PathBuf::from(format!("{ROOT}/{file}"))
+}
+
+pub(super) fn paths(loads: &[Load]) -> Vec<PathBuf> {
+    loads.iter().map(|load| load.path.clone()).collect()
 }
 
 pub(super) fn failure() -> VaultError {
@@ -165,34 +250,35 @@ pub(super) fn failure() -> VaultError {
 #[test]
 fn a_build_asked_while_one_runs_is_dirty_and_runs_after_it() {
     let mut h = Harness::new(&[("a.md", ""), ("b.md", "")]);
-    let entries = h.vault.shared_entries();
-    let Some(job) = h.live.start_build(entries.clone()) else {
-        panic!("idle");
-    };
+    let _ = h.vault_changed();
+    assert!(h.pending.build.is_some(), "the change starts a build");
 
-    assert!(h.live.start_build(entries.clone()).is_none(), "one build");
-    assert!(h.live.start_build(entries).is_none(), "still one");
-    assert!(h.live.apply_build(job.run(), &h.vault).dirty);
-    assert!(!h.build().dirty, "the rebuild saw no notify");
+    // `Harness::turn` refuses a second job while one is pending.
+    let _ = h.vault_changed();
+    let _ = h.vault_changed();
+    let _ = h.run_build();
+    assert!(
+        h.pending.build.is_some(),
+        "dirty: its apply asks for another"
+    );
+    let _ = h.run_build();
+    assert!(h.pending.build.is_none(), "the rebuild saw no notify");
 }
 
 #[test]
 fn a_build_landing_behind_the_vault_applies() {
     let mut h = Harness::loaded(&[("a.md", ""), ("b.md", "")]);
     h.write("c.md", "");
-    let Some(job) = h.live.start_build(h.vault.shared_entries()) else {
-        panic!("idle");
-    };
+    let _ = h.vault_changed();
     h.write("d.md", "");
-    assert!(h.live.start_build(h.vault.shared_entries()).is_none());
+    let _ = h.vault_changed();
 
-    let applied = h.live.apply_build(job.run(), &h.vault);
+    let applied = h.run_build();
 
-    assert!(applied.dirty);
+    assert!(h.pending.build.is_some(), "dirty");
     assert!(applied.layout, "c joined before the read");
-    drop(applied.retired);
     assert_eq!(h.live.index().names().len(), 3, "read before d");
-    assert!(h.build().layout);
+    assert!(h.run_build().layout);
     assert_eq!(h.live.index().names().len(), 4);
 }
 
@@ -202,11 +288,11 @@ fn a_vault_with_no_notes_applies_one_layout_and_stops_building() {
     assert!(h.live.awaits_first_build());
     assert!(h.live.is_building());
 
-    assert!(h.build().layout, "the first build");
+    assert!(h.built().layout, "the first build");
 
     assert!(!h.live.awaits_first_build());
     assert!(!h.live.is_building());
-    assert!(!h.build().layout, "empty against empty moves nothing");
+    assert!(!h.built().layout, "empty against empty moves nothing");
 }
 
 #[test]
@@ -214,7 +300,7 @@ fn status_goes_scanning_indexing_ready() {
     let mut h = Harness::new(&[("a.md", ""), ("b.md", "")]);
     assert_eq!(h.live.status(), Status::Scanning);
 
-    let _ = h.build();
+    let _ = h.built();
     let (a, b) = (h.start(), h.start());
     assert_eq!(
         h.live.status(),
@@ -242,11 +328,11 @@ fn an_mtime_only_change_queues_that_note_and_keeps_the_set() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", ""), ("c.md", "")]);
     h.write("a.md", "new");
 
-    assert!(!h.build().layout);
+    assert!(!h.built().layout);
 
     let load = h.start();
     assert_eq!(load.path, path("a.md"));
-    assert!(h.next(SLOTS).is_none(), "only a moved");
+    assert!(h.pending.loads.is_empty(), "only a moved");
     assert!(h.land(&load));
     assert_eq!(h.text("a.md").as_deref(), Some("new"));
 }
@@ -255,14 +341,15 @@ fn an_mtime_only_change_queues_that_note_and_keeps_the_set() {
 fn a_save_since_the_build_read_is_not_queued() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "outside");
-    let Some(job) = h.live.start_build(h.vault.shared_entries()) else {
-        panic!("idle");
-    };
+    let _ = h.vault_changed();
     h.save("a.md", "saved");
 
-    let _ = h.live.apply_build(job.run(), &h.vault);
+    let _ = h.run_build();
 
-    assert!(h.next(SLOTS).is_none(), "the save is newer than the read");
+    assert!(
+        h.pending.loads.is_empty(),
+        "the save is newer than the read"
+    );
     assert_eq!(h.text("a.md").as_deref(), Some("saved"));
 }
 
@@ -272,9 +359,9 @@ fn a_rescan_finding_the_saved_mtime_loads_nothing() {
     h.save("a.md", "saved");
     h.rescan();
 
-    let _ = h.build();
+    let _ = h.built();
 
-    assert!(h.next(SLOTS).is_none());
+    assert!(h.pending.loads.is_empty());
     assert_eq!(h.loads("a.md"), 1);
 }
 
@@ -282,13 +369,13 @@ fn a_rescan_finding_the_saved_mtime_loads_nothing() {
 fn a_load_landing_after_a_newer_save_is_dropped() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "outside");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     let read = h.read(&load);
 
     h.save("a.md", "saved");
 
-    assert!(!h.live.landed(load.ticket, read, &h.vault));
+    assert!(!h.landed(load.ticket, read));
     assert_eq!(h.text("a.md").as_deref(), Some("saved"));
 }
 
@@ -296,7 +383,7 @@ fn a_load_landing_after_a_newer_save_is_dropped() {
 fn a_stale_failure_keeps_the_newer_mtime() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "outside");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     h.save("a.md", "saved");
 
@@ -304,26 +391,25 @@ fn a_stale_failure_keeps_the_newer_mtime() {
 
     assert_eq!(h.text("a.md").as_deref(), Some("saved"));
     h.rescan();
-    let _ = h.build();
+    let _ = h.built();
     assert!(
-        h.next(SLOTS).is_none(),
+        h.pending.loads.is_empty(),
         "the save's mtime is still the one indexed"
     );
 }
 
 #[test]
 fn a_note_queued_twice_is_loaded_once() {
-    let mut h = Harness::loaded(&[("a.md", ""), ("b.md", ""), ("c.md", "")]);
+    let mut h = Harness::loaded_with_slots(&[("a.md", ""), ("b.md", ""), ("c.md", "")], 1);
     h.fs.insert_file(path("a.md"), "a");
     h.write("b.md", "[[a]]");
-    let _ = h.build();
-    let Some(a) = h.next(1) else {
-        panic!("a is first in vault order");
-    };
+    let _ = h.built();
+    let a = h.start();
+    assert_eq!(a.path, path("a.md"), "a is first in vault order");
     h.write("b.md", "[[c]]");
-    let _ = h.build();
+    let _ = h.built();
 
-    assert!(h.next(1).is_none(), "a holds the one slot");
+    assert!(h.pending.loads.is_empty(), "a holds the one slot");
     h.land(&a);
     h.load_all();
 
@@ -339,12 +425,12 @@ fn a_note_queued_twice_is_loaded_once() {
 fn a_note_queued_while_it_loads_waits_for_its_load() {
     let mut h = Harness::loaded(&[("a.md", ""), ("b.md", "")]);
     h.write("a.md", "[[c]]");
-    let _ = h.build();
+    let _ = h.built();
     let first = h.start();
     h.write("a.md", "[[b]]");
-    let _ = h.build();
+    let _ = h.built();
 
-    assert!(h.next(SLOTS).is_none(), "one read per note at a time");
+    assert!(h.pending.loads.is_empty(), "one read per note at a time");
     assert_eq!(
         h.live.progress(),
         (1, 2),
@@ -352,7 +438,7 @@ fn a_note_queued_while_it_loads_waits_for_its_load() {
     );
 
     let stale = h.read(&first);
-    h.live.landed(first.ticket, stale, &h.vault);
+    h.landed(first.ticket, stale);
     let second = h.start();
     assert_eq!(second.path, path("a.md"));
     h.land(&second);
@@ -361,56 +447,32 @@ fn a_note_queued_while_it_loads_waits_for_its_load() {
 }
 
 #[test]
-fn next_load_fills_at_most_the_slots_in_vault_order() {
-    let files: Vec<String> = (0..5).map(|n| format!("n{n}.md")).collect();
-    let files: Vec<(&str, &str)> = files.iter().map(|file| (file.as_str(), "")).collect();
-    let mut h = Harness::new(&files);
-    let _ = h.build();
-
-    let (Some(n0), Some(n1)) = (h.next(2), h.next(2)) else {
-        panic!("two slots");
-    };
-    assert_eq!((n0.path.clone(), n1.path), (path("n0.md"), path("n1.md")));
-    assert!(h.next(2).is_none(), "two slots, two loads");
-    assert_eq!(h.live.progress(), (0, 5));
-
-    h.land(&n0);
-    let Some(n2) = h.next(2) else {
-        panic!("n0's slot is free");
-    };
-    assert_eq!(n2.path, path("n2.md"));
-    assert_eq!(h.live.progress(), (1, 5));
-}
-
-#[test]
 fn a_save_landing_during_a_load_keeps_its_slot() {
-    let mut h = Harness::loaded(&[("a.md", ""), ("b.md", "")]);
+    let mut h = Harness::loaded_with_slots(&[("a.md", ""), ("b.md", "")], 1);
     h.fs.insert_file(path("a.md"), "outside");
     h.write("b.md", "outside");
-    let _ = h.build();
-    let Some(_a) = h.next(1) else {
-        panic!("a is first in vault order");
-    };
+    let _ = h.built();
+    let a = h.start();
+    assert_eq!(a.path, path("a.md"), "a is first in vault order");
 
     h.save("a.md", "saved");
 
-    assert!(h.next(1).is_none(), "a's load still holds the slot");
+    assert!(h.pending.loads.is_empty(), "a's load still holds the slot");
 }
 
 #[test]
 fn a_load_in_flight_for_a_note_gone_is_not_pending() {
-    let mut h = Harness::loaded(&[("a.md", ""), ("b.md", ""), ("c.md", "")]);
+    let mut h = Harness::loaded_with_slots(&[("a.md", ""), ("b.md", ""), ("c.md", "")], 1);
     h.fs.insert_file(path("a.md"), "changed");
     h.write("b.md", "changed");
-    let _ = h.build();
-    let Some(load) = h.next(1) else {
-        panic!("a is first in vault order");
-    };
+    let _ = h.built();
+    let load = h.start();
+    assert_eq!(load.path, path("a.md"), "a is first in vault order");
     assert_eq!(h.live.progress(), (1, 3), "a is loading, b is queued");
 
     h.fs.remove(&path("a.md"));
     h.remove("b.md");
-    let _ = h.build();
+    let _ = h.built();
 
     assert_eq!(h.live.progress(), (1, 1), "c, the only note, is loaded");
     assert!(!h.live.is_building());
@@ -420,13 +482,12 @@ fn a_load_in_flight_for_a_note_gone_is_not_pending() {
 
 #[test]
 fn a_note_reloading_during_its_load_counts_once() {
-    let mut h = Harness::loaded(&[("a.md", ""), ("b.md", "")]);
+    let mut h = Harness::loaded_with_slots(&[("a.md", ""), ("b.md", "")], 1);
     h.fs.insert_file(path("a.md"), "[[c]]");
     h.write("c.md", "");
-    let _ = h.build();
-    let Some(first) = h.next(1) else {
-        panic!("a is first in vault order");
-    };
+    let _ = h.built();
+    let first = h.start();
+    assert_eq!(first.path, path("a.md"), "a is first in vault order");
     assert_eq!(
         h.live.progress(),
         (1, 3),
@@ -435,7 +496,7 @@ fn a_note_reloading_during_its_load_counts_once() {
 
     h.fs.insert_file(path("a.md"), "[[b]]");
     h.write("d.md", "");
-    let _ = h.build();
+    let _ = h.built();
     assert_eq!(
         h.live.progress(),
         (1, 4),
@@ -452,10 +513,10 @@ fn a_note_reloading_during_its_load_counts_once() {
 fn a_load_failing_after_a_layout_is_retried() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "new");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     h.write("c.md", "");
-    assert!(h.build().layout);
+    assert!(h.built().layout);
     let c = h.start();
     h.land(&c);
 
@@ -471,32 +532,35 @@ fn a_load_failing_after_a_layout_is_retried() {
 fn a_load_failing_after_only_mtimes_forgets_the_note() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "new");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     h.write("b.md", "moved");
-    assert!(!h.build().layout);
+    assert!(!h.built().layout);
     h.load_all();
 
     assert!(h.fail(load.ticket));
 
     assert_eq!(h.text("a.md"), None, "its text is dropped");
     assert!(!h.live.index().is_indexed(h.id("a.md")));
-    assert!(h.next(SLOTS).is_none(), "not retried before the next apply");
+    assert!(
+        h.pending.loads.is_empty(),
+        "not retried before the next apply"
+    );
 }
 
 #[test]
 fn a_forgotten_note_is_queued_at_the_next_apply_of_either_kind() {
     let mut h = Harness::loaded(&[("a.md", "old"), ("b.md", "")]);
     h.write("a.md", "new");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     h.write("b.md", "moved");
-    let _ = h.build();
+    let _ = h.built();
     h.load_all();
     assert!(h.fail(load.ticket));
 
     h.write("b.md", "again");
-    assert!(!h.build().layout);
+    assert!(!h.built().layout);
     h.load_all();
     assert_eq!(
         h.text("a.md").as_deref(),
@@ -506,15 +570,15 @@ fn a_forgotten_note_is_queued_at_the_next_apply_of_either_kind() {
 
     let load = {
         h.write("a.md", "newer");
-        let _ = h.build();
+        let _ = h.built();
         h.start()
     };
     h.write("b.md", "once more");
-    let _ = h.build();
+    let _ = h.built();
     h.load_all();
     assert!(h.fail(load.ticket));
     h.write("c.md", "");
-    assert!(h.build().layout);
+    assert!(h.built().layout);
     h.load_all();
     assert_eq!(
         h.text("a.md").as_deref(),
@@ -528,7 +592,7 @@ fn a_failed_load_behind_a_save_still_parsing_keeps_the_note() {
     let mut h = Harness::loaded(&[("a.md", "old words"), ("b.md", "")]);
     h.write("a.md", "changed");
     h.write("c.md", "");
-    let _ = h.build();
+    let _ = h.built();
     let load = h.start();
     let c = h.start();
     h.land(&c);
@@ -539,7 +603,7 @@ fn a_failed_load_behind_a_save_still_parsing_keeps_the_note() {
     assert!(!h.fail(load.ticket));
 
     assert_eq!(h.text("a.md").as_deref(), Some("old words"));
-    assert!(h.next(SLOTS).is_none(), "the save brings the text");
+    assert!(h.pending.loads.is_empty(), "the save brings the text");
 }
 
 #[test]
@@ -547,22 +611,19 @@ fn a_failed_load_behind_a_queued_reload_keeps_the_note() {
     let mut h = Harness::loaded(&[("a.md", "[[b]] old"), ("b.md", "")]);
     h.write("a.md", "first");
     h.write("c.md", "");
-    let _ = h.build();
+    let _ = h.built();
     let first = h.start();
     h.write("a.md", "second");
     h.write("d.md", "");
-    let _ = h.build();
+    let _ = h.built();
     // The vault still lists the note: the batch that drops it has not landed.
     h.fs.remove(&path("a.md"));
 
     assert!(!h.fail(first.ticket));
 
     assert_eq!(h.text("a.md").as_deref(), Some("[[b]] old"));
-    let started: Vec<PathBuf> = iter::from_fn(|| h.next(SLOTS))
-        .map(|load| load.path)
-        .collect();
     assert!(
-        started.contains(&path("a.md")),
+        paths(&h.pending.loads).contains(&path("a.md")),
         "the queued reload still runs"
     );
 }
@@ -572,16 +633,65 @@ fn a_save_landing_before_its_note_joins_is_reloaded_by_the_next_build() {
     let mut h = Harness::new(&[("a.md", "[[b]]"), ("b.md", "")]);
     let a = h.id("a.md");
     let mtime = h.mtime_on_disk("a.md");
-    let ticket = h.live.saved(a, mtime);
+    let (ticket, _) = h.turn(|t| t.saved(a, mtime));
 
-    h.live.landed(
-        ticket,
-        Ok(NoteContent::parse("[[b]]".into(), mtime)),
-        &h.vault,
-    );
-    let _ = h.build();
+    h.landed(ticket, Ok(NoteContent::parse("[[b]]".into(), mtime)));
+    let _ = h.built();
     h.load_all();
 
     assert_eq!(h.text("a.md").as_deref(), Some("[[b]]"));
     assert_eq!(h.loads("a.md"), 1, "the build reloads it");
+}
+
+#[test]
+fn a_layout_moves_the_revision_once() {
+    let mut h = Harness::loaded(&[("a.md", ""), ("b.md", "")]);
+    let before = h.live.revision();
+    h.write("a.md", "moved");
+    assert!(!h.built().layout);
+    assert_eq!(h.live.revision(), before, "an mtime apply only queues");
+
+    h.write("c.md", "");
+    assert!(h.built().layout);
+
+    assert_eq!(h.live.revision(), before + 1, "one layout, no load");
+}
+
+#[test]
+fn a_failed_load_moves_the_revision() {
+    let mut h = Harness::loaded(&[("a.md", "[[b]]"), ("b.md", "")]);
+    h.write("a.md", "changed");
+    let _ = h.built();
+    let load = h.start();
+    let before = h.live.revision();
+
+    assert!(h.fail(load.ticket));
+
+    assert_eq!(h.live.revision(), before + 1, "a's forget");
+}
+
+#[test]
+fn a_stale_ticket_a_merge_and_a_mint_leave_the_revision() {
+    let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let _ = h.built();
+    h.load_all();
+    assert!(
+        h.pending.merge.is_some(),
+        "the load's end starts the settle"
+    );
+    let before = h.live.revision();
+    let _ = h.run_merge();
+    assert_eq!(h.live.revision(), before, "a merge");
+
+    h.write("a.md", "outside");
+    let _ = h.built();
+    let load = h.start();
+    let before = h.live.revision();
+    let (ticket, content) = h.saving("a.md", "saved");
+    assert_eq!(h.live.revision(), before, "a mint");
+    assert!(!h.land(&load));
+    assert_eq!(h.live.revision(), before, "a stale ticket");
+
+    assert!(h.landed(ticket, Ok(content)));
+    assert_eq!(h.live.revision(), before + 1, "the save's parse");
 }

@@ -185,13 +185,16 @@ build's snapshot: it finds an id in O(1) (coalesced-reconcile spec, R1), and
 
 ### Ordering
 
+The turn's end is `LiveIndex::turn`'s since the index-turn-effects spec
+(`2026-09-30-index-turn-effects-design.md`, D2): it refills the slots, steps
+the startup and the merge, reruns a dirty build, then compares for `notify`.
+No caller calls `next_load` or `end_turn`; `IndexSync` marks `Indexed`
+outside its timed turn.
+
 - `apply_build`: `note_sets += 1` and `set_notes` (layout only), prune (L4),
   replace `last`, queue the changed notes (L2), retry the forgotten (L5).
-  The caller then fills the slots with `next_load`.
 - `landed`: free the ticket's slot first, then apply or fail, so a retry can
   take the slot it frees.
-- The caller calls `end_turn` last in every turn, inside the timed turn, and
-  marks `Indexed` after it, outside, as `timed_turn` does today.
 
 ### What moves where
 
