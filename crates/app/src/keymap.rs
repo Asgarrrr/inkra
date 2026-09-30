@@ -12,7 +12,9 @@ use crate::editor::actions::{
 use crate::field::{Cancel, Confirm};
 use crate::picker;
 use crate::quick_open::QuickOpen;
-use crate::shell::{ActivateLastTab, ActivateTab, CloseTab, NewTab, NextTab, PreviousTab};
+use crate::shell::{
+    ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
+};
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
 use crate::text_input::actions::{
@@ -83,6 +85,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // ⌘⇧] as macOS reports it (gpui_macos events.rs:470-479).
         KeyBinding::new("cmd-}", NextTab, Some("AppShell")),
         KeyBinding::new("cmd-{", PreviousTab, Some("AppShell")),
+        // `[` is no letter, so macOS keeps it with `cmd` (gpui_macos events.rs:440-481).
+        KeyBinding::new("cmd-[", GoBack, Some("AppShell")),
+        KeyBinding::new("cmd-]", GoForward, Some("AppShell")),
         KeyBinding::new("cmd-1", ActivateTab(0), Some("AppShell")),
         KeyBinding::new("cmd-2", ActivateTab(1), Some("AppShell")),
         KeyBinding::new("cmd-3", ActivateTab(2), Some("AppShell")),

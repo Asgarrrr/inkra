@@ -66,7 +66,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
-  - which tab is active, what a close activates → `tabs`; what a place holds → `app`
+  - which tab is active, what a close activates, which place back and forward reach → `tabs`;
+    what a place holds → `app`
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
@@ -85,8 +86,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - Mutate a buffer only through `Buffer::transact_at`. Call
   `finalize_transaction` on **both** sides of a gesture that must not merge
   (paste, cut), and on neither side when it edits nothing.
-  Exception: a tab switch's capture calls it on the note left even with no
-  edit, so typing on both sides of `⌃Tab` is two undo steps (tabs spec, A3).
+  Exception: a tab switch's, an open's, or a back's capture calls it on the
+  note left even with no edit, so typing on both sides of `⌃Tab` is two undo steps (tabs spec, A3).
 - `Buffer` assumes LF: text entering from outside (load, paste) goes through
   `inkra_vault::normalize_line_endings`.
 - Only `app` reads a clock; `text` and `editor` take the `Instant` as an argument.

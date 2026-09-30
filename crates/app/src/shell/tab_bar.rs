@@ -4,9 +4,9 @@ use gpui::{
     App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
+use inkra_vault::EntryId;
 
 use super::AppShell;
-use super::tabs::Place;
 use crate::one_line::one_line;
 use crate::theme;
 use crate::vault::NoteStore;
@@ -14,20 +14,18 @@ use crate::vault::NoteStore;
 const NEW_TAB: &str = "New tab";
 const CLOSE: &str = "×";
 
-fn tab_title(place: &Place, notes: &NoteStore, cx: &App) -> String {
-    place
-        .note
-        .and_then(|id| notes.title(id, cx))
+fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> String {
+    note.and_then(|id| notes.title(id, cx))
         .map_or_else(|| NEW_TAB.to_owned(), |title| one_line(&title).into_owned())
 }
 
 impl AppShell {
     /// Every tab's title, reading the store once.
     pub(super) fn tab_titles(&self, cx: &App) -> Vec<String> {
-        let notes = self.notes.read(cx);
+        let (notes, showing) = (self.notes.read(cx), self.showing());
         self.tabs
             .iter()
-            .map(|tab| tab_title(tab.place(), notes, cx))
+            .map(|tab| tab_title(tab.place().map_or(showing, |place| place.note), notes, cx))
             .collect()
     }
 

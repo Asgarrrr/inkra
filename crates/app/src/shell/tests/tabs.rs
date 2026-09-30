@@ -1,29 +1,18 @@
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{
-    Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
-};
-use inkra_text::ByteOffset;
+use gpui::{Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowOptions};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use super::{
     ab_focused, activate, at, check, editor, open, scroll_to, select, showing, tab_notes,
-    tall_notes, text_of, trash,
+    tall_notes, text_of, trash, view_of,
 };
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
-use crate::shell::{AppShell, NextTab};
+use crate::shell::NextTab;
 use crate::text_input::InputHost;
-
-fn view_of(
-    window: &WindowHandle<AppShell>,
-    cx: &mut TestAppContext,
-) -> (Range<ByteOffset>, ByteOffset) {
-    editor(window, cx).update(cx, |editor, _| (editor.selected(), editor.offset_at_top()))
-}
 
 #[gpui::test]
 fn a_switch_restores_each_tabs_caret_and_top_line(cx: &mut TestAppContext) {
@@ -433,12 +422,14 @@ fn every_tab_key_dismisses_an_open_picker_first(cx: &mut TestAppContext) {
             ("ctrl-shift-tab", 9, 8),
             ("cmd-{", 9, 7),
             ("cmd-}", 9, 8),
+            ("cmd-[", 9, 8),
+            ("cmd-]", 9, 8),
             ("cmd-t", 10, 9),
             ("cmd-w", 9, 8),
         ]
         .map(|(keys, count, active)| (keys.to_owned(), count, active)),
     );
-    assert_eq!(steps.len(), 15);
+    assert_eq!(steps.len(), 17);
 
     for (keys, count, active) in steps {
         cx.simulate_keystrokes("cmd-p");
@@ -461,7 +452,7 @@ fn every_tab_key_dismisses_an_open_picker_first(cx: &mut TestAppContext) {
     }
 }
 
-/// The sidebar still opens through `open_note`; landing on the note showing restores nothing.
+/// The sidebar opens through `show_note`: a click on the note showing only takes focus.
 #[gpui::test]
 fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestAppContext) {
     let (window, mut cx, a, _b) = tall_notes(cx);

@@ -8,10 +8,11 @@ use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
-use super::tabs::{Place, capture};
+use super::tabs::capture;
 use super::{AppShell, Bound, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 use crate::open::Open;
+use crate::sidebar::Cursor;
 
 impl AppShell {
     /// Commits into the tab active when it started, or nowhere; bind, select, focus and
@@ -22,23 +23,16 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let tab = self.tabs.active();
+        let (tab, since) = (self.tabs.active(), self.tree_cursor(cx));
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
         self.activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                let place = Place {
-                    note: Some(id),
-                    view: None,
-                };
                 // Backed by dropping `activation` on every op that changes the active tab (T4): no load targets an inactive tab.
-                if !shell
-                    .tabs
-                    .commit(tab, place, || capture(shell.bound.as_ref(), cx))
-                {
+                if !shell.tabs.commit(tab, || capture(shell.bound.as_ref(), cx)) {
                     return;
                 }
-                shell.land(id, buffer, at, window, cx);
+                shell.land(id, buffer, at, since, window, cx);
             });
         }));
     }
@@ -49,10 +43,11 @@ impl AppShell {
         id: EntryId,
         buffer: Entity<Buffer>,
         at: Option<Range<ByteOffset>>,
+        since: Cursor,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let editor = self.bind(id, buffer, None, cx);
+        let editor = self.bind(id, buffer, None, since, cx);
         if let Some(range) = at {
             editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
         }
@@ -111,12 +106,21 @@ impl AppShell {
         }
     }
 
-    /// The one place `bound` changes, so the backlinks panel cannot lag it.
-    pub(super) fn set_showing(&mut self, bound: Option<Bound>, cx: &mut Context<Self>) {
+    /// The one place `bound` changes, so the backlinks panel and the sidebar's highlight cannot lag
+    /// it; the highlight moves only if the tree's cursor is still `since`.
+    pub(super) fn set_showing(
+        &mut self,
+        bound: Option<Bound>,
+        since: Cursor,
+        cx: &mut Context<Self>,
+    ) {
         self.bound = bound;
         let note = self.showing();
+        // `None` keeps the highlight: a tree trash has already moved it to the neighbour.
         if let Some(id) = note {
             remember(&mut self.recent, id);
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
         }
         self.backlinks
             .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
@@ -147,6 +151,7 @@ impl AppShell {
         id: EntryId,
         buffer: Entity<Buffer>,
         view: Option<ViewState>,
+        since: Cursor,
         cx: &mut Context<Self>,
     ) -> Entity<EditorView> {
         let mut view = view;
@@ -172,6 +177,7 @@ impl AppShell {
                 note: id,
                 editor: editor.clone(),
             }),
+            since,
             cx,
         );
         self.notes.update(cx, |notes, cx| notes.set_current(id, cx));

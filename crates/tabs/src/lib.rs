@@ -1,23 +1,92 @@
 //! Tabs with stable ids, an MRU and the index rule, generic over the place a tab shows (tabs spec, A1).
 
+use std::collections::VecDeque;
+
+/// What a tab shows, as far as history needs it.
+pub trait Place: Default {
+    type Note: Copy + Eq;
+    /// `None`: an empty tab. Never pushed on a stack (invariant 5).
+    fn note(&self) -> Option<Self::Note>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
+
+/// Each back and forward stack keeps at most this many entries (invariant 6).
+const HISTORY: usize = 1024;
+
+/// The stack a walk pops from, then the stack it pushes the place left on.
+type Walk<P> = fn(&mut Tab<P>) -> (&mut Stack<P>, &mut Stack<P>);
+
+/// Oldest first; no empty place (H2) and no two adjacent entries on one note (H1).
+#[derive(Debug, Clone)]
+struct Stack<P>(VecDeque<P>);
+
+impl<P> Default for Stack<P> {
+    fn default() -> Self {
+        Self(VecDeque::new())
+    }
+}
+
+impl<P: Place> Stack<P> {
+    /// Skips an empty place; replaces a top on the same note, else drops the oldest when full.
+    fn push(&mut self, place: P) {
+        let Some(note) = place.note() else { return };
+        if self.0.back().and_then(Place::note) == Some(note) {
+            self.0.pop_back();
+        } else if self.0.len() == HISTORY {
+            self.0.pop_front();
+        }
+        self.0.push_back(place);
+    }
+
+    /// Re-pushes every entry not on `note`: the push rule collapses the runs a removal joined, keeping the newest.
+    fn forget(&mut self, note: P::Note) {
+        for place in std::mem::take(&mut self.0) {
+            if place.note() != Some(note) {
+                self.push(place);
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The newest entry off the note `showing`; the entries on it above that one are dropped.
+    fn pop(&mut self, showing: Option<P::Note>) -> Option<P> {
+        std::iter::from_fn(|| self.0.pop_back()).find(|place| place.note() != showing)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Tab<P> {
     id: TabId,
-    place: P,
+    /// `None` exactly for the active tab (H8): its place is on screen, not here.
+    place: Option<P>,
+    back: Stack<P>,
+    forward: Stack<P>,
 }
 
 impl<P> Tab<P> {
+    fn new(id: TabId) -> Self {
+        Self {
+            id,
+            place: None,
+            back: Stack::default(),
+            forward: Stack::default(),
+        }
+    }
+
     #[must_use]
     pub fn id(&self) -> TabId {
         self.id
     }
 
+    /// `None` for the active tab.
     #[must_use]
-    pub fn place(&self) -> &P {
-        &self.place
+    pub fn place(&self) -> Option<&P> {
+        self.place.as_ref()
     }
 }
 
@@ -45,12 +114,19 @@ pub struct Tabs<P> {
     next: u64,
 }
 
+impl<P> Default for Tabs<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<P> Tabs<P> {
+    /// One active tab; the caller shows its place.
     #[must_use]
-    pub fn new(first: P) -> Self {
+    pub fn new() -> Self {
         let id = TabId(0);
         Self {
-            list: vec![Tab { id, place: first }],
+            list: vec![Tab::new(id)],
             active: id,
             mru: vec![id],
             next: 1,
@@ -68,11 +144,6 @@ impl<P> Tabs<P> {
     pub fn active_index(&self) -> usize {
         self.index_of(self.active)
             .unwrap_or_else(|| panic!("the active id is always a tab"))
-    }
-
-    #[must_use]
-    pub fn active_place(&self) -> &P {
-        &self.list[self.active_index()].place
     }
 
     #[must_use]
@@ -116,12 +187,13 @@ impl<P> Tabs<P> {
     }
 }
 
-impl<P: Clone + Default> Tabs<P> {
-    /// Opens `place` in a new tab at `at`, clamped to the bar, and activates it.
-    pub fn insert(&mut self, at: usize, place: P, leaving: impl FnOnce() -> P) -> TabId {
-        self.leave_active(leaving);
+impl<P: Place> Tabs<P> {
+    /// Opens a new tab at `at`, clamped to the bar, and activates it; the caller shows its place.
+    pub fn insert(&mut self, at: usize, leaving: impl FnOnce() -> P) -> TabId {
+        let (tab, left) = self.leave_active(leaving);
+        tab.place = Some(left);
         let id = self.fresh_id();
-        self.list.insert(at.min(self.list.len()), Tab { id, place });
+        self.list.insert(at.min(self.list.len()), Tab::new(id));
         self.active = id;
         self.mru.insert(0, id);
         id
@@ -133,33 +205,43 @@ impl<P: Clone + Default> Tabs<P> {
             return None;
         }
         let index = self.index_of(id)?;
-        self.leave_active(leaving);
+        let (tab, left) = self.leave_active(leaving);
+        tab.place = Some(left);
         self.active = id;
         self.mru.retain(|&other| other != id);
         self.mru.insert(0, id);
-        Some(self.list[index].place.clone())
+        self.list[index].place.take()
     }
 
     /// The last tab gives way to an empty one with a fresh id: a load keyed by the old id lands nowhere.
+    ///
+    /// # Panics
+    /// Only on a broken invariant (H8): an inactive tab always holds a place.
     pub fn close(&mut self, id: TabId, leaving: impl FnOnce() -> P) -> Option<Closed<P>> {
         let index = self.index_of(id)?;
         let was_active = id == self.active;
-        if was_active {
-            self.leave_active(leaving);
-        }
-        let place = self.list.remove(index).place;
+        let left = was_active.then(|| self.leave_active(leaving).1);
+        let stored = self.list.remove(index).place;
+        let place = left
+            .or(stored)
+            .unwrap_or_else(|| panic!("H8: an inactive tab holds a place"));
         self.mru.retain(|&other| other != id);
         if self.list.is_empty() {
             let fresh = self.fresh_id();
             self.list.push(Tab {
-                id: fresh,
-                place: P::default(),
+                place: Some(P::default()),
+                ..Tab::new(fresh)
             });
             self.mru.push(fresh);
         }
         let shown = was_active.then(|| {
             self.active = self.mru[0];
-            (self.active, self.active_place().clone())
+            let index = self.active_index();
+            let place = self.list[index]
+                .place
+                .take()
+                .unwrap_or_else(|| panic!("H8: the tab taking over held no place"));
+            (self.active, place)
         });
         Some(Closed {
             place,
@@ -168,35 +250,62 @@ impl<P: Clone + Default> Tabs<P> {
         })
     }
 
-    /// Replaces the place of tab `id` if it is still active; else changes nothing.
+    /// Leaves tab `id` for the place the caller shows next, if it is still active: the place left
+    /// goes on back and forward clears. Else changes nothing.
     #[must_use]
-    pub fn commit(&mut self, id: TabId, place: P, leaving: impl FnOnce() -> P) -> bool {
+    pub fn commit(&mut self, id: TabId, leaving: impl FnOnce() -> P) -> bool {
         if id != self.active {
             return false;
         }
-        self.leave_active(leaving);
-        let index = self.active_index();
-        self.list[index].place = place;
+        let (tab, left) = self.leave_active(leaving);
+        tab.back.push(left);
+        tab.forward.clear();
         true
     }
 
-    /// Empties every tab whose place is `gone`; returns whether the active one was.
-    #[must_use]
-    pub fn forget(&mut self, gone: impl Fn(&P) -> bool) -> bool {
-        let mut active = false;
+    /// The newest place behind the active tab on another note than `showing`; `None`, calling no
+    /// `leaving`, when there is none. The place left goes on forward.
+    pub fn back(&mut self, showing: Option<P::Note>, leaving: impl FnOnce() -> P) -> Option<P> {
+        self.walk(showing, leaving, |tab| (&mut tab.back, &mut tab.forward))
+    }
+
+    /// As `back`, the other way.
+    pub fn forward(&mut self, showing: Option<P::Note>, leaving: impl FnOnce() -> P) -> Option<P> {
+        self.walk(showing, leaving, |tab| (&mut tab.forward, &mut tab.back))
+    }
+
+    /// Empties every inactive tab on `note` and drops it from every stack; the active tab's place
+    /// is the caller's.
+    pub fn forget(&mut self, note: P::Note) {
         for tab in &mut self.list {
-            if gone(&tab.place) {
-                tab.place = P::default();
-                active |= tab.id == self.active;
+            if let Some(place) = &mut tab.place
+                && place.note() == Some(note)
+            {
+                *place = P::default();
             }
+            tab.back.forget(note);
+            tab.forward.forget(note);
         }
-        active
+    }
+
+    // Pops before `leaving` runs: it seals an undo group, so it runs only when a place arrives.
+    fn walk(
+        &mut self,
+        showing: Option<P::Note>,
+        leaving: impl FnOnce() -> P,
+        stacks: Walk<P>,
+    ) -> Option<P> {
+        let index = self.active_index();
+        let arriving = stacks(&mut self.list[index]).0.pop(showing)?;
+        let (tab, left) = self.leave_active(leaving);
+        stacks(tab).1.push(left);
+        Some(arriving)
     }
 
     // The one caller of `leaving`: it may have side effects, so it runs once per real leave.
-    fn leave_active(&mut self, leaving: impl FnOnce() -> P) {
+    fn leave_active(&mut self, leaving: impl FnOnce() -> P) -> (&mut Tab<P>, P) {
         let index = self.active_index();
-        self.list[index].place = leaving();
+        (&mut self.list[index], leaving())
     }
 
     fn fresh_id(&mut self) -> TabId {

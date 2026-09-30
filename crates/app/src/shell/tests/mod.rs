@@ -3,7 +3,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, WindowHandle, point, px};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
@@ -11,6 +11,7 @@ use inkra_vault::{EntryId, Fs};
 use crate::keymap::key_bindings;
 use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
+use crate::sidebar::row_center;
 use crate::test_support;
 
 use super::{AppShell, EditorView, NoteStore, Sidebar};
@@ -23,6 +24,7 @@ mod command_palette;
 mod creating;
 mod following;
 mod gone;
+mod history;
 mod modal;
 mod open;
 mod open_first;
@@ -30,6 +32,7 @@ mod parked;
 mod quick_open;
 mod reload;
 mod renaming;
+mod sidebar_selection;
 mod tab_bar;
 mod tab_keys;
 mod tabs;
@@ -233,10 +236,22 @@ pub(super) fn tab_notes(
 ) -> (Vec<Option<EntryId>>, usize) {
     window
         .update(cx, |shell, _, _| {
-            let notes = shell.tabs.iter().map(|tab| tab.place().note).collect();
+            let notes = shell
+                .tabs
+                .iter()
+                .map(|tab| tab.place().map_or(shell.showing(), |place| place.note))
+                .collect();
             (notes, shell.tabs.active_index())
         })
         .expect("the shell is open")
+}
+
+/// The editor's selection and top line.
+pub(super) fn view_of(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+) -> (Range<ByteOffset>, ByteOffset) {
+    editor(window, cx).update(cx, |editor, _| (editor.selected(), editor.offset_at_top()))
 }
 
 pub(super) fn select(
@@ -268,21 +283,32 @@ pub(super) fn text_of(
         .unwrap()
 }
 
-/// T1, T3, and tabs S2's I1 and I2; T2 holds by construction (`Bound`).
+/// H8, T3, and tabs S2's I1 and I2; T2 holds by construction (`Bound`), T1 by H8.
 pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
         .update(cx, |shell, _, cx| {
-            assert_eq!(shell.showing(), shell.tabs.active_place().note, "T1");
+            let active = shell.tabs.active();
+            assert!(
+                shell
+                    .tabs
+                    .iter()
+                    .all(|tab| tab.place().is_none() == (tab.id() == active)),
+                "H8"
+            );
             assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
             let inactive_notes = shell
                 .tabs
                 .iter()
-                .filter(|tab| tab.id() != shell.tabs.active() && tab.place().note.is_some())
+                .filter(|tab| tab.place().is_some_and(|place| place.note.is_some()))
                 .map(inkra_tabs::Tab::id)
                 .collect();
             assert_eq!(shell.parked.tabs(), inactive_notes, "I1");
             assert!(
-                shell.tabs.iter().all(|tab| tab.place().view.is_none()),
+                shell
+                    .tabs
+                    .iter()
+                    .filter_map(inkra_tabs::Tab::place)
+                    .all(|place| place.view.is_none()),
                 "I2"
             );
         })
@@ -320,4 +346,47 @@ pub(super) fn trash(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id
     let trashed = notes.update(cx, |notes, cx| notes.trash(id, cx));
     cx.run_until_parked();
     assert!(futures::executor::block_on(trashed), "the trash succeeded");
+}
+
+/// `a`–`d` ("alpha", "beta", "gamma", "delta") behind `shell_focused`.
+pub(super) fn four_notes(
+    cx: &mut TestAppContext,
+) -> (
+    Arc<MemFs>,
+    WindowHandle<AppShell>,
+    VisualTestContext,
+    [EntryId; 4],
+) {
+    let fs = Arc::new(MemFs::new());
+    for (name, text) in [
+        ("a", "alpha"),
+        ("b", "beta"),
+        ("c", "gamma"),
+        ("d", "delta"),
+    ] {
+        fs.insert_file(format!("/vault/{name}.md"), text);
+    }
+    let (window, notes, mut visual) = shell_focused(cx, &fs);
+    let ids = ["a", "b", "c", "d"].map(|name| test_support::entry_id(&notes, &mut visual, name));
+    (fs, window, visual, ids)
+}
+
+/// Rows 0–3 are `a`–`d` in `four_notes`.
+pub(super) fn click_row(cx: &mut VisualTestContext, row: f32) {
+    cx.simulate_click(point(px(20.), row_center(row)), Modifiers::none());
+    cx.run_until_parked();
+}
+
+pub(super) fn focus_tree(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+    window
+        .update(cx, |shell, window, cx| {
+            window.focus(&shell.tree_focus_handle(cx), cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+}
+
+pub(super) fn keys(cx: &mut VisualTestContext, keys: &str) {
+    cx.simulate_keystrokes(keys);
+    cx.run_until_parked();
 }

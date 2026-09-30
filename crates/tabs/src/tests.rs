@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
-use super::{Closed, Direction, TabId, Tabs};
+use super::{Closed, Direction, HISTORY, Place, TabId, Tabs};
+
+mod history;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Fake {
@@ -13,10 +15,32 @@ struct Fake {
     seq: u32,
 }
 
-impl<P> Tabs<P> {
-    /// M1–M3.
+impl Place for Fake {
+    type Note = u8;
+
+    fn note(&self) -> Option<u8> {
+        self.note
+    }
+}
+
+impl<P: Place> Tabs<P> {
+    /// M1–M3, H1's adjacency, H2, H3, H8.
     fn check(&self) {
         assert!(!self.list.is_empty(), "at least one tab");
+        for tab in &self.list {
+            assert_eq!(tab.place.is_none(), tab.id == self.active, "H8");
+            for stack in [&tab.back.0, &tab.forward.0] {
+                assert!(stack.len() <= HISTORY, "H3");
+                assert!(stack.iter().all(|place| place.note().is_some()), "H2");
+                assert!(
+                    stack
+                        .iter()
+                        .zip(stack.iter().skip(1))
+                        .all(|(older, newer)| older.note() != newer.note()),
+                    "H1: no adjacent entries on one note"
+                );
+            }
+        }
         let ids: Vec<TabId> = self.list.iter().map(|tab| tab.id).collect();
         let unique: HashSet<TabId> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "ids are unique");
@@ -32,9 +56,11 @@ impl<P> Tabs<P> {
     }
 }
 
-/// Tabs of `Fake` whose `leaving` logs the tab left and returns its note with a new `seq`.
+/// Tabs of `Fake` whose `leaving` logs the tab left and returns the note showing with a new `seq`.
 struct Harness {
     tabs: Tabs<Fake>,
+    /// The active tab's place, which `Tabs` does not hold (H8): the caller's screen.
+    showing: Fake,
     seq: u32,
     left: Vec<TabId>,
 }
@@ -42,7 +68,8 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         Self {
-            tabs: Tabs::new(Fake::default()),
+            tabs: Tabs::new(),
+            showing: Fake::default(),
             seq: 0,
             left: Vec::new(),
         }
@@ -62,7 +89,7 @@ impl Harness {
         op: impl FnOnce(&mut Tabs<Fake>, &mut dyn FnMut() -> Fake) -> R,
     ) -> (R, Option<Fake>) {
         let active = self.tabs.active();
-        let note = self.tabs.active_place().note;
+        let note = self.showing.note;
         let mut given = None;
         let mut seq = self.seq;
         let left = &mut self.left;
@@ -78,32 +105,74 @@ impl Harness {
     }
 
     fn insert(&mut self, at: usize) -> TabId {
-        let place = self.fresh(None);
-        self.with_leaving(|tabs, leaving| tabs.insert(at, place, leaving))
-            .0
+        let id = self
+            .with_leaving(|tabs, leaving| tabs.insert(at, leaving))
+            .0;
+        self.showing = self.fresh(None);
+        id
     }
 
     fn activate(&mut self, id: TabId) -> Option<Fake> {
-        self.with_leaving(|tabs, leaving| tabs.activate(id, leaving))
-            .0
+        let arrived = self
+            .with_leaving(|tabs, leaving| tabs.activate(id, leaving))
+            .0;
+        if let Some(place) = &arrived {
+            self.showing = place.clone();
+        }
+        arrived
     }
 
     fn close(&mut self, id: TabId) -> Option<Closed<Fake>> {
-        self.with_leaving(|tabs, leaving| tabs.close(id, leaving)).0
+        let closed = self.with_leaving(|tabs, leaving| tabs.close(id, leaving)).0;
+        if let Some(Closed {
+            shown: Some((_, place)),
+            ..
+        }) = &closed
+        {
+            self.showing = place.clone();
+        }
+        closed
     }
 
     fn commit(&mut self, id: TabId, note: Option<u8>) -> bool {
-        let place = self.fresh(note);
-        self.with_leaving(|tabs, leaving| tabs.commit(id, place, leaving))
-            .0
+        let committed = self
+            .with_leaving(|tabs, leaving| tabs.commit(id, leaving))
+            .0;
+        if committed {
+            self.showing = self.fresh(note);
+        }
+        committed
+    }
+
+    /// `back` or `forward` from the note showing; the arrival and the place left, if any.
+    fn walk(&mut self, back: bool) -> (Option<Fake>, Option<Fake>) {
+        let showing = self.showing.note;
+        let (arrived, left) = self.with_leaving(|tabs, leaving| {
+            if back {
+                tabs.back(showing, leaving)
+            } else {
+                tabs.forward(showing, leaving)
+            }
+        });
+        if let Some(place) = &arrived {
+            self.showing = place.clone();
+        }
+        (arrived, left)
+    }
+
+    fn forget(&mut self, note: u8) {
+        self.tabs.forget(note);
+        if self.showing.note == Some(note) {
+            self.showing = Fake::default();
+        }
     }
 
     fn ids(&self) -> Vec<TabId> {
         self.tabs.iter().map(super::Tab::id).collect()
     }
 
-    fn places(&self) -> Vec<Fake> {
-        self.tabs.iter().map(|tab| tab.place().clone()).collect()
+    fn places(&self) -> Vec<Option<Fake>> {
+        self.tabs.iter().map(|tab| tab.place().cloned()).collect()
     }
 }
 
@@ -116,18 +185,23 @@ enum Op {
     Close(Index),
     Commit(Index, Option<u8>),
     Forget(u8),
+    Back,
+    Forward,
 }
 
+/// Weighted toward commits and walks, so stacks grow deep enough to walk.
 fn op() -> impl Strategy<Value = Op> {
     let direction = prop_oneof![Just(Direction::Next), Just(Direction::Previous)];
     prop_oneof![
-        (0..12_usize).prop_map(Op::Insert),
-        any::<Index>().prop_map(Op::Activate),
-        direction.prop_map(Op::Step),
-        Just(Op::Last),
-        any::<Index>().prop_map(Op::Close),
-        (any::<Index>(), proptest::option::of(0..4_u8)).prop_map(|(ix, note)| Op::Commit(ix, note)),
-        (0..4_u8).prop_map(Op::Forget),
+        1 => (0..12_usize).prop_map(Op::Insert),
+        1 => any::<Index>().prop_map(Op::Activate),
+        1 => direction.prop_map(Op::Step),
+        1 => Just(Op::Last),
+        1 => any::<Index>().prop_map(Op::Close),
+        4 => (any::<Index>(), proptest::option::of(0..4_u8)).prop_map(|(ix, note)| Op::Commit(ix, note)),
+        1 => (0..4_u8).prop_map(Op::Forget),
+        2 => Just(Op::Back),
+        2 => Just(Op::Forward),
     ]
 }
 
@@ -140,16 +214,14 @@ impl Harness {
         self.ids()[ix.index(self.tabs.count())]
     }
 
-    /// Runs `op`, updates `shadow` (each tab's expected place), returns whether it left the active tab.
+    /// Runs `op`, updates `shadow` (each inactive tab's expected place), returns whether it left the active tab.
     fn apply(&mut self, op: &Op, shadow: &mut HashMap<TabId, Fake>) -> bool {
         let active = self.tabs.active();
         match op {
             Op::Insert(at) => {
-                let place = self.fresh(None);
-                let (id, left) =
-                    self.with_leaving(|tabs, leaving| tabs.insert(*at, place.clone(), leaving));
+                let (_, left) = self.with_leaving(|tabs, leaving| tabs.insert(*at, leaving));
                 shadow.insert(active, left.expect("an insert leaves the active tab"));
-                shadow.insert(id, place);
+                self.showing = self.fresh(None);
                 true
             }
             Op::Activate(ix) => {
@@ -168,43 +240,43 @@ impl Harness {
                 let id = self.pick(*ix);
                 let (closed, left) = self.with_leaving(|tabs, leaving| tabs.close(id, leaving));
                 let closed = closed.expect("a tab closes");
-                let stored = shadow.remove(&id).expect("the tab was shadowed");
-                assert_eq!(
-                    closed.place,
-                    left.unwrap_or(stored),
-                    "a close returns the tab's place"
-                );
+                let expected = if id == active {
+                    left.expect("closing the active tab leaves it")
+                } else {
+                    shadow.remove(&id).expect("an inactive tab is shadowed")
+                };
+                assert_eq!(closed.place, expected, "a close returns the tab's place");
                 if let Some((shown, place)) = &closed.shown {
-                    let expected = shadow.entry(*shown).or_default();
-                    assert_eq!(expected, place, "a close shows the stored place");
+                    let expected = shadow.remove(shown).unwrap_or_default();
+                    assert_eq!(&expected, place, "a close shows the stored place");
+                    self.showing = place.clone();
                 }
                 id == active
             }
             Op::Commit(ix, note) => {
                 let id = self.pick(*ix);
-                let place = self.fresh(*note);
-                let committed = self
-                    .with_leaving(|tabs, leaving| tabs.commit(id, place.clone(), leaving))
-                    .0;
+                let committed = self.commit(id, *note);
                 assert_eq!(
                     committed,
                     id == active,
                     "a commit writes only the active tab"
                 );
-                if committed {
-                    shadow.insert(id, place);
-                }
                 committed
             }
+            Op::Back | Op::Forward => self.walk(matches!(op, Op::Back)).0.is_some(),
             Op::Forget(note) => {
-                let matched = self.tabs.forget(|place| place.note == Some(*note));
-                let active_matched = shadow[&active].note == Some(*note);
-                assert_eq!(matched, active_matched, "forget reports the active tab");
+                self.forget(*note);
                 for place in shadow.values_mut() {
                     if place.note == Some(*note) {
                         *place = Fake::default();
                     }
                 }
+                let active = self.tabs.iter().find(|tab| tab.id() == active);
+                assert_eq!(
+                    active.and_then(|tab| tab.place()),
+                    None,
+                    "forget leaves the active tab"
+                );
                 false
             }
         }
@@ -219,10 +291,11 @@ impl Harness {
         }
         shadow.insert(active, left.expect("an activation leaves the active tab"));
         assert_eq!(
-            arrived.as_ref(),
-            Some(&shadow[&id]),
+            arrived,
+            shadow.remove(&id),
             "an activation returns the stored place"
         );
+        self.showing = arrived.expect("an inactive tab holds a place");
         true
     }
 }
@@ -233,7 +306,7 @@ fn run(
     mut after: impl FnMut(&Harness, &Op, TabId, bool, &HashMap<TabId, Fake>),
 ) -> Harness {
     let mut harness = Harness::new();
-    let mut shadow = HashMap::from([(harness.tabs.active(), Fake::default())]);
+    let mut shadow = HashMap::new();
     for op in ops {
         let active = harness.tabs.active();
         let leaves = harness.apply(op, &mut shadow);
@@ -280,14 +353,13 @@ proptest! {
         let index = ix.index(before.len());
         let closed = harness.close(before[index]).expect("a tab closes");
         prop_assert_eq!(closed.index, index);
-        let place = closed.place.clone();
-        let id = harness.with_leaving(|tabs, leaving| tabs.insert(closed.index, place, leaving)).0;
+        let id = harness.with_leaving(|tabs, leaving| tabs.insert(closed.index, leaving)).0;
         let expected: Vec<TabId> = before
             .iter()
             .map(|&other| if other == before[index] { id } else { other })
             .collect();
         prop_assert_eq!(harness.ids(), expected);
-        prop_assert_eq!(harness.tabs.active_place(), &closed.place);
+        harness.tabs.check();
     }
 
     #[test]
@@ -305,7 +377,7 @@ proptest! {
     #[test]
     fn a_left_tab_gives_back_the_place_it_was_left_with(ops in ops()) {
         run(&ops, |harness, op, _, _, shadow| {
-            let expected: Vec<Fake> = harness.ids().iter().map(|id| shadow[id].clone()).collect();
+            let expected: Vec<Option<Fake>> = harness.ids().iter().map(|id| shadow.get(id).cloned()).collect();
             assert_eq!(harness.places(), expected, "{op:?}");
         });
     }
@@ -320,14 +392,14 @@ fn closing_the_last_tab_leaves_one_empty_tab_with_a_new_id() {
     assert_eq!(harness.tabs.count(), 1);
     let fresh = harness.tabs.active();
     assert_ne!(fresh, only);
-    assert_eq!(harness.tabs.active_place(), &Fake::default());
+    assert_eq!(harness.places(), vec![None]);
     assert_eq!(closed.shown, Some((fresh, Fake::default())));
     assert_eq!(closed.place.note, Some(1));
     assert!(
         !harness.commit(only, Some(2)),
         "a load keyed by the old id lands nowhere"
     );
-    assert_eq!(harness.tabs.active_place(), &Fake::default());
+    assert_eq!(harness.showing, Fake::default());
 }
 
 /// Tabs `[a, b, c]` in order, used `a`, `c`, `b` from least recent: `b` is active.
@@ -344,10 +416,10 @@ fn three() -> (Harness, [TabId; 3]) {
 fn closing_the_active_tab_activates_the_most_recent_other() {
     let (mut harness, [a, b, c]) = three();
     harness.activate(a);
-    let c_place = harness.tabs.iter().nth(2).unwrap().place().clone();
+    let [b_place, c_place] = [1, 2].map(|ix| harness.places()[ix].clone().unwrap());
     let closed = harness.close(a).expect("a closes");
     assert_eq!(harness.tabs.active(), b, "b was used after c");
-    assert_eq!(closed.shown, Some((b, harness.tabs.active_place().clone())));
+    assert_eq!(closed.shown, Some((b, b_place)));
     assert_eq!(harness.ids(), vec![b, c]);
     let closed = harness.close(b).expect("b closes");
     assert_eq!(closed.shown, Some((c, c_place)));
@@ -356,12 +428,11 @@ fn closing_the_active_tab_activates_the_most_recent_other() {
 #[test]
 fn closing_another_tab_keeps_the_active_one() {
     let (mut harness, [a, b, c]) = three();
-    let place = harness.tabs.active_place().clone();
     let closed = harness.close(c).expect("c closes");
     assert_eq!(closed.shown, None);
     assert_eq!(closed.index, 2);
     assert_eq!(harness.tabs.active(), b);
-    assert_eq!(harness.tabs.active_place(), &place);
+    assert_eq!(harness.places()[1], None);
     harness.close(b);
     assert_eq!(harness.tabs.active(), a, "c left the MRU");
 }
@@ -383,22 +454,20 @@ fn forget_empties_only_matching_tabs() {
     harness.commit(a, Some(2));
     harness.activate(c);
     harness.commit(c, Some(1));
-    let a_place = harness.tabs.iter().next().unwrap().place().clone();
+    let a_place = harness.places()[0].clone();
 
-    assert!(
-        harness.tabs.forget(|place| place.note == Some(1)),
-        "c is active"
-    );
+    harness.forget(1);
     assert_eq!(
         harness.places(),
-        vec![a_place.clone(), Fake::default(), Fake::default()]
+        vec![a_place, Some(Fake::default()), None],
+        "c is active: its place is the caller's"
     );
     assert_eq!(harness.tabs.active(), c);
-    assert!(
-        !harness.tabs.forget(|place| place.note == Some(2)),
-        "a is not active"
+    harness.forget(2);
+    assert_eq!(
+        harness.places(),
+        vec![Some(Fake::default()), Some(Fake::default()), None]
     );
-    assert_eq!(harness.places(), vec![Fake::default(); 3]);
 }
 
 #[test]

@@ -25,7 +25,7 @@ use crate::vault::NoteStore;
 impl Sidebar {
     #[cfg(test)]
     pub(crate) fn select_for_test(&mut self, id: EntryId, cx: &mut Context<Self>) {
-        self.selected = Some(id);
+        self.select(Some(id));
         cx.notify();
     }
 
