@@ -66,7 +66,8 @@ impl Drop for Unreadable {
 /// A window would keep the process alive: exiting on its own within the bound is the proof.
 #[test]
 fn an_unreadable_vault_exits_one_before_any_window() {
-    let path = std::env::temp_dir().join("inkra-unreadable-vault");
+    // Per process: two concurrent runs of this test must not share, and remove, one folder.
+    let path = std::env::temp_dir().join(format!("inkra-unreadable-vault-{}", std::process::id()));
     // A run killed before its guard dropped leaves the folder unreadable.
     drop(Unreadable(path.clone()));
     if let Err(error) = std::fs::create_dir(&path) {
