@@ -5,8 +5,8 @@ use gpui::{
     Entity, Focusable, Modifiers, MouseButton, Subscription, TestAppContext, VisualTestContext,
 };
 
-use super::letters::{DELAY, Letters};
-use super::{Dismissed, Picker};
+use super::letters::{Answer, DELAY, Letters};
+use super::{Arrival, Dismissed, Picker};
 use crate::keymap::key_bindings;
 use crate::open::Open;
 use crate::theme;
@@ -260,9 +260,90 @@ fn a_click_on_a_header_does_nothing(cx: &mut TestAppContext) {
 fn an_update_past_the_last_selectable_row_selects_the_one_before(cx: &mut TestAppContext) {
     let (picker, mut visual) = open(cx, &["a", "# h"]);
 
-    picker.update(&mut visual, |picker, cx| picker.matches_updated(1, cx));
+    picker.update(&mut visual, |picker, cx| {
+        picker.land(
+            Arrival {
+                row: 1,
+                ..Arrival::first()
+            },
+            cx,
+        );
+    });
 
     assert_eq!(selected(&picker, &mut visual), Some(0));
+}
+
+#[gpui::test]
+fn a_landing_that_asks_for_a_rerun_runs_it_unless_confirmed(cx: &mut TestAppContext) {
+    let rerun = Arrival {
+        rerun: true,
+        ..Arrival::first()
+    };
+    let applied = |picker: &Entity<Picker<Letters>>, visual: &mut VisualTestContext| {
+        picker.read_with(visual, |picker, _| picker.delegate.applied.borrow().len())
+    };
+    let (picker, mut visual) = open(cx, ROWS);
+    let before = applied(&picker, &mut visual);
+
+    picker.update(&mut visual, |picker, cx| picker.land(rerun, cx));
+    settle(&mut visual);
+    assert_eq!(
+        applied(&picker, &mut visual),
+        before + 1,
+        "the re-run answered"
+    );
+
+    // An `enter` queued behind a query no task answers, so only the re-run could add to `applied`.
+    picker.update(&mut visual, |picker, cx| {
+        picker.awaiting_matches = true;
+        picker.confirm(Open::Here, cx);
+        picker.land(rerun, cx);
+    });
+    settle(&mut visual);
+    assert_eq!(confirmed(&picker, &mut visual), [("apple", Open::Here)]);
+    assert_eq!(
+        applied(&picker, &mut visual),
+        before + 1,
+        "no re-run after a confirm"
+    );
+}
+
+#[gpui::test]
+fn an_answer_at_once_lands_inside_the_refresh(cx: &mut TestAppContext) {
+    let mut letters = Letters::new(ROWS);
+    letters.answer = Answer::AtOnce;
+    let (picker, mut visual) = open_with(cx, letters);
+
+    let confirmed = picker.update(&mut visual, |picker, cx| {
+        picker.query = "b".into();
+        picker.refresh(cx);
+        picker.confirm(Open::Here, cx);
+        picker.delegate.confirmed.borrow().clone()
+    });
+
+    assert_eq!(confirmed, [("beet", Open::Here)]);
+}
+
+#[gpui::test]
+fn an_answer_of_none_lands_nothing_and_keeps_enter_queued(cx: &mut TestAppContext) {
+    let mut letters = Letters::new(ROWS);
+    letters.answer = Answer::Nothing;
+    let (picker, mut visual) = open_with(cx, letters);
+
+    visual.simulate_keystrokes("b enter");
+    settle(&mut visual);
+    let applied = picker.read_with(&visual, |picker, _| {
+        picker.delegate.applied.borrow().clone()
+    });
+    assert_eq!(applied, Vec::<String>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
+
+    picker.update(&mut visual, |picker, cx| {
+        picker.delegate.answer = Answer::Later;
+        picker.refresh(cx);
+    });
+    settle(&mut visual);
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::Here)]);
 }
 
 #[gpui::test]

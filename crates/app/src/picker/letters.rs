@@ -5,15 +5,26 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, IntoElement, ParentElement, Pixels, SharedString, Styled, Task, div,
+    AnyElement, App, Context, IntoElement, ParentElement, Pixels, SharedString, Styled, div,
 };
 
-use super::{Picker, PickerDelegate};
+use super::{Arrival, Picker, PickerDelegate, Update};
 use crate::open::Open;
 use crate::theme;
 
 /// Each query answers after this, so a test can type twice before the first answer.
 pub(crate) const DELAY: Duration = Duration::from_millis(10);
+
+/// How `update_matches` answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answer {
+    /// After `DELAY`; the default.
+    Later,
+    /// Before `update_matches` returns.
+    AtOnce,
+    /// After `DELAY`, with no answer.
+    Nothing,
+}
 
 /// `KIND` makes two picker types from one delegate, so a test can open one over the other.
 pub(crate) struct Letters<const KIND: u8 = 0> {
@@ -24,6 +35,7 @@ pub(crate) struct Letters<const KIND: u8 = 0> {
     pub(crate) applied: Rc<RefCell<Vec<String>>>,
     pub(crate) footer: Option<&'static str>,
     pub(crate) lines: u8,
+    pub(crate) answer: Answer,
 }
 
 impl<const KIND: u8> Letters<KIND> {
@@ -35,11 +47,14 @@ impl<const KIND: u8> Letters<KIND> {
             applied: Rc::default(),
             footer: None,
             lines: 1,
+            answer: Answer::Later,
         }
     }
 }
 
 impl<const KIND: u8> PickerDelegate for Letters<KIND> {
+    type Matches = (String, Vec<&'static str>);
+
     fn key_context(&self) -> &'static str {
         "Letters"
     }
@@ -64,23 +79,37 @@ impl<const KIND: u8> PickerDelegate for Letters<KIND> {
         self.rows.get(ix).is_some_and(|row| !row.starts_with('#'))
     }
 
-    fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
+    fn update_matches(
+        &mut self,
+        query: &str,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Update<Self::Matches> {
         let rows: Vec<&'static str> = self
             .all
             .iter()
             .copied()
             .filter(|row| row.contains(query))
             .collect();
-        let query = query.to_owned();
-        let applied = Rc::clone(&self.applied);
-        cx.spawn(async move |picker, cx| {
-            cx.background_executor().timer(DELAY).await;
-            let _ = picker.update(cx, |picker, cx| {
-                applied.borrow_mut().push(query);
-                picker.delegate.rows = rows;
-                picker.matches_updated(0, cx);
-            });
-        })
+        let matches = (query.to_owned(), rows);
+        let answer = self.answer;
+        match answer {
+            Answer::AtOnce => Update::Ready(matches),
+            Answer::Later | Answer::Nothing => Update::Pending(cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(DELAY).await;
+                (answer == Answer::Later).then_some(matches)
+            })),
+        }
+    }
+
+    fn apply_matches(
+        &mut self,
+        (query, rows): Self::Matches,
+        _: Option<usize>,
+        _: &mut Context<Picker<Self>>,
+    ) -> Arrival {
+        self.applied.borrow_mut().push(query);
+        self.rows = rows;
+        Arrival::first()
     }
 
     fn confirm(&mut self, ix: usize, open: Open, _: &mut Context<Picker<Self>>) {

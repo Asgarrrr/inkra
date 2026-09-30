@@ -6,15 +6,15 @@ use std::sync::atomic::AtomicBool;
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
-    Subscription, Task, actions, div,
+    Subscription, actions, div,
 };
 use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
 use crate::index::{IndexSync, NotesChanged, SCANNING, indexing_footer};
 use crate::open::{NoteActivated, Open};
-use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
-use crate::picker::{Picker, PickerDelegate};
+use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs};
+use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
 use list::List;
 
@@ -164,6 +164,8 @@ impl IndexDelegate for QuickOpenDelegate {
 }
 
 impl PickerDelegate for QuickOpenDelegate {
+    type Matches = Ran<<Self as IndexDelegate>::Found>;
+
     fn key_context(&self) -> &'static str {
         "QuickOpen"
     }
@@ -196,8 +198,21 @@ impl PickerDelegate for QuickOpenDelegate {
         true
     }
 
-    fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
+    fn update_matches(
+        &mut self,
+        query: &str,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Update<Self::Matches> {
         Runs::update_matches(self, query, cx)
+    }
+
+    fn apply_matches(
+        &mut self,
+        matches: Self::Matches,
+        selected: Option<usize>,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Arrival {
+        Runs::apply_matches(self, matches, selected, cx)
     }
 
     fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>) {

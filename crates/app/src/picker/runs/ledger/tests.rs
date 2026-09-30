@@ -23,8 +23,6 @@ fn a_start_cancels_the_run_before_and_supersedes_it() {
     let second = ledger.start();
     assert!(cancelled(&first));
     assert!(!cancelled(&second));
-    assert!(!ledger.is_current(first.id));
-    assert!(ledger.is_current(second.id));
 }
 
 #[test]

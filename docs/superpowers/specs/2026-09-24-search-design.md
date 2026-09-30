@@ -718,6 +718,15 @@ previous note. A refresh reads the kept note when its result lands, not when
 > row is selected and scrolled to, through `matches_updated` (smart quick open
 > spec, S5, "Built in slice 8").
 
+> **Superseded 2026-09-30** by
+> [`2026-09-30-picker-owns-landing-design.md`](2026-09-30-picker-owns-landing-design.md):
+> `matches_updated` and `matches_refreshed` are gone. A delegate returns its
+> answer from `update_matches` and sets its rows in `apply_matches`, which
+> returns an `Arrival`: the row to select, whether the list keeps its scroll,
+> and whether to re-run. Only the picker lands the answer; no delegate calls
+> it back. The stale-id test is gone: quick open's
+> `a_superseded_scan_never_lands` drives keys instead.
+
 **A refresh must not cancel a running scan of the same query.** Today a
 `NotesChanged` bumps the search id and sets the cancel flag, so it drops the
 scan of a query the user is still waiting on. A refresh, from `NotesChanged`

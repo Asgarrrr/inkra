@@ -11,7 +11,7 @@ use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::test_support::{entry_id, vault};
 use crate::theme;
 
-fn logged(opened: &mut Opened) -> usize {
+pub(super) fn logged(opened: &mut Opened) -> usize {
     opened
         .picker
         .read_with(&opened.visual, |picker, _| picker.delegate.logged)

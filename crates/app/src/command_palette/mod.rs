@@ -6,12 +6,12 @@ mod tests;
 
 use gpui::{
     Action, AnyElement, App, Context, EventEmitter, IntoElement, ParentElement, Pixels,
-    SharedString, Styled, Task, actions, div,
+    SharedString, Styled, actions, div,
 };
 use inkra_index::{NoteQuery, word_starts};
 
 use crate::open::Open;
-use crate::picker::{Picker, PickerDelegate};
+use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::row_text::{LitText, styled};
 use crate::theme;
 
@@ -30,7 +30,7 @@ pub(crate) struct CommandPaletteDelegate {
 }
 
 /// One match: its index in `commands` and its name, lit.
-struct Row {
+pub(crate) struct Row {
     command: usize,
     name: LitText,
 }
@@ -45,6 +45,8 @@ impl CommandPaletteDelegate {
 }
 
 impl PickerDelegate for CommandPaletteDelegate {
+    type Matches = Vec<Row>;
+
     fn key_context(&self) -> &'static str {
         "CommandPalette"
     }
@@ -69,7 +71,11 @@ impl PickerDelegate for CommandPaletteDelegate {
         true
     }
 
-    fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()> {
+    fn update_matches(
+        &mut self,
+        query: &str,
+        _: &mut Context<Picker<Self>>,
+    ) -> Update<Self::Matches> {
         let query = NoteQuery::new(query, None, &[]);
         let mut rows: Vec<(bool, Row)> = self
             .commands
@@ -88,15 +94,17 @@ impl PickerDelegate for CommandPaletteDelegate {
             .collect();
         // Stable: recent keeps its order and each group stays alphabetical (palette spec, D3).
         rows.sort_by_key(|(later, _)| *later);
-        self.rows = rows.into_iter().map(|(_, row)| row).collect();
-        // The picker is borrowed here; `App::defer` lands in this flush, before any draw or key.
-        let picker = cx.weak_entity();
-        cx.defer(move |cx| {
-            picker
-                .update(cx, |picker, cx| picker.matches_updated(0, cx))
-                .ok();
-        });
-        Task::ready(())
+        Update::Ready(rows.into_iter().map(|(_, row)| row).collect())
+    }
+
+    fn apply_matches(
+        &mut self,
+        rows: Self::Matches,
+        _: Option<usize>,
+        _: &mut Context<Picker<Self>>,
+    ) -> Arrival {
+        self.rows = rows;
+        Arrival::first()
     }
 
     /// `open` does not apply: `⌘↵` runs the command, as `enter`.

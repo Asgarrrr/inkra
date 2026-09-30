@@ -149,6 +149,8 @@ Read the spec before changing its area:
   owning the run, `IndexWatch::observe`
 - `docs/superpowers/specs/2026-09-30-runs-testable-design.md` — `Ledger`: which
   run is current, D7's deferred re-run, the wait; `Runs` drives it, `begun` in tests
+- `docs/superpowers/specs/2026-09-30-picker-owns-landing-design.md` — `Picker`
+  lands every answer: `Update`, `apply_matches`, `Arrival`, `Ran`, the `None` rule
 - `docs/superpowers/specs/2026-09-29-command-palette-design.md` — `⌘⇧P`: the
   listed actions, the hide list, `word_starts`, the handle a command runs on,
   keys, recent order

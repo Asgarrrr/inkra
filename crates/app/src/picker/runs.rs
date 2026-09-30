@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use gpui::{Context, Entity, Priority, Subscription, Task};
+use gpui::{Context, Entity, Priority, Subscription};
 use inkra_index::live::Status;
 use inkra_index::{IndexSnapshot, NoteQuery};
 use inkra_vault::Jobs;
 
-use super::{Picker, PickerDelegate};
+use super::{Arrival, Picker, PickerDelegate, Update};
 use crate::background::Background;
 use crate::index::{IndexSync, IndexWatch};
 
@@ -38,9 +38,15 @@ pub(crate) trait IndexDelegate: PickerDelegate {
         jobs: &dyn Jobs,
         cancel: &AtomicBool,
     ) -> impl Future<Output = Option<Self::Found>> + Send;
-    /// Replaces the rows with what `landed` found.
+    /// Replaces the rows with a run's answer, before the picker lands it.
     fn show(&mut self, landed: Landed<Self::Found>, cx: &mut Context<Picker<Self>>);
     fn key(&self, ix: usize) -> Option<Self::Key>;
+}
+
+/// A run's answer: `Settled` when the delegate already set rows that need no scan.
+pub(crate) enum Ran<F> {
+    Settled,
+    Found(Landed<F>),
 }
 
 /// A run's result, and what it answered.
@@ -103,18 +109,18 @@ impl Runs {
         delegate: &mut D,
         text: &str,
         cx: &mut Context<Picker<D>>,
-    ) -> Task<()> {
+    ) -> Update<Ran<D::Found>> {
         let sync = delegate.sync().clone();
         let index_sync = sync.read(cx);
         let started = delegate.runs().start(index_sync);
         if index_sync.status() == Status::Scanning {
             // Nothing to list yet; the first build's notify runs the query again.
             delegate.runs().scanning = true;
-            return Self::settle(started.id, cx);
+            return Update::Ready(Ran::Settled);
         }
         let Some(query) = delegate.query(text, started.run) else {
             delegate.runs().scanning = false;
-            return Self::settle(started.id, cx);
+            return Update::Ready(Ran::Settled);
         };
         let released = delegate.runs().begin_scan(&started);
         let Started {
@@ -129,77 +135,59 @@ impl Runs {
             priority: Priority::default(),
         };
         let begun = Instant::now();
-        cx.spawn(async move |picker, cx| {
+        // Off the foreground: dropping it drops the scans' scope on a background thread.
+        Update::Pending(cx.background_executor().spawn(async move {
             if let Some(wait) = wait {
-                cx.background_executor().timer(wait).await;
+                jobs.executor.timer(wait).await;
             }
             released.await;
-            let (scanned, asked) = (snapshot.clone(), Arc::clone(&query));
-            // Its own task: dropping this one drops the scans' scope on a background thread.
-            let found = cx
-                .background_executor()
-                .spawn(async move { D::search(&scanned, &asked, &jobs, &cancel).await });
-            let Some(found) = found.await else {
-                return;
-            };
-            let landed = Landed {
+            let found = D::search(&snapshot, &query, &jobs, &cancel).await?;
+            Some(Ran::Found(Landed {
                 id,
                 run,
                 begun,
                 snapshot,
                 query,
                 found,
-            };
-            let _ = picker.update(cx, |picker, cx| Self::apply(picker, landed, cx));
-        })
+            }))
+        }))
     }
 
-    /// Shows the current run's result, keeping the selection on a refresh; a stale one is dropped.
-    pub(crate) fn apply<D: IndexDelegate>(
-        picker: &mut Picker<D>,
-        landed: Landed<D::Found>,
+    /// Shows what a run found, keeping the selection on a refresh.
+    pub(crate) fn apply_matches<D: IndexDelegate>(
+        delegate: &mut D,
+        ran: Ran<D::Found>,
+        selected: Option<usize>,
         cx: &mut Context<Picker<D>>,
-    ) {
-        if !picker.delegate.runs().ledger.is_current(landed.id) {
-            return;
-        }
-        // Read now, not when the refresh started: the user may have moved meanwhile.
-        let kept = picker
-            .selected()
+    ) -> Arrival {
+        let Ran::Found(landed) = ran else {
+            return Arrival::first();
+        };
+        // Read at landing, not when the refresh started: the user may have moved meanwhile.
+        let kept = selected
             .filter(|_| !landed.run.is_user())
-            .and_then(|ix| picker.delegate.key(ix));
-        picker.delegate.runs().scanning = false;
-        picker.delegate.show(landed, cx);
-        let delegate = &picker.delegate;
+            .and_then(|ix| delegate.key(ix));
+        delegate.runs().scanning = false;
+        delegate.show(landed, cx);
         let row = kept.and_then(|kept| {
             (0..delegate.match_count()).find(|&ix| delegate.key(ix).as_ref() == Some(&kept))
         });
+        let ledger = &mut delegate.runs().ledger;
+        let rerun = ledger
+            .landed()
+            .and_then(|run| ledger.refresh(run))
+            .is_some();
         match row {
-            Some(ix) => picker.matches_refreshed(ix, cx),
+            Some(row) => Arrival {
+                row,
+                keep_scroll: true,
+                rerun,
+            },
             // A new query, or the kept row is gone: the first row, scrolled to.
-            None => picker.matches_updated(0, cx),
-        }
-        // After the rows land: an `enter` waiting on them confirms before a re-run starts.
-        Self::landed(picker, cx);
-    }
-
-    /// Lands a run that scans nothing: the delegate already set its rows.
-    fn settle<D: IndexDelegate>(id: RunId, cx: &mut Context<Picker<D>>) -> Task<()> {
-        cx.spawn(async move |picker, cx| {
-            let _ = picker.update(cx, |picker, cx| {
-                if picker.delegate.runs().ledger.is_current(id) {
-                    picker.matches_updated(0, cx);
-                }
-            });
-        })
-    }
-
-    /// The current run's rows landed; a refresh deferred behind it starts now, unless the picker confirmed.
-    fn landed<D: IndexDelegate>(picker: &mut Picker<D>, cx: &mut Context<Picker<D>>) {
-        if let Some(run) = picker.delegate.runs().ledger.landed()
-            && !picker.confirmed
-        {
-            Self::refresh_or_defer(picker, run, cx);
+            None => Arrival {
+                rerun,
+                ..Arrival::first()
+            },
         }
     }
 

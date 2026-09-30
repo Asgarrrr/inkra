@@ -107,6 +107,15 @@ and its rules (`start`, `begin_scan`, `refresh`, `landed`) live in `Ledger`,
 `picker/runs/ledger.rs`; `Scan` is private to it, and `Runs::begun` replaces
 the test counters and `cancel_flag`.
 
+Superseded in part by `2026-09-30-picker-owns-landing-design.md`: the
+landing moves into `Picker`. `Runs::update_matches` returns
+`Update<Ran<D::Found>>`: `Ready(Ran::Settled)` where it settled, else one
+task on the background executor (`cx.background_executor().spawn`) that
+answers `None` on cancel. `Runs::apply_matches`
+replaces `apply` and returns an `Arrival`, whose `rerun` comes from
+`Ledger::landed` through `Ledger::refresh`. `settle`, `landed` and
+`is_current` are gone; `Runs` no longer reads `Picker::confirmed`.
+
 `picker/runs.rs` gains one trait, with two implementers (quick open and vault
 search):
 
@@ -371,6 +380,10 @@ Each step merges alone with `./scripts/check.sh` green and
 
 Steps 2 to 5 are one commit each on `arch/query-run`. Deviations from the
 design above:
+
+- **Later, 2026-09-30:** `Runs::apply`, `settle`, `landed` and `is_current`
+  are gone, and the query runs in one background task with no foreground
+  task inside `Runs`. See `2026-09-30-picker-owns-landing-design.md`.
 
 - **`Landed` carries the `RunId`.** Quick open's `List` keys its excerpts by
   run, so `show` needs it. `Runs::apply(picker, landed, cx)` reads it there

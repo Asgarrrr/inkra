@@ -46,7 +46,7 @@ impl Run {
     }
 }
 
-/// Which run a result answers: only the current one applies.
+/// Which run found a list: quick open drops an excerpt asked for by an older one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct RunId(u64);
 
@@ -99,10 +99,6 @@ impl Ledger {
             user: started.run.is_user(),
             rerun: false,
         });
-    }
-
-    pub(crate) fn is_current(&self, id: RunId) -> bool {
-        id == self.id
     }
 
     /// Search spec D7: `None` while a scan is in flight, which re-runs once it lands;

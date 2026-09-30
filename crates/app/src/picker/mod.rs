@@ -25,7 +25,40 @@ pub(crate) struct Dismissed;
 
 impl<D: PickerDelegate> EventEmitter<Dismissed> for Picker<D> {}
 
+/// A query's answer: at once, or from a task the picker holds.
+pub(crate) enum Update<T> {
+    /// Applied and landed before `refresh` returns.
+    Ready(T),
+    /// Applied and landed when it finishes with `Some`. `None`, or dropping it, lands nothing.
+    Pending(Task<Option<T>>),
+}
+
+/// What the picker does once the rows are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Arrival {
+    /// Selects the first selectable row from here, else the nearest before it.
+    pub(crate) row: usize,
+    /// The same answer refreshed: the list keeps its scroll.
+    pub(crate) keep_scroll: bool,
+    /// The data changed under this answer: re-run in the background, unless confirmed.
+    pub(crate) rerun: bool,
+}
+
+impl Arrival {
+    /// A new answer: its first selectable row, scrolled to.
+    pub(crate) fn first() -> Self {
+        Self {
+            row: 0,
+            keep_scroll: false,
+            rerun: false,
+        }
+    }
+}
+
 pub(crate) trait PickerDelegate: Sized + 'static {
+    /// One answer, from `update_matches` to `apply_matches`.
+    type Matches: 'static;
+
     /// Joins `Picker` in the key context, so a delegate's own bindings exist only in it.
     fn key_context(&self) -> &'static str;
     /// The dialog's accessible name.
@@ -35,8 +68,19 @@ pub(crate) trait PickerDelegate: Sized + 'static {
     fn empty_text(&self, cx: &App) -> Option<SharedString>;
     fn match_count(&self) -> usize;
     fn is_selectable(&self, ix: usize) -> bool;
-    /// The picker holds the task, so the next query drops it.
-    fn update_matches(&mut self, query: &str, cx: &mut Context<Picker<Self>>) -> Task<()>;
+    /// The picker holds a `Pending` task, so the next query drops it.
+    fn update_matches(
+        &mut self,
+        query: &str,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Update<Self::Matches>;
+    /// Replaces the rows with `matches`; `selected` is the row selected now, before they change.
+    fn apply_matches(
+        &mut self,
+        matches: Self::Matches,
+        selected: Option<usize>,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Arrival;
     /// `open` is where the pick shows: `⌘↵` and a `⌘`-click ask for a new tab.
     fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>);
     /// Exactly `row_height` tall: `uniform_list` measures every row from row 0.
@@ -59,7 +103,7 @@ pub(crate) struct Picker<D: PickerDelegate> {
     scroll: UniformListScrollHandle,
     /// Held, never detached: replacing it drops the previous query's task.
     pending: Option<Task<()>>,
-    /// Until the delegate calls `matches_updated` or `matches_refreshed`, the rows answer an older query.
+    /// Until an answer lands, the rows answer an older query.
     awaiting_matches: bool,
     /// `enter` or `⌘↵` landed while `awaiting_matches`: confirm once the rows answer the current query.
     confirm_on_update: Option<Open>,
@@ -109,6 +153,7 @@ impl<D: PickerDelegate> Picker<D> {
         &self.query
     }
 
+    #[cfg(test)]
     pub(crate) fn selected(&self) -> Option<usize> {
         self.selected
     }
@@ -121,21 +166,43 @@ impl<D: PickerDelegate> Picker<D> {
 
     /// Re-runs the query for data that changed under it: an `enter` meanwhile confirms the rows shown.
     pub(crate) fn refresh_in_background(&mut self, cx: &mut Context<Self>) {
-        let query = self.query.clone();
-        self.pending = Some(self.delegate.update_matches(&query, cx));
+        match self.delegate.update_matches(&self.query, cx) {
+            Update::Ready(matches) => {
+                self.pending = None;
+                self.apply(matches, cx);
+            }
+            Update::Pending(task) => {
+                self.pending = Some(cx.spawn(async move |picker, cx| {
+                    let Some(matches) = task.await else {
+                        return;
+                    };
+                    picker
+                        .update(cx, |picker, cx| picker.apply(matches, cx))
+                        .ok();
+                }));
+            }
+        }
     }
 
-    /// Selects the first selectable row from `ix`, else the nearest before it, and scrolls to it.
-    pub(crate) fn matches_updated(&mut self, ix: usize, cx: &mut Context<Self>) {
-        self.select_from(ix);
-        self.reveal_selected();
-        self.matches_landed(cx);
+    fn apply(&mut self, matches: D::Matches, cx: &mut Context<Self>) {
+        let arrival = self.delegate.apply_matches(matches, self.selected, cx);
+        self.land(arrival, cx);
     }
 
-    /// As `matches_updated`, for a background refresh: the list keeps its scroll.
-    pub(crate) fn matches_refreshed(&mut self, ix: usize, cx: &mut Context<Self>) {
-        self.select_from(ix);
-        self.matches_landed(cx);
+    /// Select, scroll, clear the flag, the queued confirm, then the re-run: this order is the Interface.
+    fn land(&mut self, arrival: Arrival, cx: &mut Context<Self>) {
+        self.select_from(arrival.row);
+        if !arrival.keep_scroll {
+            self.reveal_selected();
+        }
+        self.awaiting_matches = false;
+        cx.notify();
+        if let Some(open) = self.confirm_on_update.take() {
+            self.confirm_selected(open, cx);
+        }
+        if arrival.rerun && !self.confirmed {
+            self.refresh_in_background(cx);
+        }
     }
 
     fn select_from(&mut self, ix: usize) {
@@ -144,14 +211,6 @@ impl<D: PickerDelegate> Picker<D> {
         self.selected = (from..count)
             .chain((0..from).rev())
             .find(|&ix| self.delegate.is_selectable(ix));
-    }
-
-    fn matches_landed(&mut self, cx: &mut Context<Self>) {
-        self.awaiting_matches = false;
-        cx.notify();
-        if let Some(open) = self.confirm_on_update.take() {
-            self.confirm_selected(open, cx);
-        }
     }
 
     fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {

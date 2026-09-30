@@ -9,6 +9,7 @@ use std::sync::Arc;
 use gpui::{AppContext as _, Focusable, TestAppContext};
 use inkra_vault::{Fs, Kind};
 
+use super::background::logged;
 use super::{Opened, footer, last_scan, listed, open, search, with_texts};
 use crate::index::{BUILDING_REFRESH, IndexSync};
 use crate::keymap::key_bindings;
@@ -94,6 +95,22 @@ fn a_keystroke_during_the_scan_cancels_it(cx: &mut TestAppContext) {
         typed,
         "the keystroke's scan read the newest index: no re-run for the notify"
     );
+}
+
+#[gpui::test]
+fn a_superseded_scan_never_lands(cx: &mut TestAppContext) {
+    let fs = vault(&["plan.md", "pear.md"]);
+    let mut opened = open(cx, &fs, None, &[]);
+    let release = hold_scans(&mut opened);
+    let before = logged(&mut opened);
+
+    opened.visual.simulate_keystrokes("p");
+    opened.visual.simulate_keystrokes("l");
+    let _ = release.send(());
+    advance(&mut opened, super::SEARCH_DEBOUNCE);
+
+    assert_eq!(logged(&mut opened), before + 1, "only the newest run lands");
+    assert_eq!(listed(&mut opened), ["plan"]);
 }
 
 #[gpui::test]
