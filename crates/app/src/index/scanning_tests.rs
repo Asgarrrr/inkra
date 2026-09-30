@@ -6,11 +6,12 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use gpui::{AppContext as _, TestAppContext};
+use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind, Mtime, Stamp};
 
 use super::IndexSync;
-use super::tests::{backlinks, create, hold_builds, indexed_vault, notes_changed, rescan};
+use super::tests::{backlinks, create, hold_builds, indexed_vault, notes_changed, rescan, status};
 use crate::test_support::{entry_id, unscanned_notes};
 use crate::timeline::Timeline;
 use crate::vault::NoteSaved;
@@ -22,7 +23,7 @@ fn the_startup_load_runs_one_build(cx: &mut TestAppContext) {
     fs.insert_file("/vault/f/b.md", "beta");
     let notes = unscanned_notes(cx, fs as Arc<dyn Fs>);
     let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-    assert!(links.read_with(cx, |links, _| links.awaits_first_build()));
+    assert_eq!(status(cx, &links), Status::Scanning);
     let (changed, _subscription) = notes_changed(cx, &links);
 
     cx.run_until_parked();
@@ -33,7 +34,7 @@ fn the_startup_load_runs_one_build(cx: &mut TestAppContext) {
         "the root pass and the full pass, one build"
     );
     links.read_with(cx, |links, _| {
-        assert!(!links.awaits_first_build());
+        assert_eq!(links.status(), Status::Ready);
         assert_eq!(links.index().names().len(), 2);
     });
 }

@@ -8,7 +8,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
 use super::IndexSync;
-use super::tests::{create, indexed_vault, saved_edit};
+use super::tests::{create, indexed_vault, saved_edit, status};
 use crate::test_support::{entry_id, scan_notes};
 use crate::timeline::Timeline;
 
@@ -78,10 +78,7 @@ fn a_load_finishing_after_a_trash_indexes_no_words(cx: &mut TestAppContext) {
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "changed");
     create(cx, &notes, "c");
-    assert!(
-        links.read_with(cx, |links, _| links.is_building()),
-        "the load is parked"
-    );
+    assert!(!status(cx, &links).is_ready(), "the load is parked");
     let trashed = notes.update(cx, |notes, cx| notes.trash(a, cx));
     cx.run_until_parked();
     drop(trashed);
@@ -177,7 +174,7 @@ fn a_startup_load_ending_in_a_rebuild_settles_before_it_is_marked_indexed(cx: &m
     let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
     cx.run_until_parked();
-    assert!(links.read_with(cx, |links, _| links.is_building()));
+    assert!(!status(cx, &links).is_ready());
 
     let (b, c) = (entry_id(&notes, cx, "b"), entry_id(&notes, cx, "c"));
     for id in [b, c] {

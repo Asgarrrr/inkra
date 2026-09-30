@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui::{Context, Entity, Priority, Subscription, Task};
+use inkra_index::live::Status;
 use inkra_index::{IndexSnapshot, NoteQuery};
 use inkra_vault::Jobs;
 
@@ -26,8 +27,6 @@ pub(crate) trait IndexDelegate: PickerDelegate {
 
     fn runs(&mut self) -> &mut Runs;
     fn sync(&self) -> &Entity<IndexSync>;
-    /// Before the first build: empty rows that say so.
-    fn scanning(&mut self);
     /// The query `text` runs; `None` once the delegate set rows that need no scan.
     fn query(&mut self, text: &str, run: Run) -> Option<NoteQuery>;
     /// Off the foreground: `find_notes` or `search`, with the delegate's limit.
@@ -108,6 +107,8 @@ pub(crate) struct Runs {
     next: Run,
     /// Loads add text, so rows; a notify refreshes at most every `BUILDING_REFRESH` while they land.
     watch: IndexWatch,
+    /// Set by a run before the first build; cleared when a run lands or the delegate needs no scan.
+    scanning: bool,
     /// Scans started, the scanning state's empty runs aside.
     #[cfg(test)]
     started: usize,
@@ -175,6 +176,10 @@ impl Runs {
         id == self.id
     }
 
+    pub(crate) fn scanning(&self) -> bool {
+        self.scanning
+    }
+
     /// The whole of an `IndexDelegate`'s `update_matches`.
     pub(crate) fn update_matches<D: IndexDelegate>(
         delegate: &mut D,
@@ -184,12 +189,13 @@ impl Runs {
         let sync = delegate.sync().clone();
         let index_sync = sync.read(cx);
         let started = delegate.runs().start(index_sync);
-        if index_sync.awaits_first_build() {
+        if index_sync.status() == Status::Scanning {
             // Nothing to list yet; the first build's notify runs the query again.
-            delegate.scanning();
+            delegate.runs().scanning = true;
             return Self::settle(started.id, cx);
         }
         let Some(query) = delegate.query(text, started.run) else {
+            delegate.runs().scanning = false;
             return Self::settle(started.id, cx);
         };
         let wait = started.run.wait(started.behind_user);
@@ -242,6 +248,7 @@ impl Runs {
             .selected()
             .filter(|_| !landed.run.is_user())
             .and_then(|ix| picker.delegate.key(ix));
+        picker.delegate.runs().scanning = false;
         picker.delegate.show(landed, cx);
         let delegate = &picker.delegate;
         let row = kept.and_then(|kept| {

@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::TestAppContext;
+use inkra_index::live::Status;
 use inkra_vault::{Mtime, Stamp};
 
-use super::tests::{hold_builds, indexed_vault, notes_changed, rescan};
+use super::tests::{hold_builds, indexed_vault, indexing, notes_changed, rescan, status};
 use crate::test_support::entry_id;
 use crate::timeline::Timeline;
 use crate::vault::NoteSaved;
@@ -50,7 +51,7 @@ fn a_vault_with_no_notes_applies_one_build(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("image.png", "")]);
     let (changed, _subscription) = notes_changed(cx, &links);
     cx.run_until_parked();
-    assert!(!links.read_with(cx, |links, _| links.awaits_first_build()));
+    assert_eq!(status(cx, &links), Status::Ready);
 
     rescan(cx, &fs, &notes);
 
@@ -102,7 +103,7 @@ fn a_startup_load_ending_in_a_dirty_rebuild_settles_before_it_is_marked_indexed(
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "beta")]);
     let gate = fs.block_load("/vault/b.md");
     cx.run_until_parked();
-    assert!(links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), indexing(1, 2));
     let release = hold_builds(cx, &links);
 
     // The rebuild drops `b`, the last note loading; the notify while it is held makes it dirty.

@@ -9,7 +9,7 @@ use proptest::prelude::*;
 
 use super::diff::notes;
 use super::tests::{Harness, failure};
-use super::{BuildJob, LiveIndex, Ticket};
+use super::{BuildJob, LiveIndex, Status, Ticket};
 use crate::NoteContent;
 use crate::test_support::{ROOT, texts};
 
@@ -225,6 +225,21 @@ impl Model {
             pending.len()
         );
         prop_assert_eq!(loaded, total - pending.len());
+        match live.status() {
+            Status::Scanning => prop_assert!(live.last.is_none(), "scanning after a build"),
+            Status::Indexing {
+                loaded: shown,
+                total: of,
+            } => {
+                prop_assert!(live.last.is_some(), "indexing before a build");
+                prop_assert_eq!((shown, of), (loaded, total));
+                prop_assert!(shown < of, "indexing {shown} of {of}");
+            }
+            Status::Ready => {
+                prop_assert!(live.last.is_some(), "ready before a build");
+                prop_assert_eq!(loaded, total);
+            }
+        }
         let stray: Vec<&EntryId> = pending.iter().filter(|id| !applied.contains(id)).collect();
         prop_assert!(
             stray.is_empty(),

@@ -83,7 +83,7 @@ impl BacklinksPanel {
             self.rebuilds += 1;
         }
         let links = self.links.read(cx);
-        let building = links.is_building();
+        let building = !links.status().is_ready();
         self.watch.seen(links);
         let vault = self.notes.read(cx).vault().map(|vault| vault.read(cx));
         let name = |id: EntryId| {

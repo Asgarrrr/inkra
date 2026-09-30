@@ -8,12 +8,13 @@ use std::time::{Duration, SystemTime};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 use inkra_index::NoteContent;
+use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Mtime};
 
 use super::IndexSync;
 use super::loading::Landed;
-use super::tests::{backlinks, create, found, indexed_vault, rescan};
+use super::tests::{backlinks, create, found, indexed_vault, indexing, rescan, status};
 use crate::test_support::{entry_id, scan_notes};
 use crate::vault::NoteStore;
 
@@ -53,23 +54,22 @@ fn at_most_one_load_per_core_runs_at_once(cx: &mut TestAppContext) {
     let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
     let started =
         |fs: &MemFs| -> usize { paths.iter().map(|path| fs.loads(Path::new(path))).sum() };
-    let progress = |cx: &mut TestAppContext| links.read_with(cx, |links, _| links.progress());
 
     cx.run_until_parked();
     assert_eq!(started(&fs), 2, "two cores, two loads");
-    assert_eq!(progress(cx), (0, 5));
+    assert_eq!(status(cx, &links), indexing(0, 5));
 
     // The queue follows vault order: n0 and n1 hold the slots.
     gates.remove(0).release();
     cx.run_until_parked();
     assert_eq!(started(&fs), 3, "n0's slot went to n2");
     assert_eq!(fs.loads(Path::new("/vault/n2.md")), 1);
-    assert_eq!(progress(cx), (1, 5));
+    assert_eq!(status(cx, &links), indexing(1, 5));
 
     gates.clear();
     cx.run_until_parked();
     assert_eq!(started(&fs), 5, "each note loaded once");
-    assert_eq!(progress(cx), (5, 5));
+    assert_eq!(status(cx, &links), Status::Ready);
 }
 
 #[gpui::test]
@@ -91,8 +91,11 @@ fn a_turn_over_its_budget_yields_and_the_rest_applies_later(cx: &mut TestAppCont
         6,
         "one load per turn"
     );
-    assert_eq!(links.read_with(cx, |links, _| links.progress()), (6, 6));
-    assert!(!links.read_with(cx, |links, _| links.is_building()));
+    assert_eq!(status(cx, &links), Status::Ready);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().names().len()),
+        6
+    );
 }
 
 /// All landed before `drain` polls; returns the turns so far.
@@ -177,13 +180,16 @@ fn a_turn_applies_every_landed_load_within_its_budget(cx: &mut TestAppContext) {
 fn a_note_queued_while_it_loads_waits_for_its_load(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
-    let progress = |cx: &mut TestAppContext| links.read_with(cx, |links, _| links.progress());
     let a = Path::new("/vault/a.md");
 
     let gate = fs.block_load("/vault/a.md");
     fs.insert_file("/vault/a.md", "[[c]]");
     create(cx, &notes, "c");
-    assert_eq!(progress(cx), (2, 3), "a is loading, c is loaded");
+    assert_eq!(
+        status(cx, &links),
+        indexing(2, 3),
+        "a is loading, c is loaded"
+    );
     let reads = fs.loads(a);
 
     // Free slots remain, yet a's new entry waits: one read per note at a time.
@@ -195,8 +201,8 @@ fn a_note_queued_while_it_loads_waits_for_its_load(cx: &mut TestAppContext) {
         "no second read of a while one is in flight"
     );
     assert_eq!(
-        progress(cx),
-        (3, 4),
+        status(cx, &links),
+        indexing(3, 4),
         "a is loading and queued, and counts once"
     );
 
@@ -207,7 +213,7 @@ fn a_note_queued_while_it_loads_waits_for_its_load(cx: &mut TestAppContext) {
         reads + 1,
         "the queued entry loads once the first lands"
     );
-    assert_eq!(progress(cx), (4, 4));
+    assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
 }
 
@@ -228,7 +234,11 @@ fn a_note_renamed_while_it_loads_is_loaded_at_its_new_path(cx: &mut TestAppConte
 
     assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["z"]);
-    assert_eq!(links.read_with(cx, |links, _| links.progress()), (3, 3));
+    assert_eq!(status(cx, &links), Status::Ready);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().names().len()),
+        3
+    );
 }
 
 /// Renamed at the `Fs` only: `drain` wakes at the read, before the rename back's first foreground turn.
@@ -252,7 +262,11 @@ fn a_load_failing_after_a_build_is_retried_at_the_same_path(cx: &mut TestAppCont
 
     assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
-    assert_eq!(links.read_with(cx, |links, _| links.progress()), (4, 4));
+    assert_eq!(status(cx, &links), Status::Ready);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().names().len()),
+        4
+    );
 }
 
 /// As above, but only mtime changes apply during the load: none can have moved the note.
@@ -356,10 +370,7 @@ fn a_scoped_scan_landing_during_loads_leaves_the_index_consistent(cx: &mut TestA
     futures::executor::block_on(fs.rename(at_b, Path::new("/vault/z.md"))).expect("rename");
     cx.run_until_parked();
     assert_eq!(entry_id(&notes, cx, "z"), b, "the scan landed");
-    assert!(
-        links.read_with(cx, |links, _| links.is_building()),
-        "the loads are still held"
-    );
+    assert!(!status(cx, &links).is_ready(), "the loads are still held");
     drop(gates);
     cx.run_until_parked();
 
@@ -367,5 +378,9 @@ fn a_scoped_scan_landing_during_loads_leaves_the_index_consistent(cx: &mut TestA
     assert_eq!(found(cx, &links, "beta"), [(b, "[[c]] beta".to_owned())]);
     assert_eq!(found(cx, &links, "old"), []);
     assert_eq!(backlinks(cx, &notes, &links, "c"), ["z"]);
-    assert_eq!(links.read_with(cx, |links, _| links.progress()), (2, 2));
+    assert_eq!(status(cx, &links), Status::Ready);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().names().len()),
+        2
+    );
 }

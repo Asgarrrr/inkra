@@ -11,7 +11,7 @@ use gpui::{
 use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
-use crate::index::{IndexSync, NotesChanged, SCANNING};
+use crate::index::{IndexSync, NotesChanged, SCANNING, indexing_footer};
 use crate::open::{NoteActivated, Open};
 use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
@@ -51,8 +51,6 @@ pub(crate) struct QuickOpenDelegate {
 enum Answered {
     /// Before the first result, so no empty text flashes before it.
     Nothing,
-    /// The vault's first scan and build have not applied: there are no names to search.
-    Scanning,
     /// An empty query: the recent notes.
     Recent,
     Query,
@@ -68,7 +66,7 @@ impl QuickOpenDelegate {
         let subscriptions = vec![
             cx.subscribe(links, |picker, _, _: &NotesChanged, cx| {
                 // The first names after the scan list at once: the user is waiting, and nothing is selected.
-                let run = if picker.delegate.answered == Answered::Scanning {
+                let run = if picker.delegate.runs.scanning() {
                     Run::Search
                 } else {
                     Run::Refresh
@@ -97,7 +95,7 @@ impl QuickOpenDelegate {
     }
 
     fn footer(&self, cx: &App) -> Option<SharedString> {
-        self.links.read(cx).indexing_footer()
+        indexing_footer(self.links.read(cx).status())
     }
 }
 
@@ -111,11 +109,6 @@ impl IndexDelegate for QuickOpenDelegate {
 
     fn sync(&self) -> &Entity<IndexSync> {
         &self.links
-    }
-
-    fn scanning(&mut self) {
-        self.answered = Answered::Scanning;
-        self.list.clear();
     }
 
     fn query(&mut self, text: &str, run: Run) -> Option<NoteQuery> {
@@ -184,9 +177,11 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn empty_text(&self, _: &App) -> Option<SharedString> {
+        if self.runs.scanning() {
+            return Some(SCANNING.into());
+        }
         let text = match self.answered {
             Answered::Nothing => None,
-            Answered::Scanning => Some(SCANNING),
             Answered::Recent => Some("No recent notes"),
             Answered::Query => Some("No matching notes"),
         };
