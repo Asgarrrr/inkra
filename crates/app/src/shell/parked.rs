@@ -28,6 +28,11 @@ impl Parked {
             .map(|view| view.unpark(cx))
     }
 
+    /// The tab's view where its anchors are now, forgetting none; `None` if it parked no view.
+    pub(super) fn peek(&self, tab: TabId, cx: &App) -> Option<ViewState> {
+        self.0.get(&tab)?.1.as_ref().map(|view| view.peek(cx))
+    }
+
     /// Drops every entry on `note`, whose buffer closed, without forgetting its anchors.
     pub(super) fn drop_note(&mut self, note: EntryId) {
         self.0.retain(|_, (entry, _)| *entry != note);

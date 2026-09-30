@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, Pixels, ScrollHandle, Task, Window,
     px,
@@ -18,12 +20,14 @@ mod modal;
 mod palette;
 mod parked;
 mod render;
+mod session;
 mod tab_bar;
 mod tabs;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
 use parked::Parked;
+use session::{Restore, SessionFile};
 use tabs::Place;
 
 pub(crate) use tabs::{
@@ -98,12 +102,16 @@ pub(crate) struct AppShell {
     recent: Vec<EntryId>,
     /// The commands run from the palette, by action name, newest first.
     recent_commands: Vec<&'static str>,
+    /// `None` unless a vault launched with a session file: nothing else writes one.
+    session: Option<SessionFile>,
+    restore: Restore,
 }
 
 impl AppShell {
     pub(crate) fn new(
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
+        session: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -116,7 +124,7 @@ impl AppShell {
         })
         .detach();
         if let Some(editor) = &editor {
-            Self::follow_links_of(editor, cx);
+            Self::watch_editor(editor, cx);
         }
         cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
             shell.open(event.note, None, event.open, cx);
@@ -146,11 +154,17 @@ impl AppShell {
             },
         )
         .detach();
-        // Tab titles follow a rename, as the sidebar's rows do.
+        // Tab titles and the saved session follow a rename, as the sidebar's rows do.
         if let Some(vault) = notes.read(cx).vault().cloned() {
-            cx.observe(&vault, |_, _, cx| cx.notify()).detach();
+            cx.observe(&vault, |shell, _, cx| {
+                shell.save_session_later(cx);
+                shell.try_restore(cx);
+                cx.notify();
+            })
+            .detach();
         }
         let first = notes.read(cx).current();
+        let (session, restore) = Self::open_session(session, &notes, cx);
         Self {
             // `root` adopts the note it launches with, so its editor comes with `current`.
             shown: editor.zip(first).map_or(Shown::Empty, |(editor, note)| {
@@ -168,6 +182,8 @@ impl AppShell {
             modal: None,
             recent: Vec::new(),
             recent_commands: Vec::new(),
+            session,
+            restore,
         }
     }
 

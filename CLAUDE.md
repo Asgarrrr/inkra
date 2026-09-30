@@ -158,6 +158,8 @@ Read the spec before changing its area:
   lifecycle in `NoteStore`: `Sessions`, `Lifecycle`, `Queue`, the live set
 - `docs/superpowers/specs/2026-09-29-tabs-design.md` — tabs: `inkra-tabs`,
   `Place`, per-tab history, parked anchors, one rebound `EditorView`
+- `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
+  its one writer and throttle, `Restore`'s states, the landing predicate
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

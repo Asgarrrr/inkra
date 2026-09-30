@@ -137,6 +137,7 @@ impl AppShell {
             cx.notify();
         }
         self.keep_active_tab_visible();
+        self.save_session_later(cx);
     }
 
     /// Parks the tab left, as `new_tab`; the place arriving holds a plain view, so no `arrive`.
@@ -161,6 +162,7 @@ impl AppShell {
     pub(super) fn move_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
         self.tabs.move_tab(id, to);
         self.keep_active_tab_visible();
+        self.save_session_later(cx);
         cx.notify();
     }
 
@@ -247,6 +249,7 @@ impl AppShell {
         if self.forget_note(id) {
             self.display(Place::default(), window, cx);
         }
+        self.save_session_later(cx);
         cx.notify();
     }
 
@@ -265,16 +268,7 @@ impl AppShell {
                 view: None,
             };
             self.display(place, window, cx);
-            // The root holds the focus, or a picker returns to it, only if the tab took it there.
-            let root = &self.focus_handle;
-            let took_root = root.is_focused(window)
-                || self
-                    .modal
-                    .as_ref()
-                    .is_some_and(|modal| modal.restores(root));
-            if took_root && let Some(focus) = self.land_focus(cx) {
-                window.focus(&focus, cx);
-            }
+            self.focus_note_from_root(window, cx);
             cx.notify();
         }
     }
@@ -294,7 +288,7 @@ impl AppShell {
     }
 
     /// After every change to the tab set or the active tab: a close to its left shifts it too.
-    fn keep_active_tab_visible(&self) {
+    pub(super) fn keep_active_tab_visible(&self) {
         self.tab_scroll.scroll_to_item(self.tabs.active_index());
     }
 

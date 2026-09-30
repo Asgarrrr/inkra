@@ -8,15 +8,22 @@ use super::{AppShell, BACKLINKS_WIDTH, SIDEBAR_WIDTH};
 use crate::theme;
 
 impl AppShell {
-    fn render_empty(&self, cx: &App) -> impl IntoElement {
-        let lines: &[&str] = if self.notes.read(cx).vault().is_some() {
-            &["Select a note."]
-        } else {
+    /// None while the restore is pending, so the launch does not flash the empty state before the note.
+    pub(super) fn empty_lines(&self, cx: &App) -> &'static [&'static str] {
+        if self.notes.read(cx).vault().is_none() {
             &[
                 "No vault is open.",
                 "Restart with a folder path to open one.",
             ]
-        };
+        } else if self.restore_pending() {
+            &[]
+        } else {
+            &["Select a note."]
+        }
+    }
+
+    fn render_empty(&self, cx: &App) -> impl IntoElement {
+        let lines = self.empty_lines(cx);
         div()
             .flex()
             .flex_col()

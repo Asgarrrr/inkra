@@ -105,6 +105,9 @@ pub trait Fs: Send + Sync {
     /// and a present note whose folder moved away must fail, not be written beside its copy.
     async fn create_parents(&self, path: &Path) -> Result<()>;
 
+    /// Atomic, creating missing folders; no conflict check, so for the app's own state, never a note.
+    async fn replace(&self, path: &Path, text: &str) -> Result<()>;
+
     /// Creates an empty note or directory; fails if `path` already exists.
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
 

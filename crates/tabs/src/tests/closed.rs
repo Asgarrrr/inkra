@@ -244,3 +244,73 @@ fn forget_empties_a_closed_tab_with_history() {
     let (back, _) = harness.walk(true);
     assert_eq!(back.map(|place| place.note), Some(Some(1)));
 }
+
+#[test]
+fn closing_the_last_tab_leaves_one_empty_tab_with_a_new_id() {
+    let mut harness = Harness::new();
+    let only = harness.tabs.active();
+    harness.commit(only, Some(1));
+    let closed = harness.close(only).expect("the tab closes");
+    assert_eq!(harness.tabs.count(), 1);
+    let fresh = harness.tabs.active();
+    assert_ne!(fresh, only);
+    assert_eq!(harness.places(), vec![None]);
+    assert_eq!(closed.shown, Some((fresh, Fake::default())));
+    assert_eq!(closed.place.note, Some(1));
+    assert!(
+        !harness.commit(only, Some(2)),
+        "a load keyed by the old id lands nowhere"
+    );
+    assert_eq!(harness.showing, Fake::default());
+}
+
+#[test]
+fn closing_the_active_tab_activates_the_most_recent_other() {
+    let (mut harness, [a, b, c]) = three();
+    harness.activate(a);
+    let [b_place, c_place] = [1, 2].map(|ix| harness.places()[ix].clone().unwrap());
+    let closed = harness.close(a).expect("a closes");
+    assert_eq!(harness.tabs.active(), b, "b was used after c");
+    assert_eq!(closed.shown, Some((b, b_place)));
+    assert_eq!(harness.ids(), vec![b, c]);
+    let closed = harness.close(b).expect("b closes");
+    assert_eq!(closed.shown, Some((c, c_place)));
+}
+
+#[test]
+fn closing_another_tab_keeps_the_active_one() {
+    let (mut harness, [a, b, c]) = three();
+    let closed = harness.close(c).expect("c closes");
+    assert_eq!(closed.shown, None);
+    assert_eq!(closed.index, 2);
+    assert_eq!(harness.tabs.active(), b);
+    assert_eq!(harness.places()[1], None);
+    harness.close(b);
+    assert_eq!(harness.tabs.active(), a, "c left the MRU");
+}
+
+#[test]
+fn a_commit_to_a_tab_not_active_changes_nothing() {
+    let (mut harness, [a, _, _]) = three();
+    let places = harness.places();
+    assert!(!harness.commit(a, Some(3)));
+    assert_eq!(harness.places(), places);
+    assert_eq!(harness.activate(a).map(|place| place.note), Some(None));
+}
+
+#[test]
+fn closing_an_inactive_tab_does_not_call_leaving() {
+    let (mut harness, [a, _, c]) = three();
+    let calls = harness.left.len();
+    harness.close(a);
+    harness.close(c);
+    assert_eq!(harness.left.len(), calls);
+}
+
+#[test]
+fn a_commit_to_an_inactive_tab_does_not_call_leaving() {
+    let (mut harness, [a, _, _]) = three();
+    let calls = harness.left.len();
+    harness.commit(a, Some(1));
+    assert_eq!(harness.left.len(), calls);
+}

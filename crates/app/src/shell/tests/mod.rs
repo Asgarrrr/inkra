@@ -36,6 +36,9 @@ mod quick_open;
 mod reload;
 mod renaming;
 mod reopen;
+mod restore_lands;
+mod restore_refused;
+mod session_writes;
 mod sidebar_selection;
 mod tab_bar;
 mod tab_keys;
@@ -83,7 +86,7 @@ pub(super) fn open_vault(
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, window, cx)
+        move |window, cx| AppShell::new(None, notes, None, window, cx)
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.sidebar.clone())
@@ -160,7 +163,7 @@ pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, Visu
     let notes = cx.update(|cx| {
         gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
     });
-    let window = cx.add_window(move |window, cx| AppShell::new(None, notes, window, cx));
+    let window = cx.add_window(move |window, cx| AppShell::new(None, notes, None, window, cx));
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window

@@ -42,7 +42,7 @@ pub(super) fn open_shell(
     });
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(Some(editor), notes, window, cx)
+        move |window, cx| AppShell::new(Some(editor), notes, None, window, cx)
     });
     window
         .update(cx, |shell, window, cx| {

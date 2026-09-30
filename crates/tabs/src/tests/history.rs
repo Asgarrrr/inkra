@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use proptest::prelude::*;
 
-use super::{Fake, Harness, Op, TabId, entries, ops, run};
+use super::{Fake, Harness, Op, TabId, entries, ops, run, three};
 use crate::Stack;
 
 fn fake(note: u8, seq: usize) -> Fake {
@@ -295,4 +295,28 @@ fn a_new_tab_starts_with_no_history() {
 
     assert_eq!(harness.walked(true), [Vec::<Fake>::new(), Vec::new()]);
     assert_eq!(harness.walk(true), (None, None));
+}
+
+#[test]
+fn forget_empties_only_matching_tabs() {
+    let (mut harness, [a, b, c]) = three();
+    harness.commit(b, Some(1));
+    harness.activate(a);
+    harness.commit(a, Some(2));
+    harness.activate(c);
+    harness.commit(c, Some(1));
+    let a_place = harness.places()[0].clone();
+
+    harness.forget(1);
+    assert_eq!(
+        harness.places(),
+        vec![a_place, Some(Fake::default()), None],
+        "c is active: its place is the caller's"
+    );
+    assert_eq!(harness.tabs.active(), c);
+    harness.forget(2);
+    assert_eq!(
+        harness.places(),
+        vec![Some(Fake::default()), Some(Fake::default()), None]
+    );
 }

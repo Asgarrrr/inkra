@@ -192,6 +192,10 @@ here, so the two cannot drift.
   commit or cancel on blur. This predates tabs: gpui's `track_focus` on the
   tree takes the focus on any press inside it. **Trigger:** the first report
   of a name field left open.
+- The session file's folder comes from a platform data directory, not the
+  macOS path `$HOME/Library/Application Support` that `bootstrap::launch`
+  joins today (`superpowers/specs/2026-09-30-restore-tabs-design.md`, R1).
+  **Trigger:** a non-macOS build.
 
 ## Startup performance
 

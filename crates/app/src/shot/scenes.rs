@@ -204,6 +204,11 @@ const CATALOGUE: &[Scene] = &[
         open: tabs::dragging,
     },
     Scene {
+        name: "tabs-restored",
+        shows: "a relaunch: `index`, `reading` and `today` back in the bar, `reading` active with `Books to read,` selected; `reading` highlighted in the sidebar; no \"Select a note.\"",
+        open: tabs::restored,
+    },
+    Scene {
         name: "quick-open-results",
         shows: "cmd-p over the editor: name rows then text rows, word starts lit, a dimmed second line under each, folders cut from the start",
         open: quick_open::results,

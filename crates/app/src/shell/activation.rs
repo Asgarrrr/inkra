@@ -103,6 +103,19 @@ impl AppShell {
         }
     }
 
+    /// Moves focus to the note only if the root holds it, or a picker returns to it: it stays where the user put it.
+    pub(super) fn focus_note_from_root(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let root = &self.focus_handle;
+        let took_root = root.is_focused(window)
+            || self
+                .modal
+                .as_ref()
+                .is_some_and(|modal| modal.restores(root));
+        if took_root && let Some(focus) = self.land_focus(cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
     /// The one place `shown` changes; the highlight moves only if the tree's cursor is still `since`.
     pub(super) fn set_shown(&mut self, shown: Shown, since: Cursor, cx: &mut Context<Self>) {
         self.shown = shown;
@@ -115,14 +128,18 @@ impl AppShell {
         }
         self.backlinks
             .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+        self.save_session_later(cx);
     }
 
     /// Detached: the editor is created once and rebound, so it lives as long as the shell.
-    pub(super) fn follow_links_of(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+    /// Its notify is a caret move or an edit, which the session saves.
+    pub(super) fn watch_editor(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
         cx.subscribe(editor, |shell, _, event: &LinkFollowed, cx| {
             shell.follow(&event.link, event.open, cx);
         })
         .detach();
+        cx.observe(editor, |shell, _, cx| shell.save_session_later(cx))
+            .detach();
     }
 
     /// Resolved against the note showing, before any tab changes; a detached note resolves only URLs.
@@ -155,7 +172,7 @@ impl AppShell {
             }
             Shown::Empty | Shown::Trashing(_) => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
-                Self::follow_links_of(&editor, cx);
+                Self::watch_editor(&editor, cx);
                 editor
             }
         };
