@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 121e3d07be09b6cbe875e7065f5f1ee8aec9432dabc5f9c2805e4d2c0980b1c8 # shrinks to ops = [Insert(1), Close(Index(0))], ix = Index(0)
+cc 6327ab6179fab292f07ab4f0553025f0a307076be257663883833dd02267810c # shrinks to ops = [Insert(1), Close(Index(0))]
+cc 6241f742673ef974880db609cf0546a5bc49c5ab861b341b6068244361b8e759 # shrinks to ops = [Insert(1), Close(Index(0))]
+cc e66722e083d1de7a61d1bc139b32784c17c028b2415f69d0b089c8911816ef5e # shrinks to ops = [Commit(Index(0), Some(1)), Close(Index(0))], note = 1
+cc fa723523df596f3e3153453239489dbcf7bd0afd7a9fe69ad05cc7f4f5b1bdbe # shrinks to ops = [Insert(0), Move(Index(0), 1)]
+cc 056294992669a70291ee1bd353b195ea855379cb679748c5364aca37c9f43a36 # shrinks to ops = [Commit(Index(0), Some(0)), Close(Index(0)), Reopen, Move(Index(0), 1)], note = 0
+cc 487a3db9bfd2576adc9fd8fb81d6ea6be8b4258ae60d54e0af8a69d21dcb7482 # shrinks to ops = [Commit(Index(0), Some(0)), Close(Index(0)), Reopen, Move(Index(0), 1)]

@@ -165,3 +165,18 @@ fn cmd_9_activates_the_last_tab(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-9");
     assert_eq!(tab_notes(&window, &mut cx).1, 9);
 }
+
+#[gpui::test]
+fn cmd_shift_t_reopens_the_last_closed_tab(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-w");
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+
+    cx.simulate_keystrokes("cmd-shift-t");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(text_shown(&window, &mut cx), "beta");
+}

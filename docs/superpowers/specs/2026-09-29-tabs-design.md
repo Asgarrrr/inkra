@@ -573,6 +573,162 @@ Lever, with its trigger:
 |---|---|
 | Make H8 unrepresentable: a zipper (tabs left of the active one, the active tab with no place, tabs right of it), so no `Option` place and no H8 panic | A third H8 panic site, or H8 failing in a proptest |
 
+## As built (S5)
+
+Plan: `docs/superpowers/plans/2026-09-30-tabs-s5.md`, with its binding red/blue
+section. Built as planned, with these facts and deviations:
+
+- **The closed stack lives in `Tabs`.** A private `ClosedTab { place, index,
+  back, forward }` per entry, in a `VecDeque`, oldest first. `close` pushes one
+  through a private `remember`: a blank entry (no note, no history) is skipped
+  (invariant 7), and a push onto 1024 entries drops the oldest (invariant 6).
+  There is no adjacency rule: two closed tabs on one note are two tabs to
+  reopen. The public `Closed { place, index, shown }` is unchanged; `place` is
+  the entry's place, cloned, so the `Place` trait gains a `Clone` bound.
+- **`close(id, leaving, resolve)`.** The entry's place is `leaving()` for the
+  active tab and `resolve(stored)` for an inactive one; each runs only in its
+  case. `close_tab` unparks the closed id **before** `close` and moves the view
+  into `resolve`, so the closed stack keeps plain offsets (A2). The old
+  `let _ = self.parked.unpark(..)` after `close` is gone. One closure taking
+  `Option<P>` was rejected: `leave_active` stays the one caller of `leaving`.
+- **`reopen(leaving)` is `insert` plus the entry's stacks.** It pops the
+  newest entry first and returns `None`, calling no `leaving`, when there is
+  none. Else it calls `insert(entry.index, leaving)`, which clamps, parks the
+  tab left, takes a fresh id and puts it first in the MRU; the new tab takes
+  the entry's `back` and `forward`, and `reopen` returns the entry's place.
+  `leaving` runs once, inside `insert`. `insert` keeps its two arguments: the
+  red/blue shape passed `entry.place` to it, but the active tab holds no place
+  (H8).
+- **The app's reopen is a tab switch.** `reopen_closed_tab` dismisses the
+  picker, parks the tab left through `insert`'s closure, and shows the place
+  through `show_place`, with no `arrive`: the fresh id has no parked entry, and
+  the view is plain, clipped at restore. The sidebar follows through
+  `set_showing`.
+- **Four deviations from Zed's closed stack** (`pane.rs:479`,
+  `reopen_closed_item`, `workspace.rs:3310-3321`):
+  - The tab comes back at its old index, clamped (invariant 8), as a browser
+    does. Zed reopens beside the active item.
+  - With its history. Zed's entry is one item; ours is the whole tab.
+  - No skip. Zed skips an entry whose item is still in the pane; a tab is a
+    slot, and one note may show in two tabs.
+  - An empty tab with no history is not kept (invariant 7). Zed keeps no entry
+    for a preview item, the nearest case.
+- **A trash prunes the closed stack.** `forget` empties each entry on the
+  note, drops the note from both its stacks, then drops every entry left
+  blank. Order is kept. `forget_note` already called `tabs.forget`.
+- **T4's fourth no-op case.** `⌘⇧T` with nothing closed changes nothing on
+  screen, so a pending open still lands. A reopen that brings a tab drops
+  `activation` through `show_place`.
+- **Reopening after the last tab closed keeps the empty tab** beside the
+  reopened one: removing it would be a special case, and `⌘W` closes it.
+- **`⌘⇧T` is `cmd-shift-t`.** macOS keeps `shift` for a letter key, as for
+  `cmd-shift-n`. The palette lists "Reopen closed tab, ⇧⌘T".
+- **Test adjustments.**
+  - The model harness passes a `resolve` that marks the place (`RESOLVED`), so
+    the `Op::Close` arm tells a resolved place from a stored one. `Op::Reopen`
+    joins the ops; its arm asserts C2, C4 and C5 against the newest entry.
+    `check` asserts C1 and C3 on the closed stack. `entries` moved to the
+    model's `tests.rs`.
+  - `a_tab_switch_changes_no_history` skips the reopened tab: its history is
+    the entry's, which the `Op::Reopen` arm asserts.
+  - `reopen_pops_the_newest_closed_tab` drains the whole stack and compares it
+    with the entries reversed.
+  - Two units give their tab a note first
+    (`closing_an_inactive_tab_keeps_the_place_resolve_gives`,
+    `a_reopened_tab_gets_a_fresh_id`): after invariant 7 a blank tab is not
+    kept, and they would pass vacuously.
+  - `trashing_a_closed_tabs_note_keeps_its_history` passed before the pruning
+    landed: `show_place`'s missing-buffer branch empties the tab. It stays as a
+    guard: it fails when a trash drops the entry outright (checked by
+    injecting the bug).
+  - The five Task 4 guards passed when first run. Three were checked by
+    injecting their bug: no `keep_active_tab_visible`, `activation` dropped
+    unconditionally, no `dismiss_modal`.
+  - `start_open` and `selected` moved to the shared shell test helpers.
+- **Mutants.** `cargo mutants -p inkra-tabs --test-package inkra-tabs`: 75
+  mutants, 58 caught, 17 unviable, none missed, no exclusion added.
+
+Levers, each with its trigger:
+
+| Lever | Trigger |
+|---|---|
+| Drop `Closed::{place, index}` and the `Place: Clone` bound: nothing in `app` reads them, only the model tests | The next change to `close`'s signature |
+| Have `insert` return the index it used, so `reopen` does not look the new tab up with `active_index` | The next change to `insert` |
+
+## As built (S6)
+
+Plan: `docs/superpowers/plans/2026-09-30-tabs-s6.md`, with its binding red/blue
+section. Built as planned, with these facts and deviations:
+
+- **The model: `Tabs::move_tab(id, to)`**, Zed's remove-then-insert, clamped.
+  Dragged right, a tab lands after the tab dropped on; dragged left, before
+  it. It needs no `Place` and takes no `leaving`: no tab is left. An id that
+  is no tab changes nothing. The MRU, the active id, every place and history
+  and the closed stack stay (invariant 3).
+- **The gesture is gpui's drag and drop, as Zed's tab bar.** Each tab has
+  `on_drag` with a `DraggedTab { id, index, title, active }`, `drag_over` and
+  `on_drop`. The drop reads `id`; `index` only picks the indicator's side. The
+  preview is a plain `div` with no id and no listener, so it inserts no hitbox.
+- **The app handler is a reorder.** `AppShell::move_tab` moves, keeps the
+  active tab in the bar and notifies. No `dismiss_modal`: a picker's backdrop
+  takes the press and dismisses it, so no drag starts under a picker.
+- **The press rule: every press on a tab lands focus on the active tab's
+  content.** The shell's root tracks focus, and gpui focuses a focusable
+  element on any press that bubbles to it (`div.rs:2765-2780`). A drop, a
+  click on the active tab and a close of an inactive tab show no place, so
+  nothing would focus the content again. One handler, `press_tab`, on the
+  left and middle buttons of each tab, calls `window.prevent_default()` and
+  then focuses the active tab's content through `land_focus`: the editor, or
+  the root on an empty tab. A `show_place` after the press may focus again,
+  which is harmless. This also closes a gap older than S6: a middle click on
+  an inactive tab left focus on the root.
+- **Deviation from the red/blue review, item 2.** A drag begun on the × and
+  released on it closes nothing. gpui clears every element's pending press
+  while a drag is active (`div.rs:2234-2243`), so the ×'s click never fires,
+  and the tab's drop onto itself moves nothing. The test is
+  `a_drag_started_on_the_x_and_released_on_it_closes_nothing`, not
+  `.._closes_the_tab_only`. No click fires anywhere during a drag, which is
+  what keeps a dragged tab from activating.
+- **Four deviations from Zed's tab drop:**
+  - A drop does not activate the tab (Zed's `move_item` does). Invariant 3
+    keeps the active id.
+  - No drop target after the last tab: a drop on the last tab puts the tab
+    last, and the bar's children stay the tabs, which `scroll_to_item` indexes.
+  - No split zones, no cross-pane move, no ⌥-drag clone, no path or selection
+    drops: one pane, one bar.
+  - The indicator is Zed's: the target's background and a 2 px border on the
+    side the tab lands, with colours and width from `theme.rs`
+    (`tab_drop_background`, `tab_drop_border`, `TAB_DROP_EDGE`).
+- **T4's fifth no-op case.** A drop leaves the active tab and its note, so a
+  pending open still lands in it.
+- **The look.** The `tabs-dragging` shot shows the target lit, its right edge
+  drawn, and the preview under the pointer. The indicator's border takes
+  layout space, but the shot shows no tab shifted beyond the 2 px edge. The
+  preview covers part of the target's title, as in Zed. The `tabs` shot is
+  unchanged. The scene presses at `AppShell::tab_center`, which reads
+  `tab_scroll.bounds_for_item` under the `shot` feature.
+- **Test adjustments.**
+  - `DraggedTab` gained `index` and `active` with their readers in the second
+    commit: a field nothing reads fails clippy.
+  - `moving_an_unknown_id_changes_nothing` moves to index 1, so a fallback to
+    index 0 fails it.
+  - `a_drop_outside_the_tabs_moves_nothing` and
+    `a_drag_under_a_picker_moves_nothing` passed with no drag listener: they
+    are guards. The other drag tests failed first, which proves the `drag`
+    helper.
+  - The model's R1 proptest reuses `closed_entries` from the closed-stack
+    tests.
+- **Review fixes.** The press rule above replaced a bare `prevent_default`,
+  which left focus in the tree after a click on the active tab or an inactive
+  tab's ×. Four tests pin it, each starting with the tree focused. The
+  per-tab builder moved to `render_tab`, and `tab_titles` returns
+  `SharedString`s. `reopen_cancels_a_pending_open` asserts `activation` is
+  dropped: the reopened tab has a fresh id, so no landing gate could show a
+  kept task. `close_tab` keeps its unpark before `close`: by I1, `parked`
+  holds no entry for an id that is no tab, so no view can be dropped.
+- **Mutants.** `cargo mutants -p inkra-tabs --test-package inkra-tabs`: 76
+  mutants, 59 caught, 17 unviable, none missed, no exclusion added.
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the
@@ -597,3 +753,5 @@ Lever, with its trigger:
 | Reveal the note showing in the tree: expand its folders, scroll to it | A user loses a nested note in the tree |
 | Anchors for back and forward entries | Back lands off its text after an edit elsewhere |
 | Mouse buttons 4 and 5, and swipe, for back and forward | A user asks |
+| Cap the history kept per closed tab: each of 1024 entries can hold 2 × 1024 places | Memory measured to grow with tabs closed |
+| Scroll the bar while a drag nears its edge | A user cannot drag a tab past the visible part of a crowded bar |

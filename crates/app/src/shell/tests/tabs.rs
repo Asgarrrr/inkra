@@ -426,10 +426,12 @@ fn every_tab_key_dismisses_an_open_picker_first(cx: &mut TestAppContext) {
             ("cmd-]", 9, 8),
             ("cmd-t", 10, 9),
             ("cmd-w", 9, 8),
+            // The tab `cmd-w` closed is empty with no history: nothing to reopen.
+            ("cmd-shift-t", 9, 8),
         ]
         .map(|(keys, count, active)| (keys.to_owned(), count, active)),
     );
-    assert_eq!(steps.len(), 17);
+    assert_eq!(steps.len(), 18);
 
     for (keys, count, active) in steps {
         cx.simulate_keystrokes("cmd-p");

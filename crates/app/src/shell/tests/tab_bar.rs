@@ -4,16 +4,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds, WindowHandle,
-    WindowOptions, px, size,
+    Bounds, Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds,
+    WindowHandle, WindowOptions, px, size,
 };
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{AppShell, ab_focused, check, editor, no_vault, open, showing, tab_notes};
+use super::{
+    AppShell, ab_focused, check, editor, focus_tree, keys, no_vault, open, showing, tab_notes,
+};
 use crate::bootstrap::{Launch, root};
 
-fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<String> {
+fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<gpui::SharedString> {
     window
         .update(cx, |shell, _, cx| shell.tab_titles(cx))
         .unwrap()
@@ -23,6 +25,18 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx.debug_bounds(selector).expect("drawn");
     cx.simulate_click(bounds.center(), Modifiers::none());
     cx.run_until_parked();
+}
+
+/// Whether the active tab's content (its editor, or the root on an empty tab) and the tree hold focus.
+fn focus(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> (bool, bool) {
+    window
+        .update(cx, |shell, window, cx| {
+            (
+                shell.focus_handle(cx).is_focused(window),
+                shell.tree_focus_handle(cx).is_focused(window),
+            )
+        })
+        .unwrap()
 }
 
 fn press(cx: &mut VisualTestContext, selector: &'static str, button: MouseButton) {
@@ -100,6 +114,7 @@ fn clicking_a_tab_activates_it(cx: &mut TestAppContext) {
         editor.buffer().read(cx).text().to_owned()
     });
     assert_eq!(text, "alpha");
+    assert_eq!(focus(&window, &mut cx), (true, false));
 }
 
 #[gpui::test]
@@ -116,6 +131,61 @@ fn clicking_x_closes_that_tab_and_keeps_the_active_one(cx: &mut TestAppContext) 
         .update(&mut cx, |shell, _, _| shell.showing())
         .unwrap();
     assert_eq!(showing, Some(b));
+    assert_eq!(focus(&window, &mut cx), (true, false));
+}
+
+#[gpui::test]
+fn clicking_the_active_tab_focuses_its_editor(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    focus_tree(&window, &mut cx);
+
+    click(&mut cx, "tab-0");
+
+    assert_eq!(focus(&window, &mut cx), (true, false));
+}
+
+#[gpui::test]
+fn closing_an_inactive_tab_with_its_x_focuses_the_active_editor(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    focus_tree(&window, &mut cx);
+
+    click(&mut cx, "tab-close-0");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(focus(&window, &mut cx), (true, false));
+}
+
+#[gpui::test]
+fn a_middle_click_on_an_inactive_tab_focuses_the_active_editor(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    focus_tree(&window, &mut cx);
+
+    press(&mut cx, "tab-0", MouseButton::Middle);
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(focus(&window, &mut cx), (true, false));
+}
+
+#[gpui::test]
+fn clicking_a_tab_on_an_empty_tab_focuses_the_root(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+    focus_tree(&window, &mut cx);
+
+    click(&mut cx, "tab-0");
+
+    assert_eq!(focus(&window, &mut cx), (true, false));
+    keys(&mut cx, "cmd-p");
+    let modal = window
+        .update(&mut cx, |shell, _, _| shell.modal.is_some())
+        .unwrap();
+    assert!(modal, "cmd-p reaches the shell");
 }
 
 #[gpui::test]

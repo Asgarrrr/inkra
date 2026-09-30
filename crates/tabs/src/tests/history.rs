@@ -2,12 +2,8 @@ use std::collections::HashMap;
 
 use proptest::prelude::*;
 
-use super::{Fake, Harness, Op, TabId, ops, run};
+use super::{Fake, Harness, Op, TabId, entries, ops, run};
 use crate::Stack;
-
-fn entries(stack: &Stack<Fake>) -> Vec<Fake> {
-    stack.0.iter().cloned().collect()
-}
 
 fn fake(note: u8, seq: usize) -> Fake {
     Fake {
@@ -32,7 +28,7 @@ impl Harness {
         [entries(from), entries(to)]
     }
 
-    fn stacks(&self) -> HashMap<TabId, [Vec<Fake>; 2]> {
+    pub(super) fn stacks(&self) -> HashMap<TabId, [Vec<Fake>; 2]> {
         self.tabs
             .iter()
             .map(|tab| (tab.id, [entries(&tab.back), entries(&tab.forward)]))
@@ -133,9 +129,14 @@ proptest! {
         for op in &ops {
             let before = harness.stacks();
             harness.apply(op, &mut shadow);
-            if matches!(op, Op::Activate(_) | Op::Step(_) | Op::Last | Op::Insert(_) | Op::Close(_)) {
+            if matches!(op, Op::Activate(_) | Op::Step(_) | Op::Last | Op::Insert(_) | Op::Close(_) | Op::Reopen | Op::Move(..)) {
                 for (id, stacks) in harness.stacks() {
-                    let expected = before.get(&id).cloned().unwrap_or_default();
+                    // A reopened tab brings its own history, which `reopen_checked` asserts.
+                    let expected = match before.get(&id) {
+                        Some(stacks) => stacks.clone(),
+                        None if matches!(op, Op::Reopen) => continue,
+                        None => Default::default(),
+                    };
                     prop_assert_eq!(stacks, expected, "{:?}", op);
                 }
             }

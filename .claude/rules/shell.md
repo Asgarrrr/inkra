@@ -19,6 +19,13 @@ paths:
   `activate` and `close` return (`arrive`) and every closed id; a place `back`
   or `forward` returns is a plain view. Drop a note's entries with
   `forget_note`, never `tabs.forget` alone. `Tabs` holds no view (I2).
+  `close_tab` unparks the closed id **before** `close` and hands the view to
+  `resolve`: the closed stack keeps plain offsets. `reopen` parks the tab left
+  through `insert`'s closure; its place is a plain view, never `arrive`d.
+- A drop in the bar (`move_tab`) calls no closure: it captures, parks and
+  unparks nothing, and keeps `activation` (T4). It does not activate the tab
+  dropped. A tab's left press calls `prevent_default`, so the root does not
+  take focus from the editor.
 - `Tabs` holds no place for the active tab (H8): `showing()` is its note, and
   `leaving` hands `Tabs` the place when the tab is left.
 - An action holds its window leased: `cx.with_window` returns `None` inside it,

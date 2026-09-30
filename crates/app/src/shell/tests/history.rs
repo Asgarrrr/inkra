@@ -1,20 +1,10 @@
-use gpui::{Focusable, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_vault::EntryId;
+use gpui::{Focusable, TestAppContext};
 
 use super::{
     at, check, click_row, editor, focus_tree, four_notes, keys, open, scroll_to, select, showing,
-    tall_notes, text_of, trash, view_of,
+    start_open, tall_notes, text_of, trash, view_of,
 };
 use crate::open::Open;
-use crate::shell::AppShell;
-
-/// Starts `id`'s load into the active tab and leaves it pending behind its gate.
-fn start_open(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, id: EntryId) {
-    window
-        .update(cx, |shell, _, cx| shell.open_note(id, None, cx))
-        .unwrap();
-    cx.run_until_parked();
-}
 
 #[gpui::test]
 fn back_and_forward_restore_each_notes_caret_and_top_line(cx: &mut TestAppContext) {

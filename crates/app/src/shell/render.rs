@@ -63,6 +63,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::command_palette))
             .on_action(cx.listener(Self::new_tab))
             .on_action(cx.listener(Self::close_active_tab))
+            .on_action(cx.listener(Self::reopen_closed_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::activate_nth_tab))

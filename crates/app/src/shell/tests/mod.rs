@@ -22,6 +22,7 @@ mod backlinks;
 mod column;
 mod command_palette;
 mod creating;
+mod dragging;
 mod following;
 mod gone;
 mod history;
@@ -32,6 +33,7 @@ mod parked;
 mod quick_open;
 mod reload;
 mod renaming;
+mod reopen;
 mod sidebar_selection;
 mod tab_bar;
 mod tab_keys;
@@ -389,4 +391,21 @@ pub(super) fn focus_tree(window: &WindowHandle<AppShell>, cx: &mut VisualTestCon
 pub(super) fn keys(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes(keys);
     cx.run_until_parked();
+}
+
+/// Starts `id`'s load into the active tab and leaves it pending behind its gate.
+pub(super) fn start_open(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, id: EntryId) {
+    window
+        .update(cx, |shell, _, cx| shell.open_note(id, None, cx))
+        .unwrap();
+    cx.run_until_parked();
+}
+
+pub(super) fn selected(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+) -> Option<EntryId> {
+    window
+        .update(cx, |shell, _, cx| shell.sidebar.read(cx).selected())
+        .unwrap()
 }

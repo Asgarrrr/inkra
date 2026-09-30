@@ -1,14 +1,6 @@
-use gpui::{TestAppContext, VisualTestContext, WindowHandle};
-use inkra_vault::EntryId;
+use gpui::TestAppContext;
 
-use super::{click_row, focus_tree, four_notes, keys, open, showing};
-use crate::shell::AppShell;
-
-fn selected(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Option<EntryId> {
-    window
-        .update(cx, |shell, _, cx| shell.sidebar.read(cx).selected())
-        .unwrap()
-}
+use super::{click_row, focus_tree, four_notes, keys, open, selected, showing};
 
 #[gpui::test]
 fn the_sidebar_selects_the_active_tabs_note(cx: &mut TestAppContext) {

@@ -14,6 +14,7 @@ use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::shell::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
+    ReopenClosedTab,
 };
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
@@ -79,6 +80,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-shift-p", command_palette::Toggle, Some("AppShell")),
         KeyBinding::new("cmd-t", NewTab, Some("AppShell")),
+        KeyBinding::new("cmd-shift-t", ReopenClosedTab, Some("AppShell")),
         KeyBinding::new("cmd-w", CloseTab, Some("AppShell")),
         KeyBinding::new("ctrl-tab", NextTab, Some("AppShell")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("AppShell")),
