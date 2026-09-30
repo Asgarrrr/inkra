@@ -12,6 +12,7 @@ use crate::editor::actions::{
 use crate::field::{Cancel, Confirm};
 use crate::picker;
 use crate::quick_open::QuickOpen;
+use crate::shell::{ActivateLastTab, ActivateTab, CloseTab, NewTab, NextTab, PreviousTab};
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
 use crate::text_input::actions::{
@@ -71,6 +72,23 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
         KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-shift-p", command_palette::Toggle, Some("AppShell")),
+        KeyBinding::new("cmd-t", NewTab, Some("AppShell")),
+        KeyBinding::new("cmd-w", CloseTab, Some("AppShell")),
+        KeyBinding::new("ctrl-tab", NextTab, Some("AppShell")),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("AppShell")),
+        // ⌘⇧] as macOS reports it (gpui_macos events.rs:470-479).
+        KeyBinding::new("cmd-}", NextTab, Some("AppShell")),
+        KeyBinding::new("cmd-{", PreviousTab, Some("AppShell")),
+        KeyBinding::new("cmd-1", ActivateTab(0), Some("AppShell")),
+        KeyBinding::new("cmd-2", ActivateTab(1), Some("AppShell")),
+        KeyBinding::new("cmd-3", ActivateTab(2), Some("AppShell")),
+        KeyBinding::new("cmd-4", ActivateTab(3), Some("AppShell")),
+        KeyBinding::new("cmd-5", ActivateTab(4), Some("AppShell")),
+        KeyBinding::new("cmd-6", ActivateTab(5), Some("AppShell")),
+        KeyBinding::new("cmd-7", ActivateTab(6), Some("AppShell")),
+        KeyBinding::new("cmd-8", ActivateTab(7), Some("AppShell")),
+        // The last tab, not the ninth, as in Zed.
+        KeyBinding::new("cmd-9", ActivateLastTab, Some("AppShell")),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

@@ -73,12 +73,10 @@ impl NoteStore {
         self.vault.as_ref()
     }
 
-    #[cfg(test)]
     pub(crate) fn buffer_for(&self, id: EntryId) -> Option<&Entity<Buffer>> {
         self.sessions.note(id).map(OpenNote::buffer)
     }
 
-    #[cfg(test)]
     pub(crate) fn current(&self) -> Option<EntryId> {
         self.current
     }
@@ -142,6 +140,14 @@ impl NoteStore {
             self.schedule_save(leaving, Duration::ZERO, cx);
         }
         self.current = Some(id);
+        cx.notify();
+    }
+
+    /// An empty tab shows no note: the note left saves now, as `set_current` does.
+    pub(crate) fn clear_current(&mut self, cx: &mut Context<Self>) {
+        if let Some(left) = self.current.take() {
+            self.schedule_save(left, Duration::ZERO, cx);
+        }
         cx.notify();
     }
 

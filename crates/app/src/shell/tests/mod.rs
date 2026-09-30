@@ -25,6 +25,8 @@ mod open_first;
 mod quick_open;
 mod reload;
 mod renaming;
+mod tab_keys;
+mod tabs;
 mod trashing;
 mod vault_search;
 
@@ -162,4 +164,62 @@ pub(super) fn vault_names(notes: &Entity<NoteStore>, cx: &mut TestAppContext) ->
             .map(|entry| entry.path.as_path().to_string_lossy().into_owned())
             .collect()
     })
+}
+
+/// A vault on `fs`, keys bound, the shell's root focused and drawn.
+pub(super) fn shell_focused(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (WindowHandle<AppShell>, Entity<NoteStore>, VisualTestContext) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let (window, _sidebar, notes) = open_vault(cx, Arc::clone(fs) as Arc<dyn Fs>);
+    let visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    window
+        .update(cx, |shell, window, cx| {
+            window.focus(&shell.focus_handle, cx);
+        })
+        .expect("the shell is open");
+    visual.run_until_parked();
+    (window, notes, visual)
+}
+
+/// `a.md` ("alpha") and `b.md` ("beta") behind `shell_focused`.
+pub(super) fn ab_focused(
+    cx: &mut TestAppContext,
+) -> (
+    Arc<MemFs>,
+    WindowHandle<AppShell>,
+    VisualTestContext,
+    EntryId,
+    EntryId,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    let (window, notes, mut visual) = shell_focused(cx, &fs);
+    let a = test_support::entry_id(&notes, &mut visual, "a");
+    let b = test_support::entry_id(&notes, &mut visual, "b");
+    (fs, window, visual, a, b)
+}
+
+/// Opens `id` into the active tab and lets it land.
+pub(super) fn open(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) {
+    window
+        .update(cx, |shell, _, cx| shell.open_note(id, None, cx))
+        .expect("the shell is open");
+    cx.run_until_parked();
+}
+
+/// Each tab's note, and the active tab's index.
+pub(super) fn tab_notes(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+) -> (Vec<Option<EntryId>>, usize) {
+    window
+        .update(cx, |shell, _, _| {
+            let notes = shell.tabs.iter().map(|tab| tab.place().note).collect();
+            (notes, shell.tabs.active_index())
+        })
+        .expect("the shell is open")
 }

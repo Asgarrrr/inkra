@@ -13,8 +13,13 @@ mod activation;
 mod modal;
 mod palette;
 mod render;
+mod tabs;
 
+use inkra_tabs::Tabs;
 use modal::Modal;
+use tabs::Place;
+
+pub(crate) use tabs::{ActivateLastTab, ActivateTab, CloseTab, NewTab, NextTab, PreviousTab};
 
 const SIDEBAR_WIDTH: Pixels = px(220.);
 const BACKLINKS_WIDTH: Pixels = px(260.);
@@ -37,8 +42,9 @@ pub(crate) struct AppShell {
     backlinks: Entity<BacklinksPanel>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
-    /// Not `NoteStore::current`: `trash` clears that before `NoteClosed` is delivered.
+    /// The active tab's note, written only by `set_showing`. Not `NoteStore::current`: `trash` clears that before `NoteClosed`.
     showing: Option<EntryId>,
+    tabs: Tabs<Place>,
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
     /// load cannot rebind the editor behind a later activation.
     activation: Option<Task<()>>,
@@ -84,30 +90,26 @@ impl AppShell {
         // Drop the view, not leave it: a buffer with no file is still typable
         // and every keystroke would be lost.
         cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
-            if shell.showing != Some(event.0) {
-                return;
+            if shell.tabs.forget(|place| place.note == Some(event.0)) {
+                cx.with_window(cx.entity_id(), |window, cx| shell.drop_editor(window, cx));
+                shell.set_showing(None, cx);
             }
-            if let Some(editor) = shell.editor.take() {
-                // Focus left on a dropped view's handle reaches no action, not even the shell's.
-                let root = shell.focus_handle.clone();
-                cx.with_window(cx.entity_id(), |window, cx| {
-                    if editor.focus_handle(cx).contains_focused(window, cx) {
-                        window.focus(&root, cx);
-                    }
-                });
-            }
-            shell.set_showing(None, cx);
             cx.notify();
         })
         .detach();
+        let first = Place {
+            note: notes.read(cx).current(),
+            view: None,
+        };
         Self {
             editor,
+            showing: first.note,
+            tabs: Tabs::new(first),
             notes,
             sidebar,
             links,
             backlinks,
             focus_handle: cx.focus_handle(),
-            showing: None,
             activation: None,
             modal: None,
             recent: Vec::new(),

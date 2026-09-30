@@ -89,6 +89,11 @@ impl TextInput {
         self.last_bounds = None;
     }
 
+    /// Only `EditorView::restore` calls this; it clips `selection` first. A composition drops, as in `rebind`.
+    pub(crate) fn reset_state(&mut self, selection: Selection) {
+        self.state = EditorState::new(selection);
+    }
+
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
         &self.buffer
     }

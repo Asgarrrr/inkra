@@ -183,11 +183,26 @@ impl EditorView {
         self.input.cursor()
     }
 
+    /// Seals the undo group even with no edit, so typing on both sides of a tab switch undoes in two steps.
+    pub(crate) fn capture(&self, cx: &mut App) -> ViewState {
+        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| buffer.finalize_transaction());
+        self.view_state()
+    }
+
+    /// A view back onto the bound buffer: no resubscribe and no reparse, unlike `open_buffer`.
+    pub(crate) fn restore(&mut self, view: ViewState, cx: &mut Context<Self>) {
+        let view = view.clipped(self.input.buffer().read(cx));
+        self.input.reset_state(view.selection);
+        self.is_selecting = false;
+        self.viewport = Viewport::default();
+        self.viewport.request(ScrollTo::Top(view.top));
+        cx.notify();
+    }
+
     /// Reads a waiting scroll request before the drawn frame, so two switches in one frame keep it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "tabs S1 captures the leaving tab (tabs spec, A3)")
-    )]
     pub(crate) fn view_state(&self) -> ViewState {
         ViewState {
             selection: self.input.state().selection().clone(),
@@ -208,6 +223,10 @@ impl EditorView {
 impl EditorView {
     pub(crate) fn buffer(&self) -> &Entity<Buffer> {
         self.input.buffer()
+    }
+
+    pub(crate) fn parsed_at(&self) -> Option<u64> {
+        self.parsed_at
     }
 
     pub(crate) fn selected(&self) -> std::ops::Range<ByteOffset> {
