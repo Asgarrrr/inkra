@@ -6,7 +6,7 @@ use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault};
 
-use super::session::{Location, OpenNote, Sessions};
+use super::session::{Lifecycle, Location, OpenNote, Sessions};
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
 pub(crate) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
@@ -114,8 +114,10 @@ impl NoteStore {
         id: EntryId,
         cx: &mut Context<Self>,
     ) -> Task<Option<Entity<Buffer>>> {
-        if let Some(note) = self.sessions.note(id) {
-            return Task::ready(Some(note.buffer().clone()));
+        if let Some(session) = self.sessions.get(id)
+            && session.life.bound().is_some()
+        {
+            return Task::ready(openable(&session.life));
         }
 
         let Some(vault) = self.vault.clone() else {
@@ -134,16 +136,18 @@ impl NoteStore {
             this.update(cx, |this, cx| {
                 // Two clicks on one unopened note race; the second must not
                 // replace a buffer already typed into.
-                if let Some(note) = this.sessions.note(id) {
-                    return note.buffer().clone();
+                if this.sessions.note(id).is_none() {
+                    let stamp = loaded.stamp;
+                    let buffer = cx.new(|_| Buffer::new(loaded.text));
+                    this.track(id, buffer, Location::Vault, stamp, cx);
+                    cx.notify();
                 }
-                let stamp = loaded.stamp;
-                let buffer = cx.new(|_| Buffer::new(loaded.text));
-                this.track(id, buffer.clone(), Location::Vault, stamp, cx);
-                cx.notify();
-                buffer
+                this.sessions
+                    .get(id)
+                    .and_then(|session| openable(&session.life))
             })
             .ok()
+            .flatten()
         })
     }
 
@@ -202,5 +206,13 @@ impl NoteStore {
         });
         let note = OpenNote::new(buffer, stamp, observer);
         self.sessions.update(id, |life| life.open(location, note));
+    }
+}
+
+/// A trashing note still binds its buffer; no opener lands on it.
+fn openable(life: &Lifecycle<OpenNote>) -> Option<Entity<Buffer>> {
+    match life {
+        Lifecycle::Open(_, note) => Some(note.buffer().clone()),
+        Lifecycle::Closed | Lifecycle::Trashing(_) => None,
     }
 }

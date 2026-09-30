@@ -7,8 +7,9 @@ use inkra_vault::{EntryId, Kind};
 use crate::backlinks::BacklinksPanel;
 use crate::editor::EditorView;
 use crate::index::IndexSync;
+use crate::open::{NoteActivated, Open};
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
-use crate::sidebar::{NewFolder, NewNote, NoteActivated, Sidebar};
+use crate::sidebar::{NewFolder, NewNote, Sidebar};
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
@@ -81,15 +82,20 @@ impl AppShell {
         let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
         // A note linking to itself lists itself.
         cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
-            shell.show_note(event.0, None, cx);
+            shell.open(event.note, None, event.open, cx);
         })
         .detach();
         if let Some(editor) = &editor {
             Self::follow_links_of(editor, cx);
         }
-        cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
-            shell.open_note(event.0, None, cx);
-        })
+        // `Here` stays on `open_note` until the sidebar opens through `show_note` (tabs S4).
+        cx.subscribe(
+            &sidebar,
+            |shell, _sidebar, event: &NoteActivated, cx| match event.open {
+                Open::Here => shell.open_note(event.note, None, cx),
+                Open::NewTab => shell.open_in_new_tab(event.note, None, cx),
+            },
+        )
         .detach();
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
             eprintln!("save failed for {:?}", event.0);
@@ -105,6 +111,8 @@ impl AppShell {
         // and every keystroke would be lost.
         cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
             if shell.forget_note(event.0) {
+                // The active tab emptied: a pending open from it is cancelled (T4).
+                shell.activation = None;
                 cx.with_window(cx.entity_id(), |window, cx| {
                     shell.unfocus_editor(window, cx);
                 });
@@ -172,7 +180,7 @@ impl AppShell {
             window,
             cx,
             |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
-            |shell, event: &NoteActivated, cx| shell.show_note(event.0, None, cx),
+            |shell, event: &NoteActivated, cx| shell.open(event.note, None, event.open, cx),
         );
     }
 
@@ -186,7 +194,7 @@ impl AppShell {
             cx,
             |cx| VaultSearchDelegate::new(&links, vault, cx),
             |shell, event: &HitActivated, cx| {
-                shell.show_note(event.note, Some(event.range.clone()), cx);
+                shell.open(event.note, Some(event.range.clone()), event.open, cx);
             },
         );
     }

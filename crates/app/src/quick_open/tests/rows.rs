@@ -10,10 +10,10 @@ use inkra_vault::Fs;
 use super::{Opened, empty_text, footer, listed, open, search, with_texts};
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
+use crate::open::NoteActivated;
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::quick_open::QuickOpenDelegate;
 use crate::quick_open::render::{BUILDS, DRAWS};
-use crate::sidebar::NoteActivated;
 use crate::test_support::{entry_id, unscanned_notes, vault};
 use crate::theme;
 
@@ -186,7 +186,7 @@ fn enter_opens_a_text_only_match(cx: &mut TestAppContext) {
     let _guard = opened.visual.update(|_, cx| {
         let activated = Rc::clone(&activated);
         cx.subscribe(&opened.picker, move |_, event: &NoteActivated, _| {
-            activated.borrow_mut().push(event.0);
+            activated.borrow_mut().push(event.note);
         })
     });
 

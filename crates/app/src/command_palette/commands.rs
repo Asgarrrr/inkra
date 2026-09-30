@@ -2,6 +2,7 @@ use gpui::{Action, App, FocusHandle, KeybindingKeystroke, SharedString, Window};
 
 use crate::editor::actions as editor;
 use crate::field;
+use crate::picker;
 use crate::sidebar;
 use crate::text_input::actions as text_input;
 
@@ -28,6 +29,7 @@ pub(super) fn is_hidden(name: &str) -> bool {
         sidebar::SelectPrev::name_for_type(),
         sidebar::SelectNext::name_for_type(),
         field::Confirm::name_for_type(),
+        picker::SecondaryConfirm::name_for_type(),
         field::Cancel::name_for_type(),
         super::Toggle::name_for_type(),
     ]
@@ -36,6 +38,8 @@ pub(super) fn is_hidden(name: &str) -> bool {
 
 pub(crate) struct Command {
     pub(super) name: SharedString,
+    /// Run from the palette before: keeps its place above every other match.
+    pub(super) recent: bool,
     pub(super) key: Option<SharedString>,
     pub(super) action: Box<dyn Action>,
 }
@@ -105,6 +109,7 @@ pub(super) fn keys_label(keystrokes: &[KeybindingKeystroke]) -> SharedString {
 }
 
 /// The commands at `target`, each with its key there: `recent` first, newest first, then by name.
+/// A query moves the rest whose match starts later than their first word down (`update_matches`).
 pub(crate) fn commands(
     window: &Window,
     cx: &App,
@@ -121,6 +126,7 @@ pub(crate) fn commands(
                 .map(|binding| keys_label(binding.keystrokes()));
             Command {
                 name: humanize(action.name()).into(),
+                recent: recent.contains(&action.name()),
                 key,
                 action,
             }

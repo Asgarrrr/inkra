@@ -5,8 +5,8 @@ use inkra_vault::EntryId;
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
+use crate::open::NoteActivated;
 use crate::row_text::LitText;
-use crate::sidebar::NoteActivated;
 use crate::vault::NoteStore;
 
 mod render;

@@ -6,8 +6,8 @@ use gpui::KeyBinding;
 use crate::Quit;
 use crate::command_palette;
 use crate::editor::actions::{
-    Copy, Cut, DocEnd, DocStart, Down, FollowLink, Newline, Paste, Redo, SelectDown, SelectUp,
-    Undo, Up,
+    Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, Newline, Paste, Redo,
+    SelectDown, SelectUp, Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
 use crate::picker;
@@ -50,6 +50,8 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-down", DocEnd, editor),
         KeyBinding::new("enter", Newline, editor),
         KeyBinding::new("cmd-enter", FollowLink, editor),
+        // `enter` keeps shift on macOS, unlike a character key (gpui_macos `events.rs`).
+        KeyBinding::new("cmd-shift-enter", FollowLinkInNewTab, editor),
         KeyBinding::new("cmd-c", Copy, editor),
         KeyBinding::new("cmd-x", Cut, editor),
         KeyBinding::new("cmd-v", Paste, editor),
@@ -62,6 +64,8 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // `enter` and `escape` stay the field's: the deepest context wins, so a `Picker` binding would never fire.
         KeyBinding::new("up", picker::SelectPrev, Some("Picker")),
         KeyBinding::new("down", picker::SelectNext, Some("Picker")),
+        // The field binds no `cmd-enter`, so this one fires; the editor's is out of reach.
+        KeyBinding::new("cmd-enter", picker::SecondaryConfirm, Some("Picker")),
         // `enter` confirms here and inserts a newline in the editor.
         KeyBinding::new("enter", Confirm, field),
         KeyBinding::new("escape", Cancel, field),

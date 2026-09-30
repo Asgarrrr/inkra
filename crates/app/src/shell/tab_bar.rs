@@ -1,8 +1,8 @@
 //! The row of tabs above the note column (tabs spec, A5).
 
 use gpui::{
-    App, Context, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
-    Styled, div, prelude::FluentBuilder,
+    App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
 
 use super::AppShell;
@@ -58,6 +58,13 @@ impl AppShell {
                     })
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.activate_tab(id, window, cx);
+                    }))
+                    // The × has no aux listener, so a middle click on it closes its tab here.
+                    .on_aux_click(cx.listener(move |shell, event: &ClickEvent, window, cx| {
+                        if event.is_middle_click() {
+                            cx.stop_propagation();
+                            shell.close_tab(id, window, cx);
+                        }
                     }))
                     .child(div().min_w_0().truncate().child(title))
                     .child(

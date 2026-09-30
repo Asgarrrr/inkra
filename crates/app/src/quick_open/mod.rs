@@ -12,9 +12,9 @@ use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
 use crate::index::{IndexSync, NotesChanged, SCANNING};
+use crate::open::{NoteActivated, Open};
 use crate::picker::runs::{IndexDelegate, Landed, Run, Runs};
 use crate::picker::{Picker, PickerDelegate};
-use crate::sidebar::NoteActivated;
 use crate::theme;
 use list::List;
 
@@ -205,9 +205,12 @@ impl PickerDelegate for QuickOpenDelegate {
         Runs::update_matches(self, query, cx)
     }
 
-    fn confirm(&mut self, ix: usize, cx: &mut Context<Picker<Self>>) {
+    fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>) {
         if let Some(row) = self.list.rows.get(ix) {
-            cx.emit(NoteActivated(row.found.id));
+            cx.emit(NoteActivated {
+                note: row.found.id,
+                open,
+            });
         }
     }
 

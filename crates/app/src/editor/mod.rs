@@ -23,6 +23,7 @@ use inkra_editor::Selection;
 use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset};
 
+use crate::open::Open;
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
 use element::TextElement;
@@ -31,9 +32,12 @@ use viewport::{Reveal, ScrollTo, Viewport};
 pub(crate) use parked::ParkedView;
 pub(crate) use viewport::TopLine;
 
-/// A link the user asked to follow, with ⌘-click or ⌘↵.
+/// A link the user asked to follow: ⌘-click or ⌘↵ here, ⌘⇧-click or ⌘⇧↵ in a new tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LinkFollowed(pub(crate) Link);
+pub(crate) struct LinkFollowed {
+    pub(crate) link: Link,
+    pub(crate) open: Open,
+}
 
 impl EventEmitter<LinkFollowed> for EditorView {}
 
@@ -327,6 +331,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::follow_link))
+            .on_action(cx.listener(Self::follow_link_in_new_tab))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))

@@ -1,11 +1,12 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, KeyContext, ParentElement, Render, Role,
-    StatefulInteractiveElement, Styled, Window, div, prelude::*, uniform_list,
+    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, KeyContext, ParentElement,
+    Render, Role, StatefulInteractiveElement, Styled, Window, div, prelude::*, uniform_list,
 };
 
 use super::{Picker, PickerDelegate};
+use crate::open::Open;
 use crate::theme;
 
 /// Past this the list scrolls.
@@ -33,7 +34,10 @@ impl<D: PickerDelegate> Picker<D> {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .when(selected, |row| row.bg(theme::selected_row_background()))
-                    .on_click(cx.listener(move |picker, _, _, cx| picker.click(ix, cx)))
+                    .on_click(cx.listener(move |picker, event: &ClickEvent, _, cx| {
+                        // The release's modifiers: a picker row acts at mouse-up, a sidebar row at the press.
+                        picker.click(ix, Open::from_click(event.modifiers()), cx);
+                    }))
                     .child(self.delegate.render_row(ix, selected, cx))
                     .into_any_element()
             })
@@ -82,6 +86,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .key_context(context)
             .on_action(cx.listener(Self::select_prev))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::secondary_confirm))
             .flex()
             .flex_col()
             .w_full()

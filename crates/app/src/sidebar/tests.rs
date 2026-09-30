@@ -17,7 +17,8 @@ use inkra_vault::{EntryId, Fs};
 
 use super::edit::Rejection;
 use super::rows::Item;
-use super::{Kind, NoteActivated, Row, Sidebar, row_center};
+use super::{Kind, Row, Sidebar, row_center};
+use crate::open::{NoteActivated, Open};
 use crate::test_support::opened;
 use crate::vault::NoteStore;
 
@@ -296,10 +297,14 @@ fn collapsing_a_folder_hides_its_children_and_nothing_else(cx: &mut TestAppConte
     assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
 
     let projects = row(&sidebar, cx, "Projects/");
-    sidebar.update(cx, |sidebar, cx| sidebar.activate(&projects, cx));
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.activate(&projects, Open::Here, cx);
+    });
     assert_eq!(labels(&sidebar, cx), ["Projects/", "plan", "Projects", "a"]);
 
-    sidebar.update(cx, |sidebar, cx| sidebar.activate(&projects, cx));
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.activate(&projects, Open::Here, cx);
+    });
     assert_eq!(labels(&sidebar, cx), ["Projects/", "Projects", "a"]);
 }
 
@@ -313,7 +318,9 @@ fn expanding_a_folder_leaves_its_nested_folders_collapsed(cx: &mut TestAppContex
     assert_eq!(labels(&sidebar, cx), ["Projects/"]);
 
     let projects = row(&sidebar, cx, "Projects/");
-    sidebar.update(cx, |sidebar, cx| sidebar.activate(&projects, cx));
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.activate(&projects, Open::Here, cx);
+    });
 
     assert_eq!(
         labels(&sidebar, cx),
@@ -366,7 +373,13 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let a = row(&sidebar, cx, "a");
     visual.simulate_click(point(px(20.), row_center(2.)), Modifiers::none());
     visual.run_until_parked();
-    assert_eq!(*seen.borrow(), [NoteActivated(a.id)]);
+    assert_eq!(
+        *seen.borrow(),
+        [NoteActivated {
+            note: a.id,
+            open: Open::Here
+        }]
+    );
 }
 
 /// Pinned at row 29 of 30 so drift passes a whole row before this catches
@@ -389,7 +402,10 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
 
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated(last.id)],
+        [NoteActivated {
+            note: last.id,
+            open: Open::Here
+        }],
         "the rendered pitch has drifted from the stated line height"
     );
 }
@@ -427,6 +443,67 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
     );
 }
 
+#[gpui::test]
+fn a_cmd_click_on_a_note_row_activates_it_in_a_new_tab(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    let (seen, _guard) = watch(&sidebar, cx);
+
+    let a = row(&sidebar, cx, "a");
+    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::command());
+    visual.run_until_parked();
+
+    assert_eq!(
+        *seen.borrow(),
+        [NoteActivated {
+            note: a.id,
+            open: Open::NewTab
+        }]
+    );
+}
+
+#[gpui::test]
+fn a_cmd_click_on_a_folder_row_toggles_it(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/Projects/plan.md", "plan");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    let (seen, _guard) = watch(&sidebar, cx);
+
+    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::command());
+    visual.run_until_parked();
+
+    assert_eq!(labels(&sidebar, cx), ["Projects/", "plan"]);
+    assert!(seen.borrow().is_empty());
+}
+
+#[gpui::test]
+fn a_click_during_a_rename_does_not_activate_another_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    let (seen, _guard) = watch(&sidebar, cx);
+    let a = row(&sidebar, cx, "a");
+    sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(a.id, cx));
+    visual.update(|window, cx| {
+        sidebar.update(cx, |sidebar, cx| sidebar.rename(&super::Rename, window, cx));
+    });
+    visual.run_until_parked();
+
+    visual.simulate_click(point(px(20.), row_center(1.)), Modifiers::none());
+    visual.run_until_parked();
+
+    assert!(seen.borrow().is_empty(), "no row activates");
+    let (editing, selected) =
+        sidebar.read_with(cx, |sidebar, _| (sidebar.is_editing(), sidebar.selected()));
+    assert!(editing, "the rename is still open");
+    assert_eq!(selected, Some(a.id), "on the row it renames");
+}
+
 /// A file name may hold a newline on macOS; `uniform_list` sizes every row from row 0.
 #[gpui::test]
 fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
@@ -443,7 +520,10 @@ fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
 
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated(c.id)],
+        [NoteActivated {
+            note: c.id,
+            open: Open::Here
+        }],
         "a two-line row 0 covers row 1"
     );
 }

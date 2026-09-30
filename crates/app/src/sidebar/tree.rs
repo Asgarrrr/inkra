@@ -4,6 +4,7 @@ use gpui::{Context, ScrollStrategy, Window};
 use inkra_vault::{EntryId, Kind};
 
 use super::{Row, SelectNext, SelectPrev, Sidebar};
+use crate::open::{NoteActivated, Open};
 
 impl Sidebar {
     pub(super) fn rebuild(&mut self, cx: &mut Context<Self>) {
@@ -27,13 +28,17 @@ impl Sidebar {
         self.rebuild(cx);
     }
 
-    pub(super) fn activate(&mut self, row: &Row, cx: &mut Context<Self>) {
+    /// Guarded while a name is typed, as `step`: the field keeps its row.
+    pub(super) fn activate(&mut self, row: &Row, open: Open, cx: &mut Context<Self>) {
+        if self.rows.edit().is_some() {
+            return;
+        }
         self.selected = Some(row.id);
         if row.kind == Kind::Dir {
             self.toggle(row.id, cx);
             return;
         }
-        cx.emit(super::NoteActivated(row.id));
+        cx.emit(NoteActivated { note: row.id, open });
     }
 
     /// Guarded while a name is typed, or an arrow key bubbles up and moves

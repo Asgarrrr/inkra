@@ -8,6 +8,7 @@ use gpui::{
 use super::letters::{DELAY, Letters};
 use super::{Dismissed, Picker};
 use crate::keymap::key_bindings;
+use crate::open::Open;
 use crate::theme;
 
 const ROWS: &[&str] = &["# fruit", "apple", "apricot", "# veg", "beet"];
@@ -42,7 +43,10 @@ fn selected(picker: &Entity<Picker<Letters>>, cx: &mut VisualTestContext) -> Opt
     picker.read_with(cx, |picker, _| picker.selected())
 }
 
-fn confirmed(picker: &Entity<Picker<Letters>>, cx: &mut VisualTestContext) -> Vec<&'static str> {
+fn confirmed(
+    picker: &Entity<Picker<Letters>>,
+    cx: &mut VisualTestContext,
+) -> Vec<(&'static str, Open)> {
     picker.read_with(cx, |picker, _| picker.delegate.confirmed.borrow().clone())
 }
 
@@ -166,8 +170,43 @@ fn enter_confirms_the_selected_row_and_dismisses(cx: &mut TestAppContext) {
 
     visual.simulate_keystrokes("down enter");
 
-    assert_eq!(confirmed(&picker, &mut visual), ["apricot"]);
+    assert_eq!(confirmed(&picker, &mut visual), [("apricot", Open::Here)]);
     assert_eq!(dismissed.get(), 1);
+}
+
+#[gpui::test]
+fn cmd_enter_confirms_the_selected_row_in_a_new_tab_and_dismisses(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, ROWS);
+    let (dismissed, _guard) = watch_dismissed(&picker, &mut visual);
+
+    visual.simulate_keystrokes("down cmd-enter");
+
+    assert_eq!(confirmed(&picker, &mut visual), [("apricot", Open::NewTab)]);
+    assert_eq!(dismissed.get(), 1);
+}
+
+#[gpui::test]
+fn cmd_enter_while_a_query_is_pending_confirms_its_first_row_in_a_new_tab(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, ROWS);
+    visual.simulate_keystrokes("down");
+
+    visual.simulate_keystrokes("b cmd-enter");
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
+    settle(&mut visual);
+
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::NewTab)]);
+}
+
+#[gpui::test]
+fn a_cmd_click_confirms_the_row_in_a_new_tab(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, ROWS);
+    let row = visual.debug_bounds("picker-row-4");
+    assert!(row.is_some(), "row 4 is drawn");
+    let at = row.map(|row| row.center()).unwrap_or_default();
+
+    visual.simulate_click(at, Modifiers::command());
+
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::NewTab)]);
 }
 
 #[gpui::test]
@@ -179,7 +218,7 @@ fn enter_with_no_row_does_nothing(cx: &mut TestAppContext) {
 
     visual.simulate_keystrokes("enter");
 
-    assert_eq!(confirmed(&picker, &mut visual), Vec::<&str>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
     assert_eq!(dismissed.get(), 0);
 }
 
@@ -190,7 +229,7 @@ fn escape_dismisses_without_confirming(cx: &mut TestAppContext) {
 
     visual.simulate_keystrokes("escape");
 
-    assert_eq!(confirmed(&picker, &mut visual), Vec::<&str>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
     assert_eq!(dismissed.get(), 1);
 }
 
@@ -201,7 +240,7 @@ fn a_click_confirms_the_row_it_lands_on(cx: &mut TestAppContext) {
 
     click(&mut visual, "picker-row-4");
 
-    assert_eq!(confirmed(&picker, &mut visual), ["beet"]);
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::Here)]);
     assert_eq!(dismissed.get(), 1);
 }
 
@@ -212,7 +251,7 @@ fn a_click_on_a_header_does_nothing(cx: &mut TestAppContext) {
 
     click(&mut visual, "picker-row-3");
 
-    assert_eq!(confirmed(&picker, &mut visual), Vec::<&str>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
     assert_eq!(dismissed.get(), 0);
     assert_eq!(selected(&picker, &mut visual), Some(1));
 }
@@ -288,10 +327,14 @@ fn enter_while_a_query_is_pending_confirms_its_first_row(cx: &mut TestAppContext
     visual.simulate_keystrokes("down");
 
     visual.simulate_keystrokes("b enter");
-    assert_eq!(confirmed(&picker, &mut visual), Vec::<&str>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
     settle(&mut visual);
 
-    assert_eq!(confirmed(&picker, &mut visual), ["beet"], "not apricot");
+    assert_eq!(
+        confirmed(&picker, &mut visual),
+        [("beet", Open::Here)],
+        "not apricot"
+    );
     assert_eq!(dismissed.get(), 1);
 }
 
@@ -304,10 +347,10 @@ fn a_row_confirms_on_release_not_on_press(cx: &mut TestAppContext) {
     let at = row.map(|row| row.center()).unwrap_or_default();
 
     visual.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
-    assert_eq!(confirmed(&picker, &mut visual), Vec::<&str>::new());
+    assert_eq!(confirmed(&picker, &mut visual), Vec::<(&str, Open)>::new());
 
     visual.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
-    assert_eq!(confirmed(&picker, &mut visual), ["beet"]);
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::Here)]);
 }
 
 #[gpui::test]

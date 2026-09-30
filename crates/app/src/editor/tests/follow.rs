@@ -5,21 +5,26 @@ use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHand
 
 use super::{at, dispatching};
 use crate::editor::{EditorView, LinkFollowed};
+use crate::open::Open;
 
 const TEXT: &str = "go [[target]] end\nplain";
+
+/// Each followed link's target and where it opens.
+type Followed = Rc<RefCell<Vec<(String, Open)>>>;
 
 /// Every `LinkFollowed` target, in order; the subscription lives as long as the returned guard.
 fn followed(
     window: &WindowHandle<EditorView>,
     cx: &mut VisualTestContext,
-) -> (Rc<RefCell<Vec<String>>>, gpui::Subscription) {
+) -> (Followed, gpui::Subscription) {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&seen);
     let subscription = window
         .update(cx, |_, _, cx| {
             let view = cx.entity();
             cx.subscribe(&view, move |_, _, event: &LinkFollowed, _| {
-                sink.borrow_mut().push(event.0.target.clone());
+                sink.borrow_mut()
+                    .push((event.link.target.clone(), event.open));
             })
         })
         .unwrap();
@@ -58,13 +63,26 @@ fn cmd_enter_inside_a_link_follows_it(cx: &mut TestAppContext) {
 
     cx.simulate_keystrokes("cmd-enter");
 
-    assert_eq!(*seen.borrow(), ["target"]);
+    assert_eq!(*seen.borrow(), [("target".to_owned(), Open::Here)]);
     assert_eq!(caret(&window, &mut cx), 5, "following moves no caret");
     window
         .update(&mut cx, |view, _, cx| {
             assert_eq!(view.input.buffer().read(cx).text(), TEXT);
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn cmd_shift_enter_inside_a_link_follows_it_in_a_new_tab(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, TEXT);
+    cx.run_until_parked();
+    let (seen, _guard) = followed(&window, &mut cx);
+    cx.simulate_keystrokes("cmd-up right right right right right");
+
+    cx.simulate_keystrokes("cmd-shift-enter");
+
+    assert_eq!(*seen.borrow(), [("target".to_owned(), Open::NewTab)]);
+    assert_eq!(caret(&window, &mut cx), 5, "following moves no caret");
 }
 
 #[gpui::test]
@@ -94,7 +112,7 @@ fn a_cmd_click_on_a_concealed_link_follows_it_and_leaves_the_caret(cx: &mut Test
     cx.simulate_mouse_down(on_link, MouseButton::Left, Modifiers::command());
     cx.run_until_parked();
 
-    assert_eq!(*seen.borrow(), ["target"]);
+    assert_eq!(*seen.borrow(), [("target".to_owned(), Open::Here)]);
     assert_eq!(caret(&window, &mut cx), before);
     window
         .update(&mut cx, |view, _, _| {
@@ -104,6 +122,21 @@ fn a_cmd_click_on_a_concealed_link_follows_it_and_leaves_the_caret(cx: &mut Test
             );
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn a_cmd_shift_click_on_a_link_follows_it_in_a_new_tab(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, TEXT);
+    cx.run_until_parked();
+    let (seen, _guard) = followed(&window, &mut cx);
+    let before = caret(&window, &mut cx);
+    let on_link = point_at(&window, &mut cx, 7);
+
+    cx.simulate_mouse_down(on_link, MouseButton::Left, Modifiers::command_shift());
+    cx.run_until_parked();
+
+    assert_eq!(*seen.borrow(), [("target".to_owned(), Open::NewTab)]);
+    assert_eq!(caret(&window, &mut cx), before, "no selection is extended");
 }
 
 #[gpui::test]
@@ -191,7 +224,7 @@ fn a_cmd_click_on_a_links_last_drawn_glyph_follows_it(cx: &mut TestAppContext) {
     cx.simulate_click(right_half, Modifiers::command());
     cx.run_until_parked();
 
-    assert_eq!(*seen.borrow(), ["b"]);
+    assert_eq!(*seen.borrow(), [("b".to_owned(), Open::Here)]);
 }
 
 #[gpui::test]

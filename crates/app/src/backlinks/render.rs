@@ -1,11 +1,11 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div,
 };
 
 use super::{BacklinksPanel, Row};
+use crate::open::{NoteActivated, Open};
 use crate::row_text::styled;
-use crate::sidebar::NoteActivated;
 use crate::theme;
 
 impl BacklinksPanel {
@@ -20,7 +20,13 @@ impl BacklinksPanel {
             .pb_2()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |_, _, _, cx| cx.emit(NoteActivated(source))),
+                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
+                    // The press's modifiers: the row acts at mouse-down, a picker row at the release.
+                    cx.emit(NoteActivated {
+                        note: source,
+                        open: Open::from_click(event.modifiers),
+                    });
+                }),
             )
             .child(
                 div()

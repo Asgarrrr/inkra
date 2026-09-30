@@ -5,6 +5,7 @@ use gpui::TestAppContext;
 use inkra_text::ByteOffset;
 
 use super::{listed, open, search, selected, with_texts};
+use crate::open::Open;
 use crate::test_support::entry_id;
 use crate::vault_search::HitActivated;
 
@@ -71,6 +72,7 @@ fn enter_confirms_the_selected_hit(cx: &mut TestAppContext) {
         [HitActivated {
             note: a,
             range: ByteOffset(9)..ByteOffset(13),
+            open: Open::Here,
         }]
     );
 }

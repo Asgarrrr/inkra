@@ -4,11 +4,13 @@ use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
+use crate::editor::LinkFollowed;
 use crate::keymap::key_bindings;
+use crate::open::Open;
 use crate::shell::AppShell;
 use crate::test_support::entry_id;
 
-use super::{activate, editor, open_vault, showing, vault_names};
+use super::{activate, check, editor, open_vault, showing, tab_notes, vault_names};
 
 /// A vault whose `a` is showing, its caret at 0 (`open_buffer` leaves it at the end), with the
 /// index built.
@@ -123,10 +125,52 @@ fn following_a_link_to_the_note_showing_during_a_slow_load_keeps_it(cx: &mut Tes
     cx.run_until_parked();
     let link = inkra_markdown::links("[[a]]").remove(0);
     window
-        .update(cx, |shell, _, cx| shell.follow(&link, cx))
+        .update(cx, |shell, _, cx| shell.follow(&link, Open::Here, cx))
         .unwrap_or_else(|_| panic!("the window is open"));
     gate.release();
     cx.run_until_parked();
 
     assert_eq!(showing(&window, cx), Some(a));
+}
+
+#[gpui::test]
+fn cmd_shift_enter_on_a_wikilink_opens_its_note_in_a_new_tab(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[[b]] next"), ("b.md", "beta")]);
+    let a = showing(&window, cx);
+
+    visual.simulate_keystrokes("cmd-shift-enter");
+    visual.run_until_parked();
+
+    let (tabs, active) = tab_notes(&window, cx);
+    assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
+    assert_eq!(shown_text(&window, cx), "beta");
+    check(&window, cx);
+}
+
+/// The link resolves from the note it is written in, not from the new tab.
+#[gpui::test]
+fn a_relative_link_in_a_new_tab_resolves_from_the_note_left(cx: &mut TestAppContext) {
+    let (window, visual) = showing_a(
+        cx,
+        &[
+            ("a.md", "[x](sub/c.md)"),
+            ("c.md", "wrong"),
+            ("sub/c.md", "gamma"),
+        ],
+    );
+    let a = showing(&window, cx);
+    let link = inkra_markdown::links("[x](sub/c.md)").remove(0);
+
+    editor(&window, cx).update(cx, |_, cx| {
+        cx.emit(LinkFollowed {
+            link,
+            open: Open::NewTab,
+        });
+    });
+    visual.run_until_parked();
+
+    let (tabs, active) = tab_notes(&window, cx);
+    assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
+    assert_eq!(shown_text(&window, cx), "gamma");
+    check(&window, cx);
 }

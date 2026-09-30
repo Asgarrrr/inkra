@@ -12,10 +12,10 @@ use inkra_vault::{Fs, Kind};
 use super::{Opened, cancel_flag, footer, listed, open, search, with_texts};
 use crate::index::{BUILDING_REFRESH, IndexSync};
 use crate::keymap::key_bindings;
+use crate::open::NoteActivated;
 use crate::picker::Picker;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::quick_open::QuickOpenDelegate;
-use crate::sidebar::NoteActivated;
 use crate::test_support::{entry_id, unscanned_notes, vault};
 
 /// Holds every scan that starts from now on until the sender is dropped or sent.
@@ -292,7 +292,7 @@ fn enter_during_a_dirty_scan_confirms_without_a_rerun(cx: &mut TestAppContext) {
     let _guard = opened.visual.update(|_, cx| {
         let activated = Rc::clone(&activated);
         cx.subscribe(&opened.picker, move |_, event: &NoteActivated, _| {
-            activated.borrow_mut().push(event.0);
+            activated.borrow_mut().push(event.note);
         })
     });
     let release = hold_scans(&mut opened);

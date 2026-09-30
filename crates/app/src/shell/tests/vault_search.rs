@@ -9,6 +9,7 @@ use inkra_vault::{EntryId, Fs};
 
 use super::{activate, editor, no_vault, open_vault, showing, tree_focused};
 use crate::keymap::key_bindings;
+use crate::open::Open;
 use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::picker::{Picker, PickerDelegate};
 use crate::quick_open::QuickOpenDelegate;
@@ -249,6 +250,7 @@ fn a_hit_past_the_end_of_an_edited_note_is_clipped(cx: &mut TestAppContext) {
         cx.emit(HitActivated {
             note: a,
             range: ByteOffset(6)..ByteOffset(10),
+            open: Open::Here,
         });
     });
     visual.run_until_parked();

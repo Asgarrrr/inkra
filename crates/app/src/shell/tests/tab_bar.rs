@@ -4,13 +4,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Modifiers, TestAppContext, VisualTestContext, WindowBounds, WindowHandle,
+    Bounds, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds, WindowHandle,
     WindowOptions, px, size,
 };
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{AppShell, ab_focused, editor, no_vault, open, tab_notes};
+use super::{AppShell, ab_focused, check, editor, no_vault, open, showing, tab_notes};
 use crate::bootstrap::{Launch, root};
 
 fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<String> {
@@ -22,6 +22,13 @@ fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<Strin
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx.debug_bounds(selector).expect("drawn");
     cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+}
+
+fn press(cx: &mut VisualTestContext, selector: &'static str, button: MouseButton) {
+    let at = cx.debug_bounds(selector).expect("drawn").center();
+    cx.simulate_mouse_down(at, button, Modifiers::none());
+    cx.simulate_mouse_up(at, button, Modifiers::none());
     cx.run_until_parked();
 }
 
@@ -219,4 +226,79 @@ fn many_tabs_never_widen_the_note_column(cx: &mut TestAppContext) {
         backlinks.right() <= px(700.),
         "the backlinks column is pushed out"
     );
+}
+
+#[gpui::test]
+fn a_middle_click_closes_the_tab_under_it(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-t");
+
+    press(&mut cx, "tab-0", MouseButton::Middle);
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    check(&window, &mut cx);
+}
+
+#[gpui::test]
+fn a_right_click_on_a_tab_closes_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-t");
+
+    press(&mut cx, "tab-0", MouseButton::Right);
+
+    assert_eq!(
+        tab_notes(&window, &mut cx),
+        (vec![Some(a), Some(b), None], 2)
+    );
+}
+
+/// The most recent tab is `b`'s, two to the right; the neighbour is empty.
+#[gpui::test]
+fn a_middle_click_on_the_active_tab_shows_the_most_recent_one(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-1");
+
+    press(&mut cx, "tab-0", MouseButton::Middle);
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(showing(&window, &mut cx), Some(b));
+    check(&window, &mut cx);
+}
+
+#[gpui::test]
+fn a_middle_click_on_the_x_closes_its_tab(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-t");
+
+    press(&mut cx, "tab-close-0", MouseButton::Middle);
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    check(&window, &mut cx);
+}
+
+/// The picker's overlay covers the bar.
+#[gpui::test]
+fn a_middle_click_on_a_tab_under_cmd_p_closes_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-p");
+
+    press(&mut cx, "tab-0", MouseButton::Middle);
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
 }
