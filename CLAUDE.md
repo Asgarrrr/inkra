@@ -47,6 +47,9 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   file; a forgotten `mod` line drops tests and still compiles green.
 - mutants: `cargo mutants` after changing `text`, `editor`, `markdown`, `index` or `tabs` logic.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
+- compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
+  — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
+  Quit Obsidian first; it runs in an isolated profile and never touches the user's.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
   `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
 - `vendor/zed-reference` is gitignored; `./scripts/vendor-gpui.sh` restores it
