@@ -12,6 +12,7 @@ use super::*;
 use crate::fs::{DirEntry, Loaded, Saved, Stamp};
 use crate::mem_fs::MemFs;
 use crate::watch::Watch;
+use crate::{Job, Jobs};
 
 const ROOT: &str = "/vault";
 

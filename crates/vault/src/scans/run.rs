@@ -2,7 +2,8 @@
 
 use crate::RelPath;
 use crate::fs::{Fs, Result};
-use crate::vault::{Jobs, Reach, Vault, Walk};
+use crate::jobs::Jobs;
+use crate::vault::{Reach, Vault, Walk};
 use crate::watch::Pending;
 
 /// A pass to run off the foreground: its base and what it reads. Only `Scans` makes one.
