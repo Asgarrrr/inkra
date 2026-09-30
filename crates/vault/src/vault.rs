@@ -7,12 +7,13 @@ use std::sync::Arc;
 
 use crate::RelPath;
 use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
+use crate::jobs::Serial;
 
 mod identity;
 mod reclaim;
 mod walk;
 
-pub use walk::{Job, Jobs, Reach, Serial, Walk};
+pub use walk::{Reach, Walk};
 
 /// Guards against a pathological tree; no real vault approaches it.
 const MAX_DEPTH: usize = 64;

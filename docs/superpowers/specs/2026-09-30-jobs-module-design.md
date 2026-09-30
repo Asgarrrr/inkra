@@ -198,3 +198,11 @@ Red/blue pass, 2026-09-30.
 - **Blue: Interface block, slicing, test-glob risk.** Confirmations; no change.
 
 No finding argues for dropping the candidate. It proceeds.
+
+J1 review, 2026-09-30.
+
+- **Q1** (major, contract placement). Fixed; deviates from "stated once in
+  the module doc". `jobs` is a private module re-exported at the crate root,
+  so rustdoc and hover on `inkra_vault::Jobs` never show its `//!` doc. Each
+  clause now sits on its item: the `'a` scope on `Job`, the hint on
+  `parallelism`, completion on `run`. The module doc keeps one line.

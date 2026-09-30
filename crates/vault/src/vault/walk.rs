@@ -4,13 +4,13 @@ use std::collections::{BTreeSet, HashSet};
 use std::future::poll_fn;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::task::{Poll, Waker};
 
 use super::{MAX_DEPTH, Vault};
 use crate::RelPath;
 use crate::fs::{DirEntry, Fs, Kind, Result, VaultError};
+use crate::jobs::{Job, Jobs};
 
 /// What one scan read from disk.
 #[derive(Debug, Default, Clone)]
@@ -32,32 +32,6 @@ pub enum Reach {
     Whole,
     /// A folder `walk_changed` was asked to read failed, other than gone: a full scan retries it.
     Incomplete,
-}
-
-pub type Job<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-
-/// Runs jobs to completion, a walk's or a query's: the app on its background threads, a test inline.
-pub trait Jobs: Sync {
-    /// How many jobs to start.
-    fn parallelism(&self) -> usize;
-    fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a>;
-}
-
-/// One job, run inline: `scan`, `rescan` and tests.
-pub struct Serial;
-
-impl Jobs for Serial {
-    fn parallelism(&self) -> usize {
-        1
-    }
-
-    fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a> {
-        Box::pin(async move {
-            for job in jobs {
-                job.await;
-            }
-        })
-    }
 }
 
 struct Queue {
