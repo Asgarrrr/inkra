@@ -1,6 +1,6 @@
 # The picker owns the matches-landed handshake
 
-Status: **proposed 2026-09-30**. Refactor: quick open, vault search and the
+Status: **built 2026-09-30** (As built, below). Refactor: quick open, vault search and the
 command palette behave as before; a query answered at once lands inside the
 refresh that asked for it.
 
@@ -393,6 +393,10 @@ foreground task and one background task, as today. First frame is untouched:
 the palette's first answer lands inside `Picker::new`, where today it lands
 in the same effect flush.
 
+This paragraph describes the state after Slice 3. In Slice 2 the picker wraps
+the `Runs` task in its own task, so every `Runs` query spawns two foreground
+tasks. Slice 3 removes the inner task (plan item 2).
+
 ## Risks
 
 - **Landing inside `Picker::new`.** The palette's `Ready` lands while the
@@ -472,3 +476,26 @@ goes through `Ledger::refresh`, not a hand write of `next`; `RunId::previous`
 and vault search's stale test are no longer deleted here; `Landing` renamed
 `Arrival`, since restore-tabs adds a `Landing` state to `inkra-app`;
 `Runs::scanning` stays in the driver.
+
+## As built
+
+Slices 1 to 4 are one commit each on `arch/picker-runs`; slices 1 to 3 each
+have one review-fix commit. Deviations from the design above:
+
+- **`Picker::selected` is `#[cfg(test)]`.** `Runs` reads the selection from
+  `apply_matches`' `selected` argument, so no other code reads it.
+- **The palette's `Row` is `pub(crate)`.** `type Matches = Vec<Row>` names
+  it in a `pub(crate)` trait.
+- **Landing inside `Picker::new`** (Risks) needed no fallback: `new` calls
+  `refresh`, the palette's `Ready` answer lands there, and every palette test
+  stays green.
+- **`a_superseded_scan_never_lands`** advances the clock by `SEARCH_DEBOUNCE`
+  after the release, not only parks: the `l` run waits the debounce behind a
+  user search. `logged` in `quick_open/tests/background.rs` is `pub(super)`
+  so `refresh.rs` reads it.
+- **Tests.** Added: `a_landing_that_asks_for_a_rerun_runs_it_unless_confirmed`,
+  `an_answer_at_once_lands_inside_the_refresh`,
+  `an_answer_of_none_lands_nothing_and_keeps_enter_queued` (picker) and
+  `a_superseded_scan_never_lands` (quick open refresh). Removed: quick open's
+  `a_stale_result_is_dropped`, and the two `is_current` asserts in
+  `a_start_cancels_the_run_before_and_supersedes_it`.

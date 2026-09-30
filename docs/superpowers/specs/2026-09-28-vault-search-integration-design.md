@@ -61,6 +61,11 @@ Amended 2026-09-29: `Runs` now owns the whole run through the `IndexDelegate`
 trait (`Runs::update_matches`, `Runs::apply`); `AsMut<Runs>` and `confirmed`
 are gone, replaced by `Picker::confirmed`. See [`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
 
+Superseded in part 2026-09-30 by
+[`2026-09-30-picker-owns-landing-design.md`](2026-09-30-picker-owns-landing-design.md):
+`Runs::apply` and `is_current` are gone, `Runs` no longer reads
+`Picker::confirmed`, and `Picker` lands every answer.
+
 ## S2. `inkra-index`: the line and the per-note cap
 
 ### `Hit.line`
@@ -197,6 +202,9 @@ and highlight runs. Every row is one `UI_LINE_HEIGHT` tall, so
   Amended 2026-09-29: `index::fan_out` is gone; `IndexSnapshot::search` and
   `find_notes` run the lookup, the split and the merge inside `inkra-index`,
   and `Runs` drives the rest. See [`2026-09-29-query-run-design.md`](2026-09-29-query-run-design.md).
+  Superseded in part 2026-09-30: `Runs::settle` is gone; a run that scans
+  nothing answers `Ran::Settled` and `Picker` lands it. See
+  [`2026-09-30-picker-owns-landing-design.md`](2026-09-30-picker-owns-landing-design.md).
 - **Revealing a selection.** The picker scrolls the unselectable rows right
   before the selected one into view with it, so `up` onto a note's first hit
   shows its header too.

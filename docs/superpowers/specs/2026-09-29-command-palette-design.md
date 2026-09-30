@@ -133,6 +133,13 @@ through `App::defer` on the picker's weak handle. The delegate holds only
 key, so the first frame shows row 0 selected and `enter` never waits. A spawned
 task could land after a frame and flash the empty text.
 
+> **Superseded 2026-09-30** by
+> [`2026-09-30-picker-owns-landing-design.md`](2026-09-30-picker-owns-landing-design.md):
+> `update_matches` returns `Update::Ready(rows)`, and `apply_matches` sets them
+> and returns `Arrival::first()`. The picker lands the answer before `refresh`
+> returns, so `enter` still never waits. The `App::defer` and the weak handle
+> are gone.
+
 With no match, `empty_text` is `No matching command`.
 
 ### D4. Running a command

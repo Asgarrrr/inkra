@@ -1,16 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::{AppContext as _, Entity, Focusable, TestAppContext, VisualTestContext};
-use inkra_index::NoteQuery;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
 use super::QuickOpenDelegate;
 use crate::index::IndexSync;
 use crate::keymap::key_bindings;
-use crate::picker::runs::{Landed, NOTES_CHANGED_REFRESH, Run, RunId, Runs, SEARCH_DEBOUNCE};
+use crate::picker::runs::{NOTES_CHANGED_REFRESH, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::test_support::{entry_id, scan_notes, unscanned_notes, vault};
 use crate::vault::NoteStore;
@@ -206,27 +205,6 @@ fn any_core_count_lists_the_same_notes(cx: &mut TestAppContext) {
     assert!(!lists[0].is_empty());
     assert_eq!(lists[0], lists[1]);
     assert_eq!(lists[0], lists[2]);
-}
-
-#[gpui::test]
-fn a_stale_result_is_dropped(cx: &mut TestAppContext) {
-    let fs = vault(&["plan.md", "other.md"]);
-    let mut opened = open(cx, &fs, None, &[]);
-    opened.visual.simulate_keystrokes("p");
-
-    opened.picker.update(&mut opened.visual, |picker, cx| {
-        let landed = Landed {
-            id: RunId::default(),
-            run: Run::Search,
-            begun: Instant::now(),
-            snapshot: picker.delegate.links.read(cx).index().snapshot(),
-            query: Arc::new(NoteQuery::new("", None, &[])),
-            found: Vec::new(),
-        };
-        Runs::apply(picker, landed, cx);
-    });
-
-    assert_eq!(listed(&mut opened), ["plan"]);
 }
 
 #[gpui::test]
