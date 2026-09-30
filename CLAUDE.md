@@ -66,8 +66,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
-  - which tab is active, what a close activates, which place back and forward reach → `tabs`;
-    what a place holds → `app`
+  - which tab is active, what a close activates, which place back and forward reach, what `⌘⇧T`
+    reopens, where a dragged tab lands → `tabs`; what a place holds → `app`
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`

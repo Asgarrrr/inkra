@@ -24,3 +24,7 @@ paths:
   22.5 px where `phi()` predicts 22.65).
 - Headless glyphs advance `0.6 × font_size`; wrap fixtures avoid breaks landing
   exactly on the column edge.
+- Drag with `simulate_mouse_down`, a `simulate_mouse_move(.., MouseButton::Left, ..)`
+  more than 2 px away (`div.rs:52`), a move onto the target, and
+  `simulate_mouse_up` there. A drag fires no click: gpui clears every pending
+  press while a drag is active (`div.rs:2234-2243`).

@@ -126,6 +126,17 @@ pub(crate) fn tab_rule() -> Rgba {
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
 
+/// The tab a dragged tab is over: the caret's blue, faint behind it and full on the edge it lands at.
+pub(crate) fn tab_drop_background() -> Rgba {
+    rgba(0x4ea1ff26)
+}
+
+pub(crate) fn tab_drop_border() -> Rgba {
+    rgb(0x4ea1ff)
+}
+
+pub(crate) const TAB_DROP_EDGE: Pixels = px(2.);
+
 pub(crate) fn heading_text() -> Rgba {
     rgb(0xffffff)
 }

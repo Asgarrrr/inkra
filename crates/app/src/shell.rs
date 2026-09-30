@@ -28,6 +28,7 @@ use tabs::Place;
 
 pub(crate) use tabs::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
+    ReopenClosedTab,
 };
 
 const SIDEBAR_WIDTH: Pixels = px(220.);
@@ -210,6 +211,16 @@ impl AppShell {
 impl AppShell {
     pub(crate) fn tree_focus_handle(&self, cx: &App) -> FocusHandle {
         self.sidebar.read(cx).focus_handle(cx)
+    }
+}
+
+#[cfg(feature = "shot")]
+impl AppShell {
+    /// Where tab `ix` was drawn last, for a scene to press on; `None` before the bar is drawn.
+    pub(crate) fn tab_center(&self, ix: usize) -> Option<gpui::Point<Pixels>> {
+        self.tab_scroll
+            .bounds_for_item(ix)
+            .map(|bounds| bounds.center())
     }
 }
 

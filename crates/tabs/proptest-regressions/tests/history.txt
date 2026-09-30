@@ -6,3 +6,9 @@
 # everyone who runs the test benefits from these saved cases.
 cc 2d127f9bf26e7e0112a965cc131cc7c8ef16249589d82a925b78b0318c2e9331 # shrinks to ops = [Commit(Index(0), Some(0))], note = None
 cc 79b920e1b0682519a112c6b2279ef724508d74e3dce8bae4a7af345d27dc287f # shrinks to notes = [0, 1, 0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 2, 2, 0, 1, 0, 0, 1, 0, 1, 2, 2, 0, 2, 0, 0, 0, 1, 1, 0, 0, 2, 0, 1, 1, 1, 2, 0, 1, 1, 0, 0, 2, 2, 1, 1, 0, 1, 0, 0, 2, 2, 1, 2, 0, 1, 0, 0, 0, 2, 1, 2, 0, 1, 1, 0, 2, 2, 2, 2, 0, 2, 2, 2, 0, 1, 0, 1, 2, 0, 0, 0, 2, 2]
+cc c86e697304d4edd869fb7f8c33cbd42386d536093231c4fbd3a3188f702020e6 # shrinks to ops = [Insert(1), Close(Index(0))], note = None
+cc 608b2095d33e2d543d5b50c3285b611a03948915e463677f8629c408317b3c41 # shrinks to ops = [Insert(0), Insert(2), Close(Index(0))]
+cc b6ab6ab36c3c56c1c665c9f2e8a01cb70b5f1ec158ca716587172c75840aa57b # shrinks to ops = [Insert(0), Step(Next), Close(Index(0))]
+cc d28dc049c29a380c3189f7e9a7154632092f7813b6b8fe77607e009095d823f2 # shrinks to ops = [Insert(1), Close(Index(0))]
+cc 61f14a8b69c926945956afcf14485af9d3a13e2320daa35b73e732c1aa326239 # shrinks to ops = [Insert(1), Close(Index(0))]
+cc 8a0328dcc67f7002d5dcfef2df2f762599344f1f687fb7d9b381aec9c92f164b # shrinks to ops = [Insert(1), Close(Index(0))], note = 0

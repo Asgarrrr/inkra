@@ -21,7 +21,8 @@ actions!(
         PreviousTab,
         ActivateLastTab,
         GoBack,
-        GoForward
+        GoForward,
+        ReopenClosedTab
     ]
 );
 
@@ -115,9 +116,13 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     pub(super) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        let closed = self.tabs.close(id, || capture(self.bound.as_ref(), cx));
-        // Finds an entry only for an inactive tab; S5 keeps its view for the closed stack.
-        let _ = self.parked.unpark(id, cx);
+        // Plain offsets: the closed stack keeps no anchors (A2). `None` for the active tab or no tab (I1).
+        let view = self.parked.unpark(id, cx);
+        let closed = self.tabs.close(
+            id,
+            || capture(self.bound.as_ref(), cx),
+            |place| Place { view, ..place },
+        );
         if let Some(Closed {
             shown: Some((shown, place)),
             ..
@@ -129,6 +134,31 @@ impl AppShell {
             cx.notify();
         }
         self.keep_active_tab_visible();
+    }
+
+    /// Parks the tab left, as `new_tab`; the place arriving holds a plain view, so no `arrive`.
+    pub(super) fn reopen_closed_tab(
+        &mut self,
+        _: &ReopenClosedTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dismiss_modal(window, cx);
+        let left = self.tabs.active();
+        let arriving = self
+            .tabs
+            .reopen(|| park(&mut self.parked, left, self.bound.as_ref(), cx));
+        if let Some(place) = arriving {
+            self.show_place(place, window, cx);
+            self.keep_active_tab_visible();
+        }
+    }
+
+    /// A drop in the bar: nothing is left, captured or parked, so a pending open still lands (T4).
+    pub(super) fn move_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
+        self.tabs.move_tab(id, to);
+        self.keep_active_tab_visible();
+        cx.notify();
     }
 
     pub(super) fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {

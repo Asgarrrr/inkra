@@ -198,6 +198,14 @@ fn the_palette_lists_go_back_and_go_forward_with_their_keys(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn the_palette_lists_reopen_closed_tab_with_its_key(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p r e o p");
+    visual.run_until_parked();
+    assert_eq!(listed(window, &mut visual), ["Reopen closed tab, ⇧⌘T"]);
+}
+
+#[gpui::test]
 fn a_recent_command_stays_first_though_its_match_starts_later(cx: &mut TestAppContext) {
     let (window, mut visual, _, _) = editor_focused(cx);
     visual.simulate_keystrokes("cmd-shift-p f o l l o w space n e w enter");

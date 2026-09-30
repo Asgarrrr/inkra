@@ -13,3 +13,10 @@ pub(super) fn bar(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.keys(window, "cmd-t cmd-t cmd-1");
     window
 }
+
+pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    let (from, to) = (stage.tab_center(window, 0), stage.tab_center(window, 2));
+    stage.drag_holding(window, from, to);
+    window
+}

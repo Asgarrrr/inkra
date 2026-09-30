@@ -199,6 +199,11 @@ const CATALOGUE: &[Scene] = &[
         open: tabs::bar,
     },
     Scene {
+        name: "tabs-dragging",
+        shows: "`index` dragged onto the third tab, button held: that tab lit in the drop colour with a 2 px right edge, the preview under the pointer; the bar's order unchanged until the drop",
+        open: tabs::dragging,
+    },
+    Scene {
         name: "quick-open-results",
         shows: "cmd-p over the editor: name rows then text rows, word starts lit, a dimmed second line under each, folders cut from the start",
         open: quick_open::results,

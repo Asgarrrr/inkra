@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{Focusable, Pixels, Point, VisualTestAppContext, WindowHandle};
+use gpui::{
+    Focusable, Modifiers, MouseButton, Pixels, Point, VisualTestAppContext, WindowHandle, point, px,
+};
 use image::RgbaImage;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{Fs, Vault};
@@ -164,6 +166,38 @@ impl Stage {
         self.cx
             .simulate_click(window.into(), at, gpui::Modifiers::default());
         self.settle();
+    }
+
+    /// Presses at `from` and moves past gpui's 2 px threshold onto `to`, holding the button: the drag stays on screen.
+    pub(crate) fn drag_holding(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+    ) {
+        let (window, none) = (window.into(), Modifiers::default());
+        self.cx
+            .simulate_mouse_down(window, from, MouseButton::Left, none);
+        self.cx.simulate_mouse_move(
+            window,
+            from + point(px(4.), px(0.)),
+            MouseButton::Left,
+            none,
+        );
+        self.cx
+            .simulate_mouse_move(window, to, MouseButton::Left, none);
+        self.settle();
+    }
+
+    pub(crate) fn tab_center(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        ix: usize,
+    ) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |shell, _, _| shell.tab_center(ix))
+            .unwrap_or_else(|error| panic!("read tab {ix}: {error}"))
+            .unwrap_or_else(|| panic!("tab {ix} is drawn"))
     }
 
     /// Pixels are device pixels: a 1000x640 window yields 2000x1280 on a 2x display.

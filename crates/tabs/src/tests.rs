@@ -5,9 +5,11 @@ use std::collections::{HashMap, HashSet};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
-use super::{Closed, Direction, HISTORY, Place, TabId, Tabs};
+use super::{Closed, Direction, HISTORY, Place, Stack, TabId, Tabs};
 
+mod closed;
 mod history;
+mod moving;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Fake {
@@ -23,23 +25,52 @@ impl Place for Fake {
     }
 }
 
+/// Tells a place `resolve` gave apart from the one stored.
+const RESOLVED: u32 = 1 << 20;
+
+/// The harness's `resolve`: the stored place, marked.
+fn resolved(mut place: Fake) -> Fake {
+    place.seq += RESOLVED;
+    place
+}
+
+fn entries(stack: &Stack<Fake>) -> Vec<Fake> {
+    stack.0.iter().cloned().collect()
+}
+
+/// H1's adjacency, H2, H3.
+fn check_stack<P: Place>(stack: &Stack<P>) {
+    let stack = &stack.0;
+    assert!(stack.len() <= HISTORY, "H3");
+    assert!(stack.iter().all(|place| place.note().is_some()), "H2");
+    assert!(
+        stack
+            .iter()
+            .zip(stack.iter().skip(1))
+            .all(|(older, newer)| older.note() != newer.note()),
+        "H1: no adjacent entries on one note"
+    );
+}
+
 impl<P: Place> Tabs<P> {
-    /// M1–M3, H1's adjacency, H2, H3, H8.
+    /// M1–M3, H1's adjacency, H2, H3, H8, C1, C3.
     fn check(&self) {
         assert!(!self.list.is_empty(), "at least one tab");
         for tab in &self.list {
             assert_eq!(tab.place.is_none(), tab.id == self.active, "H8");
-            for stack in [&tab.back.0, &tab.forward.0] {
-                assert!(stack.len() <= HISTORY, "H3");
-                assert!(stack.iter().all(|place| place.note().is_some()), "H2");
-                assert!(
-                    stack
-                        .iter()
-                        .zip(stack.iter().skip(1))
-                        .all(|(older, newer)| older.note() != newer.note()),
-                    "H1: no adjacent entries on one note"
-                );
-            }
+            check_stack(&tab.back);
+            check_stack(&tab.forward);
+        }
+        assert!(self.closed.len() <= HISTORY, "C3");
+        for entry in &self.closed {
+            assert!(
+                entry.place.note().is_some()
+                    || !entry.back.0.is_empty()
+                    || !entry.forward.0.is_empty(),
+                "C1: no closed entry without a note or history"
+            );
+            check_stack(&entry.back);
+            check_stack(&entry.forward);
         }
         let ids: Vec<TabId> = self.list.iter().map(|tab| tab.id).collect();
         let unique: HashSet<TabId> = ids.iter().copied().collect();
@@ -123,7 +154,9 @@ impl Harness {
     }
 
     fn close(&mut self, id: TabId) -> Option<Closed<Fake>> {
-        let closed = self.with_leaving(|tabs, leaving| tabs.close(id, leaving)).0;
+        let closed = self
+            .with_leaving(|tabs, leaving| tabs.close(id, leaving, resolved))
+            .0;
         if let Some(Closed {
             shown: Some((_, place)),
             ..
@@ -160,6 +193,14 @@ impl Harness {
         (arrived, left)
     }
 
+    fn reopen(&mut self) -> Option<Fake> {
+        let arrived = self.with_leaving(|tabs, leaving| tabs.reopen(leaving)).0;
+        if let Some(place) = &arrived {
+            self.showing = place.clone();
+        }
+        arrived
+    }
+
     fn forget(&mut self, note: u8) {
         self.tabs.forget(note);
         if self.showing.note == Some(note) {
@@ -187,6 +228,8 @@ enum Op {
     Forget(u8),
     Back,
     Forward,
+    Reopen,
+    Move(Index, usize),
 }
 
 /// Weighted toward commits and walks, so stacks grow deep enough to walk.
@@ -202,6 +245,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (0..4_u8).prop_map(Op::Forget),
         2 => Just(Op::Back),
         2 => Just(Op::Forward),
+        2 => Just(Op::Reopen),
+        1 => (any::<Index>(), 0..12_usize).prop_map(|(ix, to)| Op::Move(ix, to)),
     ]
 }
 
@@ -238,12 +283,13 @@ impl Harness {
             }
             Op::Close(ix) => {
                 let id = self.pick(*ix);
-                let (closed, left) = self.with_leaving(|tabs, leaving| tabs.close(id, leaving));
+                let (closed, left) =
+                    self.with_leaving(|tabs, leaving| tabs.close(id, leaving, resolved));
                 let closed = closed.expect("a tab closes");
                 let expected = if id == active {
                     left.expect("closing the active tab leaves it")
                 } else {
-                    shadow.remove(&id).expect("an inactive tab is shadowed")
+                    resolved(shadow.remove(&id).expect("an inactive tab is shadowed"))
                 };
                 assert_eq!(closed.place, expected, "a close returns the tab's place");
                 if let Some((shown, place)) = &closed.shown {
@@ -264,6 +310,17 @@ impl Harness {
                 committed
             }
             Op::Back | Op::Forward => self.walk(matches!(op, Op::Back)).0.is_some(),
+            Op::Reopen => self.reopen_checked(shadow),
+            Op::Move(ix, to) => {
+                let (id, mru) = (self.pick(*ix), self.tabs.mru.clone());
+                let mut expected = self.ids();
+                expected.retain(|&other| other != id);
+                expected.insert((*to).min(expected.len()), id);
+                self.tabs.move_tab(id, *to);
+                assert_eq!(self.ids(), expected, "R2");
+                assert_eq!((self.tabs.active(), &self.tabs.mru), (active, &mru), "R1");
+                false
+            }
             Op::Forget(note) => {
                 self.forget(*note);
                 for place in shadow.values_mut() {
@@ -280,6 +337,46 @@ impl Harness {
                 false
             }
         }
+    }
+
+    /// C2, C4 and C5 against the newest closed entry, snapshot before the reopen.
+    fn reopen_checked(&mut self, shadow: &mut HashMap<TabId, Fake>) -> bool {
+        let (active, ids, closed) = (self.tabs.active(), self.ids(), self.tabs.closed.len());
+        let entry = self.tabs.closed.back().cloned();
+        let (arrived, left) = self.with_leaving(|tabs, leaving| tabs.reopen(leaving));
+        let Some(entry) = entry else {
+            assert_eq!(
+                (arrived, left),
+                (None, None),
+                "C5: nothing closed, no closure"
+            );
+            assert_eq!((self.tabs.active(), self.ids()), (active, ids), "C5");
+            return false;
+        };
+        let id = self.tabs.active();
+        assert!(!ids.contains(&id), "C4: a fresh id");
+        let mut expected = ids.clone();
+        expected.insert(entry.index.min(ids.len()), id);
+        assert_eq!(self.ids(), expected, "C2");
+        assert_eq!(
+            self.tabs.closed.len(),
+            closed - 1,
+            "C5: the entry is popped"
+        );
+        assert_eq!(
+            arrived.as_ref(),
+            Some(&entry.place),
+            "C4: the entry's place"
+        );
+        let tab = self.tabs.iter().find(|tab| tab.id == id).expect("a tab");
+        assert_eq!(
+            [entries(&tab.back), entries(&tab.forward)],
+            [entries(&entry.back), entries(&entry.forward)],
+            "C4: the entry's history"
+        );
+        shadow.insert(active, left.expect("a reopen leaves the active tab"));
+        self.showing = entry.place;
+        true
     }
 
     fn activate_checked(&mut self, id: TabId, shadow: &mut HashMap<TabId, Fake>) -> bool {
