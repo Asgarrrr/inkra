@@ -4,6 +4,7 @@ use gpui::{App, Context, Window, actions};
 use inkra_tabs::{Closed, Direction, TabId};
 use inkra_vault::EntryId;
 
+use super::parked::Parked;
 use super::{AppShell, Bound};
 use crate::editor::ViewState;
 use crate::vault::NoteStore;
@@ -33,12 +34,26 @@ pub(super) fn capture(bound: Option<&Bound>, cx: &mut App) -> Place {
     })
 }
 
+/// As `capture`, for a tab left inactive: its view goes to `parked`, never into `Tabs` (I2).
+fn park(parked: &mut Parked, tab: TabId, bound: Option<&Bound>, cx: &mut App) -> Place {
+    let Some(bound) = bound else {
+        return Place::default();
+    };
+    let view = bound.editor.update(cx, |editor, cx| editor.park(cx));
+    parked.park(tab, bound.note, view);
+    Place {
+        note: Some(bound.note),
+        view: None,
+    }
+}
+
 impl AppShell {
     pub(super) fn new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
-        let at = self.tabs.active_index() + 1;
-        self.tabs
-            .insert(at, Place::default(), || capture(self.bound.as_ref(), cx));
+        let (at, left) = (self.tabs.active_index() + 1, self.tabs.active());
+        self.tabs.insert(at, Place::default(), || {
+            park(&mut self.parked, left, self.bound.as_ref(), cx)
+        });
         self.show_place(Place::default(), window, cx);
         self.keep_active_tab_visible();
     }
@@ -55,11 +70,15 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     pub(super) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let closed = self.tabs.close(id, || capture(self.bound.as_ref(), cx));
+        // Finds an entry only for an inactive tab; S5 keeps its view for the closed stack.
+        let _ = self.parked.unpark(id, cx);
         if let Some(Closed {
-            shown: Some((_, place)),
+            shown: Some((shown, place)),
             ..
-        }) = self.tabs.close(id, || capture(self.bound.as_ref(), cx))
+        }) = closed
         {
+            let place = self.arrive(shown, place, cx);
             self.show_place(place, window, cx);
         } else {
             cx.notify();
@@ -109,10 +128,27 @@ impl AppShell {
     }
 
     pub(super) fn activate_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(place) = self.tabs.activate(id, || capture(self.bound.as_ref(), cx)) {
+        let left = self.tabs.active();
+        let arriving = self
+            .tabs
+            .activate(id, || park(&mut self.parked, left, self.bound.as_ref(), cx));
+        if let Some(place) = arriving {
+            let place = self.arrive(id, place, cx);
             self.show_place(place, window, cx);
         }
         self.keep_active_tab_visible();
+    }
+
+    /// Empties every tab on `id` and drops its parked views; returns whether the active tab was one.
+    pub(super) fn forget_note(&mut self, id: EntryId) -> bool {
+        self.parked.drop_note(id);
+        self.tabs.forget(|place| place.note == Some(id))
+    }
+
+    /// The place `Tabs` hands back, with the view its tab parked, resolved now.
+    fn arrive(&mut self, tab: TabId, mut place: Place, cx: &mut App) -> Place {
+        place.view = self.parked.unpark(tab, cx);
+        place
     }
 
     /// After every change to the tab set or the active tab: a close to its left shifts it too.
@@ -131,7 +167,7 @@ impl AppShell {
         } else {
             // Unreachable while nothing evicts a note; forgetting beats a panic.
             if let Some(id) = place.note {
-                let _ = self.tabs.forget(|place| place.note == Some(id));
+                let _ = self.forget_note(id);
             }
             self.unfocus_editor(window, cx);
             self.set_showing(None, cx);

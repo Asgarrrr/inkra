@@ -302,11 +302,7 @@ impl EditorState {
             self.selection.collapse_to(caret, Goal::None);
         } else {
             let range = map_inward(diff, &self.selection.range());
-            self.selection = if range.is_empty() {
-                Selection::at(range.start)
-            } else {
-                Selection::new(range, self.selection.reversed())
-            };
+            self.selection = Selection::settled(range, self.selection.reversed());
         }
         self.marked_range = self
             .marked_range

@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use inkra_editor::{EditorState, LogicalMovement, Selection};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_editor::{EditorState, Goal, LogicalMovement, ParkedSelection, Selection};
+use inkra_text::{Buffer, ByteOffset, Hunk, diff};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -213,5 +213,99 @@ proptest! {
         if !selection.is_empty() {
             prop_assert_eq!(state.cursor(), selection.end);
         }
+    }
+}
+
+fn reload_text_strategy() -> impl Strategy<Value = String> {
+    prop::collection::vec(
+        prop_oneof![
+            "[ab ]{1,3}",
+            Just("\n".to_string()),
+            Just("é".to_string()),
+            Just("日".to_string()),
+            Just("🎉".to_string()),
+        ],
+        0..12,
+    )
+    .prop_map(|parts| parts.concat())
+}
+
+/// The char boundary `pick` lands on in `text`, the end included.
+fn boundary(text: &str, pick: usize) -> ByteOffset {
+    let boundaries: Vec<usize> = text
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain([text.len()])
+        .collect();
+    ByteOffset(boundaries[pick % boundaries.len()])
+}
+
+/// A selection from `tail` to `head`, carrying a goal so a kept or dropped goal shows.
+fn selection_on(text: &str, tail: usize, head: usize) -> Selection {
+    let mut selection = Selection::at(boundary(text, tail));
+    selection.set_head(boundary(text, head), Goal::Column(7.5));
+    selection
+}
+
+/// Distinct punctuation and symbols: each char is its own token, so `diff` finds the literal edit.
+const UNIQUE: &str = "!#$%&()*+,-./:;<=>?@[]^`{|}~\n§¶•→★♥€£¥©®±×÷¿¡«»🎉🚀";
+
+proptest! {
+    #[test]
+    fn parking_through_a_reload_matches_map_through(
+        old in reload_text_strategy(),
+        new in reload_text_strategy(),
+        tail in any::<usize>(),
+        head in any::<usize>(),
+    ) {
+        let selection = selection_on(&old, tail, head);
+        let mut oracle = EditorState::new(selection.clone());
+        oracle.map_through(&diff(0, &old, &new));
+
+        let mut buffer = Buffer::new(old.clone());
+        let parked = ParkedSelection::park(&selection, &mut buffer);
+        prop_assert!(buffer.apply_diff(Instant::now(), &diff(buffer.version(), &old, &new)));
+        let unparked = parked.unpark(&mut buffer);
+
+        prop_assert_eq!(unparked.range(), oracle.selection().range());
+        prop_assert_eq!(unparked.reversed(), oracle.selection().reversed());
+        if old != new {
+            prop_assert_eq!(unparked.goal(), oracle.selection().goal());
+        }
+    }
+
+    #[test]
+    fn parking_through_a_sequence_of_edits_matches_map_through(
+        chars in Just(UNIQUE.chars().collect::<Vec<_>>()).prop_shuffle(),
+        initial in 0..12usize,
+        tail in any::<usize>(),
+        head in any::<usize>(),
+        edits in prop::collection::vec((any::<usize>(), any::<usize>(), 0..4usize), 1..8),
+    ) {
+        let mut fresh = chars.into_iter();
+        let text: String = fresh.by_ref().take(initial).collect();
+        let selection = selection_on(&text, tail, head);
+        let mut oracle = EditorState::new(selection.clone());
+        let mut buffer = Buffer::new(text);
+        let parked = ParkedSelection::park(&selection, &mut buffer);
+
+        for (from, to, inserted) in edits {
+            let before = buffer.text().to_string();
+            let (from, to) = (boundary(&before, from), boundary(&before, to));
+            let range = from.min(to)..from.max(to);
+            let text: String = fresh.by_ref().take(inserted).collect();
+            if range.is_empty() && text.is_empty() {
+                continue;
+            }
+            let version = buffer.version();
+            buffer.transact(|buffer| buffer.replace(range.clone(), &text));
+            let edit = diff(version, &before, buffer.text());
+            prop_assume!(edit.hunks() == [Hunk { range, text }]);
+            oracle.map_through(&edit);
+        }
+
+        let unparked = parked.unpark(&mut buffer);
+        prop_assert_eq!(unparked.range(), oracle.selection().range());
+        prop_assert_eq!(unparked.reversed(), oracle.selection().reversed());
     }
 }

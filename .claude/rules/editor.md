@@ -61,5 +61,9 @@ Layout:
   panics.
 - Two tabs on one note share one buffer and one `EditorView`: a switch between
   them calls `restore`, beside `open_buffer`, which resets the state and the
-  viewport with no rebind. An inactive tab's view is plain offsets, clipped on
-  restore; anchors come in tabs S2. Two panes (splits) are not supported.
+  viewport with no rebind. Two panes (splits) are not supported.
+- An inactive tab's view is a `ParkedView` in the shell's `Parked`: anchors in
+  its own buffer, the selection biased as `map_through` (start `Right`, end
+  `Left`), the top line `Left`. `EditorView::park` clips before it anchors: a
+  waiting top line can lie past the end. `ParkedView` owns its buffer and
+  `unpark` consumes it, so its anchors resolve only there, and once.

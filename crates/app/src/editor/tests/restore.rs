@@ -462,3 +462,67 @@ fn a_view_restored_onto_a_shorter_note_is_clipped(cx: &mut TestAppContext) {
         .unwrap();
     cx.run_until_parked();
 }
+
+fn park_and_unpark(window: WindowHandle<EditorView>, cx: &mut VisualTestContext) -> ViewState {
+    window
+        .update(cx, |view, _, cx| {
+            let parked = view.park(cx);
+            parked.unpark(cx)
+        })
+        .unwrap()
+}
+
+#[gpui::test]
+fn park_then_unpark_with_no_edit_is_the_view_captured(cx: &mut TestAppContext) {
+    let (window, mut cx) = scrolled(cx);
+    window
+        .update(&mut cx, |view, window, cx| {
+            view.select_range(at(612)..at(612), window, cx);
+            view.scroll_to_top(at(600), cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.simulate_keystrokes("shift-up shift-up");
+    let view = capture(window, &mut cx);
+    assert!(view.selection.reversed());
+    assert!(matches!(view.selection.goal(), Goal::Column(_)));
+    assert_ne!(view.top, TopLine::default());
+
+    assert_eq!(park_and_unpark(window, &mut cx), view);
+}
+
+#[gpui::test]
+fn park_seals_the_undo_group(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "");
+    cx.simulate_input("x");
+    park_and_unpark(window, &mut cx);
+    cx.simulate_input("y");
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text(window, &mut cx), "x");
+}
+
+/// The delete notifies no one, so the restored top line still waits, past the new end.
+#[gpui::test]
+fn park_clips_a_waiting_top_line_past_the_end(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, &tall_document());
+    cx.run_until_parked();
+
+    let unparked = window
+        .update(&mut cx, |editor, _, cx| {
+            editor.restore(
+                ViewState {
+                    selection: Selection::at(at(0)),
+                    top: TopLine::at(at(600)),
+                },
+                cx,
+            );
+            editor
+                .buffer()
+                .update(cx, |buffer, _| buffer.delete(at(10)..buffer.len()));
+            let parked = editor.park(cx);
+            parked.unpark(cx)
+        })
+        .unwrap();
+
+    assert_eq!(unparked.top.offset(), at(10));
+}

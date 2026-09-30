@@ -3,7 +3,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::{Bias, Buffer, ByteOffset};
 
 const SIZES: [usize; 3] = [1_000, 10_000, 100_000];
 
@@ -94,6 +94,47 @@ fn bench_insert(c: &mut Criterion) {
                 },
             );
         }
+    }
+    group.finish();
+}
+
+/// A tab switch parks three anchors and later forgets them; `Buffer` keeps every slot (tabs S2).
+fn bench_insert_after_parks(c: &mut Criterion) {
+    let now = Instant::now();
+    let mut group = c.benchmark_group("buffer_insert_after_parks");
+    let mut document = String::new();
+    let mut lines = 0;
+    while document.len() < 10_000 {
+        lines += 1;
+        document = build_document(lines);
+    }
+    let near_end = near_end_offset(&document);
+    group.throughput(Throughput::Bytes(document.len() as u64));
+    for parks in [0, 1_000] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(parks),
+            &document,
+            |b, document| {
+                b.iter_batched(
+                    || {
+                        let mut buffer = Buffer::new(document.clone());
+                        for _ in 0..parks {
+                            let anchors = [Bias::Right, Bias::Left, Bias::Left]
+                                .map(|bias| buffer.anchor(near_end, bias));
+                            for anchor in anchors {
+                                buffer.forget(anchor);
+                            }
+                        }
+                        buffer
+                    },
+                    |mut buffer| {
+                        buffer.transact_at(now, |buffer| buffer.insert(near_end, "x"));
+                        buffer
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
     }
     group.finish();
 }
@@ -233,6 +274,7 @@ criterion_group!(
     benches,
     bench_new,
     bench_insert,
+    bench_insert_after_parks,
     bench_undo,
     bench_line_for_offset,
     bench_line_range,
