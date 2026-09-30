@@ -38,7 +38,7 @@ fn cmd_backspace_asks_before_trashing_the_selected_note(cx: &mut TestAppContext)
     cx.run_until_parked();
 
     let mut visual = tree_focused(cx, window, &sidebar);
-    // The landing selected `a` (`set_showing`).
+    // The landing selected `a` (`set_shown`).
     assert_eq!(
         sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
         Some(a)

@@ -6,8 +6,8 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use super::{
-    ab_focused, activate, at, check, editor, open, scroll_to, select, showing, tab_notes,
-    tall_notes, text_of, trash, view_of,
+    ab_focused, activate, at, check, editor, finish_trash, open, scroll_to, select, showing,
+    start_trash, tab_notes, tall_notes, text_of, trash, view_of,
 };
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
@@ -217,7 +217,7 @@ fn single_file_mode_switches_back_to_its_file(cx: &mut TestAppContext) {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| root(Arc::clone(&fs) as Arc<dyn Fs>, launch, cx),
+                |window, cx| root(Arc::clone(&fs) as Arc<dyn Fs>, launch, window, cx),
             )
         })
         .unwrap();
@@ -384,6 +384,69 @@ fn trashing_a_note_in_an_inactive_tab_keeps_the_editor(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn switching_to_a_tab_whose_note_is_being_trashed_shows_it_empty(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, a);
+    let gate = fs.block_save("/vault/a.md");
+    cx.simulate_input("x");
+    cx.simulate_keystrokes("ctrl-tab");
+    let trashing = start_trash(&window, &mut cx, a);
+
+    cx.simulate_keystrokes("ctrl-tab");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(showing(&window, &mut cx), None, "no editor to type into");
+    check(&window, &mut cx);
+    finish_trash(&fs, gate, trashing, &mut cx);
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    check(&window, &mut cx);
+}
+
+#[gpui::test]
+fn going_back_to_a_note_being_trashed_shows_it_empty(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let gate = fs.block_save("/vault/a.md");
+    cx.simulate_input("x");
+    open(&window, &mut cx, b);
+    let trashing = start_trash(&window, &mut cx, a);
+
+    cx.simulate_keystrokes("cmd-[");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(showing(&window, &mut cx), None);
+    check(&window, &mut cx);
+    finish_trash(&fs, gate, trashing, &mut cx);
+    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
+    cx.simulate_keystrokes("cmd-]");
+    assert_eq!(showing(&window, &mut cx), Some(b));
+    check(&window, &mut cx);
+}
+
+#[gpui::test]
+fn reopening_a_tab_whose_note_is_being_trashed_shows_it_empty(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, b);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, a);
+    let gate = fs.block_save("/vault/a.md");
+    cx.simulate_input("x");
+    cx.simulate_keystrokes("cmd-w");
+    let trashing = start_trash(&window, &mut cx, a);
+
+    cx.simulate_keystrokes("cmd-shift-t");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(showing(&window, &mut cx), None);
+    check(&window, &mut cx);
+    finish_trash(&fs, gate, trashing, &mut cx);
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    check(&window, &mut cx);
+}
+
+#[gpui::test]
 fn a_gone_note_keeps_its_tab(cx: &mut TestAppContext) {
     let (fs, window, mut cx, a, b) = ab_focused(cx);
     open(&window, &mut cx, a);
@@ -473,8 +536,7 @@ fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestA
     assert_eq!(view_of(&window, &mut cx), (at(610)..at(612), top));
 }
 
-/// `close_tab` leaves through `capture`, which seals the undo group; the tab shown is on the
-/// same note, so no save of a note left seals it instead.
+/// `capture` must seal the undo group: the tab shown is on the same note, so no save seals it instead.
 #[gpui::test]
 fn closing_a_tab_onto_the_same_note_seals_its_undo_group(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);

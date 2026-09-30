@@ -68,8 +68,7 @@ fn a_reopened_tab_keeps_its_caret_and_top_line(cx: &mut TestAppContext) {
     check(&window, &mut cx);
 }
 
-/// Tab 1's caret is parked as anchors; `close_tab` must unpark it before `close` and hand it to
-/// `resolve`, else the closed entry keeps no view.
+/// `close_tab` must unpark tab 1's caret and hand it to `resolve`, else the closed entry keeps no view.
 #[gpui::test]
 fn a_closed_tab_on_the_note_showing_reopens_with_the_view_its_anchors_moved_to(
     cx: &mut TestAppContext,
@@ -199,8 +198,7 @@ fn trashing_a_note_in_a_closed_tabs_history_drops_the_entry(cx: &mut TestAppCont
     check(&window, &mut cx);
 }
 
-/// The reopened tab has a fresh id, so no landing gate can let the load land into it: only the
-/// held task shows whether the reopen dropped `activation`.
+/// The reopened tab's fresh id admits no landing: only the held task shows whether `activation` dropped.
 #[gpui::test]
 fn reopen_cancels_a_pending_open(cx: &mut TestAppContext) {
     let (fs, window, mut cx, [a, b, c, _]) = four_notes(cx);
@@ -225,8 +223,7 @@ fn reopen_cancels_a_pending_open(cx: &mut TestAppContext) {
     check(&window, &mut cx);
 }
 
-/// T4: nothing changes on screen, so the pending open still lands. Catches a reopen that drops
-/// `activation` unconditionally.
+/// T4: nothing changes on screen, so the pending open still lands.
 #[gpui::test]
 fn reopen_with_nothing_closed_keeps_a_pending_open(cx: &mut TestAppContext) {
     let (fs, window, mut cx, [a, b, ..]) = four_notes(cx);
@@ -243,7 +240,7 @@ fn reopen_with_nothing_closed_keeps_a_pending_open(cx: &mut TestAppContext) {
     check(&window, &mut cx);
 }
 
-/// Catches a path that writes `bound` without `set_showing`.
+/// Catches a path that writes `shown` without `set_shown`.
 #[gpui::test]
 fn reopening_a_tab_selects_its_note_in_the_sidebar(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, ..]) = four_notes(cx);

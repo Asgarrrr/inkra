@@ -23,7 +23,7 @@ impl AppShell {
             .size_full()
             .items_center()
             .justify_center()
-            // Without this the window default shows through; check.sh renders nothing, so only a shot catches it.
+            // Without this the window default shows through.
             .bg(theme::editor_background())
             .text_size(theme::UI_TEXT_SIZE)
             .line_height(theme::UI_LINE_HEIGHT)

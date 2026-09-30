@@ -9,9 +9,11 @@ paths:
 
 # Shell, sidebar, keymap
 
-- `AppShell.bound` holds the editor and its note in one `Option`: no editor
-  until a note opens, so nothing untracked can be typed into; an empty tab has
-  no editor either. `render_empty` fills the slot. `set_showing` is its one writer.
+- `AppShell.shown` (`Shown`) is `Empty`, `Bound` (the editor and its note) or
+  `Trashing` (the tab stays on a note whose trash is pending, with no editor).
+  No editor until a note opens, so nothing untracked can be typed into.
+  `render_empty` fills the slot. `set_shown` is its one writer. A note leaves
+  the tabs only on `NoteClosed`; `TrashFailed` rebinds a `Trashing` tab.
 - Every tab action dismisses the picker first (`dismiss_modal`).
 - Park only in the `leaving` closure of `Tabs::insert` and `Tabs::activate`;
   `close`, `commit`, `back` and `forward` keep the plain `capture`: back and
@@ -26,7 +28,8 @@ paths:
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not
   take focus from the editor.
-- `Tabs` holds no place for the active tab (H8): `showing()` is its note, and
+- `Tabs` holds no place for the active tab (H8): `active_note()` is its note
+  (`showing()` is the note bound in the editor, `None` while `Trashing`), and
   `leaving` hands `Tabs` the place when the tab is left.
 - An action holds its window leased: `cx.with_window` returns `None` inside it,
   so tab code takes `&mut Window` (`unfocus_editor`). A subscription fired by
@@ -50,7 +53,7 @@ paths:
   owns the selection.
 - `Sidebar::selected` is what a tree command acts on; `NoteStore::current` is
   what the editor shows. Do not confuse them. A tree gesture writes `selected`
-  at once through `Sidebar::select`, which bumps its `cursor`. `set_showing`
+  at once through `Sidebar::select`, which bumps its `cursor`. `set_shown`
   moves it to the note showing through `follow(id, since)`, only while the
   cursor is still `since`: a synchronous op reads `since` in its own update;
   an async landing captures it at spawn. `None` and a name being typed leave

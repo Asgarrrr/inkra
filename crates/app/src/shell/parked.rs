@@ -8,21 +8,24 @@ use inkra_vault::EntryId;
 
 use crate::editor::{ParkedView, ViewState};
 
-/// An entry for a tab iff it is inactive and shows a note (I1).
+/// An entry for a tab iff it is inactive and shows a note (I1); no view if its note was being trashed.
 #[derive(Default)]
-pub(super) struct Parked(HashMap<TabId, (EntryId, ParkedView)>);
+pub(super) struct Parked(HashMap<TabId, (EntryId, Option<ParkedView>)>);
 
 impl Parked {
     /// # Panics
     /// If `tab` is already parked: its anchors would never be forgotten.
-    pub(super) fn park(&mut self, tab: TabId, note: EntryId, view: ParkedView) {
+    pub(super) fn park(&mut self, tab: TabId, note: EntryId, view: Option<ParkedView>) {
         let previous = self.0.insert(tab, (note, view));
         assert!(previous.is_none(), "tab {tab:?} parked twice");
     }
 
-    /// Resolves and forgets the tab's anchors; `None` if it parked nothing.
+    /// Resolves and forgets the tab's anchors; `None` if it parked no view.
     pub(super) fn unpark(&mut self, tab: TabId, cx: &mut App) -> Option<ViewState> {
-        self.0.remove(&tab).map(|(_, view)| view.unpark(cx))
+        self.0
+            .remove(&tab)
+            .and_then(|(_, view)| view)
+            .map(|view| view.unpark(cx))
     }
 
     /// Drops every entry on `note`, whose buffer closed, without forgetting its anchors.

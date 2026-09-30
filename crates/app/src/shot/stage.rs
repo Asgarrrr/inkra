@@ -118,7 +118,7 @@ impl Stage {
     fn open(&mut self, fs: Arc<dyn Fs>, launched: Launch) -> WindowHandle<AppShell> {
         let window = self
             .cx
-            .open_offscreen_window(WINDOW_SIZE, |_, cx| root(fs, launched, cx))
+            .open_offscreen_window(WINDOW_SIZE, |window, cx| root(fs, launched, window, cx))
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         self.settle();
         window

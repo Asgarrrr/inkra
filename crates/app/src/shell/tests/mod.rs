@@ -1,11 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, WindowHandle, point, px};
+use gpui::{Entity, Modifiers, Task, TestAppContext, VisualTestContext, WindowHandle, point, px};
 use inkra_text::ByteOffset;
-use inkra_vault::mem_fs::MemFs;
+use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{EntryId, Fs};
 
 use crate::keymap::key_bindings;
@@ -14,7 +15,7 @@ use crate::quick_open::QuickOpenDelegate;
 use crate::sidebar::row_center;
 use crate::test_support;
 
-use super::{AppShell, EditorView, NoteStore, Sidebar};
+use super::{AppShell, EditorView, NoteStore, Shown, Sidebar};
 use crate::open::{NoteActivated, Open};
 
 mod activation;
@@ -23,6 +24,7 @@ mod column;
 mod command_palette;
 mod creating;
 mod dragging;
+mod failed_trash;
 mod following;
 mod gone;
 mod history;
@@ -81,7 +83,7 @@ pub(super) fn open_vault(
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |_, cx| AppShell::new(None, notes, cx)
+        move |window, cx| AppShell::new(None, notes, window, cx)
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.sidebar.clone())
@@ -158,7 +160,7 @@ pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, Visu
     let notes = cx.update(|cx| {
         gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
     });
-    let window = cx.add_window(move |_, cx| AppShell::new(None, notes, cx));
+    let window = cx.add_window(move |window, cx| AppShell::new(None, notes, window, cx));
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window
@@ -241,7 +243,7 @@ pub(super) fn tab_notes(
             let notes = shell
                 .tabs
                 .iter()
-                .map(|tab| tab.place().map_or(shell.showing(), |place| place.note))
+                .map(|tab| tab.place().map_or(shell.active_note(), |place| place.note))
                 .collect();
             (notes, shell.tabs.active_index())
         })
@@ -285,7 +287,7 @@ pub(super) fn text_of(
         .unwrap()
 }
 
-/// H8, T3, and tabs S2's I1 and I2; T2 holds by construction (`Bound`), T1 by H8.
+/// H8, T3, I1, I2, and no buffer for a `Trashing` note; T2 holds by construction (`Shown`), T1 by H8.
 pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
         .update(cx, |shell, _, cx| {
@@ -298,6 +300,9 @@ pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
                 "H8"
             );
             assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
+            if let Shown::Trashing(id) = shell.shown {
+                assert!(shell.notes.read(cx).buffer_for(id).is_none(), "Trashing");
+            }
             let inactive_notes = shell
                 .tabs
                 .iter()
@@ -342,12 +347,45 @@ pub(super) fn scroll_to(
 }
 
 pub(super) fn trash(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) {
+    let trashed = start_trash(window, cx, id);
+    assert!(futures::executor::block_on(trashed), "the trash succeeded");
+}
+
+/// Starts trashing `id` without letting it finish: it stays `Trashing` while its chain is held.
+pub(super) fn start_trash(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+    id: EntryId,
+) -> Task<bool> {
     let notes = window
         .update(cx, |shell, _, _| shell.notes.clone())
         .unwrap();
-    let trashed = notes.update(cx, |notes, cx| notes.trash(id, cx));
+    let trashing = notes.update(cx, |notes, cx| notes.trash(id, cx));
     cx.run_until_parked();
-    assert!(futures::executor::block_on(trashed), "the trash succeeded");
+    trashing
+}
+
+/// `a` was typed into and left with its save held at `gate`, so the trash waits `Trashing` behind it.
+pub(super) fn finish_trash(
+    fs: &MemFs,
+    gate: Gate,
+    trashing: Task<bool>,
+    cx: &mut VisualTestContext,
+) {
+    gate.release();
+    cx.run_until_parked();
+    assert!(futures::executor::block_on(trashing), "the trash succeeded");
+    assert_eq!(
+        fs.trashed(Path::new("/vault/a.md")).as_deref(),
+        Some("alphax")
+    );
+}
+
+/// Lets a trash held behind `gate` fail: its note was made untrashable, so it stays open.
+pub(super) fn fail_trash(gate: Gate, trashing: Task<bool>, cx: &mut VisualTestContext) {
+    gate.release();
+    cx.run_until_parked();
+    assert!(!futures::executor::block_on(trashing), "the trash failed");
 }
 
 /// `a`–`d` ("alpha", "beta", "gamma", "delta") behind `shell_focused`.

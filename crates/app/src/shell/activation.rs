@@ -9,14 +9,13 @@ use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
 use super::tabs::capture;
-use super::{AppShell, Bound, remember};
+use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 use crate::open::Open;
 use crate::sidebar::Cursor;
 
 impl AppShell {
-    /// Commits into the tab active when it started, or nowhere; bind, select, focus and
-    /// `set_current` run with no `await` between them.
+    /// Commits into the tab active when it started, or nowhere; no `await` from bind to `set_current`.
     pub(super) fn open_note(
         &mut self,
         id: EntryId,
@@ -28,8 +27,8 @@ impl AppShell {
         self.activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                // Backed by dropping `activation` on every op that changes the active tab (T4): no load targets an inactive tab.
-                if !shell.tabs.commit(tab, || capture(shell.bound.as_ref(), cx)) {
+                // T4: `show` drops `activation` on every other change to what the active tab shows.
+                if !shell.tabs.commit(tab, || capture(&shell.shown, cx)) {
                     return;
                 }
                 shell.land(id, buffer, at, since, window, cx);
@@ -37,7 +36,6 @@ impl AppShell {
         }));
     }
 
-    /// A loaded note into the active tab: bind, select `at`, focus.
     pub(super) fn land(
         &mut self,
         id: EntryId,
@@ -70,8 +68,7 @@ impl AppShell {
         }
     }
 
-    /// Opens `id` unless it is showing, which only selects `at` and takes focus, synchronously.
-    /// Either way it is the last pick, so a slower activation of another note must not land after it.
+    /// Opens `id`, or only selects `at` if it is showing; either way no slower activation may land after it.
     pub(super) fn show_note(
         &mut self,
         id: EntryId,
@@ -106,17 +103,11 @@ impl AppShell {
         }
     }
 
-    /// The one place `bound` changes, so the backlinks panel and the sidebar's highlight cannot lag
-    /// it; the highlight moves only if the tree's cursor is still `since`.
-    pub(super) fn set_showing(
-        &mut self,
-        bound: Option<Bound>,
-        since: Cursor,
-        cx: &mut Context<Self>,
-    ) {
-        self.bound = bound;
+    /// The one place `shown` changes; the highlight moves only if the tree's cursor is still `since`.
+    pub(super) fn set_shown(&mut self, shown: Shown, since: Cursor, cx: &mut Context<Self>) {
+        self.shown = shown;
         let note = self.showing();
-        // `None` keeps the highlight: a tree trash has already moved it to the neighbour.
+        // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
         if let Some(id) = note {
             remember(&mut self.recent, id);
             self.sidebar
@@ -126,8 +117,7 @@ impl AppShell {
             .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
     }
 
-    /// Detached, like the shell's other subscriptions: the editor is created once and rebound
-    /// after, so it lives as long as the shell.
+    /// Detached: the editor is created once and rebound, so it lives as long as the shell.
     pub(super) fn follow_links_of(editor: &Entity<EditorView>, cx: &mut Context<Self>) {
         cx.subscribe(editor, |shell, _, event: &LinkFollowed, cx| {
             shell.follow(&event.link, event.open, cx);
@@ -155,15 +145,15 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Entity<EditorView> {
         let mut view = view;
-        let editor = match &self.bound {
-            Some(bound) if bound.note == id => bound.editor.clone(),
+        let editor = match &self.shown {
+            Shown::Bound(bound) if bound.note == id => bound.editor.clone(),
             // A rebind restores the view itself, clipped to the new buffer.
-            Some(bound) => {
+            Shown::Bound(bound) => {
                 let editor = bound.editor.clone();
                 editor.update(cx, |editor, cx| editor.open_buffer(buffer, view.take(), cx));
                 editor
             }
-            None => {
+            Shown::Empty | Shown::Trashing(_) => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
                 Self::follow_links_of(&editor, cx);
                 editor
@@ -172,8 +162,8 @@ impl AppShell {
         if let Some(view) = view {
             editor.update(cx, |editor, cx| editor.restore(view, cx));
         }
-        self.set_showing(
-            Some(Bound {
+        self.set_shown(
+            Shown::Bound(Bound {
                 note: id,
                 editor: editor.clone(),
             }),
@@ -184,7 +174,7 @@ impl AppShell {
         editor
     }
 
-    /// Before the editor drops: focus on a dropped handle reaches no action. An action leases the window, so pass it in.
+    /// Before the editor drops: focus on a dropped handle reaches no action.
     pub(super) fn unfocus_editor(&self, window: &mut Window, cx: &mut App) {
         if let Some(editor) = self.editor()
             && editor.focus_handle(cx).contains_focused(window, cx)

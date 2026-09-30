@@ -1,4 +1,4 @@
-//! Opening in a new tab: the tab is inserted after the active one when its note lands (tabs S3).
+//! Opening in a new tab: the tab is inserted after the active one when its note lands.
 
 use std::sync::Arc;
 
@@ -219,12 +219,13 @@ fn a_new_tab_opened_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn a_note_closed_on_the_active_tab_cancels_a_pending_new_tab_open(cx: &mut TestAppContext) {
+fn a_note_closed_on_the_active_tab_keeps_a_pending_new_tab_open(cx: &mut TestAppContext) {
     let Abc {
         fs,
         window,
         mut cx,
         a,
+        b,
         ..
     } = abc(cx);
     open(&window, &mut cx, a);
@@ -235,8 +236,8 @@ fn a_note_closed_on_the_active_tab_cancels_a_pending_new_tab_open(cx: &mut TestA
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
-    assert_eq!(showing(&window, &mut cx), None);
+    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(showing(&window, &mut cx), Some(b));
     check(&window, &mut cx);
 }
 

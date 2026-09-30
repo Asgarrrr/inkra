@@ -201,8 +201,7 @@ impl<P> Tabs<P> {
         self.list[index % count].id
     }
 
-    /// Moves tab `id` to `to`, clamped to the bar; the MRU and the active id stay (invariant 3).
-    /// Nothing for an id that is no tab: it closed during the drag.
+    /// Moves tab `id` to `to`, clamped; the MRU and the active id stay (invariant 3). A closed `id` is a no-op.
     pub fn move_tab(&mut self, id: TabId, to: usize) {
         let Some(from) = self.index_of(id) else {
             return;
@@ -243,8 +242,6 @@ impl<P: Place> Tabs<P> {
     }
 
     /// The last tab gives way to an empty one with a fresh id: a load keyed by the old id lands nowhere.
-    /// The closed stack keeps the tab's place: `leaving()` if it was active, else `resolve` of the
-    /// place it stored.
     ///
     /// # Panics
     /// Only on a broken invariant (H8): an inactive tab always holds a place.
@@ -294,8 +291,7 @@ impl<P: Place> Tabs<P> {
         })
     }
 
-    /// Leaves tab `id` for the place the caller shows next, if it is still active: the place left
-    /// goes on back and forward clears. Else changes nothing.
+    /// Leaves tab `id` if it is still active: the place left goes on back and forward clears.
     #[must_use]
     pub fn commit(&mut self, id: TabId, leaving: impl FnOnce() -> P) -> bool {
         if id != self.active {
@@ -307,8 +303,7 @@ impl<P: Place> Tabs<P> {
         true
     }
 
-    /// The newest place behind the active tab on another note than `showing`; `None`, calling no
-    /// `leaving`, when there is none. The place left goes on forward.
+    /// The newest place behind on another note than `showing`; `None`, calling no `leaving`, if none.
     pub fn back(&mut self, showing: Option<P::Note>, leaving: impl FnOnce() -> P) -> Option<P> {
         self.walk(showing, leaving, |tab| (&mut tab.back, &mut tab.forward))
     }
@@ -318,8 +313,7 @@ impl<P: Place> Tabs<P> {
         self.walk(showing, leaving, |tab| (&mut tab.forward, &mut tab.back))
     }
 
-    /// Reinserts the newest closed tab at its old index, clamped, under a fresh id, with its
-    /// history, and activates it; returns its place. `None`, calling no `leaving`, when nothing is closed.
+    /// Reopens the newest closed tab at its old index under a fresh id; `None`, calling no `leaving`, if none.
     pub fn reopen(&mut self, leaving: impl FnOnce() -> P) -> Option<P> {
         let entry = self.closed.pop_back()?;
         self.insert(entry.index, leaving);
@@ -330,8 +324,7 @@ impl<P: Place> Tabs<P> {
         Some(entry.place)
     }
 
-    /// Empties every inactive tab and closed tab on `note` and drops it from every stack; the
-    /// active tab's place is the caller's. A closed tab left blank drops (invariant 7).
+    /// Drops `note` from every inactive tab, closed tab and stack; the active tab's place is the caller's.
     pub fn forget(&mut self, note: P::Note) {
         for tab in &mut self.list {
             if let Some(place) = &mut tab.place

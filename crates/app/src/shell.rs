@@ -10,7 +10,7 @@ use crate::index::IndexSync;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{Cursor, NewFolder, NewNote, Sidebar};
-use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed};
+use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
@@ -49,9 +49,35 @@ struct Bound {
     editor: Entity<EditorView>,
 }
 
+/// What the active tab shows; only `Bound` has an editor (T2).
+enum Shown {
+    Empty,
+    Bound(Bound),
+    /// The note's trash is pending: no editor until `NoteClosed` or `TrashFailed`.
+    /// Entered only from a bound note, so a failed trash always finds its buffer again.
+    Trashing(EntryId),
+}
+
+impl Shown {
+    fn bound(&self) -> Option<&Bound> {
+        match self {
+            Self::Bound(bound) => Some(bound),
+            Self::Empty | Self::Trashing(_) => None,
+        }
+    }
+
+    /// The note the tab is on, bound or being trashed.
+    fn note(&self) -> Option<EntryId> {
+        match self {
+            Self::Empty => None,
+            Self::Bound(Bound { note, .. }) | Self::Trashing(note) => Some(*note),
+        }
+    }
+}
+
 pub(crate) struct AppShell {
-    /// Written only by `set_showing`; `None` has no editor. Not `NoteStore::current`, which `trash` clears first.
-    bound: Option<Bound>,
+    /// Written only by `set_shown`. Not `NoteStore::current`, which `trash` clears first.
+    shown: Shown,
     notes: Entity<NoteStore>,
     sidebar: Entity<Sidebar>,
     links: Entity<IndexSync>,
@@ -78,6 +104,7 @@ impl AppShell {
     pub(crate) fn new(
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), cx));
@@ -105,20 +132,19 @@ impl AppShell {
             }
         })
         .detach();
-        // Drop the view, not leave it: a buffer with no file is still typable
-        // and every keystroke would be lost.
-        cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
-            if shell.forget_note(event.0) {
-                // The active tab emptied: a pending open from it is cancelled (T4).
-                shell.activation = None;
-                cx.with_window(cx.entity_id(), |window, cx| {
-                    shell.unfocus_editor(window, cx);
-                });
-                let since = shell.tree_cursor(cx);
-                shell.set_showing(None, since, cx);
-            }
-            cx.notify();
-        })
+        cx.subscribe_in(
+            &notes,
+            window,
+            |shell, _notes, event: &NoteClosed, window, cx| shell.note_closed(event.0, window, cx),
+        )
+        .detach();
+        cx.subscribe_in(
+            &notes,
+            window,
+            |shell, _notes, event: &TrashFailed, window, cx| {
+                shell.trash_failed(event.0, window, cx);
+            },
+        )
         .detach();
         // Tab titles follow a rename, as the sidebar's rows do.
         if let Some(vault) = notes.read(cx).vault().cloned() {
@@ -127,9 +153,9 @@ impl AppShell {
         let first = notes.read(cx).current();
         Self {
             // `root` adopts the note it launches with, so its editor comes with `current`.
-            bound: editor
-                .zip(first)
-                .map(|(editor, note)| Bound { note, editor }),
+            shown: editor.zip(first).map_or(Shown::Empty, |(editor, note)| {
+                Shown::Bound(Bound { note, editor })
+            }),
             tabs: Tabs::new(),
             parked: Parked::default(),
             tab_scroll: ScrollHandle::new(),
@@ -145,9 +171,14 @@ impl AppShell {
         }
     }
 
-    /// The active tab's note (Decision 8's `showing`).
+    /// The note bound in the editor; `None` on a tab whose note is being trashed.
     pub(super) fn showing(&self) -> Option<EntryId> {
-        self.bound.as_ref().map(|bound| bound.note)
+        self.shown.bound().map(|bound| bound.note)
+    }
+
+    /// The note the active tab is on, bound or being trashed.
+    pub(super) fn active_note(&self) -> Option<EntryId> {
+        self.shown.note()
     }
 
     /// Read when an open or a tab op begins; a synchronous op reads it in its own update.
@@ -156,7 +187,7 @@ impl AppShell {
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
-        self.bound.as_ref().map(|bound| &bound.editor)
+        self.shown.bound().map(|bound| &bound.editor)
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {

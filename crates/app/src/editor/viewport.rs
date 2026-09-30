@@ -165,8 +165,7 @@ impl Viewport {
         self.pending.take()
     }
 
-    /// Scrolls now when the geometry is current, else requests, and `resolve` applies the
-    /// request against the next frame's layout.
+    /// Scrolls now when the geometry is current, else requests it for `resolve` in the next prepaint.
     pub(super) fn reveal(
         &mut self,
         layout: Option<&DocumentLayout>,

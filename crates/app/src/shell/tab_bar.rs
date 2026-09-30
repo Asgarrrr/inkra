@@ -56,10 +56,10 @@ fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString
 impl AppShell {
     /// Every tab's title, reading the store once.
     pub(super) fn tab_titles(&self, cx: &App) -> Vec<SharedString> {
-        let (notes, showing) = (self.notes.read(cx), self.showing());
+        let (notes, active) = (self.notes.read(cx), self.active_note());
         self.tabs
             .iter()
-            .map(|tab| tab_title(tab.place().map_or(showing, |place| place.note), notes, cx))
+            .map(|tab| tab_title(tab.place().map_or(active, |place| place.note), notes, cx))
             .collect()
     }
 
@@ -159,9 +159,7 @@ impl AppShell {
             )
     }
 
-    /// Every press on a tab lands focus on the active tab's content: gpui's root focus-on-press
-    /// (div.rs:2765-2780) is prevented, and a click on the active tab, a drop or an inactive
-    /// close shows no place that would focus it.
+    /// Focuses the active tab's content: gpui's root focus-on-press (div.rs:2765-2780) is prevented.
     fn press_tab(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.prevent_default();
         if let Some(focus) = self.land_focus(cx) {

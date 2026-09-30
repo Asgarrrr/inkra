@@ -38,7 +38,7 @@ fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
             store
         })
     });
-    let window = cx.add_window(move |_, cx| AppShell::new(Some(editor), notes, cx));
+    let window = cx.add_window(move |window, cx| AppShell::new(Some(editor), notes, window, cx));
     window
         .update(cx, |shell, window, cx| {
             window.focus(&shell.focus_handle(cx), cx);
@@ -273,7 +273,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         ..Default::default()
                     },
-                    |_, cx| root(fs, launched, cx),
+                    |window, cx| root(fs, launched, window, cx),
                 )
             })
             .expect("open the window");

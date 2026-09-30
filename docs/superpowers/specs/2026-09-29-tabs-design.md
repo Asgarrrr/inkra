@@ -445,8 +445,12 @@ these facts and deviations:
   its tab empty for good.
 - **One pending open.** `Here` and `NewTab` share `activation`: the last pick
   wins, and every op that changes the active tab cancels it (T4). A trash that
-  empties the active tab now drops `activation` too, in the `NoteClosed`
-  subscription. The landing's source check is backed by that drop, as
+  emptied the active tab once dropped `activation` too; the failed-trash
+  change reversed that (As built, a failed trash keeps its tabs): a trash
+  outcome keeps a pending open. `show_place` is `show` plus the focus;
+  `NoteClosed` calls `display`, with no focus move, so a trash from the tree
+  keeps the focus there. `AppShell::new`
+  takes the `Window` for that `subscribe_in`, as Zed's views do. The landing's source check is backed by that drop, as
   `commit`'s is: removing it breaks no test.
 - **A new tab on the note showing duplicates its view.** `bind`'s same-note
   branch keeps the editor's caret and top line, and the tab left parks the
@@ -728,6 +732,56 @@ section. Built as planned, with these facts and deviations:
   holds no entry for an id that is no tab, so no view can be dropped.
 - **Mutants.** `cargo mutants -p inkra-tabs --test-package inkra-tabs`: 76
   mutants, 59 caught, 17 unviable, none missed, no exclusion added.
+- **Final review: no tab shows a note being trashed.** `NoteStore::buffer_for`
+  applies `openable`, as `open_note` does, so `show_place` finds no buffer for
+  a `Trashing` note, forgets it and shows the tab empty; the later
+  `NoteClosed` finds nothing left to forget.
+
+## As built (a failed trash keeps its tabs)
+
+Plan: `docs/superpowers/plans/2026-09-30-failed-trash-keeps-tabs.md`. It
+replaces the last S6 bullet: `show` no longer forgets a note being trashed.
+
+- **The rule: a note leaves the tabs only on `NoteClosed`.** While its trash
+  is pending, every tab, stack and closed entry keeps it. `NoteClosed`
+  forgets it everywhere, as before. `TrashFailed` shows it again in the
+  active tab if that tab is still on it, at the top of the note.
+- **`Shown` replaces `Option<Bound>`.** `Empty`, `Bound(Bound)` or
+  `Trashing(EntryId)`. Only `Bound` holds an editor (T2), so nothing can be
+  typed into a note whose file is about to go. `set_shown` is the one
+  writer; its recent, sidebar and backlinks effects read `showing()`.
+- **`showing()` vs `active_note()`.** `showing()` is the note bound in the
+  editor (`Bound` only): T3, backlinks, recent, the sidebar highlight, the
+  gone banner, following a link and quick open read it. `active_note()` is
+  the note the active tab is on (`Bound` or `Trashing`): `capture`, `park`,
+  `forget_note`'s active check, `tab_titles` and the note `Tabs::back` and
+  `forward` skip read it.
+- **T4, as the user decided on 2026-09-30: a user action drops a pending
+  open; a trash outcome updates the tab like a landing and keeps it.** `show`
+  is the user path: it drops `activation`, then calls `display`. `display`
+  binds, shows `Trashing` or shows `Empty`, and touches no `activation`. The
+  `NoteClosed` and `TrashFailed` handlers (`note_closed`, `trash_failed`)
+  call `display`. So an open started from a `Trashing` tab, here or in a new
+  tab, lands whatever the trash's outcome.
+- **`Parked` holds `(EntryId, Option<ParkedView>)`.** A tab left while
+  `Trashing` has a note and no view, so I1 stays exact: an entry iff the tab
+  is inactive and on a note. `unpark` flattens the two `Option`s. The loss is
+  accepted: after a failed trash, such a tab opens its note at the top. The
+  same loss hits a tab that arrives at the note while `Trashing`, even with a
+  view parked before the trash: `display` drops the view it unparked. The
+  view cannot be re-anchored without an editor. A failed trash is rare.
+- **The focus on `TrashFailed`.** The shell focuses the note only if its root
+  holds the focus, or if an open picker restores to the root (`land_focus`
+  then retargets the dismissal, `Modal::restores`). The root holds it when
+  the `Trashing` tab took it there through `show_place`. A tree the user
+  moved to keeps the focus, with or without a picker over it.
+- **Test adjustments.** The three "being trashed shows it empty" tests now
+  see the note in the active tab during the trash, and no note after
+  `NoteClosed`. `check` asserts that a `Trashing` note has no buffer.
+  The new tests are in `shell/tests/failed_trash.rs`.
+  `a_note_closed_on_the_active_tab_cancels_a_pending_new_tab_open` became
+  `..._keeps_a_pending_new_tab_open`: the new tab lands after the emptied
+  tab.
 
 ## Risks
 
