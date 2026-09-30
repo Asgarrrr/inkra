@@ -4,6 +4,7 @@ mod command_palette;
 mod gone;
 mod quick_open;
 mod reload;
+mod tabs;
 mod vault_search;
 
 use gpui::{WindowHandle, point, px};
@@ -191,6 +192,11 @@ const CATALOGUE: &[Scene] = &[
         name: "backlinks",
         shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
         open: backlinks,
+    },
+    Scene {
+        name: "tabs",
+        shows: "four tabs over the note column: `index` active and lit, `reading`, `New tab` twice; sidebar and backlinks at full height",
+        open: tabs::bar,
     },
     Scene {
         name: "quick-open-results",

@@ -102,6 +102,30 @@ pub(crate) fn gone_banner_text() -> Rgba {
     rgb(0xe0b27a)
 }
 
+/// The tab bar over the note column (tabs spec, A5): the sidebar's shade, the active tab the editor's.
+pub(crate) fn tab_bar_background() -> Rgba {
+    rgb(0x181818)
+}
+
+pub(crate) fn tab_active_background() -> Rgba {
+    rgb(0x1e1e1e)
+}
+
+pub(crate) fn tab_text() -> Rgba {
+    rgb(0xd0d0d0)
+}
+
+pub(crate) fn tab_inactive_text() -> Rgba {
+    rgb(0x8a8a8a)
+}
+
+pub(crate) fn tab_rule() -> Rgba {
+    rgb(0x3c3c3c)
+}
+
+/// A long note name truncates rather than crowd out the other tabs.
+pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
+
 pub(crate) fn heading_text() -> Rgba {
     rgb(0xffffff)
 }

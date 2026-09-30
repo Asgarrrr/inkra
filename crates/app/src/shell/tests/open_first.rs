@@ -165,7 +165,7 @@ fn enter_during_the_scan_opens_nothing_once_it_ends(cx: &mut TestAppContext) {
 
     let (open, showing) = window
         .update(&mut visual, |shell, _, _| {
-            (shell.modal.is_some(), shell.showing)
+            (shell.modal.is_some(), shell.showing())
         })
         .expect("the shell is open");
     assert!(open, "the picker is still open");

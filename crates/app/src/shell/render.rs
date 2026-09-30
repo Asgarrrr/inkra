@@ -33,7 +33,7 @@ impl AppShell {
 
     /// Over the note showing while it is gone from disk (watcher spec, F9).
     fn render_gone_banner(&self, cx: &App) -> Option<impl IntoElement> {
-        let showing = self.showing?;
+        let showing = self.showing()?;
         self.notes.read(cx).is_gone(showing).then(|| {
             div()
                 .debug_selector(|| "gone-banner".into())
@@ -81,18 +81,24 @@ impl Render for AppShell {
             .child(
                 div()
                     .flex_1()
+                    // `min_w_0`: else the tab bar's content width would widen the column past the window.
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
+                    // A sibling of the editor's slot, outside its scroll `div` (T7).
+                    .child(self.render_tab_bar(cx))
                     .children(self.render_gone_banner(cx))
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
-                    .child(div().flex_1().min_h_0().child(match &self.editor {
+                    .child(div().flex_1().min_h_0().child(match self.editor() {
                         Some(editor) => editor.clone().into_any_element(),
                         None => self.render_empty(cx).into_any_element(),
                     })),
             )
-            .children(self.editor.is_some().then(|| {
+            // Shown for an empty tab too, so a switch does not move the bar by the column's width.
+            .children(self.notes.read(cx).vault().is_some().then(|| {
                 div()
+                    .debug_selector(|| "backlinks-column".into())
                     .flex_none()
                     .w(BACKLINKS_WIDTH)
                     .h_full()

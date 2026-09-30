@@ -288,6 +288,75 @@ Levers for later, each with its trigger:
 bypasses `edit_buffer` before the first prepaint is not clipped again. No
 path reaches this today.
 
+## As built (S1)
+
+Plan: `docs/superpowers/plans/2026-09-29-tabs-s1.md`. Built as planned, with
+these deviations and facts:
+
+- **`⌘}` / `⌘{`, not `⌘⇧]` / `⌘⇧[`.** macOS clears `shift` for a non-letter
+  key and reports the shifted character (`gpui_macos/src/events.rs:470-479`).
+  A `cmd-shift-]` binding passes `simulate_keystrokes` and never fires on
+  hardware. `⌃Tab` / `⌃⇧Tab` work on every layout.
+- **`leaving` is a closure.** `Tabs` calls it from one private place,
+  `leave_active`, once per real leave: `insert`, `activate` of another tab,
+  and `close` or `commit` of the active tab. A close or a commit of an
+  inactive id never calls it, because the app's closure seals an undo group.
+- **The model's shapes.** `close` returns `Closed { place, index, shown }`;
+  `step` takes a `Direction`. Closing the last tab leaves one empty tab with a
+  fresh id, so a load keyed by the old id lands nowhere.
+- **Growth for S4 and S5.** `Tab<P>` gains private `back` and `forward` stacks.
+  `commit` pushes the `leaving` value on `back`. `back` and `forward` return
+  `Option<P>` like `activate`. `close` pushes its `Closed` on a closed stack,
+  and `reopen` inserts at `Closed::index`. S4 adds a `Place` trait bound with
+  two implementers, the app's `Place` and the proptest fake.
+- **T4 keeps `activation` in two cases.** Closing an inactive tab and `⌘N` on
+  the active tab change nothing on screen, so a pending load still lands.
+  Every other tab operation drops it: a pending load is cancelled by any
+  switch, new tab or close of the active tab. The red team noted this as UX;
+  it is intended.
+- **One field binds the editor to its note.** `AppShell.bound:
+  Option<Bound { note, editor }>` replaces `editor` and `showing`, so an editor
+  with no note (T2) cannot be written. `showing()` reads it; `set_showing`
+  stays its one writer and keeps the side effects (recent, backlinks).
+  `drop_editor` became `unfocus_editor`: it moves focus off the editor, and
+  `set_showing(None)` drops it.
+- **Same-note binds restore only.** A sidebar click on the note showing still
+  goes through `open_note`. It now keeps the caret and the scroll, where the
+  old `open_buffer(None)` reset them.
+- **The launch seeds the first tab** with `NoteStore::current()`. A file launch
+  therefore starts with `showing() == Some(DETACHED)`, not `None`.
+- **Invariant panics.** `expect_used` is denied workspace-wide, so
+  `active_index` and `last` use `unwrap_or_else(|| panic!(..))` with a
+  `# Panics` doc naming the invariant.
+- **Smaller deviations.** `Tabs`' private list is `list` (clippy's
+  `struct_field_names`). `check` lives in the model's `tests.rs`. Each action
+  landed with its handler; the `⌘1`–`⌘8` handler is `activate_nth_tab`.
+  `tab_scroll` landed with the bar. The `tabs` scene shows four tabs, not
+  three.
+- **Test adjustments.** The inactive-close undo test types `x` after coming
+  back: the plan's order seals `x` on the switch, so its assertion failed with
+  correct code. Two tests prove "no reparse": a write with no notify before
+  the switch, then `parsed_at` must not move (a `cfg(test)` accessor). The
+  keystroke test in `shell/tests/activation.rs` now adopts its note, since an
+  editor with no note is no longer representable.
+- **Stale views on one note** stay plain offsets until S2; returning to a tab
+  whose note another tab emptied clips its caret to the end
+  (`a_stale_view_in_another_tab_on_the_same_note_clips_on_return`).
+- **Single-file mode has no backlinks column.** The column shows only while a
+  vault is open. Before S1 a launched file showed it, always empty.
+- **The active tab stays in the bar.** Every change to the tab set or the
+  active tab ends with `keep_active_tab_visible`. A close to the left of the
+  active tab shifts it too, so a switch alone is not enough. The test calls
+  the × handler directly: a tab scrolled out of the bar cannot be clicked.
+- **Known gap.** The sidebar highlight does not follow the active tab. This
+  predates tabs; S4 fixes it when the sidebar opens through `show_note`.
+
+Lever for S4:
+
+| Lever | Trigger |
+|---|---|
+| `Tabs` keeps no place for the active tab: `leave_active` writes it, `activate` takes it. This removes T1's pair (`bound.note` and `active_place().note`) and the stale `view` of the active tab | S4 reshapes `commit` and `leave_active` for the back stack |
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the

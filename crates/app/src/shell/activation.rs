@@ -9,7 +9,7 @@ use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
 use super::tabs::{Place, capture};
-use super::{AppShell, remember};
+use super::{AppShell, Bound, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 
 impl AppShell {
@@ -30,10 +30,11 @@ impl AppShell {
                     note: Some(id),
                     view: None,
                 };
-                // Backed today by dropping `activation` on every tab op; load-bearing once S3 opens into other tabs.
-                if !shell.tabs.commit(tab, place, || {
-                    capture(shell.showing, shell.editor.as_ref(), cx)
-                }) {
+                // Backed today by dropping `activation` on every tab op that changes the active tab; load-bearing once S3 opens into other tabs.
+                if !shell
+                    .tabs
+                    .commit(tab, place, || capture(shell.bound.as_ref(), cx))
+                {
                     return;
                 }
                 let editor = shell.bind(id, buffer, None, cx);
@@ -55,9 +56,9 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        if self.showing == Some(id) {
+        if self.showing() == Some(id) {
             self.activation = None;
-            if let (Some(range), Some(editor)) = (at, &self.editor) {
+            if let (Some(range), Some(editor)) = (at, self.editor()) {
                 cx.with_window(cx.entity_id(), |window, cx| {
                     editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
                 });
@@ -83,9 +84,10 @@ impl AppShell {
         }
     }
 
-    /// The one place `showing` changes, so the backlinks panel cannot lag it.
-    pub(super) fn set_showing(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
-        self.showing = note;
+    /// The one place `bound` changes, so the backlinks panel cannot lag it.
+    pub(super) fn set_showing(&mut self, bound: Option<Bound>, cx: &mut Context<Self>) {
+        self.bound = bound;
+        let note = self.showing();
         if let Some(id) = note {
             remember(&mut self.recent, id);
         }
@@ -104,7 +106,7 @@ impl AppShell {
 
     /// Resolved against the note showing; a detached note resolves only URLs.
     pub(super) fn follow(&mut self, link: &Link, cx: &mut Context<Self>) {
-        let source = self.showing.unwrap_or(EntryId::DETACHED);
+        let source = self.showing().unwrap_or(EntryId::DETACHED);
         match self.links.read(cx).index().resolve_link(source, link) {
             Resolution::Note(id) => self.show_note(id, None, cx),
             Resolution::External(url) => cx.open_url(&url),
@@ -120,39 +122,41 @@ impl AppShell {
         view: Option<ViewState>,
         cx: &mut Context<Self>,
     ) -> Entity<EditorView> {
-        let editor = match &self.editor {
-            Some(editor) if self.showing == Some(id) => {
-                if let Some(view) = view {
-                    editor.update(cx, |editor, cx| editor.restore(view, cx));
-                }
-                editor.clone()
-            }
-            Some(editor) => {
-                editor.update(cx, |editor, cx| editor.open_buffer(buffer, view, cx));
-                editor.clone()
+        let mut view = view;
+        let editor = match &self.bound {
+            Some(bound) if bound.note == id => bound.editor.clone(),
+            // A rebind restores the view itself, clipped to the new buffer.
+            Some(bound) => {
+                let editor = bound.editor.clone();
+                editor.update(cx, |editor, cx| editor.open_buffer(buffer, view.take(), cx));
+                editor
             }
             None => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
-                if let Some(view) = view {
-                    editor.update(cx, |editor, cx| editor.restore(view, cx));
-                }
                 Self::follow_links_of(&editor, cx);
-                self.editor = Some(editor.clone());
                 editor
             }
         };
-        self.set_showing(Some(id), cx);
+        if let Some(view) = view {
+            editor.update(cx, |editor, cx| editor.restore(view, cx));
+        }
+        self.set_showing(
+            Some(Bound {
+                note: id,
+                editor: editor.clone(),
+            }),
+            cx,
+        );
         self.notes.update(cx, |notes, cx| notes.set_current(id, cx));
         editor
     }
 
-    /// Takes the window: an action holds it leased, so `with_window` would return `None` there.
-    pub(super) fn drop_editor(&mut self, window: &mut Window, cx: &mut App) {
-        if let Some(editor) = self.editor.take() {
-            // Focus left on a dropped view's handle reaches no action, not even the shell's.
-            if editor.focus_handle(cx).contains_focused(window, cx) {
-                window.focus(&self.focus_handle, cx);
-            }
+    /// Before the editor drops: focus on a dropped handle reaches no action. An action leases the window, so pass it in.
+    pub(super) fn unfocus_editor(&self, window: &mut Window, cx: &mut App) {
+        if let Some(editor) = self.editor()
+            && editor.focus_handle(cx).contains_focused(window, cx)
+        {
+            window.focus(&self.focus_handle, cx);
         }
     }
 }

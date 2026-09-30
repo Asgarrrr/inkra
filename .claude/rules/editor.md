@@ -59,5 +59,7 @@ Layout:
   a real one.
 - No observer of an `Entity<Buffer>` may lease that same buffer: a second lease
   panics.
-- Two panes on one note are not supported: `Selection` holds raw offsets, not
-  anchors.
+- Two tabs on one note share one buffer and one `EditorView`: a switch between
+  them calls `restore`, beside `open_buffer`, which resets the state and the
+  viewport with no rebind. An inactive tab's view is plain offsets, clipped on
+  restore; anchors come in tabs S2. Two panes (splits) are not supported.

@@ -25,6 +25,7 @@ mod open_first;
 mod quick_open;
 mod reload;
 mod renaming;
+mod tab_bar;
 mod tab_keys;
 mod tabs;
 mod trashing;
@@ -80,7 +81,7 @@ pub(super) fn open_vault(
 
 pub(super) fn showing(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Option<EntryId> {
     window
-        .update(cx, |shell, _, _| shell.showing)
+        .update(cx, |shell, _, _| shell.showing())
         .expect("the shell is open")
 }
 
@@ -90,7 +91,7 @@ pub(super) fn editor(
     cx: &mut TestAppContext,
 ) -> Entity<EditorView> {
     window
-        .update(cx, |shell, _, _| shell.editor.clone())
+        .update(cx, |shell, _, _| shell.editor().cloned())
         .expect("the shell is open")
         .expect("a note has been activated, so the editor exists")
 }

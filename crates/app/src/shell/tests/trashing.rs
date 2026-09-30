@@ -93,7 +93,7 @@ fn trashing_the_open_note_empties_the_editor(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(
         window
-            .update(cx, |shell, _, _| shell.editor.is_some())
+            .update(cx, |shell, _, _| shell.editor().is_some())
             .expect("the shell is open"),
         "the note is on screen to begin with"
     );
@@ -103,7 +103,7 @@ fn trashing_the_open_note_empties_the_editor(cx: &mut TestAppContext) {
 
     assert!(
         window
-            .update(cx, |shell, _, _| shell.editor.is_none())
+            .update(cx, |shell, _, _| shell.editor().is_none())
             .expect("the shell is open"),
         "the editor must go with the note"
     );
@@ -122,7 +122,7 @@ fn trashing_a_note_that_is_not_on_screen_leaves_the_editor(cx: &mut TestAppConte
 
     assert!(
         window
-            .update(cx, |shell, _, _| shell.editor.is_some())
+            .update(cx, |shell, _, _| shell.editor().is_some())
             .expect("the shell is open"),
         "the editor was showing a different note"
     );
