@@ -81,6 +81,23 @@ impl NoteStore {
         self.current
     }
 
+    /// A tab's title: the vault name, a gone note's last name, or a detached file's name.
+    pub(crate) fn title(&self, id: EntryId, cx: &App) -> Option<String> {
+        if let Some(entry) = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.read(cx).entry(id))
+        {
+            return Some(entry.path.display_name());
+        }
+        let name = match self.sessions.get(id)?.life.location()? {
+            Location::Gone(path) => path.file_stem(),
+            Location::Detached(path) => path.file_name(),
+            Location::Vault => None,
+        };
+        name.map(|name| name.to_string_lossy().into_owned())
+    }
+
     pub(crate) fn is_gone(&self, id: EntryId) -> bool {
         self.sessions
             .get(id)

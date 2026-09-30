@@ -22,7 +22,22 @@ fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
     let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
-    let notes = cx.update(|cx| cx.new(|cx| NoteStore::new(Arc::new(MemFs::new()), None, cx)));
+    // Adopted, as `root` does: an editor comes with the note it shows.
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/notes/a.md", "");
+    let loaded = futures::executor::block_on(fs.load(Path::new("/notes/a.md"))).unwrap();
+    let notes = cx.update(|cx| {
+        cx.new(|cx| {
+            let mut store = NoteStore::new(fs, None, cx);
+            store.adopt(
+                buffer.clone(),
+                PathBuf::from("/notes/a.md"),
+                loaded.stamp,
+                cx,
+            );
+            store
+        })
+    });
     let window = cx.add_window(move |_, cx| AppShell::new(Some(editor), notes, cx));
     window
         .update(cx, |shell, window, cx| {
@@ -215,7 +230,7 @@ fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     let a = entry_id(&notes, cx, "a");
     assert!(
         window
-            .update(cx, |shell, _, _| shell.editor.is_none())
+            .update(cx, |shell, _, _| shell.editor().is_none())
             .unwrap()
     );
 
@@ -263,7 +278,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
             })
             .expect("open the window");
         let has_editor = window
-            .update(cx, |shell, _, _| shell.editor.is_some())
+            .update(cx, |shell, _, _| shell.editor().is_some())
             .unwrap();
         assert_eq!(has_editor, expected);
     }

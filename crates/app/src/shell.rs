@@ -1,4 +1,7 @@
-use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Pixels, Task, Window, px};
+use gpui::{
+    App, AppContext, Context, Entity, FocusHandle, Focusable, Pixels, ScrollHandle, Task, Window,
+    px,
+};
 use inkra_vault::{EntryId, Kind};
 
 use crate::backlinks::BacklinksPanel;
@@ -13,6 +16,7 @@ mod activation;
 mod modal;
 mod palette;
 mod render;
+mod tab_bar;
 mod tabs;
 
 use inkra_tabs::Tabs;
@@ -33,18 +37,24 @@ fn remember<T: PartialEq>(recent: &mut Vec<T>, item: T) {
     recent.truncate(RECENT);
 }
 
+/// The editor and the note it shows, in one field: an editor never shows no note (T2).
+struct Bound {
+    note: EntryId,
+    editor: Entity<EditorView>,
+}
+
 pub(crate) struct AppShell {
-    /// Must not default to a real, untracked `Buffer` — see CLAUDE.md.
-    editor: Option<Entity<EditorView>>,
+    /// Written only by `set_showing`; `None` has no editor. Not `NoteStore::current`, which `trash` clears first.
+    bound: Option<Bound>,
     notes: Entity<NoteStore>,
     sidebar: Entity<Sidebar>,
     links: Entity<IndexSync>,
     backlinks: Entity<BacklinksPanel>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
-    /// The active tab's note, written only by `set_showing`. Not `NoteStore::current`: `trash` clears that before `NoteClosed`.
-    showing: Option<EntryId>,
     tabs: Tabs<Place>,
+    /// The bar's horizontal scroll, moved to the active tab on every switch.
+    tab_scroll: ScrollHandle,
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
     /// load cannot rebind the editor behind a later activation.
     activation: Option<Task<()>>,
@@ -82,7 +92,7 @@ impl AppShell {
         })
         .detach();
         cx.subscribe(&notes, |shell, _notes, event: &GoneChanged, cx| {
-            if shell.showing == Some(event.0) {
+            if shell.showing() == Some(event.0) {
                 cx.notify();
             }
         })
@@ -91,20 +101,29 @@ impl AppShell {
         // and every keystroke would be lost.
         cx.subscribe(&notes, |shell, _notes, event: &NoteClosed, cx| {
             if shell.tabs.forget(|place| place.note == Some(event.0)) {
-                cx.with_window(cx.entity_id(), |window, cx| shell.drop_editor(window, cx));
+                cx.with_window(cx.entity_id(), |window, cx| {
+                    shell.unfocus_editor(window, cx);
+                });
                 shell.set_showing(None, cx);
             }
             cx.notify();
         })
         .detach();
+        // Tab titles follow a rename, as the sidebar's rows do.
+        if let Some(vault) = notes.read(cx).vault().cloned() {
+            cx.observe(&vault, |_, _, cx| cx.notify()).detach();
+        }
         let first = Place {
             note: notes.read(cx).current(),
             view: None,
         };
         Self {
-            editor,
-            showing: first.note,
+            // `root` adopts the note it launches with, so its editor comes with `current`.
+            bound: editor
+                .zip(first.note)
+                .map(|(editor, note)| Bound { note, editor }),
             tabs: Tabs::new(first),
+            tab_scroll: ScrollHandle::new(),
             notes,
             sidebar,
             links,
@@ -115,6 +134,15 @@ impl AppShell {
             recent: Vec::new(),
             recent_commands: Vec::new(),
         }
+    }
+
+    /// The active tab's note (Decision 8's `showing`).
+    pub(super) fn showing(&self) -> Option<EntryId> {
+        self.bound.as_ref().map(|bound| bound.note)
+    }
+
+    pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
+        self.bound.as_ref().map(|bound| &bound.editor)
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
@@ -134,7 +162,7 @@ impl AppShell {
         if self.notes.read(cx).vault().is_none() {
             return;
         }
-        let (links, showing, recent) = (self.links.clone(), self.showing, self.recent.clone());
+        let (links, showing, recent) = (self.links.clone(), self.showing(), self.recent.clone());
         self.toggle_picker_with(
             window,
             cx,
@@ -174,7 +202,7 @@ impl AppShell {
 
 impl Focusable for AppShell {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.editor.as_ref().map_or_else(
+        self.editor().map_or_else(
             || self.focus_handle.clone(),
             |editor| editor.focus_handle(cx),
         )

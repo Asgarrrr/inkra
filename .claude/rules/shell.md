@@ -9,8 +9,13 @@ paths:
 
 # Shell, sidebar, keymap
 
-- `AppShell.editor` is an `Option`: no editor until a note opens, so nothing
-  untracked can be typed into. `render_empty` fills the slot.
+- `AppShell.bound` holds the editor and its note in one `Option`: no editor
+  until a note opens, so nothing untracked can be typed into; an empty tab has
+  no editor either. `render_empty` fills the slot. `set_showing` is its one writer.
+- Every tab action dismisses the picker first (`dismiss_modal`).
+- An action holds its window leased: `cx.with_window` returns `None` inside it,
+  so tab code takes `&mut Window` (`unfocus_editor`). A subscription fired by
+  a tab action runs after the lease ends, so `with_window` works there.
 - `AppShell` tracks its own `FocusHandle` on the root div; without it, with no
   editor, `cmd-s` never reaches its handler.
 - `AppShell::open_note` gets its `Window` via `update_in`; do not thread a

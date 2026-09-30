@@ -23,7 +23,7 @@ fn cmd_t_opens_an_empty_tab_after_the_active_one(cx: &mut TestAppContext) {
     );
     window
         .update(&mut cx, |shell, window, _| {
-            assert!(shell.editor.is_none(), "an empty tab has no editor");
+            assert!(shell.editor().is_none(), "an empty tab has no editor");
             assert!(
                 shell.focus_handle.is_focused(window),
                 "the root keeps the keys"
@@ -103,7 +103,7 @@ fn cmd_w_on_the_last_tab_leaves_one_empty_tab(cx: &mut TestAppContext) {
     assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
     let (editor, current) = window
         .update(&mut cx, |shell, _, cx| {
-            (shell.editor.is_some(), shell.notes.read(cx).current())
+            (shell.editor().is_some(), shell.notes.read(cx).current())
         })
         .unwrap();
     assert!(!editor, "an empty tab has no editor");

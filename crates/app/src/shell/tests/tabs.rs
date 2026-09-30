@@ -23,7 +23,7 @@ fn at(offset: usize) -> ByteOffset {
 fn select(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, range: Range<usize>) {
     window
         .update(cx, |shell, window, cx| {
-            let editor = shell.editor.clone().expect("a note is showing");
+            let editor = shell.editor().cloned().expect("a note is showing");
             editor.update(cx, |editor, cx| {
                 editor.select_range(at(range.start)..at(range.end), window, cx);
             });
@@ -41,13 +41,12 @@ fn text_of(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId
         .unwrap()
 }
 
-/// T1–T3.
+/// T1 and T3; T2 holds by construction (`Bound`).
 fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
         .update(cx, |shell, _, cx| {
-            assert_eq!(shell.showing, shell.tabs.active_place().note, "T1");
-            assert_eq!(shell.editor.is_some(), shell.showing.is_some(), "T2");
-            assert_eq!(shell.notes.read(cx).current(), shell.showing, "T3");
+            assert_eq!(shell.showing(), shell.tabs.active_place().note, "T1");
+            assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
         })
         .unwrap();
 }
@@ -109,7 +108,7 @@ fn switching_back_to_a_note_tab_recreates_the_editor_focused(cx: &mut TestAppCon
     cx.simulate_keystrokes("cmd-t");
     assert!(
         window
-            .update(&mut cx, |shell, _, _| shell.editor.is_none())
+            .update(&mut cx, |shell, _, _| shell.editor().is_none())
             .unwrap()
     );
 
@@ -117,7 +116,10 @@ fn switching_back_to_a_note_tab_recreates_the_editor_focused(cx: &mut TestAppCon
 
     window
         .update(&mut cx, |shell, window, cx| {
-            let editor = shell.editor.clone().expect("the note's tab has an editor");
+            let editor = shell
+                .editor()
+                .cloned()
+                .expect("the note's tab has an editor");
             assert!(editor.focus_handle(cx).is_focused(window));
         })
         .unwrap();
@@ -170,7 +172,7 @@ fn two_tabs_on_one_note_keep_their_own_carets(cx: &mut TestAppContext) {
     // A write with no notify: only a rebind's reparse inside the switch would read it.
     window
         .update(&mut cx, |shell, window, cx| {
-            let editor = shell.editor.clone().unwrap();
+            let editor = shell.editor().cloned().unwrap();
             let (buffer, parsed_at) = editor.read_with(cx, |editor, _| {
                 (editor.buffer().clone(), editor.parsed_at())
             });
@@ -217,7 +219,7 @@ fn a_switch_drops_a_composition_and_keeps_its_text(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     window
         .update(&mut cx, |shell, window, cx| {
-            let editor = shell.editor.clone().unwrap();
+            let editor = shell.editor().cloned().unwrap();
             editor.update(cx, |editor, cx| {
                 editor.replace_and_mark_text_in_range(None, "か", Some(1..1), window, cx);
             });
@@ -228,7 +230,7 @@ fn a_switch_drops_a_composition_and_keeps_its_text(cx: &mut TestAppContext) {
 
     let marked = window
         .update(&mut cx, |shell, window, cx| {
-            let editor = shell.editor.clone().unwrap();
+            let editor = shell.editor().cloned().unwrap();
             editor.update(cx, |editor, cx| editor.marked_text_range(window, cx))
         })
         .unwrap();
@@ -298,6 +300,10 @@ fn single_file_mode_switches_back_to_its_file(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("ctrl-tab");
     assert_eq!(showing(&window, &mut cx), Some(EntryId::DETACHED));
     check(&window, &mut cx);
+    assert!(
+        cx.debug_bounds("backlinks-column").is_none(),
+        "no vault, no backlinks column"
+    );
 
     cx.simulate_input("y");
     cx.simulate_keystrokes("cmd-s");
@@ -383,7 +389,7 @@ fn a_load_landing_after_its_only_tab_was_closed_lands_nowhere(cx: &mut TestAppCo
     assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
     assert!(
         window
-            .update(&mut cx, |shell, _, _| shell.editor.is_none())
+            .update(&mut cx, |shell, _, _| shell.editor().is_none())
             .unwrap()
     );
     check(&window, &mut cx);
@@ -462,6 +468,11 @@ fn a_gone_note_keeps_its_tab(cx: &mut TestAppContext) {
     fs.remove(Path::new("/vault/a.md"));
     cx.run_until_parked();
     assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    // Gone from the vault's entries, the title comes from the note's last path.
+    let titles = window
+        .update(&mut cx, |shell, _, cx| shell.tab_titles(cx))
+        .unwrap();
+    assert_eq!(titles, ["a", "b"]);
 
     cx.simulate_keystrokes("ctrl-tab");
     cx.run_until_parked();

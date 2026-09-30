@@ -15,8 +15,9 @@ paths:
   order (reclaim, replay, replace) is `inkra_vault::Scans`'s: the app calls
   `Scans`, never the `Vault` primitives it assembles.
 - `NoteStore::current` is the note `⌘S` writes and must be the note on screen.
-  Its only writers are `set_current` (right after `EditorView::open_buffer`, no
-  `await` between) and the synchronous `adopt` at launch.
+  Its only writers are `set_current` (right after the editor binds the note, no
+  `await` between), `clear_current` (an empty tab), the synchronous `adopt` at
+  launch, and `trash`'s direct clear (`tree_ops.rs`) before `NoteClosed`.
 - Every filesystem operation on one note is ordered on its chain
   (`session::Queue`), queued through `NoteStore::queue` with a `PendingSave`.
   Do not order moves by `Writer`'s sequence: a write pending when a delete is
