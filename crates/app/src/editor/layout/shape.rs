@@ -1,11 +1,12 @@
 use std::ops::Range;
 
-use gpui::{Pixels, ShapedLine, SharedString, TextStyle, Window, px};
-use inkra_markdown::{Conceal, DisplayLine, Markdown, Span, is_active};
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextStyle, Window, point, px};
+use inkra_markdown::{Conceal, DisplayLine, Gutter, Markdown, Span, is_active};
 use inkra_text::{Buffer, ByteOffset};
 
+use super::prefix::{GutterCarry, Hanging, Prefix, indent};
 use super::runs::{RunStyles, line_runs};
-use super::{DocumentLayout, Hanging, LineLayout, rows::rows};
+use super::{DocumentLayout, LineLayout, rows::rows};
 use crate::theme;
 
 #[cfg(test)]
@@ -38,10 +39,13 @@ pub(crate) fn shape_document(
 
     let mut row_count = 0;
     let mut top = px(0.);
-    // Spans and markers never cross a `\n`, so each line's are the next ones in order.
+    let mut bars = Vec::new();
+    // Spans, markers and gutters never cross a `\n`, so each line's are the next ones in order.
     let mut rest = markdown.spans.as_slice();
     let mut conceals = markdown.conceals.as_slice();
+    let mut gutters = markdown.gutters.as_slice();
     let mut headings = markdown.headings.as_slice();
+    let mut carry = GutterCarry::new(body_size);
     let lines = buffer
         .lines()
         .map(|(start, text)| {
@@ -65,41 +69,34 @@ pub(crate) fn shape_document(
                 .map_or((body_size, body_height), |metrics| {
                     (metrics.size, metrics.line_height)
                 });
-            let own = rest
-                .iter()
-                .take_while(|span| span.range.start < range.end)
-                .count();
-            let (line_spans, next) = rest.split_at(own);
-            rest = next;
-            let own = conceals
-                .iter()
-                .take_while(|conceal| conceal.marker.start < range.end)
-                .count();
-            let (line_conceals, next) = conceals.split_at(own);
-            conceals = next;
-            let display = display_line(&range, line_conceals, opening.as_ref(), selection);
+            let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
+            let line_conceals =
+                line_items(&mut conceals, |conceal| conceal.marker.start <= range.end);
+            let line_gutters = line_items(&mut gutters, |gutter| gutter.range.start <= range.end);
+            let gutter = line_gutters
+                .first()
+                .map(|gutter| (gutter, &text[..gutter.range.end.0 - start.0]));
+            let (prefix, text_conceals) = line_prefix(
+                gutter,
+                &mut carry,
+                opening,
+                line_conceals,
+                selection,
+                font_size,
+                |range, size| show(range, text, line_spans, marked, size, &mut styles, window),
+            );
+            let display = display_line(
+                &range,
+                text_conceals,
+                prefix.as_ref().map(Prefix::range),
+                selection,
+            );
             let shown = SharedString::from(display.text(text).into_owned());
             let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
-            let revealed = line_conceals.iter().any(|conceal| {
-                Some(&conceal.marker) == opening.as_ref() && !is_active(conceal, selection)
-            });
-            let hanging = opening.map(|range| Hanging {
-                shaped: revealed.then(|| {
-                    show(
-                        &range,
-                        text,
-                        line_spans,
-                        marked,
-                        font_size,
-                        &mut styles,
-                        window,
-                    )
-                }),
-                range,
-            });
+            let wrap = wrap_width.map(|width| (width - indent(prefix.as_ref())).max(px(0.)));
             let wrapped = window
                 .text_system()
-                .shape_text(shown.clone(), font_size, &runs, wrap_width, None)
+                .shape_text(shown.clone(), font_size, &runs, wrap, None)
                 .map_err(|err| eprintln!("failed to shape line at {start}: {err}"))
                 .ok()
                 .and_then(|mut shaped| shaped.pop())
@@ -111,6 +108,7 @@ pub(crate) fn shape_document(
             #[allow(clippy::cast_precision_loss)]
             let row_total = rows.len() as f32;
             top += row_height * row_total;
+            bars.extend(line_bars(prefix.as_ref(), line_top, top));
             LineLayout {
                 wrapped,
                 range,
@@ -119,7 +117,7 @@ pub(crate) fn shape_document(
                 rows,
                 top: line_top,
                 row_height,
-                hanging,
+                prefix,
             }
         })
         .collect();
@@ -128,6 +126,7 @@ pub(crate) fn shape_document(
         lines,
         row_count,
         height: top,
+        bars,
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
@@ -137,17 +136,83 @@ pub(crate) fn shape_document(
     }
 }
 
-/// The marker never enters the shaped text, so a reveal cannot re-wrap the heading.
+/// One bar per quote level, from the line's top to the next line's, so a quote's bars meet.
+fn line_bars(
+    prefix: Option<&Prefix>,
+    top: Pixels,
+    bottom: Pixels,
+) -> impl Iterator<Item = Bounds<Pixels>> + '_ {
+    prefix.map_or(&[][..], Prefix::bars).iter().map(move |&x| {
+        Bounds::from_corners(point(x, top), point(x + theme::QUOTE_BAR_WIDTH, bottom))
+    })
+}
+
+/// The items of a sorted cursor that start on this line; `rest` moves past them. The next line's
+/// start at `range.end + 1` at the earliest, so `start <= range.end` holds for an empty item too.
+fn line_items<'a, T>(rest: &mut &'a [T], on_line: impl Fn(&T) -> bool) -> &'a [T] {
+    let own = rest.iter().take_while(|item| on_line(item)).count();
+    let (line, next) = rest.split_at(own);
+    *rest = next;
+    line
+}
+
+/// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
+/// prefix and the conceals left for the text.
+fn line_prefix<'a, 'c>(
+    gutter: Option<(&Gutter, &'a str)>,
+    carry: &mut GutterCarry<'a>,
+    opening: Option<Range<ByteOffset>>,
+    conceals: &'c [Conceal],
+    selection: &Range<ByteOffset>,
+    font_size: Pixels,
+    mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
+) -> (Option<Prefix>, &'c [Conceal]) {
+    let own = gutter
+        .map(|(gutter, _)| &gutter.range)
+        .or(opening.as_ref())
+        .map_or(0, |prefix| {
+            conceals.partition_point(|conceal| conceal.marker.start < prefix.end)
+        });
+    let (own, rest) = conceals.split_at(own);
+    // A gap conceal skips a line's leading `[ \t>]*` and a heading's own marker is the only conceal
+    // before `opening.end`, so every conceal before the prefix's end is the prefix's own.
+    debug_assert!(match gutter {
+        Some((gutter, _)) => own.len() == gutter.quotes.len(),
+        None =>
+            own.len() <= 1
+                && own
+                    .iter()
+                    .all(|conceal| Some(&conceal.marker) == opening.as_ref()),
+    });
+    let revealed = own.iter().any(|conceal| !is_active(conceal, selection));
+    let prefix = match gutter {
+        Some((gutter, source)) => Some(Prefix::Gutter(
+            carry.layout(gutter, source, revealed, &mut shape),
+        )),
+        None => opening.map(|range| {
+            Prefix::Margin(Hanging {
+                shaped: revealed.then(|| shape(&range, font_size)),
+                range,
+            })
+        }),
+    };
+    (prefix, rest)
+}
+
+/// The prefix never enters the shaped text, so no reveal can re-wrap its line.
 fn display_line(
     range: &Range<ByteOffset>,
     conceals: &[Conceal],
-    opening: Option<&Range<ByteOffset>>,
+    prefix: Option<&Range<ByteOffset>>,
     selection: &Range<ByteOffset>,
 ) -> DisplayLine {
-    let hidden = opening.map(|marker| (marker.clone(), ""));
+    // A lazy line's gutter hides nothing.
+    let hidden = prefix
+        .filter(|prefix| !prefix.is_empty())
+        .map(|prefix| (prefix.clone(), ""));
     let active = conceals
         .iter()
-        .filter(|conceal| Some(&conceal.marker) != opening && is_active(conceal, selection))
+        .filter(|conceal| is_active(conceal, selection))
         .map(|conceal| (conceal.marker.clone(), conceal.replacement));
     DisplayLine::new(range.clone(), hidden.into_iter().chain(active))
 }

@@ -1,6 +1,8 @@
 //! Every pixel ↔ offset conversion, in rows: one `shape_text` call per line, so a
 //! keystroke does not re-shape the whole document.
 
+mod paint;
+mod prefix;
 mod rows;
 mod runs;
 mod shape;
@@ -11,12 +13,10 @@ pub(crate) use shape::shape_document;
 
 use std::ops::{Range, RangeInclusive};
 
-use gpui::{
-    App, Bounds, PaintQuad, Pixels, Point, ShapedLine, TextAlign, TextStyle, Window, WrappedLine,
-    fill, point, px, size,
-};
+use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, WrappedLine, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset};
+use prefix::Prefix;
 
 use crate::theme;
 
@@ -31,30 +31,13 @@ struct LineLayout {
     rows: Vec<Row>,
     top: Pixels,
     row_height: Pixels,
-    /// A heading's opening marker, kept out of the text in both states (live-preview spec, D12).
-    hanging: Option<Hanging>,
+    /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
+    prefix: Option<Prefix>,
 }
 
-struct Hanging {
-    range: Range<ByteOffset>,
-    /// `Some` only while revealed; painted left of the text and right-aligned to it.
-    shaped: Option<ShapedLine>,
-}
-
-impl Hanging {
-    /// Negative, since the text starts at 0; `None` while concealed.
-    fn x_for_offset(&self, offset: ByteOffset) -> Option<Pixels> {
-        let shaped = self.shaped.as_ref()?;
-        Some(shaped.x_for_index(offset.0 - self.range.start.0) - shaped.width())
-    }
-
-    /// A concealed marker shows no glyph, so its whole margin lands on its start.
-    fn offset_for_x(&self, x: Pixels) -> ByteOffset {
-        let index = self
-            .shaped
-            .as_ref()
-            .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()));
-        ByteOffset(self.range.start.0 + index)
+impl LineLayout {
+    fn indent(&self) -> Pixels {
+        prefix::indent(self.prefix.as_ref())
     }
 }
 
@@ -73,6 +56,8 @@ pub(crate) struct DocumentLayout {
     lines: Vec<LineLayout>,
     row_count: usize,
     height: Pixels,
+    /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3).
+    bars: Vec<Bounds<Pixels>>,
     body_row_height: Pixels,
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
@@ -126,6 +111,21 @@ impl DocumentLayout {
     #[cfg(test)]
     pub(crate) fn shown(&self, line: usize) -> &str {
         &self.lines[line].wrapped.text
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quote_bars(&self) -> &[Bounds<Pixels>] {
+        &self.bars
+    }
+
+    /// Whether line `line`'s prefix paints its source text.
+    #[cfg(test)]
+    pub(crate) fn prefix_painted(&self, line: usize) -> bool {
+        self.lines[line]
+            .prefix
+            .as_ref()
+            .and_then(Prefix::shown)
+            .is_some()
     }
 
     pub(crate) fn height(&self) -> Pixels {
@@ -182,21 +182,21 @@ impl DocumentLayout {
         line.first_row + within.min(line.rows.len() - 1)
     }
 
-    /// Only row 0 holds the marker.
-    fn hanging_on(line: &LineLayout, within: usize) -> Option<&Hanging> {
-        line.hanging.as_ref().filter(|_| within == 0)
+    /// Only row 0 holds the prefix.
+    fn prefix_on(line: &LineLayout, within: usize) -> Option<&Prefix> {
+        line.prefix.as_ref().filter(|_| within == 0)
     }
 
     fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
         let offset = offset.clamp(line.range.start, line.range.end);
-        if let Some(x) = Self::hanging_on(line, within)
-            .filter(|hanging| offset < hanging.range.end)
-            .and_then(|hanging| hanging.x_for_offset(offset))
+        if let Some(x) = Self::prefix_on(line, within)
+            .filter(|prefix| offset < prefix.range().end)
+            .and_then(|prefix| prefix.x_for_offset(offset))
         {
             return x;
         }
         let index = line.display.to_display(offset).0;
-        line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
+        line.indent() + line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
     }
 
     fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
@@ -240,15 +240,13 @@ impl DocumentLayout {
     pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
         let (line, within) = self.locate(row);
         let target = &line.rows[within];
-        // A hanging row splits at x = 0: the margin is the marker's, the text starts at its end (D12).
-        let hanging = Self::hanging_on(line, within);
-        if let Some(hanging) = hanging.filter(|_| x < px(0.)) {
-            return hanging
-                .offset_for_x(x)
-                .clamp(target.start, target.caret_end);
+        // Row 0 splits at the text's start: left of it is the prefix's, and the text never maps into the prefix (D12).
+        let prefix = Self::prefix_on(line, within);
+        if let Some(prefix) = prefix.filter(|prefix| x < prefix.indent()) {
+            return prefix.offset_for_x(x).clamp(target.start, target.caret_end);
         }
         let layout = &line.wrapped.unwrapped_layout;
-        let index = layout.closest_index_for_x(x + target.start_x);
+        let index = layout.closest_index_for_x(x - line.indent() + target.start_x);
         // At or past the display end, land after a hidden suffix (live-preview spec, D5).
         let bias = if index >= layout.len {
             Bias::Right
@@ -259,7 +257,7 @@ impl DocumentLayout {
             .display
             .to_buffer(DisplayOffset(index), bias)
             .clamp(target.start, target.caret_end);
-        hanging.map_or(offset, |hanging| offset.max(hanging.range.end))
+        prefix.map_or(offset, |prefix| offset.max(prefix.range().end))
     }
 
     pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
@@ -318,40 +316,5 @@ impl DocumentLayout {
                 )
             })
             .collect()
-    }
-
-    /// One `WrappedLine::paint` per line; gpui steps rows down at each wrap. A
-    /// failed line is skipped and logged, not fatal, so one bad glyph run doesn't blank the page.
-    pub(crate) fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
-        for (index, line) in self.lines.iter().enumerate() {
-            let line_origin = origin + point(px(0.), line.top);
-            if let Err(err) = line.wrapped.paint(
-                line_origin,
-                line.row_height,
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            ) {
-                eprintln!("failed to paint line {index}: {err}");
-            }
-            if let Some(shaped) = line
-                .hanging
-                .as_ref()
-                .and_then(|hanging| hanging.shaped.as_ref())
-            {
-                let marker_origin = line_origin - point(shaped.width(), px(0.));
-                if let Err(err) = shaped.paint(
-                    marker_origin,
-                    line.row_height,
-                    TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                ) {
-                    eprintln!("failed to paint the marker of line {index}: {err}");
-                }
-            }
-        }
     }
 }

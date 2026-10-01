@@ -1,9 +1,14 @@
+mod unrepeated;
+
+pub(crate) use unrepeated::Unrepeated;
+
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Options, Parser, Tag};
 
-use crate::{Conceal, Styles};
+use crate::gutters::{cut, gutters, quote_conceals};
+use crate::{Conceal, Gutter, Styles};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Markdown {
@@ -13,6 +18,8 @@ pub struct Markdown {
     pub conceals: Vec<Conceal>,
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
+    /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included.
+    pub gutters: Vec<Gutter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +49,7 @@ pub fn parse(text: &str) -> Markdown {
     };
     let mut open: Vec<Open> = Vec::new();
     let mut headings = Vec::new();
+    let mut quotes = Vec::new();
 
     for (event, range) in Unrepeated::new(Parser::new_ext(text, options()).into_offset_iter()) {
         let current = open.last().cloned();
@@ -60,10 +68,17 @@ pub fn parse(text: &str) -> Markdown {
                         level: level as u8,
                     });
                 }
+                // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
+                let leading = matches!(tag, Tag::BlockQuote(_))
+                    && current.as_ref().is_none_or(|open| open.leading);
+                if leading {
+                    quotes.push(without_line_ending(text, &range));
+                }
                 open.push(Open {
                     styles: styles | tag_styles(&tag),
                     end: range.end,
                     element: concealable(&tag, &range),
+                    leading,
                 });
             }
             Event::End(_) => {
@@ -80,6 +95,7 @@ pub fn parse(text: &str) -> Markdown {
                     styles: styles | Styles::CODE,
                     end: range.end,
                     element: Some(range.clone()),
+                    leading: false,
                 };
                 out.markers_until(range.start, current.as_ref());
                 out.markers_until(content_start, Some(&code));
@@ -95,57 +111,17 @@ pub fn parse(text: &str) -> Markdown {
             _ => {}
         }
     }
+    let gutters = gutters(text, &quotes);
+    cut(text, &mut out.spans, &gutters);
+    let mut conceals = out.conceals;
+    conceals.extend(quote_conceals(&gutters));
+    // Two sorted runs: the stable sort merges them in one linear pass.
+    conceals.sort_by_key(|conceal| conceal.marker.start);
     Markdown {
         spans: out.spans,
-        conceals: out.conceals,
+        conceals,
         headings,
-    }
-}
-
-/// pulldown-cmark 0.13.4 emits the subtrees after an empty wikilink alias inside the link too;
-/// this drops each copy that starts at or past the innermost open element's end.
-pub(crate) struct Unrepeated<I> {
-    events: I,
-    /// The end of each open element yielded so far, innermost last.
-    ends: Vec<usize>,
-    /// Depth of the subtree being skipped.
-    skipped: usize,
-}
-
-impl<I> Unrepeated<I> {
-    pub(crate) fn new(events: I) -> Self {
-        Self {
-            events,
-            ends: Vec::new(),
-            skipped: 0,
-        }
-    }
-}
-
-impl<'a, I: Iterator<Item = (Event<'a>, Range<usize>)>> Iterator for Unrepeated<I> {
-    type Item = (Event<'a>, Range<usize>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let (event, range) = self.events.next()?;
-            match event {
-                Event::End(_) if self.skipped > 0 => self.skipped -= 1,
-                Event::End(_) => {
-                    self.ends.pop();
-                    return Some((event, range));
-                }
-                _ if self.ends.last().is_some_and(|&end| range.start >= end) => {
-                    if let Event::Start(_) = event {
-                        self.skipped += 1;
-                    }
-                }
-                Event::Start(_) => {
-                    self.ends.push(range.end);
-                    return Some((event, range));
-                }
-                _ => return Some((event, range)),
-            }
-        }
+        gutters,
     }
 }
 
@@ -188,6 +164,11 @@ fn heading_text(text: &str, range: &Range<usize>) -> Range<usize> {
     range.start..range.start + len
 }
 
+/// A block's range ends after its last `\n`; a gutter must not reach the line after it.
+fn without_line_ending(text: &str, range: &Range<usize>) -> Range<usize> {
+    range.start..range.end - usize::from(text[..range.end].ends_with('\n'))
+}
+
 /// The length of an ATX opening sequence: 1 to 6 `#`, then spaces and tabs up to the text or the
 /// line end. `None` for setext; pulldown-cmark starts the range after any indent.
 fn opening_sequence(heading: &str) -> Option<usize> {
@@ -219,6 +200,8 @@ struct Open {
     styles: Styles,
     end: usize,
     element: Option<Range<usize>>,
+    /// A quote whose ancestors are all quotes.
+    leading: bool,
 }
 
 struct Out<'a> {
@@ -315,19 +298,24 @@ impl Out<'_> {
     }
 
     fn push(&mut self, range: Range<usize>, styles: Styles) {
-        if range.is_empty() || styles.is_empty() {
-            return;
-        }
-        let range = to_offsets(range);
-        if let Some(last) = self.spans.last_mut()
-            && last.range.end == range.start
-            && last.styles == styles
-        {
-            last.range.end = range.end;
-            return;
-        }
-        self.spans.push(Span { range, styles });
+        push(&mut self.spans, range, styles);
     }
+}
+
+/// Appends a span, merged into the last one when they touch and share their styles.
+pub(crate) fn push(spans: &mut Vec<Span>, range: Range<usize>, styles: Styles) {
+    if range.is_empty() || styles.is_empty() {
+        return;
+    }
+    let range = to_offsets(range);
+    if let Some(last) = spans.last_mut()
+        && last.range.end == range.start
+        && last.styles == styles
+    {
+        last.range.end = range.end;
+        return;
+    }
+    spans.push(Span { range, styles });
 }
 
 /// The pieces of `range` between its `\n` bytes, which they exclude.

@@ -2,6 +2,7 @@
 
 mod command_palette;
 mod gone;
+mod markdown_blocks;
 mod quick_open;
 mod reload;
 mod tabs;
@@ -287,6 +288,16 @@ const CATALOGUE: &[Scene] = &[
         name: "command-palette",
         shows: "cmd-shift-p over the editor, n typed: every command with a word starting n, lit, its key right and dimmed",
         open: command_palette::open,
+    },
+    Scene {
+        name: "markdown-blocks",
+        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote",
+        open: markdown_blocks::concealed,
+    },
+    Scene {
+        name: "markdown-blocks-revealed",
+        shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
+        open: markdown_blocks::revealed,
     },
 ];
 

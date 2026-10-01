@@ -162,6 +162,13 @@ pub(crate) fn quote_text() -> Rgba {
     rgb(0xa8a8a8)
 }
 
+/// One per quote level, down the gutter (markdown blocks spec, D3).
+pub(crate) fn quote_bar() -> Rgba {
+    rgb(0x4a4a4a)
+}
+
+pub(crate) const QUOTE_BAR_WIDTH: Pixels = px(2.);
+
 /// `Marker` goes last so a marker stays dimmed inside a link or a heading; it
 /// keeps weight and style so its width matches the text around it.
 pub(crate) fn markdown_style(base: &TextStyle, styles: Styles) -> TextStyle {

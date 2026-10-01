@@ -185,9 +185,10 @@ fn a_fence_inside_a_quote_keeps_both_styles() {
         vec![
             ("> ", Q | M),
             ("```", C | Q | M),
-            ("> ", C | Q | M),
+            ("> ", Q | M),
             ("code", C | Q),
-            ("> ```", C | Q | M),
+            ("> ", Q | M),
+            ("```", C | Q | M),
         ]
     );
 }
@@ -353,7 +354,10 @@ fn a_heading_hides_its_opening_sequence_only() {
 
 #[test]
 fn a_heading_inside_a_container_conceals_its_opening_sequence() {
-    assert_eq!(concealed("> # q\n"), vec![("# ", "# q", "")]);
+    assert_eq!(
+        concealed("> # q\n"),
+        vec![(">", ">", ""), ("# ", "# q", "")]
+    );
     assert_eq!(
         concealed("- # a\n"),
         vec![("-", "-", "•"), ("# ", "# a", "")]
@@ -442,7 +446,12 @@ fn a_link_across_lines_conceals_each_marker_on_its_own_line() {
 fn a_continuation_prefix_inside_a_link_is_not_concealed() {
     assert_eq!(
         concealed("> [a\n> b](u)"),
-        vec![("[", "[a\n> b](u)", ""), ("](u)", "[a\n> b](u)", "")]
+        vec![
+            (">", ">", ""),
+            ("[", "[a\n> b](u)", ""),
+            (">", ">", ""),
+            ("](u)", "[a\n> b](u)", "")
+        ]
     );
 }
 
@@ -450,7 +459,12 @@ fn a_continuation_prefix_inside_a_link_is_not_concealed() {
 fn a_marker_after_a_continuation_prefix_is_concealed() {
     assert_eq!(
         concealed("> [a\n> ](u)"),
-        vec![("[", "[a\n> ](u)", ""), ("](u)", "[a\n> ](u)", "")]
+        vec![
+            (">", ">", ""),
+            ("[", "[a\n> ](u)", ""),
+            (">", ">", ""),
+            ("](u)", "[a\n> ](u)", "")
+        ]
     );
 }
 
@@ -476,7 +490,7 @@ fn unordered_bullets_become_dots_and_numbers_stay() {
     assert_eq!(concealed("* a"), vec![("*", "*", "•")]);
     assert_eq!(concealed("1. a"), vec![]);
     assert_eq!(concealed("- [ ] t"), vec![("-", "-", "•")]);
-    assert_eq!(concealed("> - a"), vec![("-", "-", "•")]);
+    assert_eq!(concealed("> - a"), vec![(">", ">", ""), ("-", "-", "•")]);
     assert_eq!(
         concealed("- a\n  - b"),
         vec![("-", "-", "•"), ("-", "-", "•")]
@@ -490,10 +504,10 @@ fn an_indented_bullet_is_found_past_the_indentation() {
 }
 
 #[test]
-fn quotes_and_escapes_conceal_nothing_themselves() {
+fn escapes_conceal_nothing_and_a_quote_only_its_markers() {
     assert_eq!(
         concealed("> **q**"),
-        vec![("**", "**q**", ""), ("**", "**q**", "")]
+        vec![(">", ">", ""), ("**", "**q**", ""), ("**", "**q**", "")]
     );
     assert_eq!(concealed("a\\*b"), vec![]);
 }
@@ -623,6 +637,8 @@ fn syntax_fragment() -> impl Strategy<Value = String> {
         Just("```\n".to_string()),
         Just("# ".to_string()),
         Just("> ".to_string()),
+        Just(">".to_string()),
+        Just("    ".to_string()),
         Just("- ".to_string()),
         Just("  - ".to_string()),
         Just("1. ".to_string()),
@@ -660,4 +676,5 @@ proptest! {
 
 }
 
+mod gutters;
 mod headings;

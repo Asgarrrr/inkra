@@ -115,6 +115,8 @@ Read the spec before changing its area:
 
 - `docs/superpowers/specs/2026-09-23-markdown-live-preview-design.md` —
   markdown styling and concealment
+- `docs/superpowers/specs/2026-09-30-markdown-blocks-design.md` — quote
+  gutters and bars, code backgrounds, task boxes
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel

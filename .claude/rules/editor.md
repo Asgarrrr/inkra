@@ -45,6 +45,9 @@ Layout:
 
 - Every pixel ↔ offset conversion goes through `DocumentLayout`, in rows. All its
   lookups clamp.
+- A line's `Prefix` sits outside its shaped text: a heading's `Margin` hangs at
+  negative `x`, a quote's `Gutter` moves every row right by its width.
+  Conversions add `LineLayout::indent`; nothing else adds a width.
 - An offset at a wrap belongs to the next row; End, clicks and up/down landing
   on the earlier row clamp to `Row::caret_end`. That is why the caret has no
   affinity bit. Row starts snap to grapheme boundaries.
