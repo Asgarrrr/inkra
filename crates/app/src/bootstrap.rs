@@ -38,25 +38,23 @@ pub(crate) fn root(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    let (note, vault, session) = match launched {
-        Launch::Nothing => (None, None, None),
-        Launch::Note(path, text, stamp) => (Some((path, text, stamp)), None, None),
-        Launch::Vault(vault, session) => (None, Some(vault), session),
-    };
-    let opened = note.map(|(path, text, stamp)| {
-        let buffer = cx.new(|_| Buffer::new(text));
-        let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
-        (buffer, editor, path, stamp)
-    });
-    let vault = vault.map(|vault| cx.new(|_| vault));
-    let editor = opened.as_ref().map(|(_, editor, _, _)| editor.clone());
-    let notes = cx.new(|cx| {
-        let mut store = NoteStore::new(fs, vault, cx);
-        if let Some((buffer, _, path, stamp)) = opened {
-            store.adopt(buffer, path, stamp, cx);
+    let (editor, notes, session) = match launched {
+        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
+        Launch::Note(path, text, stamp) => {
+            let buffer = cx.new(|_| Buffer::new(text));
+            let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
+            let notes = cx.new(|cx| NoteStore::detached(fs, buffer, path, stamp, cx));
+            (Some(editor), notes, None)
         }
-        store
-    });
+        Launch::Vault(vault, session) => {
+            let vault = cx.new(|_| vault);
+            (
+                None,
+                cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
+                session,
+            )
+        }
+    };
     cx.new(|cx| AppShell::new(editor, notes, session, window, cx))
 }
 

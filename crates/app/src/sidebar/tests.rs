@@ -19,7 +19,7 @@ use super::edit::Rejection;
 use super::rows::Item;
 use super::{Kind, Row, Sidebar, row_center};
 use crate::open::{NoteActivated, Open};
-use crate::test_support::opened;
+use crate::test_support::{opened, vault_of};
 use crate::vault::NoteStore;
 
 impl Sidebar {
@@ -106,13 +106,15 @@ fn open_with_store(
     fs: Arc<dyn Fs>,
 ) -> (Entity<Sidebar>, Entity<NoteStore>) {
     let notes = parts(cx, fs);
-    let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes.clone(), cx)));
+    let vault = vault_of(&notes, cx);
+    let sidebar = cx.update(|cx| cx.new(|cx| Sidebar::new(notes.clone(), vault, cx)));
     (sidebar, notes)
 }
 
 fn drawn(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, VisualTestContext) {
     let notes = parts(cx, fs);
-    let window = cx.add_window(move |_, cx| Sidebar::new(notes, cx));
+    let vault = vault_of(&notes, cx);
+    let window = cx.add_window(move |_, cx| Sidebar::new(notes, vault, cx));
     let sidebar = window.root(cx).expect("root view");
     (sidebar, VisualTestContext::from_window(window.into(), cx))
 }
@@ -135,9 +137,7 @@ fn a_field_survives_the_tree_shrinking_under_it(cx: &mut TestAppContext) {
 
     fs.remove(Path::new("/vault/b.md"));
     fs.remove(Path::new("/vault/c.md"));
-    let vault = notes
-        .read_with(cx, |notes, _| notes.vault().cloned())
-        .expect("a vault");
+    let vault = vault_of(&notes, cx);
     vault.update(cx, |vault, cx| {
         futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
@@ -194,9 +194,7 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
     });
 
     fs.remove(Path::new("/vault/b.md"));
-    let vault = notes
-        .read_with(cx, |notes, _| notes.vault().cloned())
-        .expect("a vault");
+    let vault = vault_of(&notes, cx);
     vault.update(cx, |vault, cx| {
         futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
@@ -222,9 +220,7 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
     );
 
     fs.insert_file("/vault/a (conflict 1970-01-01 00-00-01Z).md", "theirs");
-    let vault = notes
-        .read_with(cx, |notes, _| notes.vault().cloned())
-        .expect("a vault");
+    let vault = vault_of(&notes, cx);
     vault.update(cx, |vault, cx| {
         futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
         cx.notify();
@@ -565,9 +561,7 @@ fn a_rename_field_closes_when_its_note_moves_under_a_collapsed_folder(cx: &mut T
     });
     assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
 
-    let vault = notes
-        .read_with(cx, |notes, _| notes.vault().cloned())
-        .expect("a vault");
+    let vault = vault_of(&notes, cx);
     vault.update(cx, |vault, cx| {
         futures::executor::block_on(
             fs.rename(Path::new("/vault/a.md"), Path::new("/vault/Archive/a.md")),

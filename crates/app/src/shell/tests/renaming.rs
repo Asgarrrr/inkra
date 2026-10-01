@@ -8,7 +8,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::sidebar::row_center;
-use crate::test_support::entry_id;
+use crate::test_support::{detached_store, entry_id};
 use crate::vault::{NoteStore, RenameFailed};
 
 use super::{activate, open_vault, tree_focused, two_notes, vault_names};
@@ -275,21 +275,25 @@ async fn a_failed_rename_is_reported(cx: &mut TestAppContext) {
     );
 }
 
-/// `current` can be `DETACHED`; a caller must not move a file the vault does not list.
+/// A detached store has no vault, so `rename` moves nothing.
 #[gpui::test]
 async fn renaming_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
-    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
-    let visual = tree_focused(cx, window, &sidebar);
+    fs.insert_file("/vault/a.md", "alpha");
+    let (_buffer, notes) = detached_store(cx, Arc::clone(&fs) as Arc<dyn Fs>, "/vault/a.md");
 
     assert!(
         !notes
             .update(cx, |notes, cx| notes.rename(EntryId::DETACHED, "plan", cx))
             .await
     );
-    visual.run_until_parked();
+    cx.run_until_parked();
 
-    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md"]);
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("alpha")
+    );
+    assert_eq!(fs.read_to_string(Path::new("/vault/plan.md")), None);
 }
 
 /// While a name is typed, the tree's own keys must reach no handler.

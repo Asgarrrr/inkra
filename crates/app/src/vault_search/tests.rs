@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
-use gpui::{AppContext as _, Entity, Focusable, TestAppContext, VisualTestContext};
+use gpui::{Entity, Focusable, TestAppContext, VisualTestContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::VaultSearchDelegate;
 use super::rows::Row;
-use crate::index::IndexSync;
 use crate::keymap::key_bindings;
 use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::picker::{Picker, PickerDelegate as _};
-use crate::test_support::scan_notes;
+use crate::test_support::{index_sync, scan_notes, vault_of};
 use crate::vault::NoteStore;
 
 mod keys;
@@ -33,10 +32,8 @@ pub(super) fn with_texts(files: &[(&str, &str)]) -> Arc<MemFs> {
 }
 
 pub(super) fn open_over(cx: &mut TestAppContext, notes: Entity<NoteStore>) -> Opened {
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-    let vault = notes
-        .read_with(cx, |notes, _| notes.vault().cloned())
-        .unwrap_or_else(|| panic!("a vault"));
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
     let (picker, visual) = cx.add_window_view(move |window, cx| {
         let delegate = VaultSearchDelegate::new(&links, vault, cx);
         Picker::new(delegate, window, cx)

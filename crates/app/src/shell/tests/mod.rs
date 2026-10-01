@@ -15,8 +15,9 @@ use crate::quick_open::QuickOpenDelegate;
 use crate::sidebar::row_center;
 use crate::test_support;
 
-use super::{AppShell, EditorView, NoteStore, Shown, Sidebar};
+use super::{AppShell, EditorView, NoteStore, Shown};
 use crate::open::{NoteActivated, Open};
+use crate::sidebar::Sidebar;
 
 mod activation;
 mod backlinks;
@@ -48,11 +49,12 @@ mod vault_search;
 
 impl AppShell {
     pub(crate) fn tree_row_names(&self, cx: &gpui::App) -> Vec<String> {
-        self.sidebar.read(cx).row_names()
+        self.panes().sidebar.read(cx).row_names()
     }
 
     pub(crate) fn toggle_tree_row(&mut self, name: &str, cx: &mut gpui::Context<Self>) {
-        self.sidebar
+        self.panes()
+            .sidebar
             .update(cx, |sidebar, cx| sidebar.toggle_named(name, cx));
     }
 
@@ -89,7 +91,7 @@ pub(super) fn open_vault(
         move |window, cx| AppShell::new(None, notes, None, window, cx)
     });
     let sidebar = window
-        .update(cx, |shell, _, _| shell.sidebar.clone())
+        .update(cx, |shell, _, _| shell.panes().sidebar.clone())
         .expect("the shell is open");
     (window, sidebar, notes)
 }
@@ -447,6 +449,6 @@ pub(super) fn selected(
     cx: &mut VisualTestContext,
 ) -> Option<EntryId> {
     window
-        .update(cx, |shell, _, cx| shell.sidebar.read(cx).selected())
+        .update(cx, |shell, _, cx| shell.panes().sidebar.read(cx).selected())
         .unwrap()
 }

@@ -1,23 +1,19 @@
 use std::path::PathBuf;
 
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, Pixels, ScrollHandle, Task, Window,
-    px,
-};
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, ScrollHandle, Task, Window, px};
 use inkra_vault::{EntryId, Kind};
 
-use crate::backlinks::BacklinksPanel;
 use crate::editor::EditorView;
-use crate::index::IndexSync;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
-use crate::sidebar::{Cursor, NewFolder, NewNote, Sidebar};
+use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
 mod modal;
 mod palette;
+mod panes;
 mod parked;
 mod render;
 mod session;
@@ -26,6 +22,7 @@ mod tabs;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
+use panes::VaultPanes;
 use parked::Parked;
 use session::{Restore, SessionFile};
 use tabs::Place;
@@ -83,9 +80,8 @@ pub(crate) struct AppShell {
     /// Written only by `set_shown`. Not `NoteStore::current`, which `trash` clears first.
     shown: Shown,
     notes: Entity<NoteStore>,
-    sidebar: Entity<Sidebar>,
-    links: Entity<IndexSync>,
-    backlinks: Entity<BacklinksPanel>,
+    /// `None` with no vault: the launch settles the mode once.
+    panes: Option<VaultPanes>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
     tabs: Tabs<Place>,
@@ -115,21 +111,14 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), cx));
-        let links = cx.new(|cx| IndexSync::new(&notes, cx));
-        let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), notes.clone(), cx));
-        // A note linking to itself lists itself.
-        cx.subscribe(&backlinks, |shell, _, event: &NoteActivated, cx| {
-            shell.open(event.note, None, event.open, cx);
-        })
-        .detach();
+        let panes = notes
+            .read(cx)
+            .vault()
+            .cloned()
+            .map(|vault| VaultPanes::new(vault, &notes, cx));
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }
-        cx.subscribe(&sidebar, |shell, _sidebar, event: &NoteActivated, cx| {
-            shell.open(event.note, None, event.open, cx);
-        })
-        .detach();
         cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
             eprintln!("save failed for {:?}", event.0);
         })
@@ -154,15 +143,6 @@ impl AppShell {
             },
         )
         .detach();
-        // Tab titles and the saved session follow a rename, as the sidebar's rows do.
-        if let Some(vault) = notes.read(cx).vault().cloned() {
-            cx.observe(&vault, |shell, _, cx| {
-                shell.save_session_later(cx);
-                shell.try_restore(cx);
-                cx.notify();
-            })
-            .detach();
-        }
         let first = notes.read(cx).current();
         let (session, restore) = Self::open_session(session, &notes, cx);
         Self {
@@ -174,9 +154,7 @@ impl AppShell {
             parked: Parked::default(),
             tab_scroll: ScrollHandle::new(),
             notes,
-            sidebar,
-            links,
-            backlinks,
+            panes,
             focus_handle: cx.focus_handle(),
             activation: None,
             modal: None,
@@ -199,7 +177,9 @@ impl AppShell {
 
     /// Read when an open or a tab op begins; a synchronous op reads it in its own update.
     pub(super) fn tree_cursor(&self, cx: &App) -> Cursor {
-        self.sidebar.read(cx).cursor()
+        self.panes
+            .as_ref()
+            .map_or_else(Cursor::default, |panes| panes.sidebar.read(cx).cursor())
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
@@ -220,10 +200,10 @@ impl AppShell {
     }
 
     fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
-        if self.notes.read(cx).vault().is_none() {
+        let Some(panes) = &self.panes else {
             return;
-        }
-        let (links, showing, recent) = (self.links.clone(), self.showing(), self.recent.clone());
+        };
+        let (links, showing, recent) = (panes.links.clone(), self.showing(), self.recent.clone());
         self.toggle_picker_with(
             window,
             cx,
@@ -233,10 +213,10 @@ impl AppShell {
     }
 
     fn search_vault(&mut self, _: &SearchVault, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(vault) = self.notes.read(cx).vault().cloned() else {
+        let Some(panes) = &self.panes else {
             return;
         };
-        let links = self.links.clone();
+        let (links, vault) = (panes.links.clone(), panes.vault.clone());
         self.toggle_picker_with(
             window,
             cx,
@@ -248,16 +228,25 @@ impl AppShell {
     }
 
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
-        self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.start_creating(kind, window, cx);
-        });
+        if let Some(panes) = &self.panes {
+            panes.sidebar.update(cx, |sidebar, cx| {
+                sidebar.start_creating(kind, window, cx);
+            });
+        }
     }
 }
 
 #[cfg(any(test, feature = "shot"))]
 impl AppShell {
+    fn panes(&self) -> &VaultPanes {
+        let Some(panes) = &self.panes else {
+            panic!("a vault is open");
+        };
+        panes
+    }
+
     pub(crate) fn tree_focus_handle(&self, cx: &App) -> FocusHandle {
-        self.sidebar.read(cx).focus_handle(cx)
+        self.panes().sidebar.read(cx).focus_handle(cx)
     }
 }
 

@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{AppContext as _, Focusable, TestAppContext};
+use gpui::{Focusable, TestAppContext};
 use inkra_vault::{Fs, Kind};
 
 use super::background::logged;
@@ -17,7 +17,7 @@ use crate::open::NoteActivated;
 use crate::picker::Picker;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::quick_open::QuickOpenDelegate;
-use crate::test_support::{entry_id, unscanned_notes, vault};
+use crate::test_support::{entry_id, index_sync, unscanned_notes, vault};
 
 /// Holds every scan that starts from now on until the sender is dropped or sent.
 pub(super) fn hold_scans(opened: &mut Opened) -> oneshot::Sender<()> {
@@ -259,7 +259,7 @@ fn a_build_during_the_first_scan_does_not_cancel_it(cx: &mut TestAppContext) {
     let fs = vault(&["plan a.md", "f/plan b.md"]);
     let gate = fs.block_read_dir("/vault/f");
     let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     let (picker, visual) = cx.add_window_view(move |window, cx| {
         let delegate = QuickOpenDelegate::new(&links, None, Vec::new(), cx);
         Picker::new(delegate, window, cx)

@@ -3,18 +3,17 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{AppContext as _, TestAppContext};
+use gpui::TestAppContext;
 use inkra_index::Group;
 use inkra_vault::Fs;
 
 use super::{Opened, empty_text, footer, listed, open, search, with_texts};
-use crate::index::IndexSync;
 use crate::keymap::key_bindings;
 use crate::open::NoteActivated;
 use crate::picker::{Picker, PickerDelegate as _};
 use crate::quick_open::QuickOpenDelegate;
 use crate::quick_open::render::{BUILDS, DRAWS};
-use crate::test_support::{entry_id, unscanned_notes, vault};
+use crate::test_support::{entry_id, index_sync, unscanned_notes, vault};
 use crate::theme;
 
 fn groups(opened: &mut Opened) -> Vec<(String, Group)> {
@@ -147,7 +146,7 @@ fn the_scanning_state_shows_no_footer(cx: &mut TestAppContext) {
     let fs = vault(&["a.md", "f/b.md"]);
     let _gate = fs.block_read_dir("/vault/f");
     let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     let (picker, visual) = cx.add_window_view(move |window, cx| {
         let delegate = QuickOpenDelegate::new(&links, None, Vec::new(), cx);
         Picker::new(delegate, window, cx)

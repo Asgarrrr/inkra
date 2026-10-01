@@ -9,7 +9,7 @@ use std::time::{Instant, SystemTime};
 use futures::FutureExt as _;
 use futures::channel::oneshot;
 use futures::executor::block_on;
-use gpui::{AppContext as _, Entity, Subscription, TestAppContext};
+use gpui::{Entity, Subscription, TestAppContext};
 use inkra_index::live::Status;
 use inkra_index::{NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
@@ -17,7 +17,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp};
 
 use super::{IndexSync, NotesChanged};
-use crate::test_support::{entry_id, named, scan_notes};
+use crate::test_support::{entry_id, index_sync, named, scan_notes, vault_of};
 use crate::vault::{AUTOSAVE_DELAY, NoteSaved, NoteStore};
 
 pub(super) fn indexed_vault(
@@ -29,7 +29,7 @@ pub(super) fn indexed_vault(
         fs.insert_file(format!("/vault/{name}"), *text);
     }
     let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     (fs, notes, links)
 }
 
@@ -277,7 +277,7 @@ fn a_save_during_a_build_is_not_reloaded_when_the_build_applies(cx: &mut TestApp
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "")]);
     cx.run_until_parked();
     let a = entry_id(&notes, cx, "a");
-    let vault = notes.read_with(cx, |notes, _| notes.vault().cloned().expect("a vault"));
+    let vault = vault_of(&notes, cx);
     let path = Path::new("/vault/a.md");
     let before = futures::executor::block_on(fs.load(path))
         .expect("a loads")
@@ -531,55 +531,6 @@ async fn a_write_emits_the_text_it_wrote(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_store_without_a_vault_is_ready(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new()) as Arc<dyn Fs>;
-    let notes = cx.update(|cx| cx.new(|cx| NoteStore::new(fs, None, cx)));
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-
-    assert_eq!(status(cx, &links), Status::Ready);
-}
-
-#[gpui::test]
-fn a_detached_note_emits_nothing(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/loose.md", "");
-    let notes =
-        cx.update(|cx| cx.new(|cx| NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx)));
-    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
-    let stamp = Stamp {
-        mtime: Mtime(SystemTime::UNIX_EPOCH),
-        size: 0,
-    };
-    notes.update(cx, |notes, cx| {
-        notes.adopt(buffer.clone(), PathBuf::from("/loose.md"), stamp, cx);
-    });
-    let seen = Arc::new(std::sync::Mutex::new(0));
-    let sink = Arc::clone(&seen);
-    let _subscription = cx.update(|cx| {
-        cx.subscribe(&notes, move |_, _: &NoteSaved, _| {
-            *sink.lock().expect("unpoisoned") += 1;
-        })
-    });
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-
-    buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| {
-            buffer.insert(ByteOffset(0), "[[x]]");
-        });
-        cx.notify();
-    });
-    cx.executor().advance_clock(AUTOSAVE_DELAY);
-    cx.run_until_parked();
-
-    assert_eq!(
-        fs.read_to_string(Path::new("/loose.md")).as_deref(),
-        Some("[[x]]")
-    );
-    assert_eq!(*seen.lock().expect("unpoisoned"), 0);
-    assert_eq!(status(cx, &links), Status::Ready);
-}
-
-#[gpui::test]
 fn a_load_in_flight_for_a_note_gone_is_not_counted_as_pending(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", ""), ("b.md", "")]);
     cx.run_until_parked();
@@ -787,7 +738,7 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
         .detach();
     cx.run_until_parked();
 
-    let fresh = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let fresh = index_sync(&notes, cx);
     cx.run_until_parked();
 
     assert_eq!(snapshot(cx, &notes, &links), snapshot(cx, &notes, &fresh));

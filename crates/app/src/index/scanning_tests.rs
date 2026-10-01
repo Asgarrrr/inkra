@@ -5,14 +5,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
-use gpui::{AppContext as _, TestAppContext};
+use gpui::TestAppContext;
 use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind, Mtime, Stamp};
 
-use super::IndexSync;
 use super::tests::{backlinks, create, hold_builds, indexed_vault, notes_changed, rescan, status};
-use crate::test_support::{entry_id, unscanned_notes};
+use crate::test_support::{entry_id, index_sync, unscanned_notes};
 use crate::timeline::Timeline;
 use crate::vault::NoteSaved;
 
@@ -22,7 +21,7 @@ fn the_startup_load_runs_one_build(cx: &mut TestAppContext) {
     fs.insert_file("/vault/a.md", "alpha");
     fs.insert_file("/vault/f/b.md", "beta");
     let notes = unscanned_notes(cx, fs as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     assert_eq!(status(cx, &links), Status::Scanning);
     let (changed, _subscription) = notes_changed(cx, &links);
 
@@ -47,7 +46,7 @@ fn a_save_during_the_initial_scan_marks_no_indexed_step(cx: &mut TestAppContext)
     fs.insert_file("/vault/f/b.md", "beta");
     let gate = fs.block_read_dir("/vault/f");
     let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let _links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let _links = index_sync(&notes, cx);
     cx.run_until_parked();
 
     let a = entry_id(&notes, cx, "a");

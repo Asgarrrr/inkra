@@ -1,17 +1,16 @@
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{TestAppContext, prelude::*};
-use inkra_text::Buffer;
+use gpui::TestAppContext;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::vault::store::AUTOSAVE_DELAY;
-use crate::vault::{NoteClosed, NoteStore, TrashFailed};
+use crate::vault::{NoteClosed, TrashFailed};
 
-use crate::test_support::{edit, opened, two_notes};
+use crate::test_support::{detached_store, edit, opened, two_notes};
 
 /// A write pending when the delete is issued would otherwise land after
 /// it and recreate the note; `block_save` makes this reproducible.
@@ -134,15 +133,7 @@ async fn a_failed_trash_keeps_the_note_and_reports_it(cx: &mut TestAppContext) {
 async fn trashing_the_command_line_note_does_nothing(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "alpha");
-    let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md"))).expect("load");
-    let store = cx.update(|cx| {
-        cx.new(|cx| {
-            let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx);
-            let buffer = cx.new(|_| Buffer::new(loaded.text.clone()));
-            store.adopt(buffer, PathBuf::from("/vault/a.md"), loaded.stamp, cx);
-            store
-        })
-    });
+    let (_buffer, store) = detached_store(cx, Arc::clone(&fs) as Arc<dyn Fs>, "/vault/a.md");
 
     assert!(
         !store

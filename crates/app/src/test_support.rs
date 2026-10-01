@@ -41,6 +41,31 @@ pub(crate) fn unscanned_notes(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> Entit
     })
 }
 
+/// One file opened by path, outside any vault; `path` must already be in `fs`.
+pub(crate) fn detached_store(
+    cx: &mut TestAppContext,
+    fs: Arc<dyn Fs>,
+    path: &str,
+) -> (Entity<Buffer>, Entity<NoteStore>) {
+    // Loaded, not fabricated: a fabricated stamp would mismatch on the first write and mint a conflict file.
+    let loaded = block_on(fs.load(Path::new(path))).expect("the caller inserts the file first");
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(loaded.text)));
+    let notes = cx.update(|cx| {
+        let buffer = buffer.clone();
+        cx.new(|cx| NoteStore::detached(fs, buffer, PathBuf::from(path), loaded.stamp, cx))
+    });
+    (buffer, notes)
+}
+
+pub(crate) fn vault_of(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Entity<Vault> {
+    notes.read_with(cx, |notes, _| notes.vault().cloned().expect("a vault"))
+}
+
+pub(crate) fn index_sync(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Entity<IndexSync> {
+    let vault = vault_of(notes, cx);
+    cx.update(|cx| cx.new(|cx| IndexSync::new(notes, vault, cx)))
+}
+
 /// By name, never by index: the comparator decides the order.
 pub(crate) fn entry_id(notes: &Entity<NoteStore>, cx: &mut TestAppContext, name: &str) -> EntryId {
     notes.update(cx, |notes, cx| {

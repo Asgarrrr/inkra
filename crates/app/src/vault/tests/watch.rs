@@ -6,18 +6,18 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Entity, TestAppContext, prelude::*};
+use gpui::{Entity, TestAppContext};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Pending, RelPath};
 
 use crate::index::IndexSync;
-use crate::test_support::{edit, entry_id, named, opened, scan_notes, vault};
+use crate::test_support::{edit, entry_id, index_sync, named, opened, scan_notes, vault};
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
 
 fn indexed(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<IndexSync>) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
-    let links = cx.new(|cx| IndexSync::new(&notes, cx));
+    let links = index_sync(&notes, cx);
     cx.run_until_parked();
     (notes, links)
 }

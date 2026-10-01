@@ -301,7 +301,7 @@ fn the_empty_line_is_hidden_until_the_restore_ends(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let lines = |window: &WindowHandle<AppShell>, cx: &mut VisualTestContext| {
         window
-            .update(cx, |shell, _, cx| shell.empty_lines(cx).to_vec())
+            .update(cx, |shell, _, _| shell.empty_lines().to_vec())
             .unwrap()
     };
     assert_eq!(lines(&window, &mut cx), Vec::<&str>::new());

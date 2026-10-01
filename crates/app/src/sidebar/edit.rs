@@ -252,11 +252,8 @@ impl Sidebar {
     }
 
     fn is_current_name(&self, target: Option<EntryId>, name: &str, cx: &App) -> bool {
-        let Some(vault) = self.notes.read(cx).vault() else {
-            return false;
-        };
         target
-            .and_then(|id| vault.read(cx).entry(id))
+            .and_then(|id| self.vault.read(cx).entry(id))
             .is_some_and(|entry| entry.path.display_name() == name.trim())
     }
 
@@ -273,14 +270,8 @@ impl Sidebar {
             Kind::Note => inkra_vault::note_file_name(name),
             Kind::Dir => name.trim().to_owned(),
         };
-        let Some(vault) = self.notes.read(cx).vault() else {
-            return false;
-        };
-        let vault = vault.read(cx);
-        let Some(parent_path) = parent
-            .and_then(|id| vault.entry(id))
-            .map(|e| e.path.clone())
-        else {
+        let vault = self.vault.read(cx);
+        let Some(parent_path) = parent.and_then(|id| vault.entry(id)).map(|e| &e.path) else {
             return vault.entries().any(|entry| {
                 Some(entry.id) != target && entry.path.depth() == 0 && file_name_of(entry) == wanted
             });
@@ -288,7 +279,7 @@ impl Sidebar {
         vault.entries().any(|entry| {
             Some(entry.id) != target
                 && entry.path.depth() == parent_path.depth() + 1
-                && entry.path.starts_with(&parent_path)
+                && entry.path.starts_with(parent_path)
                 && file_name_of(entry) == wanted
         })
     }

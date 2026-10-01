@@ -9,8 +9,8 @@ use crate::theme;
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
-    pub(super) fn empty_lines(&self, cx: &App) -> &'static [&'static str] {
-        if self.notes.read(cx).vault().is_none() {
+    pub(super) fn empty_lines(&self) -> &'static [&'static str] {
+        if self.panes.is_none() {
             &[
                 "No vault is open.",
                 "Restart with a folder path to open one.",
@@ -22,8 +22,8 @@ impl AppShell {
         }
     }
 
-    fn render_empty(&self, cx: &App) -> impl IntoElement {
-        let lines = self.empty_lines(cx);
+    fn render_empty(&self) -> impl IntoElement {
+        let lines = self.empty_lines();
         div()
             .flex()
             .flex_col()
@@ -86,7 +86,7 @@ impl Render for AppShell {
                     .w(SIDEBAR_WIDTH)
                     .h_full()
                     .bg(theme::sidebar_background())
-                    .child(self.sidebar.clone()),
+                    .children(self.panes.as_ref().map(|panes| panes.sidebar.clone())),
             )
             .child(
                 div()
@@ -102,17 +102,17 @@ impl Render for AppShell {
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
                     .child(div().flex_1().min_h_0().child(match self.editor() {
                         Some(editor) => editor.clone().into_any_element(),
-                        None => self.render_empty(cx).into_any_element(),
+                        None => self.render_empty().into_any_element(),
                     })),
             )
             // Shown for an empty tab too, so a switch does not move the bar by the column's width.
-            .children(self.notes.read(cx).vault().is_some().then(|| {
+            .children(self.panes.as_ref().map(|panes| {
                 div()
                     .debug_selector(|| "backlinks-column".into())
                     .flex_none()
                     .w(BACKLINKS_WIDTH)
                     .h_full()
-                    .child(self.backlinks.clone())
+                    .child(panes.backlinks.clone())
             }))
             .children(self.render_modal(cx))
     }

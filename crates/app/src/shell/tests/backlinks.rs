@@ -44,7 +44,9 @@ fn the_panel_follows_the_note_showing(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let sources = |window: &gpui::WindowHandle<crate::shell::AppShell>, cx: &mut TestAppContext| {
         window
-            .update(cx, |shell, _, cx| shell.backlinks.read(cx).source_names())
+            .update(cx, |shell, _, cx| {
+                shell.panes().backlinks.read(cx).source_names()
+            })
             .expect("the shell is open")
     };
 

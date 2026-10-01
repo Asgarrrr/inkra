@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Window};
-use inkra_index::Resolution;
+use inkra_index::{Resolution, Target};
 use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
@@ -120,14 +120,20 @@ impl AppShell {
     pub(super) fn set_shown(&mut self, shown: Shown, since: Cursor, cx: &mut Context<Self>) {
         self.shown = shown;
         let note = self.showing();
-        // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
         if let Some(id) = note {
             remember(&mut self.recent, id);
-            self.sidebar
-                .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
         }
-        self.backlinks
-            .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+        if let Some(panes) = &self.panes {
+            // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
+            if let Some(id) = note {
+                panes
+                    .sidebar
+                    .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
+            }
+            panes
+                .backlinks
+                .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+        }
         self.save_session_later(cx);
     }
 
@@ -144,8 +150,17 @@ impl AppShell {
 
     /// Resolved against the note showing, before any tab changes; a detached note resolves only URLs.
     pub(super) fn follow(&mut self, link: &Link, open: Open, cx: &mut Context<Self>) {
-        let source = self.showing().unwrap_or(EntryId::DETACHED);
-        match self.links.read(cx).index().resolve_link(source, link) {
+        let resolution = match &self.panes {
+            Some(panes) => {
+                let source = self.showing().unwrap_or(EntryId::DETACHED);
+                panes.links.read(cx).index().resolve_link(source, link)
+            }
+            None => match Target::parse(link) {
+                Target::External(url) => Resolution::External(url),
+                _ => Resolution::Unresolved,
+            },
+        };
+        match resolution {
             Resolution::Note(id) => self.open(id, None, open, cx),
             Resolution::External(url) => cx.open_url(&url),
             Resolution::Unresolved | Resolution::SelfLink => {}
