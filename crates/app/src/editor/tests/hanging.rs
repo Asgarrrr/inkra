@@ -1,17 +1,12 @@
 //! D12: a revealed heading's opening marker hangs left of the text. Headless, an H1 glyph is 20.4 px, so `# ` is 40.8.
 
-use gpui::{Modifiers, Pixels, TestAppContext, point, px};
+use gpui::{Modifiers, TestAppContext, point, px};
 
 use super::geometry::H1_LINE_HEIGHT as H1;
-use super::{at, dispatching};
+use super::{assert_x, at, dispatching};
 use crate::text_input::InputHost;
 
 const H1_GLYPH: f32 = 0.6 * 34.;
-
-fn assert_x(actual: Pixels, expected: f32) {
-    let actual = f32::from(actual);
-    assert!((actual - expected).abs() < 0.01, "{actual} != {expected}");
-}
 
 /// 36 chars fit an H1 row (734.4 px of 756); with `# ` inline, 38 wrapped onto a second.
 #[gpui::test]
@@ -149,7 +144,7 @@ fn the_ime_rectangle_of_a_marker_range_is_in_the_margin(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn a_heading_inside_a_quote_keeps_its_inline_conceal(cx: &mut TestAppContext) {
+fn a_heading_inside_a_quote_keeps_its_inline_conceal_after_the_gutter(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> # q\nx");
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-up right right");
@@ -157,8 +152,8 @@ fn a_heading_inside_a_quote_keeps_its_inline_conceal(cx: &mut TestAppContext) {
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
             assert_eq!(view.cursor(), at(2));
-            assert_eq!(layout.shown(0), "> # q");
-            assert!(layout.x_for_offset(at(2)) > px(0.));
+            assert_eq!(layout.shown(0), "# q");
+            assert_x(layout.x_for_offset(at(2)), 2. * 0.6 * 18.);
         })
         .unwrap();
 }

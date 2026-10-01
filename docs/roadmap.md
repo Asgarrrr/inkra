@@ -154,7 +154,7 @@ Deferred table of its own.
 | Item | Trigger | Estimate |
 |---|---|---|
 | ~~Measure slice~~ | **Done 2026-09-24.** Figures under Editor, Measurements. | — |
-| Checkboxes, a bar for quotes, code-block background with hidden fences | The user asks. Each needs a quad per row. | 1–2 d |
+| Checkboxes, a bar for quotes, code-block background with hidden fences | **Asked 2026-09-30.** Specced in `superpowers/specs/2026-09-30-markdown-blocks-design.md`: a gutter, not only a quad per row. S1 (quote gutters and bars) built on `feat/markdown-blocks-s1`; S2 code blocks and S3 tasks remain. | 4–5 d |
 | ~~Clickable links~~ | **Shipped 2026-09-24**, with `inkra-index` and the backlinks panel. ⌘-click and ⌘↵ follow a link. See `superpowers/specs/2026-09-24-links-and-backlinks-design.md`, whose Deferred table holds what links left out. | — |
 | Inline images | Images need an element beside text. | — |
 

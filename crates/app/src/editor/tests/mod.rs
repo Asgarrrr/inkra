@@ -3,7 +3,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui::{Context, Entity, Subscription, TestAppContext, VisualTestContext, Window, prelude::*};
+use gpui::{
+    Context, Entity, Pixels, Subscription, TestAppContext, VisualTestContext, Window, prelude::*,
+};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::EditorView;
@@ -13,6 +15,7 @@ mod clipboard;
 mod conceal;
 mod dispatch;
 mod follow;
+mod gutter;
 mod hanging;
 mod headings;
 mod margin;
@@ -81,6 +84,11 @@ pub(super) fn tall_document() -> String {
 
 pub(super) fn at(offset: usize) -> ByteOffset {
     ByteOffset(offset)
+}
+
+pub(super) fn assert_x(actual: Pixels, expected: f32) {
+    let actual = f32::from(actual);
+    assert!((actual - expected).abs() < 0.01, "{actual} != {expected}");
 }
 
 /// Written out rather than read back from the view: a derived expectation
