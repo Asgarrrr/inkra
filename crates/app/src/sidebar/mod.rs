@@ -2,17 +2,20 @@ use std::collections::HashSet;
 
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, Styled, Subscription, UniformListScrollHandle, Window, actions,
-    div, px, uniform_list,
+    ParentElement, Render, Styled, Subscription, UniformListScrollHandle, Window, actions, div,
+    uniform_list,
 };
 use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::NoteActivated;
 use crate::theme;
+use crate::ui::UiText;
 use crate::vault::NoteStore;
 
 mod edit;
 mod render;
+#[cfg(test)]
+mod render_tests;
 mod rows;
 #[cfg(test)]
 mod rows_tests;
@@ -31,9 +34,6 @@ use rows::Rows;
 actions!(sidebar, [Trash, SelectPrev, SelectNext, Rename]);
 
 actions!(vault_tree, [NewNote, NewFolder]);
-
-const INDENT_BASE: Pixels = px(8.);
-const INDENT_STEP: Pixels = px(12.);
 
 impl EventEmitter<NoteActivated> for Sidebar {}
 
@@ -125,9 +125,8 @@ impl Render for Sidebar {
                     .map(|rejected| {
                         div()
                             .w_full()
-                            .text_size(theme::UI_TEXT_SIZE)
-                            .line_height(theme::UI_LINE_HEIGHT)
-                            .pl(INDENT_BASE)
+                            .ui_text()
+                            .pl(theme::ROW_INSET)
                             .text_color(theme::rejected_text())
                             .child(rejected.message())
                     }),

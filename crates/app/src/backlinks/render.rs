@@ -7,17 +7,12 @@ use super::{BacklinksPanel, Row};
 use crate::open::{NoteActivated, Open};
 use crate::row_text::styled;
 use crate::theme;
+use crate::ui::{ListItem, UiText, v_flex};
 
 impl BacklinksPanel {
     fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
         let source = row.source;
-        div()
-            .debug_selector(|| format!("backlink-{index}"))
-            .flex()
-            .flex_col()
-            .w_full()
-            .px_2()
-            .pb_2()
+        ListItem::new(("backlink", index))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |_, event: &MouseDownEvent, _, cx| {
@@ -29,15 +24,19 @@ impl BacklinksPanel {
                 }),
             )
             .child(
-                div()
-                    .text_color(theme::sidebar_text())
-                    .child(row.name.clone()),
+                v_flex()
+                    .pb_2()
+                    .child(
+                        div()
+                            .text_color(theme::sidebar_text())
+                            .child(row.name.clone()),
+                    )
+                    .children(row.occurrences.iter().map(|occurrence| {
+                        div()
+                            .text_color(theme::placeholder_text())
+                            .child(styled(&occurrence.context, theme::link_text().into()))
+                    })),
             )
-            .children(row.occurrences.iter().map(|occurrence| {
-                div()
-                    .text_color(theme::placeholder_text())
-                    .child(styled(&occurrence.context, theme::link_text().into()))
-            }))
     }
 }
 
@@ -55,18 +54,17 @@ impl Render for BacklinksPanel {
             .size_full()
             .overflow_y_scroll()
             .bg(theme::sidebar_background())
-            .text_size(theme::UI_TEXT_SIZE)
-            .line_height(theme::UI_LINE_HEIGHT)
+            .ui_text()
             .child(
                 div()
-                    .px_2()
+                    .px(theme::ROW_INSET)
                     .py_1()
                     .text_color(theme::placeholder_text())
                     .child("Backlinks"),
             )
             .children(message.map(|message| {
                 div()
-                    .px_2()
+                    .px(theme::ROW_INSET)
                     .text_color(theme::placeholder_text())
                     .child(message)
             }))

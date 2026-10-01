@@ -255,6 +255,13 @@ impl AppShell {
             .bounds_for_item(ix)
             .map(|bounds| bounds.center())
     }
+
+    /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.
+    pub(crate) fn quick_open_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
+        self.modal_picker::<QuickOpenDelegate>()?
+            .read(cx)
+            .row_center(ix)
+    }
 }
 
 impl Focusable for AppShell {

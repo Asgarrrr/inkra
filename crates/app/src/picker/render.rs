@@ -2,12 +2,13 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, KeyContext, ParentElement,
-    Render, Role, StatefulInteractiveElement, Styled, Window, div, prelude::*, uniform_list,
+    Render, Role, StatefulInteractiveElement, Styled, Window, div, uniform_list,
 };
 
 use super::{Picker, PickerDelegate};
 use crate::open::Open;
 use crate::theme;
+use crate::ui::{ListItem, UiText};
 
 /// Past this the list scrolls.
 const MAX_ROWS: u8 = 10;
@@ -23,25 +24,40 @@ impl<D: PickerDelegate> Picker<D> {
         range
             .map(|ix| {
                 let selected = self.selected == Some(ix);
-                div()
-                    .id(("picker-row", ix))
+                ListItem::new(("picker-row", ix))
                     .role(Role::ListItem)
                     .aria_label(self.delegate.row_label(ix))
-                    .debug_selector(|| format!("picker-row-{ix}"))
-                    // Load-bearing: an `auto` width is clickable only where the text reaches.
-                    .w_full()
-                    .px_2()
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .when(selected, |row| row.bg(theme::selected_row_background()))
+                    .selected(selected)
                     .on_click(cx.listener(move |picker, event: &ClickEvent, _, cx| {
                         // The release's modifiers: a picker row acts at mouse-up, a sidebar row at the press.
                         picker.click(ix, Open::from_click(event.modifiers()), cx);
                     }))
-                    .child(self.delegate.render_row(ix, selected, cx))
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .child(self.delegate.render_row(ix, selected, cx)),
+                    )
                     .into_any_element()
             })
             .collect()
+    }
+}
+
+#[cfg(feature = "shot")]
+impl<D: PickerDelegate> Picker<D> {
+    /// Where row `ix` was drawn last, for a scene to point at; `None` before the list is drawn.
+    pub(crate) fn row_center(&self, ix: f32) -> Option<gpui::Point<gpui::Pixels>> {
+        let list = self.scroll.0.borrow().base_handle.clone();
+        let bounds = list.bounds();
+        // Zero-sized until the list's first prepaint.
+        if bounds.is_empty() {
+            return None;
+        }
+        let top = bounds.top() + list.offset().y;
+        Some(gpui::point(
+            bounds.center().x,
+            top + self.delegate.row_height() * (ix + 0.5),
+        ))
     }
 }
 
@@ -54,7 +70,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
         let shown = u8::try_from(count).unwrap_or(u8::MAX).min(MAX_ROWS);
         let body = if count == 0 {
             div()
-                .px_2()
+                .px(theme::ROW_INSET)
                 .text_color(theme::placeholder_text())
                 .children(self.delegate.empty_text(cx))
                 .into_any_element()
@@ -75,7 +91,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
         let footer = self.delegate.render_footer(cx).map(|footer| {
             div()
                 .debug_selector(|| "picker-footer".into())
-                .px_2()
+                .px(theme::ROW_INSET)
                 .text_color(theme::placeholder_text())
                 .child(footer)
         });
@@ -91,21 +107,20 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .flex_col()
             .w_full()
             .py_1()
-            .text_size(theme::UI_TEXT_SIZE)
-            .line_height(theme::UI_LINE_HEIGHT)
+            .ui_text()
             .text_color(theme::sidebar_text())
             .child(
                 div()
                     .debug_selector(|| "picker-field".into())
                     .relative()
-                    .px_2()
+                    .px(theme::ROW_INSET)
                     .pb_1()
                     .child(self.field.clone())
                     .children(self.query.is_empty().then(|| {
                         div()
                             .absolute()
                             .inset_0()
-                            .px_2()
+                            .px(theme::ROW_INSET)
                             .text_color(theme::placeholder_text())
                             .child(self.delegate.placeholder())
                     })),

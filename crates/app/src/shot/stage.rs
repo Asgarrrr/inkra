@@ -14,6 +14,7 @@ use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
 use crate::restore::{SavedTab, Session};
 use crate::shell::AppShell;
+use crate::ui::Assets;
 
 const VAULT_ROOT: &str = "/vault";
 
@@ -29,7 +30,10 @@ impl Stage {
     /// Both halves or neither: bindings without the `Quit` handler give a
     /// scene a silent no-op where the real app quits.
     pub(crate) fn new() -> Self {
-        let mut cx = VisualTestAppContext::new(gpui_platform::current_platform(false));
+        let mut cx = VisualTestAppContext::with_asset_source(
+            gpui_platform::current_platform(false),
+            Arc::new(Assets),
+        );
         cx.update(|cx| {
             cx.bind_keys(key_bindings());
             cx.on_action(|_: &Quit, cx| cx.quit());
@@ -189,6 +193,13 @@ impl Stage {
         self.settle();
     }
 
+    /// Moves the pointer with no button held, so the row under it shows its hover style.
+    pub(crate) fn hover(&mut self, window: WindowHandle<AppShell>, at: Point<Pixels>) {
+        self.cx
+            .simulate_mouse_move(window.into(), at, None, Modifiers::default());
+        self.settle();
+    }
+
     /// Presses at `from` and moves past gpui's 2 px threshold onto `to`, holding the button: the drag stays on screen.
     pub(crate) fn drag_holding(
         &mut self,
@@ -219,6 +230,19 @@ impl Stage {
             .update(&mut self.cx, |shell, _, _| shell.tab_center(ix))
             .unwrap_or_else(|error| panic!("read tab {ix}: {error}"))
             .unwrap_or_else(|| panic!("tab {ix} is drawn"))
+    }
+
+    pub(crate) fn quick_open_row_center(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        ix: f32,
+    ) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |shell, _, cx| {
+                shell.quick_open_row_center(ix, cx)
+            })
+            .unwrap_or_else(|error| panic!("read quick open's row {ix}: {error}"))
+            .unwrap_or_else(|| panic!("quick open's row {ix} is drawn"))
     }
 
     /// Pixels are device pixels: a 1000x640 window yields 2000x1280 on a 2x display.

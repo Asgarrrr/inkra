@@ -24,6 +24,7 @@ mod test_support;
 mod text_input;
 mod theme;
 mod timeline;
+mod ui;
 mod vault;
 mod vault_search;
 

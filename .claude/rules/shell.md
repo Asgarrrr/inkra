@@ -60,3 +60,6 @@ paths:
   loads every restored note first: every tab's note has a buffer until `NoteClosed`.
 - The session has one writer, `write_session` (its `SessionWriter`), gated on
   `Restore::Done`; arm it with `save_session_later`, never write from elsewhere.
+- A tree, picker or backlink row is a `ui::ListItem`: it owns background, hover and
+  padding; the view attaches handlers, role, labels and content. A caller's
+  `.hover()` trips gpui's "hover style already set" assert.

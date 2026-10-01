@@ -111,7 +111,10 @@ fn open_with_store(
     (sidebar, notes)
 }
 
-fn drawn(cx: &mut TestAppContext, fs: Arc<dyn Fs>) -> (Entity<Sidebar>, VisualTestContext) {
+pub(super) fn drawn(
+    cx: &mut TestAppContext,
+    fs: Arc<dyn Fs>,
+) -> (Entity<Sidebar>, VisualTestContext) {
     let notes = parts(cx, fs);
     let vault = vault_of(&notes, cx);
     let window = cx.add_window(move |_, cx| Sidebar::new(notes, vault, cx));
@@ -271,7 +274,7 @@ fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String>
     })
 }
 
-fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row {
+pub(super) fn row(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, wanted: &str) -> Row {
     sidebar.update(cx, |sidebar, _| {
         sidebar
             .visible_rows()
