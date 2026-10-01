@@ -15,16 +15,9 @@ paths:
   `render_empty` fills the slot. `set_shown` is its one writer. A note leaves
   the tabs only on `NoteClosed`; `TrashFailed` rebinds a `Trashing` tab.
 - Every tab action dismisses the picker first (`dismiss_modal`).
-- Park only in the `leaving` closure of `Tabs::insert` and `Tabs::activate`,
-  and in `land_restore` (`shell/session.rs`), which parks each restored inactive tab;
-  `close`, `commit`, `back` and `forward` keep the plain `capture`: back and
-  forward keep the tab active, so they never park. Unpark every place
-  `activate` and `close` return (`arrive`) and every closed id; a place `back`
-  or `forward` returns is a plain view. Drop a note's entries with
-  `forget_note`, never `tabs.forget` alone. `Tabs` holds no view (I2).
-  `close_tab` unparks the closed id **before** `close` and hands the view to
-  `resolve`: the closed stack keeps plain offsets. `reopen` parks the tab left
-  through `insert`'s closure; its place is a plain view, never `arrive`d.
+- An inactive tab's slot in `Tabs<Place, Parked>` holds its `Parked` view, so
+  each op's closure type picks `Parked::park` or `capture`; bind a `Parked` only
+  through `unpark`, or its anchors leak.
 - A drop in the bar (`move_tab`) calls no closure: it captures, parks and
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not

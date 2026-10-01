@@ -12,6 +12,7 @@ mod closed;
 mod harness;
 mod history;
 mod moving;
+mod parked;
 mod restored;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -55,7 +56,7 @@ fn check_stack<P: Place>(stack: &Stack<P>) {
     );
 }
 
-impl<P: Place> Tabs<P> {
+impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
     /// M1–M3, H1's adjacency, H2, H3, H8, C1, C3.
     fn check(&self) {
         assert!(!self.list.is_empty(), "at least one tab");
@@ -156,8 +157,9 @@ impl Harness {
             }
             Op::Close(ix) => {
                 let id = self.pick(*ix);
-                let (closed, left) =
-                    self.with_leaving(|tabs, leaving| tabs.close(id, leaving, resolved));
+                let (closed, left) = self.with_leaving(|tabs, leaving| {
+                    tabs.close(id, |slot| slot.map_or_else(leaving, resolved))
+                });
                 let closed = closed.expect("a tab closes");
                 let expected = if id == active {
                     left.expect("closing the active tab leaves it")

@@ -59,7 +59,10 @@ impl AppShell {
         let (notes, active) = (self.notes.read(cx), self.active_note());
         self.tabs
             .iter()
-            .map(|tab| tab_title(tab.place().map_or(active, |place| place.note), notes, cx))
+            .map(|tab| {
+                let note = tab.place().map_or(active, inkra_tabs::Place::note);
+                tab_title(note, notes, cx)
+            })
             .collect()
     }
 

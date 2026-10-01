@@ -308,6 +308,15 @@ open three tabs, quit, relaunch.
 - `Restore::Loading` and `Landing` name their task fields: a tuple field held only for its
   `Drop` fails `dead_code`, and lints are not disabled.
 
+## As built (tab views one owner)
+
+Spec: `docs/superpowers/specs/2026-09-30-tab-views-one-owner-design.md`.
+
+- `land_restore` parks nothing after `Tabs::restored`. It hands `restored` a `Vec<Parked>`: one
+  `Parked::new` per inactive tab, and `Parked::default()` at `active`, which `restored` drops.
+  `shell.md`'s `land_restore` exception is gone.
+- `write_session` reads an inactive tab's view with `Parked::peek` on its slot.
+
 ## Deferred
 
 | Item | Trigger |

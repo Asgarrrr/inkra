@@ -248,7 +248,10 @@ pub(super) fn tab_notes(
             let notes = shell
                 .tabs
                 .iter()
-                .map(|tab| tab.place().map_or(shell.active_note(), |place| place.note))
+                .map(|tab| {
+                    tab.place()
+                        .map_or(shell.active_note(), inkra_tabs::Place::note)
+                })
                 .collect();
             (notes, shell.tabs.active_index())
         })
@@ -292,7 +295,8 @@ pub(super) fn text_of(
         .unwrap()
 }
 
-/// H8, T3, I1, I2, and no buffer for a `Trashing` note; T2 holds by construction (`Shown`), T1 by H8.
+/// H8, T3, and no buffer for a `Trashing` note; T2 holds by construction (`Shown`), T1 by H8.
+/// I1 and I2 hold by type, an inactive slot holding the `Parked`; `Tabs::close` panics on a slot that breaks H8.
 pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
         .update(cx, |shell, _, cx| {
@@ -308,21 +312,6 @@ pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
             if let Shown::Trashing(id) = shell.shown {
                 assert!(shell.notes.read(cx).buffer_for(id).is_none(), "Trashing");
             }
-            let inactive_notes = shell
-                .tabs
-                .iter()
-                .filter(|tab| tab.place().is_some_and(|place| place.note.is_some()))
-                .map(inkra_tabs::Tab::id)
-                .collect();
-            assert_eq!(shell.parked.tabs(), inactive_notes, "I1");
-            assert!(
-                shell
-                    .tabs
-                    .iter()
-                    .filter_map(inkra_tabs::Tab::place)
-                    .all(|place| place.view.is_none()),
-                "I2"
-            );
         })
         .unwrap();
 }

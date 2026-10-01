@@ -153,9 +153,11 @@ fn closing_the_active_tab_calls_no_resolve() {
     let mut resolves = 0;
 
     let (closed, left) = harness.with_leaving(|tabs, leaving| {
-        tabs.close(b, leaving, |place| {
-            resolves += 1;
-            place
+        tabs.close(b, |slot| {
+            slot.map_or_else(leaving, |place| {
+                resolves += 1;
+                place
+            })
         })
     });
 
