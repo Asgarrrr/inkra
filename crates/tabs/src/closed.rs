@@ -4,13 +4,13 @@ use crate::history::{HISTORY, Stack};
 use crate::{Place, Tab, TabId, Tabs};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Closed<P> {
-    /// The tab's place, fresh from `leaving` if it was active.
+pub struct Closed<P, Q = P> {
+    /// The plain place the closed stack keeps, from `closing`.
     pub place: P,
     /// Where it stood; an insert there puts it back.
     pub index: usize,
-    /// The tab now active, when the active tab closed.
-    pub shown: Option<(TabId, P)>,
+    /// The tab now active and the place it held, when the active tab closed.
+    pub shown: Option<(TabId, Q)>,
 }
 
 /// A closed tab as `reopen` puts it back (A1 invariants 7, 8).
@@ -29,7 +29,7 @@ impl<P: Place> ClosedTab<P> {
     }
 }
 
-impl<P> Tabs<P> {
+impl<P, Q> Tabs<P, Q> {
     /// Whether `reopen` has a tab to bring back.
     #[must_use]
     pub fn has_closed(&self) -> bool {
@@ -37,26 +37,29 @@ impl<P> Tabs<P> {
     }
 }
 
-impl<P: Place> Tabs<P> {
-    /// The last tab gives way to an empty one with a fresh id: a load keyed by the old id lands nowhere.
+impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
+    /// `closing` gets the closed tab's slot, `None` for the active tab (H8), and returns the plain
+    /// place the closed stack keeps; it runs once, after the tab has left the list, so it must not
+    /// look the tab up. The last tab gives way to an empty one with a fresh id: a load keyed by the
+    /// old id lands nowhere.
     ///
     /// # Panics
-    /// Only on a broken invariant (H8): an inactive tab always holds a place.
+    /// On a broken H8, before `closing` runs: an inactive tab with no slot, or the active tab with
+    /// one.
     pub fn close(
         &mut self,
         id: TabId,
-        leaving: impl FnOnce() -> P,
-        resolve: impl FnOnce(P) -> P,
-    ) -> Option<Closed<P>> {
+        closing: impl FnOnce(Option<Q>) -> P,
+    ) -> Option<Closed<P, Q>> {
         let index = self.index_of(id)?;
         let was_active = id == self.active;
-        let left = was_active.then(|| self.leave_active(leaving).1);
         let tab = self.list.remove(index);
-        let place = match (left, tab.place) {
-            (Some(left), _) => left,
-            (None, Some(stored)) => resolve(stored),
-            (None, None) => panic!("H8: an inactive tab holds a place"),
+        let slot = match (was_active, tab.place) {
+            (true, None) => None,
+            (false, Some(parked)) => Some(parked),
+            _ => panic!("H8: a tab's slot is empty exactly when it is active"),
         };
+        let place = closing(slot);
         self.remember(ClosedTab {
             place: place.clone(),
             index,
@@ -67,7 +70,7 @@ impl<P: Place> Tabs<P> {
         if self.list.is_empty() {
             let fresh = self.fresh_id();
             self.list.push(Tab {
-                place: Some(P::default()),
+                place: Some(Q::default()),
                 ..Tab::new(fresh)
             });
             self.mru.push(fresh);
@@ -87,23 +90,26 @@ impl<P: Place> Tabs<P> {
             shown,
         })
     }
+}
 
+impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
     /// Leaves tab `id` if it is still active: the place left goes on back and forward clears.
     #[must_use]
-    pub fn commit(&mut self, id: TabId, leaving: impl FnOnce() -> P) -> bool {
+    pub fn commit(&mut self, id: TabId, capture: impl FnOnce() -> P) -> bool {
         if id != self.active {
             return false;
         }
-        let (tab, left) = self.leave_active(leaving);
+        let (tab, left) = self.leave_active(capture);
         tab.back.push(left);
         tab.forward.clear();
         true
     }
 
-    /// Reopens the newest closed tab at its old index under a fresh id; `None`, calling no `leaving`, if none.
-    pub fn reopen(&mut self, leaving: impl FnOnce() -> P) -> Option<P> {
+    /// Reopens the newest closed tab at its old index under a fresh id; `None`, calling no `park`,
+    /// if none. The tab left keeps what `park` returns.
+    pub fn reopen(&mut self, park: impl FnOnce() -> Q) -> Option<P> {
         let entry = self.closed.pop_back()?;
-        self.insert(entry.index, leaving);
+        self.insert(entry.index, park);
         let index = self.active_index();
         let tab = &mut self.list[index];
         tab.back = entry.back;

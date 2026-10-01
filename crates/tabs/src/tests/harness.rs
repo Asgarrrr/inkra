@@ -68,7 +68,9 @@ impl Harness {
 
     pub(super) fn close(&mut self, id: TabId) -> Option<Closed<Fake>> {
         let closed = self
-            .with_leaving(|tabs, leaving| tabs.close(id, leaving, resolved))
+            .with_leaving(|tabs, leaving| {
+                tabs.close(id, |slot| slot.map_or_else(leaving, resolved))
+            })
             .0;
         if let Some(Closed {
             shown: Some((_, place)),

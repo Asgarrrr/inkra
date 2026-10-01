@@ -17,7 +17,7 @@ proptest! {
     fn restored_tabs_hold_the_places_in_order_but_the_active_one(
         (places, active) in places(),
     ) {
-        let tabs = Tabs::restored(places.clone(), active);
+        let tabs = Tabs::<Fake>::restored(places.clone(), active);
 
         tabs.check();
         prop_assert_eq!(tabs.active_index(), active);
@@ -33,7 +33,7 @@ proptest! {
     /// A close falls back through the MRU: the active tab, then the rest in bar order.
     #[test]
     fn the_mru_is_the_active_tab_then_bar_order((places, active) in places()) {
-        let tabs = Tabs::restored(places, active);
+        let tabs = Tabs::<Fake>::restored(places, active);
         let mut expected = vec![tabs.active()];
         expected.extend(tabs.iter().map(Tab::id).filter(|&id| id != tabs.active()));
         prop_assert_eq!(&tabs.mru, &expected);
@@ -59,7 +59,7 @@ proptest! {
 
 #[test]
 fn a_restore_has_no_closed_tab() {
-    let tabs = Tabs::restored(vec![Fake::default(), Fake::default()], 1);
+    let tabs = Tabs::<Fake>::restored(vec![Fake::default(), Fake::default()], 1);
     assert!(!tabs.has_closed());
 }
 
@@ -78,7 +78,7 @@ fn a_close_is_remembered() {
 #[test]
 #[should_panic(expected = "out of range")]
 fn a_restore_with_the_active_index_out_of_range_panics() {
-    let _ = Tabs::restored(vec![Fake::default()], 1);
+    let _ = Tabs::<Fake>::restored(vec![Fake::default()], 1);
 }
 
 #[test]

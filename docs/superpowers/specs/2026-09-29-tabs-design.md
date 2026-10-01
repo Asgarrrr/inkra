@@ -783,6 +783,24 @@ replaces the last S6 bullet: `show` no longer forgets a note being trashed.
   `..._keeps_a_pending_new_tab_open`: the new tab lands after the emptied
   tab.
 
+## As built (tab views one owner)
+
+Spec: `docs/superpowers/specs/2026-09-30-tab-views-one-owner-design.md`. It
+replaces A2's parked table and S2's `arrive`.
+
+- **`Tabs<Place, Parked>`.** An inactive tab's slot holds its `Parked`: its
+  note and its anchored view. Stacks and closed entries hold a plain `Place`.
+  The table beside `Tabs` and `AppShell::arrive` are gone.
+- **The closure types pick park or capture.** `insert`, `activate` and
+  `reopen` take `Parked::park`; `commit`, `back` and `forward` take `capture`.
+  `close` takes one `closing`: it captures the active tab and unparks an
+  inactive one. `activate` and `Closed.shown` yield a `Parked`, which binds
+  only through `unpark`.
+- **I1 and I2 hold by type.** `check` no longer asserts them. `Tabs::close`
+  panics on a slot that breaks H8, before `closing` runs.
+- **`Tabs::forget` drops a forgotten note's `Parked`** without forgetting its
+  anchors, as `drop_note` did: the buffer is gone.
+
 ## Risks
 
 - **Prepaint scroll (S0)** moves `Viewport` into the element's prepaint, the

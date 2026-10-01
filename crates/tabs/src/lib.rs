@@ -12,7 +12,7 @@ use history::HISTORY;
 use history::Stack;
 
 /// What a tab shows, as far as history needs it.
-pub trait Place: Default + Clone {
+pub trait Place: Default {
     type Note: Copy + Eq;
     /// `None`: an empty tab. Never pushed on a stack (invariant 5).
     fn note(&self) -> Option<Self::Note>;
@@ -21,16 +21,17 @@ pub trait Place: Default + Clone {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
 
+/// Its stacks hold plain places `P`; its slot, while inactive, holds `Q`.
 #[derive(Debug, Clone)]
-pub struct Tab<P> {
+pub struct Tab<P, Q = P> {
     id: TabId,
     /// `None` exactly for the active tab (H8): its place is on screen, not here.
-    place: Option<P>,
+    place: Option<Q>,
     back: Stack<P>,
     forward: Stack<P>,
 }
 
-impl<P> Tab<P> {
+impl<P, Q> Tab<P, Q> {
     fn new(id: TabId) -> Self {
         Self {
             id,
@@ -45,9 +46,9 @@ impl<P> Tab<P> {
         self.id
     }
 
-    /// `None` for the active tab.
+    /// `None` for the active tab (H8): its place is on screen.
     #[must_use]
-    pub fn place(&self) -> Option<&P> {
+    pub fn place(&self) -> Option<&Q> {
         self.place.as_ref()
     }
 }
@@ -59,8 +60,8 @@ pub enum Direction {
 }
 
 #[derive(Debug)]
-pub struct Tabs<P> {
-    list: Vec<Tab<P>>,
+pub struct Tabs<P, Q = P> {
+    list: Vec<Tab<P, Q>>,
     active: TabId,
     mru: Vec<TabId>,
     next: u64,
@@ -68,13 +69,13 @@ pub struct Tabs<P> {
     closed: VecDeque<ClosedTab<P>>,
 }
 
-impl<P> Default for Tabs<P> {
+impl<P, Q> Default for Tabs<P, Q> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<P> Tabs<P> {
+impl<P, Q> Tabs<P, Q> {
     /// One active tab; the caller shows its place.
     #[must_use]
     pub fn new() -> Self {
@@ -107,7 +108,7 @@ impl<P> Tabs<P> {
     }
 
     #[must_use]
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Tab<P>> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Tab<P, Q>> {
         self.list.iter()
     }
 
@@ -151,13 +152,14 @@ impl<P> Tabs<P> {
     }
 }
 
-impl<P: Place> Tabs<P> {
-    /// Tabs on `places` in bar order; the caller shows `active`'s (H8). Fresh ids, MRU the active first.
+impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
+    /// Tabs on `places` in bar order; the caller shows `active`'s (H8), and its `Q` is dropped.
+    /// Fresh ids, MRU the active first.
     ///
     /// # Panics
     /// If `places` is empty or `active` is out of range.
     #[must_use]
-    pub fn restored(places: Vec<P>, active: usize) -> Self {
+    pub fn restored(places: Vec<Q>, active: usize) -> Self {
         assert!(
             active < places.len(),
             "active tab {active} out of range of {} places",
@@ -191,9 +193,10 @@ impl<P: Place> Tabs<P> {
         tabs
     }
 
-    /// Opens a new tab at `at`, clamped to the bar, and activates it; the caller shows its place.
-    pub fn insert(&mut self, at: usize, leaving: impl FnOnce() -> P) -> TabId {
-        let (tab, left) = self.leave_active(leaving);
+    /// Opens a new tab at `at`, clamped to the bar, and activates it; the tab left keeps what
+    /// `park` returns.
+    pub fn insert(&mut self, at: usize, park: impl FnOnce() -> Q) -> TabId {
+        let (tab, left) = self.leave_active(park);
         tab.place = Some(left);
         let id = self.fresh_id();
         self.list.insert(at.min(self.list.len()), Tab::new(id));
@@ -202,13 +205,14 @@ impl<P: Place> Tabs<P> {
         id
     }
 
-    /// Returns the arriving tab's place, or `None` if `id` is active or no tab.
-    pub fn activate(&mut self, id: TabId, leaving: impl FnOnce() -> P) -> Option<P> {
+    /// The arriving tab's parked place; `None`, calling no `park`, if `id` is active or no tab.
+    #[must_use]
+    pub fn activate(&mut self, id: TabId, park: impl FnOnce() -> Q) -> Option<Q> {
         if id == self.active {
             return None;
         }
         let index = self.index_of(id)?;
-        let (tab, left) = self.leave_active(leaving);
+        let (tab, left) = self.leave_active(park);
         tab.place = Some(left);
         self.active = id;
         self.mru.retain(|&other| other != id);
@@ -216,10 +220,11 @@ impl<P: Place> Tabs<P> {
         self.list[index].place.take()
     }
 
-    // The one caller of `leaving`: it may have side effects, so it runs once per real leave.
-    fn leave_active(&mut self, leaving: impl FnOnce() -> P) -> (&mut Tab<P>, P) {
+    // The one caller of `park` and `capture`: they may have side effects, so each runs once per
+    // real leave.
+    fn leave_active<R>(&mut self, leave: impl FnOnce() -> R) -> (&mut Tab<P, Q>, R) {
         let index = self.active_index();
-        (&mut self.list[index], leaving())
+        (&mut self.list[index], leave())
     }
 
     fn fresh_id(&mut self) -> TabId {

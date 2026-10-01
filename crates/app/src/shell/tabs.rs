@@ -56,27 +56,11 @@ pub(super) fn capture(shown: &Shown, cx: &mut App) -> Place {
     }
 }
 
-/// As `capture`, for a tab left inactive: its view goes to `parked`, never into `Tabs` (I2).
-fn park(parked: &mut Parked, tab: TabId, shown: &Shown, cx: &mut App) -> Place {
-    let Some(note) = shown.note() else {
-        return Place::default();
-    };
-    let view = shown
-        .bound()
-        .map(|bound| bound.editor.update(cx, |editor, cx| editor.park(cx)));
-    parked.park(tab, note, view);
-    Place {
-        note: Some(note),
-        view: None,
-    }
-}
-
 impl AppShell {
     pub(super) fn new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
-        let (at, left) = (self.tabs.active_index() + 1, self.tabs.active());
-        self.tabs
-            .insert(at, || park(&mut self.parked, left, &self.shown, cx));
+        let at = self.tabs.active_index() + 1;
+        self.tabs.insert(at, || Parked::park(&self.shown, cx));
         self.show_place(Place::default(), window, cx);
         self.keep_active_tab_visible();
     }
@@ -98,7 +82,7 @@ impl AppShell {
                     return;
                 }
                 shell.tabs.insert(shell.tabs.active_index() + 1, || {
-                    park(&mut shell.parked, source, &shell.shown, cx)
+                    Parked::park(&shell.shown, cx)
                 });
                 shell.land(id, buffer, at, since, window, cx);
                 shell.keep_active_tab_visible();
@@ -119,19 +103,17 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     pub(super) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        // Plain offsets: the closed stack keeps no anchors (A2). `None` for the active tab or no tab (I1).
-        let view = self.parked.unpark(id, cx);
-        let closed = self.tabs.close(
-            id,
-            || capture(&self.shown, cx),
-            |place| Place { view, ..place },
-        );
+        // Plain offsets: the closed stack keeps no anchors (A2).
+        let closed = self.tabs.close(id, |slot| match slot {
+            None => capture(&self.shown, cx),
+            Some(parked) => parked.unpark(cx),
+        });
         if let Some(Closed {
-            shown: Some((shown, place)),
+            shown: Some((_, parked)),
             ..
         }) = closed
         {
-            let place = self.arrive(shown, place, cx);
+            let place = parked.unpark(cx);
             self.show_place(place, window, cx);
         } else {
             cx.notify();
@@ -140,7 +122,7 @@ impl AppShell {
         self.save_session_later(cx);
     }
 
-    /// Parks the tab left, as `new_tab`; the place arriving holds a plain view, so no `arrive`.
+    /// Parks the tab left, as `new_tab`; the place arriving is plain, from the closed stack.
     pub(super) fn reopen_closed_tab(
         &mut self,
         _: &ReopenClosedTab,
@@ -148,10 +130,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_modal(window, cx);
-        let left = self.tabs.active();
-        let arriving = self
-            .tabs
-            .reopen(|| park(&mut self.parked, left, &self.shown, cx));
+        let arriving = self.tabs.reopen(|| Parked::park(&self.shown, cx));
         if let Some(place) = arriving {
             self.show_place(place, window, cx);
             self.keep_active_tab_visible();
@@ -208,12 +187,9 @@ impl AppShell {
     }
 
     pub(super) fn activate_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        let left = self.tabs.active();
-        let arriving = self
-            .tabs
-            .activate(id, || park(&mut self.parked, left, &self.shown, cx));
-        if let Some(place) = arriving {
-            let place = self.arrive(id, place, cx);
+        let arriving = self.tabs.activate(id, || Parked::park(&self.shown, cx));
+        if let Some(parked) = arriving {
+            let place = parked.unpark(cx);
             self.show_place(place, window, cx);
         }
         self.keep_active_tab_visible();
@@ -273,18 +249,11 @@ impl AppShell {
         }
     }
 
-    /// Empties every tab on `id` and drops its parked views; returns whether the active tab was one.
+    /// Empties every tab on `id`, dropping its parked views; returns whether the active tab was one.
     pub(super) fn forget_note(&mut self, id: EntryId) -> bool {
         let active = self.active_note() == Some(id);
-        self.parked.drop_note(id);
         self.tabs.forget(id);
         active
-    }
-
-    /// The place `Tabs` hands back, with the view its tab parked, resolved now.
-    fn arrive(&mut self, tab: TabId, mut place: Place, cx: &mut App) -> Place {
-        place.view = self.parked.unpark(tab, cx);
-        place
     }
 
     /// After every change to the tab set or the active tab: a close to its left shifts it too.

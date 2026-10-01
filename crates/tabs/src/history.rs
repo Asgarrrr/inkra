@@ -8,7 +8,7 @@ use crate::{Place, Tab, Tabs};
 pub(crate) const HISTORY: usize = 1024;
 
 /// The stack a walk pops from, then the stack it pushes the place left on.
-type Walk<P> = fn(&mut Tab<P>) -> (&mut Stack<P>, &mut Stack<P>);
+type Walk<P, Q> = fn(&mut Tab<P, Q>) -> (&mut Stack<P>, &mut Stack<P>);
 
 /// Oldest first; no empty place (H2) and no two adjacent entries on one note (H1).
 #[derive(Debug, Clone)]
@@ -51,15 +51,16 @@ impl<P: Place> Stack<P> {
     }
 }
 
-impl<P: Place> Tabs<P> {
-    /// The newest place behind on another note than `showing`; `None`, calling no `leaving`, if none.
-    pub fn back(&mut self, showing: Option<P::Note>, leaving: impl FnOnce() -> P) -> Option<P> {
-        self.walk(showing, leaving, |tab| (&mut tab.back, &mut tab.forward))
+impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
+    /// The newest place behind on another note than `showing`; `None`, calling no `capture`, if
+    /// none.
+    pub fn back(&mut self, showing: Option<P::Note>, capture: impl FnOnce() -> P) -> Option<P> {
+        self.walk(showing, capture, |tab| (&mut tab.back, &mut tab.forward))
     }
 
     /// As `back`, the other way.
-    pub fn forward(&mut self, showing: Option<P::Note>, leaving: impl FnOnce() -> P) -> Option<P> {
-        self.walk(showing, leaving, |tab| (&mut tab.forward, &mut tab.back))
+    pub fn forward(&mut self, showing: Option<P::Note>, capture: impl FnOnce() -> P) -> Option<P> {
+        self.walk(showing, capture, |tab| (&mut tab.forward, &mut tab.back))
     }
 
     /// Drops `note` from every inactive tab, closed tab and stack; the active tab's place is the caller's.
@@ -68,7 +69,7 @@ impl<P: Place> Tabs<P> {
             if let Some(place) = &mut tab.place
                 && place.note() == Some(note)
             {
-                *place = P::default();
+                *place = Q::default();
             }
             tab.back.forget(note);
             tab.forward.forget(note);
@@ -83,16 +84,16 @@ impl<P: Place> Tabs<P> {
         self.closed.retain(|entry| !entry.is_blank());
     }
 
-    // Pops before `leaving` runs: it seals an undo group, so it runs only when a place arrives.
+    // Pops before `capture` runs: it seals an undo group, so it runs only when a place arrives.
     fn walk(
         &mut self,
         showing: Option<P::Note>,
-        leaving: impl FnOnce() -> P,
-        stacks: Walk<P>,
+        capture: impl FnOnce() -> P,
+        stacks: Walk<P, Q>,
     ) -> Option<P> {
         let index = self.active_index();
         let arriving = stacks(&mut self.list[index]).0.pop(showing)?;
-        let (tab, left) = self.leave_active(leaving);
+        let (tab, left) = self.leave_active(capture);
         stacks(tab).1.push(left);
         Some(arriving)
     }

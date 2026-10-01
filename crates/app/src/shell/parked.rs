@@ -1,47 +1,58 @@
-//! The views of inactive tabs, kept as anchors so edits elsewhere move them (tabs spec, A2).
-
-use std::collections::HashMap;
+//! The place an inactive tab holds in `Tabs`: its view kept as anchors so edits elsewhere move it (tabs spec, A2).
 
 use gpui::App;
-use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
+use super::Shown;
+use super::tabs::Place;
 use crate::editor::{ParkedView, ViewState};
 
-/// An entry for a tab iff it is inactive and shows a note (I1); no view if its note was being trashed.
+/// Not `Clone`, and bound only through `unpark`: its anchors resolve once.
+#[must_use]
 #[derive(Default)]
-pub(super) struct Parked(HashMap<TabId, (EntryId, Option<ParkedView>)>);
+pub(super) struct Parked {
+    note: Option<EntryId>,
+    view: Option<ParkedView>,
+}
 
-impl Parked {
-    /// # Panics
-    /// If `tab` is already parked: its anchors would never be forgotten.
-    pub(super) fn park(&mut self, tab: TabId, note: EntryId, view: Option<ParkedView>) {
-        let previous = self.0.insert(tab, (note, view));
-        assert!(previous.is_none(), "tab {tab:?} parked twice");
-    }
+impl inkra_tabs::Place for Parked {
+    type Note = EntryId;
 
-    /// Resolves and forgets the tab's anchors; `None` if it parked no view.
-    pub(super) fn unpark(&mut self, tab: TabId, cx: &mut App) -> Option<ViewState> {
-        self.0
-            .remove(&tab)
-            .and_then(|(_, view)| view)
-            .map(|view| view.unpark(cx))
-    }
-
-    /// The tab's view where its anchors are now, forgetting none; `None` if it parked no view.
-    pub(super) fn peek(&self, tab: TabId, cx: &App) -> Option<ViewState> {
-        self.0.get(&tab)?.1.as_ref().map(|view| view.peek(cx))
-    }
-
-    /// Drops every entry on `note`, whose buffer closed, without forgetting its anchors.
-    pub(super) fn drop_note(&mut self, note: EntryId) {
-        self.0.retain(|_, (entry, _)| *entry != note);
+    fn note(&self) -> Option<EntryId> {
+        self.note
     }
 }
 
-#[cfg(test)]
 impl Parked {
-    pub(super) fn tabs(&self) -> std::collections::HashSet<TabId> {
-        self.0.keys().copied().collect()
+    /// A place on `note`, its view already anchored; `None` if its note was being trashed.
+    pub(super) fn new(note: EntryId, view: Option<ParkedView>) -> Self {
+        Self {
+            note: Some(note),
+            view,
+        }
+    }
+
+    /// The active tab's place, its view anchored; seals the undo group (A3).
+    pub(super) fn park(shown: &Shown, cx: &mut App) -> Self {
+        let Some(note) = shown.note() else {
+            return Self::default();
+        };
+        let view = shown
+            .bound()
+            .map(|bound| bound.editor.update(cx, |editor, cx| editor.park(cx)));
+        Self::new(note, view)
+    }
+
+    /// Resolves and forgets the anchors: the plain place to bind.
+    pub(super) fn unpark(self, cx: &mut App) -> Place {
+        Place {
+            note: self.note,
+            view: self.view.map(|view| view.unpark(cx)),
+        }
+    }
+
+    /// The view where its anchors are now, forgetting none (restore-tabs spec, R5).
+    pub(super) fn peek(&self, cx: &App) -> Option<ViewState> {
+        self.view.as_ref().map(|view| view.peek(cx))
     }
 }

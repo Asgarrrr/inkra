@@ -84,9 +84,7 @@ pub(crate) struct AppShell {
     panes: Option<VaultPanes>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
-    tabs: Tabs<Place>,
-    /// The views of inactive tabs showing a note; changed only by `park`, `unpark` and `drop_note`.
-    parked: Parked,
+    tabs: Tabs<Place, Parked>,
     /// The bar's horizontal scroll, moved to the active tab on every switch.
     tab_scroll: ScrollHandle,
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
@@ -151,7 +149,6 @@ impl AppShell {
                 Shown::Bound(Bound { note, editor })
             }),
             tabs: Tabs::new(),
-            parked: Parked::default(),
             tab_scroll: ScrollHandle::new(),
             notes,
             panes,

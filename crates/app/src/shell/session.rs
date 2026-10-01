@@ -4,10 +4,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{App, AppContext as _, Context, Entity, Subscription, Task, Window};
+use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
 use inkra_text::Buffer;
 
-use super::tabs::Place;
+use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ParkedView;
 use crate::restore::{self, Plan, Restored, Session, SessionWriter};
@@ -104,7 +105,7 @@ impl AppShell {
             return None;
         }
         let session = self.session.as_mut()?;
-        let (shown, parked) = (&self.shown, &self.parked);
+        let shown = &self.shown;
         let notes = self.notes.read(cx);
         let vault = notes.vault()?.read(cx);
         // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
@@ -112,7 +113,7 @@ impl AppShell {
             None => shown.bound().map_or((None, None), |bound| {
                 (Some(bound.note), Some(bound.editor.read(cx).view_state()))
             }),
-            Some(place) => (place.note, parked.peek(tab.id(), cx)),
+            Some(parked) => (parked.note(), parked.peek(cx)),
         });
         session
             .writer
@@ -193,25 +194,18 @@ impl AppShell {
         else {
             return;
         };
-        let mut notes: Vec<_> = parked.iter().map(|arrival| arrival.note).collect();
-        notes.insert(active, shown.note);
-        let places = notes
+        let mut places: Vec<_> = parked
             .into_iter()
-            .map(|note| Place {
-                note: Some(note),
-                view: None,
+            .map(|arrival| {
+                let view = arrival
+                    .view
+                    .map(|view| ParkedView::new(arrival.buffer, view, cx));
+                Parked::new(arrival.note, view)
             })
             .collect();
+        // `restored` drops the active entry: `bind` shows it, and a default one holds no anchor.
+        places.insert(active, Parked::default());
         self.tabs = Tabs::restored(places, active);
-        let active = self.tabs.active();
-        let inactive = self.tabs.iter().filter(|tab| tab.id() != active);
-        for (tab, arrival) in inactive.zip(parked) {
-            // The one park outside `insert`'s and `activate`'s `leaving` (restore-tabs spec, R7).
-            let view = arrival
-                .view
-                .map(|view| ParkedView::new(arrival.buffer, view, cx));
-            self.parked.park(tab.id(), arrival.note, view);
-        }
         let since = self.tree_cursor(cx);
         self.bind(shown.note, shown.buffer, shown.view, since, cx);
         self.focus_note_from_root(window, cx);
