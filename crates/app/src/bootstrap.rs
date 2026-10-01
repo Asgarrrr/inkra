@@ -16,6 +16,7 @@ use crate::keymap::key_bindings;
 use crate::restore::session_file;
 use crate::shell::AppShell;
 use crate::timeline::{Step, Timeline};
+use crate::ui::Assets;
 use crate::vault::NoteStore;
 
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
@@ -85,7 +86,8 @@ fn launch() -> Result<Launch, String> {
 
 pub fn run() {
     let started = Instant::now();
-    gpui_platform::application().run(move |cx: &mut App| {
+    let app = gpui_platform::application().with_assets(Assets);
+    app.run(move |cx: &mut App| {
         cx.set_global(Timeline::new(started));
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());

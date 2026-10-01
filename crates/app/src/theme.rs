@@ -74,9 +74,27 @@ pub(crate) fn cursor() -> Rgba {
     rgba(0x4ea1ffff)
 }
 
+/// A white overlay, so it reads on any surface: #2d2d2d on the sidebar, #39393a on a modal.
 pub(crate) fn selected_row_background() -> Rgba {
-    rgb(0x2d2d2d)
+    rgba(0xffffff17)
 }
+
+/// A white overlay, fainter than selection on any surface: #232323 on the sidebar, #2f2f30 on a modal.
+pub(crate) fn row_hover_background() -> Rgba {
+    rgba(0xffffff0c)
+}
+
+pub(crate) fn icon_muted() -> Rgba {
+    rgb(0x8a8a8a)
+}
+
+pub(crate) const ICON_SIZE: Pixels = px(14.);
+
+/// A list item's left and right padding.
+pub(crate) const ROW_INSET: Pixels = px(8.);
+
+/// One level of the tree.
+pub(crate) const INDENT_STEP: Pixels = px(12.);
 
 pub(crate) fn modal_background() -> Rgba {
     rgb(0x252526)

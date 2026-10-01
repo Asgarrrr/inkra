@@ -2,6 +2,7 @@
 
 mod command_palette;
 mod gone;
+mod hover;
 mod markdown_blocks;
 mod quick_open;
 mod reload;
@@ -146,7 +147,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-vault",
-        shows: "the tree: directories first, indents, a nested note",
+        shows: "the tree: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
         open: sidebar_vault,
     },
     Scene {
@@ -173,6 +174,16 @@ const CATALOGUE: &[Scene] = &[
         name: "sidebar-dirty",
         shows: "the dirty dot on a note edited but not written",
         open: sidebar_dirty,
+    },
+    Scene {
+        name: "sidebar-hover",
+        shows: "the pointer on `index`, an unselected row: the hover background, fainter than the selected `projects`",
+        open: hover::sidebar,
+    },
+    Scene {
+        name: "sidebar-hover-selected",
+        shows: "the pointer on the selected `index`: it keeps the selected background, no hover colour over it",
+        open: hover::sidebar_selected,
     },
     Scene {
         name: "sidebar-root-only",
@@ -213,6 +224,11 @@ const CATALOGUE: &[Scene] = &[
         name: "quick-open-results",
         shows: "cmd-p over the editor: name rows then text rows, word starts lit, a dimmed second line under each, folders cut from the start",
         open: quick_open::results,
+    },
+    Scene {
+        name: "picker-hover",
+        shows: "quick open's results with the pointer on row 2: the hover background there, row 0 still selected",
+        open: hover::picker,
     },
     Scene {
         name: "quick-open-groups",

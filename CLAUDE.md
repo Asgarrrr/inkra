@@ -76,6 +76,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
   - a colour or text size → `app/src/theme.rs`, never a literal
   - network → `app`, until a crate earns it
+  - a reusable piece of chrome (row, icon, button) → `app/src/ui/`; a view composes it and keeps its own handlers
 - `inkra-app` is a library with two entry points (`main.rs`, `examples/shot.rs`).
   Views stay `pub(crate)`. An example touching a feature-gated module needs
   `required-features`, or `cargo test` breaks.
@@ -171,6 +172,8 @@ Read the spec before changing its area:
   `Place`, per-tab history, parked anchors, one rebound `EditorView`
 - `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
   its one writer and throttle, `Restore`'s states, the landing predicate
+- `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
+  `Icon`, `Assets`), row overlays, Lucide icons; the chrome slices
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
