@@ -19,7 +19,7 @@ fn a_sidebar_open_before_the_walk_wins(cx: &mut TestAppContext) {
 
     let a = id(&window, &mut cx, "a");
     let sidebar = window
-        .update(&mut cx, |shell, _, _| shell.sidebar.clone())
+        .update(&mut cx, |shell, _, _| shell.panes().sidebar.clone())
         .unwrap();
     sidebar.update(&mut cx, |_, cx| {
         cx.emit(NoteActivated {

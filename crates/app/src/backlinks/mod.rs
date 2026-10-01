@@ -1,13 +1,12 @@
 //! The notes linking to the one showing, beside the editor.
 
 use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Vault};
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
 use crate::open::NoteActivated;
 use crate::row_text::LitText;
-use crate::vault::NoteStore;
 
 mod render;
 #[cfg(test)]
@@ -17,7 +16,7 @@ impl EventEmitter<NoteActivated> for BacklinksPanel {}
 
 pub(crate) struct BacklinksPanel {
     links: Entity<IndexSync>,
-    notes: Entity<NoteStore>,
+    vault: Entity<Vault>,
     note: Option<EntryId>,
     /// Rebuilt when the index or the note changes, never in a draw: `backlinks` walks every
     /// link sharing the note's name.
@@ -46,7 +45,7 @@ struct Occurrence {
 impl BacklinksPanel {
     pub(crate) fn new(
         links: Entity<IndexSync>,
-        notes: Entity<NoteStore>,
+        vault: Entity<Vault>,
         cx: &mut Context<Self>,
     ) -> Self {
         // On a build applying, not on the vault's notify, so names and rows come from one table.
@@ -56,7 +55,7 @@ impl BacklinksPanel {
         ];
         Self {
             links,
-            notes,
+            vault,
             note: None,
             rows: Vec::new(),
             building: false,
@@ -85,10 +84,10 @@ impl BacklinksPanel {
         let links = self.links.read(cx);
         let building = !links.status().is_ready();
         self.watch.seen(links);
-        let vault = self.notes.read(cx).vault().map(|vault| vault.read(cx));
+        let vault = self.vault.read(cx);
         let name = |id: EntryId| {
             vault
-                .and_then(|vault| vault.entry(id))
+                .entry(id)
                 .map(|entry| one_line(&entry.path.display_name()).into_owned())
         };
         let rows: Vec<Row> = self

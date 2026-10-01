@@ -50,7 +50,7 @@ type Hold = futures::future::Shared<futures::channel::oneshot::Receiver<()>>;
 
 pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
-    vault: Option<Entity<Vault>>,
+    vault: Entity<Vault>,
     live: LiveIndex,
     /// `simulate_load`'s loads, added to the index's revision.
     #[cfg(test)]
@@ -65,17 +65,20 @@ pub(crate) struct IndexSync {
     /// A build waits for it before it starts, so a test can hold one in flight.
     #[cfg(test)]
     hold: Option<Hold>,
-    _subscriptions: Vec<Subscription>,
+    _subscriptions: [Subscription; 2],
 }
 
 impl IndexSync {
-    pub(crate) fn new(notes: &Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        notes: &Entity<NoteStore>,
+        vault: Entity<Vault>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let fs = notes.read(cx).fs();
-        let vault = notes.read(cx).vault().cloned();
-        let mut subscriptions = vec![cx.subscribe(notes, Self::saved)];
-        if let Some(vault) = &vault {
-            subscriptions.push(cx.observe(vault, |this, _, cx| this.reconcile(cx)));
-        }
+        let subscriptions = [
+            cx.subscribe(notes, Self::saved),
+            cx.observe(&vault, |this, _, cx| this.reconcile(cx)),
+        ];
         let (landed, arrivals) = unbounded();
         // Detached: it holds only a weak handle, so it ends when this entity does.
         cx.spawn(async move |this, cx| Self::drain(this, arrivals, cx).await)
@@ -119,30 +122,21 @@ impl IndexSync {
         self.live.index()
     }
 
-    /// `Ready` without a vault: nothing will ever load.
     pub(crate) fn status(&self) -> Status {
-        match self.vault {
-            Some(_) => self.live.status(),
-            None => Status::Ready,
-        }
+        self.live.status()
     }
 
-    /// Runs one timed turn and its effects; `None` without a vault.
-    fn turn<R>(
-        &mut self,
-        cx: &mut Context<Self>,
-        inputs: impl FnOnce(&mut Turn<'_>) -> R,
-    ) -> Option<R> {
-        let vault = self.vault.as_ref()?;
+    /// Runs one timed turn and its effects.
+    fn turn<R>(&mut self, cx: &mut Context<Self>, inputs: impl FnOnce(&mut Turn<'_>) -> R) -> R {
         let started = Instant::now();
-        let (result, effects) = self.live.turn(vault.read(cx), inputs);
+        let (result, effects) = self.live.turn(self.vault.read(cx), inputs);
         let indexed = effects.indexed;
         self.run(effects, cx);
         Timeline::turn(started.elapsed(), cx);
         if indexed {
             self.mark_indexed(cx);
         }
-        Some(result)
+        result
     }
 
     /// Runs a turn's effects; the `Indexed` mark stays with `turn`, outside the timing.
@@ -217,15 +211,13 @@ impl IndexSync {
     /// Never queued: a write needs no load and must not wait behind the startup queue.
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
         let (id, modified) = (event.id, event.stamp.mtime);
-        let Some(ticket) = self.turn(cx, |turn| turn.saved(id, modified)) else {
-            return;
-        };
+        let ticket = self.turn(cx, |turn| turn.saved(id, modified));
         let text = Arc::clone(&event.text);
         let parsed = cx.background_spawn(async move { NoteContent::parse(text, modified) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
             let _ = this.update(cx, |this, cx| {
-                this.turn(cx, |turn| turn.landed(ticket, Ok(content)))
+                this.turn(cx, |turn| turn.landed(ticket, Ok(content)));
             });
         })
         .detach();

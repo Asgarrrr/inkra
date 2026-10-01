@@ -1,9 +1,13 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{TestAppContext, VisualTestContext, WindowHandle};
-use inkra_vault::Fs;
+use gpui::{
+    Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
+};
 use inkra_vault::mem_fs::MemFs;
+use inkra_vault::{EntryId, Fs};
 
+use crate::bootstrap::{Launch, root};
 use crate::editor::LinkFollowed;
 use crate::keymap::key_bindings;
 use crate::open::Open;
@@ -173,4 +177,58 @@ fn a_relative_link_in_a_new_tab_resolves_from_the_note_left(cx: &mut TestAppCont
     assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
     assert_eq!(shown_text(&window, cx), "gamma");
     check(&window, cx);
+}
+
+/// `/notes/a.md` launched by path beside a `b.md`, its editor focused and its caret at 0.
+fn detached(cx: &mut TestAppContext, text: &str) -> (WindowHandle<AppShell>, VisualTestContext) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/notes/a.md", text);
+    fs.insert_file("/notes/b.md", "beta");
+    let loaded = futures::executor::block_on(fs.load(Path::new("/notes/a.md"))).unwrap();
+    let launch = Launch::Note(PathBuf::from("/notes/a.md"), loaded.text, loaded.stamp);
+    let window = cx
+        .update(|cx| {
+            let bounds = Bounds::maximized(None, cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| root(fs as Arc<dyn Fs>, launch, window, cx),
+            )
+        })
+        .unwrap();
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    window
+        .update(&mut visual, |shell, window, cx| {
+            window.focus(&shell.focus_handle(cx), cx);
+        })
+        .unwrap();
+    visual.simulate_keystrokes("cmd-up");
+    (window, visual)
+}
+
+#[gpui::test]
+fn a_url_in_a_detached_note_opens_outside_the_app(cx: &mut TestAppContext) {
+    let (window, mut visual) = detached(cx, "[x](https://x.org/p)");
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(visual.opened_url().as_deref(), Some("https://x.org/p"));
+    assert_eq!(showing(&window, &mut visual), Some(EntryId::DETACHED));
+}
+
+#[gpui::test]
+fn a_wikilink_in_a_detached_note_changes_nothing(cx: &mut TestAppContext) {
+    let (window, mut visual) = detached(cx, "[[b]]");
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(visual.opened_url(), None);
+    assert_eq!(showing(&window, &mut visual), Some(EntryId::DETACHED));
+    assert_eq!(tab_notes(&window, &mut visual).0.len(), 1);
 }

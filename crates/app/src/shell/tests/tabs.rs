@@ -522,7 +522,7 @@ fn every_tab_key_dismisses_an_open_picker_first(cx: &mut TestAppContext) {
 fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestAppContext) {
     let (window, mut cx, a, _b) = tall_notes(cx);
     let sidebar = window
-        .update(&mut cx, |shell, _, _| shell.sidebar.clone())
+        .update(&mut cx, |shell, _, _| shell.panes().sidebar.clone())
         .unwrap();
     activate(&sidebar, &mut cx, a);
     cx.run_until_parked();

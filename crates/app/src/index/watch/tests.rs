@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use gpui::{AppContext as _, Entity, Task, TestAppContext};
+use gpui::{Entity, Task, TestAppContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::{IndexWatch, Refresh};
 use crate::index::IndexSync;
-use crate::test_support::{scan_notes, vault};
+use crate::test_support::{index_sync, scan_notes, vault};
 
 fn sync(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> Entity<IndexSync> {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     cx.run_until_parked();
     links
 }

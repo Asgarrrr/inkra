@@ -75,7 +75,9 @@ fn a_tab_switch_while_renaming_keeps_the_selection(cx: &mut TestAppContext) {
     focus_tree(&window, &mut cx);
     keys(&mut cx, "enter");
     let renaming = window
-        .update(&mut cx, |shell, _, cx| shell.sidebar.read(cx).is_editing())
+        .update(&mut cx, |shell, _, cx| {
+            shell.panes().sidebar.read(cx).is_editing()
+        })
         .unwrap();
     assert!(renaming);
 

@@ -5,14 +5,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Entity, Subscription, TestAppContext, prelude::*};
+use gpui::{Entity, Subscription, TestAppContext};
 use inkra_text::Buffer;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::buffer_events::Reloaded;
-use crate::index::IndexSync;
-use crate::test_support::{conflicts, edit, entry_id, named, opened, scan_notes};
+use crate::test_support::{conflicts, edit, entry_id, index_sync, named, opened, scan_notes};
 use crate::vault::store::AUTOSAVE_DELAY;
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, SaveFailed, TrashFailed};
 
@@ -313,7 +312,7 @@ async fn two_gone_notes_with_one_last_path_the_lower_id_reclaims_it(cx: &mut Tes
 #[gpui::test]
 async fn quick_open_names_a_restored_gone_note_once_under_its_id(cx: &mut TestAppContext) {
     let (fs, notes, a, _buffer) = open_a(cx).await;
-    let links = cx.new(|cx| IndexSync::new(&notes, cx));
+    let links = index_sync(&notes, cx);
     cx.run_until_parked();
 
     fs.remove(Path::new(A));

@@ -7,7 +7,7 @@ use inkra_vault::mem_fs::MemFs;
 use crate::sidebar::row_center;
 use crate::test_support::entry_id;
 
-use super::{activate, open_vault, tree_focused, two_notes, vault_names};
+use super::{activate, no_vault, open_vault, tree_focused, two_notes, vault_names};
 
 #[gpui::test]
 fn cmd_n_opens_a_field_with_the_editor_focused(cx: &mut TestAppContext) {
@@ -253,4 +253,28 @@ fn a_field_opened_far_below_the_drawn_rows_takes_keystrokes(cx: &mut TestAppCont
     visual.run_until_parked();
 
     assert!(vault_names(&notes, cx).contains(&"z.md".to_owned()));
+}
+
+#[gpui::test]
+fn cmd_n_does_nothing_without_a_vault(cx: &mut TestAppContext) {
+    assert_no_name_field_after("cmd-n", cx);
+}
+
+#[gpui::test]
+fn cmd_shift_n_does_nothing_without_a_vault(cx: &mut TestAppContext) {
+    assert_no_name_field_after("cmd-shift-n", cx);
+}
+
+fn assert_no_name_field_after(keys: &str, cx: &mut TestAppContext) {
+    let (window, mut visual) = no_vault(cx);
+
+    visual.simulate_keystrokes(keys);
+    visual.run_until_parked();
+
+    let root_focused = window
+        .update(&mut visual, |shell, window, _| {
+            shell.focus_handle.is_focused(window)
+        })
+        .expect("the shell is open");
+    assert!(root_focused, "no name field may take the keys");
 }

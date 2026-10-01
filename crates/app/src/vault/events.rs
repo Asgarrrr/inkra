@@ -6,7 +6,7 @@ use inkra_vault::{EntryId, Stamp};
 
 use super::NoteStore;
 
-/// A write landed; never emitted for `EntryId::DETACHED`, which no vault indexes.
+/// A write landed; its one subscriber, `IndexSync`, exists only beside a vault, so never beside a detached note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NoteSaved {
     pub(crate) id: EntryId,

@@ -1,15 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use gpui::{TestAppContext, prelude::*};
-use inkra_text::{Buffer, ByteOffset};
+use gpui::TestAppContext;
+use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
+use crate::test_support::detached_store;
 use crate::vault::store::AUTOSAVE_DELAY;
-use crate::vault::{ConflictPreserved, NoteStore, SaveFailed};
+use crate::vault::{ConflictPreserved, NoteSaved, NoteStore, SaveFailed};
 
 use super::open_shell;
 
@@ -38,21 +39,7 @@ fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "before");
 
-    let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md")))
-        .expect("the file was just inserted");
-    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(loaded.text.clone())));
-    let notes = cx.update(|cx| {
-        cx.new(|cx| {
-            let mut store = NoteStore::new(Arc::clone(&fs) as Arc<dyn Fs>, None, cx);
-            store.adopt(
-                buffer.clone(),
-                PathBuf::from("/vault/a.md"),
-                loaded.stamp,
-                cx,
-            );
-            store
-        })
-    });
+    let (buffer, notes) = detached_store(cx, Arc::clone(&fs) as Arc<dyn Fs>, "/vault/a.md");
     buffer.update(cx, |buffer, _| {
         buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
     });
@@ -347,4 +334,32 @@ fn cmd_s_on_an_untouched_note_leaves_the_file_alone(cx: &mut TestAppContext) {
         fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
         Some("on disk, not in the buffer")
     );
+}
+
+/// Only `IndexSync` subscribes, and it exists only beside a vault: the emit needs no mode guard.
+#[gpui::test]
+fn a_detached_write_emits_note_saved(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/loose.md", "before");
+    let (buffer, notes) = detached_store(cx, Arc::clone(&fs) as Arc<dyn Fs>, "/loose.md");
+    let saved = Arc::new(AtomicUsize::new(0));
+    let _guard = cx.update(|cx| {
+        let saved = Arc::clone(&saved);
+        cx.subscribe(&notes, move |_, _: &NoteSaved, _| {
+            saved.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    buffer.update(cx, |buffer, cx| {
+        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        cx.notify();
+    });
+    cx.executor().advance_clock(AUTOSAVE_DELAY);
+    cx.run_until_parked();
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/loose.md")).as_deref(),
+        Some("Xbefore")
+    );
+    assert_eq!(saved.load(Ordering::SeqCst), 1);
 }

@@ -5,39 +5,25 @@ use gpui::{
     Bounds, Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowBounds,
     WindowOptions, point, prelude::*, px,
 };
-use inkra_text::Buffer;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Vault};
 
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
-use crate::shell::{AppShell, EditorView, NoteStore, Save};
+use crate::shell::{AppShell, EditorView, Save};
 use crate::sidebar::row_center;
-use crate::test_support::entry_id;
+use crate::test_support::{detached_store, entry_id};
 
 use super::{activate, editor, open_vault, two_notes};
 
 #[gpui::test]
 fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
-    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("")));
-    let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
-    // Adopted, as `root` does: an editor comes with the note it shows.
+    // Detached, as `root` does: an editor comes with the note it shows.
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/notes/a.md", "");
-    let loaded = futures::executor::block_on(fs.load(Path::new("/notes/a.md"))).unwrap();
-    let notes = cx.update(|cx| {
-        cx.new(|cx| {
-            let mut store = NoteStore::new(fs, None, cx);
-            store.adopt(
-                buffer.clone(),
-                PathBuf::from("/notes/a.md"),
-                loaded.stamp,
-                cx,
-            );
-            store
-        })
-    });
+    let (buffer, notes) = detached_store(cx, fs, "/notes/a.md");
+    let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
     let window =
         cx.add_window(move |window, cx| AppShell::new(Some(editor), notes, None, window, cx));
     window

@@ -5,7 +5,7 @@ use gpui::{
     ParentElement, Pixels, Render, Styled, Subscription, UniformListScrollHandle, Window, actions,
     div, px, uniform_list,
 };
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::NoteActivated;
 use crate::theme;
@@ -39,6 +39,7 @@ impl EventEmitter<NoteActivated> for Sidebar {}
 
 pub(crate) struct Sidebar {
     notes: Entity<NoteStore>,
+    vault: Entity<Vault>,
     expanded: HashSet<EntryId>,
     /// Not `NoteStore::current`: a row can be selected unopened.
     selected: Option<EntryId>,
@@ -50,7 +51,7 @@ pub(crate) struct Sidebar {
     /// unrendered focus handle falls back to the root, swallowing keystrokes.
     scroll: UniformListScrollHandle,
     /// Never read; dropping a `Subscription` cancels it.
-    _vault_changed: Option<Subscription>,
+    _vault_changed: Subscription,
 }
 
 /// The tree's write generation when an open began; `follow` moves `selected` only if it still holds.
@@ -66,11 +67,15 @@ struct Row {
 }
 
 impl Sidebar {
-    pub(crate) fn new(notes: Entity<NoteStore>, cx: &mut Context<Self>) -> Self {
-        let vault = notes.read(cx).vault().cloned();
-        let watched = vault.map(|vault| cx.observe(&vault, |this, _, cx| this.rebuild(cx)));
+    pub(crate) fn new(
+        notes: Entity<NoteStore>,
+        vault: Entity<Vault>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let watched = cx.observe(&vault, |this, _, cx| this.rebuild(cx));
         let mut sidebar = Self {
             notes,
+            vault,
             expanded: HashSet::new(),
             selected: None,
             cursor: Cursor::default(),

@@ -141,13 +141,11 @@ impl NoteStore {
             // An atomic save moves the inode: without the re-key the id orphans on the next rescan.
             this.reidentify(id, saved.identity, saved.stamp.mtime, cx);
             // The index's only signal for an ordinary write: it neither rescans nor notifies.
-            if id != EntryId::DETACHED {
-                cx.emit(NoteSaved {
-                    id,
-                    text,
-                    stamp: saved.stamp,
-                });
-            }
+            cx.emit(NoteSaved {
+                id,
+                text,
+                stamp: saved.stamp,
+            });
             if let Some(preserved) = saved.preserved.clone() {
                 cx.emit(ConflictPreserved {
                     id,

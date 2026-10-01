@@ -28,6 +28,7 @@ pub(crate) struct NoteStore {
 }
 
 impl NoteStore {
+    /// A vault's store, or the empty launch's with `None`.
     pub(crate) fn new(
         fs: Arc<dyn Fs>,
         vault: Option<Entity<Vault>>,
@@ -57,6 +58,26 @@ impl NoteStore {
         {
             store.rescan_changed(Pending::Everything, cx);
         }
+        store
+    }
+
+    /// One file opened by path, outside any vault; it is `current`.
+    pub(crate) fn detached(
+        fs: Arc<dyn Fs>,
+        buffer: Entity<Buffer>,
+        path: PathBuf,
+        stamp: Stamp,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut store = Self::new(fs, None, cx);
+        store.track(
+            EntryId::DETACHED,
+            buffer,
+            Location::Detached(path),
+            stamp,
+            cx,
+        );
+        store.current = Some(EntryId::DETACHED);
         store
     }
 
@@ -171,23 +192,6 @@ impl NoteStore {
             self.schedule_save(left, Duration::ZERO, cx);
         }
         cx.notify();
-    }
-
-    pub(crate) fn adopt(
-        &mut self,
-        buffer: Entity<Buffer>,
-        path: PathBuf,
-        stamp: Stamp,
-        cx: &mut Context<Self>,
-    ) {
-        self.track(
-            EntryId::DETACHED,
-            buffer,
-            Location::Detached(path),
-            stamp,
-            cx,
-        );
-        self.current = Some(EntryId::DETACHED);
     }
 
     /// Must not lease the buffer it observes — a second lease of one entity panics.

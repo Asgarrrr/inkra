@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{Entity, TestAppContext};
 use inkra_index::NoteContent;
 use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
@@ -15,7 +15,7 @@ use inkra_vault::{EntryId, Fs, Mtime};
 use super::IndexSync;
 use super::loading::Landed;
 use super::tests::{backlinks, create, found, indexed_vault, indexing, rescan, status};
-use crate::test_support::{entry_id, scan_notes};
+use crate::test_support::{entry_id, index_sync, scan_notes};
 use crate::vault::NoteStore;
 
 #[gpui::test]
@@ -29,7 +29,7 @@ fn at_most_one_load_per_core_runs_at_once(cx: &mut TestAppContext) {
         gates.push(fs.block_load(path.as_str()));
     }
     let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     let started =
         |fs: &MemFs| -> usize { paths.iter().map(|path| fs.loads(Path::new(path))).sum() };
 
@@ -90,9 +90,7 @@ fn land_at_once(
         links.apply_budget = Some(budget);
         for id in ids {
             let mtime = Mtime(SystemTime::UNIX_EPOCH);
-            let ticket = links
-                .turn(cx, |turn| turn.saved(id, mtime))
-                .expect("a vault");
+            let ticket = links.turn(cx, |turn| turn.saved(id, mtime));
             let loaded = Ok(NoteContent::parse(Arc::from(text), mtime));
             links
                 .landed

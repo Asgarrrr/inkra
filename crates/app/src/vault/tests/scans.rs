@@ -5,12 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
-use gpui::{Entity, TestAppContext, prelude::*};
+use gpui::{Entity, TestAppContext};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
-use crate::index::IndexSync;
-use crate::test_support::{edit, entry_id, named, opened, scan_notes, unscanned_notes};
+use crate::test_support::{edit, entry_id, index_sync, named, opened, scan_notes, unscanned_notes};
 use crate::timeline::Timeline;
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
@@ -106,7 +105,7 @@ async fn a_scan_that_swaps_in_between_a_save_and_its_re_key_keeps_the_note(
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "alpha");
     let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.new(|cx| IndexSync::new(&notes, cx));
+    let links = index_sync(&notes, cx);
     let a = entry_id(&notes, cx, "a");
     let buffer = opened(&notes, cx, a).await;
 

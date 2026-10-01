@@ -2,16 +2,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use gpui::{AppContext as _, Entity, Focusable, TestAppContext, VisualTestContext};
+use gpui::{Entity, Focusable, TestAppContext, VisualTestContext};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Kind};
 
 use super::QuickOpenDelegate;
-use crate::index::IndexSync;
 use crate::keymap::key_bindings;
 use crate::picker::runs::{NOTES_CHANGED_REFRESH, SEARCH_DEBOUNCE};
 use crate::picker::{Picker, PickerDelegate as _};
-use crate::test_support::{entry_id, scan_notes, unscanned_notes, vault};
+use crate::test_support::{entry_id, index_sync, scan_notes, unscanned_notes, vault};
 use crate::vault::NoteStore;
 
 mod background;
@@ -34,7 +33,7 @@ fn open(
 ) -> Opened {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     cx.run_until_parked();
     let showing = showing.map(|name| entry_id(&notes, cx, name));
     let recent: Vec<EntryId> = recent
@@ -310,7 +309,7 @@ fn the_picker_says_scanning_then_lists_the_first_names_without_the_refresh_wait(
     // Held: typing runs until parked, which would otherwise finish the scan.
     let gate = fs.block_read_dir("/vault/f");
     let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
+    let links = index_sync(&notes, cx);
     let (picker, visual) = cx.add_window_view(move |window, cx| {
         let delegate = QuickOpenDelegate::new(&links, None, Vec::new(), cx);
         Picker::new(delegate, window, cx)

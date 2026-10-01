@@ -120,9 +120,6 @@ impl NoteStore {
     }
 
     pub(crate) fn rename(&mut self, id: EntryId, name: &str, cx: &mut Context<Self>) -> Task<bool> {
-        if id == EntryId::DETACHED {
-            return Task::ready(false);
-        }
         if inkra_vault::check_name(name).is_some() {
             return Task::ready(false);
         }

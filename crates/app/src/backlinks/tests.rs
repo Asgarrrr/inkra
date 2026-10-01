@@ -8,13 +8,14 @@ use inkra_vault::{Fs, Kind};
 
 use super::BacklinksPanel;
 use crate::index::IndexSync;
-use crate::test_support::{entry_id, scan_notes, unscanned_notes};
+use crate::test_support::{entry_id, index_sync, scan_notes, unscanned_notes, vault_of};
 use crate::vault::NoteStore;
 
 fn panel(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, notes.clone(), cx)));
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
     (notes, panel)
 }
 
@@ -217,9 +218,7 @@ fn trash_behind_the_store(
     path: &str,
 ) {
     fs.remove(std::path::Path::new(path));
-    let Some(vault) = notes.read_with(cx, |notes, _| notes.vault().cloned()) else {
-        panic!("a vault");
-    };
+    let vault = vault_of(notes, cx);
     vault.update(cx, |vault, cx| {
         let rescan = futures::executor::block_on(vault.rescan(&**fs));
         assert!(rescan.is_ok(), "a MemFs rescan: {rescan:?}");
@@ -376,8 +375,9 @@ fn a_note_opened_during_the_initial_scan_shows_building(cx: &mut TestAppContext)
     fs.insert_file("/vault/f/b.md", "[[a]]");
     let gate = fs.block_read_dir("/vault/f");
     let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
-    let links = cx.update(|cx| cx.new(|cx| IndexSync::new(&notes, cx)));
-    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, notes.clone(), cx)));
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
     cx.run_until_parked();
 
     show(cx, &notes, &panel, "a");

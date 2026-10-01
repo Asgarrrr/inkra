@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gpui::{Context, ScrollStrategy, Window};
 use inkra_vault::{EntryId, Kind};
 
@@ -8,11 +6,7 @@ use crate::open::{NoteActivated, Open};
 
 impl Sidebar {
     pub(super) fn rebuild(&mut self, cx: &mut Context<Self>) {
-        let entries = self
-            .notes
-            .read(cx)
-            .vault()
-            .map_or_else(|| Arc::from([]), |vault| vault.read(cx).shared_entries());
+        let entries = self.vault.read(cx).shared_entries();
         // The field must end up on a row the list still draws: an unrendered
         // row is in no dispatch node, so gpui silently swallows every keystroke.
         if let Some(item) = self.rows.rewalk(entries, &self.expanded) {
