@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use gpui::{Focusable, Modifiers, TestAppContext, point, px};
+use gpui::{Focusable, Modifiers, TestAppContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use crate::sidebar::row_center;
 use crate::test_support::entry_id;
 
-use super::{activate, no_vault, open_vault, tree_focused, two_notes, vault_names};
+use super::{activate, click_row, no_vault, open_vault, tree_focused, two_notes, vault_names};
 
 #[gpui::test]
 fn cmd_n_opens_a_field_with_the_editor_focused(cx: &mut TestAppContext) {
@@ -196,8 +195,7 @@ fn a_note_created_under_a_selected_folder_lands_inside_it(cx: &mut TestAppContex
     let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let mut visual = tree_focused(cx, window, &sidebar);
 
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&mut visual, 0., Modifiers::none());
     visual.simulate_keystrokes("cmd-n p l a n enter");
     visual.run_until_parked();
 

@@ -279,13 +279,7 @@ fn many_tabs_never_widen_the_note_column(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-1");
     cx.run_until_parked();
 
-    let bar = cx.debug_bounds("tab-bar").unwrap();
     let backlinks = cx.debug_bounds("backlinks-column").unwrap();
-    assert!(
-        bar.right() <= backlinks.left(),
-        "the bar ends at {:?}",
-        bar.right()
-    );
     let text = editor(&window, &mut cx).read_with(&cx, |view, _| view.text_bounds().unwrap());
     assert!(
         text.right() <= backlinks.left(),

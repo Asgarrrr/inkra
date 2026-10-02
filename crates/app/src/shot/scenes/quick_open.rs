@@ -1,11 +1,10 @@
 use std::time::Duration;
 
-use gpui::{WindowHandle, point};
+use gpui::WindowHandle;
 
-use super::{SIDEBAR_X, UNSCANNED};
+use super::UNSCANNED;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
-use crate::sidebar::row_center;
 
 /// Texts give each row its second line: a name row its first prose line, a text row the match.
 const NOTES: &[(&str, &str)] = &[
@@ -59,7 +58,7 @@ pub(super) const PICKER_SETTLE: Duration = Duration::from_millis(300);
 pub(super) fn results(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(NOTES);
     // Folders come first, so `index` is row 2.
-    stage.click(window, point(SIDEBAR_X, row_center(2.)));
+    stage.click_tree_row(window, 2.);
     stage.focus(window);
     stage.keys(window, "cmd-p");
     stage.keys(window, "p l a n");

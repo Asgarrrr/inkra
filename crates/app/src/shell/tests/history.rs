@@ -1,4 +1,4 @@
-use gpui::{Focusable, TestAppContext};
+use gpui::{Focusable, Modifiers, TestAppContext};
 
 use super::{
     at, check, click_row, editor, focus_tree, four_notes, keys, open, scroll_to, select, showing,
@@ -239,12 +239,12 @@ fn a_tab_emptied_by_a_trash_goes_back_to_its_last_note(cx: &mut TestAppContext) 
 #[gpui::test]
 fn a_sidebar_click_on_the_note_showing_keeps_forward(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, ..]) = four_notes(cx);
-    click_row(&mut cx, 0.);
-    click_row(&mut cx, 1.);
+    click_row(&mut cx, 0., Modifiers::none());
+    click_row(&mut cx, 1., Modifiers::none());
     keys(&mut cx, "cmd-[");
     assert_eq!(showing(&window, &mut cx), Some(a));
 
-    click_row(&mut cx, 0.);
+    click_row(&mut cx, 0., Modifiers::none());
     keys(&mut cx, "cmd-]");
 
     assert_eq!(showing(&window, &mut cx), Some(b));
@@ -254,10 +254,10 @@ fn a_sidebar_click_on_the_note_showing_keeps_forward(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_sidebar_click_on_the_note_showing_focuses_the_editor(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, ..]) = four_notes(cx);
-    click_row(&mut cx, 0.);
+    click_row(&mut cx, 0., Modifiers::none());
     focus_tree(&window, &mut cx);
 
-    click_row(&mut cx, 0.);
+    click_row(&mut cx, 0., Modifiers::none());
 
     assert_eq!(showing(&window, &mut cx), Some(a));
     let focused = window

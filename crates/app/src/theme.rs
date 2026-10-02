@@ -1,6 +1,8 @@
 #![allow(clippy::unreadable_literal)]
 
-use gpui::{FontStyle, FontWeight, Pixels, Rgba, StrikethroughStyle, TextStyle, px, rgb, rgba};
+use gpui::{
+    FontStyle, FontWeight, Pixels, Point, Rgba, StrikethroughStyle, TextStyle, point, px, rgb, rgba,
+};
 use inkra_markdown::Styles;
 
 pub(crate) const BODY_TEXT_SIZE: Pixels = px(18.);
@@ -158,8 +160,20 @@ pub(crate) fn tab_rule() -> Rgba {
     rgb(0x3c3c3c)
 }
 
-/// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH`, the tab bar's (`px` has no const add).
-pub(crate) const TAB_BAR_HEIGHT: Pixels = px(23.);
+/// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH` (`px` has no const add).
+pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(23.);
+
+/// The title row, which holds the tabs: Zed's macOS title bar height.
+pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(34.);
+
+/// The traffic lights' width and margins, on the macOS 26 SDK (Zed's `TRAFFIC_LIGHT_PADDING`).
+pub(crate) const TRAFFIC_LIGHT_PADDING: Pixels = px(78.);
+
+/// `(TITLE_BAR_HEIGHT - 16) / 2`: gpui centres the 16 px buttons in a `16 + 2y` container.
+pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(9.), px(9.));
+
+/// The empty title row after the tabs never shrinks below this, so the window can always move.
+pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
 
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);

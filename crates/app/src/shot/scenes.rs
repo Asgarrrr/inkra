@@ -9,11 +9,10 @@ mod reload;
 mod tabs;
 mod vault_search;
 
-use gpui::{WindowHandle, point, px};
+use gpui::WindowHandle;
 
 use super::stage::Stage;
 use crate::shell::AppShell;
-use crate::sidebar::row_center;
 
 pub(crate) struct Scene {
     pub(crate) name: &'static str,
@@ -147,7 +146,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-vault",
-        shows: "the tree under its `vault` header, level with the tab bar and ruled like it: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
+        shows: "the tree under its `vault` header, below the title row, level with the `Backlinks` header and ruled like it: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
         open: sidebar_vault,
     },
     Scene {
@@ -202,17 +201,17 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "backlinks",
-        shows: "the panel right of the editor under its `Backlinks` header, level with the tab bar and ruled like it: two sources, one linking twice, each link in the link colour",
+        shows: "the panel right of the editor under its `Backlinks` header, below the title row, level with the `vault` header and ruled like it: two sources, one linking twice, each link in the link colour",
         open: backlinks,
     },
     Scene {
         name: "tabs",
-        shows: "four tabs over the note column: `index` active, lit and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; the panel toggles lit at the row's ends; the `vault` and `Backlinks` headers level with the bar, ruled like it",
+        shows: "the title row across the window, the traffic lights' space empty at its left: the sidebar toggle, four tabs as tall as the row, the empty drag space, the backlinks toggle; `index` active, lit from the row's top to its rule and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the `vault` and `Backlinks` headers level under the row, ruled like it",
         open: tabs::dirty,
     },
     Scene {
         name: "panels-hidden",
-        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width; both toggles muted at the bar's ends",
+        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width under the title row; both toggles muted, the sidebar's after the traffic lights' space and the backlinks' at the row's right end",
         open: tabs::panels_hidden,
     },
     Scene {
@@ -229,6 +228,11 @@ const CATALOGUE: &[Scene] = &[
         name: "tabs-dragging",
         shows: "`index` dragged onto the third tab, button held: that tab lit in the drop colour with a 2 px right edge, the preview under the pointer; the bar's order unchanged until the drop",
         open: tabs::dragging,
+    },
+    Scene {
+        name: "tabs-overflow",
+        shows: "30 tabs in the title row, the last one active (`cmd-9`) and scrolled into view; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle",
+        open: tabs::overflow,
     },
     Scene {
         name: "tabs-restored",
@@ -426,13 +430,12 @@ fn editor_heading_revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
 
 fn sidebar_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    stage.click_tree_row(window, 0.);
     window
 }
 
 fn sidebar_dirty(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    let window = sidebar_selected(stage);
     stage.focus(window);
     stage.keys(window, "e d i t e d");
     window
@@ -455,13 +458,12 @@ fn sidebar_root_only(stage: &mut Stage) -> WindowHandle<AppShell> {
 
 fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    stage.click_tree_row(window, 1.);
     window
 }
 
 fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    let window = sidebar_selected(stage);
     // The click handed focus to the editor.
     stage.focus_tree(window);
     stage.keys(window, "cmd-n");
@@ -470,8 +472,7 @@ fn sidebar_naming(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    let window = sidebar_selected(stage);
     // The click handed focus to the editor.
     stage.focus_tree(window);
     stage.keys(window, "cmd-n");
@@ -480,18 +481,15 @@ fn sidebar_rejected(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 fn sidebar_renaming(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    let window = sidebar_selected(stage);
     // The click handed focus to the editor.
     stage.focus_tree(window);
     stage.keys(window, "enter");
     window
 }
 
-const SIDEBAR_X: gpui::Pixels = px(80.);
-
 fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(LINKED);
-    stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    stage.click_tree_row(window, 0.);
     window
 }

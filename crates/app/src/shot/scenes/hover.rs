@@ -1,22 +1,21 @@
-use gpui::{WindowHandle, point};
+use gpui::WindowHandle;
 
-use super::{SIDEBAR_X, VAULT, quick_open};
+use super::{VAULT, quick_open};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
-use crate::sidebar::row_center;
 
 /// `projects` expanded and selected; the pointer on `index`.
 pub(super) fn sidebar(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(0.)));
-    stage.hover(window, point(SIDEBAR_X, row_center(3.)));
+    stage.click_tree_row(window, 0.);
+    stage.hover_tree_row(window, 3.);
     window
 }
 
 pub(super) fn sidebar_selected(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(VAULT);
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
-    stage.hover(window, point(SIDEBAR_X, row_center(1.)));
+    stage.click_tree_row(window, 1.);
+    stage.hover_tree_row(window, 1.);
     window
 }
 

@@ -28,8 +28,6 @@ mod visible;
 mod visible_tests;
 
 use edit::EditState;
-#[cfg(any(test, feature = "shot"))]
-pub(crate) use render::row_center;
 use rows::Rows;
 
 actions!(sidebar, [Trash, SelectPrev, SelectNext, Rename]);

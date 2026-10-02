@@ -20,6 +20,7 @@ mod render;
 mod session;
 mod tab_bar;
 mod tabs;
+mod title_bar;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
@@ -101,6 +102,8 @@ pub(crate) struct AppShell {
     /// `None` unless a vault launched with a session file: nothing else writes one.
     session: Option<SessionFile>,
     restore: Restore,
+    /// A left press on a title drag region, not yet moved or released (S3-D3).
+    title_drag_armed: bool,
 }
 
 impl AppShell {
@@ -161,6 +164,7 @@ impl AppShell {
             recent_commands: Vec::new(),
             session,
             restore,
+            title_drag_armed: false,
         }
     }
 
@@ -249,6 +253,11 @@ impl AppShell {
 
     pub(crate) fn tree_focus_handle(&self, cx: &App) -> FocusHandle {
         self.panes().sidebar.read(cx).focus_handle(cx)
+    }
+
+    /// Where tree row `ix` was drawn last; `None` before the tree is drawn.
+    pub(crate) fn tree_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
+        self.panes().sidebar.read(cx).row_center(ix)
     }
 }
 

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, Window, WindowBounds,
-    WindowOptions, px, size,
+    App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, TitlebarOptions, Window,
+    WindowBounds, WindowOptions, px, size,
 };
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
@@ -15,6 +15,7 @@ use crate::editor::EditorView;
 use crate::keymap::key_bindings;
 use crate::restore::session_file;
 use crate::shell::AppShell;
+use crate::theme;
 use crate::timeline::{Step, Timeline};
 use crate::ui::Assets;
 use crate::vault::NoteStore;
@@ -104,6 +105,13 @@ pub fn run() {
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(theme::TRAFFIC_LIGHT_POSITION),
+                }),
+                // The app moves the window from its drag regions; AppKit never drags it from a tab.
+                app_owns_titlebar_drag: true,
                 ..Default::default()
             },
             |window, cx| root(Arc::new(RealFs), launched, window, cx),

@@ -1,16 +1,15 @@
-use gpui::{WindowHandle, point};
+use gpui::WindowHandle;
 
-use super::{LINKED, SIDEBAR_X};
+use super::LINKED;
 use crate::restore::{SavedTab, SavedView};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
-use crate::sidebar::row_center;
 
 pub(super) fn bar(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(LINKED);
-    stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    stage.click_tree_row(window, 0.);
     stage.keys(window, "cmd-t");
-    stage.click(window, point(SIDEBAR_X, row_center(1.)));
+    stage.click_tree_row(window, 1.);
     stage.keys(window, "cmd-t cmd-t cmd-1");
     window
 }
@@ -39,6 +38,13 @@ pub(super) fn toggle_hover(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     let toggle = stage.sidebar_toggle_point(window);
     stage.hover(window, toggle);
+    window
+}
+
+/// Thirty tabs: the bar scrolls, and the drag region keeps its floor.
+pub(super) fn overflow(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    stage.keys(window, &format!("{}cmd-9", "cmd-t ".repeat(26)));
     window
 }
 

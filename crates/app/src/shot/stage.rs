@@ -238,6 +238,23 @@ impl Stage {
             .unwrap_or_else(|error| panic!("read the sidebar toggle: {error}"))
     }
 
+    pub(crate) fn click_tree_row(&mut self, window: WindowHandle<AppShell>, ix: f32) {
+        let at = self.tree_row_center(window, ix);
+        self.click(window, at);
+    }
+
+    pub(crate) fn hover_tree_row(&mut self, window: WindowHandle<AppShell>, ix: f32) {
+        let at = self.tree_row_center(window, ix);
+        self.hover(window, at);
+    }
+
+    fn tree_row_center(&mut self, window: WindowHandle<AppShell>, ix: f32) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |shell, _, cx| shell.tree_row_center(ix, cx))
+            .unwrap_or_else(|error| panic!("read the tree's row {ix}: {error}"))
+            .unwrap_or_else(|| panic!("the tree's row {ix} is drawn"))
+    }
+
     pub(crate) fn quick_open_row_center(
         &mut self,
         window: WindowHandle<AppShell>,

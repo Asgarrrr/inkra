@@ -23,6 +23,13 @@ paths:
   dropped. A tab's left press calls `prevent_default`, so the root does not
   take focus from the editor. An `IconButton` (a panel toggle, the ×) prevents it on
   a left press itself, so a click on one leaves focus where it was.
+- The window moves only from the two leaf drag regions of the title row
+  (`title-drag-start`, `title-drag-end`): only a region's left press sets
+  `title_drag_armed`, and calls `prevent_default` to keep the editor's focus.
+  The root's mouse move clears the flag on every move, and starts the move only with the
+  left button held: a release outside the window reaches no listener. Never put
+  a drag handler on the row: a tab's press would bubble to it.
+- With no vault, no sidebar column is drawn; the note column starts at x 0.
 - `Tabs` holds no place for the active tab (H8): `active_note()` is its note
   (`showing()` is the note bound in the editor, `None` while `Trashing`), and
   `leaving` hands `Tabs` the place when the tab is left.

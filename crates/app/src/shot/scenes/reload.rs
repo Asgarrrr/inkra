@@ -1,12 +1,10 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use gpui::{WindowHandle, point};
+use gpui::WindowHandle;
 
-use super::SIDEBAR_X;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
-use crate::sidebar::row_center;
 
 fn numbered(prefix: &str, count: usize) -> String {
     (0..count).fold(String::new(), |mut text, n| {
@@ -20,7 +18,7 @@ fn numbered(prefix: &str, count: usize) -> String {
 pub(super) fn scroll(stage: &mut Stage) -> WindowHandle<AppShell> {
     let old = numbered("line", 200);
     let window = stage.open_vault(&[("note.md", &old)]);
-    stage.click(window, point(SIDEBAR_X, row_center(0.)));
+    stage.click_tree_row(window, 0.);
     stage.focus(window);
     let keys = format!("cmd-down{}", " up".repeat(77));
     stage.keys(window, &keys);
