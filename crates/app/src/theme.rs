@@ -84,11 +84,23 @@ pub(crate) fn row_hover_background() -> Rgba {
     rgba(0xffffff0c)
 }
 
+/// A white overlay stronger than a row's hover, so an icon button reads as a target within a hovered row.
+pub(crate) fn button_hover_background() -> Rgba {
+    rgba(0xffffff1f)
+}
+
 pub(crate) fn icon_muted() -> Rgba {
     rgb(0x8a8a8a)
 }
 
 pub(crate) const ICON_SIZE: Pixels = px(14.);
+
+/// A note edited but not written, on its tab and its tree row.
+pub(crate) fn dirty_dot() -> Rgba {
+    rgb(0x8a8a8a)
+}
+
+pub(crate) const DOT_SIZE: Pixels = px(6.);
 
 /// A list item's left and right padding.
 pub(crate) const ROW_INSET: Pixels = px(8.);
@@ -143,6 +155,9 @@ pub(crate) fn tab_rule() -> Rgba {
 
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
+
+/// A title cell: the ×'s 18 px box, so a tab's centre lies left of its × by the gap.
+pub(crate) const TAB_MIN_WIDTH: Pixels = px(18.);
 
 /// The tab a dragged tab is over: the caret's blue, faint behind it and full on the edge it lands at.
 pub(crate) fn tab_drop_background() -> Rgba {

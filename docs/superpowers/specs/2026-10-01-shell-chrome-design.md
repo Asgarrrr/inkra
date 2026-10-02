@@ -1,6 +1,6 @@
 # Shell chrome: components, icons, panels, title bar
 
-Status: S0 built 2026-10-01 on `feat/shell-chrome-s0`; S1–S4 pending.
+Status: S0 shipped 2026-10-02 (#57). S1 built 2026-10-02 on `feat/shell-chrome-s1`. S2–S4 pending.
 
 ## Why
 
@@ -83,10 +83,12 @@ Apache-2.0.
 ## D1. The module
 
 ```
-crates/app/src/ui.rs            // pub(crate) re-exports, h_flex, v_flex, UiText
+crates/app/src/ui.rs            // pub(crate) re-exports, h_flex, v_flex, UiText, selectable (S1)
 crates/app/src/ui/assets.rs     // Assets: AssetSource, IconName
 crates/app/src/ui/icon.rs       // Icon
 crates/app/src/ui/list_item.rs  // ListItem
+crates/app/src/ui/tab.rs        // Tab (S1)
+crates/app/src/ui/indicator.rs  // Indicator (S1)
 crates/app/src/ui/tests.rs
 crates/app/assets/icons/*.svg   // Lucide, verbatim
 crates/app/assets/icons/LICENSE // Lucide ISC + Feather MIT, verbatim
@@ -96,8 +98,8 @@ Everything is `pub(crate)`. `ui` depends on `theme` and gpui only. It never
 reads a view, an entity or a vault type, so the dependency points one way:
 views → `ui` → `theme`.
 
-`ui.rs` holds three helpers that every component and view migrated by a
-slice uses:
+`ui.rs` holds four helpers. Every component and every view migrated by a
+slice uses the three below. The fourth, `selectable`, came with S1 (S1-D1).
 
 ```rust
 pub(crate) fn h_flex() -> Div { div().flex().flex_row().items_center() }
@@ -194,7 +196,7 @@ pub(crate) struct ListItem {
     indent: usize,                // tree depth; 0 outside the tree
     start: Option<AnyElement>,    // chevron or spacer
     children: Vec<AnyElement>,
-    end: Option<AnyElement>,      // count, key hint; S0 has no user, so not built (rule 4)
+    end: Option<AnyElement>,      // added in S1 for the dirty dot; S0 had no user (rule 4)
     selected: bool,
 }
 
@@ -325,7 +327,7 @@ unverified, and the svg reads its own style (`svg.rs:150`).
 | `Component`/`RegisterComponent` preview registry | none; shots are the gallery | the registry serves Zed's component preview only |
 | `ListItem` owns `on_click` | `ListItem` forwards `Interactivity` | two press semantics, each deliberate (D4) |
 | `rust-embed` via `fs_embed!` | `include_bytes!` match | 3 icons; no dependency |
-| `IconName` by strum | a hand-written `match` and `ALL` | no dependency for a handful of variants; tests keep it in sync |
+| `IconName` by strum | `macro_rules! icons` generates the enum, `ALL`, `path` and `bytes` from one list | no dependency added |
 | Zed's redrawn icons | Lucide verbatim | licence |
 
 ## Tests (S0)
@@ -372,8 +374,8 @@ shots, then `check.sh` green.
 | Slice | Content | New components | Opens on |
 |---|---|---|---|
 | **S0** | `ui` module, `Assets`, Lucide chevrons, `ListItem`, `Icon`; tree, field row, picker and backlinks on `ListItem`; hover everywhere a row is clickable | `Icon`, `ListItem` | — |
-| S1 | Tabs: a `Tab` component shared by the bar and the drag preview (2 sites, `tab_bar.rs:30-47,96-163`); `IconButton` with Lucide `x`, shown on the active tab and on hover; a hover background; the dirty dot as an `Indicator` on tab and tree row | `Tab`, `IconButton`, `Indicator` | S0 |
-| S2 | Panels: hide and show the sidebar and backlinks, with a resize handle (Zed's `dock.rs:1275-1332` pattern: `deferred`, `on_drag` + `on_drag_move` on the shell); a panel header shared by sidebar (vault name) and backlinks; aligned header heights | `PanelHeader` | S1 (`IconButton`) |
+| S1 | Tabs: a `Tab` component shared by the bar and the drag preview; the close glyph becomes Lucide `x`, shown on the active tab and on hover; a hover background; the dirty dot as an `Indicator` on tab and tree row. Specified in S1. Tabs, below | `Tab`, `Indicator` | S0 |
+| S2 | Panels: `IconButton` (its second site after the tab's close button); hide and show the sidebar and backlinks, with a resize handle (Zed's `dock.rs:1275-1332` pattern: `deferred`, `on_drag` + `on_drag_move` on the shell); a panel header shared by sidebar (vault name) and backlinks; aligned header heights | `IconButton`, `PanelHeader` | S1 |
 | S3 | Title bar: `appears_transparent`, traffic-light padding, the tab bar on the title row, window drag area | — | S1 (`Tab`), S2 (header heights) |
 | S4 | Status bar | — | S2 (panel layout); free against S3 |
 
@@ -385,10 +387,218 @@ The S0 quality review's levers, each taken up by the slice named:
 |---|---|---|
 | A | S1 | `ListItem`'s end slot holds the dirty `Indicator`; the ` •` no longer clips on a long name |
 | B | S1 | the hover-or-selected rule becomes one `ui` helper when `Tab` lands, its second user |
-| D | S1 | `aria_selected` and `aria_expanded` through `ListItem::role`, checked against `docs/gpui-accessibility.md` |
+| D | S1, S2 | S1: `Role::Tab`, `Role::TabList` and `aria_selected` on `Tab`. S2: `ListItem::role` and the tree's `aria_expanded` |
 | E | S1 | an icons `macro_rules!` at the third icon |
 | F | S2 | `UiText` becomes `StyledExt` with a muted variant, or a `Label` |
 | G | S2 | `ListItem` owns the start slot's width when a second fixed-slot user appears |
+
+The S1 reviews' levers:
+
+| Slice | Change |
+|---|---|
+| S2 | `IconButton` owns its debug selector, padding, hover, `Role::Button` and label; `stop_propagation` stays at the call site |
+| S2, or the third slotted component | one shared slot layout and slot selectors for `ListItem` and `Tab` |
+| S2, with lever F | `selectable` becomes a chained builder |
+| S3 | the drag preview: its wrapper `div` (As built S1, 3; quality review lever 4), and its `Role::Tab` outside the `TabList` (`/code-review`) |
+| the next per-tab field | one per-tab struct in `render_tab_bar`, in place of zipped vectors |
+| a second control shown on hover | a show-on-hover helper |
+
+## S1. Tabs
+
+Specified 2026-10-02. The user delegated the open choices ("je te laisse
+gérer"). Each choice taken under that delegation is marked *(delegated)*, so
+the user can revisit it.
+
+### What S1 changes
+
+- The tab and its drag preview become one `Tab` component. Today the preview
+  restates the tab's look by hand (`tab_bar.rs:30-47` against `:96-163`).
+- An inactive tab gets the row hover. The active tab keeps its opaque
+  `tab_active_background`, which opens it into the editor below.
+- The close glyph `×` becomes the Lucide `x` icon. It shows on the active tab
+  and on any tab under the pointer *(delegated: Zed's and Obsidian's choice)*.
+- A dirty note shows a dot. On a tab, the dot sits before the title, as in Zed
+  *(delegated)*. On a tree row, it moves out of the name string into
+  `ListItem`'s new end slot. A long name then clips before the dot, not the
+  dot itself (lever A).
+
+### S1-D1. The hover-or-selected rule, once (lever B)
+
+`ListItem::render` holds the rule "a row carries the selected background or a
+hover style, never both". `Tab` needs the same rule with a different selected
+colour. It becomes one function in `ui.rs`:
+
+```rust
+/// One background or a hover, never both: a hover refinement repaints the base (`div.rs:3451`).
+pub(crate) fn selectable(base: Stateful<Div>, selected: Option<Rgba>) -> Stateful<Div>
+```
+
+`ListItem` passes `selected.then(theme::selected_row_background)`. `Tab`
+passes `active.then(theme::tab_active_background)`. The hover colour is
+`row_hover_background` for both: an overlay, so it reads on the tab bar too.
+
+### S1-D2. `Tab`
+
+```rust
+#[derive(IntoElement)]
+pub(crate) struct Tab {
+    base: Stateful<Div>,
+    active: bool,
+    start: Option<AnyElement>,   // the dirty dot, or nothing
+    end: Option<AnyElement>,     // the close button, or nothing (the drag preview)
+    children: Vec<AnyElement>,   // the title
+}
+// new(id), active(bool), start(e), end(e); ParentElement; Interactivity forwarded, no Styled
+```
+
+Render: `h_flex`, `flex_none`, `gap_2`, `max_w(TAB_MAX_WIDTH)`,
+`px(ROW_INSET)`, `ui_text`, `selectable(.., active)`, and the text colour by
+`active`. The title sits in a `min_w_0` `truncate` cell. The start and end
+slots are `flex_none`.
+
+`Tab` also sets `.group(TAB_GROUP)`. The end slot reads that group to show on
+hover (S1-D3). gpui resolves a group name to the nearest enclosing element
+with that name, so one constant serves every tab.
+
+The two sites:
+
+- **The bar.** `render_tab` builds `Tab::new(("tab", ix))` and attaches every
+  handler it has today, unchanged: both mouse-downs, click, aux-click, drag,
+  drag-over, drop. `debug_selector` comes from the id, as in `ListItem`, so
+  `tab-{ix}` is unchanged.
+- **The preview.** `DraggedTab::render` builds `Tab::new("tab-preview")` with
+  the same title and active flag, and no end slot. Today's comment "drawn at
+  the window root, so it inherits nothing" stays true: `Tab` states its own
+  text size and colour.
+
+**Accessibility (lever D).** The tab gets `Role::Tab` and
+`aria_selected(active)`, and the bar gets `Role::TabList`. Both methods exist
+on `StatefulInteractiveElement` (`div.rs:1304,1388`). `Tab` sets the role and
+the selection itself, so the two cannot drift. `docs/gpui-accessibility.md`
+records that gpui's bridge is widget-level only. These are widget properties,
+so they reach it. `ListItem::role` is left to S2, when the tree's
+`aria_expanded` can come from the same `expanded` test as the chevron.
+
+### S1-D3. The close button: shown on hover, never hidden from the pointer
+
+The close button is a `div` with an id, holding `Icon::new(IconName::X)`, with
+today's `on_click` and `stop_propagation`. On an inactive tab it has
+`opacity(0.)` and `.group_hover(TAB_GROUP, |s| s.opacity(1.))`.
+
+**Why opacity and not `invisible()`.** A div with `Visibility::Hidden` returns
+before it registers its mouse listeners (`div.rs:2529`). An invisible ×
+would therefore be unclickable until a frame had drawn the hover. The tests
+that click `tab-close-0` and `tab-close-1` would depend on that frame
+(`shell/tests/tab_bar.rs:127,156,355`, `dragging.rs:188`). Opacity keeps the
+button laid out, painted and clickable. The tab's width also stays the same
+whether or not the × shows.
+
+The button gets the button hover: `button_hover_background()`, a white
+overlay stronger than the row's, so the × reads as a target within a hovered
+tab. It also gets `rounded_sm` and a 2 px padding around the 14 px icon. The
+padded box is 18 px, which fits the 22 px line box, so the tab's height does
+not change.
+
+This is not `IconButton` yet. It has one site in S1, the tab, so rule 4
+places the component in S2 with the panel toggles. S2 moves this code into
+`IconButton` unchanged.
+
+### S1-D4. `Indicator`: the dirty dot
+
+```rust
+#[derive(IntoElement)]
+pub(crate) struct Indicator;   // a dot: DOT_SIZE square, rounded_full, bg(theme::dirty_dot())
+```
+
+There are two sites:
+
+- **The tab's start slot**, when its note is dirty. `tab_titles` keeps its
+  signature: three tests compare its result to plain titles
+  (`shell/tests/tab_bar.rs:20`, `tabs.rs:461`, `failed_trash.rs:423`). The
+  note each tab shows moves into `tab_notes()`. `tab_titles` and
+  `render_tab_bar` both read it, and the bar asks `is_dirty` per note.
+- **`ListItem`'s new `end` slot** (`flex_none`, after the content), on a dirty
+  tree row.
+
+`row_label` loses its ` •`. The sidebar test that reads the dot
+(`sidebar/tests.rs:424-439`, through `row_labels`) moves to the state it
+names. A `row_is_dirty(sidebar, row)` helper reads `is_dirty` exactly where
+the render reads it, so the test keeps its name and its three asserts.
+
+The dot reads `NoteStore::is_dirty(id, cx)` (`vault/store.rs:129`) inside the
+draw, as the label does today. The comment "reading inside the draw is what
+repaints the dot" moves with it.
+
+**Why a save with no keystroke clears the dot.** Inkra caches no view: there
+is no `.cached(` in the crate. So every `render` runs on every window draw,
+and the gated reuse in `gpui/src/view.rs:481-488` never applies. A save
+notifies `NoteStore`. The draw read that entity, so the window redraws
+(`gpui/src/app.rs:1210,2790`). Blue confirmed this with a throwaway test
+(Red/blue, S1). A view that adopts `.cached()` must notify on `NoteSaved`
+itself.
+
+### S1-D5. Icons (lever E)
+
+`x` is the third icon. `assets.rs` becomes one `macro_rules! icons`, which
+generates the enum, `ALL`, `path` and `bytes` from one list of
+`Variant => "file-stem"` pairs. A variant can then no longer be missing from
+`ALL`. The three asset tests stay as they are.
+
+### S1-D6. Theme
+
+| Item | Value | Use |
+|---|---|---|
+| `button_hover_background()` | white overlay `0x1f` | an icon button under the pointer |
+| `dirty_dot()` | `tab_inactive_text`'s #8a8a8a | the dirty `Indicator` |
+| `DOT_SIZE` | 6 px | `Indicator` |
+| `TAB_GROUP` | `"tab"`; a name, not a colour, but it binds `Tab` to its end slot, so it lives beside `Tab` in `ui/tab.rs`, not in `theme.rs` | — |
+
+### S1 tests
+
+The success criteria are written first. Each one fails on the current tree.
+
+1. `ui/tests.rs`: the three asset tests now cover `x`. A new
+   `every_icon_has_a_distinct_path` replaces what the hand-written `ALL` used
+   to guard.
+2. `shell/tests/tab_bar.rs`:
+   - `an_inactive_tabs_close_button_closes_it_without_a_hover`: a click on
+     `tab-close-1` with no prior mouse move closes tab 1. It fails if the ×
+     is `invisible()`.
+   - `a_dirty_note_shows_a_dot_on_its_tab`: edit the note in tab 0, and
+     `tab-dot-0` is drawn. Save it, and the dot is gone.
+   - `the_tab_keeps_its_width_when_hovered`: the bounds of `tab-1` are equal
+     before and after the pointer moves onto it.
+   - `the_preview_matches_the_tab`: the bounds of the dragged preview and of
+     its tab have equal height. No test here reads bounds mid-drag yet. The
+     drag start calls `window.refresh()` (`div.rs:2999`), so the preview
+     should be in the next frame. If it is not reachable, render
+     `DraggedTab` alone in a `VisualTestContext` and compare.
+3. `sidebar/render_tests.rs`:
+   - `a_dirty_rows_dot_survives_a_long_name`: at the 220 px column, a note
+     with a 200-character name and an edit has a drawn `tree-dot-{item}`
+     whose right edge is inside the row.
+   - `a_saved_notes_dot_leaves_the_frame`: the dot is drawn after an edit, and
+     gone after `save_current` and `run_until_parked`, with no further input.
+
+   **Measure edges, not widths.** A child of `ListItem`'s content cell is a
+   block, so it fills the row whatever its text. A width taken there reads
+   the row, not the text.
+4. The existing tab tests stay green unchanged: click, middle-click, close,
+   drag, reorder, restore. So does `tab_titles` and its three callers.
+   `test-names.sh` shows no lost test.
+5. Shots, looked at:
+   - `tabs`: an × on the active tab only, dots where notes are dirty;
+   - new `tabs-hover`: the pointer over an inactive tab, so its hover
+     background and its × show;
+   - `tabs-dragging`: the preview is unchanged;
+   - `sidebar-dirty`: the dot sits at the row's right edge.
+
+### Out of S1
+
+- `IconButton`, which S2 adds at its second site.
+- The tab's ⌘-hover tooltip, and tooltips in general (Deferred).
+- Swapping the dot for the × on hover, as Obsidian does. It would need two
+  states in one slot, while the dot-before-title layout needs none.
 
 ## Open questions for the user
 
@@ -432,6 +642,63 @@ above or fills a gap in it.
    `backlink_excerpts_still_wrap` is in `shell/tests/backlinks.rs`, because it
    needs the shell's 260 px column.
 
+## As built (S1)
+
+S1 was built on `feat/shell-chrome-s1`. Each item below deviates from the S1
+text above or fills a gap in it.
+
+1. **The new tab tests are in `shell/tests/tab_chrome.rs`, not `tab_bar.rs`.**
+   `tab_bar.rs` holds 373 lines, and five more tests would carry it past 400.
+   `tab_bar.rs`'s `click` helper became `pub(super)` for the new file.
+2. **A tab's title cell has a minimum width, `theme::TAB_MIN_WIDTH` (18 px).**
+   Without it, a one-letter tab's centre lies on the ×'s 18 px box: `a` is
+   8 px of padding, about 8 px of text and an 8 px gap, so the box spans
+   about 24 px to 42 px and the centre sits near 25 px. A centre click then
+   closed the tab, the active one too. `clicking_a_tab_activates_it` failed,
+   and `clicking_the_active_tab_focuses_its_editor` passed while it closed
+   the only tab. A tab is `2 × ROW_INSET + title + gap + ×`, and its centre
+   lies left of the × when the title is wider than the × less the gap. A
+   title cell as wide as the × keeps the centre a gap's width clear. Both
+   tests click the centre, as before S1. The second now also asserts the
+   tab list, and `a_click_on_a_short_tabs_centre_never_closes_it` fails with
+   `TAB_MIN_WIDTH` at 0.
+3. **The drag preview paints `tab_active_background` behind its `Tab`.** An
+   inactive `Tab` has no background, only a hover, and gpui applies no hover
+   while a drag is active (`div.rs:3431`). A preview built from `Tab` alone
+   would be bare text at the window root when an inactive tab is dragged. The
+   preview before S1 always painted that background, so a wrapper `div` keeps
+   it. The `tabs-dragging` shot shows the preview unchanged.
+4. **The `tabs` scene types into the active `index`, not into an inactive
+   tab.** A note left saves at once (`NoteStore::set_current`), so an inactive
+   tab shows the dot only while its save is in flight or has failed. The
+   scene shows the dot, the title and the × on one tab. `tabs-hover` and
+   `tabs-dragging` open the clean bar.
+5. **The dot's debug selectors sit on a wrapper `div` at each call site:**
+   `tab-dot-{ix}` and `tree-dot-{item}`. `Indicator` stays a unit struct with
+   no id and no interactivity.
+6. **`row_label` is gone.** `render_row` calls `one_line(&row.name)` for the
+   label, and the `Sidebar` method `row_is_dirty` for the dot. The test helper
+   `dirty_rows` lists the names of the rows that `row_is_dirty` marks, so the
+   three asserts read none, `b`, none.
+7. **The ×'s 2 px padding is `p_0p5()`**, 0.125 rem at gpui's 16 px rem. The
+   bar's other spacings are rem helpers too (`px_2`, `gap_2`).
+8. **The bar's `text_size` and `line_height` pair became `ui_text()`**, as D1
+   asks of the files a slice touches.
+9. **`tab_notes()` is `pub(super)` and returns an iterator.** `tab_titles`,
+   `render_tab_bar` and the shell tests' `tab_notes` helper read it.
+10. **`a_saved_notes_dot_leaves_the_frame` was seen red only on the tree
+    before S1**, where no `tree-dot` exists. Its named bug, a cached view,
+    cannot be injected in its window: the window's root is the `Sidebar`
+    itself. Every other S1 test was also seen red with its named bug injected.
+11. **Deferred drops its `ListItem` end slot row**, because S1 built the slot
+    for the dirty dot.
+12. **`Tab` hides its own end slot on an inactive tab**, with the opacity and
+    the `group_hover` of S1-D3, on the slot's `flex_none` wrapper. The bar's
+    close button carries no visibility rule, and `TAB_GROUP` is private to
+    `ui/tab.rs`.
+13. **The close button has `Role::Button` and the label "Close tab"**, found
+    by `/code-review`.
+
 ## Deferred
 
 | Item | Trigger |
@@ -439,7 +706,6 @@ above or fills a gap in it.
 | `Disclosure` | a toggle that is not the row's own action |
 | `Divider` | a second drawn hairline (one today: vault search's group rule) |
 | `Label` with size, colour and truncation | a slice that migrates the ellipsis cells and muted texts; 6 and 12 sites today, left out of S0 to keep it reviewable |
-| `ListItem` end slot | its first user: vault search's count or the palette's key hint, when their slice moves them |
 | `Theme` global | a second theme or a size setting |
 | Tooltips | the first icon-only button with no visible label (S2's toggles) |
 | `ui` as its own crate | a second consumer |
@@ -461,6 +727,12 @@ and reviewed the fixes. Findings folded in:
 | `render_rows` returns `Vec<Div>` | found by blue | `Vec<AnyElement>` (D4) |
 | S3 needs S1's `Tab`; S4's order against S3 unstated | confirmed, minor | Slices table |
 | Licence in a shipped `.app` | moot today: no bundling | Deferred |
+| S1: the dirty dot stays after a save that lands with no keystroke | refuted by blue with a running test: no view is cached, so every render reruns | S1-D4 records why; the test is kept as `a_saved_notes_dot_leaves_the_frame` |
+| S1: lever D's row overstated S1's scope | confirmed | the levers table |
+| S1: `tab_titles` returning tuples breaks three tests | found by blue | `tab_notes()`; `tab_titles` unchanged (S1-D4) |
+| S1: the icons macro is premature at three icons | blue: keep; it prevents a variant missing from `ALL`, which no test catches | kept (S1-D5) |
+| S1: a mid-drag bounds read has no precedent | found by blue | fallback named in S1 tests |
+| S1 as built: a one-letter tab's centre lies on its ×, so a centre click closes it, the active tab too; `clicking_the_active_tab_focuses_its_editor` passed while it closed the only tab | confirmed by red, with the built tests reverted; blocker | `TAB_MIN_WIDTH` on the title cell (As built S1, 2); the test asserts the tab list; new `a_click_on_a_short_tabs_centre_never_closes_it` |
 | `ListItem` implemented `Styled`: a caller could set its height, padding or direction | confirmed, quality review and red | `Styled` dropped; wrapping and colour on the content (As built 3) |
 | Picker hover invisible on #252526: an opaque #232323 is darker than the modal | found in the `picker-hover` shot | overlays: hover and selected are white at alpha `0x0c` and `0x17` (D3) |
 

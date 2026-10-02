@@ -38,3 +38,12 @@ fn no_icon_file_is_dangling() {
 fn unknown_path_is_none() {
     assert!(Assets.load("icons/nope.svg").expect("load").is_none());
 }
+
+#[test]
+fn every_icon_has_a_distinct_path() {
+    for (ix, name) in IconName::ALL.iter().enumerate() {
+        for other in &IconName::ALL[ix + 1..] {
+            assert_ne!(name.path(), other.path(), "{name:?} and {other:?}");
+        }
+    }
+}

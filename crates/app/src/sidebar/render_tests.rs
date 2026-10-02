@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
-use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext};
+use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, px, size};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind};
 
 use super::tests::{drawn, row};
+use crate::test_support::{edit, opened};
 use crate::theme;
+use crate::vault::NoteStore;
 
 fn bounds(visual: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> {
     visual.run_until_parked();
@@ -60,4 +62,52 @@ fn the_field_row_has_the_tree_rows_height(cx: &mut TestAppContext) {
     let plain = bounds(&mut visual, "tree-row-0");
     let field = bounds(&mut visual, "tree-row-1");
     assert_eq!(field.size.height, plain.size.height);
+}
+
+/// The shell's sidebar column is 220 px wide; a nowrap name inside the content cell would push the dot out.
+#[gpui::test]
+async fn a_dirty_rows_dot_survives_a_long_name(cx: &mut TestAppContext) {
+    let name = "n".repeat(200);
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file(format!("/vault/{name}.md"), "alpha");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    visual.simulate_resize(size(px(220.), px(400.)));
+    let note = row(&sidebar, cx, &name);
+    let notes = sidebar.read_with(cx, |sidebar, _| sidebar.notes.clone());
+    let buffer = opened(&notes, cx, note.id).await;
+    edit(&buffer, cx, "X");
+
+    let dot = bounds(&mut visual, "tree-dot-0");
+    let row = bounds(&mut visual, "tree-row-0");
+    assert!(
+        dot.right() <= row.right(),
+        "the dot at {dot:?} is outside the row at {row:?}"
+    );
+}
+
+/// No view is cached, so the save's notify redraws the tree with no further input (spec S1-D4).
+#[gpui::test]
+async fn a_saved_notes_dot_leaves_the_frame(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    let a = row(&sidebar, cx, "a");
+    let notes = sidebar.read_with(cx, |sidebar, _| sidebar.notes.clone());
+    let buffer = opened(&notes, cx, a.id).await;
+    edit(&buffer, cx, "X");
+    visual.run_until_parked();
+    assert!(
+        visual.debug_bounds("tree-dot-0").is_some(),
+        "the edit draws it"
+    );
+
+    notes.update(cx, NoteStore::save_current);
+    visual.run_until_parked();
+
+    assert!(
+        visual.debug_bounds("tree-dot-0").is_none(),
+        "the save clears it"
+    );
 }

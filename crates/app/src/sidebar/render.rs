@@ -4,27 +4,22 @@ use std::ops::Range;
 use gpui::Pixels;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement, Styled, Window, div,
+    ParentElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use inkra_vault::Kind;
 
 use crate::one_line::one_line;
 use crate::open::Open;
 use crate::theme;
-use crate::ui::{Icon, IconName, ListItem};
+use crate::ui::{Icon, IconName, Indicator, ListItem};
 
 use super::rows::Item;
 use super::{EditState, Row, Sidebar};
 
 impl Sidebar {
     /// Split out only so a test can read the dot.
-    pub(super) fn row_label(&self, row: &Row, cx: &App) -> String {
-        let dot = if self.notes.read(cx).is_dirty(row.id, cx) {
-            " •"
-        } else {
-            ""
-        };
-        format!("{}{dot}", one_line(&row.name))
+    pub(super) fn row_is_dirty(&self, row: &Row, cx: &App) -> bool {
+        self.notes.read(cx).is_dirty(row.id, cx)
     }
 
     /// The field's row: a `ListItem` like any other, or a pixel taller misplaces every row below it.
@@ -55,7 +50,8 @@ impl Sidebar {
     fn render_row(&self, item: usize, row: &Row, cx: &mut Context<Self>) -> AnyElement {
         let row = row.clone();
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
-        let label = self.row_label(&row, cx);
+        let dirty = self.row_is_dirty(&row, cx);
+        let label = one_line(&row.name).into_owned();
         let start = match row.kind {
             Kind::Dir if self.expanded.contains(&row.id) => {
                 Icon::new(IconName::ChevronDown).into_any_element()
@@ -83,6 +79,13 @@ impl Sidebar {
                     .text_color(theme::sidebar_text())
                     .child(label),
             )
+            .when(dirty, |list_item| {
+                list_item.end(
+                    div()
+                        .debug_selector(move || format!("tree-dot-{item}"))
+                        .child(Indicator),
+                )
+            })
             .into_any_element()
     }
 }

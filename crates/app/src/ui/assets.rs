@@ -5,28 +5,36 @@ use gpui::{AssetSource, Result, SharedString};
 /// Embedded at build time: a missing file is a compile error, not a blank icon.
 pub(crate) struct Assets;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum IconName {
-    ChevronDown,
-    ChevronRight,
+/// One list of `Variant => "file-stem"` pairs, so no variant can be missing from `ALL`.
+macro_rules! icons {
+    ($($name:ident => $stem:literal),+ $(,)?) => {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub(crate) enum IconName {
+            $($name),+
+        }
+
+        impl IconName {
+            pub(crate) const ALL: &[IconName] = &[$(Self::$name),+];
+
+            pub(crate) fn path(self) -> &'static str {
+                match self {
+                    $(Self::$name => concat!("icons/", $stem, ".svg")),+
+                }
+            }
+
+            fn bytes(self) -> &'static [u8] {
+                match self {
+                    $(Self::$name => include_bytes!(concat!("../../assets/icons/", $stem, ".svg"))),+
+                }
+            }
+        }
+    };
 }
 
-impl IconName {
-    pub(crate) const ALL: &[IconName] = &[IconName::ChevronDown, IconName::ChevronRight];
-
-    pub(crate) fn path(self) -> &'static str {
-        match self {
-            IconName::ChevronDown => "icons/chevron-down.svg",
-            IconName::ChevronRight => "icons/chevron-right.svg",
-        }
-    }
-
-    fn bytes(self) -> &'static [u8] {
-        match self {
-            IconName::ChevronDown => include_bytes!("../../assets/icons/chevron-down.svg"),
-            IconName::ChevronRight => include_bytes!("../../assets/icons/chevron-right.svg"),
-        }
-    }
+icons! {
+    ChevronDown => "chevron-down",
+    ChevronRight => "chevron-right",
+    X => "x",
 }
 
 impl AssetSource for Assets {

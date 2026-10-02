@@ -21,7 +21,7 @@ fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<gpui:
         .unwrap()
 }
 
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
+pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx.debug_bounds(selector).expect("drawn");
     cx.simulate_click(bounds.center(), Modifiers::none());
     cx.run_until_parked();
@@ -142,6 +142,7 @@ fn clicking_the_active_tab_focuses_its_editor(cx: &mut TestAppContext) {
 
     click(&mut cx, "tab-0");
 
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(focus(&window, &mut cx), (true, false));
 }
 
