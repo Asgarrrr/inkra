@@ -2,27 +2,18 @@
 
 use std::sync::Arc;
 
-use gpui::{Focusable, TestAppContext, VisualTestContext, WindowHandle, px, size};
+use gpui::{TestAppContext, VisualTestContext, px, size};
 use inkra_vault::mem_fs::MemFs;
 
 use super::tab_bar::click;
 use super::{
-    AppShell, ab_focused, editor, focus_tree, keys, no_vault, open, selected, shell_focused,
+    ab_focused, editor_focused, focus_tree, keys, no_vault, open, selected, shell_focused,
     tree_focused, two_notes, vault_names,
 };
 use crate::test_support::entry_id;
 
 fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
-}
-
-fn editor_focused(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
-    let editor = editor(window, cx);
-    window
-        .update(cx, |_, window, cx| {
-            editor.focus_handle(cx).is_focused(window)
-        })
-        .unwrap()
 }
 
 #[gpui::test]
@@ -114,17 +105,6 @@ fn a_shown_sidebar_keeps_its_open_folders_and_selection(cx: &mut TestAppContext)
         .unwrap();
     assert_eq!(names, ["projects", "inkra", "a"]);
     assert_eq!(selected(&window, &mut cx), Some(a));
-}
-
-/// Measured against the row, not a constant: the bar's height is never set from `TAB_BAR_HEIGHT`.
-#[gpui::test]
-fn the_headers_line_up_with_the_tab_bar(cx: &mut TestAppContext) {
-    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
-    let row = cx.debug_bounds("tab-row").unwrap();
-    let sidebar = cx.debug_bounds("panel-header-sidebar").unwrap();
-    let backlinks = cx.debug_bounds("panel-header-backlinks").unwrap();
-    assert_eq!(sidebar.bottom(), row.bottom());
-    assert_eq!(backlinks.bottom(), row.bottom());
 }
 
 /// Cancelled, not committed: a half-typed name must not create a note.

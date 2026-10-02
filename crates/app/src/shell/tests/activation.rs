@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gpui::{
     Bounds, Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowBounds,
-    WindowOptions, point, prelude::*, px,
+    WindowOptions, prelude::*,
 };
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Vault};
@@ -11,10 +11,9 @@ use inkra_vault::{Fs, Vault};
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
 use crate::shell::{AppShell, EditorView, Save};
-use crate::sidebar::row_center;
 use crate::test_support::{detached_store, entry_id};
 
-use super::{activate, editor, open_vault, two_notes};
+use super::{activate, click_row, editor, open_vault, two_notes};
 
 #[gpui::test]
 fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
@@ -49,8 +48,7 @@ fn clicking_a_row_hands_its_buffer_to_the_editor(cx: &mut TestAppContext) {
 
     let (window, _sidebar, _notes) = open_vault(cx, fs as Arc<dyn Fs>);
     let mut visual = VisualTestContext::from_window(window.into(), cx);
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&mut visual, 0., Modifiers::none());
 
     editor(&window, cx).update(cx, |editor, cx| {
         assert_eq!(editor.buffer().read(cx).text(), "alpha");

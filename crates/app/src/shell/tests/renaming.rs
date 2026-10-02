@@ -3,15 +3,14 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Modifiers, TestAppContext, point, px};
+use gpui::{Modifiers, TestAppContext};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
-use crate::sidebar::row_center;
 use crate::test_support::{detached_store, entry_id};
 use crate::vault::{NoteStore, RenameFailed};
 
-use super::{activate, open_vault, tree_focused, two_notes, vault_names};
+use super::{activate, click_row, open_vault, tree_focused, two_notes, vault_names};
 
 /// A rename keeps the row's `EntryId`, so any open buffer stays bound.
 #[gpui::test]
@@ -188,8 +187,7 @@ fn renaming_a_folder_moves_its_subtree(cx: &mut TestAppContext) {
     let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let mut visual = tree_focused(cx, window, &sidebar);
 
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&mut visual, 0., Modifiers::none());
     visual.simulate_keystrokes("enter");
     visual.run_until_parked();
     visual.simulate_keystrokes("a r c h i v e enter");

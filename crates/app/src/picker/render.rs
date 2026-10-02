@@ -47,17 +47,7 @@ impl<D: PickerDelegate> Picker<D> {
 impl<D: PickerDelegate> Picker<D> {
     /// Where row `ix` was drawn last, for a scene to point at; `None` before the list is drawn.
     pub(crate) fn row_center(&self, ix: f32) -> Option<gpui::Point<gpui::Pixels>> {
-        let list = self.scroll.0.borrow().base_handle.clone();
-        let bounds = list.bounds();
-        // Zero-sized until the list's first prepaint.
-        if bounds.is_empty() {
-            return None;
-        }
-        let top = bounds.top() + list.offset().y;
-        Some(gpui::point(
-            bounds.center().x,
-            top + self.delegate.row_height() * (ix + 0.5),
-        ))
+        crate::ui::list_row_center(&self.scroll, self.delegate.row_height(), ix)
     }
 }
 

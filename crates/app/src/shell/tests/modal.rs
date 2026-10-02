@@ -1,16 +1,13 @@
 use std::sync::Arc;
 
-use gpui::{
-    Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle, point, px,
-};
+use gpui::{Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 
-use super::{activate, editor, showing, tree_focused, two_notes};
+use super::{activate, editor, row_point, showing, tree_focused, two_notes};
 use crate::open::Open;
 use crate::picker::Picker;
 use crate::picker::letters::{DELAY, Letters};
 use crate::shell::{AppShell, SIDEBAR_WIDTH};
-use crate::sidebar::row_center;
 
 const ROWS: &[&str] = &["apple", "apricot", "beet"];
 
@@ -136,7 +133,8 @@ fn a_click_on_the_backdrop_over_a_sidebar_row_dismisses_without_activating_it(
     let mut visual = tree_focused(cx, window, &sidebar);
     open_letters::<0>(window, &mut visual);
 
-    visual.simulate_click(point(px(20.), row_center(1.)), Modifiers::none());
+    let at = row_point(&mut visual, 1.);
+    visual.simulate_click(at, Modifiers::none());
 
     assert!(!has_modal(window, &mut visual));
     assert_eq!(showing(&window, cx), Some(a), "b's row never saw the click");

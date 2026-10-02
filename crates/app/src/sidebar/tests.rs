@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use futures::FutureExt;
 use gpui::{
-    Context, Entity, Focusable, Modifiers, Subscription, TestAppContext, VisualTestContext, point,
-    prelude::*, px,
+    Context, Entity, Focusable, Modifiers, ScrollStrategy, Subscription, TestAppContext,
+    VisualTestContext, prelude::*, px, size,
 };
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
@@ -17,7 +17,7 @@ use inkra_vault::{EntryId, Fs};
 
 use super::edit::Rejection;
 use super::rows::Item;
-use super::{Kind, Row, Sidebar, row_center};
+use super::{Kind, Row, Sidebar};
 use crate::open::{NoteActivated, Open};
 use crate::test_support::{opened, vault_of};
 use crate::vault::NoteStore;
@@ -120,6 +120,15 @@ pub(super) fn drawn(
     let window = cx.add_window(move |_, cx| Sidebar::new(notes, vault, cx));
     let sidebar = window.root(cx).expect("root view");
     (sidebar, VisualTestContext::from_window(window.into(), cx))
+}
+
+/// Clicks where row `ix` was drawn last.
+fn click_row(sidebar: &Entity<Sidebar>, cx: &mut VisualTestContext, ix: f32, modifiers: Modifiers) {
+    let at = sidebar
+        .read_with(cx, |sidebar, _| sidebar.row_center(ix))
+        .expect("the tree is drawn");
+    cx.simulate_click(at, modifiers);
+    cx.run_until_parked();
 }
 
 /// An unrendered row has no dispatch node, so the field would take no keystrokes — not even `escape`.
@@ -340,8 +349,7 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
 
     let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
 
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 0., Modifiers::none());
 
     assert_eq!(
         labels(&sidebar, cx),
@@ -351,9 +359,9 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
 }
 
 /// Discriminates `.w_full()`: headless text measures at 0.6 x `font_size`
-/// per glyph, so an `auto` row around the stem `a` ends at 17.6px and x=20
-/// misses. Does not cover `.size_full()`, which needs the real `SIDEBAR_WIDTH`
-/// parent from `shell.rs` to resolve against.
+/// per glyph, so an `auto` row around the stem `a` ends at 17.6px and the
+/// list's centre misses. Does not cover `.size_full()`, which needs the real
+/// `SIDEBAR_WIDTH` parent from `shell.rs` to resolve against.
 #[gpui::test]
 fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -363,8 +371,7 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
     let (seen, _guard) = watch(&sidebar, cx);
 
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 0., Modifiers::none());
     assert!(
         seen.borrow().is_empty(),
         "a folder reports no note, its own or a sibling's"
@@ -372,8 +379,7 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
 
     // Expanded: `a` is now row 2 (`Projects/`, `plan`, `a`).
     let a = row(&sidebar, cx, "a");
-    visual.simulate_click(point(px(20.), row_center(2.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 2., Modifiers::none());
     assert_eq!(
         *seen.borrow(),
         [NoteActivated {
@@ -398,8 +404,7 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
     let (seen, _guard) = watch(&sidebar, cx);
 
     let last = row(&sidebar, cx, "note-29");
-    visual.simulate_click(point(px(20.), row_center(29.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 29., Modifiers::none());
 
     assert_eq!(
         *seen.borrow(),
@@ -409,6 +414,28 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
         }],
         "the rendered pitch has drifted from the stated line height"
     );
+}
+
+/// Row 50 of 60 is drawn only scrolled to: `row_center` must add the list's scroll offset.
+#[gpui::test]
+fn a_click_on_a_scrolled_tree_lands_on_the_row_it_names(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    for ix in 0..60 {
+        fs.insert_file(format!("/vault/note-{ix:02}.md"), "text");
+    }
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    visual.simulate_resize(size(px(400.), px(300.)));
+    sidebar.update(&mut visual, |sidebar, cx| {
+        sidebar.scroll.scroll_to_item(50, ScrollStrategy::Center);
+        cx.notify();
+    });
+    visual.run_until_parked();
+    let target = row(&sidebar, cx, "note-50");
+
+    click_row(&sidebar, &mut visual, 50., Modifiers::none());
+
+    let selected = sidebar.read_with(&visual, |sidebar, _| sidebar.selected());
+    assert_eq!(selected, Some(target.id));
 }
 
 /// Reads the predicate the render draws the dot from; `render_tests` sees the dot drawn and cleared.
@@ -453,8 +480,7 @@ fn a_cmd_click_on_a_note_row_activates_it_in_a_new_tab(cx: &mut TestAppContext) 
     let (seen, _guard) = watch(&sidebar, cx);
 
     let a = row(&sidebar, cx, "a");
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::command());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 0., Modifiers::command());
 
     assert_eq!(
         *seen.borrow(),
@@ -473,8 +499,7 @@ fn a_cmd_click_on_a_folder_row_toggles_it(cx: &mut TestAppContext) {
     let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
     let (seen, _guard) = watch(&sidebar, cx);
 
-    visual.simulate_click(point(px(20.), row_center(0.)), Modifiers::command());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 0., Modifiers::command());
 
     assert_eq!(labels(&sidebar, cx), ["Projects/", "plan"]);
     assert!(seen.borrow().is_empty());
@@ -495,8 +520,7 @@ fn a_click_during_a_rename_does_not_activate_another_row(cx: &mut TestAppContext
     });
     visual.run_until_parked();
 
-    visual.simulate_click(point(px(20.), row_center(1.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 1., Modifiers::none());
 
     assert!(seen.borrow().is_empty(), "no row activates");
     let (editing, selected) =
@@ -516,8 +540,7 @@ fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
     let (seen, _guard) = watch(&sidebar, cx);
 
     let c = row(&sidebar, cx, "c");
-    visual.simulate_click(point(px(20.), row_center(1.)), Modifiers::none());
-    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 1., Modifiers::none());
 
     assert_eq!(
         *seen.borrow(),

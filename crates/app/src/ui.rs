@@ -44,6 +44,23 @@ pub(crate) fn selectable(base: Stateful<Div>, selected: Option<Rgba>) -> Statefu
     }
 }
 
+/// Where row `ix` of a uniform list was drawn last, at `pitch` per row; `None` before the list is drawn.
+#[cfg(any(test, feature = "shot"))]
+pub(crate) fn list_row_center(
+    scroll: &gpui::UniformListScrollHandle,
+    pitch: gpui::Pixels,
+    ix: f32,
+) -> Option<gpui::Point<gpui::Pixels>> {
+    let list = scroll.0.borrow().base_handle.clone();
+    let bounds = list.bounds();
+    // Zero-sized until the list's first prepaint.
+    if bounds.is_empty() {
+        return None;
+    }
+    let top = bounds.top() + list.offset().y;
+    Some(gpui::point(bounds.center().x, top + pitch * (ix + 0.5)))
+}
+
 pub(crate) trait UiText: Styled + Sized {
     fn ui_text(self) -> Self {
         self.text_size(theme::UI_TEXT_SIZE)

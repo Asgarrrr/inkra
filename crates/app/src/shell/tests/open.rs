@@ -2,17 +2,16 @@
 
 use std::sync::Arc;
 
-use gpui::{
-    Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle, point, px, size,
-};
+use gpui::{Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{at, check, editor, open, select, shell_focused, showing, tab_notes, text_of, trash};
+use super::{
+    at, check, click_row, editor, open, select, shell_focused, showing, tab_notes, text_of, trash,
+};
 use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::shell::AppShell;
-use crate::sidebar::row_center;
 use crate::test_support;
 
 struct Abc {
@@ -44,11 +43,6 @@ fn abc(cx: &mut TestAppContext) -> Abc {
     }
 }
 
-fn cmd_click_row(cx: &mut VisualTestContext, row: f32) {
-    cx.simulate_click(point(px(20.), row_center(row)), Modifiers::command());
-    cx.run_until_parked();
-}
-
 fn caret(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> ByteOffset {
     editor(window, cx).update(cx, |editor, _| editor.cursor())
 }
@@ -66,7 +60,7 @@ fn cmd_click_on_a_sidebar_row_opens_it_in_a_new_tab_after_the_active_one(cx: &mu
     cx.simulate_keystrokes("cmd-t");
     cx.simulate_keystrokes("cmd-1");
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
 
     assert_eq!(
         tab_notes(&window, &mut cx),
@@ -88,7 +82,7 @@ fn a_new_tab_opened_from_an_empty_tab_keeps_the_empty_tab(cx: &mut TestAppContex
     open(&window, &mut cx, a);
     cx.simulate_keystrokes("cmd-t");
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
 
     assert_eq!(
         tab_notes(&window, &mut cx),
@@ -108,7 +102,7 @@ fn a_new_tab_on_the_note_showing_duplicates_its_view_and_parks_the_tab_left(
     open(&window, &mut cx, a);
     select(&window, &mut cx, 3..3);
 
-    cmd_click_row(&mut cx, 0.);
+    click_row(&mut cx, 0., Modifiers::command());
 
     assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(a)], 1));
     assert_eq!(caret(&window, &mut cx), at(3));
@@ -133,7 +127,7 @@ fn the_new_tab_takes_focus_and_keys(cx: &mut TestAppContext) {
     } = abc(cx);
     open(&window, &mut cx, a);
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
 
     let focused = window
         .update(&mut cx, |shell, window, cx| {
@@ -161,8 +155,8 @@ fn the_later_of_two_pending_new_tab_opens_wins(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     let gate = fs.block_load("/vault/b.md");
 
-    cmd_click_row(&mut cx, 1.);
-    cmd_click_row(&mut cx, 2.);
+    click_row(&mut cx, 1., Modifiers::command());
+    click_row(&mut cx, 2., Modifiers::command());
     gate.release();
     cx.run_until_parked();
 
@@ -184,7 +178,7 @@ fn a_tab_switch_cancels_a_pending_new_tab_open(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-t");
     let gate = fs.block_load("/vault/b.md");
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
     cx.simulate_keystrokes("ctrl-tab");
     gate.release();
     cx.run_until_parked();
@@ -207,7 +201,7 @@ fn a_new_tab_opened_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext)
     cx.simulate_keystrokes("cmd-9");
     cx.run_until_parked();
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
 
     assert_eq!(tab_notes(&window, &mut cx).1, 30);
     let bar = cx.debug_bounds("tab-bar").expect("the bar is drawn");
@@ -231,7 +225,7 @@ fn a_note_closed_on_the_active_tab_keeps_a_pending_new_tab_open(cx: &mut TestApp
     open(&window, &mut cx, a);
     let gate = fs.block_load("/vault/b.md");
 
-    cmd_click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::command());
     trash(&window, &mut cx, a);
     gate.release();
     cx.run_until_parked();

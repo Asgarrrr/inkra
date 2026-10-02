@@ -6,7 +6,7 @@ use gpui::{
 use super::{UiText, h_flex};
 use crate::theme;
 
-/// A panel's first row: its title, as tall as the tab bar and ruled like it.
+/// A panel's first row: its title, ruled like the title row; both panels' headers line up.
 #[derive(IntoElement)]
 pub(crate) struct PanelHeader {
     base: Div,
@@ -26,8 +26,8 @@ impl RenderOnce for PanelHeader {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         self.base
             .flex_none()
-            // Border-box: the rule sits inside the height, as the tab bar's does.
-            .h(theme::TAB_BAR_HEIGHT)
+            // Border-box: the rule sits inside the height.
+            .h(theme::PANEL_HEADER_HEIGHT)
             .px(theme::ROW_INSET)
             .ui_text()
             .text_color(theme::placeholder_text())

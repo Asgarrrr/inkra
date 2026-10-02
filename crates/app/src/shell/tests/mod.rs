@@ -4,7 +4,9 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{Entity, Modifiers, Task, TestAppContext, VisualTestContext, WindowHandle, point, px};
+use gpui::{
+    Entity, Modifiers, Pixels, Point, Task, TestAppContext, VisualTestContext, WindowHandle,
+};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{EntryId, Fs};
@@ -12,7 +14,6 @@ use inkra_vault::{EntryId, Fs};
 use crate::keymap::key_bindings;
 use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
-use crate::sidebar::row_center;
 use crate::test_support;
 
 use super::{AppShell, EditorView, NoteStore, Shown};
@@ -46,6 +47,7 @@ mod tab_bar;
 mod tab_chrome;
 mod tab_keys;
 mod tabs;
+mod title_bar;
 mod trashing;
 mod vault_search;
 
@@ -399,10 +401,32 @@ pub(super) fn four_notes(
     (fs, window, visual, ids)
 }
 
+/// Where the shell's tree drew `row`, read from the window's root.
+pub(super) fn row_point(cx: &mut VisualTestContext, row: f32) -> Point<Pixels> {
+    cx.update(|window, cx| {
+        let shell = window
+            .root::<AppShell>()
+            .flatten()
+            .expect("the shell is the root");
+        shell.read(cx).tree_row_center(row, cx)
+    })
+    .expect("the tree is drawn")
+}
+
 /// Rows 0–3 are `a`–`d` in `four_notes`.
-pub(super) fn click_row(cx: &mut VisualTestContext, row: f32) {
-    cx.simulate_click(point(px(20.), row_center(row)), Modifiers::none());
+pub(super) fn click_row(cx: &mut VisualTestContext, row: f32, modifiers: Modifiers) {
+    let at = row_point(cx, row);
+    cx.simulate_click(at, modifiers);
     cx.run_until_parked();
+}
+
+pub(super) fn editor_focused(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+    let editor = editor(window, cx);
+    window
+        .update(cx, |_, window, cx| {
+            gpui::Focusable::focus_handle(&editor, cx).is_focused(window)
+        })
+        .unwrap()
 }
 
 pub(super) fn focus_tree(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) {

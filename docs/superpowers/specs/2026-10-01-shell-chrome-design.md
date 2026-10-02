@@ -1,6 +1,6 @@
 # Shell chrome: components, icons, panels, title bar
 
-Status: S0 shipped (#57), S1 shipped (#58). S2a built 2026-10-02 on `feat/shell-chrome-s2a` (As built (S2a), below); S2b, S2c, S2d, S3, S4 pending.
+Status: S0 shipped (#57), S1 shipped (#58). S2a shipped (#59); S3 specified 2026-10-02 (S3, below), ahead of S2b, S2c and S2d; S2b, S2c, S2d, S4 pending.
 
 ## Why
 
@@ -378,6 +378,7 @@ shots, then `check.sh` green.
 | S2 | S2a (specified below): `IconButton`, toggles, `PanelHeader`. S2b: resize. S2c: persist. S2d: tooltips. Original row: Panels: `IconButton` (its second site after the tab's close button); hide and show the sidebar and backlinks, with a resize handle (Zed's `dock.rs:1275-1332` pattern: `deferred`, `on_drag` + `on_drag_move` on the shell); a panel header shared by sidebar (vault name) and backlinks; aligned header heights | `IconButton`, `PanelHeader` | S1 |
 | S3 | Title bar: `appears_transparent`, traffic-light padding, the tab bar on the title row, window drag area | — | S1 (`Tab`), S2 (header heights) |
 | S4 | Status bar | — | S2 (panel layout); free against S3 |
+| S5 | Translucency: a blurred window background, panels drawn as cards on it | — | S3 |
 
 ### Carried to later slices
 
@@ -414,6 +415,231 @@ The S2a quality review's levers:
 | S2d | `IconButton` renders its tooltip from `label`; an optional `.action()` gives a key hint and `aria_keyshortcuts`; toggles dispatch their action |
 | S3 | `TAB_BAR_HEIGHT` becomes `PANEL_HEADER_HEIGHT` |
 | `PanelHeader`'s first control | an end slot, which makes it the third slotted component |
+
+## S3. Title bar: the tab row is the window's title bar
+
+Specified 2026-10-02. The user asked for it from a reference app, with the
+tabs in the native title bar, not under it. S3 ships ahead of S2b, S2c and
+S2d, which stay pending; none of them blocks it. Choices taken under the
+delegation are marked *(delegated)*.
+
+### What S3 changes
+
+- The system title bar goes. The window draws its content under the traffic
+  lights (`TitlebarOptions { appears_transparent: true, .. }`), and the tab
+  row takes the title bar's place.
+- **The tab row spans the window's width**, above all three columns
+  *(delegated: the reference app's layout and Zed's)*. Today it sits at the
+  top of the note column only, and each side panel's header sits level with
+  it. After S3 the row is the top of the window. The sidebar, the note column
+  and the backlinks sit under it, and the two panel headers sit level with
+  each other, under the row.
+- The row, left to right: the traffic lights' space, the sidebar toggle,
+  `#tab-bar`, a drag region, the backlinks toggle.
+- **The window moves by a drag on the row's empty space**, and a double-click
+  there does what the user set in System Settings (zoom, minimise or
+  nothing). A press on a tab, a toggle or a × does neither.
+- **With no vault, the sidebar column is not drawn** *(delegated; the S2a
+  lever "decide the no-vault layout")*. The empty state takes the width. The
+  title row is still drawn, with no toggles, so the window can still move.
+
+### S3-D1. The window
+
+`bootstrap.rs` opens the window with:
+
+```rust
+titlebar: Some(TitlebarOptions {
+    title: None,
+    appears_transparent: true,
+    traffic_light_position: Some(TRAFFIC_LIGHT_POSITION),
+}),
+app_owns_titlebar_drag: true,
+```
+
+- `app_owns_titlebar_drag: true` makes the whole view app-owned for AppKit
+  (`gpui_macos/src/window.rs:3497-3515`). AppKit then never drags the window
+  from the title area, so a tab drag cannot also move the window, and a click
+  there is not delayed while AppKit tells a click from a drag. The app moves
+  the window itself (S3-D3). Zed sets the same option for the same reason
+  (`zed/src/zed.rs:1712`).
+- gpui centres the buttons in a container `button height + 2 y` tall
+  (`gpui_macos/src/window.rs:744-748`). Their frame is 16 px tall, so `y` is
+  `(TITLE_BAR_HEIGHT - 16) / 2`. With Zed's 34 px bar this is Zed's own
+  `(9, 9)` (`zed/src/zed.rs:396`).
+- `title: None` is today's value (the default). S3 does not change what the
+  Window menu or Mission Control shows.
+
+### S3-D2. The title row
+
+`render_tab_row` moves to a new `shell/title_bar.rs`, which holds the row's
+layout, its drag regions and the traffic lights' space: the window chrome is
+one concern. The row keeps its `tab-row` selector, its background and its
+bottom rule. It now spans the window. It is `TITLE_BAR_HEIGHT` tall.
+
+| Element | Width | Content |
+|---|---|---|
+| leading drag region, `title-drag-start` | `TRAFFIC_LIGHT_PADDING`, or `ROW_INSET` in full screen | nothing; the native buttons draw over it |
+| `panel-toggle-sidebar` | its own | unchanged |
+| `#tab-bar` | its tabs' width, shrinking to scroll when they overflow | unchanged: tabs only, `Role::TabList`, the scroll |
+| trailing drag region, `title-drag-end` | the rest, at least `TITLE_DRAG_MIN_WIDTH` | nothing |
+| `panel-toggle-backlinks` | its own | unchanged |
+
+- **`#tab-bar` stops growing.** It was `flex_1`. It becomes `flex_initial`
+  with `min_w_0`: as wide as its tabs, and narrower, scrolling, when the row
+  is short. The empty space after the tabs is then the trailing drag region,
+  not the bar. Its children stay the tabs only, so `scroll_to_item` is
+  unchanged (S2a-D2 test 2b).
+- **The tabs fill the row's height.** `#tab-bar` is `h_full` and stretches
+  its tabs, so a tab's hover and active background run from the row's top to
+  its rule, as in the reference app. `Tab` itself is unchanged.
+- **The traffic lights' space reads the window.** `window.is_fullscreen()`
+  hides the native buttons, so the leading region shrinks to `ROW_INSET`, as
+  Zed's does (`platform_title_bar.rs:248-251`).
+- **With no vault** the row holds the leading region, `#tab-bar` and the
+  trailing region.
+
+### S3-D3. Moving the window: drag regions, not a draggable row
+
+A drag region is a leaf `div` with no child. A left press on it arms a move
+and calls `window.prevent_default()`. The root div tracks `AppShell`'s focus
+handle, and gpui runs the innermost bubble listener first
+(`window.rs:5780-5786`), so the press keeps the editor's focus
+(`div.rs:2765-2780`). A click on it with `click_count() == 2` calls
+`window.titlebar_double_click()`.
+
+The move and the release listen on the shell's root div, not on the region:
+
+- a mouse move while armed disarms and calls `window.start_window_move()`;
+- a left release disarms.
+
+`on_mouse_move` fires only while its own hitbox is hovered (`div.rs:298-310`).
+On the region itself, a fast drag that leaves it before the first move event
+would start no move. The root covers the window, so it sees that event. Only
+a region's press arms, so a press on a tab never reaches the root's move
+listener armed.
+
+This is Zed's gesture set (`platform_title_bar.rs:196-230`), with the move
+moved to the root. The armed flag is one `bool` on `AppShell`,
+`title_drag_armed`: only one press happens at a time.
+
+**Why regions, not the row.** Zed puts the handlers on the whole bar, so a
+press on any child bubbles up to them. Ours holds tabs that drag and click.
+gpui bubbles a child's mouse-down to its parent unless the child stops it
+(`window.rs:5778-5786`). On a draggable row, a tab drag would arm a move, and
+the first mouse move would drag the window instead of the tab. A double-click
+on a tab would also zoom the window. Every child would need a
+`stop_propagation`, and the next child added would forget it. With the
+handlers on two leaf regions, no child of the row can reach them.
+
+The trailing region keeps `TITLE_DRAG_MIN_WIDTH` when the tabs overflow, so
+the window can always move by its title row.
+
+### S3-D4. Panel headers
+
+`TAB_BAR_HEIGHT` becomes `PANEL_HEADER_HEIGHT` (the S2a lever): the headers
+are no longer level with the bar, only with each other. Its value stays
+23 px. `PanelHeader` reads the new name.
+
+**`row_center` reads the painted list, not a sum.** Today it is
+`TAB_BAR_HEIGHT + UI_LINE_HEIGHT * (ix + 0.5)`, true in a window that holds
+the sidebar alone. In the shell the sidebar now starts under the title row,
+so every shell test and shot scene that clicks a tree row would land 34 px
+high. A second variant adding `TITLE_BAR_HEIGHT` would be a second sum to
+keep in step. Instead `Sidebar::row_center(&self, ix)` reads the tree list's
+painted bounds through its `UniformListScrollHandle` and returns `None`
+before the first paint, as `Picker::row_center` does
+(`picker/render.rs:49-58`). It is right in both windows. Its callers pass the
+sidebar entity.
+
+### S3 theme
+
+| Item | Value | Use |
+|---|---|---|
+| `TITLE_BAR_HEIGHT` | 34 px, Zed's macOS value (`ui/src/utils/constants.rs:17-19`) | the title row |
+| `TRAFFIC_LIGHT_PADDING` | 78 px, Zed's value for the macOS 26 SDK (`ui/src/utils/constants.rs:10`) | the leading drag region |
+| `TRAFFIC_LIGHT_POSITION` | `(9, 9)`, from `TITLE_BAR_HEIGHT` (S3-D1) | `bootstrap.rs` |
+| `TITLE_DRAG_MIN_WIDTH` | 32 px *(delegated)* | the trailing drag region's floor |
+| `PANEL_HEADER_HEIGHT` | renamed from `TAB_BAR_HEIGHT`, 23 px | `PanelHeader`, `row_center` |
+
+### S3 deviations from Zed
+
+| Zed | Inkra | Why |
+|---|---|---|
+| handlers on the whole bar | two leaf drag regions | the bar holds draggable tabs (S3-D3) |
+| `TRAFFIC_LIGHT_PADDING` is 71 or 78 by a build-time SDK cfg | 78 | one build machine, SDK 26.5; trigger: a build on an older SDK |
+| a `PlatformTitleBar` entity | a module of `AppShell` | one window kind, macOS only |
+| the move listener on the bar | on the shell's root | a region is small; a fast drag would leave it before the first move (S3-D3) |
+| `window_control_area(Drag)` on the bar | none | inert on macOS (`gpui_macos/src/window.rs:2041`); trigger: a Windows or Linux build |
+| disarms in `on_mouse_down_out` | disarms on any move; the move starts only with the left button held | the root's up listener misses a release outside the window (As built S3, 10) |
+
+### S3 tests
+
+In `shell/tests/title_bar.rs`.
+
+1. `the_tab_row_spans_the_window_above_every_column`: `tab-row` starts at
+   x 0, is the window's width and `TITLE_BAR_HEIGHT` tall. `sidebar-column`,
+   the note column and `backlinks-column` start at its bottom.
+2. `the_traffic_lights_have_their_space`: `title-drag-start` is
+   `TRAFFIC_LIGHT_PADDING` wide, and the sidebar toggle starts at its right
+   edge. After `toggle_fullscreen` it is `ROW_INSET` wide.
+3. `the_space_after_the_tabs_is_a_drag_region`: with two tabs,
+   `title-drag-end` starts at `#tab-bar`'s right edge and ends at the
+   backlinks toggle.
+4. `overflowing_tabs_keep_a_drag_region`: with 30 tabs, `title-drag-end` is
+   at least `TITLE_DRAG_MIN_WIDTH` wide, and `cmd-9` still scrolls `tab-29`
+   into `#tab-bar`'s bounds.
+5. `a_press_on_a_drag_region_keeps_the_editors_focus`, and arms a move; a
+   release disarms it.
+6. `a_drag_on_a_drag_region_moves_the_window`: a press on `title-drag-end`
+   then a move reaches `start_window_move`, which the test platform leaves
+   `unimplemented!()` (`gpui/src/platform/test/window.rs:568`). The test is
+   `#[should_panic(expected = "not implemented")]`: `#[gpui::test]` moves the
+   attribute to its outer `#[test]` and re-raises the panic
+   (`gpui/src/test.rs:110-137`). A second case moves out of the region on the
+   first move and expects the same panic.
+7. `a_tab_drag_never_arms_a_window_move`: a press on `tab-0` leaves
+   `title_drag_armed` false, and a drag to `tab-2` reorders the tabs with no
+   panic. The existing tab drag tests stay green unchanged.
+8. `no_vault_draws_no_sidebar_column`: the empty state starts at x 0 under
+   the row, and the row is drawn.
+9. `the_panel_headers_line_up_under_the_title_row`: both headers' tops equal
+   `tab-row`'s bottom, and both bottoms equal that plus
+   `PANEL_HEADER_HEIGHT`. A wrong constant moves every tree click in the
+   tests, so this guards `row_center`.
+9b. `a_click_at_row_center_lands_on_its_row`, in the shell: a click at
+   `row_center(1)` selects tree row 1. It fails with the old sum.
+10. The S2a tests that measured the headers against `tab-row` move to test 9.
+    `test-names.sh` shows every other test kept.
+11. Shots, looked at: `tabs`, `panels-hidden`, `toggle-hover`, `tabs-hover`,
+    `tabs-dragging`, `sidebar-vault`, `backlinks`; a new `tabs-overflow`
+    with 30 tabs. The shot PNG holds the gpui scene only, so it shows no
+    traffic lights and no native bar; its leading region is empty.
+12. The real app, looked at: `cargo run -p inkra-app <vault>`, then a
+    screenshot of the window. The traffic lights sit centred in the row, a
+    drag on the empty space moves the window, a double-click zooms it, a tab
+    drag reorders tabs and does not move the window. A test cannot see the
+    native buttons or the AppKit drag.
+
+### S3 red/blue, 2026-10-02
+
+| Finding | Verdict | Change |
+|---|---|---|
+| a renamed `row_center` lands every shell tree click 34 px high | red, blocker; blue confirmed | `row_center` reads the painted list (S3-D4); test 9b |
+| test 7 proved nothing: the tab drag tests never move over a region | red, major; blue confirmed | test 7 asserts the flag |
+| `on_mouse_move` is hitbox-gated, so a fast drag leaves a small region unmoved | blue | the move listens on the root (S3-D3); test 6's second case |
+| test 6's fallback is dead: gpui re-raises the panic | red, minor; blue confirmed | `should_panic` |
+| `window_control_area(Drag)` omitted | minor, inert on macOS | deviation row |
+| the shot window keeps a native bar, so shots show two bars | blue; refuted: a shot PNG holds the gpui scene only, and today's shots start at y 0 | none |
+
+### Out of S3
+
+- Translucency (`WindowBackgroundAppearance::Blurred`) and panels drawn as
+  cards: the next slice, S5 *(delegated)*.
+- The tab hover card from the reference app.
+- The drag preview's wrapper `div` and its `Role::Tab` outside the
+  `TabList` (S1 levers): S3 does not touch the preview. They move to the
+  next slice that does.
+- Tooltips (S2d), resize (S2b), persistence (S2c).
 
 ## S2a. Panels: toggles, headers, `IconButton`
 
@@ -878,6 +1104,62 @@ text above or fills a gap in it.
     `ui/tab.rs`.
 13. **The close button has `Role::Button` and the label "Close tab"**, found
     by `/code-review`.
+
+## As built (S3)
+
+S3 was built on `feat/shell-chrome-s3`. Each item below deviates from the
+S3 text above or fills a gap in it.
+
+1. **`tab-row` has no left padding.** The leading region is the row's inset,
+   so a press at x 0 moves the window. The row keeps S2a's 4 px (`pr_1`) at
+   its right end only (As built S2a, 15).
+2. **The body under the row has a definite width (`w_full`).** Without it
+   taffy measures the row's content, and a keystroke shaped the note twice:
+   `a_keystroke_in_a_narrow_pane_shapes_the_note_once` read 2 against 1.
+3. **The drag preview is as tall as a tab in the bar.** Its wrapper `div` is
+   `flex` and `TITLE_BAR_HEIGHT - RULE_WIDTH` tall, so its `Tab` stretches as
+   the bar's do. With the bar's tabs stretched and the preview unchanged,
+   `the_preview_matches_the_tab` read 22 against 33. This touches the preview
+   that "Out of S3" leaves alone; the two S1 levers on it (the wrapper `div`,
+   `Role::Tab` outside the `TabList`) stay with the next slice.
+4. **`many_tabs_never_widen_the_note_column` drops its bar assertion.** The
+   bar now ends past the backlinks column's left edge by design. Its note
+   column and backlinks column assertions stay. Test 4 asserts that the
+   backlinks toggle stays inside the window.
+5. **`Sidebar::row_center` returns the list's centre x**, as
+   `Picker::row_center` does, and callers no longer pass x 20.
+   `a_click_reports_the_row_it_landed_on` still guards `w_full`: an `auto` row
+   ends at 17.6 px, far left of the centre. The pitch stays `UI_LINE_HEIGHT`,
+   not the list's `last_item_size`, so
+   `a_click_far_down_the_list_lands_on_the_row_it_names` still catches a drift.
+   Shell tests reach it through `row_point`, which reads the window's root;
+   scenes through `Stage::tree_row_center`. It stays
+   `#[cfg(any(test, feature = "shot"))]`: nothing else reads it.
+6. **Test 6's second case is its own test**,
+   `a_fast_drag_off_a_drag_region_moves_the_window`: a `should_panic` test
+   holds one panic. It failed with the move listener on the region. Test 7
+   failed with the press armed on the whole row, test 5 without
+   `prevent_default`.
+7. **Test 3 also asserts that `#tab-bar` ends at its last tab**, so it names
+   the cause when the bar grows. With the bar still `flex_1`, it read 997
+   against 257.
+8. **The note column has the selector `note-column`**, for tests 1 and 8.
+   Test 8 measures it, not the empty state, which fills it.
+9. **Zed sets `app_owns_titlebar_drag` at `zed/src/zed.rs:408`**, next to
+   its `(9, 9)`. S3-D1's `zed.rs:1712` is the About window, at `(12, 12)`.
+10. **A release outside the window disarmed nothing.** The root's up and move
+    listeners need its hitbox hovered (`div.rs:217-219, 309`). So a press on a
+    region and a release outside the window left the flag set, and the next
+    plain move over the window started a move with no button held.
+    `title_drag_move` now disarms on every move and starts the move only when
+    `pressed_button` is the left button.
+    `a_release_outside_the_window_leaves_no_move_armed` failed first, with the
+    test platform's `not implemented` panic.
+11. **`row_center`'s scroll offset is tested.**
+    `a_click_on_a_scrolled_tree_lands_on_the_row_it_names` scrolls 60 notes to
+    row 50 in a 300 px window and clicks there. With the offset term deleted,
+    nothing was selected. The sidebar's and the picker's `row_center` share one
+    helper, `ui::list_row_center`.
 
 ## As built (S2a)
 

@@ -1,4 +1,4 @@
-//! The row of tabs above the note column (tabs spec, A5).
+//! The tabs, in the title row over every column (tabs spec, A5; shell chrome spec, S3).
 
 use std::cmp::Ordering;
 
@@ -30,11 +30,16 @@ pub(super) struct DraggedTab {
 impl Render for DraggedTab {
     /// Drawn at the window root, so it inherits nothing; an inactive `Tab` has no background, so this paints one.
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().bg(theme::tab_active_background()).child(
-            Tab::new("tab-preview")
-                .active(self.active)
-                .child(self.title.clone()),
-        )
+        // As tall as a tab in the bar, which stretches its tabs to the row inside its rule.
+        div()
+            .flex()
+            .h(theme::TITLE_BAR_HEIGHT - theme::RULE_WIDTH)
+            .bg(theme::tab_active_background())
+            .child(
+                Tab::new("tab-preview")
+                    .active(self.active)
+                    .child(self.title.clone()),
+            )
     }
 }
 
@@ -87,8 +92,11 @@ impl AppShell {
             .role(Role::TabList)
             .flex()
             .flex_row()
-            .flex_1()
+            // As wide as its tabs, so the row's space after them is the drag region's.
+            .flex_initial()
             .min_w_0()
+            // Its tabs stretch to the row's height, so a tab's background runs from the top to the rule.
+            .h_full()
             .overflow_x_scroll()
             .track_scroll(&self.tab_scroll)
             .ui_text()

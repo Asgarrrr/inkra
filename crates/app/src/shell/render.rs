@@ -1,12 +1,12 @@
-//! The shell's layout: sidebar, note column, backlinks, and the picker over them.
+//! The shell's layout: the title row over the sidebar, note column and backlinks, and the picker over them.
 
 use gpui::{
-    App, Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div,
+    App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render,
+    Styled, Window, div,
 };
 
 use super::{AppShell, BACKLINKS_WIDTH, SIDEBAR_WIDTH};
 use crate::theme;
-use crate::ui::h_flex;
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -54,29 +54,59 @@ impl AppShell {
                 .child("Deleted from disk. Typing restores it.")
         })
     }
+}
 
-    /// The bar between the panel toggles; the row carries the background and the rule, so both span the toggles.
-    fn render_tab_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (sidebar, backlinks) = self.render_panel_toggles(cx).unzip();
-        h_flex()
-            .debug_selector(|| "tab-row".into())
-            .flex_none()
-            .px_1()
-            .bg(theme::tab_bar_background())
-            .border_b(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
-            .children(sidebar)
-            .child(self.render_tab_bar(cx))
-            .children(backlinks)
+/// A side panel's column: fixed width, the body's full height.
+fn side_column(selector: &'static str, width: Pixels) -> Div {
+    div()
+        .debug_selector(move || selector.into())
+        .flex_none()
+        .w(width)
+        .h_full()
+}
+
+impl AppShell {
+    /// Under the title row: the sidebar, the note column and the backlinks.
+    fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let panes = self.panes.as_ref();
+        div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            // A definite width: else taffy measures the row's content, and a keystroke shapes the note twice.
+            .w_full()
+            // `min_h_0`: a flex child's minimum is its content, which would outgrow the window.
+            .min_h_0()
+            .children(panes.filter(|panes| panes.shown.sidebar).map(|panes| {
+                side_column("sidebar-column", SIDEBAR_WIDTH)
+                    .bg(theme::sidebar_background())
+                    .child(panes.sidebar.clone())
+            }))
+            .child(
+                div()
+                    .debug_selector(|| "note-column".into())
+                    .flex_1()
+                    // `min_w_0`: else the note's content width would widen the column past the window.
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .children(self.render_gone_banner(cx))
+                    // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
+                    .child(div().flex_1().min_h_0().child(match self.editor() {
+                        Some(editor) => editor.clone().into_any_element(),
+                        None => self.render_empty().into_any_element(),
+                    })),
+            )
+            // Shown for an empty tab too, so a switch does not move the note column by the panel's width.
+            .children(panes.filter(|panes| panes.shown.backlinks).map(|panes| {
+                side_column("backlinks-column", BACKLINKS_WIDTH).child(panes.backlinks.clone())
+            }))
     }
 }
 
 impl Render for AppShell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown = self.panes.as_ref().map(|panes| panes.shown);
-        // No vault keeps the sidebar's column, empty, and no backlinks: the launch layout until S3/S4 settle it.
-        let sidebar_shown = shown.is_none_or(|shown| shown.sidebar);
-        let backlinks_shown = shown.is_some_and(|shown| shown.backlinks);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
             .key_context("AppShell")
@@ -99,44 +129,13 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_backlinks))
+            .on_mouse_move(cx.listener(Self::title_drag_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::title_drag_release))
             .flex()
-            .flex_row()
+            .flex_col()
             .size_full()
-            .children(sidebar_shown.then(|| {
-                div()
-                    .debug_selector(|| "sidebar-column".into())
-                    .flex_none()
-                    .w(SIDEBAR_WIDTH)
-                    .h_full()
-                    .bg(theme::sidebar_background())
-                    .children(self.panes.as_ref().map(|panes| panes.sidebar.clone()))
-            }))
-            .child(
-                div()
-                    .flex_1()
-                    // `min_w_0`: else the tab bar's content width would widen the column past the window.
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    // A sibling of the editor's slot, outside its scroll `div` (T7).
-                    .child(self.render_tab_row(cx))
-                    .children(self.render_gone_banner(cx))
-                    // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
-                    .child(div().flex_1().min_h_0().child(match self.editor() {
-                        Some(editor) => editor.clone().into_any_element(),
-                        None => self.render_empty().into_any_element(),
-                    })),
-            )
-            // Shown for an empty tab too, so a switch does not move the bar by the column's width.
-            .children(backlinks_shown.then(|| {
-                div()
-                    .debug_selector(|| "backlinks-column".into())
-                    .flex_none()
-                    .w(BACKLINKS_WIDTH)
-                    .h_full()
-                    .children(self.panes.as_ref().map(|panes| panes.backlinks.clone()))
-            }))
+            .child(self.render_tab_row(window, cx))
+            .child(self.render_columns(cx))
             .children(self.render_modal(cx))
     }
 }

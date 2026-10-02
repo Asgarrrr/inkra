@@ -1,4 +1,4 @@
-use gpui::TestAppContext;
+use gpui::{Modifiers, TestAppContext};
 
 use super::{click_row, focus_tree, four_notes, keys, open, selected, showing};
 
@@ -100,7 +100,7 @@ fn a_superseded_activation_leaves_the_sidebar_selection_on_the_note_showing(
     open(&window, &mut cx, b);
     keys(&mut cx, "cmd-t");
     let gate = fs.block_load("/vault/a.md");
-    click_row(&mut cx, 0.);
+    click_row(&mut cx, 0., Modifiers::none());
     assert_eq!(selected(&window, &mut cx), Some(a));
 
     keys(&mut cx, "ctrl-tab");
@@ -116,7 +116,7 @@ fn a_click_on_a_note_row_selects_it_at_once(cx: &mut TestAppContext) {
     let (fs, window, mut cx, [_, b, ..]) = four_notes(cx);
     let gate = fs.block_load("/vault/b.md");
 
-    click_row(&mut cx, 1.);
+    click_row(&mut cx, 1., Modifiers::none());
 
     assert_eq!(selected(&window, &mut cx), Some(b));
     gate.release();
@@ -128,7 +128,7 @@ fn a_landing_keeps_a_tree_cursor_moved_since_its_open_began(cx: &mut TestAppCont
     let (fs, window, mut cx, [a, _, c, d]) = four_notes(cx);
     open(&window, &mut cx, a);
     let gate = fs.block_load("/vault/c.md");
-    click_row(&mut cx, 2.);
+    click_row(&mut cx, 2., Modifiers::none());
     keys(&mut cx, "down");
     assert_eq!(selected(&window, &mut cx), Some(d));
 

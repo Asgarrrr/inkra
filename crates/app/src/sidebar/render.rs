@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-#[cfg(any(test, feature = "shot"))]
-use gpui::Pixels;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
     ParentElement, Role, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
+#[cfg(any(test, feature = "shot"))]
+use gpui::{Pixels, Point};
 use inkra_vault::Kind;
 
 use crate::one_line::one_line;
@@ -100,8 +100,10 @@ fn spacer() -> Div {
     div().size(theme::ICON_SIZE)
 }
 
-/// Not `#[cfg(test)]`-gated: the shot runner needs it in a normal build too. Below the panel header.
 #[cfg(any(test, feature = "shot"))]
-pub(crate) fn row_center(ix: f32) -> Pixels {
-    theme::TAB_BAR_HEIGHT + theme::UI_LINE_HEIGHT * (ix + 0.5)
+impl Sidebar {
+    /// The stated pitch, not the drawn one: a drift between them misplaces the click, which a test catches.
+    pub(crate) fn row_center(&self, ix: f32) -> Option<Point<Pixels>> {
+        crate::ui::list_row_center(&self.scroll, theme::UI_LINE_HEIGHT, ix)
+    }
 }
