@@ -6,6 +6,7 @@ use gpui::{
 
 use super::{AppShell, BACKLINKS_WIDTH, SIDEBAR_WIDTH};
 use crate::theme;
+use crate::ui::h_flex;
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -53,10 +54,29 @@ impl AppShell {
                 .child("Deleted from disk. Typing restores it.")
         })
     }
+
+    /// The bar between the panel toggles; the row carries the background and the rule, so both span the toggles.
+    fn render_tab_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (sidebar, backlinks) = self.render_panel_toggles(cx).unzip();
+        h_flex()
+            .debug_selector(|| "tab-row".into())
+            .flex_none()
+            .px_1()
+            .bg(theme::tab_bar_background())
+            .border_b(theme::RULE_WIDTH)
+            .border_color(theme::tab_rule())
+            .children(sidebar)
+            .child(self.render_tab_bar(cx))
+            .children(backlinks)
+    }
 }
 
 impl Render for AppShell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let shown = self.panes.as_ref().map(|panes| panes.shown);
+        // No vault keeps the sidebar's column, empty, and no backlinks: the launch layout until S3/S4 settle it.
+        let sidebar_shown = shown.is_none_or(|shown| shown.sidebar);
+        let backlinks_shown = shown.is_some_and(|shown| shown.backlinks);
         div()
             // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
             .key_context("AppShell")
@@ -77,17 +97,20 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::activate_last_tab))
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::go_forward))
+            .on_action(cx.listener(Self::toggle_sidebar))
+            .on_action(cx.listener(Self::toggle_backlinks))
             .flex()
             .flex_row()
             .size_full()
-            .child(
+            .children(sidebar_shown.then(|| {
                 div()
+                    .debug_selector(|| "sidebar-column".into())
                     .flex_none()
                     .w(SIDEBAR_WIDTH)
                     .h_full()
                     .bg(theme::sidebar_background())
-                    .children(self.panes.as_ref().map(|panes| panes.sidebar.clone())),
-            )
+                    .children(self.panes.as_ref().map(|panes| panes.sidebar.clone()))
+            }))
             .child(
                 div()
                     .flex_1()
@@ -97,7 +120,7 @@ impl Render for AppShell {
                     .flex()
                     .flex_col()
                     // A sibling of the editor's slot, outside its scroll `div` (T7).
-                    .child(self.render_tab_bar(cx))
+                    .child(self.render_tab_row(cx))
                     .children(self.render_gone_banner(cx))
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
                     .child(div().flex_1().min_h_0().child(match self.editor() {
@@ -106,13 +129,13 @@ impl Render for AppShell {
                     })),
             )
             // Shown for an empty tab too, so a switch does not move the bar by the column's width.
-            .children(self.panes.as_ref().map(|panes| {
+            .children(backlinks_shown.then(|| {
                 div()
                     .debug_selector(|| "backlinks-column".into())
                     .flex_none()
                     .w(BACKLINKS_WIDTH)
                     .h_full()
-                    .child(panes.backlinks.clone())
+                    .children(self.panes.as_ref().map(|panes| panes.backlinks.clone()))
             }))
             .children(self.render_modal(cx))
     }

@@ -4,6 +4,7 @@ use gpui::{AppContext as _, Context, Entity, Subscription};
 use inkra_vault::Vault;
 
 use super::AppShell;
+use super::panels::PanelsShown;
 use crate::backlinks::BacklinksPanel;
 use crate::index::IndexSync;
 use crate::open::NoteActivated;
@@ -16,6 +17,8 @@ pub(super) struct VaultPanes {
     pub(super) links: Entity<IndexSync>,
     pub(super) sidebar: Entity<Sidebar>,
     pub(super) backlinks: Entity<BacklinksPanel>,
+    /// Here, not on `AppShell`: with no vault there is no panel to show.
+    pub(super) shown: PanelsShown,
     /// The two panes' `NoteActivated`, and the vault: tab titles, the session file and a
     /// waiting restore follow it, as the sidebar's rows do.
     _subscriptions: [Subscription; 3],
@@ -49,6 +52,7 @@ impl VaultPanes {
             links,
             sidebar,
             backlinks,
+            shown: PanelsShown::default(),
             _subscriptions: subscriptions,
         }
     }

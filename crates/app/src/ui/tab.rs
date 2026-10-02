@@ -4,7 +4,7 @@ use gpui::{
     prelude::FluentBuilder,
 };
 
-use super::{UiText, h_flex, selectable};
+use super::{UiText, h_flex, identified, selectable};
 use crate::theme;
 
 /// A tab's end slot reads this group to show on the tab's hover; gpui resolves it to the nearest tab.
@@ -22,9 +22,8 @@ pub(crate) struct Tab {
 
 impl Tab {
     pub(crate) fn new(id: impl Into<ElementId>) -> Self {
-        let id = id.into();
         Self {
-            base: h_flex().debug_selector(|| id.to_string()).id(id),
+            base: identified(h_flex(), id),
             active: false,
             start: None,
             end: None,

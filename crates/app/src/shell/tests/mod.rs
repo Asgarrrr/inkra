@@ -32,6 +32,7 @@ mod history;
 mod modal;
 mod open;
 mod open_first;
+mod panels;
 mod parked;
 mod quick_open;
 mod reload;

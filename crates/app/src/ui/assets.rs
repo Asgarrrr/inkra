@@ -34,6 +34,8 @@ macro_rules! icons {
 icons! {
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
+    PanelLeft => "panel-left",
+    PanelRight => "panel-right",
     X => "x",
 }
 

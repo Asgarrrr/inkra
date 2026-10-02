@@ -147,7 +147,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-vault",
-        shows: "the tree: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
+        shows: "the tree under its `vault` header, level with the tab bar and ruled like it: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
         open: sidebar_vault,
     },
     Scene {
@@ -202,13 +202,23 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "backlinks",
-        shows: "the panel right of the editor: two sources, one linking twice, each link in the link colour",
+        shows: "the panel right of the editor under its `Backlinks` header, level with the tab bar and ruled like it: two sources, one linking twice, each link in the link colour",
         open: backlinks,
     },
     Scene {
         name: "tabs",
-        shows: "four tabs over the note column: `index` active, lit and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; sidebar and backlinks at full height",
+        shows: "four tabs over the note column: `index` active, lit and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; the panel toggles lit at the row's ends; the `vault` and `Backlinks` headers level with the bar, ruled like it",
         open: tabs::dirty,
+    },
+    Scene {
+        name: "panels-hidden",
+        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width; both toggles muted at the bar's ends",
+        open: tabs::panels_hidden,
+    },
+    Scene {
+        name: "toggle-hover",
+        shows: "the pointer on the sidebar toggle: the button hover behind its lit icon",
+        open: tabs::toggle_hover,
     },
     Scene {
         name: "tabs-hover",

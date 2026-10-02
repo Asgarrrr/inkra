@@ -21,7 +21,8 @@ paths:
 - A drop in the bar (`move_tab`) calls no closure: it captures, parks and
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not
-  take focus from the editor.
+  take focus from the editor. An `IconButton` (a panel toggle, the ×) prevents it on
+  a left press itself, so a click on one leaves focus where it was.
 - `Tabs` holds no place for the active tab (H8): `active_note()` is its note
   (`showing()` is the note bound in the editor, `None` while `Trashing`), and
   `leaving` hands `Tabs` the place when the tab is left.
@@ -60,6 +61,7 @@ paths:
   loads every restored note first: every tab's note has a buffer until `NoteClosed`.
 - The session has one writer, `write_session` (its `SessionWriter`), gated on
   `Restore::Done`; arm it with `save_session_later`, never write from elsewhere.
-- A tree, picker or backlink row is a `ui::ListItem`, and a tab is a `ui::Tab`: each
-  owns background, hover and padding; the view attaches handlers, role, labels and
-  content. A caller's `.hover()` on either trips gpui's "hover style already set" assert.
+- A tree, picker or backlink row is a `ui::ListItem`, a tab is a `ui::Tab`, and an
+  icon-only button is a `ui::IconButton`: each owns background, hover and padding; the
+  view attaches handlers, role, labels and content. A caller's `.hover()` on any of them
+  trips gpui's "hover style already set" assert.

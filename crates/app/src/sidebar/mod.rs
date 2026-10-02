@@ -1,15 +1,16 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Subscription, UniformListScrollHandle, Window, actions, div,
-    uniform_list,
+    ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    UniformListScrollHandle, Window, actions, div, uniform_list,
 };
 use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::NoteActivated;
 use crate::theme;
-use crate::ui::UiText;
+use crate::ui::{PanelHeader, UiText};
 use crate::vault::NoteStore;
 
 mod edit;
@@ -46,6 +47,8 @@ pub(crate) struct Sidebar {
     /// Bumped by every tree write of `selected` (`select`), never by `follow`.
     cursor: Cursor,
     focus_handle: FocusHandle,
+    /// The vault root's folder name, for the header and the tree's label.
+    title: SharedString,
     rows: Rows<EditState>,
     /// Load-bearing: `uniform_list` only renders the visible range, and an
     /// unrendered focus handle falls back to the root, swallowing keystrokes.
@@ -73,6 +76,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let watched = cx.observe(&vault, |this, _, cx| this.rebuild(cx));
+        let title = title_of(vault.read(cx).root());
         let mut sidebar = Self {
             notes,
             vault,
@@ -80,6 +84,7 @@ impl Sidebar {
             selected: None,
             cursor: Cursor::default(),
             focus_handle: cx.focus_handle(),
+            title,
             rows: Rows::default(),
             scroll: UniformListScrollHandle::default(),
             _vault_changed: watched,
@@ -87,6 +92,15 @@ impl Sidebar {
         sidebar.rebuild(cx);
         sidebar
     }
+}
+
+/// The root's folder name; the whole path for a root that has none, such as `/`.
+fn title_of(root: &Path) -> SharedString {
+    root.file_name()
+        .unwrap_or(root.as_os_str())
+        .to_string_lossy()
+        .into_owned()
+        .into()
 }
 
 impl Focusable for Sidebar {
@@ -98,6 +112,9 @@ impl Focusable for Sidebar {
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id("sidebar")
+            .role(Role::Tree)
+            .aria_label(self.title.clone())
             .key_context("Sidebar")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::trash))
@@ -107,6 +124,7 @@ impl Render for Sidebar {
             .flex()
             .flex_col()
             .size_full()
+            .child(PanelHeader::new("panel-header-sidebar", self.title.clone()))
             .child(
                 uniform_list(
                     "vault-tree",

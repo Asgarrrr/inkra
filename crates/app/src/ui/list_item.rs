@@ -3,7 +3,7 @@ use gpui::{
     RenderOnce, Stateful, StatefulInteractiveElement, Styled, Window, div,
 };
 
-use super::{UiText, h_flex, selectable};
+use super::{UiText, h_flex, identified, selectable};
 use crate::theme;
 
 /// A row of a list. It owns background, hover and padding; a caller attaches handlers, role,
@@ -20,9 +20,8 @@ pub(crate) struct ListItem {
 
 impl ListItem {
     pub(crate) fn new(id: impl Into<ElementId>) -> Self {
-        let id = id.into();
         Self {
-            base: h_flex().debug_selector(|| id.to_string()).id(id),
+            base: identified(h_flex(), id),
             indent: 0,
             start: None,
             children: Vec::new(),

@@ -93,6 +93,11 @@ pub(crate) fn icon_muted() -> Rgba {
     rgb(0x8a8a8a)
 }
 
+/// A toggled icon button's icon: the panel it names is shown.
+pub(crate) fn icon_active() -> Rgba {
+    rgb(0xd0d0d0)
+}
+
 pub(crate) const ICON_SIZE: Pixels = px(14.);
 
 /// A note edited but not written, on its tab and its tree row.
@@ -152,6 +157,9 @@ pub(crate) fn tab_inactive_text() -> Rgba {
 pub(crate) fn tab_rule() -> Rgba {
     rgb(0x3c3c3c)
 }
+
+/// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH`, the tab bar's (`px` has no const add).
+pub(crate) const TAB_BAR_HEIGHT: Pixels = px(23.);
 
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);

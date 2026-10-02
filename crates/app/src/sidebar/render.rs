@@ -4,7 +4,7 @@ use std::ops::Range;
 use gpui::Pixels;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement, Styled, Window, div, prelude::FluentBuilder,
+    ParentElement, Role, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use inkra_vault::Kind;
 
@@ -25,6 +25,7 @@ impl Sidebar {
     /// The field's row: a `ListItem` like any other, or a pixel taller misplaces every row below it.
     fn render_field(item: usize, edit: &EditState) -> AnyElement {
         ListItem::new(("tree-row", item))
+            .role(Role::TreeItem)
             .indent(edit.depth)
             .start(spacer())
             .selected(true)
@@ -52,17 +53,21 @@ impl Sidebar {
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
         let dirty = self.row_is_dirty(&row, cx);
         let label = one_line(&row.name).into_owned();
-        let start = match row.kind {
-            Kind::Dir if self.expanded.contains(&row.id) => {
-                Icon::new(IconName::ChevronDown).into_any_element()
-            }
-            Kind::Dir => Icon::new(IconName::ChevronRight).into_any_element(),
-            Kind::Note => spacer().into_any_element(),
+        // One test for the chevron and `aria_expanded`, so the two cannot disagree.
+        let expanded = (row.kind == Kind::Dir).then(|| self.expanded.contains(&row.id));
+        let start = match expanded {
+            Some(true) => Icon::new(IconName::ChevronDown).into_any_element(),
+            Some(false) => Icon::new(IconName::ChevronRight).into_any_element(),
+            None => spacer().into_any_element(),
         };
+        let selected = self.selected == Some(row.id);
         ListItem::new(("tree-row", item))
+            .role(Role::TreeItem)
+            .aria_selected(selected)
+            .when_some(expanded, StatefulInteractiveElement::aria_expanded)
             .indent(row.depth)
             .start(start)
-            .selected(self.selected == Some(row.id))
+            .selected(selected)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |sidebar, event: &MouseDownEvent, window, cx| {
@@ -95,8 +100,8 @@ fn spacer() -> Div {
     div().size(theme::ICON_SIZE)
 }
 
-/// Not `#[cfg(test)]`-gated: the shot runner needs it in a normal build too.
+/// Not `#[cfg(test)]`-gated: the shot runner needs it in a normal build too. Below the panel header.
 #[cfg(any(test, feature = "shot"))]
 pub(crate) fn row_center(ix: f32) -> Pixels {
-    theme::UI_LINE_HEIGHT * (ix + 0.5)
+    theme::TAB_BAR_HEIGHT + theme::UI_LINE_HEIGHT * (ix + 0.5)
 }

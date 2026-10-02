@@ -13,7 +13,7 @@ use inkra_vault::EntryId;
 use super::AppShell;
 use crate::one_line::one_line;
 use crate::theme;
-use crate::ui::{Icon, IconName, Indicator, Tab, UiText};
+use crate::ui::{IconButton, IconName, Indicator, Tab, UiText};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
@@ -87,13 +87,10 @@ impl AppShell {
             .role(Role::TabList)
             .flex()
             .flex_row()
-            .flex_none()
+            .flex_1()
             .min_w_0()
             .overflow_x_scroll()
             .track_scroll(&self.tab_scroll)
-            .bg(theme::tab_bar_background())
-            .border_b(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
             .ui_text()
             .children(tabs)
     }
@@ -149,20 +146,13 @@ impl AppShell {
             }))
             .child(title)
             .end(
-                div()
-                    .id(("tab-close", ix))
-                    .debug_selector(move || format!("tab-close-{ix}"))
-                    .p_0p5()
-                    .rounded_sm()
-                    .hover(|style| style.bg(theme::button_hover_background()))
-                    .role(Role::Button)
-                    .aria_label("Close tab")
-                    .child(Icon::new(IconName::X))
-                    .on_click(cx.listener(move |shell, _, window, cx| {
+                IconButton::new(("tab-close", ix), IconName::X, "Close tab").on_click(cx.listener(
+                    move |shell, _, window, cx| {
                         // One click, one action: the tab under the × must not also see it.
                         cx.stop_propagation();
                         shell.close_tab(id, window, cx);
-                    })),
+                    },
+                )),
             )
     }
 

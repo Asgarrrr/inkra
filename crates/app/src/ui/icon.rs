@@ -1,4 +1,4 @@
-use gpui::{App, IntoElement, RenderOnce, Styled, Window, svg};
+use gpui::{App, Hsla, IntoElement, RenderOnce, Styled, Window, svg};
 
 use super::IconName;
 use crate::theme;
@@ -6,11 +6,20 @@ use crate::theme;
 #[derive(IntoElement)]
 pub(crate) struct Icon {
     name: IconName,
+    color: Hsla,
 }
 
 impl Icon {
     pub(crate) fn new(name: IconName) -> Self {
-        Self { name }
+        Self {
+            name,
+            color: theme::icon_muted().into(),
+        }
+    }
+
+    pub(crate) fn color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = color.into();
+        self
     }
 }
 
@@ -21,6 +30,6 @@ impl RenderOnce for Icon {
             .path(self.name.path())
             .size(theme::ICON_SIZE)
             .flex_none()
-            .text_color(theme::icon_muted())
+            .text_color(self.color)
     }
 }
