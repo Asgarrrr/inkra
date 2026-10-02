@@ -3,7 +3,7 @@ use gpui::{
     RenderOnce, Stateful, StatefulInteractiveElement, Styled, Window, div,
 };
 
-use super::{UiText, h_flex};
+use super::{UiText, h_flex, selectable};
 use crate::theme;
 
 /// A row of a list. It owns background, hover and padding; a caller attaches handlers, role,
@@ -14,6 +14,7 @@ pub(crate) struct ListItem {
     indent: usize,
     start: Option<AnyElement>,
     children: Vec<AnyElement>,
+    end: Option<AnyElement>,
     selected: bool,
 }
 
@@ -25,6 +26,7 @@ impl ListItem {
             indent: 0,
             start: None,
             children: Vec::new(),
+            end: None,
             selected: false,
         }
     }
@@ -36,6 +38,11 @@ impl ListItem {
 
     pub(crate) fn start(mut self, element: impl IntoElement) -> Self {
         self.start = Some(element.into_any_element());
+        self
+    }
+
+    pub(crate) fn end(mut self, element: impl IntoElement) -> Self {
+        self.end = Some(element.into_any_element());
         self
     }
 
@@ -70,13 +77,8 @@ impl RenderOnce for ListItem {
             .ui_text()
             .pl(theme::ROW_INSET + theme::INDENT_STEP * depth)
             .pr(theme::ROW_INSET);
-        // A hover style would repaint a selected row too (`div.rs:3451`), so a row carries one or the other.
-        let row = if self.selected {
-            row.bg(theme::selected_row_background())
-        } else {
-            row.hover(|style| style.bg(theme::row_hover_background()))
-        };
-        row.children(self.start.map(|start| div().flex_none().child(start)))
+        selectable(row, self.selected.then(theme::selected_row_background))
+            .children(self.start.map(|start| div().flex_none().child(start)))
             .child(
                 div()
                     .flex_1()
@@ -84,5 +86,6 @@ impl RenderOnce for ListItem {
                     .overflow_hidden()
                     .children(self.children),
             )
+            .children(self.end.map(|end| div().flex_none().child(end)))
     }
 }

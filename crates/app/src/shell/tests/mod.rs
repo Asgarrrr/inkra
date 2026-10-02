@@ -42,6 +42,7 @@ mod restore_refused;
 mod session_writes;
 mod sidebar_selection;
 mod tab_bar;
+mod tab_chrome;
 mod tab_keys;
 mod tabs;
 mod trashing;
@@ -245,15 +246,7 @@ pub(super) fn tab_notes(
 ) -> (Vec<Option<EntryId>>, usize) {
     window
         .update(cx, |shell, _, _| {
-            let notes = shell
-                .tabs
-                .iter()
-                .map(|tab| {
-                    tab.place()
-                        .map_or(shell.active_note(), inkra_tabs::Place::note)
-                })
-                .collect();
-            (notes, shell.tabs.active_index())
+            (shell.tab_notes().collect(), shell.tabs.active_index())
         })
         .expect("the shell is open")
 }

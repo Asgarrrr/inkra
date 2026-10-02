@@ -172,7 +172,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-dirty",
-        shows: "the dirty dot on a note edited but not written",
+        shows: "the dirty dot on a note edited but not written, at its row's right edge",
         open: sidebar_dirty,
     },
     Scene {
@@ -207,8 +207,13 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs",
-        shows: "four tabs over the note column: `index` active and lit, `reading`, `New tab` twice; `index` highlighted in the sidebar; sidebar and backlinks at full height",
-        open: tabs::bar,
+        shows: "four tabs over the note column: `index` active, lit and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; sidebar and backlinks at full height",
+        open: tabs::dirty,
+    },
+    Scene {
+        name: "tabs-hover",
+        shows: "the pointer on the inactive `reading`: the row hover behind it and its × shown; the other inactive tabs show no ×",
+        open: tabs::hover,
     },
     Scene {
         name: "tabs-dragging",

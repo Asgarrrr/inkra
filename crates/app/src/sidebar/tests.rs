@@ -264,12 +264,14 @@ fn label(row: &Row) -> String {
     }
 }
 
-fn row_labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
+/// The names of the rows `row_is_dirty` marks.
+fn dirty_rows(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, cx| {
         sidebar
             .visible_rows()
-            .iter()
-            .map(|row| sidebar.row_label(row, cx))
+            .into_iter()
+            .filter(|row| sidebar.row_is_dirty(row, cx))
+            .map(|row| row.name)
             .collect()
     })
 }
@@ -409,7 +411,7 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
     );
 }
 
-/// Asserts the label, not `is_dirty`: that predicate passes even with the dot deleted from render.
+/// Reads the predicate the render draws the dot from; `render_tests` sees the dot drawn and cleared.
 #[gpui::test]
 async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -421,8 +423,8 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
 
     let buffer = opened(&notes, cx, b.id).await;
     assert_eq!(
-        row_labels(&sidebar, cx),
-        ["a", "b"],
+        dirty_rows(&sidebar, cx),
+        Vec::<String>::new(),
         "opening a note changes nothing about it"
     );
 
@@ -430,14 +432,14 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
         buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
     });
 
-    assert_eq!(row_labels(&sidebar, cx), ["a", "b •"]);
+    assert_eq!(dirty_rows(&sidebar, cx), ["b"]);
 
     notes.update(cx, NoteStore::save_current);
     cx.run_until_parked();
 
     assert_eq!(
-        row_labels(&sidebar, cx),
-        ["a", "b"],
+        dirty_rows(&sidebar, cx),
+        Vec::<String>::new(),
         "the write caught the file up, so the note is no longer modified"
     );
 }

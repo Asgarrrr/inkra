@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use gpui::{
     App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    MouseDownEvent, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
     Window, div, prelude::FluentBuilder,
 };
 use inkra_tabs::TabId;
@@ -13,10 +13,10 @@ use inkra_vault::EntryId;
 use super::AppShell;
 use crate::one_line::one_line;
 use crate::theme;
+use crate::ui::{Icon, IconName, Indicator, Tab, UiText};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
-const CLOSE: &str = "×";
 
 /// The tab under the pointer; also its preview. `index` is where it stood when the drag began.
 #[derive(Clone)]
@@ -28,21 +28,13 @@ pub(super) struct DraggedTab {
 }
 
 impl Render for DraggedTab {
-    /// Drawn at the window root, so it inherits nothing from the bar and states its whole look.
+    /// Drawn at the window root, so it inherits nothing; an inactive `Tab` has no background, so this paints one.
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px_2()
-            .max_w(theme::TAB_MAX_WIDTH)
-            .truncate()
-            .bg(theme::tab_active_background())
-            .text_color(if self.active {
-                theme::tab_text()
-            } else {
-                theme::tab_inactive_text()
-            })
-            .text_size(theme::UI_TEXT_SIZE)
-            .line_height(theme::UI_LINE_HEIGHT)
-            .child(self.title.clone())
+        div().bg(theme::tab_active_background()).child(
+            Tab::new("tab-preview")
+                .active(self.active)
+                .child(self.title.clone()),
+        )
     }
 }
 
@@ -54,31 +46,45 @@ fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString
 }
 
 impl AppShell {
-    /// Every tab's title, reading the store once.
-    pub(super) fn tab_titles(&self, cx: &App) -> Vec<SharedString> {
-        let (notes, active) = (self.notes.read(cx), self.active_note());
+    /// The note each tab shows; `None` for an empty tab.
+    pub(super) fn tab_notes(&self) -> impl Iterator<Item = Option<EntryId>> + '_ {
+        let active = self.active_note();
         self.tabs
             .iter()
-            .map(|tab| {
-                let note = tab.place().map_or(active, inkra_tabs::Place::note);
-                tab_title(note, notes, cx)
-            })
+            .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::note))
+    }
+
+    /// Every tab's title, reading the store once.
+    pub(super) fn tab_titles(&self, cx: &App) -> Vec<SharedString> {
+        let notes = self.notes.read(cx);
+        self.tab_notes()
+            .map(|note| tab_title(note, notes, cx))
             .collect()
     }
 
     /// Its children are the tabs only, so `scroll_to_item` indexes tabs (`div.rs:4291-4322`).
     pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.tabs.active();
+        let notes = self.notes.read(cx);
+        // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
+        let dirty: Vec<bool> = self
+            .tab_notes()
+            .map(|note| note.is_some_and(|id| notes.is_dirty(id, cx)))
+            .collect();
         let tabs: Vec<_> = self
             .tabs
             .iter()
             .zip(self.tab_titles(cx))
+            .zip(dirty)
             .enumerate()
-            .map(|(ix, (tab, title))| Self::render_tab(ix, tab.id(), title, tab.id() == active, cx))
+            .map(|(ix, ((tab, title), dirty))| {
+                Self::render_tab(ix, tab.id(), title, tab.id() == active, dirty, cx)
+            })
             .collect();
         div()
             .id("tab-bar")
             .debug_selector(|| "tab-bar".into())
+            .role(Role::TabList)
             .flex()
             .flex_row()
             .flex_none()
@@ -88,8 +94,7 @@ impl AppShell {
             .bg(theme::tab_bar_background())
             .border_b(theme::RULE_WIDTH)
             .border_color(theme::tab_rule())
-            .text_size(theme::UI_TEXT_SIZE)
-            .line_height(theme::UI_LINE_HEIGHT)
+            .ui_text()
             .children(tabs)
     }
 
@@ -98,6 +103,7 @@ impl AppShell {
         id: TabId,
         title: SharedString,
         is_active: bool,
+        dirty: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let dragged = DraggedTab {
@@ -106,20 +112,14 @@ impl AppShell {
             title: title.clone(),
             active: is_active,
         };
-        div()
-            .id(("tab", ix))
-            .debug_selector(move || format!("tab-{ix}"))
-            .flex()
-            .flex_row()
-            .flex_none()
-            .gap_2()
-            .max_w(theme::TAB_MAX_WIDTH)
-            .px_2()
-            .when(is_active, |tab| tab.bg(theme::tab_active_background()))
-            .text_color(if is_active {
-                theme::tab_text()
-            } else {
-                theme::tab_inactive_text()
+        Tab::new(("tab", ix))
+            .active(is_active)
+            .when(dirty, |tab| {
+                tab.start(
+                    div()
+                        .debug_selector(move || format!("tab-dot-{ix}"))
+                        .child(Indicator),
+                )
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press_tab))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::press_tab))
@@ -147,13 +147,17 @@ impl AppShell {
             .on_drop(cx.listener(move |shell, dragged: &DraggedTab, _, cx| {
                 shell.move_tab(dragged.id, ix, cx);
             }))
-            .child(div().min_w_0().truncate().child(title))
-            .child(
+            .child(title)
+            .end(
                 div()
                     .id(("tab-close", ix))
                     .debug_selector(move || format!("tab-close-{ix}"))
-                    .flex_none()
-                    .child(CLOSE)
+                    .p_0p5()
+                    .rounded_sm()
+                    .hover(|style| style.bg(theme::button_hover_background()))
+                    .role(Role::Button)
+                    .aria_label("Close tab")
+                    .child(Icon::new(IconName::X))
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         // One click, one action: the tab under the × must not also see it.
                         cx.stop_propagation();

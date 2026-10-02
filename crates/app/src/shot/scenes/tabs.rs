@@ -15,6 +15,20 @@ pub(super) fn bar(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
+/// `index` typed into: the active tab carries the dot, since a note left saves at once (`set_current`).
+pub(super) fn dirty(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    stage.keys(window, "x");
+    window
+}
+
+pub(super) fn hover(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    let reading = stage.tab_center(window, 1);
+    stage.hover(window, reading);
+    window
+}
+
 pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     let (from, to) = (stage.tab_center(window, 0), stage.tab_center(window, 2));
