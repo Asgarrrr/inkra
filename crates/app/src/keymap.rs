@@ -14,7 +14,7 @@ use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::shell::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
-    ReopenClosedTab,
+    ReopenClosedTab, ToggleBacklinks, ToggleSidebar,
 };
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
@@ -100,6 +100,9 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-8", ActivateTab(7), Some("AppShell")),
         // The last tab, not the ninth, as in Zed.
         KeyBinding::new("cmd-9", ActivateLastTab, Some("AppShell")),
+        KeyBinding::new("cmd-\\", ToggleSidebar, Some("AppShell")),
+        // ⌘⇧\ as macOS reports it, as `cmd-}` above.
+        KeyBinding::new("cmd-|", ToggleBacklinks, Some("AppShell")),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

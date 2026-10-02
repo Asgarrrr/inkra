@@ -173,7 +173,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
   its one writer and throttle, `Restore`'s states, the landing predicate
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
-  `Tab`, `Icon`, `Indicator`, `Assets`), row overlays, Lucide icons; the chrome slices
+  `Tab`, `Icon`, `Indicator`, `IconButton`, `PanelHeader`, `Assets`), row overlays, Lucide
+  icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

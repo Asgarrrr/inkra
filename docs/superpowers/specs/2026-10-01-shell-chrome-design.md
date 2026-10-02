@@ -1,6 +1,6 @@
 # Shell chrome: components, icons, panels, title bar
 
-Status: S0 shipped 2026-10-02 (#57). S1 built 2026-10-02 on `feat/shell-chrome-s1`. S2–S4 pending.
+Status: S0 shipped (#57), S1 shipped (#58). S2a built 2026-10-02 on `feat/shell-chrome-s2a` (As built (S2a), below); S2b, S2c, S2d, S3, S4 pending.
 
 ## Why
 
@@ -13,8 +13,8 @@ The engine is done: index, search, watcher, tabs and restore all ship. The chrom
   `cursor_pointer`, no tooltip.
 - The tab's close button is the text glyph `×`. There is no icon anywhere.
 - The sidebar and backlinks are fixed at 220 and 260 px and cannot be hidden.
-- The system title bar costs a row, and the backlinks header sits 8 px lower
-  than the tab bar beside it.
+- The system title bar costs a row, and the backlinks header sits 7 px lower
+  than the tab bar beside it (measured 2026-10-02).
 
 The cause is structural. Every view builds its chrome from raw `div()`s:
 
@@ -375,7 +375,7 @@ shots, then `check.sh` green.
 |---|---|---|---|
 | **S0** | `ui` module, `Assets`, Lucide chevrons, `ListItem`, `Icon`; tree, field row, picker and backlinks on `ListItem`; hover everywhere a row is clickable | `Icon`, `ListItem` | — |
 | S1 | Tabs: a `Tab` component shared by the bar and the drag preview; the close glyph becomes Lucide `x`, shown on the active tab and on hover; a hover background; the dirty dot as an `Indicator` on tab and tree row. Specified in S1. Tabs, below | `Tab`, `Indicator` | S0 |
-| S2 | Panels: `IconButton` (its second site after the tab's close button); hide and show the sidebar and backlinks, with a resize handle (Zed's `dock.rs:1275-1332` pattern: `deferred`, `on_drag` + `on_drag_move` on the shell); a panel header shared by sidebar (vault name) and backlinks; aligned header heights | `IconButton`, `PanelHeader` | S1 |
+| S2 | S2a (specified below): `IconButton`, toggles, `PanelHeader`. S2b: resize. S2c: persist. S2d: tooltips. Original row: Panels: `IconButton` (its second site after the tab's close button); hide and show the sidebar and backlinks, with a resize handle (Zed's `dock.rs:1275-1332` pattern: `deferred`, `on_drag` + `on_drag_move` on the shell); a panel header shared by sidebar (vault name) and backlinks; aligned header heights | `IconButton`, `PanelHeader` | S1 |
 | S3 | Title bar: `appears_transparent`, traffic-light padding, the tab bar on the title row, window drag area | — | S1 (`Tab`), S2 (header heights) |
 | S4 | Status bar | — | S2 (panel layout); free against S3 |
 
@@ -387,21 +387,202 @@ The S0 quality review's levers, each taken up by the slice named:
 |---|---|---|
 | A | S1 | `ListItem`'s end slot holds the dirty `Indicator`; the ` •` no longer clips on a long name |
 | B | S1 | the hover-or-selected rule becomes one `ui` helper when `Tab` lands, its second user |
-| D | S1, S2 | S1: `Role::Tab`, `Role::TabList` and `aria_selected` on `Tab`. S2: `ListItem::role` and the tree's `aria_expanded` |
+| D | S1, S2a, done | S1: `Role::Tab`, `Role::TabList` and `aria_selected` on `Tab`. S2a: `Role::Tree` on the tree, `Role::TreeItem`, `aria_selected` and `aria_expanded` on its rows, set at the call site (As built S2a, 8) |
 | E | S1 | an icons `macro_rules!` at the third icon |
-| F | S2 | `UiText` becomes `StyledExt` with a muted variant, or a `Label` |
-| G | S2 | `ListItem` owns the start slot's width when a second fixed-slot user appears |
+| F | deferred to the `Label` sweep (S2a-D4) | `UiText` becomes `StyledExt` with a muted variant, or a `Label` |
+| G | deferred (S2a-D4) | `ListItem` owns the start slot's width when a second fixed-slot user appears |
 
 The S1 reviews' levers:
 
 | Slice | Change |
 |---|---|
-| S2 | `IconButton` owns its debug selector, padding, hover, `Role::Button` and label; `stop_propagation` stays at the call site |
-| S2, or the third slotted component | one shared slot layout and slot selectors for `ListItem` and `Tab` |
-| S2, with lever F | `selectable` becomes a chained builder |
+| S2a, done | `IconButton` owns its debug selector, padding, hover, `Role::Button` and label; `stop_propagation` stays at the call site |
+| deferred: the third slotted component | one shared slot layout and slot selectors for `ListItem` and `Tab` |
+| deferred, with lever F | `selectable` becomes a chained builder |
 | S3 | the drag preview: its wrapper `div` (As built S1, 3; quality review lever 4), and its `Role::Tab` outside the `TabList` (`/code-review`) |
 | the next per-tab field | one per-tab struct in `render_tab_bar`, in place of zipped vectors |
 | a second control shown on hover | a show-on-hover helper |
+
+The S2a quality review's levers:
+
+| Slice | Change |
+|---|---|
+| S2b | a `Panel` enum and `PanelState { shown, width }` keyed by it: `toggle(Panel)`, `render_panel_toggle(Panel)`, `render_column(Panel)`; the fields private once S2c writes them |
+| a focus slice | one shell-wide `on_focus_lost` → `land_focus` (Zed `workspace.rs:1892`), in place of the special cases |
+| S3 or S4 | decide the no-vault layout and drop the asymmetric column branch |
+| the roadmap's blur item | the name field cancels on blur, so the shell stops calling `cancel_edit` |
+| S2d | `IconButton` renders its tooltip from `label`; an optional `.action()` gives a key hint and `aria_keyshortcuts`; toggles dispatch their action |
+| S3 | `TAB_BAR_HEIGHT` becomes `PANEL_HEADER_HEIGHT` |
+| `PanelHeader`'s first control | an end slot, which makes it the third slotted component |
+
+## S2a. Panels: toggles, headers, `IconButton`
+
+Specified 2026-10-02 under the user's delegation ("je te laisse gérer").
+Choices taken under it are marked *(delegated)*.
+
+S2 splits in two. **S2a** hides and shows the panels and gives them headers.
+**S2b** resizes them, with a drag handle (Zed's `dock.rs:1275-1332`).
+Persisting widths and visibility across launches is **S2c**: it writes the
+session file that restore-tabs owns, so it gets its own slice and its own
+review of that file's format *(delegated)*.
+
+### What S2a changes
+
+- `cmd-\` hides or shows the sidebar, and ⌘⇧\ the backlinks
+  *(delegated)*. Neither key is bound today, and `cmd-b` stays free for bold.
+  ⌘⇧\ is bound as `cmd-|`. macOS reports a shifted non-letter as its shifted
+  character with shift cleared (`gpui_macos/src/events.rs:461-479`), as
+  `keymap.rs` already does for `cmd-}`. A `cmd-shift-\` binding would pass a
+  `simulate_keystrokes` test, which parses the string directly
+  (`gpui/src/app/test_app.rs:383`), and never fire on a keyboard.
+  Both actions appear in the command palette, which lists every bound action
+  not on its hide list.
+- Two icon buttons sit at the ends of the tab bar row. `panel-left` at its
+  start toggles the sidebar; `panel-right` at its end toggles the backlinks.
+  They sit in a new outer `h_flex` row: toggle, then the existing `#tab-bar`
+  scrolling `div`, unchanged, then toggle. The scrolling `div`'s children
+  stay "the tabs only", because `scroll_to_item` indexes them by child
+  position (`tab_bar.rs:70`, `div.rs:4291-4309`). The `tab-bar` selector
+  stays on the scrolling `div`.
+  The row stays on screen when either panel is hidden, so each toggle stays
+  reachable *(delegated: Obsidian's placement; Zed's is a status bar, which is
+  S4)*. With no vault there are no panels, so there are no toggles
+  (`VaultPanes`).
+- Each panel gets a `PanelHeader`: the vault's folder name over the tree, and
+  "Backlinks" over the backlinks. A header is exactly as tall as the tab bar,
+  so the three columns' first rows line up. Today the backlinks header sits
+  7 px lower than the tabs.
+
+### S2a-D1. `IconButton`
+
+Its two S2a sites are the two panel toggles, and S1's close button moves onto
+it as the third. Rule 4 is met.
+
+```rust
+#[derive(IntoElement)]
+pub(crate) struct IconButton {
+    base: Stateful<Div>,   // id → debug_selector, as ListItem and Tab
+    icon: IconName,
+    label: SharedString,   // aria_label; required, an icon has no text
+    toggled: bool,         // a panel shown: the icon at full strength
+}
+// new(id, icon, label), toggled(bool); Interactivity forwarded, no Styled
+```
+
+Render: `p_0p5`, `rounded_sm`, `Role::Button`, `aria_label(label)`, the
+`button_hover_background` hover, and the `Icon` inside. The icon colour is
+`icon_muted()` by default and `icon_active()` when toggled. `icon_active()`
+is a new theme token, with `tab_text`'s value, so a panel toggle reads no
+tab colour. That is `Icon`'s
+first `.color()` builder (As built S0, 1).
+
+`stop_propagation` stays at the close button's call site. The tab bar is the
+reason for it, not the button (S1 levers).
+
+### S2a-D2. `PanelHeader`
+
+```rust
+#[derive(IntoElement)]
+pub(crate) struct PanelHeader { title: SharedString }
+```
+
+Render: `h_flex`, `flex_none`, `h(TAB_BAR_HEIGHT)`, `px(ROW_INSET)`,
+`ui_text`, `text_color(placeholder_text())`, a `truncate` title, and the
+same bottom rule as the tab bar: `border_b(RULE_WIDTH)` in `tab_rule()`.
+
+`TAB_BAR_HEIGHT` is new in `theme.rs`: `UI_LINE_HEIGHT + RULE_WIDTH`,
+23 px, which red measured as today's bar. The tab bar does **not** take it as
+its height. The bar keeps its natural height, so the alignment test compares
+a constant against a measured layout, not a constant against itself. Taffy's
+boxes are border-box (`taffy-0.13.0/src/style/mod.rs:109`), so the header's
+rule sits inside its 23 px, as the bar's does.
+
+The sidebar's title is the vault root's folder name, read through `Vault`.
+The backlinks title is "Backlinks". The backlinks panel drops its own header
+`div` (`backlinks/render.rs`, the "Backlinks" `px_2 py_1` row) for it.
+
+### S2a-D3. Showing and hiding
+
+The panel is the sidebar or the backlinks; "hide" covers the key, the toggle
+and the palette entry.
+
+`AppShell` gains `PanelsShown { sidebar: bool, backlinks: bool }`, both true
+at launch. A hidden panel renders nothing: its column is gone, and the note
+column takes the width.
+
+- **Focus.** Hiding the sidebar while the tree has focus would leave focus on
+  an element no longer drawn. The toggle then lands focus where a tab switch
+  does (`land_focus`). The backlinks panel takes no focus, so hiding it
+  needs no landing.
+- **State.** A hidden sidebar keeps its entity, its expanded folders and its
+  selection. Showing it again shows them unchanged: the panel is not rebuilt.
+- **An open name field is cancelled on hide** *(delegated)*. Hiding moves
+  focus off the field, the way a click elsewhere does. That case is already a
+  known defect: "a click elsewhere during a rename leaves the name field open
+  without focus" (`docs/roadmap.md`). Hiding would also make the stranded
+  field invisible. The hide therefore cancels the field through the path that
+  `escape` takes. Cancel, not commit: a half-typed name must not create or
+  rename a file. The roadmap item about the click stays open.
+- **The modal.** The modal centres on the window, not on the note column. A
+  hidden panel therefore moves no modal.
+
+### S2a-D4. Levers taken
+
+- **F stays deferred.** Renaming `UiText` to `StyledExt` would edit an import
+  in seven files that S2a does not otherwise touch. A `muted()` helper would
+  have one real site, `PanelHeader`, out of about twelve muted texts, and
+  would leave two idioms for one look. F goes to the slice that sweeps the
+  muted texts (Deferred, `Label`). `selectable` stays a free function.
+- **D, second half.** `ListItem::role(Role)` emits `aria_selected(selected)`.
+  The tree uses `Role::TreeItem`, and folder rows add `aria_expanded`, read
+  from the same `expanded` test as the chevron.
+- **G** and the shared slot layout stay deferred. `PanelHeader` has no start
+  slot, so it is not the third slotted component.
+
+### S2a theme
+
+| Item | Value | Use |
+|---|---|---|
+| `TAB_BAR_HEIGHT` | `UI_LINE_HEIGHT + RULE_WIDTH`, 23 px | every `PanelHeader`; the bar keeps its natural height |
+| `icon_active()` | #d0d0d0 | a toggled `IconButton`'s icon |
+| icons `panel-left`, `panel-right` | Lucide 1.49.0, verbatim | the toggles |
+
+### S2a tests
+
+1. Keys, one `simulate_keystrokes` test each (CLAUDE.md):
+   - `cmd_backslash_hides_and_shows_the_sidebar`: `backlinks-column` stays,
+     the sidebar column goes, then comes back.
+   - `cmd_pipe_hides_and_shows_the_backlinks`, simulating `cmd-|`, the
+     keystroke macOS delivers for ⌘⇧\.
+2. `hiding_the_focused_sidebar_lands_focus_on_the_note`.
+2b. `the_tab_bar_still_scrolls_to_the_active_tab_with_toggles`: an existing
+   scroll-into-view test is re-run with the toggles present. It fails if a
+   toggle becomes a child of the scrolling `div`.
+3. `a_shown_sidebar_keeps_its_open_folders_and_selection`.
+4. `the_headers_line_up_with_the_tab_bar`: the bottom edges of
+   `panel-header-sidebar` and `panel-header-backlinks` equal the measured
+   bottom of `tab-bar`. The bar's height is not set from the constant, so a
+   wrong `TAB_BAR_HEIGHT`, or a bar that grows, fails the test. The rule's
+   colour is only checked in the shots.
+4b. `hiding_the_sidebar_cancels_an_open_name_field`: start a new note, then
+   hide the sidebar. No note is created, and showing the sidebar shows no
+   field.
+5. `a_click_on_a_toggle_hides_its_panel`, for each toggle.
+6. `no_vault_shows_no_toggle`.
+7. `ui/tests.rs`: the asset tests cover the two new icons.
+8. The existing tests stay green unchanged. `test-names.sh` shows no lost
+   test.
+9. Shots, looked at:
+   - `tabs`, `sidebar-vault` and `backlinks`, with headers;
+   - new `panels-hidden`, both panels hidden;
+   - new `toggle-hover`, the pointer over a toggle.
+
+### Out of S2a
+
+- Resizing (S2b) and persisting (S2c).
+- Tooltips on the toggles. The first icon-only buttons have arrived, which is
+  Deferred's trigger. But a tooltip needs a delay, a position and an
+  `AnyView`, so it gets its own slice, S2d, before S3.
 
 ## S1. Tabs
 
@@ -605,11 +786,10 @@ The success criteria are written first. Each one fails on the current tree.
 1. **Note icons.** Should a note row show a file icon, as in Zed, or a chevron
    for folders only, as in Obsidian? This spec assumes chevrons only, with a
    spacer on notes.
-2. **Panel shortcuts (S2).** `cmd-b` is Zed's sidebar toggle, but it is bold in
-   every markdown editor. Proposal: `cmd-\` for the sidebar and
-   `cmd-shift-\` for backlinks. Neither is bound today.
-3. **Panel widths and visibility (S2).** Should they persist across launches,
-   in the session file that restore-tabs writes?
+2. **Panel shortcuts (S2).** Answered in S2a: `cmd-\` for the sidebar and
+   `cmd-|` (⌘⇧\) for the backlinks; `cmd-b` stays free for bold.
+3. **Panel widths and visibility (S2).** Answered: they persist, in S2c,
+   which writes the session file that restore-tabs owns.
 4. **Status bar (S4).** What should it show: save state, indexing progress,
    word count, caret line?
 5. **Light theme.** Is it on the roadmap? It is the trigger for D3's theme
@@ -699,15 +879,94 @@ text above or fills a gap in it.
 13. **The close button has `Role::Button` and the label "Close tab"**, found
     by `/code-review`.
 
+## As built (S2a)
+
+S2a was built on `feat/shell-chrome-s2a`. Each item below deviates from the
+S2a text above or fills a gap in it.
+
+1. **The background and the rule move from `#tab-bar` to a new outer row,
+   `tab-row`.** A rule on the scrolling `div` alone stops short of both
+   toggles. `#tab-bar` keeps its id, its `Role::TabList`, its scroll and its
+   tabs-only children, and becomes `flex_1` inside the row. So
+   `the_headers_line_up_with_the_tab_bar` measures the bottom of `tab-row`,
+   where the rule is. A wrong `TAB_BAR_HEIGHT` fails it (22 px read 22 against
+   23), and so does a row grown by a larger toggle (`p_1p5` read 23 against 27).
+2. **Each header is drawn by its panel's own view**, `Sidebar` and
+   `BacklinksPanel`, not by the shell. The sidebar reads its title through
+   its own `Vault`. The backlinks' scroll moves to an inner `div` under the
+   header, so the header does not scroll away.
+3. **`row_center` adds `TAB_BAR_HEIGHT`.** The header moves every tree row
+   down by 23 px. The tests and scenes that click a row call `row_center`, so
+   their bodies stay unchanged.
+4. **`PanelHeader::new(selector, title)` is a plain `Div` with a debug
+   selector and no id**: `panel-header-sidebar`, `panel-header-backlinks`. It
+   has no interactivity, so it needs no id. `ListItem`, `Tab` and `IconButton`
+   build their root with one `ui` helper, `identified(base, id)`, which sets
+   the debug selector from the id.
+5. **`PanelsShown` lives in `VaultPanes`**, as `panes.shown`. With no vault
+   there is no panel, so there is no state to hold.
+6. **`TAB_BAR_HEIGHT` is the literal `px(23.)`.** `px` has no const add. Its
+   doc names the sum, and test 4 catches a drift.
+7. **`IconButton` calls `prevent_default` on a left mouse-down**, as a tab's
+   press does. Without it gpui's root takes focus on the press
+   (`div.rs:2765-2780`), and a click on a toggle unfocuses the editor.
+   `a_click_on_a_toggle_hides_its_panel` asserts that the editor keeps focus.
+   The close button gets it too; the tab's own press already prevents it.
+8. **`ListItem` has no `role` of its own and emits no `aria_selected`.** The
+   tree's call site sets `.role(Role::TreeItem).aria_selected(selected)`
+   through the trait, and `aria_expanded` on folders. The field row is a
+   `Role::TreeItem` too. The picker row is unchanged from S1: `Role::ListItem`,
+   no `aria_selected`. An inherent `ListItem::role` was tried and dropped: it
+   shadowed the trait method and changed the picker's output silently.
+9. **`Role::Tree` sits on the sidebar's root**, which gains the id `sidebar`
+   and an `aria_label`, the vault's title.
+   gpui's `UniformList` is not a `StatefulInteractiveElement`, so it takes no
+   role. Zed puts `Role::Tree` on the list's parent too
+   (`settings_ui.rs:3211`). The header is a child of that node, but it has no
+   role, so it is no node of its own.
+10. **With no vault, the sidebar column stays drawn empty**, as before S2a.
+    Only a vault's sidebar hides.
+11. **`IconButton` is `flex_none`**, so a toggle keeps its 18 px in the row.
+12. **The sidebar's title is the root's folder name**, or the whole path for a
+    root with none, such as `/`. `Sidebar::new` computes it once; the root
+    never changes.
+13. **Test 2b asserts the toggles lie outside `#tab-bar`'s bounds**, then that
+    `tab-29` lies inside them after `cmd-9`. With both toggles moved into the
+    scrolling `div`, the existing `a_tab_activated_past_the_bar_edge_scrolls_into_view`
+    stayed green, so 2b is the only guard.
+14. **The tests are in `shell/tests/panels.rs`.** `toggle-hover` hovers the
+    point just left of the bar's drawn bounds, centred on the bar
+    (`AppShell::sidebar_toggle_point`). The toggle ends where the bar begins.
+    The shot runner cannot read `debug_bounds`, because gpui keeps the
+    rendered frame `pub(crate)`.
+15. **`tab-row` has a 4 px (`px_1`) inset at each end**, so a toggle does not
+    touch the column's edge. It is the row's padding; no element special-cases
+    it.
+16. **`cmd-n` and `cmd-shift-n` show a hidden sidebar first**, as Obsidian
+    reveals its tree *(delegated)*. Without it, `create` opened and focused a
+    name field that was not drawn, so every keystroke went out of sight.
+    `creating_with_the_sidebar_hidden_shows_it` failed before the fix: the
+    sidebar column was not drawn after `cmd-n`.
+17. **`IconButton::toggled` is an `Option<bool>`.** `Some` emits `aria_toggled`;
+    the icon is at full strength only for `Some(true)`. The close button is
+    `None`, a plain button.
+18. **`cancel_edit` notifies only when it closed a field.** `escape` always
+    has one; a hide often has none.
+19. **A pre-existing defect, fixed: the palette drew `cmd-|`, `cmd-}` and
+    `cmd-{` as ⌘|, ⌘} and ⌘{.** macOS reports a shifted symbol with shift
+    cleared, so the binding holds no ⇧. `key_label` now maps each such symbol
+    to ⇧ and the key pressed, on a US layout: ⇧⌘\, ⇧⌘] and ⇧⌘[.
+    `a_shifted_symbol_draws_as_shift_and_its_key` failed first (`⌘|`).
+
 ## Deferred
 
 | Item | Trigger |
 |---|---|
 | `Disclosure` | a toggle that is not the row's own action |
 | `Divider` | a second drawn hairline (one today: vault search's group rule) |
-| `Label` with size, colour and truncation | a slice that migrates the ellipsis cells and muted texts; 6 and 12 sites today, left out of S0 to keep it reviewable |
+| `Label` with size, colour and truncation (lever F) | a slice that migrates the ellipsis cells and muted texts; 6 and 12 sites today, left out of S0 to keep it reviewable |
 | `Theme` global | a second theme or a size setting |
-| Tooltips | the first icon-only button with no visible label (S2's toggles) |
+| Tooltips | S2d: the toggles are the first icon-only buttons with no visible label |
 | `ui` as its own crate | a second consumer |
 | The Lucide licence shown in the app (About, Acknowledgements) | the first distributed build; none exists, so the licence file in the source tree is enough today |
 
@@ -732,6 +991,15 @@ and reviewed the fixes. Findings folded in:
 | S1: `tab_titles` returning tuples breaks three tests | found by blue | `tab_notes()`; `tab_titles` unchanged (S1-D4) |
 | S1: the icons macro is premature at three icons | blue: keep; it prevents a variant missing from `ALL`, which no test catches | kept (S1-D5) |
 | S1: a mid-drag bounds read has no precedent | found by blue | fallback named in S1 tests |
+| S2a: `cmd-shift-\` never fires on macOS; the test would pass anyway | confirmed, blocker (precedent `keymap.rs:87`) | bound as `cmd-|` |
+| S2a: toggles inside `#tab-bar` break `scroll_to_item`'s indexing | confirmed, blocker | an outer row; test 2b |
+| S2a: the alignment test compared a constant with itself | confirmed | the bar keeps its natural height |
+| S2a: lever F was a drive-by across seven files, and `muted` had one real site | confirmed | F deferred |
+| S2a: hiding strands an open name field out of sight | confirmed | the hide cancels it; test 4b |
+| S2a: `tab_text` read by a panel toggle | minor | `icon_active()` |
+| S2a as built: `cmd-n` with the sidebar hidden opens and focuses an undrawn name field | confirmed by `/code-review`, the quality review and the spec review; blocker | `create` shows the sidebar first (As built S2a, 16); test `creating_with_the_sidebar_hidden_shows_it` |
+| S2a as built: an inherent `ListItem::role` shadows the trait's, and changes the picker's output | red, major | dropped; the tree sets its role and selection at the call site (As built S2a, 8) |
+| S2a as built: the palette draws ⌘⇧\ as ⌘\| | red, minor; pre-existing for `cmd-}` and `cmd-{` | `key_label` maps shifted symbols (As built S2a, 19) |
 | S1 as built: a one-letter tab's centre lies on its ×, so a centre click closes it, the active tab too; `clicking_the_active_tab_focuses_its_editor` passed while it closed the only tab | confirmed by red, with the built tests reverted; blocker | `TAB_MIN_WIDTH` on the title cell (As built S1, 2); the test asserts the tab list; new `a_click_on_a_short_tabs_centre_never_closes_it` |
 | `ListItem` implemented `Styled`: a caller could set its height, padding or direction | confirmed, quality review and red | `Styled` dropped; wrapping and colour on the content (As built 3) |
 | Picker hover invisible on #252526: an opaque #232323 is darker than the modal | found in the `picker-hover` shot | overlays: hover and selected are white at alpha `0x0c` and `0x17` (D3) |

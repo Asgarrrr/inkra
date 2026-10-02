@@ -62,21 +62,28 @@ pub(super) fn humanize(name: &str) -> String {
     out
 }
 
+/// A symbol macOS reports with shift cleared (`gpui_macos/src/events.rs:461-479`), and the key pressed for it (US layout).
+const SHIFTED: &[(&str, &str)] = &[("|", "\\"), ("}", "]"), ("{", "[")];
+
 /// Apple order, `⌃⌥⇧⌘`, then the key's glyph (spec D5); gpui's `Display` orders `⌘⇧` and prints `enter`.
 pub(super) fn key_label(keystroke: &KeybindingKeystroke) -> String {
     let modifiers = keystroke.modifiers();
+    let shifted = SHIFTED
+        .iter()
+        .find(|(symbol, _)| *symbol == keystroke.key())
+        .map(|(_, key)| *key);
     let mut out = String::new();
     for (on, glyph) in [
         (modifiers.control, '⌃'),
         (modifiers.alt, '⌥'),
-        (modifiers.shift, '⇧'),
+        (modifiers.shift || shifted.is_some(), '⇧'),
         (modifiers.platform, '⌘'),
     ] {
         if on {
             out.push(glyph);
         }
     }
-    match keystroke.key() {
+    match shifted.unwrap_or(keystroke.key()) {
         "enter" => out.push('↩'),
         "backspace" => out.push('⌫'),
         "delete" => out.push('⌦'),

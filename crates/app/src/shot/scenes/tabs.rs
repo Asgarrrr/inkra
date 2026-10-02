@@ -29,6 +29,19 @@ pub(super) fn hover(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
+pub(super) fn panels_hidden(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    stage.keys(window, "cmd-\\ cmd-|");
+    window
+}
+
+pub(super) fn toggle_hover(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    let toggle = stage.sidebar_toggle_point(window);
+    stage.hover(window, toggle);
+    window
+}
+
 pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     let (from, to) = (stage.tab_center(window, 0), stage.tab_center(window, 2));

@@ -232,6 +232,12 @@ impl Stage {
             .unwrap_or_else(|| panic!("tab {ix} is drawn"))
     }
 
+    pub(crate) fn sidebar_toggle_point(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |shell, _, _| shell.sidebar_toggle_point())
+            .unwrap_or_else(|error| panic!("read the sidebar toggle: {error}"))
+    }
+
     pub(crate) fn quick_open_row_center(
         &mut self,
         window: WindowHandle<AppShell>,

@@ -13,6 +13,7 @@ use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 mod activation;
 mod modal;
 mod palette;
+mod panels;
 mod panes;
 mod parked;
 mod render;
@@ -27,6 +28,7 @@ use parked::Parked;
 use session::{Restore, SessionFile};
 use tabs::Place;
 
+pub(crate) use panels::{ToggleBacklinks, ToggleSidebar};
 pub(crate) use tabs::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
     ReopenClosedTab,
@@ -224,11 +226,14 @@ impl AppShell {
         );
     }
 
+    /// Shows a hidden sidebar first: the name field it focuses must be drawn.
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(panes) = &self.panes {
+        if let Some(panes) = &mut self.panes {
+            panes.shown.sidebar = true;
             panes.sidebar.update(cx, |sidebar, cx| {
                 sidebar.start_creating(kind, window, cx);
             });
+            cx.notify();
         }
     }
 }
@@ -254,6 +259,12 @@ impl AppShell {
         self.tab_scroll
             .bounds_for_item(ix)
             .map(|bounds| bounds.center())
+    }
+
+    /// A point on the sidebar toggle as drawn last: it ends where the bar begins, centred on the same row.
+    pub(crate) fn sidebar_toggle_point(&self) -> gpui::Point<Pixels> {
+        let bar = self.tab_scroll.bounds();
+        gpui::point(bar.left() - px(1.), bar.center().y)
     }
 
     /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.

@@ -2,18 +2,22 @@
 
 mod assets;
 mod icon;
+mod icon_button;
 mod indicator;
 mod list_item;
+mod panel_header;
 mod tab;
 #[cfg(test)]
 mod tests;
 
-use gpui::{Div, InteractiveElement, Rgba, Stateful, Styled, div};
+use gpui::{Div, ElementId, InteractiveElement, Rgba, Stateful, Styled, div};
 
 pub(crate) use assets::{Assets, IconName};
 pub(crate) use icon::Icon;
+pub(crate) use icon_button::IconButton;
 pub(crate) use indicator::Indicator;
 pub(crate) use list_item::ListItem;
+pub(crate) use panel_header::PanelHeader;
 pub(crate) use tab::Tab;
 
 use crate::theme;
@@ -24,6 +28,12 @@ pub(crate) fn h_flex() -> Div {
 
 pub(crate) fn v_flex() -> Div {
     div().flex().flex_col()
+}
+
+/// A component's root: its id is also its debug selector, so `("tab", 3)` reads `tab-3` in tests.
+pub(crate) fn identified(base: Div, id: impl Into<ElementId>) -> Stateful<Div> {
+    let id = id.into();
+    base.debug_selector(|| id.to_string()).id(id)
 }
 
 /// One background or a hover, never both: a hover refinement repaints the base (`div.rs:3451`).

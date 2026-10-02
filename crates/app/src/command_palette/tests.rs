@@ -61,6 +61,14 @@ fn keys_draw_in_apple_order_with_glyphs() {
     }
 }
 
+/// macOS reports ⌘⇧\ as `cmd-|`; the label names the keys pressed, in Apple order.
+#[test]
+fn a_shifted_symbol_draws_as_shift_and_its_key() {
+    for (source, want) in [("cmd-|", "⇧⌘\\"), ("cmd-}", "⇧⌘]"), ("cmd-{", "⇧⌘[")] {
+        assert_eq!(label(source), want, "{source}");
+    }
+}
+
 #[test]
 fn a_chord_joins_its_keystrokes_with_a_space() {
     let chord = [keystroke("cmd-k"), keystroke("cmd-s")];

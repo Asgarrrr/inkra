@@ -155,10 +155,16 @@ impl Sidebar {
             sidebar.confirm(&event.0, cx);
         });
         let cancelled = cx.subscribe(&field, |sidebar, _, _: &Cancelled, cx| {
-            sidebar.rows.close();
-            cx.notify();
+            sidebar.cancel_edit(cx);
         });
         (field, [confirmed, cancelled])
+    }
+
+    /// Closes the name field without acting on it: a half-typed name creates and renames nothing.
+    pub(crate) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
+        if self.rows.close().is_some() {
+            cx.notify();
+        }
     }
 
     pub(super) fn rename(&mut self, _: &Rename, window: &mut Window, cx: &mut Context<Self>) {
