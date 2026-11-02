@@ -11,6 +11,7 @@ mod editor;
 mod field;
 mod index;
 mod keymap;
+mod logger;
 mod one_line;
 mod open;
 mod picker;

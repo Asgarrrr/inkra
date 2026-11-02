@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use gpui::{App, Context, Task, prelude::*};
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, VaultError};
 
 use super::session::{Location, PendingSave, write_through};
 use super::{ConflictPreserved, NoteSaved, NoteStore, SaveFailed};
@@ -75,7 +75,10 @@ impl NoteStore {
 
     /// Copies buffers out synchronously: shutdown holds the `AppCell`
     /// borrowed, so a later borrow here would panic.
-    pub(super) fn flush_all(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
+    pub(super) fn flush_all(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> impl Future<Output = Vec<VaultError>> + use<> {
         let dirty: Vec<_> = self
             .sessions
             .live()
@@ -112,8 +115,14 @@ impl NoteStore {
             })
             .collect();
 
+        // `None` is a write overtaken by a newer one, not a failure.
         async move {
-            futures::future::join_all(writes).await;
+            futures::future::join_all(writes)
+                .await
+                .into_iter()
+                .flatten()
+                .filter_map(Result::err)
+                .collect()
         }
     }
 

@@ -86,6 +86,7 @@ fn launch() -> Result<Launch, String> {
 }
 
 pub fn run() {
+    crate::logger::init();
     let started = Instant::now();
     let app = gpui_platform::application().with_assets(Assets);
     app.run(move |cx: &mut App| {
@@ -96,7 +97,7 @@ pub fn run() {
         let launched = match launch() {
             Ok(launched) => launched,
             Err(message) => {
-                eprintln!("{message}");
+                log::error!("{message}");
                 std::process::exit(1);
             }
         };

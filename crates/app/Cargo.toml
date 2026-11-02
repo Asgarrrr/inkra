@@ -39,6 +39,8 @@ gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", feat
 # The session file (restore-tabs spec, R2); the majors gpui already locks.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The facade gpui already locks; `logger.rs` installs the only logger.
+log = "0.4"
 # Same `^0.25` as gpui, so `RgbaImage` is one type on both sides.
 image = { version = "0.25", default-features = false, features = [
     "png",

@@ -41,6 +41,21 @@ fn a_missing_note_exits_one_and_names_the_path() {
     );
 }
 
+/// The line is the logger's, so a `run` that installs no logger fails here.
+#[test]
+fn a_launch_failure_is_an_error_line_from_the_logger() {
+    let path = absent_path(b"inkra-absent-vault");
+    let (code, stderr) = run(&path);
+
+    assert_ne!(code, Some(0), "stderr: {stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("ERROR inkra_app") && line.contains("inkra-absent-vault")),
+        "stderr: {stderr}"
+    );
+}
+
 /// `std::env::args` unwraps every argument into a `String`; a non-UTF-8
 /// filename would panic across the macOS FFI boundary as a non-unwinding
 /// abort — SIGABRT instead of naming the path.

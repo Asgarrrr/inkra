@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use gpui::TestAppContext;
 use inkra_text::ByteOffset;
-use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
+use inkra_vault::{Fs, VaultError};
 
 use crate::test_support::{edit, entry_id, opened, scan_notes, two_notes};
 use crate::vault::NoteStore;
@@ -130,5 +130,28 @@ fn quitting_leaves_a_clean_note_alone(cx: &mut TestAppContext) {
     assert_eq!(
         fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
         Some("on disk, not in the buffer")
+    );
+}
+
+#[gpui::test]
+async fn the_quit_flush_reports_each_failed_write(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (store, a, b) = two_notes(cx, &fs);
+    for id in [a, b] {
+        let buffer = opened(&store, cx, id).await;
+        edit(&buffer, cx, "X");
+    }
+    fs.make_unwritable("/vault/a.md");
+
+    let errors = store.update(cx, NoteStore::flush_all).await;
+
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        matches!(&errors[0], VaultError::Io { path, .. } if path == Path::new("/vault/a.md")),
+        "{errors:?}"
+    );
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/b.md")).as_deref(),
+        Some("Xbeta")
     );
 }
