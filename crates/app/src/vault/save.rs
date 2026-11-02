@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
-use gpui::{App, Context, prelude::*};
+use gpui::{App, Context, Task, prelude::*};
 use inkra_vault::EntryId;
 
-use super::session::{Location, write_through};
+use super::session::{Location, PendingSave, write_through};
 use super::{ConflictPreserved, NoteSaved, NoteStore, SaveFailed};
 
 impl NoteStore {
@@ -44,6 +44,33 @@ impl NoteStore {
         if let Some(id) = self.current {
             self.schedule_save(id, Duration::ZERO, cx);
         }
+    }
+
+    /// Open notes with unsaved text; a note mid-trash is not open, so it is never one.
+    pub(crate) fn unsaved(&self, cx: &App) -> Vec<EntryId> {
+        self.sessions
+            .live()
+            .filter(|(_, session)| session.life.is_open())
+            .filter(|(_, session)| {
+                session
+                    .life
+                    .bound_at()
+                    .is_some_and(|(_, note)| note.is_dirty(cx))
+            })
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// The quit's flush: on each note's chain, so a write behind a rename lands under the new name.
+    pub(crate) fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        let writes: Vec<_> = self
+            .unsaved(cx)
+            .into_iter()
+            .map(|id| self.queue(id, PendingSave::Write, cx, async |_, _| true))
+            .collect();
+        cx.foreground_executor().spawn(async move {
+            futures::future::join_all(writes).await;
+        })
     }
 
     /// Copies buffers out synchronously: shutdown holds the `AppCell`
