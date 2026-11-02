@@ -55,7 +55,6 @@ struct Row {
 }
 
 /// What a `DocumentLayout` is shaped from: `shape_document` takes it, `is_shaped_from` compares it.
-#[derive(Clone, Copy)]
 pub(crate) struct LayoutInputs<'a> {
     pub(crate) buffer: &'a Buffer,
     pub(crate) markdown: &'a Markdown,
