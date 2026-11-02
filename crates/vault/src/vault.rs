@@ -10,6 +10,7 @@ use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
 use crate::jobs::Serial;
 
 mod identity;
+mod names;
 mod reclaim;
 mod walk;
 
@@ -366,3 +367,7 @@ mod replay_tests;
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod reclaim_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod names_tests;

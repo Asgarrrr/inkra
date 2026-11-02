@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
+use crate::note_file_name;
 use crate::watch::Watch;
 
 /// Paired, not inode alone: an inode is unique only within one filesystem, and
@@ -33,6 +34,17 @@ pub struct Stamp {
 pub enum Kind {
     Dir,
     Note,
+}
+
+impl Kind {
+    /// The file name `typed` gets as this kind: a note's via `note_file_name`, a folder's trimmed.
+    #[must_use]
+    pub fn file_name(self, typed: &str) -> String {
+        match self {
+            Self::Note => note_file_name(typed),
+            Self::Dir => typed.trim().to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

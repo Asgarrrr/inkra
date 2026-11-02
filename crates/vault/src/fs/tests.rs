@@ -1,4 +1,4 @@
-use super::normalize_line_endings;
+use super::{Kind, normalize_line_endings};
 
 #[test]
 fn a_stamp_differs_when_only_the_size_does() {
@@ -44,4 +44,21 @@ fn text_without_cr_is_unchanged() {
 #[test]
 fn a_trailing_cr_becomes_lf() {
     assert_eq!(normalize_line_endings("a\r"), "a\n");
+}
+
+#[test]
+fn a_note_typed_any_way_gets_a_lowercase_md_file_name() {
+    for typed in ["plan", "plan.MD", " plan "] {
+        assert_eq!(Kind::Note.file_name(typed), "plan.md", "{typed:?}");
+    }
+}
+
+#[test]
+fn a_note_keeps_an_extension_other_than_md() {
+    assert_eq!(Kind::Note.file_name("notes.2026"), "notes.2026.md");
+}
+
+#[test]
+fn a_folder_name_is_trimmed_and_gets_no_extension() {
+    assert_eq!(Kind::Dir.file_name(" d "), "d");
 }

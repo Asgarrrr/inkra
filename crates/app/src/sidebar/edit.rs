@@ -2,7 +2,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, Focusable, PromptLevel, ScrollStrategy, Subscription,
     Window,
 };
-use inkra_vault::{Entry, EntryId, Kind, NameProblem};
+use inkra_vault::{EntryId, Kind, NameProblem};
 
 use crate::field::{Cancelled, Confirmed, NameField};
 
@@ -35,19 +35,6 @@ impl Rejection {
             Self::Name(NameProblem::TooLong) => "That name is too long.",
             Self::Duplicate => "That name is already taken.",
         }
-    }
-}
-
-/// Compared against `note_file_name`'s output, so `plan`, `plan.md` and `plan.MD` collide as one name.
-fn file_name_of(entry: &Entry) -> String {
-    let name = entry
-        .path
-        .as_path()
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    match entry.kind {
-        Kind::Note => inkra_vault::note_file_name(&name),
-        Kind::Dir => name,
     }
 }
 
@@ -224,7 +211,9 @@ impl Sidebar {
         let rejected = inkra_vault::check_name(name)
             .map(Rejection::Name)
             .or_else(|| {
-                self.taken(target, parent, kind, name, cx)
+                self.vault
+                    .read(cx)
+                    .name_taken(parent, kind, name, target)
                     .then_some(Rejection::Duplicate)
             });
         if let Some(rejected) = rejected {
@@ -261,32 +250,5 @@ impl Sidebar {
         target
             .and_then(|id| self.vault.read(cx).entry(id))
             .is_some_and(|entry| entry.path.display_name() == name.trim())
-    }
-
-    /// `target` is excluded so a same-name (or case-only) rename is a no-op, not a duplicate.
-    fn taken(
-        &self,
-        target: Option<EntryId>,
-        parent: Option<EntryId>,
-        kind: Kind,
-        name: &str,
-        cx: &App,
-    ) -> bool {
-        let wanted = match kind {
-            Kind::Note => inkra_vault::note_file_name(name),
-            Kind::Dir => name.trim().to_owned(),
-        };
-        let vault = self.vault.read(cx);
-        let Some(parent_path) = parent.and_then(|id| vault.entry(id)).map(|e| &e.path) else {
-            return vault.entries().any(|entry| {
-                Some(entry.id) != target && entry.path.depth() == 0 && file_name_of(entry) == wanted
-            });
-        };
-        vault.entries().any(|entry| {
-            Some(entry.id) != target
-                && entry.path.depth() == parent_path.depth() + 1
-                && entry.path.starts_with(parent_path)
-                && file_name_of(entry) == wanted
-        })
     }
 }
