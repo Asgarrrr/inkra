@@ -90,7 +90,11 @@ fn an_unscrolled_capture_is_the_note_top() {
 /// Inserts a ten-byte line at 0: an offset past it moves by ten.
 fn ten_bytes_at_the_start() -> Diff {
     let old = "line\n".repeat(20);
-    inkra_text::diff(0, &old, &format!("ten bytes\n{old}"))
+    inkra_text::diff(
+        inkra_text::Version::default(),
+        &old,
+        &format!("ten bytes\n{old}"),
+    )
 }
 
 #[test]

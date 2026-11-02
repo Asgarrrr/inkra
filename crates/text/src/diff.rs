@@ -5,7 +5,7 @@ use similar::{Algorithm, DiffTag, capture_diff_slices};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::anchor::{Bias, transform};
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, Version};
 use crate::offset::ByteOffset;
 
 // Not Zed's histogram: `similar`'s took 65x Myers' time on a 1 MB note (watcher spec, F8).
@@ -32,7 +32,7 @@ pub struct Hunk {
 /// Only [`diff`] builds one, so its hunks are in order, disjoint, and each edits something.
 #[derive(Debug)]
 pub struct Diff {
-    base_version: u64,
+    base_version: Version,
     hunks: Vec<Hunk>,
 }
 
@@ -56,7 +56,7 @@ impl Diff {
 /// The diff from `old`, the text of a buffer at `base_version`, to `new`.
 /// A line diff, refined to words inside small hunks, as Zed's `text_diff` does.
 #[must_use]
-pub fn diff(base_version: u64, old: &str, new: &str) -> Diff {
+pub fn diff(base_version: Version, old: &str, new: &str) -> Diff {
     let mut hunks = Vec::new();
     diff_tokens(
         &old.split_inclusive('\n').collect::<Vec<_>>(),

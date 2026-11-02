@@ -11,7 +11,7 @@ fn hunk(range: Range<usize>, text: &str) -> Hunk {
 }
 
 fn hunks(old: &str, new: &str) -> Vec<Hunk> {
-    diff(0, old, new).hunks
+    diff(Version::default(), old, new).hunks
 }
 
 /// Applies the diff from the buffer's own text and version to `new`.
@@ -231,7 +231,7 @@ fn anchors_outside_the_hunks_stay_on_their_text() {
 /// Two hunks sharing an edge, which `diff` never emits: `ab|cd` becomes `X|YZW`.
 fn touching() -> Diff {
     Diff {
-        base_version: 0,
+        base_version: Version::default(),
         hunks: vec![hunk(0..2, "X"), hunk(2..4, "YZW")],
     }
 }

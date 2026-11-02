@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
-use inkra_text::{Bias, Buffer, ByteOffset};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
 use prefix::Prefix;
 use shape::LineShape;
 
@@ -77,7 +77,7 @@ pub(crate) struct DocumentLayout {
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
-    version: u64,
+    version: Version,
     selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
 }

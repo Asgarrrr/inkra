@@ -87,7 +87,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - Offsets are `ByteOffset`, `Utf16Offset` and, in layout, `DisplayOffset`;
   never mix them, never add a char offset. Move and delete by grapheme.
-- Mutate a buffer only through `Buffer::transact_at`. Call
+- Mutate a buffer only inside `Buffer::transact_at`, through its `Txn`. Call
   `finalize_transaction` on **both** sides of a gesture that must not merge
   (paste, cut), and on neither side when it edits nothing.
   Exception: a tab switch's, an open's, or a back's capture calls it on the

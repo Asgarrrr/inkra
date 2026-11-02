@@ -21,7 +21,7 @@ use gpui::{
 use gpui::{Bounds, Pixels};
 use inkra_editor::Selection;
 use inkra_markdown::{Link, Markdown, touched};
-use inkra_text::{Bias, Buffer, ByteOffset};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
 
 use crate::open::Open;
 use crate::text_input::{self, InputHost, Mode, TextInput};
@@ -65,7 +65,7 @@ pub(crate) struct EditorView {
     input: TextInput,
     markdown: Markdown,
     /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
-    parsed_at: Option<u64>,
+    parsed_at: Option<Version>,
     is_selecting: bool,
     viewport: Viewport,
     /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
@@ -223,7 +223,7 @@ impl EditorView {
         self.input.buffer()
     }
 
-    pub(crate) fn parsed_at(&self) -> Option<u64> {
+    pub(crate) fn parsed_at(&self) -> Option<Version> {
         self.parsed_at
     }
 

@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
-use inkra_text::{Buffer, diff};
+use inkra_text::{Buffer, Version, diff};
 
 const WORDS: [&str; 20] = [
     "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "lorem", "ipsum", "dolor",
@@ -48,9 +48,9 @@ fn bench_case(c: &mut Criterion, name: &str, old: &str, new: &str) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(old.len() as u64));
     group.bench_function("diff", |b| {
-        b.iter(|| diff(0, black_box(old), black_box(new)));
+        b.iter(|| diff(Version::default(), black_box(old), black_box(new)));
     });
-    let diff = diff(0, old, new);
+    let diff = diff(Version::default(), old, new);
     let now = Instant::now();
     group.bench_function("apply", |b| {
         b.iter_batched(

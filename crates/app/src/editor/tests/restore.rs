@@ -394,9 +394,9 @@ fn restore_on_the_same_buffer_keeps_its_parse(cx: &mut TestAppContext) {
         .update(&mut cx, |editor, _, cx| {
             let parsed_at = editor.parsed_at;
             // No notify: a reparse inside `restore` is the only thing that would read it.
-            editor
-                .buffer()
-                .update(cx, |buffer, _| buffer.insert(at(1000), "x"));
+            editor.buffer().update(cx, |buffer, _| {
+                buffer.transact(|buffer| buffer.insert(at(1000), "x"));
+            });
             editor.restore(view.clone(), cx);
             assert_eq!(editor.parsed_at, parsed_at, "restore reparsed");
             assert_eq!(editor.view_state(), view);
@@ -514,9 +514,9 @@ fn park_clips_a_waiting_top_line_past_the_end(cx: &mut TestAppContext) {
                 },
                 cx,
             );
-            editor
-                .buffer()
-                .update(cx, |buffer, _| buffer.delete(at(10)..buffer.len()));
+            editor.buffer().update(cx, |buffer, _| {
+                buffer.transact(|buffer| buffer.delete(at(10)..buffer.len()));
+            });
             let parked = editor.park(cx);
             parked.unpark(cx)
         })
