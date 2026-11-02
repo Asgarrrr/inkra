@@ -349,5 +349,4 @@ fn center(line: Range<Pixels>, viewport: Range<Pixels>, offset: Pixels) -> Optio
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::unwrap_used))]
 mod tests;

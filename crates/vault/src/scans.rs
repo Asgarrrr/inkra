@@ -222,17 +222,13 @@ fn fail(live: &mut Vault, rekeys: Vec<Rekey>, error: VaultError) -> Swapped {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod test_helpers;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod swap_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod history_tests;

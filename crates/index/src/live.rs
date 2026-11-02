@@ -162,5 +162,4 @@ mod turn_tests;
 mod model_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod diff_tests;

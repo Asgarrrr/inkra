@@ -37,9 +37,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
   and the no-gpui-below-app check. Green is the definition of done.
-- fmt: `cargo fmt -p inkra-text -p inkra-editor -p inkra-app -p inkra-vault -p inkra-markdown -p inkra-index -p inkra-tabs`.
-  **Never `cargo fmt --all`**: it rewrites the vendored gpui source. A new
-  workspace member joins this list and `check.sh`'s in the same change.
+- fmt: `cargo fmt`, from the repo root, formats every workspace member.
+  **Never `cargo fmt --all`**: it rewrites the vendored gpui source.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
   renders scenes off-screen to `target/shots/*.png`. `check.sh` renders nothing.
 - run: `cargo run -p inkra-app [path]`
@@ -63,7 +62,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
   `inkra-tabs` depends on no workspace crate; `app` depends on it.
 - `text`, `editor`, `vault`, `markdown`, `index` and `tabs` have no gpui dependency; `check.sh`
-  enforces it and a new crate below `app` joins that check.
+  enforces it for every workspace member except `inkra-app`.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel

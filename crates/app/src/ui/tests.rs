@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used)]
-
 use std::path::Path;
 
 use gpui::AssetSource;

@@ -109,5 +109,4 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests;

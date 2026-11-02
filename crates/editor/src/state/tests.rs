@@ -1,5 +1,3 @@
-#![cfg_attr(test, allow(clippy::unwrap_used))]
-
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
