@@ -23,17 +23,17 @@ pub(crate) fn transform(
     removed_len: usize,
     inserted_len: usize,
 ) -> ByteOffset {
-    let touched_end = at.0 + removed_len;
-    if offset.0 < at.0 {
+    let touched_end = at + removed_len;
+    if offset < at {
         offset
-    } else if offset.0 == at.0 || (removed_len > 0 && offset.0 < touched_end) {
+    } else if offset == at || (removed_len > 0 && offset < touched_end) {
         match bias {
             Bias::Left => at,
-            Bias::Right => ByteOffset(at.0 + inserted_len),
+            Bias::Right => at + inserted_len,
         }
     } else {
-        // No underflow: this branch only runs where offset.0 >= touched_end >= removed_len.
-        ByteOffset(offset.0 - removed_len + inserted_len)
+        // No underflow: this branch only runs where offset >= touched_end >= removed_len.
+        offset - removed_len + inserted_len
     }
 }
 

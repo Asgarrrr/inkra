@@ -12,7 +12,12 @@ fn styled(text: &str) -> Vec<(&str, Styles)> {
     parse(text)
         .spans
         .iter()
-        .map(|span| (&text[span.range.start.0..span.range.end.0], span.styles))
+        .map(|span| {
+            (
+                &text[span.range.start.get()..span.range.end.get()],
+                span.styles,
+            )
+        })
         .collect()
 }
 
@@ -266,8 +271,8 @@ fn concealed(text: &str) -> Vec<(&str, &str, &'static str)> {
                  replacement,
              }| {
                 (
-                    &text[marker.start.0..marker.end.0],
-                    &text[element.start.0..element.end.0],
+                    &text[marker.start.get()..marker.end.get()],
+                    &text[element.start.get()..element.end.get()],
                     *replacement,
                 )
             },
@@ -388,8 +393,8 @@ fn an_indented_atx_heading_starts_at_its_hashes() {
     assert_eq!(
         conceals,
         vec![Conceal {
-            element: ByteOffset(3)..ByteOffset(6),
-            marker: ByteOffset(3)..ByteOffset(5),
+            element: ByteOffset::new(3)..ByteOffset::new(6),
+            marker: ByteOffset::new(3)..ByteOffset::new(5),
             replacement: "",
         }]
     );
@@ -527,7 +532,7 @@ fn check_invariants(text: &str) {
         spans, conceals, ..
     } = parse(text);
     for span in &spans {
-        let (start, end) = (span.range.start.0, span.range.end.0);
+        let (start, end) = (span.range.start.get(), span.range.end.get());
         assert!(start < end, "empty span {span:?} in {text:?}");
         assert!(end <= text.len(), "span {span:?} past the end of {text:?}");
         assert!(text.is_char_boundary(start) && text.is_char_boundary(end));
@@ -550,7 +555,7 @@ fn check_invariants(text: &str) {
         }
     }
     for conceal in &conceals {
-        let (start, end) = (conceal.marker.start.0, conceal.marker.end.0);
+        let (start, end) = (conceal.marker.start.get(), conceal.marker.end.get());
         assert!(start < end, "empty marker {conceal:?} in {text:?}");
         assert!(
             end <= text.len(),
@@ -567,7 +572,7 @@ fn check_invariants(text: &str) {
             "marker {conceal:?} crosses a line in {text:?}"
         );
         assert!(
-            !text[conceal.element.start.0..conceal.element.end.0].ends_with('\n'),
+            !text[conceal.element.start.get()..conceal.element.end.get()].ends_with('\n'),
             "element {conceal:?} keeps its line ending in {text:?}"
         );
         if conceal.replacement == "•" {

@@ -26,22 +26,21 @@ fn headings_are_well_formed(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
     let mut previous_end = 0;
     for heading in &markdown.headings {
-        let (start, end) = (heading.range.start.0, heading.range.end.0);
+        let (start, end) = (heading.range.start.get(), heading.range.end.get());
         prop_assert!(start >= previous_end && start < end);
         prop_assert!(text.is_char_boundary(start) && text.is_char_boundary(end));
         prop_assert!(!text[start..end].ends_with('\n'));
         prop_assert!((1..=6).contains(&heading.level));
         // A setext heading's leading `#` is text, so only an ATX heading starts with a `#` marker.
         let atx = text[start..].starts_with('#')
-            && markdown
-                .spans
-                .iter()
-                .any(|span| span.range.start.0 == start && span.styles.contains(Styles::MARKER));
+            && markdown.spans.iter().any(|span| {
+                span.range.start.get() == start && span.styles.contains(Styles::MARKER)
+            });
         prop_assert_eq!(heading.marker.is_some(), atx);
         if let Some(marker) = &heading.marker {
-            prop_assert!(text[marker.start.0..].starts_with('#'));
-            prop_assert_eq!(marker.start.0, start);
-            prop_assert!(marker.end.0 <= end);
+            prop_assert!(text[marker.start.get()..].starts_with('#'));
+            prop_assert_eq!(marker.start.get(), start);
+            prop_assert!(marker.end.get() <= end);
             prop_assert_eq!(
                 markdown
                     .conceals
@@ -50,16 +49,26 @@ fn headings_are_well_formed(text: &str) -> Result<(), TestCaseError> {
                     .count(),
                 1
             );
-            for byte in marker.start.0..marker.end.0 {
-                prop_assert!(markdown.spans.iter().any(|span| span.range.start.0 <= byte
-                    && byte < span.range.end.0
-                    && span.styles.contains(Styles::MARKER)));
+            for byte in marker.start.get()..marker.end.get() {
+                prop_assert!(
+                    markdown
+                        .spans
+                        .iter()
+                        .any(|span| span.range.start.get() <= byte
+                            && byte < span.range.end.get()
+                            && span.styles.contains(Styles::MARKER))
+                );
             }
         }
         // The app keys a line's size on this: the first byte carries the same level.
-        prop_assert!(markdown.spans.iter().any(|span| span.range.start.0 <= start
-            && start < span.range.end.0
-            && span.styles.heading_level() == Some(heading.level)));
+        prop_assert!(
+            markdown
+                .spans
+                .iter()
+                .any(|span| span.range.start.get() <= start
+                    && start < span.range.end.get()
+                    && span.styles.heading_level() == Some(heading.level))
+        );
         previous_end = end;
     }
     Ok(())
@@ -72,7 +81,7 @@ fn headings(text: &str) -> Vec<(&str, u8)> {
         .iter()
         .map(|heading| {
             (
-                &text[heading.range.start.0..heading.range.end.0],
+                &text[heading.range.start.get()..heading.range.end.get()],
                 heading.level,
             )
         })
@@ -100,7 +109,7 @@ fn heading_markers(text: &str) -> Vec<Option<&str>> {
             heading
                 .marker
                 .as_ref()
-                .map(|marker| &text[marker.start.0..marker.end.0])
+                .map(|marker| &text[marker.start.get()..marker.end.get()])
         })
         .collect()
 }
@@ -134,8 +143,8 @@ fn a_heading_inside_a_container_names_its_opening_sequence() {
     assert_eq!(
         markers,
         vec![
-            Some(ByteOffset(2)..ByteOffset(4)),
-            Some(ByteOffset(8)..ByteOffset(10))
+            Some(ByteOffset::new(2)..ByteOffset::new(4)),
+            Some(ByteOffset::new(8)..ByteOffset::new(10))
         ]
     );
 }

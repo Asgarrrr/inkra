@@ -77,7 +77,7 @@ fn heading_lines(scanned: &str, start: usize, cancel: &AtomicBool) -> Option<usi
     let next = find(scanned, start, cancel, |c| c == '\n')? + 1;
     let lines = format!("{line}\n{}", line_at(scanned, next));
     Some(match parse(&lines).headings.first() {
-        Some(heading) if !lines[..heading.range.start.0].contains('\n') => {
+        Some(heading) if !lines[..heading.range.start.get()].contains('\n') => {
             if heading.marker.is_some() { 1 } else { 2 }
         }
         _ => 0,

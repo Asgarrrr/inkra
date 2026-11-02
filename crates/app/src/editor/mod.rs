@@ -105,7 +105,7 @@ impl EditorView {
         let view = view.map(|view| view.clipped(buffer.read(cx)));
         // Rebuilt: the old `Subscription`s would observe the closed note.
         self._buffer = Self::watch_buffer(&buffer, cx);
-        let (selection, top) = view.map_or((Selection::at(ByteOffset(0)), None), |view| {
+        let (selection, top) = view.map_or((Selection::at(ByteOffset::new(0)), None), |view| {
             (view.selection, Some(view.top))
         });
         // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.

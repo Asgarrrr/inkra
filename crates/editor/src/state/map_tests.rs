@@ -3,7 +3,7 @@ use inkra_text::diff;
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 /// The state after `old` becomes `new`, the selection `range` set on `old` first.

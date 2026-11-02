@@ -1,7 +1,7 @@
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 #[test]

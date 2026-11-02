@@ -4,7 +4,7 @@ use super::*;
 use crate::selection::Goal;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 fn caret(offset: usize, goal: Goal) -> Selection {

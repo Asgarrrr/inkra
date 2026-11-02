@@ -13,6 +13,10 @@ Two newtypes, never mixed:
 - `Utf16Offset` — position in UTF-16 code units. The coordinate platform text
   input protocols speak.
 
+Both are opaque: `new` builds one, `get` reads it. An offset plus a length is an
+offset, two offsets differ by a length, and a count or length stays `usize`
+(`2026-11-02-type-safety-hygiene-design.md`).
+
 There was a third, `CharOffset`, removed after the input spike. It bought
 nothing byte offsets don't — every consumer wanted either storage positions or
 protocol positions — and it added a conversion hop on a path already crossing
@@ -72,9 +76,9 @@ deletes the wrong bytes.
 
 ```rust
 let mut buf = Buffer::new("abc");
-buf.insert(ByteOffset(3), "1");        // "abc1"
+buf.insert(ByteOffset::new(3), "1");   // "abc1"
 buf.transact(|buf| {
-    buf.insert(ByteOffset(0), "X");    // "Xabc1"
+    buf.insert(ByteOffset::new(0), "X"); // "Xabc1"
     buf.undo();                        // → "Xab1" without the guard
 });
 ```

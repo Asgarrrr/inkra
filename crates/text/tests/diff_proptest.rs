@@ -75,14 +75,14 @@ fn grapheme_boundary(text: &str, offset: usize) -> bool {
 
 /// How many bytes a hunk adds to the text, negative when it removes more than it inserts.
 fn growth(range: &Range<ByteOffset>, text: &str) -> isize {
-    text.len().cast_signed() - (range.end.0 - range.start.0).cast_signed()
+    text.len().cast_signed() - (range.end - range.start).cast_signed()
 }
 
 // Strict: at a hunk's start a `Left` anchor stays before the replacement, off its old text.
 fn outside_every_hunk(offset: usize, hunks: &[Hunk]) -> bool {
     hunks
         .iter()
-        .all(|hunk| offset < hunk.range.start.0 || offset > hunk.range.end.0)
+        .all(|hunk| offset < hunk.range.start.get() || offset > hunk.range.end.get())
 }
 
 proptest! {
@@ -102,9 +102,9 @@ proptest! {
     fn every_hunk_starts_and_ends_on_graphemes_of_both_texts((old, new) in old_and_new()) {
         let mut shift = 0isize;
         for Hunk { range, text } in diff(0, &old, &new).hunks() {
-            prop_assert!(grapheme_boundary(&old, range.start.0), "old {:?} at {:?}", old, range);
-            prop_assert!(grapheme_boundary(&old, range.end.0), "old {:?} at {:?}", old, range);
-            let start = range.start.0.strict_add_signed(shift);
+            prop_assert!(grapheme_boundary(&old, range.start.get()), "old {:?} at {:?}", old, range);
+            prop_assert!(grapheme_boundary(&old, range.end.get()), "old {:?} at {:?}", old, range);
+            let start = range.start.get().strict_add_signed(shift);
             prop_assert!(grapheme_boundary(&new, start), "new {:?} at {}", new, start);
             prop_assert!(grapheme_boundary(&new, start + text.len()), "new {:?} at {}", new, start);
             shift += growth(range, text);
@@ -132,7 +132,7 @@ proptest! {
             .enumerate()
             .map(|(index, offset)| {
                 let bias = if index % 2 == 0 { Bias::Left } else { Bias::Right };
-                (offset, buffer.anchor(ByteOffset(offset), bias))
+                (offset, buffer.anchor(ByteOffset::new(offset), bias))
             })
             .collect();
 
@@ -141,10 +141,10 @@ proptest! {
         for (offset, anchor) in anchored {
             let shift: isize = hunks
                 .iter()
-                .filter(|hunk| hunk.range.end.0 < offset)
+                .filter(|hunk| hunk.range.end.get() < offset)
                 .map(|hunk| growth(&hunk.range, &hunk.text))
                 .sum();
-            let resolved = buffer.resolve(anchor).0;
+            let resolved = buffer.resolve(anchor).get();
             prop_assert_eq!(resolved.cast_signed(), offset.cast_signed() + shift);
             prop_assert_eq!(new[resolved..].chars().next(), old[offset..].chars().next());
         }
@@ -157,7 +157,7 @@ proptest! {
         left in any::<bool>(),
     ) {
         let offsets: Vec<usize> = old.char_indices().map(|(offset, _)| offset).chain([old.len()]).collect();
-        let offset = ByteOffset(offsets[pick.index(offsets.len())]);
+        let offset = ByteOffset::new(offsets[pick.index(offsets.len())]);
         let bias = if left { Bias::Left } else { Bias::Right };
         let mut buffer = Buffer::new(old.as_str());
         let diff = diff(buffer.version(), &old, &new);
@@ -178,14 +178,14 @@ proptest! {
         let offsets = old.char_indices().map(|(offset, _)| offset).chain([old.len()]);
         for offset in offsets {
             for bias in [Bias::Left, Bias::Right] {
-                let mapped = diff.map(ByteOffset(offset), bias).0;
+                let mapped = diff.map(ByteOffset::new(offset), bias).get();
                 let touched = hunks
                     .iter()
-                    .position(|hunk| hunk.range.start.0 <= offset && offset <= hunk.range.end.0);
+                    .position(|hunk| hunk.range.start.get() <= offset && offset <= hunk.range.end.get());
                 let Some(index) = touched else {
                     let shift: isize = hunks
                         .iter()
-                        .filter(|hunk| hunk.range.end.0 < offset)
+                        .filter(|hunk| hunk.range.end.get() < offset)
                         .map(|hunk| growth(&hunk.range, &hunk.text))
                         .sum();
                     prop_assert_eq!(mapped.cast_signed(), offset.cast_signed() + shift);
@@ -197,10 +197,10 @@ proptest! {
                     .iter()
                     .map(|hunk| growth(&hunk.range, &hunk.text))
                     .sum();
-                let start = hunk.range.start.0.strict_add_signed(shift);
+                let start = hunk.range.start.get().strict_add_signed(shift);
                 let end = start + hunk.text.len();
                 // The end of a removal is unchanged text after the hunk, so the bias does not apply.
-                let at_end = offset == hunk.range.end.0 && hunk.range.start < hunk.range.end;
+                let at_end = offset == hunk.range.end.get() && hunk.range.start < hunk.range.end;
                 let expected = match bias {
                     _ if at_end => end,
                     Bias::Left => start,

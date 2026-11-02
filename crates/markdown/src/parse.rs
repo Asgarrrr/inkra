@@ -327,7 +327,7 @@ fn lines(text: &str, range: Range<usize>) -> impl Iterator<Item = Range<usize>> 
 }
 
 fn to_offsets(range: Range<usize>) -> Range<ByteOffset> {
-    ByteOffset(range.start)..ByteOffset(range.end)
+    ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
 #[cfg(test)]

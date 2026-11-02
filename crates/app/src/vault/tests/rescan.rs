@@ -69,7 +69,7 @@ fn a_save_keeps_the_note_reachable_across_a_rescan(cx: &mut TestAppContext) {
         let buffer = store.buffer_for(a).cloned().expect("a is open");
         buffer.update(cx, |buffer, _| {
             buffer.transact_at(Instant::now(), |buffer| {
-                buffer.insert(ByteOffset(0), "X");
+                buffer.insert(ByteOffset::new(0), "X");
             });
         });
     });

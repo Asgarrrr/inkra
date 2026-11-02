@@ -3,9 +3,29 @@ use std::ops::Range;
 
 use inkra_text::{Bias, ByteOffset};
 
-/// A UTF-8 byte index into the text a line shows.
+/// A UTF-8 byte index into the text a line shows. The index is private, so only `new` builds one:
+///
+/// ```compile_fail
+/// let _ = inkra_markdown::DisplayOffset(3);
+/// ```
+///
+/// ```
+/// let _ = inkra_markdown::DisplayOffset::new(3);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DisplayOffset(pub usize);
+pub struct DisplayOffset(usize);
+
+impl DisplayOffset {
+    #[must_use]
+    pub const fn new(offset: usize) -> Self {
+        Self(offset)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
 
 /// One buffer line with some ranges hidden or replaced (live-preview spec, D5).
 #[derive(Debug, Clone)]
@@ -57,7 +77,7 @@ impl DisplayLine {
         if self.is_identity() {
             return Cow::Borrowed(line);
         }
-        let start = self.line.start.0;
+        let start = self.line.start.get();
         let mut shown = String::with_capacity(line.len());
         for segment in self.segments() {
             let buffer = segment.buffer.start - start..segment.buffer.end - start;
@@ -69,7 +89,9 @@ impl DisplayLine {
     /// An offset strictly inside a hidden range clamps to that range's display start.
     #[must_use]
     pub fn to_display(&self, offset: ByteOffset) -> DisplayOffset {
-        let offset = offset.0.clamp(self.line.start.0, self.line.end.0);
+        let offset = offset
+            .get()
+            .clamp(self.line.start.get(), self.line.end.get());
         let index = match self.segments().find(|s| offset <= s.buffer.end) {
             Some(s) if s.replacement.is_none() => s.display.start + (offset - s.buffer.start),
             Some(s) if offset == s.buffer.end => s.display.end,
@@ -99,9 +121,9 @@ impl DisplayLine {
             Some(s) if bias == Bias::Left && index == s.display.start => s.buffer.start,
             Some(s) if bias == Bias::Right && index != s.display.end => s.buffer.start,
             Some(s) => s.buffer.end,
-            None => self.line.end.0,
+            None => self.line.end.get(),
         };
-        ByteOffset(offset)
+        ByteOffset::new(offset)
     }
 
     fn display_len(&self) -> usize {
@@ -121,14 +143,16 @@ impl DisplayLine {
     }
 
     fn segments(&self) -> impl Iterator<Item = Segment> + '_ {
-        let mut buffer = self.line.start.0;
+        let mut buffer = self.line.start.get();
         let mut display = 0;
         let mut hidden = self.hidden.iter().peekable();
         std::iter::from_fn(move || {
             let (range, replacement) = match hidden.peek() {
-                Some((range, _)) if buffer < range.start.0 => (buffer..range.start.0, None),
-                Some((range, replacement)) => (range.start.0..range.end.0, Some(*replacement)),
-                None if buffer < self.line.end.0 => (buffer..self.line.end.0, None),
+                Some((range, _)) if buffer < range.start.get() => (buffer..range.start.get(), None),
+                Some((range, replacement)) => {
+                    (range.start.get()..range.end.get(), Some(*replacement))
+                }
+                None if buffer < self.line.end.get() => (buffer..self.line.end.get(), None),
                 None => return None,
             };
             if replacement.is_some() {

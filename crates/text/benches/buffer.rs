@@ -42,12 +42,12 @@ fn build_document(line_count: usize) -> String {
 }
 
 fn middle_offset(document: &str) -> ByteOffset {
-    Buffer::new(document.to_string()).clip(ByteOffset(document.len() / 2))
+    Buffer::new(document.to_string()).clip(ByteOffset::new(document.len() / 2))
 }
 
 fn near_end_offset(document: &str) -> ByteOffset {
     let target = document.len().saturating_sub(NEAR_END_MARGIN);
-    Buffer::new(document.to_string()).clip(ByteOffset(target))
+    Buffer::new(document.to_string()).clip(ByteOffset::new(target))
 }
 
 fn bench_new(c: &mut Criterion) {
@@ -71,9 +71,9 @@ fn bench_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_insert_char");
     for lines in SIZES {
         let document = build_document(lines);
-        let end = ByteOffset(document.len());
+        let end = ByteOffset::new(document.len());
         let positions = [
-            ("start", ByteOffset(0)),
+            ("start", ByteOffset::new(0)),
             ("middle", middle_offset(&document)),
             ("end", end),
         ];
@@ -230,7 +230,7 @@ fn bench_utf16_range(c: &mut Criterion) {
     for lines in SIZES {
         let document = build_document(lines);
         let buffer = Buffer::new(document.clone());
-        let all = ByteOffset(0)..ByteOffset(document.len());
+        let all = ByteOffset::new(0)..ByteOffset::new(document.len());
         let utf16 = buffer.to_utf16_range(&all);
         group.throughput(Throughput::Bytes(document.len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(lines), &buffer, |b, buffer| {
@@ -263,7 +263,7 @@ fn bench_utf16_after_insert(c: &mut Criterion) {
                     },
                     |mut buffer| {
                         buffer.transact_at(now, |buffer| buffer.insert(near_end, "x"));
-                        let utf16 = black_box(buffer.to_utf16(ByteOffset(near_end.0 + 1)));
+                        let utf16 = black_box(buffer.to_utf16(near_end + 1));
                         black_box(buffer.from_utf16(utf16));
                         buffer
                     },
@@ -313,7 +313,7 @@ fn bench_lines(c: &mut Criterion) {
             b.iter(|| {
                 buffer
                     .lines()
-                    .map(|(at, line)| at.0 + line.len())
+                    .map(|(at, line)| at.get() + line.len())
                     .sum::<usize>()
             });
         });

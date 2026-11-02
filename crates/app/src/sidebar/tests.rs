@@ -457,7 +457,9 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
     );
 
     buffer.update(cx, |buffer, _| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        buffer.transact_at(Instant::now(), |buffer| {
+            buffer.insert(ByteOffset::new(0), "X");
+        });
     });
 
     assert_eq!(dirty_rows(&sidebar, cx), ["b"]);

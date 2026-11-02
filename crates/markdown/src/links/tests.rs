@@ -19,7 +19,7 @@ fn linked(text: &str) -> Vec<(String, LinkKind, bool, String)> {
                 target,
             } = link;
             (
-                text[range.start.0..range.end.0].to_owned(),
+                text[range.start.get()..range.end.get()].to_owned(),
                 kind,
                 embed,
                 target,
@@ -181,7 +181,7 @@ fn an_image_inside_a_link_is_two_links_in_order() {
 #[test]
 fn link_at_finds_the_innermost_link_touching_the_offset() {
     let text = "x [![i](a.png)](b.md) [[c]]";
-    let at = |offset| link_at(text, ByteOffset(offset)).map(|link| link.target);
+    let at = |offset| link_at(text, ByteOffset::new(offset)).map(|link| link.target);
     assert_eq!(at(0), None);
     assert_eq!(at(2), Some("b.md".to_owned()));
     assert_eq!(at(3), Some("a.png".to_owned()));
@@ -197,7 +197,7 @@ fn link_at_finds_the_innermost_link_touching_the_offset() {
 fn link_at_prefers_a_late_inner_link_over_its_outer_one() {
     let text = "[aaaaaaaa ![i](b.png)](c.md)";
     assert_eq!(
-        link_at(text, ByteOffset(12)).map(|link| link.target),
+        link_at(text, ByteOffset::new(12)).map(|link| link.target),
         Some("b.png".to_owned())
     );
 }
@@ -205,7 +205,7 @@ fn link_at_prefers_a_late_inner_link_over_its_outer_one() {
 #[test]
 fn link_at_between_two_links_follows_the_second() {
     let text = "[[a]][[b]]";
-    let at = |offset| link_at(text, ByteOffset(offset)).map(|link| link.target);
+    let at = |offset| link_at(text, ByteOffset::new(offset)).map(|link| link.target);
     assert_eq!(at(4), Some("a".to_owned()));
     assert_eq!(at(5), Some("b".to_owned()));
     assert_eq!(at(10), Some("b".to_owned()));
@@ -216,7 +216,7 @@ fn check_invariants(text: &str) {
     let found = links(text);
     let code = parse(text).spans;
     for link in &found {
-        let (start, end) = (link.range.start.0, link.range.end.0);
+        let (start, end) = (link.range.start.get(), link.range.end.get());
         assert!(
             start < end && end <= text.len(),
             "{link:?} outside {text:?}"

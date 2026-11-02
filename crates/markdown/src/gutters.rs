@@ -62,12 +62,12 @@ fn gutter(text: &str, line: Range<usize>, depth: usize) -> Gutter {
         if bytes.get(end + indent) != Some(&b'>') {
             break;
         }
-        quotes.push(ByteOffset(line.start + end + indent));
+        quotes.push(ByteOffset::new(line.start + end + indent));
         end += indent + 1;
         end += usize::from(matches!(bytes.get(end), Some(b' ' | b'\t')));
     }
     Gutter {
-        range: ByteOffset(line.start)..ByteOffset(line.start + end),
+        range: ByteOffset::new(line.start)..ByteOffset::new(line.start + end),
         quotes,
         depth,
     }
@@ -80,11 +80,11 @@ pub(crate) fn quote_conceals(gutters: &[Gutter]) -> impl Iterator<Item = Conceal
         let last = gutter
             .quotes
             .last()
-            .map_or(gutter.range.start, |last| ByteOffset(last.0 + 1));
+            .map_or(gutter.range.start, |&last| last + 1);
         let element = gutter.range.start..last;
         gutter.quotes.iter().map(move |&quote| Conceal {
             element: element.clone(),
-            marker: quote..ByteOffset(quote.0 + 1),
+            marker: quote..quote + 1,
             replacement: "",
         })
     })
@@ -100,18 +100,18 @@ pub(crate) fn cut(text: &str, spans: &mut Vec<Span>, gutters: &[Gutter]) {
     debug_assert!(
         gutters
             .iter()
-            .all(|gutter| !text[gutter.range.start.0..gutter.range.end.0].contains('\n')),
+            .all(|gutter| !text[gutter.range.start.get()..gutter.range.end.get()].contains('\n')),
         "a gutter crosses a line"
     );
     let marker = Styles::QUOTE | Styles::MARKER;
     let mut gutters = gutters
         .iter()
-        .map(|gutter| gutter.range.start.0..gutter.range.end.0)
+        .map(|gutter| gutter.range.start.get()..gutter.range.end.get())
         .peekable();
     // Everything before this byte is a gutter's or already re-emitted.
     let mut cut = 0;
     for span in std::mem::take(spans) {
-        let range = span.range.start.0..span.range.end.0;
+        let range = span.range.start.get()..span.range.end.get();
         while let Some(gutter) = gutters.next_if(|gutter| gutter.start < range.end) {
             push(spans, range.start.max(cut)..gutter.start, span.styles);
             cut = gutter.end;

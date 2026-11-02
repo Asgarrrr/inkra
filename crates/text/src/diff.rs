@@ -47,7 +47,7 @@ impl Diff {
     #[must_use]
     pub fn map(&self, offset: ByteOffset, bias: Bias) -> ByteOffset {
         self.hunks.iter().rev().fold(offset, |offset, hunk| {
-            let removed = hunk.range.end.0 - hunk.range.start.0;
+            let removed = hunk.range.end - hunk.range.start;
             transform(offset, bias, hunk.range.start, removed, hunk.text.len())
         })
     }
@@ -95,7 +95,7 @@ fn word_diffable(text: &str, lines: usize) -> bool {
 }
 
 fn byte_range(range: Range<usize>) -> Range<ByteOffset> {
-    ByteOffset(range.start)..ByteOffset(range.end)
+    ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
 /// Calls `on_hunk(old_range, new_range, old_token_count, new_token_count)` for each changed

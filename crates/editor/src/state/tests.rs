@@ -3,7 +3,7 @@
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 fn editor(text: &str) -> (Buffer, EditorState) {
@@ -441,7 +441,10 @@ fn an_explicit_range_outranks_the_composing_region_and_the_selection() {
     state.edit(&mut buffer, Instant::now(), at(0)..at(0), "");
     state.set_marked_range(Some(at(1)..at(3)));
 
-    assert_eq!(state.target_range(&buffer, Some(&(0..2))), at(0)..at(2));
+    assert_eq!(
+        state.target_range(&buffer, Some(&(Utf16Offset::new(0)..Utf16Offset::new(2)))),
+        at(0)..at(2)
+    );
 }
 
 #[test]
@@ -465,7 +468,12 @@ fn the_selection_is_the_fallback() {
 #[test]
 fn a_utf16_range_spanning_a_surrogate_pair_resolves_onto_the_whole_char() {
     let (mut buffer, mut state) = editor("a😀b");
-    state.replace_in_range(&mut buffer, Instant::now(), Some(&(1..3)), "");
+    state.replace_in_range(
+        &mut buffer,
+        Instant::now(),
+        Some(&(Utf16Offset::new(1)..Utf16Offset::new(3))),
+        "",
+    );
 
     assert_eq!(buffer.text(), "ab");
     assert_eq!(state.cursor(), at(1));

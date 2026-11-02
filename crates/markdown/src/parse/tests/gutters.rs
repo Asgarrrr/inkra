@@ -12,8 +12,8 @@ fn gutters(text: &str) -> Vec<(&str, Vec<usize>, usize)> {
         .gutters
         .iter()
         .map(|gutter| {
-            let range = gutter.range.start.0..gutter.range.end.0;
-            let quotes = gutter.quotes.iter().map(|quote| quote.0).collect();
+            let range = gutter.range.start.get()..gutter.range.end.get();
+            let quotes = gutter.quotes.iter().map(|quote| quote.get()).collect();
             (&text[range], quotes, gutter.depth)
         })
         .collect()
@@ -212,7 +212,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
     let mut previous = None;
     for gutter in &markdown.gutters {
-        let (start, end) = (gutter.range.start.0, gutter.range.end.0);
+        let (start, end) = (gutter.range.start.get(), gutter.range.end.get());
         let line_end = text[start..]
             .find('\n')
             .map_or(text.len(), |len| start + len);
@@ -229,7 +229,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
         prop_assert_eq!(gutter.quotes.is_empty(), start == end);
         for quote in &gutter.quotes {
             prop_assert!(gutter.range.contains(quote));
-            prop_assert_eq!(text.as_bytes()[quote.0], b'>');
+            prop_assert_eq!(text.as_bytes()[quote.get()], b'>');
             let marker = markdown.spans.iter().any(|span| {
                 span.range.contains(quote) && span.styles.contains(Styles::QUOTE | Styles::MARKER)
             });
@@ -240,7 +240,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             .iter()
             .filter(|conceal| gutter.range.contains(&conceal.marker.start))
             .map(|conceal| {
-                prop_assert_eq!(conceal.marker.end.0, conceal.marker.start.0 + 1);
+                prop_assert_eq!(conceal.marker.end.get(), conceal.marker.start.get() + 1);
                 Ok(conceal.marker.start)
             })
             .collect::<Result<_, TestCaseError>>()?;

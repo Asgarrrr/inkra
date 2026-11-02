@@ -30,7 +30,7 @@ impl Edit {
     }
 
     fn range_after(&self) -> Range<ByteOffset> {
-        self.at..ByteOffset(self.at.0 + self.inserted.len())
+        self.at..self.at + self.inserted.len()
     }
 }
 
@@ -65,7 +65,7 @@ impl Buffer {
             grouping_blocked: false,
             next_edit_id: 1,
             anchors: Vec::new(),
-            utf16: Cell::new((ByteOffset(0), Utf16Offset(0))),
+            utf16: Cell::new((ByteOffset::default(), Utf16Offset::default())),
         }
     }
 
@@ -74,9 +74,16 @@ impl Buffer {
         &self.text
     }
 
+    /// # Panics
+    /// Panics if `range` is out of bounds or does not fall on char boundaries.
+    #[must_use]
+    pub fn slice(&self, range: Range<ByteOffset>) -> &str {
+        &self.text[range.start.get()..range.end.get()]
+    }
+
     #[must_use]
     pub fn len(&self) -> ByteOffset {
-        ByteOffset(self.text.len())
+        ByteOffset::new(self.text.len())
     }
 
     #[must_use]
@@ -155,13 +162,14 @@ impl Buffer {
             range.end
         );
         debug_assert!(
-            self.text.is_char_boundary(range.start.0) && self.text.is_char_boundary(range.end.0),
+            self.text.is_char_boundary(range.start.get())
+                && self.text.is_char_boundary(range.end.get()),
             "replace range {}..{} must fall on char boundaries",
             range.start,
             range.end
         );
 
-        let removed = self.text[range.start.0..range.end.0].to_string();
+        let removed = self.slice(range.clone()).to_string();
         if removed.is_empty() && text.is_empty() {
             return;
         }
@@ -232,21 +240,18 @@ impl Buffer {
     /// The one text mutation, so the anchors and the UTF-16 checkpoint follow every edit.
     fn splice(&mut self, at: ByteOffset, removed: &str, inserted: &str) {
         let (byte, utf16) = self.utf16.get();
-        let end = at.0 + removed.len();
+        let end = at + removed.len();
         if byte > at {
-            self.utf16.set(if byte.0 >= end {
+            self.utf16.set(if byte >= end {
                 (
-                    ByteOffset(byte.0 - removed.len() + inserted.len()),
-                    Utf16Offset(utf16.0 - utf16_len(removed) + utf16_len(inserted)),
+                    byte - removed.len() + inserted.len(),
+                    utf16 - utf16_len(removed) + utf16_len(inserted),
                 )
             } else {
-                (
-                    at,
-                    Utf16Offset(utf16.0 - utf16_len(&removed[..byte.0 - at.0])),
-                )
+                (at, utf16 - utf16_len(&removed[..byte - at]))
             });
         }
-        self.text.replace_range(at.0..end, inserted);
+        self.text.replace_range(at.get()..end.get(), inserted);
         self.shift_anchors(at, removed.len(), inserted.len());
     }
 
@@ -266,18 +271,32 @@ impl Buffer {
 
     /// The checkpoint lands on `start`; `end` walks from it so repeated calls do not swing the checkpoint.
     #[must_use]
-    pub fn to_utf16_range(&self, range: &Range<ByteOffset>) -> Range<usize> {
+    pub fn to_utf16_range(&self, range: &Range<ByteOffset>) -> Range<Utf16Offset> {
         let start = self.to_utf16(range.start);
-        start.0..self.utf16_from((range.start, start), range.end).0
+        start..self.utf16_from((range.start, start), range.end)
     }
 
     /// Normalized so the result is never inverted: independent snapping can otherwise cross the ends.
+    ///
+    /// Takes UTF-16 positions, never a raw `usize` range:
+    ///
+    /// ```compile_fail
+    /// use inkra_text::Utf16Offset;
+    /// let buffer = inkra_text::Buffer::new("ab");
+    /// let _ = buffer.from_utf16_range(&(0..1));
+    /// ```
+    ///
+    /// ```
+    /// use inkra_text::Utf16Offset;
+    /// let buffer = inkra_text::Buffer::new("ab");
+    /// let _ = buffer.from_utf16_range(&(Utf16Offset::new(0)..Utf16Offset::new(1)));
+    /// ```
     #[must_use]
-    pub fn from_utf16_range(&self, range: &Range<usize>) -> Range<ByteOffset> {
-        let from = self.byte_from(self.utf16.get(), Utf16Offset(range.start));
+    pub fn from_utf16_range(&self, range: &Range<Utf16Offset>) -> Range<ByteOffset> {
+        let from = self.byte_from(self.utf16.get(), range.start);
         self.utf16.set(from);
         let start = from.0;
-        let end = self.byte_from(from, Utf16Offset(range.end)).0;
+        let end = self.byte_from(from, range.end).0;
         start.min(end)..start.max(end)
     }
 
@@ -287,13 +306,13 @@ impl Buffer {
         offset: ByteOffset,
     ) -> Utf16Offset {
         debug_assert!(
-            self.text.is_char_boundary(offset.0),
+            self.text.is_char_boundary(offset.get()),
             "offset {offset} must fall on a char boundary"
         );
         if offset >= byte {
-            Utf16Offset(utf16.0 + utf16_len(&self.text[byte.0..offset.0]))
+            utf16 + utf16_len(self.slice(byte..offset))
         } else {
-            Utf16Offset(utf16.0 - utf16_len(&self.text[offset.0..byte.0]))
+            utf16 - utf16_len(self.slice(offset..byte))
         }
     }
 
@@ -303,20 +322,20 @@ impl Buffer {
         target: Utf16Offset,
     ) -> (ByteOffset, Utf16Offset) {
         if target >= utf16 {
-            for (index, ch) in self.text[byte.0..].char_indices() {
+            for (index, ch) in self.text[byte.get()..].char_indices() {
                 if utf16 >= target {
-                    return (ByteOffset(byte.0 + index), utf16);
+                    return (byte + index, utf16);
                 }
-                utf16.0 += ch.len_utf16();
+                utf16 = utf16 + ch.len_utf16();
             }
             byte = self.len();
         } else {
-            for (index, ch) in self.text[..byte.0].char_indices().rev() {
-                let previous = utf16.0 - ch.len_utf16();
-                if previous < target.0 {
+            for (index, ch) in self.text[..byte.get()].char_indices().rev() {
+                let previous = utf16 - ch.len_utf16();
+                if previous < target {
                     break;
                 }
-                (byte, utf16) = (ByteOffset(index), Utf16Offset(previous));
+                (byte, utf16) = (ByteOffset::new(index), previous);
             }
         }
         (byte, utf16)
@@ -325,16 +344,16 @@ impl Buffer {
     /// The last grapheme start before `offset`, or 0. Cost is local to `offset`.
     #[must_use]
     pub fn previous_grapheme(&self, offset: ByteOffset) -> ByteOffset {
-        let offset = offset.0.min(self.text.len());
+        let offset = offset.get().min(self.text.len());
         let floor = (0..=offset)
             .rev()
             .find(|&i| self.text.is_char_boundary(i))
             .unwrap_or(0);
         let mut cursor = GraphemeCursor::new(floor, self.text.len(), true);
         if floor < offset && cursor.is_boundary(&self.text, 0).unwrap_or(false) {
-            return ByteOffset(floor);
+            return ByteOffset::new(floor);
         }
-        ByteOffset(
+        ByteOffset::new(
             cursor
                 .prev_boundary(&self.text, 0)
                 .ok()
@@ -347,17 +366,17 @@ impl Buffer {
     #[must_use]
     pub fn next_grapheme(&self, offset: ByteOffset) -> ByteOffset {
         let len = self.text.len();
-        if offset.0 >= len {
+        if offset.get() >= len {
             return self.len();
         }
-        let ceil = (offset.0..=len)
+        let ceil = (offset.get()..=len)
             .find(|&i| self.text.is_char_boundary(i))
             .unwrap_or(len);
         let mut cursor = GraphemeCursor::new(ceil, len, true);
-        if ceil > offset.0 && cursor.is_boundary(&self.text, 0).unwrap_or(false) {
-            return ByteOffset(ceil);
+        if ceil > offset.get() && cursor.is_boundary(&self.text, 0).unwrap_or(false) {
+            return ByteOffset::new(ceil);
         }
-        ByteOffset(
+        ByteOffset::new(
             cursor
                 .next_boundary(&self.text, 0)
                 .ok()
@@ -374,7 +393,7 @@ impl Buffer {
     /// Past the end, answers for the last line rather than panicking; layout lags the text by a frame.
     #[must_use]
     pub fn line_for_offset(&self, offset: ByteOffset) -> usize {
-        self.newlines_before(offset.0.min(self.text.len()))
+        self.newlines_before(offset.get().min(self.text.len()))
     }
 
     /// Excludes the terminating newline: `line_range(0).end` and `line_range(1).start` differ,
@@ -402,13 +421,13 @@ impl Buffer {
         let end = self.text[start..]
             .find('\n')
             .map_or(self.text.len(), |index| start + index);
-        ByteOffset(start)..ByteOffset(end)
+        ByteOffset::new(start)..ByteOffset::new(end)
     }
 
     pub fn lines(&self) -> impl Iterator<Item = (ByteOffset, &str)> {
         let mut start = 0;
         self.text.split('\n').map(move |line| {
-            let at = ByteOffset(start);
+            let at = ByteOffset::new(start);
             start += line.len() + 1;
             (at, line)
         })
@@ -427,27 +446,27 @@ impl Buffer {
 
     #[must_use]
     pub fn clip(&self, offset: ByteOffset) -> ByteOffset {
-        let mut index = offset.0.min(self.text.len());
+        let mut index = offset.get().min(self.text.len());
         while !self.text.is_char_boundary(index) {
             index -= 1;
         }
-        ByteOffset(index)
+        ByteOffset::new(index)
     }
 
     /// `clip`, then onto the grapheme boundary before (`Left`) or after (`Right`) it.
     #[must_use]
     pub fn clip_grapheme(&self, offset: ByteOffset, bias: Bias) -> ByteOffset {
-        let offset = self.clip(offset).0;
+        let offset = self.clip(offset).get();
         let len = self.text.len();
         let mut cursor = GraphemeCursor::new(offset, len, true);
         if cursor.is_boundary(&self.text, 0).unwrap_or(true) {
-            return ByteOffset(offset);
+            return ByteOffset::new(offset);
         }
         let snapped = match bias {
             Bias::Left => cursor.prev_boundary(&self.text, 0).ok().flatten(),
             Bias::Right => cursor.next_boundary(&self.text, 0).ok().flatten(),
         };
-        ByteOffset(snapped.unwrap_or(offset))
+        ByteOffset::new(snapped.unwrap_or(offset))
     }
 
     /// # Panics
@@ -455,11 +474,11 @@ impl Buffer {
     #[must_use]
     pub fn anchor(&mut self, offset: ByteOffset, bias: Bias) -> Anchor {
         assert!(
-            offset.0 <= self.text.len(),
+            offset.get() <= self.text.len(),
             "anchor offset {offset} past end of buffer"
         );
         assert!(
-            self.text.is_char_boundary(offset.0),
+            self.text.is_char_boundary(offset.get()),
             "anchor offset {offset} not a char boundary"
         );
         self.anchors.push(Some(AnchorState { offset, bias }));

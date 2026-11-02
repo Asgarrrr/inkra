@@ -39,7 +39,7 @@ impl Prefix {
             Self::Gutter(gutter) => gutter
                 .shaped
                 .as_ref()
-                .map(|shaped| shaped.x_for_index(offset.0 - gutter.range.start.0)),
+                .map(|shaped| shaped.x_for_index(offset - gutter.range.start)),
         }
     }
 
@@ -81,7 +81,7 @@ impl Hanging {
     /// Negative, since the text starts at 0; `None` while concealed.
     pub(super) fn x_for_offset(&self, offset: ByteOffset) -> Option<Pixels> {
         let shaped = self.shaped.as_ref()?;
-        Some(shaped.x_for_index(offset.0 - self.range.start.0) - shaped.width())
+        Some(shaped.x_for_index(offset - self.range.start) - shaped.width())
     }
 
     /// A concealed marker shows no glyph, so its whole margin lands on its start.
@@ -90,7 +90,7 @@ impl Hanging {
             .shaped
             .as_ref()
             .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()));
-        ByteOffset(self.range.start.0 + index)
+        self.range.start + index
     }
 }
 
@@ -111,7 +111,7 @@ impl GutterLayout {
     /// A revealed gutter maps `x` through its shape (as D12's margin); a concealed one lands on the text's start.
     fn offset_for_x(&self, x: Pixels) -> ByteOffset {
         self.shaped.as_ref().map_or(self.range.end, |shaped| {
-            ByteOffset(self.range.start.0 + shaped.closest_index_for_x(x))
+            self.range.start + shaped.closest_index_for_x(x)
         })
     }
 }
@@ -175,13 +175,13 @@ impl<'a> GutterCarry<'a> {
 
 impl Geometry {
     fn measure(gutter: &Gutter, shaped: &ShapedLine) -> Self {
-        let start = gutter.range.start.0;
+        let start = gutter.range.start;
         Self {
             width: shaped.width(),
             bars: gutter
                 .quotes
                 .iter()
-                .map(|quote| shaped.x_for_index(quote.0 - start))
+                .map(|quote| shaped.x_for_index(*quote - start))
                 .collect(),
         }
     }

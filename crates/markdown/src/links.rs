@@ -51,7 +51,7 @@ pub fn links(text: &str) -> Vec<Link> {
             LinkKind::Inline
         };
         found.push(Link {
-            range: ByteOffset(range.start)..ByteOffset(range.end),
+            range: ByteOffset::new(range.start)..ByteOffset::new(range.end),
             kind,
             embed,
             target,
@@ -68,12 +68,7 @@ pub fn link_at(text: &str, offset: ByteOffset) -> Option<Link> {
     links(text)
         .into_iter()
         .filter(|link| link.range.start <= offset && offset <= link.range.end)
-        .min_by_key(|link| {
-            (
-                link.range.end == offset,
-                link.range.end.0 - link.range.start.0,
-            )
-        })
+        .min_by_key(|link| (link.range.end == offset, link.range.end - link.range.start))
 }
 
 fn target(link_type: LinkType, dest_url: &str) -> Option<String> {

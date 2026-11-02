@@ -51,7 +51,7 @@ fn point_at(
 }
 
 fn caret(window: &WindowHandle<EditorView>, cx: &mut VisualTestContext) -> usize {
-    window.update(cx, |view, _, _| view.cursor().0).unwrap()
+    window.update(cx, |view, _, _| view.cursor().get()).unwrap()
 }
 
 #[gpui::test]

@@ -71,7 +71,7 @@ fn enter_confirms_the_selected_hit(cx: &mut TestAppContext) {
         *activated.borrow(),
         [HitActivated {
             note: a,
-            range: ByteOffset(9)..ByteOffset(13),
+            range: ByteOffset::new(9)..ByteOffset::new(13),
             open: Open::Here,
         }]
     );

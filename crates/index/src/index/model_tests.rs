@@ -355,7 +355,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
             };
             for link in &parsed.links {
                 if model.resolve(*source, &link.target) == Resolution::Note(*note) {
-                    expected.push((order, *source, link.range.start.0));
+                    expected.push((order, *source, link.range.start.get()));
                     let Target::Note { path, .. } = &link.target else {
                         panic!("only note links resolve to a note");
                     };
@@ -381,7 +381,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
                 backlink
                     .links
                     .into_iter()
-                    .map(move |link| (order, backlink.source, link.range.start.0))
+                    .map(move |link| (order, backlink.source, link.range.start.get()))
             })
             .collect();
         assert_eq!(

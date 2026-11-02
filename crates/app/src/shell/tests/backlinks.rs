@@ -86,7 +86,7 @@ fn clicking_the_note_showing_in_its_own_backlinks_keeps_its_caret(cx: &mut TestA
     assert_eq!(
         editor(&window, cx)
             .read_with(cx, |editor, _| editor.cursor())
-            .0,
+            .get(),
         2
     );
     let row = visual.debug_bounds("backlink-0").expect("a lists itself");
@@ -94,7 +94,7 @@ fn clicking_the_note_showing_in_its_own_backlinks_keeps_its_caret(cx: &mut TestA
     visual.run_until_parked();
 
     let caret = editor(&window, cx).read_with(cx, |editor, _| editor.cursor());
-    assert_eq!(caret.0, 2);
+    assert_eq!(caret.get(), 2);
 }
 
 /// The click is the user's last word: the slower activation before it must not land.

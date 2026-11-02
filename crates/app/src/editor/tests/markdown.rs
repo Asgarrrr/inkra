@@ -51,8 +51,8 @@ fn a_write_outside_the_gates_refreshes_the_spans(cx: &mut TestAppContext) {
 
     buffer.update(cx, |buffer, cx| {
         buffer.transact_at(std::time::Instant::now(), |buffer| {
-            buffer.insert(ByteOffset(1), "**");
-            buffer.insert(ByteOffset(0), "**");
+            buffer.insert(ByteOffset::new(1), "**");
+            buffer.insert(ByteOffset::new(0), "**");
         });
         cx.notify();
     });
@@ -69,7 +69,9 @@ fn a_write_outside_the_gates_refreshes_the_spans(cx: &mut TestAppContext) {
 fn an_edit_is_styled_before_effects_flush(cx: &mut TestAppContext) {
     with_editor(cx, "*b", |view, window, cx| {
         view.edit_buffer(window, cx, |_, buffer| {
-            buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(2), "*"));
+            buffer.transact_at(Instant::now(), |buffer| {
+                buffer.insert(ByteOffset::new(2), "*");
+            });
         });
         // Inside the same update, so no observer has run: only `reshape` can have refreshed.
         assert_eq!(view.spans(), parse("*b*").spans.as_slice());

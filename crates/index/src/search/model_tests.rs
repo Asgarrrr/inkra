@@ -68,7 +68,11 @@ fn model(texts: &[(EntryId, Option<&str>)], query: &str, limit: usize) -> Search
                     .iter()
                     .map(|range| {
                         let line = text[..range.start].matches('\n').count() + 1;
-                        Hit::new(text, ByteOffset(range.start)..ByteOffset(range.end), line)
+                        Hit::new(
+                            text,
+                            ByteOffset::new(range.start)..ByteOffset::new(range.end),
+                            line,
+                        )
                     })
                     .collect(),
                 capped: kept < every.len(),

@@ -70,13 +70,16 @@ fn a_clean_note_changed_on_disk_keeps_the_caret_in_its_word_and_undoes_in_one_st
     let (preserved, _conflicts) = conflicts(&notes, cx);
     // Inside `quick`, after `qu`.
     visual.simulate_keystrokes("down right right right right right right");
-    assert_eq!(editor(&window, cx).read_with(cx, |e, _| e.cursor().0), 12);
+    assert_eq!(
+        editor(&window, cx).read_with(cx, |e, _| e.cursor().get()),
+        12
+    );
 
     fs.insert_file(A, new);
     cx.run_until_parked();
 
     assert_eq!(shown_text(&window, cx), new);
-    let caret = editor(&window, cx).read_with(cx, |e, _| e.cursor().0);
+    let caret = editor(&window, cx).read_with(cx, |e, _| e.cursor().get());
     assert_eq!(&new[caret - 2..caret + 3], "quick");
 
     visual.simulate_keystrokes("cmd-z");
@@ -133,7 +136,7 @@ fn a_reload_keeps_the_top_lines_text_at_the_top(cx: &mut TestAppContext) {
     let old = numbered("line", 200);
     let (fs, window, _notes, _visual) = showing_a(cx, &old);
     let view = editor(&window, cx);
-    let line_120 = ByteOffset(old.find("line 120\n").expect("line 120"));
+    let line_120 = ByteOffset::new(old.find("line 120\n").expect("line 120"));
     view.update(cx, |view, cx| view.scroll_to_top(line_120, cx));
     cx.run_until_parked();
     assert_eq!(view.read_with(cx, |view, _| view.offset_at_top()), line_120);
@@ -145,7 +148,7 @@ fn a_reload_keeps_the_top_lines_text_at_the_top(cx: &mut TestAppContext) {
     assert_eq!(shown_text(&window, cx), new);
     assert_eq!(
         view.read_with(cx, |view, _| view.offset_at_top()),
-        ByteOffset(new.find("line 120\n").expect("line 120"))
+        ByteOffset::new(new.find("line 120\n").expect("line 120"))
     );
 }
 
@@ -154,7 +157,7 @@ fn a_reload_while_scrolled_shapes_the_note_once(cx: &mut TestAppContext) {
     let old = numbered("line", 200);
     let (fs, window, _notes, _visual) = showing_a(cx, &old);
     let view = editor(&window, cx);
-    let line_120 = ByteOffset(old.find("line 120\n").expect("line 120"));
+    let line_120 = ByteOffset::new(old.find("line 120\n").expect("line 120"));
     view.update(cx, |view, cx| view.scroll_to_top(line_120, cx));
     cx.run_until_parked();
 
@@ -170,7 +173,7 @@ fn two_reloads_before_a_render_keep_the_top_lines_text_at_the_top(cx: &mut TestA
     let old = numbered("line", 200);
     let (_fs, window, _notes, _visual) = showing_a(cx, &old);
     let view = editor(&window, cx);
-    let line_120 = ByteOffset(old.find("line 120\n").expect("line 120"));
+    let line_120 = ByteOffset::new(old.find("line 120\n").expect("line 120"));
     view.update(cx, |view, cx| view.scroll_to_top(line_120, cx));
     cx.run_until_parked();
 
@@ -192,7 +195,7 @@ fn two_reloads_before_a_render_keep_the_top_lines_text_at_the_top(cx: &mut TestA
     assert_eq!(shown_text(&window, cx), second);
     assert_eq!(
         view.read_with(cx, |view, _| view.offset_at_top()),
-        ByteOffset(second.find("line 120\n").expect("line 120"))
+        ByteOffset::new(second.find("line 120\n").expect("line 120"))
     );
 }
 
@@ -202,7 +205,7 @@ fn a_reload_that_shrinks_the_note_below_the_viewport_does_not_panic(cx: &mut Tes
     let old = numbered("line", 200);
     let (fs, window, _notes, _visual) = showing_a(cx, &old);
     let view = editor(&window, cx);
-    let line_190 = ByteOffset(old.find("line 190\n").expect("line 190"));
+    let line_190 = ByteOffset::new(old.find("line 190\n").expect("line 190"));
     view.update(cx, |view, cx| view.scroll_to_top(line_190, cx));
     cx.run_until_parked();
     assert!(view.read_with(cx, |view, _| view.scroll_y()) < gpui::px(0.));

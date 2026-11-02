@@ -5,7 +5,7 @@ use crate::anchor::Bias;
 
 fn hunk(range: Range<usize>, text: &str) -> Hunk {
     Hunk {
-        range: ByteOffset(range.start)..ByteOffset(range.end),
+        range: ByteOffset::new(range.start)..ByteOffset::new(range.end),
         text: text.to_string(),
     }
 }
@@ -152,7 +152,7 @@ fn one_undo_restores_the_text_before_the_reload() {
 fn a_diff_from_an_older_version_edits_nothing() {
     let mut buffer = Buffer::new("a\n");
     let stale = diff(buffer.version(), buffer.text(), "a\nc\n");
-    buffer.transact(|buffer| buffer.insert(ByteOffset(1), "b"));
+    buffer.transact(|buffer| buffer.insert(ByteOffset::new(1), "b"));
     assert!(!buffer.apply_diff(Instant::now(), &stale));
     assert_eq!(buffer.text(), "ab\n");
 }
@@ -161,7 +161,7 @@ fn a_diff_from_an_older_version_edits_nothing() {
 fn the_reload_does_not_merge_into_typing_before_it() {
     let now = Instant::now();
     let mut buffer = Buffer::new("a\n");
-    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset(1), "b"));
+    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset::new(1), "b"));
     reload(&mut buffer, now + Duration::from_millis(1), "ab\nc\n");
     buffer.undo();
     assert_eq!(buffer.text(), "ab\n");
@@ -173,7 +173,7 @@ fn typing_after_the_reload_does_not_merge_into_it() {
     let mut buffer = Buffer::new("a\n");
     reload(&mut buffer, now, "a\nc\n");
     buffer.transact_at(now + Duration::from_millis(1), |buffer| {
-        buffer.insert(ByteOffset(1), "b");
+        buffer.insert(ByteOffset::new(1), "b");
     });
     buffer.undo();
     assert_eq!(buffer.text(), "a\nc\n");
@@ -183,9 +183,9 @@ fn typing_after_the_reload_does_not_merge_into_it() {
 fn no_hunk_leaves_a_typing_run_open() {
     let now = Instant::now();
     let mut buffer = Buffer::new("");
-    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset(0), "a"));
+    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset::new(0), "a"));
     reload(&mut buffer, now, "a");
-    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset(1), "b"));
+    buffer.transact_at(now, |buffer| buffer.insert(ByteOffset::new(1), "b"));
     buffer.undo();
     assert_eq!(buffer.text(), "");
 }
@@ -195,9 +195,9 @@ fn anchor_across_one_hunk(offset: usize, bias: Bias) -> usize {
     let (old, new) = ("a bc d", "a XYZ d");
     assert_eq!(hunks(old, new), [hunk(2..4, "XYZ")]);
     let mut buffer = Buffer::new(old);
-    let anchor = buffer.anchor(ByteOffset(offset), bias);
+    let anchor = buffer.anchor(ByteOffset::new(offset), bias);
     reload(&mut buffer, Instant::now(), new);
-    buffer.resolve(anchor).0
+    buffer.resolve(anchor).get()
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn an_anchor_at_a_hunk_end_stays_on_the_text_after_it_with_either_bias() {
 fn anchors_outside_the_hunks_stay_on_their_text() {
     let old = "keep one\nthe red fox\nkeep two\n";
     let mut buffer = Buffer::new(old);
-    let at = |word| ByteOffset(old.find(word).unwrap_or_else(|| panic!("no {word}")));
+    let at = |word| ByteOffset::new(old.find(word).unwrap_or_else(|| panic!("no {word}")));
     let one = buffer.anchor(at("one"), Bias::Left);
     let two = buffer.anchor(at("two"), Bias::Right);
     reload(
@@ -224,8 +224,8 @@ fn anchors_outside_the_hunks_stay_on_their_text() {
         Instant::now(),
         "new\nkeep one\nthe crimson fox\nkeep two\n",
     );
-    assert_eq!(&buffer.text()[buffer.resolve(one).0..][..3], "one");
-    assert_eq!(&buffer.text()[buffer.resolve(two).0..][..3], "two");
+    assert_eq!(&buffer.text()[buffer.resolve(one).get()..][..3], "one");
+    assert_eq!(&buffer.text()[buffer.resolve(two).get()..][..3], "two");
 }
 
 /// Two hunks sharing an edge, which `diff` never emits: `ab|cd` becomes `X|YZW`.
@@ -238,16 +238,34 @@ fn touching() -> Diff {
 
 #[test]
 fn a_mapped_offset_at_touching_hunks_shared_edge_goes_by_bias() {
-    assert_eq!(touching().map(ByteOffset(2), Bias::Left), ByteOffset(1));
-    assert_eq!(touching().map(ByteOffset(2), Bias::Right), ByteOffset(4));
+    assert_eq!(
+        touching().map(ByteOffset::new(2), Bias::Left),
+        ByteOffset::new(1)
+    );
+    assert_eq!(
+        touching().map(ByteOffset::new(2), Bias::Right),
+        ByteOffset::new(4)
+    );
 }
 
 #[test]
 fn a_mapped_offset_inside_either_touching_hunk_lands_on_its_edges() {
-    assert_eq!(touching().map(ByteOffset(1), Bias::Left), ByteOffset(0));
-    assert_eq!(touching().map(ByteOffset(1), Bias::Right), ByteOffset(1));
-    assert_eq!(touching().map(ByteOffset(3), Bias::Left), ByteOffset(1));
-    assert_eq!(touching().map(ByteOffset(3), Bias::Right), ByteOffset(4));
+    assert_eq!(
+        touching().map(ByteOffset::new(1), Bias::Left),
+        ByteOffset::new(0)
+    );
+    assert_eq!(
+        touching().map(ByteOffset::new(1), Bias::Right),
+        ByteOffset::new(1)
+    );
+    assert_eq!(
+        touching().map(ByteOffset::new(3), Bias::Left),
+        ByteOffset::new(1)
+    );
+    assert_eq!(
+        touching().map(ByteOffset::new(3), Bias::Right),
+        ByteOffset::new(4)
+    );
 }
 
 #[test]
@@ -255,11 +273,11 @@ fn a_mapped_offset_equals_an_anchor_across_touching_hunks() {
     for offset in 0..=4 {
         for bias in [Bias::Left, Bias::Right] {
             let mut buffer = Buffer::new("abcd");
-            let anchor = buffer.anchor(ByteOffset(offset), bias);
+            let anchor = buffer.anchor(ByteOffset::new(offset), bias);
             assert!(buffer.apply_diff(Instant::now(), &touching()));
             assert_eq!(buffer.text(), "XYZW");
             assert_eq!(
-                touching().map(ByteOffset(offset), bias),
+                touching().map(ByteOffset::new(offset), bias),
                 buffer.resolve(anchor),
                 "{offset} {bias:?}"
             );

@@ -41,7 +41,9 @@ fn saving_does_not_report_the_buffer_as_changed(cx: &mut TestAppContext) {
 
     let (buffer, notes) = detached_store(cx, Arc::clone(&fs) as Arc<dyn Fs>, "/vault/a.md");
     buffer.update(cx, |buffer, _| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        buffer.transact_at(Instant::now(), |buffer| {
+            buffer.insert(ByteOffset::new(0), "X");
+        });
     });
 
     let notified = Arc::new(AtomicUsize::new(0));
@@ -351,7 +353,9 @@ fn a_detached_write_emits_note_saved(cx: &mut TestAppContext) {
     });
 
     buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), "X"));
+        buffer.transact_at(Instant::now(), |buffer| {
+            buffer.insert(ByteOffset::new(0), "X");
+        });
         cx.notify();
     });
     cx.executor().advance_clock(AUTOSAVE_DELAY);

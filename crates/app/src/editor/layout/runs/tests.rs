@@ -8,7 +8,7 @@ use super::{RunStyles, line_runs};
 use crate::theme;
 
 fn range(start: usize, end: usize) -> Range<ByteOffset> {
-    ByteOffset(start)..ByteOffset(end)
+    ByteOffset::new(start)..ByteOffset::new(end)
 }
 
 fn lens(runs: &[gpui::TextRun]) -> Vec<usize> {

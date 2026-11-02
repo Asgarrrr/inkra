@@ -61,7 +61,11 @@ pub(crate) fn search_in(
             note,
             hits: lines(text, lit)
                 .map(|(range, line)| {
-                    Hit::new(text, ByteOffset(range.start)..ByteOffset(range.end), line)
+                    Hit::new(
+                        text,
+                        ByteOffset::new(range.start)..ByteOffset::new(range.end),
+                        line,
+                    )
                 })
                 .collect(),
             capped,

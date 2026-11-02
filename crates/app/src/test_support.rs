@@ -124,7 +124,9 @@ pub(crate) fn conflicts(
 /// Inserts `text` at the start; only the notify fires the autosave observer.
 pub(crate) fn edit(buffer: &Entity<Buffer>, cx: &mut TestAppContext, text: &str) {
     buffer.update(cx, |buffer, cx| {
-        buffer.transact_at(Instant::now(), |buffer| buffer.insert(ByteOffset(0), text));
+        buffer.transact_at(Instant::now(), |buffer| {
+            buffer.insert(ByteOffset::new(0), text);
+        });
         cx.notify();
     });
 }
