@@ -16,6 +16,7 @@ mod palette;
 mod panels;
 mod panes;
 mod parked;
+mod quit;
 mod render;
 mod session;
 mod tab_bar;
@@ -104,6 +105,8 @@ pub(crate) struct AppShell {
     restore: Restore,
     /// A left press on a title drag region, not yet moved or released (S3-D3).
     title_drag_armed: bool,
+    /// A quit is under way: a second one does nothing.
+    quitting: bool,
 }
 
 impl AppShell {
@@ -146,6 +149,7 @@ impl AppShell {
             },
         )
         .detach();
+        Self::quit_on_close(window, cx);
         let first = notes.read(cx).current();
         let (session, restore) = Self::open_session(session, &notes, cx);
         Self {
@@ -165,6 +169,7 @@ impl AppShell {
             session,
             restore,
             title_drag_armed: false,
+            quitting: false,
         }
     }
 

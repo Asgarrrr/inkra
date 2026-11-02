@@ -36,6 +36,7 @@ mod open_first;
 mod panels;
 mod parked;
 mod quick_open;
+mod quitting;
 mod reload;
 mod renaming;
 mod reopen;

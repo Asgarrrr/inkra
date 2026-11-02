@@ -100,7 +100,7 @@ impl AppShell {
     }
 
     /// The one writer. Reads each view, sealing no undo group and forgetting no anchor.
-    fn write_session(&mut self, cx: &App) -> Option<Task<()>> {
+    pub(super) fn write_session(&mut self, cx: &App) -> Option<Task<()>> {
         if !matches!(self.restore, Restore::Done) {
             return None;
         }

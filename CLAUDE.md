@@ -177,6 +177,7 @@ Read the spec before changing its area:
   icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
+- `docs/superpowers/specs/2026-11-02-quit-and-failures-design.md` — close is quit, the chained pre-quit flush, the unsaved prompt, `moves`, save retries, the notice
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`

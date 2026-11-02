@@ -18,7 +18,7 @@ use crate::test_support;
 pub(super) const SESSION: &str = "/support/sessions/vault.json";
 
 /// `a.md` ("alpha") and `b.md` ("beta"), a shell writing its session to `SESSION`, its root focused.
-fn saving(
+pub(super) fn saving(
     cx: &mut TestAppContext,
 ) -> (
     Arc<MemFs>,
