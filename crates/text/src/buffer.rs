@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
@@ -49,6 +50,8 @@ pub struct Buffer {
     next_edit_id: u64,
     /// Every anchor ever created, `None` once forgotten; slots are never reused.
     anchors: Vec<Option<AnchorState>>,
+    /// The last conversion's answer; the next walks only from here.
+    utf16: Cell<(ByteOffset, Utf16Offset)>,
 }
 
 impl Buffer {
@@ -62,6 +65,7 @@ impl Buffer {
             grouping_blocked: false,
             next_edit_id: 1,
             anchors: Vec::new(),
+            utf16: Cell::new((ByteOffset(0), Utf16Offset(0))),
         }
     }
 
@@ -162,8 +166,7 @@ impl Buffer {
             return;
         }
 
-        self.text.replace_range(range.start.0..range.end.0, text);
-        self.shift_anchors(range.start, removed.len(), text.len());
+        self.splice(range.start, &removed, text);
         let id = self.next_edit_id;
         self.next_edit_id += 1;
         self.record(Edit {
@@ -222,44 +225,101 @@ impl Buffer {
 
     /// Assumes `edit` was captured from this exact text state; only the *last* call's range stays valid.
     fn apply(&mut self, edit: &Edit) -> Range<ByteOffset> {
-        let end = edit.at.0 + edit.removed.len();
-        self.text.replace_range(edit.at.0..end, &edit.inserted);
-        self.shift_anchors(edit.at, edit.removed.len(), edit.inserted.len());
+        self.splice(edit.at, &edit.removed, &edit.inserted);
         edit.range_after()
+    }
+
+    /// The one text mutation, so the anchors and the UTF-16 checkpoint follow every edit.
+    fn splice(&mut self, at: ByteOffset, removed: &str, inserted: &str) {
+        let (byte, utf16) = self.utf16.get();
+        let end = at.0 + removed.len();
+        if byte > at {
+            self.utf16.set(if byte.0 >= end {
+                (
+                    ByteOffset(byte.0 - removed.len() + inserted.len()),
+                    Utf16Offset(utf16.0 - utf16_len(removed) + utf16_len(inserted)),
+                )
+            } else {
+                (
+                    at,
+                    Utf16Offset(utf16.0 - utf16_len(&removed[..byte.0 - at.0])),
+                )
+            });
+        }
+        self.text.replace_range(at.0..end, inserted);
+        self.shift_anchors(at, removed.len(), inserted.len());
     }
 
     #[must_use]
     pub fn to_utf16(&self, offset: ByteOffset) -> Utf16Offset {
-        debug_assert!(
-            self.text.is_char_boundary(offset.0),
-            "offset {offset} must fall on a char boundary"
-        );
-        Utf16Offset(self.text[..offset.0].chars().map(char::len_utf16).sum())
+        let answer = self.utf16_from(self.utf16.get(), offset);
+        self.utf16.set((offset, answer));
+        answer
     }
 
     #[must_use]
-    pub fn from_utf16(&self, offset: Utf16Offset) -> ByteOffset {
-        let mut utf16 = 0;
-        for (byte, ch) in self.text.char_indices() {
-            if utf16 >= offset.0 {
-                return ByteOffset(byte);
-            }
-            utf16 += ch.len_utf16();
-        }
-        self.len()
+    pub fn from_utf16(&self, target: Utf16Offset) -> ByteOffset {
+        let answer = self.byte_from(self.utf16.get(), target);
+        self.utf16.set(answer);
+        answer.0
     }
 
+    /// The checkpoint lands on `start`; `end` walks from it so repeated calls do not swing the checkpoint.
     #[must_use]
     pub fn to_utf16_range(&self, range: &Range<ByteOffset>) -> Range<usize> {
-        self.to_utf16(range.start).0..self.to_utf16(range.end).0
+        let start = self.to_utf16(range.start);
+        start.0..self.utf16_from((range.start, start), range.end).0
     }
 
     /// Normalized so the result is never inverted: independent snapping can otherwise cross the ends.
     #[must_use]
     pub fn from_utf16_range(&self, range: &Range<usize>) -> Range<ByteOffset> {
-        let start = self.from_utf16(Utf16Offset(range.start));
-        let end = self.from_utf16(Utf16Offset(range.end));
+        let from = self.byte_from(self.utf16.get(), Utf16Offset(range.start));
+        self.utf16.set(from);
+        let start = from.0;
+        let end = self.byte_from(from, Utf16Offset(range.end)).0;
         start.min(end)..start.max(end)
+    }
+
+    fn utf16_from(
+        &self,
+        (byte, utf16): (ByteOffset, Utf16Offset),
+        offset: ByteOffset,
+    ) -> Utf16Offset {
+        debug_assert!(
+            self.text.is_char_boundary(offset.0),
+            "offset {offset} must fall on a char boundary"
+        );
+        if offset >= byte {
+            Utf16Offset(utf16.0 + utf16_len(&self.text[byte.0..offset.0]))
+        } else {
+            Utf16Offset(utf16.0 - utf16_len(&self.text[offset.0..byte.0]))
+        }
+    }
+
+    fn byte_from(
+        &self,
+        (mut byte, mut utf16): (ByteOffset, Utf16Offset),
+        target: Utf16Offset,
+    ) -> (ByteOffset, Utf16Offset) {
+        if target >= utf16 {
+            for (index, ch) in self.text[byte.0..].char_indices() {
+                if utf16 >= target {
+                    return (ByteOffset(byte.0 + index), utf16);
+                }
+                utf16.0 += ch.len_utf16();
+            }
+            byte = self.len();
+        } else {
+            for (index, ch) in self.text[..byte.0].char_indices().rev() {
+                let previous = utf16.0 - ch.len_utf16();
+                if previous < target.0 {
+                    break;
+                }
+                (byte, utf16) = (ByteOffset(index), Utf16Offset(previous));
+            }
+        }
+        (byte, utf16)
     }
 
     /// The last grapheme start before `offset`, or 0. Cost is local to `offset`.
@@ -435,6 +495,10 @@ impl Buffer {
             state.offset = transform(state.offset, state.bias, at, removed_len, inserted_len);
         }
     }
+}
+
+fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
 }
 
 #[cfg(test)]

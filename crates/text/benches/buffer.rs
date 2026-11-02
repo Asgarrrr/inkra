@@ -224,6 +224,57 @@ fn bench_from_utf16(c: &mut Criterion) {
     group.finish();
 }
 
+/// The IME's `selected_text_range` and its inverse, repeated, after a select-all.
+fn bench_utf16_range(c: &mut Criterion) {
+    let mut group = c.benchmark_group("buffer_utf16_range");
+    for lines in SIZES {
+        let document = build_document(lines);
+        let buffer = Buffer::new(document.clone());
+        let all = ByteOffset(0)..ByteOffset(document.len());
+        let utf16 = buffer.to_utf16_range(&all);
+        group.throughput(Throughput::Bytes(document.len() as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(lines), &buffer, |b, buffer| {
+            b.iter(|| {
+                black_box(buffer.to_utf16_range(black_box(&all)));
+                black_box(buffer.from_utf16_range(black_box(&utf16)));
+            });
+        });
+    }
+    group.finish();
+}
+
+/// The IME's round trip at the caret just after a keystroke.
+fn bench_utf16_after_insert(c: &mut Criterion) {
+    let now = Instant::now();
+    let mut group = c.benchmark_group("buffer_utf16_after_insert");
+    for lines in SIZES {
+        let document = build_document(lines);
+        let near_end = near_end_offset(&document);
+        group.throughput(Throughput::Bytes(document.len() as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(lines),
+            &document,
+            |b, document| {
+                b.iter_batched(
+                    || {
+                        let buffer = Buffer::new(document.clone());
+                        let _ = buffer.to_utf16(near_end);
+                        buffer
+                    },
+                    |mut buffer| {
+                        buffer.transact_at(now, |buffer| buffer.insert(near_end, "x"));
+                        let utf16 = black_box(buffer.to_utf16(ByteOffset(near_end.0 + 1)));
+                        black_box(buffer.from_utf16(utf16));
+                        buffer
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_next_grapheme(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_next_grapheme");
     for lines in SIZES {
@@ -280,6 +331,8 @@ criterion_group!(
     bench_line_range,
     bench_to_utf16,
     bench_from_utf16,
+    bench_utf16_range,
+    bench_utf16_after_insert,
     bench_next_grapheme,
     bench_previous_grapheme,
     bench_lines,

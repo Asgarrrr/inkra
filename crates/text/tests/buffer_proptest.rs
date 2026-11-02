@@ -13,6 +13,15 @@ enum Op {
     Redo,
 }
 
+#[derive(Debug, Clone)]
+enum Utf16Op {
+    Edit(usize, usize, &'static str),
+    Undo,
+    Redo,
+    To(usize),
+    From(usize),
+}
+
 fn text_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
         "[a-zA-Z]{1,3}",
@@ -41,6 +50,33 @@ fn op_strategy() -> impl Strategy<Value = Op> {
         1 => Just(Op::Undo),
         1 => Just(Op::Redo),
     ]
+}
+
+fn utf16_text() -> impl Strategy<Value = &'static str> {
+    prop::sample::select(vec!["a", "é", "😀", "\n", "ab"])
+}
+
+fn utf16_op_strategy() -> impl Strategy<Value = Utf16Op> {
+    prop_oneof![
+        3 => (any::<usize>(), 0usize..4, utf16_text())
+            .prop_map(|(at, len, text)| Utf16Op::Edit(at, len, text)),
+        1 => Just(Utf16Op::Undo),
+        1 => Just(Utf16Op::Redo),
+        3 => any::<usize>().prop_map(Utf16Op::To),
+        3 => any::<usize>().prop_map(Utf16Op::From),
+    ]
+}
+
+/// The linear walk from byte 0 that `from_utf16` replaced.
+fn from_utf16_from_start(text: &str, target: usize) -> usize {
+    let mut utf16 = 0;
+    for (byte, ch) in text.char_indices() {
+        if utf16 >= target {
+            return byte;
+        }
+        utf16 += ch.len_utf16();
+    }
+    text.len()
 }
 
 fn boundary(text: &str, index: usize) -> usize {
@@ -220,6 +256,40 @@ proptest! {
             buf.to_utf16(buf.len()),
             Utf16Offset(buf.text().encode_utf16().count())
         );
+    }
+
+    #[test]
+    fn utf16_conversions_match_a_fresh_count_through_edits_and_undo(
+        parts in prop::collection::vec(utf16_text(), 0..8),
+        ops in prop::collection::vec(utf16_op_strategy(), 0..24),
+    ) {
+        let mut buf = Buffer::new(parts.concat());
+        for op in ops {
+            match op {
+                Utf16Op::Edit(at, len, text) => {
+                    let count = buf.text().char_indices().count() + 1;
+                    let start = at % count;
+                    let (start, end) = ordered_boundaries(buf.text(), start, (start + len).min(count - 1));
+                    buf.transact(|buf| buf.replace(ByteOffset(start)..ByteOffset(end), text));
+                }
+                Utf16Op::Undo => {
+                    buf.undo();
+                }
+                Utf16Op::Redo => {
+                    buf.redo();
+                }
+                Utf16Op::To(n) => {
+                    let byte = boundary(buf.text(), n);
+                    let expected = buf.text()[..byte].encode_utf16().count();
+                    prop_assert_eq!(buf.to_utf16(ByteOffset(byte)), Utf16Offset(expected));
+                }
+                Utf16Op::From(n) => {
+                    let target = n % (buf.text().encode_utf16().count() + 3);
+                    let expected = from_utf16_from_start(buf.text(), target);
+                    prop_assert_eq!(buf.from_utf16(Utf16Offset(target)), ByteOffset(expected));
+                }
+            }
+        }
     }
 
     #[test]
