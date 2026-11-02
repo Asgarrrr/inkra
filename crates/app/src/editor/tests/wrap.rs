@@ -105,6 +105,22 @@ fn a_caret_at_a_wrap_paints_at_the_start_of_the_next_row(cx: &mut TestAppContext
 }
 
 #[gpui::test]
+fn an_offset_past_the_end_lands_on_the_last_row(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "one\ntwo\nthree");
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |view, _, _| {
+            let layout = view.input.last_layout().unwrap();
+            assert_eq!(layout.row_for_offset(at(3)), 0);
+            assert_eq!(layout.row_for_offset(at(4)), 1);
+            assert_eq!(layout.row_for_offset(at(13)), 2);
+            assert_eq!(layout.row_for_offset(at(40)), 2);
+        })
+        .unwrap();
+}
+
+#[gpui::test]
 fn up_and_down_move_by_row(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, &format!("{}\nshort", two_rows()));
     cx.run_until_parked();
