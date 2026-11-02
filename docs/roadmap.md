@@ -71,6 +71,10 @@ off-screen harness, which draws a frame before each keystroke:
 The 16 ms frame budget now holds up to about 290 KB. Past that, only
 windowed shaping helps.
 
+After the 2026-11-02 perf batch (S4), a typed key costs 0.23, 0.82 and 11.4 ms
+and an idle draw 0.050, 0.048 and 0.057 ms at 5, 50 and 500 KB; the idle draw no
+longer grows with the note (`superpowers/specs/2026-11-02-perf-batch-design.md`).
+
 ### Virtualization
 
 Soft wrap has shipped, so rows are no longer one `line_height` per line and

@@ -3,6 +3,7 @@
 Status: **in progress 2026-11-02.** S1 records the baseline and lands item 3.
 S2 corrects the item 1 probe, reverses its drop, and carries shaped lines.
 S3 carries them across a change in line count.
+S4 paints only the lines and quote bars inside the content mask.
 Later slices add their own `### As built (Sx)` under the item they change.
 
 The 2026-11-02 Rust audit listed ten per-frame and per-edit costs. CLAUDE.md
@@ -217,6 +218,61 @@ Measured (median of 3 runs, ms per idle draw):
 Guard: drop the item if idle at 500 KB is under 2x idle at 50 KB. It is 8.0x.
 Kept: an idle frame costs time proportional to the document. S4 changes it.
 
+### As built (S4)
+
+`DocumentLayout::paint` reads `window.content_mask().bounds`. The div that owns
+the scroll pushes that mask, so it holds the scrolled viewport. `visible_lines`
+turns the mask into layout space (`mask.top() - origin.y`) and finds the lines
+with `partition_point` on `top`, one extra line on each side because a glyph can
+overhang its row. `bars_of` cuts the quote bars to the span of those lines with
+`partition_point` on `origin.y`. `bars` is built in line order, so it is sorted
+by top; the field's doc says so. `NameField` shares the paint and stays correct:
+its mask is its own bounds. A mask above or below the document paints at most the
+padding lines.
+
+The saving is the walk, not the atlas. gpui's `WrappedLine::paint` already skips
+glyphs outside the mask before `paint_glyph` (`text_system/line.rs`,
+`max_glyph_bounds.intersects(&content_mask.bounds)`), so an off-screen glyph never
+reached the atlas or the rasterizer. What an idle frame paid was one
+`WrappedLine::paint` call per line and one test per glyph, for every line of the note.
+
+Tests: `a_frame_paints_only_the_lines_in_view` and
+`a_frame_paints_the_bars_of_the_lines_in_view` read `painted()`, a test-only
+record of the last paint's line and bar ranges. Four mutations were applied:
+painting every line, using `mask.top()` without subtracting `origin.y`, painting
+every bar, and dropping the `+ 1` on `end`. Each fails a test. The `+ 1` mutation
+needed a lower bound the contract's assertions did not give: at the top of the
+document, `lines.len() >= fit`, where `fit` is the viewport height in body rows
+rounded up. At the end of the document `end` is `lines.len()` with or without the
+`+ 1`, so `end == TALL + 1` alone does not catch it.
+
+Measured (release probe, median of 3 runs, ms per idle draw):
+
+| size | before | after | ratio |
+|---|---|---|---|
+| 5KB | 0.062 | 0.050 | 0.81x |
+| 50KB | 0.162 | 0.048 | 0.30x |
+| 500KB | 1.307 | 0.057 | 0.044x |
+
+Acceptance: idle at 500 KB is 0.044x of before (limit 0.5x), and idle at 5 KB is
+0.81x (limit 1.1x). An idle draw no longer grows with the note.
+
+An edit still pays for its reshape; the keystroke series moved with the paint
+(median of 3 runs, ms):
+
+| size | series | before | after |
+|---|---|---|---|
+| 5KB | typed-warm-x | 0.247 | 0.228 |
+| 5KB | typed-cold-x | 0.319 | 0.302 |
+| 50KB | typed-warm-x | 0.931 | 0.819 |
+| 50KB | typed-cold-x | 1.005 | 0.890 |
+| 500KB | typed-warm-x | 13.018 | 11.438 |
+| 500KB | typed-cold-x | 12.790 | 11.226 |
+
+Shots: all 54 scenes are byte-identical before and after (`cmp`), among them
+`reload-scroll` (scrolled), `markdown-blocks` (bars), `sidebar-naming` and
+`sidebar-renaming` (`NameField`). `cargo mutants` does not cover `inkra-app`, so none ran.
+
 ## Item 3: `line_for_offset` by bisection
 
 `DocumentLayout::line_for_offset` scanned `lines` from the first line.
@@ -300,7 +356,8 @@ Median 1.149 us. gpui's `shape_line` cache serves the six markers. Dropped.
   instead carries each line's shape from the previous `DocumentLayout` when every
   `shape_text` argument is equal (S2), at the same index or at the start an
   edit moved the line to (S3).
-- Item 2: Zed culls by scroll position plus one row. Inkra culls by gpui's
+- Item 2: Zed paints rows from the scroll position plus one. Inkra's element
+  does not own its scroll (`docs/roadmap.md`, deferred), so it culls by gpui's
   content mask, because the div owns the scroll.
 - Item 4: Zed's rope keeps UTF-16 lengths in chunk summaries. Inkra keeps a
   String plus one checkpoint, because a rope is a type change.
