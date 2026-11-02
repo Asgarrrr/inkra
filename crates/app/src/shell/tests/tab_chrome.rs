@@ -1,9 +1,11 @@
-//! The tab's look: its ×, its dirty dot, its hover and its drag preview (shell chrome spec, S1).
+//! The tab's look: its ×, its dirty and failed dots, its hover and its drag preview (shell chrome spec, S1).
 
 use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
 
+use super::session_writes::wait;
 use super::tab_bar::click;
 use super::{ab_focused, keys, open, tab_notes};
+use crate::vault::AUTOSAVE_DELAY;
 
 /// No mouse move first: an `invisible()` × registers no listener until a hover frame draws it (`div.rs:2529`).
 #[gpui::test]
@@ -54,6 +56,19 @@ fn a_dirty_note_shows_a_dot_on_its_tab(cx: &mut TestAppContext) {
 
     keys(&mut cx, "cmd-s");
     assert!(cx.debug_bounds("tab-dot-0").is_none(), "the save clears it");
+}
+
+#[gpui::test]
+fn a_failed_save_shows_the_failed_dot_instead_of_the_dirty_dot(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, _b) = ab_focused(cx);
+    fs.make_unwritable("/vault/a.md");
+    open(&window, &mut cx, a);
+
+    cx.simulate_input("x");
+    wait(&mut cx, AUTOSAVE_DELAY);
+
+    assert!(cx.debug_bounds("tab-failed-0").is_some());
+    assert!(cx.debug_bounds("tab-dot-0").is_none());
 }
 
 /// The × shows on hover by opacity, so it takes its room whether shown or not.

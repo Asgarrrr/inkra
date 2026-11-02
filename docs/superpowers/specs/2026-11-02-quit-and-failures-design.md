@@ -1,6 +1,6 @@
 # Quit and failures: close is quit, the chained flush, visible failures
 
-Status: **S1, S2 and S3 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2, S3 and S4 built 2026-11-02.** Later slices append their sections here.
 
 ## Why
 
@@ -30,6 +30,10 @@ Two quits lose text today.
    `on_app_quit` subscription and its pending autosaves. A windowless Inkra
    holds nothing the user can reach, so the close button quits the app, after
    the same writes as `⌘Q`.
+2. **A failed autosave retries.** Zed retries no save: `Pane::autosave_item`
+   (`workspace/src/pane.rs:2539-2563`) saves once and returns the error. In
+   Zed a save is explicit and autosave is opt-in. Every Inkra save is
+   implicit, so a failure nobody retries is a data-loss path (Q8).
 
 ## Architecture
 
@@ -173,6 +177,42 @@ Edge cases left:
 near 400 lines and is not split here; its new test lives in
 `mem_fs/fault_tests.rs`, because `mem_fs/tests.rs` is over 500.
 
+### Q8. A failed save: the failed dot, transient retries, one conflict copy
+
+`NoteStore::failed` handles both `SaveFailed` emits in `write`: a note with
+no path in the vault (`error: None`) and a failed `Fs::save`. It logs the
+error, counts it on `OpenNote.failures`, and emits `SaveFailed { id, error }`.
+A landed write or an applied reload zeroes the count, where `saved_version`
+moves.
+
+- **The failed dot.** `Indicator::of(dirty, failed)` picks the tab's and the
+  tree row's dot: `Failed` in `theme::failed_dot()` when the note is dirty and
+  its last write failed, `Dirty` when only dirty, nothing when clean.
+- **Transient errors retry.** `Interrupted`, `WouldBlock`, `TimedOut` and
+  `ResourceBusy` reschedule the save through `schedule_save`, on the note's
+  chain, never on a side timer. The wait doubles from 1 s to a 30 s cap
+  (`retry_delay`). Other errors wait for the next edit or `⌘S`.
+- **Retries are capped at `RETRY_LIMIT` (8).** After 1 + 8 attempts the
+  failed dot and the log stay. An edit or `⌘S` still schedules a save, and a
+  landed write zeroes the count.
+- **A pending autosave absorbs a retry**, because `Queue::arm` returns `None`.
+  A keystroke during a retry's wait does not shorten it. `⌘S` and the quit
+  flush do: a zero delay preempts.
+- **A failure after preserve is `VaultError::Unwritten`.** `Fs::save`
+  preserves the note's bytes before it writes. When the write after the
+  preserve fails, the error carries the copy's path and the stamp of the
+  bytes it kept. `write_through` adopts that stamp, so the retry's
+  `Fs::save` finds no mismatch and preserves nothing more: N retries leave
+  one conflict copy. `NoteStore::failed` emits `ConflictPreserved` for it and
+  requests the rescan, as a landed preserving save does. `is_transient`
+  judges an `Unwritten` by its cause.
+- **Accepted TOCTOU.** Bytes that change between the preserve and the
+  adopted stamp's next save are overwritten unpreserved. Today's save has
+  the same window between its stat and its replace.
+
+`MemFs::fail_next_saves` and `MemFs::fail_next_saves_after_preserve` are the
+fault seams. The second fires only on a save that preserved.
+
 ## Accepted limits
 
 - **Dock quit, app-menu quit, logout and restart** run only `flush_all` and
@@ -216,3 +256,19 @@ near 400 lines and is not split here; its new test lives in
   `mem_fs/fault_tests.rs`.
 - `vault/tests/moves.rs`: the autosave, the quit flush during the rescan and
   during the rename, a trash, an open, two renames, and the dropped task.
+
+## As built (S4)
+
+- `inkra-vault`: `VaultError::Unwritten`; `RealFs::save` and `MemFs::save`
+  return it when the write after a preserve fails. `RealFs::save`'s write
+  moved into `overwrite`, so one `map_err` wraps all three failing steps.
+- `vault/session/writer.rs`: `write_through` adopts an `Unwritten` stamp.
+- `vault/save.rs`: `retry_delay`, `RETRY_LIMIT`, `is_transient`,
+  `NoteStore::failed`. `vault/store.rs`: `save_failed`.
+- `ui/indicator.rs`: `Indicator` became an enum with `of` and `selector`.
+  The shell's `eprintln!` subscriber is gone: the store logs.
+- `vault/mod.rs` exports `AUTOSAVE_DELAY` under `feature = "shot"` too, for
+  the `save-failed` scene. This file is outside S4's file list.
+- `a_failing_note_stops_retrying_after_the_limit` injects 1 + `RETRY_LIMIT`
+  faults, not 20, and counts `SaveFailed` events: one more retry would land
+  the edit, so the limit shows without reading the fault's remaining count.

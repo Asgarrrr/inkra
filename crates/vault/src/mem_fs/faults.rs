@@ -1,8 +1,12 @@
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use futures::channel::oneshot;
 
-use super::MemFs;
+use super::errors::io;
+use super::{MemFs, State};
+use crate::fs::Result;
 
 impl MemFs {
     pub fn make_unreadable(&self, path: impl Into<PathBuf>) {
@@ -12,6 +16,25 @@ impl MemFs {
     /// Sticky, not one-shot: the conditions it models don't clear themselves.
     pub fn make_unwritable(&self, path: impl Into<PathBuf>) {
         self.state().unwritable.insert(path.into());
+    }
+
+    /// The next `count` saves of `path` fail with `kind`, then saves write again.
+    pub fn fail_next_saves(&self, path: impl Into<PathBuf>, count: u32, kind: ErrorKind) {
+        self.state()
+            .failing_saves
+            .insert(path.into(), (count, kind));
+    }
+
+    /// The next `count` saves of `path` that preserve fail right after preserving, with `kind`.
+    pub fn fail_next_saves_after_preserve(
+        &self,
+        path: impl Into<PathBuf>,
+        count: u32,
+        kind: ErrorKind,
+    ) {
+        self.state()
+            .failing_after_preserve
+            .insert(path.into(), (count, kind));
     }
 
     pub fn make_untrashable(&self, path: impl Into<PathBuf>) {
@@ -57,6 +80,29 @@ impl MemFs {
         self.state().blocked_after_renames.insert(from.into(), wait);
         Gate(release)
     }
+}
+
+impl State {
+    pub(super) fn injected_save_failure(&mut self, path: &Path) -> Result<()> {
+        injected(&mut self.failing_saves, path)
+    }
+
+    pub(super) fn injected_failure_after_preserve(&mut self, path: &Path) -> Result<()> {
+        injected(&mut self.failing_after_preserve, path)
+    }
+}
+
+/// Spends one of `path`'s failures; the last one removes its entry.
+fn injected(failing: &mut BTreeMap<PathBuf, (u32, ErrorKind)>, path: &Path) -> Result<()> {
+    let Some((left @ 1.., kind)) = failing.get_mut(path) else {
+        return Ok(());
+    };
+    let kind = *kind;
+    *left -= 1;
+    if *left == 0 {
+        failing.remove(path);
+    }
+    Err(io(path, kind))
 }
 
 /// Holds one parked `MemFs` operation. Releasing or dropping it lets that

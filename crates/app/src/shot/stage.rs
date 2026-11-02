@@ -69,6 +69,14 @@ impl Stage {
         self.open(fs, Launch::Vault(scanned, None))
     }
 
+    /// The vault `open_vault` opened, so a scene can inject a fault.
+    pub(crate) fn fs(&self) -> &MemFs {
+        let Some(fs) = self.fs.as_ref() else {
+            panic!("a scene reaches the disk only after `open_vault`");
+        };
+        fs
+    }
+
     /// A change outside the app to a file of the vault `open_vault` opened.
     pub(crate) fn write(&mut self, path: &str, text: &str) {
         let Some(fs) = self.fs.as_ref() else {

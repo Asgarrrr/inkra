@@ -18,8 +18,9 @@ use super::{EditState, Row, Sidebar};
 
 impl Sidebar {
     /// Split out only so a test can read the dot.
-    pub(super) fn row_is_dirty(&self, row: &Row, cx: &App) -> bool {
-        self.notes.read(cx).is_dirty(row.id, cx)
+    pub(super) fn row_indicator(&self, row: &Row, cx: &App) -> Option<Indicator> {
+        let notes = self.notes.read(cx);
+        Indicator::of(notes.is_dirty(row.id, cx), notes.save_failed(row.id))
     }
 
     /// The field's row: a `ListItem` like any other, or a pixel taller misplaces every row below it.
@@ -51,7 +52,7 @@ impl Sidebar {
     fn render_row(&self, item: usize, row: &Row, cx: &mut Context<Self>) -> AnyElement {
         let row = row.clone();
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
-        let dirty = self.row_is_dirty(&row, cx);
+        let indicator = self.row_indicator(&row, cx);
         let label = one_line(&row.name).into_owned();
         // One test for the chevron and `aria_expanded`, so the two cannot disagree.
         let expanded = (row.kind == Kind::Dir).then(|| self.expanded.contains(&row.id));
@@ -84,11 +85,11 @@ impl Sidebar {
                     .text_color(theme::sidebar_text())
                     .child(label),
             )
-            .when(dirty, |list_item| {
+            .when_some(indicator, |list_item, indicator| {
                 list_item.end(
                     div()
-                        .debug_selector(move || format!("tree-dot-{item}"))
-                        .child(Indicator),
+                        .debug_selector(move || indicator.selector("tree", item))
+                        .child(indicator),
                 )
             })
             .into_any_element()

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use inkra_vault::{Fs, Saved, Stamp};
+use inkra_vault::{Fs, Saved, Stamp, VaultError};
 
 /// Two writers exist momentarily (the periodic chain and the quit flush);
 /// the sequence orders them, since the lock has no fairness guarantee.
@@ -69,9 +69,14 @@ pub(in crate::vault) async fn write_through(
     let result = fs.save(&path, &text, state.stamp).await;
     // Only a landed write advances the mark, or a failure corrupts the
     // next conflict check.
-    if let Ok(saved) = &result {
-        state.written = seq;
-        state.stamp = saved.stamp;
+    match &result {
+        Ok(saved) => {
+            state.written = seq;
+            state.stamp = saved.stamp;
+        }
+        // The bytes it expected are kept beside the note: a retry over them destroys nothing.
+        Err(VaultError::Unwritten { stamp, .. }) => state.stamp = *stamp,
+        Err(_) => {}
     }
     Some(result)
 }

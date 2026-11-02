@@ -1,5 +1,6 @@
 //! The write path: autosave, `⌘S` and the quit flush.
 
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,8 +9,35 @@ use futures::FutureExt;
 use gpui::{App, Context, Task, prelude::*};
 use inkra_vault::{EntryId, VaultError};
 
-use super::session::{Location, PendingSave, write_through};
+use super::session::{Location, OpenNote, PendingSave, write_through};
 use super::{ConflictPreserved, NoteSaved, NoteStore, SaveFailed};
+
+const RETRY_FIRST: Duration = Duration::from_secs(1);
+const RETRY_MAX: Duration = Duration::from_secs(30);
+/// Automatic retries after a note's first failure; an edit or `⌘S` still saves past it.
+pub(super) const RETRY_LIMIT: u32 = 8;
+
+/// The wait before retrying a note's `failures`th failed write: doubling from one second, capped.
+pub(super) fn retry_delay(failures: u32) -> Duration {
+    RETRY_FIRST
+        .saturating_mul(1 << failures.saturating_sub(1).min(5))
+        .min(RETRY_MAX)
+}
+
+/// An error a later attempt can clear by itself; a preserving failure is judged by its cause.
+fn is_transient(error: &VaultError) -> bool {
+    match error {
+        VaultError::Unwritten { source, .. } => is_transient(source),
+        VaultError::Io { source, .. } => matches!(
+            source.kind(),
+            ErrorKind::Interrupted
+                | ErrorKind::WouldBlock
+                | ErrorKind::TimedOut
+                | ErrorKind::ResourceBusy
+        ),
+        VaultError::NotUtf8 { .. } => false,
+    }
+}
 
 impl NoteStore {
     pub(super) fn schedule_save(&mut self, id: EntryId, delay: Duration, cx: &mut Context<Self>) {
@@ -140,7 +168,7 @@ impl NoteStore {
                 let (location, note) = life.bound_at()?;
                 let (text, version) = note.unsaved(cx)?;
                 let Some(path) = this.write_path(id, location, cx) else {
-                    cx.emit(SaveFailed(id));
+                    this.failed(id, None, cx);
                     return None;
                 };
                 let (writer, folder) = (note.writer(), location.folder());
@@ -167,9 +195,12 @@ impl NoteStore {
             return;
         };
         let _ = this.update(cx, |this, cx| {
-            let Ok(saved) = written else {
-                cx.emit(SaveFailed(id));
-                return;
+            let saved = match written {
+                Ok(saved) => saved,
+                Err(error) => {
+                    this.failed(id, Some(error), cx);
+                    return;
+                }
             };
             if let Some(note) = this.sessions.note_mut(id) {
                 note.landed(version);
@@ -191,5 +222,33 @@ impl NoteStore {
             }
             cx.notify();
         });
+    }
+
+    /// Retries on the note's chain while the error is transient and under `RETRY_LIMIT`.
+    fn failed(&mut self, id: EntryId, error: Option<VaultError>, cx: &mut Context<Self>) {
+        let failure = SaveFailed { id, error };
+        log::warn!(
+            "save {:?}: {}",
+            failure.id,
+            failure
+                .error
+                .as_ref()
+                .map_or("no path in the vault".into(), ToString::to_string)
+        );
+        if let Some(failures) = self.sessions.note_mut(failure.id).map(OpenNote::failed)
+            && failures <= RETRY_LIMIT
+            && failure.error.as_ref().is_some_and(is_transient)
+        {
+            self.schedule_save(failure.id, retry_delay(failures), cx);
+        }
+        if let Some(VaultError::Unwritten { preserved, .. }) = &failure.error {
+            cx.emit(ConflictPreserved {
+                id: failure.id,
+                path: preserved.clone(),
+            });
+            drop(self.rescan(cx));
+        }
+        cx.emit(failure);
+        cx.notify();
     }
 }

@@ -24,6 +24,8 @@ pub(super) struct OpenNote {
     buffer: Entity<Buffer>,
     /// Paired with the `Writer`'s stamp: `landed` and `did_reload` are its only writers.
     saved_version: u64,
+    /// Failed writes since `saved_version` last moved.
+    failures: u32,
     /// Shared with the quit flush too — a second `Writer` reintroduces the write race.
     writer: Arc<Writer>,
     /// Dropped with the note: a closed note schedules no save.
@@ -36,6 +38,7 @@ impl OpenNote {
         Self {
             buffer,
             saved_version: 0,
+            failures: 0,
             writer: Arc::new(Writer::new(stamp)),
             _observer: observer,
         }
@@ -59,6 +62,17 @@ impl OpenNote {
     /// A write of `version` landed; `write_through` moved the stamp under the `Writer`'s lock.
     pub(super) fn landed(&mut self, version: u64) {
         self.saved_version = version;
+        self.failures = 0;
+    }
+
+    /// Counts a failed write; the count since the last landed write or reload.
+    pub(super) fn failed(&mut self) -> u32 {
+        self.failures += 1;
+        self.failures
+    }
+
+    pub(super) fn has_failed(&self) -> bool {
+        self.failures > 0
     }
 
     pub(super) fn is_dirty(&self, cx: &App) -> bool {
@@ -90,6 +104,7 @@ impl OpenNote {
             return None;
         }
         self.saved_version = self.buffer.read(cx).version();
+        self.failures = 0;
         Some(Adopt(self.writer(), stamp))
     }
 
