@@ -241,14 +241,17 @@ impl NoteStore {
         {
             self.schedule_save(failure.id, retry_delay(failures), cx);
         }
-        if let Some(VaultError::Unwritten { preserved, .. }) = &failure.error {
-            cx.emit(ConflictPreserved {
-                id: failure.id,
-                path: preserved.clone(),
-            });
+        let kept = match &failure.error {
+            Some(VaultError::Unwritten { preserved, .. }) => Some(preserved.clone()),
+            _ => None,
+        };
+        let id = failure.id;
+        cx.emit(failure);
+        // Last, so the conflict notice replaces the failure's and the retry's save does not clear it.
+        if let Some(path) = kept {
+            cx.emit(ConflictPreserved { id, path });
             drop(self.rescan(cx));
         }
-        cx.emit(failure);
         cx.notify();
     }
 }

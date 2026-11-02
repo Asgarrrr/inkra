@@ -111,6 +111,72 @@ fn a_duplicate_name_is_refused_and_the_field_stays_open(cx: &mut TestAppContext)
     );
 }
 
+/// The watcher is parked on the listing, so the tree does not know `c.md` when the create hits it.
+#[gpui::test]
+fn a_name_taken_on_disk_keeps_the_field_open_with_a_message(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+    let _gate = fs.block_read_dir("/vault");
+    fs.insert_file("/vault/c.md", "x");
+
+    visual.simulate_keystrokes("cmd-n c enter");
+    visual.run_until_parked();
+
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("That name is already taken.")
+    );
+}
+
+#[gpui::test]
+fn a_refused_create_keeps_the_field_open_with_a_message(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, _notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+    fs.make_uncreatable("/vault/c.md");
+
+    visual.simulate_keystrokes("cmd-n c enter");
+    visual.run_until_parked();
+
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("The file could not be created.")
+    );
+}
+
+#[gpui::test]
+fn a_second_enter_while_creating_starts_no_second_create(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+    let gate = fs.block_read_dir("/vault");
+
+    visual.simulate_keystrokes("cmd-n c enter");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        None
+    );
+
+    gate.release();
+    visual.run_until_parked();
+
+    assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    let made = entry_id(&notes, cx, "c");
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+        Some(made)
+    );
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md", "c.md"]);
+}
+
 /// The check compares the file name the note would get, not the text typed.
 #[gpui::test]
 fn a_duplicate_is_caught_through_the_extension(cx: &mut TestAppContext) {

@@ -42,7 +42,7 @@ fn cmd_q_saves_the_notes_before_quitting(cx: &mut TestAppContext) {
     assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alphax"));
 }
 
-/// Chained, not `flush_all`: an off-chain write would resolve the stale `a.md` and recreate it.
+/// The path follows the rename before its rescan lands, so the stale `a.md` is not recreated.
 #[gpui::test]
 fn a_quit_behind_a_rename_writes_the_new_name_only(cx: &mut TestAppContext) {
     let (fs, window, mut visual, a, _b) = ab_focused(cx);
@@ -62,6 +62,54 @@ fn a_quit_behind_a_rename_writes_the_new_name_only(cx: &mut TestAppContext) {
 
     assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("alphax"));
     assert_eq!(on_disk(&fs, "/vault/a.md"), None);
+}
+
+/// Chained, not `flush_all`: an off-chain write mid-rename has no safe path and writes nothing.
+#[gpui::test]
+fn a_quit_during_a_rename_writes_after_it_at_the_new_name(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = ab_focused(cx);
+    open(&window, &mut visual, a);
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let gate = fs.block_after_rename("/vault/a.md");
+    let _renamed = notes.update(&mut visual, |notes, cx| notes.rename(a, "z", cx));
+    visual.run_until_parked();
+
+    visual.simulate_input("x");
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+    assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("alpha"));
+    assert_eq!(on_disk(&fs, "/vault/a.md"), None);
+
+    gate.release();
+    visual.run_until_parked();
+
+    assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("alphax"));
+    assert_eq!(on_disk(&fs, "/vault/a.md"), None);
+}
+
+/// The session names the note's new file: the vault still lists `a.md` until the rescan lands.
+#[gpui::test]
+fn a_quit_during_a_rename_rescan_saves_the_new_name_in_the_session(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = saving(cx);
+    open(&window, &mut visual, a);
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let _gate = fs.block_read_dir("/vault");
+    let _renamed = notes.update(&mut visual, |notes, cx| notes.rename(a, "z", cx));
+    visual.run_until_parked();
+
+    visual.simulate_input("x");
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+
+    assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("alphax"));
+    assert_eq!(
+        saved(&fs).expect("the quit's session").tabs,
+        [tab("z.md", 6, 6)]
+    );
 }
 
 /// The second `⌘Q` would preempt the "y" autosave, still on its timer, and write it.

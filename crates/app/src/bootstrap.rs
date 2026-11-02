@@ -127,11 +127,11 @@ pub fn run() {
                     window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
                 });
                 if let Err(err) = focused {
-                    eprintln!("failed to focus window: {err}");
+                    log::warn!("failed to focus window: {err}");
                 }
             }
             Err(err) => {
-                eprintln!("failed to open window: {err}");
+                log::error!("failed to open window: {err}");
                 std::process::exit(1);
             }
         }

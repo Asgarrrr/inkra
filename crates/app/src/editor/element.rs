@@ -151,7 +151,7 @@ impl Element for TextElement {
         let layout = take_measured(stash, text.size.width).unwrap_or_else(|| {
             // One frame stale height; corrects next frame. gpui's own `Text`
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
-            eprintln!("no layout measured at width {}", text.size.width);
+            log::warn!("no layout measured at width {}", text.size.width);
             let editor = self.editor.read(cx);
             let marked = editor.input.state().marked_range();
             let style = window.text_style();

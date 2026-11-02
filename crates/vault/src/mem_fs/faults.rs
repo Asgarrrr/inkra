@@ -38,6 +38,11 @@ impl MemFs {
             .insert(path.into(), (count, kind));
     }
 
+    /// `watch` of `root` fails with `PermissionDenied`.
+    pub fn make_unwatchable(&self, root: impl Into<PathBuf>) {
+        self.state().unwatchable.insert(root.into());
+    }
+
     pub fn make_untrashable(&self, path: impl Into<PathBuf>) {
         self.state().untrashable.insert(path.into());
     }
@@ -87,6 +92,13 @@ impl State {
     pub(super) fn refused_load(&self, path: &Path) -> Result<()> {
         if self.unreadable.as_deref() == Some(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
+        }
+        Ok(())
+    }
+
+    pub(super) fn refused_watch(&self, root: &Path) -> Result<()> {
+        if self.unwatchable.contains(root) {
+            return Err(io(root, ErrorKind::PermissionDenied));
         }
         Ok(())
     }

@@ -152,7 +152,7 @@ impl NoteStore {
                 true
             }
             Err(error) => {
-                eprintln!("vault scan: {error}");
+                log::warn!("vault scan: {error}");
                 false
             }
         }

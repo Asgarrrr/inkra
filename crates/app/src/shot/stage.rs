@@ -63,6 +63,23 @@ impl Stage {
         for (path, text) in files {
             fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
         }
+        self.open_scanned(fs)
+    }
+
+    /// A vault whose platform refuses the watch, so the shell opens with its notice.
+    pub(crate) fn open_unwatched_vault(
+        &mut self,
+        files: &[(&str, &str)],
+    ) -> WindowHandle<AppShell> {
+        let fs = Arc::new(MemFs::new());
+        for (path, text) in files {
+            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
+        }
+        fs.make_unwatchable(VAULT_ROOT);
+        self.open_scanned(fs)
+    }
+
+    fn open_scanned(&mut self, fs: Arc<MemFs>) -> WindowHandle<AppShell> {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
         self.fs = Some(Arc::clone(&fs));
