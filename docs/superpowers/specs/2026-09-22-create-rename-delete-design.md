@@ -371,9 +371,10 @@ struct EditState {
 ```
 
 `Rejection` is `app`'s own type: a `NameProblem` from `vault`, or `Duplicate`,
-which `vault` cannot answer — it needs the live `Vault` snapshot, not a
-property of a path. Checked synchronously against the target parent's children
-before the command is issued.
+which `check_name` cannot answer — it needs the live `Vault` snapshot, not a
+property of a path. `Vault::name_taken` in `inkra-vault` answers it from that
+snapshot, against the target parent's children, synchronously before the
+command is issued; it compares the file name `Kind::file_name` gives.
 
 > **Corrected.** The draft listed a "duplicate name refuses to confirm" test
 > with no variant to carry it and a `Confirm` that cleared state
@@ -576,6 +577,8 @@ Precedent: the existing ordering tests in `app/src/vault.rs`.
 |---|---|---|
 | Validate a typed vault name | `check_name`, returning `NameProblem` | `vault/src/path.rs` |
 | Turn a typed name into a file name | `note_file_name` | `vault/src/path.rs` |
+| The file name a typed name gets as a note or a folder | `Kind::file_name` | `vault/src/fs.rs` |
+| Whether a typed name collides with a sibling | `Vault::name_taken` | `vault/src/vault/names.rs` |
 | Create a file or a folder | `Fs::create` | `vault/src/fs.rs` |
 | Move one, never clobbering a different file | `Fs::rename` | `vault/src/fs.rs` |
 | Move a file to the platform trash | `Fs::trash` | `vault/src/fs.rs` |

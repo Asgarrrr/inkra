@@ -81,10 +81,7 @@ impl NoteStore {
         if inkra_vault::check_name(name).is_some() {
             return Task::ready(None);
         }
-        let file_name = match kind {
-            Kind::Note => inkra_vault::note_file_name(name),
-            Kind::Dir => name.trim().to_owned(),
-        };
+        let file_name = kind.file_name(name);
 
         let root = {
             let vault = vault.read(cx);
@@ -134,10 +131,7 @@ impl NoteStore {
             let Ok(Some((from, to))) = this.update(cx, |this, cx| {
                 let vault = this.vault.as_ref()?.read(cx);
                 let from = vault.absolute(id)?;
-                let file_name = match vault.entry(id)?.kind {
-                    Kind::Note => inkra_vault::note_file_name(&name),
-                    Kind::Dir => name.trim().to_owned(),
-                };
+                let file_name = vault.entry(id)?.kind.file_name(&name);
                 let to = from.parent()?.join(&file_name);
                 Some((from, to))
             }) else {
