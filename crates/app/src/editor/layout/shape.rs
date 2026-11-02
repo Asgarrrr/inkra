@@ -39,7 +39,7 @@ pub(super) struct LineShape {
 
 impl LineShape {
     fn new(
-        text: SharedString,
+        text: &str,
         font_size: Pixels,
         runs: Vec<TextRun>,
         wrap: Option<Pixels>,
@@ -48,6 +48,7 @@ impl LineShape {
     ) -> Self {
         #[cfg(test)]
         LINES.with(|lines| lines.set(lines.get() + 1));
+        let text = SharedString::from(text.to_owned());
         let wrapped = window
             .text_system()
             .shape_text(text.clone(), font_size, &runs, wrap, None)
@@ -80,7 +81,7 @@ impl LineShape {
 
 /// Takes `style` explicitly since the editor also shapes outside any draw,
 /// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
-/// Line `i` carries `previous`'s line `i` when every `shape_text` argument matches.
+/// A line carries a shape from `previous` when every `shape_text` argument matches.
 pub(crate) fn shape_document(
     inputs: &LayoutInputs<'_>,
     previous: Option<&DocumentLayout>,
@@ -150,10 +151,12 @@ pub(crate) fn shape_document(
             let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
             let wrap = wrap_width.map(|width| (width - indent(prefix.as_ref())).max(px(0.)));
             let shape = previous
-                .and_then(|previous| previous.carried(index, &shown, font_size, &runs, wrap))
+                .and_then(|previous| {
+                    let lines = candidates(previous, index, start, buffer.len());
+                    carried(lines, &shown, font_size, &runs, wrap)
+                })
                 .unwrap_or_else(|| {
-                    let text = SharedString::from(shown.to_string());
-                    Rc::new(LineShape::new(text, font_size, runs, wrap, start, window))
+                    Rc::new(LineShape::new(&shown, font_size, runs, wrap, start, window))
                 });
             let rows = rows(&shown, &shape.wrapped, &range, &display);
             let first_row = row_count;
@@ -190,21 +193,42 @@ pub(crate) fn shape_document(
     }
 }
 
-impl DocumentLayout {
-    /// Line `index`'s shape, when it took exactly these `shape_text` arguments.
-    fn carried(
-        &self,
-        index: usize,
-        text: &str,
-        font_size: Pixels,
-        runs: &[TextRun],
-        wrap: Option<Pixels>,
-    ) -> Option<Rc<LineShape>> {
-        let shape = &self.lines.get(index)?.shape;
-        shape
-            .shaped_from(text, font_size, runs, wrap)
-            .then(|| Rc::clone(shape))
-    }
+/// The first candidate's shape that took exactly these `shape_text` arguments.
+fn carried<'p>(
+    candidates: impl Iterator<Item = &'p LineLayout>,
+    text: &str,
+    font_size: Pixels,
+    runs: &[TextRun],
+    wrap: Option<Pixels>,
+) -> Option<Rc<LineShape>> {
+    candidates
+        .map(|line| &line.shape)
+        .find(|shape| shape.shaped_from(text, font_size, runs, wrap))
+        .map(Rc::clone)
+}
+
+/// The previous layout's line at `index`, then the one the edit moved to `start`, as reuse candidates.
+/// After one contiguous edit, the lines below it start `previous length - len` bytes from where they started.
+fn candidates(
+    previous: &DocumentLayout,
+    index: usize,
+    start: ByteOffset,
+    len: ByteOffset,
+) -> impl Iterator<Item = &LineLayout> {
+    let moved = previous
+        .lines
+        .last()
+        .and_then(|last| (start.0 + last.range.end.0).checked_sub(len.0))
+        .and_then(|target| {
+            previous
+                .lines
+                .binary_search_by_key(&ByteOffset(target), |line| line.range.start)
+                .ok()
+        });
+    [Some(index), moved]
+        .into_iter()
+        .flatten()
+        .filter_map(|index| previous.lines.get(index))
 }
 
 /// The heading that holds the line at `range`; `rest` moves past the headings before it. A setext
