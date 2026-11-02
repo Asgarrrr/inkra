@@ -719,10 +719,12 @@ A second adversarial review, of this live-preview version:
 - **A test pins the parse refresh at the top of `reshape`.** Without the
   refresh, an edit is shaped with the previous parse, and every other test
   still passed.
-- **pulldown-cmark 0.13.4 re-emits events inside a wikilink with an empty
-  alias.** Whole subtrees come twice. `Unrepeated` skips any event that starts
-  at or past the innermost open element's end, depth-balanced. This also fixed
-  a flaky slice-1 proptest, which failed in about 2.7% of runs.
+- **pulldown-cmark 0.13.4 re-emitted events inside a wikilink with an empty
+  alias.** Whole subtrees came twice. `Unrepeated` skipped any event that
+  started at or past the innermost open element's end, depth-balanced. This
+  also fixed a flaky slice-1 proptest, which failed in about 2.7% of runs.
+  0.13.5 fixes the repeat upstream (RUSTSEC-2026-0414, pulldown-cmark #1102),
+  and `Unrepeated` is gone.
 - **ATX detection reads the syntax.** It looks for 1–6 `#` then a space, tab,
   newline or end, at the heading's range start. pulldown starts that range at
   the `#`, even when the heading is indented. `"#a\n==="` is setext and
@@ -736,8 +738,9 @@ A second adversarial review, of this live-preview version:
 - **`to_buffer` snaps an index strictly inside a replacement.** It goes to the
   replacement's display edge, then applies the bias. gpui never produces such
   an index: `closest_index_for_x` returns glyph boundaries only.
-- **A wikilink with an empty alias, `[[a|]]`, keeps its `]]` visible.**
-  pulldown emits the `]]` as link text.
+- **A wikilink with an empty alias, `[[a|]]`, is all markers.** It has no
+  alias to show, so by D2 and D3 the whole link conceals until revealed.
+  pulldown-cmark 0.13.4 emitted the `]]` as link text, which kept it visible.
 - **Performance, release build, one `shape_document` on 5,000 lines with
   20,000 conceals:** 1.2 ms plain text, 4.5 ms concealed, 5.2 ms revealed.
   Concealment adds nothing over revealed. The gap to plain text is slice 1's

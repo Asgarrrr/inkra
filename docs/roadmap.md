@@ -160,8 +160,6 @@ Deferred table of its own.
 
 Known limits, accepted:
 
-- `[[a|]]`, a wikilink with an empty alias, keeps its `]]` visible:
-  pulldown-cmark 0.13.4 emits it as link text.
 - Revealing an inline element shifts the text after it on the same row, as
   in Obsidian. A heading's `#` hangs instead, except inside a quote or a list
   item, or indented.

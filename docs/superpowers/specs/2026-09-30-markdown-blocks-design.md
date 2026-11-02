@@ -361,7 +361,7 @@ above or fills a gap in it.
   take the items with `start <= line end`. The next line's items start one
   byte later at the earliest, so the rule also holds for an empty item.
 - **`Unrepeated` moved to `parse/unrepeated.rs`**, so `parse.rs` stays under
-  400 lines.
+  400 lines. pulldown-cmark 0.13.5 later made it unnecessary, and it is gone.
 - **gpui's `closest_index_for_x` returns the length past the last glyph's
   start** (`text_system/line_layout.rs:78-104`). In a revealed `"> "`, a click
   between the space's start and the text lands on the text's start. D12's

@@ -1,7 +1,3 @@
-mod unrepeated;
-
-pub(crate) use unrepeated::Unrepeated;
-
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -51,7 +47,7 @@ pub fn parse(text: &str) -> Markdown {
     let mut headings = Vec::new();
     let mut quotes = Vec::new();
 
-    for (event, range) in Unrepeated::new(Parser::new_ext(text, options()).into_offset_iter()) {
+    for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let current = open.last().cloned();
         let styles = current.as_ref().map_or(Styles::NONE, |open| open.styles);
         match event {
