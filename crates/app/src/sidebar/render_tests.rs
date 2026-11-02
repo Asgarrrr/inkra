@@ -13,9 +13,10 @@ use crate::vault::NoteStore;
 
 fn bounds(visual: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> {
     visual.run_until_parked();
-    visual
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("`{selector}` is drawn"))
+    let Some(bounds) = visual.debug_bounds(selector) else {
+        panic!("`{selector}` is drawn");
+    };
+    bounds
 }
 
 #[gpui::test]

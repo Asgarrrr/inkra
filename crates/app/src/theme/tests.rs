@@ -1,5 +1,5 @@
 use gpui::{FontStyle, FontWeight, Hsla, TextStyle};
-use inkra_markdown::Styles;
+use inkra_markdown::{HEADING_LEVELS, HeadingLevel, Styles};
 
 use super::{
     BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, code_text, heading_metrics, link_text,
@@ -34,7 +34,7 @@ fn strikethrough_is_struck() {
 #[test]
 fn a_heading_is_bold_at_the_body_size() {
     let base = TextStyle::default();
-    let style = markdown_style(&base, Styles::heading(1));
+    let style = markdown_style(&base, Styles::heading(HeadingLevel::H1));
     assert_eq!(style.font_weight, FontWeight::BOLD);
     assert_eq!(style.font_size, base.font_size);
 }
@@ -80,11 +80,13 @@ fn frontmatter_is_dimmed() {
 
 #[test]
 fn heading_sizes_step_down_to_the_body_and_never_below() {
-    let sizes: Vec<_> = (1..=6).map(|level| heading_metrics(level).size).collect();
+    let sizes: Vec<_> = HEADING_LEVELS
+        .map(|level| heading_metrics(level).size)
+        .to_vec();
     assert!(sizes.windows(2).all(|pair| pair[0] >= pair[1]));
     assert!(sizes[..4].windows(2).all(|pair| pair[0] > pair[1]));
     assert!(sizes.iter().all(|&size| size >= BODY_TEXT_SIZE));
-    let h6 = heading_metrics(6);
+    let h6 = heading_metrics(HeadingLevel::H6);
     assert_eq!(
         (h6.size, h6.line_height),
         (BODY_TEXT_SIZE, BODY_LINE_HEIGHT)
@@ -93,7 +95,7 @@ fn heading_sizes_step_down_to_the_body_and_never_below() {
 
 #[test]
 fn a_heading_line_is_never_shorter_than_body_or_its_own_text() {
-    for level in 1..=6 {
+    for level in HEADING_LEVELS {
         let metrics = heading_metrics(level);
         assert!(metrics.line_height >= metrics.size && metrics.line_height >= BODY_LINE_HEIGHT);
     }

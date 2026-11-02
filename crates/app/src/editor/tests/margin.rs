@@ -1,7 +1,7 @@
 //! D12's margin: reserved left of the text column, measured from the heading markers.
 
 use gpui::{Bounds, Modifiers, Pixels, TestAppContext, point, px, size};
-use inkra_markdown::Styles;
+use inkra_markdown::{HEADING_LEVELS, Styles};
 
 use super::geometry::{HEADING_MARGIN, PADDING};
 use super::{at, dispatching};
@@ -17,8 +17,8 @@ fn every_heading_marker_fits_the_margin(cx: &mut TestAppContext) {
         .update(&mut cx, |view, window, _| {
             let style = view.input.last_layout().unwrap().style().clone();
             assert_eq!(margin_width(&style, window), px(HEADING_MARGIN));
-            for level in 1..=6 {
-                let marker = format!("{} ", "#".repeat(usize::from(level)));
+            for level in HEADING_LEVELS {
+                let marker = format!("{} ", "#".repeat(level as usize));
                 let run = theme::markdown_style(&style, Styles::heading(level) | Styles::MARKER)
                     .to_run(marker.len());
                 let width = window

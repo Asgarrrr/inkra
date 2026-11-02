@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
 
 use crate::gutters::{cut, gutters, quote_conceals};
 use crate::{Conceal, Gutter, Styles};
@@ -27,7 +27,7 @@ pub struct Span {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Heading {
     pub range: Range<ByteOffset>,
-    pub level: u8,
+    pub level: HeadingLevel,
     /// An ATX heading's opening sequence, its `#` run and the spaces or tabs after it; `None` for setext.
     pub marker: Option<Range<ByteOffset>>,
 }
@@ -61,7 +61,7 @@ pub fn parse(text: &str) -> Markdown {
                     headings.push(Heading {
                         marker: out.heading(heading.clone()),
                         range: to_offsets(heading),
-                        level: level as u8,
+                        level,
                     });
                 }
                 // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
@@ -131,7 +131,7 @@ pub(crate) fn options() -> Options {
 
 fn tag_styles(tag: &Tag<'_>) -> Styles {
     match tag {
-        Tag::Heading { level, .. } => Styles::heading(*level as u8),
+        Tag::Heading { level, .. } => Styles::heading(*level),
         Tag::Strong => Styles::STRONG,
         Tag::Emphasis => Styles::EMPHASIS,
         Tag::Strikethrough => Styles::STRIKETHROUGH,

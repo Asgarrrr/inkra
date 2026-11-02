@@ -1,6 +1,6 @@
 # Type safety and hygiene: batches 3 and 4 of the 2026-11-02 audit
 
-Status: **S1, S2 and S3 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2, S3 and S4 built 2026-11-02.** Later slices append their sections here.
 
 ## Method
 
@@ -140,6 +140,51 @@ The audit found two sentinels:
   now holds by type.
 - The session file format and the restore are unchanged.
 
+## T7 Phase, T8 HeadingLevel and T9 one panic form
+
+The audit found three more loose types:
+
+- `Picker` held three flags, `awaiting_matches`, `confirm_on_update` and
+  `confirmed`. Twelve combinations were representable; `Phase` has five values.
+- A heading level was a `u8`. `Styles::heading` needed an `assert!` for 1 to
+  6, and `theme::heading_metrics` needed a `_` arm.
+- Invariant panics used two forms: `unwrap_or_else(|| panic!(..))` and
+  `let .. else { panic!(..) }`.
+
+### As built (S4)
+
+- A private `Phase` enum (`picker/mod.rs`) replaces the three flags:
+  `Current`, `Awaiting { queued: Option<Open> }` and `Confirmed`. `refresh`
+  moves `Current` to `Awaiting`. `land` moves `Awaiting` to `Current` and takes
+  `queued`, in today's order: select, scroll, the phase, the queued confirm,
+  then the re-run. `confirm` confirms in `Current`, overwrites `queued` in
+  `Awaiting` (the last `enter` wins, as before), and does nothing in
+  `Confirmed`. `confirm_selected` moves to `Confirmed`.
+- **Decided behaviour change:** the delegate confirms at most once per picker.
+  Before, a click while an `enter` was queued confirmed twice: the click, then
+  the queued `enter` when the answer landed. Now the click confirms once, and
+  any confirm after `Confirmed` is ignored.
+  `a_click_while_an_enter_is_queued_confirms_once` pins it.
+- `inkra-markdown` re-exports pulldown-cmark's `HeadingLevel` and adds
+  `HEADING_LEVELS`, the six levels in order. `Heading.level` is a
+  `HeadingLevel`, and `parse` passes pulldown-cmark's level through without a
+  cast.
+- `Styles::heading(HeadingLevel)` is infallible. The bit layout is unchanged
+  (`LEVEL = 0b111`), so every styled range is identical. `heading_level` reads
+  the bits with `HeadingLevel::try_from`, so 0 and 7 read as `None`. Before, 7
+  read as `Some(7)`, but no code built it: `parse` never produces 7.
+- The two `should_panic` tests for levels 0 and 7 are gone: no caller can pass
+  those levels now.
+- `theme::heading_metrics(HeadingLevel)` matches every level; `H5 | H6` take
+  the body metrics, as the `_` arm did. `margin_width` iterates
+  `HEADING_LEVELS`.
+- Every invariant panic on an `Option` uses `let Some(x) = .. else {
+  panic!(..) };`: `inkra-tabs` (`active_index`, `last`, `close`'s takeover),
+  `Buffer::resolve`, `shot/stage.rs` and four test helpers. Messages and
+  `# Panics` docs are unchanged. `unwrap_or_else(|error| panic!(..))` on a
+  `Result` stays, because it prints the error. `closed.rs`'s match arm and
+  `lib.rs`'s `assert!` stay: neither unwraps an `Option`.
+
 ## Deviations from Zed
 
 1. **Private fields.** Zed's offsets have a `pub` field: `MultiBufferOffset`,
@@ -165,9 +210,13 @@ The audit found two sentinels:
    `clock::Global` (`text/src/text.rs:829`) with a partial order, for
    concurrent replicas. `Buffer` has one writer, so a `Version` compares only
    for equality.
+6. **One confirm per picker.** Zed's `confirm_on_update` is an `Option<bool>`
+   beside the picker's other state (`picker/src/picker.rs:133`), and nothing
+   stops a second confirm. Inkra's `Phase` ends in `Confirmed`, because a
+   picker dismisses on its first confirm.
 
 ## Non-goals
 
-- No change of behaviour or pixels.
+- No change of behaviour or pixels, except the one decided in S4: the picker confirms at most once.
 - No new offset type, and no offset type for lengths.
 - No operators on `DisplayOffset` until code does arithmetic on it.

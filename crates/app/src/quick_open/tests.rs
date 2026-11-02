@@ -75,8 +75,10 @@ fn empty_text(opened: &mut Opened) -> Option<String> {
 /// The cancel flag the newest scan received.
 fn last_scan(opened: &mut Opened) -> Arc<AtomicBool> {
     opened.picker.read_with(&opened.visual, |picker, _| {
-        let begun = picker.delegate.runs.begun().last().cloned();
-        begun.unwrap_or_else(|| panic!("a scan began"))
+        let Some(begun) = picker.delegate.runs.begun().last().cloned() else {
+            panic!("a scan began");
+        };
+        begun
     })
 }
 

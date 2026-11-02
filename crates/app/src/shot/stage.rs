@@ -251,10 +251,13 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: usize,
     ) -> Point<Pixels> {
-        window
+        let Some(center) = window
             .update(&mut self.cx, |shell, _, _| shell.tab_center(ix))
             .unwrap_or_else(|error| panic!("read tab {ix}: {error}"))
-            .unwrap_or_else(|| panic!("tab {ix} is drawn"))
+        else {
+            panic!("tab {ix} is drawn");
+        };
+        center
     }
 
     pub(crate) fn sidebar_toggle_point(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
@@ -274,10 +277,13 @@ impl Stage {
     }
 
     fn tree_row_center(&mut self, window: WindowHandle<AppShell>, ix: f32) -> Point<Pixels> {
-        window
+        let Some(center) = window
             .update(&mut self.cx, |shell, _, cx| shell.tree_row_center(ix, cx))
             .unwrap_or_else(|error| panic!("read the tree's row {ix}: {error}"))
-            .unwrap_or_else(|| panic!("the tree's row {ix} is drawn"))
+        else {
+            panic!("the tree's row {ix} is drawn");
+        };
+        center
     }
 
     pub(crate) fn quick_open_row_center(
@@ -285,12 +291,15 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: f32,
     ) -> Point<Pixels> {
-        window
+        let Some(center) = window
             .update(&mut self.cx, |shell, _, cx| {
                 shell.quick_open_row_center(ix, cx)
             })
             .unwrap_or_else(|error| panic!("read quick open's row {ix}: {error}"))
-            .unwrap_or_else(|| panic!("quick open's row {ix} is drawn"))
+        else {
+            panic!("quick open's row {ix} is drawn");
+        };
+        center
     }
 
     /// Pixels are device pixels: a 1000x640 window yields 2000x1280 on a 2x display.

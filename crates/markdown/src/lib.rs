@@ -13,5 +13,6 @@ pub use gutters::Gutter;
 pub use links::{Link, LinkKind, link_at, links};
 pub use markup::markup;
 pub use parse::{Heading, Markdown, Span, parse};
+pub use pulldown_cmark::HeadingLevel;
 pub use reveal::{Conceal, is_active, touched};
-pub use styles::Styles;
+pub use styles::{HEADING_LEVELS, Styles};

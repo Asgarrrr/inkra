@@ -6,7 +6,7 @@ use gpui::{
 };
 
 use super::letters::{Answer, DELAY, Letters};
-use super::{Arrival, Dismissed, Picker};
+use super::{Arrival, Dismissed, Phase, Picker};
 use crate::keymap::key_bindings;
 use crate::open::Open;
 use crate::theme;
@@ -295,7 +295,7 @@ fn a_landing_that_asks_for_a_rerun_runs_it_unless_confirmed(cx: &mut TestAppCont
 
     // An `enter` queued behind a query no task answers, so only the re-run could add to `applied`.
     picker.update(&mut visual, |picker, cx| {
-        picker.awaiting_matches = true;
+        picker.phase = Phase::Awaiting { queued: None };
         picker.confirm(Open::Here, cx);
         picker.land(rerun, cx);
     });
@@ -306,6 +306,36 @@ fn a_landing_that_asks_for_a_rerun_runs_it_unless_confirmed(cx: &mut TestAppCont
         before + 1,
         "no re-run after a confirm"
     );
+}
+
+#[gpui::test]
+fn a_click_while_an_enter_is_queued_confirms_once(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, ROWS);
+    let (dismissed, _guard) = watch_dismissed(&picker, &mut visual);
+
+    picker.update(&mut visual, |picker, cx| {
+        picker.phase = Phase::Awaiting { queued: None };
+        picker.confirm(Open::Here, cx);
+        picker.click(4, Open::NewTab, cx);
+        picker.land(Arrival::first(), cx);
+    });
+
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::NewTab)]);
+    assert_eq!(dismissed.get(), 1);
+}
+
+#[gpui::test]
+fn a_second_click_after_a_confirm_confirms_nothing(cx: &mut TestAppContext) {
+    let (picker, mut visual) = open(cx, ROWS);
+    let (dismissed, _guard) = watch_dismissed(&picker, &mut visual);
+
+    picker.update(&mut visual, |picker, cx| {
+        picker.click(4, Open::NewTab, cx);
+        picker.click(1, Open::Here, cx);
+    });
+
+    assert_eq!(confirmed(&picker, &mut visual), [("beet", Open::NewTab)]);
+    assert_eq!(dismissed.get(), 1);
 }
 
 #[gpui::test]

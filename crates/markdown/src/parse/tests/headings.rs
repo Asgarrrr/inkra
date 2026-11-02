@@ -6,6 +6,7 @@ use inkra_text::ByteOffset;
 
 use super::super::parse;
 use super::syntax_fragment;
+use crate::HeadingLevel::{self, H1, H2, H3};
 use crate::Styles;
 
 proptest! {
@@ -30,7 +31,6 @@ fn headings_are_well_formed(text: &str) -> Result<(), TestCaseError> {
         prop_assert!(start >= previous_end && start < end);
         prop_assert!(text.is_char_boundary(start) && text.is_char_boundary(end));
         prop_assert!(!text[start..end].ends_with('\n'));
-        prop_assert!((1..=6).contains(&heading.level));
         // A setext heading's leading `#` is text, so only an ATX heading starts with a `#` marker.
         let atx = text[start..].starts_with('#')
             && markdown.spans.iter().any(|span| {
@@ -75,7 +75,7 @@ fn headings_are_well_formed(text: &str) -> Result<(), TestCaseError> {
 }
 
 /// Each heading as the text it covers and its level.
-fn headings(text: &str) -> Vec<(&str, u8)> {
+fn headings(text: &str) -> Vec<(&str, HeadingLevel)> {
     parse(text)
         .headings
         .iter()
@@ -90,14 +90,14 @@ fn headings(text: &str) -> Vec<(&str, u8)> {
 
 #[test]
 fn an_atx_heading_covers_its_line_without_the_newline() {
-    assert_eq!(headings("# T\nx"), vec![("# T", 1)]);
-    assert_eq!(headings("## a ##\n"), vec![("## a ##", 2)]);
+    assert_eq!(headings("# T\nx"), vec![("# T", H1)]);
+    assert_eq!(headings("## a ##\n"), vec![("## a ##", H2)]);
 }
 
 #[test]
 fn an_empty_atx_heading_is_still_a_heading() {
-    assert_eq!(headings("#"), vec![("#", 1)]);
-    assert_eq!(headings("# "), vec![("# ", 1)]);
+    assert_eq!(headings("#"), vec![("#", H1)]);
+    assert_eq!(headings("# "), vec![("# ", H1)]);
 }
 
 /// Each heading's opening sequence as the text it covers.
@@ -151,23 +151,23 @@ fn a_heading_inside_a_container_names_its_opening_sequence() {
 
 #[test]
 fn a_setext_heading_excludes_its_underline() {
-    assert_eq!(headings("T\n==="), vec![("T", 1)]);
-    assert_eq!(headings("a\nb\n---\nc"), vec![("a\nb", 2)]);
-    assert_eq!(headings("#a\n==="), vec![("#a", 1)]);
+    assert_eq!(headings("T\n==="), vec![("T", H1)]);
+    assert_eq!(headings("a\nb\n---\nc"), vec![("a\nb", H2)]);
+    assert_eq!(headings("#a\n==="), vec![("#a", H1)]);
 }
 
 #[test]
 fn a_heading_inside_a_container_starts_at_its_own_syntax() {
-    assert_eq!(headings("> # q\n"), vec![("# q", 1)]);
-    assert_eq!(headings("- # a\n"), vec![("# a", 1)]);
-    assert_eq!(headings("  # ind"), vec![("# ind", 1)]);
-    assert_eq!(headings("> a\n> b\n> ==="), vec![("a\n> b", 1)]);
+    assert_eq!(headings("> # q\n"), vec![("# q", H1)]);
+    assert_eq!(headings("- # a\n"), vec![("# a", H1)]);
+    assert_eq!(headings("  # ind"), vec![("# ind", H1)]);
+    assert_eq!(headings("> a\n> b\n> ==="), vec![("a\n> b", H1)]);
 }
 
 #[test]
 fn headings_come_in_document_order() {
     assert_eq!(
         headings("# a\n\nb\n\n### c\nd\n==="),
-        vec![("# a", 1), ("### c", 3), ("d", 1)]
+        vec![("# a", H1), ("### c", H3), ("d", H1)]
     );
 }

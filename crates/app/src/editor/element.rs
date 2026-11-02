@@ -7,7 +7,7 @@ use gpui::{
     App, AvailableSpace, Bounds, ElementId, Entity, GlobalElementId, LayoutId, Pixels, Style,
     TextStyle, Window, point, prelude::*, px, relative, size,
 };
-use inkra_markdown::Styles;
+use inkra_markdown::{HEADING_LEVELS, Styles};
 
 use super::EditorView;
 use super::layout::{DocumentLayout, LayoutInputs, shape_document};
@@ -225,11 +225,12 @@ pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
     ch * theme::BODY_COLUMN_CHARS
 }
 
-/// The widest opening heading marker, `#` × n and a space, over levels 1 to 6.
+/// The widest opening heading marker, `#` × n and a space, over every heading level.
 pub(super) fn margin_width(style: &TextStyle, window: &mut Window) -> Pixels {
-    (1..=6)
+    HEADING_LEVELS
+        .into_iter()
         .map(|level| {
-            let marker = format!("{} ", "#".repeat(usize::from(level)));
+            let marker = format!("{} ", "#".repeat(level as usize));
             let run = theme::markdown_style(style, Styles::heading(level) | Styles::MARKER)
                 .to_run(marker.len());
             let size = theme::heading_metrics(level).size;

@@ -1,4 +1,5 @@
-use super::Styles;
+use super::{HEADING_LEVELS, Styles};
+use crate::HeadingLevel;
 
 #[test]
 fn a_union_contains_each_part() {
@@ -10,19 +11,19 @@ fn a_union_contains_each_part() {
 
 #[test]
 fn heading_levels_round_trip() {
-    for level in 1..=6 {
+    for level in HEADING_LEVELS {
         assert_eq!(Styles::heading(level).heading_level(), Some(level));
     }
     assert_eq!(Styles::STRONG.heading_level(), None);
     assert_eq!(
-        (Styles::heading(2) | Styles::MARKER).heading_level(),
-        Some(2)
+        (Styles::heading(HeadingLevel::H2) | Styles::MARKER).heading_level(),
+        Some(HeadingLevel::H2)
     );
 }
 
 #[test]
 fn a_heading_level_does_not_read_as_another_tag() {
-    for level in 1..=6 {
+    for level in HEADING_LEVELS {
         let heading = Styles::heading(level);
         for tag in [
             Styles::STRONG,
@@ -40,22 +41,10 @@ fn a_heading_level_does_not_read_as_another_tag() {
 }
 
 #[test]
-#[should_panic(expected = "heading level")]
-fn heading_level_zero_panics() {
-    let _ = Styles::heading(0);
-}
-
-#[test]
-#[should_panic(expected = "heading level")]
-fn heading_level_seven_panics() {
-    let _ = Styles::heading(7);
-}
-
-#[test]
 fn only_none_is_empty() {
     assert!(Styles::NONE.is_empty());
     assert!(!Styles::MARKER.is_empty());
-    assert!(!Styles::heading(1).is_empty());
+    assert!(!Styles::heading(HeadingLevel::H1).is_empty());
 }
 
 #[test]
