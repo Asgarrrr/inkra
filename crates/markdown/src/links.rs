@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -29,9 +28,6 @@ pub enum LinkKind {
 #[must_use]
 pub fn links(text: &str) -> Vec<Link> {
     let mut found = Vec::new();
-    // Past an empty wikilink alias, pulldown-cmark 0.13.4 repeats each later link with the same
-    // range and an empty `ShortcutUnknown` destination; the first copy is the real one.
-    let mut seen = HashSet::new();
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let (link_type, dest_url, embed) = match event {
             Event::Start(Tag::Link {
@@ -46,9 +42,6 @@ pub fn links(text: &str) -> Vec<Link> {
             }) => (link_type, dest_url, true),
             _ => continue,
         };
-        if !seen.insert(range.clone()) {
-            continue;
-        }
         let Some(target) = target(link_type, &dest_url) else {
             continue;
         };

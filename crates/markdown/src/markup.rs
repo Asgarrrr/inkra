@@ -4,7 +4,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Parser, Tag};
 
-use crate::parse::{Unrepeated, backtick_runs, options};
+use crate::parse::{backtick_runs, options};
 
 /// Leads a mid-line piece: whitespace to the emphasis rules, yet no block marker can follow it.
 const INSIDE: &str = "\u{a0}";
@@ -21,7 +21,7 @@ pub fn markup(line: &str, at_line_start: bool) -> Vec<Range<ByteOffset>> {
     let mut out = Out::default();
     // Each open element's end, and whether the bytes between its children drop.
     let mut open: Vec<(usize, bool)> = Vec::new();
-    for (event, range) in Unrepeated::new(Parser::new_ext(&text, options()).into_offset_iter()) {
+    for (event, range) in Parser::new_ext(&text, options()).into_offset_iter() {
         let current = open.last().copied();
         match event {
             Event::Start(tag) => {

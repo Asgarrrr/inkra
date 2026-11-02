@@ -12,7 +12,7 @@ bench = false
 [dependencies]
 inkra-text = { workspace = true }
 # Pure Rust with runtime wikilinks; tree-sitter-md measured 20x slower (live-preview spec, X1).
-pulldown-cmark = { version = "0.13.4", default-features = false }
+pulldown-cmark = { version = "0.13.5", default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }

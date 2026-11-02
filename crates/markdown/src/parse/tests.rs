@@ -586,42 +586,47 @@ fn check_invariants(text: &str) {
 }
 
 #[test]
-fn events_repeated_past_an_empty_wikilink_alias_are_read_once() {
+fn an_empty_wikilink_alias_is_all_markers() {
     check_invariants("[[0|]]\n [");
     check_invariants(">[[(|]]0");
-    assert_eq!(
-        styled("[[0|]]\n ["),
-        vec![("[[0|", L | M), ("]]", L), (" ", M)]
-    );
+    assert_eq!(styled("[[0|]]\n ["), vec![("[[0|]]", L | M), (" ", M)]);
     assert_eq!(
         styled(">[[(|]]0"),
-        vec![(">", Q | M), ("[[(|", Q | L | M), ("]]", Q | L), ("0", Q)]
+        vec![(">", Q | M), ("[[(|]]", Q | L | M), ("0", Q)]
     );
     check_invariants("[[_|]]~*0*");
     assert_eq!(
         styled("[[_|]]~*0*"),
-        vec![
-            ("[[_|", L | M),
-            ("]]", L),
-            ("*", E | M),
-            ("0", E),
-            ("*", E | M)
-        ]
+        vec![("[[_|]]", L | M), ("*", E | M), ("0", E), ("*", E | M)]
     );
     assert_eq!(
         concealed("[[_|]]~*0*"),
-        vec![("[[_|", "[[_|]]", ""), ("*", "*0*", ""), ("*", "*0*", "")]
+        vec![
+            ("[[_|", "[[_|]]", ""),
+            ("]]", "[[_|]]", ""),
+            ("*", "*0*", ""),
+            ("*", "*0*", "")
+        ]
     );
 }
 
+/// pulldown-cmark 0.13.4 repeated the events after each empty alias, exponentially (RUSTSEC-2026-0414).
 #[test]
-fn a_repeated_subtree_leaves_its_containers_open() {
+fn many_empty_wikilink_aliases_give_one_span_each() {
+    let text = "[[a|]] ".repeat(16);
+    let mut expected = vec![("[[a|]]", L | M); 16];
+    expected.push((" ", M));
+    assert_eq!(styled(&text), expected);
+    assert_eq!(parse(&text).conceals.len(), 32);
+}
+
+#[test]
+fn an_empty_wikilink_alias_leaves_its_containers_open() {
     assert_eq!(
         styled("> [[_|]]*0*\n>\n> b"),
         vec![
             ("> ", Q | M),
-            ("[[_|", Q | L | M),
-            ("]]", Q | L),
+            ("[[_|]]", Q | L | M),
             ("*", Q | E | M),
             ("0", Q | E),
             ("*", Q | E | M),

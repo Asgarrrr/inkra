@@ -157,7 +157,7 @@ pulldown-cmark 0.13.4, checked against a scratch build:
 | `<a@b.com>` | `a@b.com`, as `LinkType::Email` — no scheme |
 | `[x][r]` with `[r]: note.md` | `note.md`, at the usage only |
 | `[missing]`, no definition | no event |
-| `[[a\|]][[b\|c]]` | `a`, then `b`, then a second `b` event with the same range, `ShortcutUnknown`, `dest_url` empty |
+| `[[a\|]][[b\|c]]` | `a`, then `b`, on 0.13.5; 0.13.4 added a second `b` event with the same range, `ShortcutUnknown`, `dest_url` empty |
 
 `links` trims the target; drops the trailing `\` an escaped pipe leaves on a
 wikilink target; prefixes an email autolink with `mailto:`, so D2 sees a
@@ -177,6 +177,10 @@ in a note name is not worth an escape rule.
 > end. Styling cannot tell, since both copies are `Tag::Link`; `links` can.
 > So `links` reads pulldown-cmark's events directly and keeps the first link
 > per range: two real links never share one.
+
+> **Corrected.** pulldown-cmark 0.13.5 no longer repeats them
+> (RUSTSEC-2026-0414, pulldown-cmark #1102). `Unrepeated` and the per-range
+> filter in `links` are gone.
 
 ### D2. Target parsing
 
