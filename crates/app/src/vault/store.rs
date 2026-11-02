@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +20,8 @@ pub(crate) struct NoteStore {
     /// `Buffer::version` can't order writes: undo lowers it.
     next_write: u64,
     pub(super) scans: Scans,
+    /// Our own rename, until its rescan swaps in: `None` while `Fs::rename` runs, then the new path.
+    pub(super) moves: HashMap<EntryId, Option<PathBuf>>,
     _watch: Option<Task<()>>,
     /// Parks the next reload between its diff and its apply (watcher spec, test 11b).
     #[cfg(test)]
@@ -46,6 +49,7 @@ impl NoteStore {
             current: None,
             next_write: 0,
             scans: Scans::default(),
+            moves: HashMap::new(),
             _watch: watch,
             #[cfg(test)]
             held_reload: None,
@@ -149,10 +153,7 @@ impl NoteStore {
             return Task::ready(openable(&session.life).cloned());
         }
 
-        let Some(vault) = self.vault.clone() else {
-            return Task::ready(None);
-        };
-        let Some(path) = vault.read(cx).absolute(id) else {
+        let Some(path) = self.path_of(id, cx) else {
             return Task::ready(None);
         };
         let fs = Arc::clone(&self.fs);

@@ -44,6 +44,7 @@ struct State {
     loads: BTreeMap<PathBuf, usize>,
     blocked_read_dirs: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_after_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_after_renames: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Listings started per path, found or not.
     read_dirs: BTreeMap<PathBuf, usize>,
     watches: Vec<watch::Watching>,
@@ -301,64 +302,74 @@ impl Fs for MemFs {
     /// travels with the file as an inode does under `rename(2)`. The subtree
     /// moves with a directory for the same reason.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        let mut state = self.state();
-        if state.uncreatable.contains(to) {
-            return Err(io(to, ErrorKind::PermissionDenied));
-        }
-        // Byte equality only: unlike a real volume, this fake does not fold
-        // case or Unicode normalization.
-        if from == to {
-            return Ok(());
-        }
-        if state.files.contains_key(to) || state.dirs.contains_key(to) {
-            return Err(io(to, ErrorKind::AlreadyExists));
-        }
+        let result = 'moved: {
+            let mut state = self.state();
+            if state.uncreatable.contains(to) {
+                break 'moved Err(io(to, ErrorKind::PermissionDenied));
+            }
+            // Byte equality only: unlike a real volume, this fake does not fold
+            // case or Unicode normalization.
+            if from == to {
+                break 'moved Ok(());
+            }
+            if state.files.contains_key(to) || state.dirs.contains_key(to) {
+                break 'moved Err(io(to, ErrorKind::AlreadyExists));
+            }
 
-        if let Some(entry) = state.files.remove(from) {
-            state.files.insert(to.to_path_buf(), entry);
+            if let Some(entry) = state.files.remove(from) {
+                state.files.insert(to.to_path_buf(), entry);
+                state.changed(from);
+                state.changed(to);
+                break 'moved Ok(());
+            }
+            let Some(entry) = state.dirs.remove(from) else {
+                break 'moved Err(io(from, ErrorKind::NotFound));
+            };
+            state.dirs.insert(to.to_path_buf(), entry);
+
+            let moved: Vec<_> = state
+                .files
+                .keys()
+                .filter(|path| path.starts_with(from))
+                .cloned()
+                .collect();
+            for path in moved {
+                let Ok(relative) = path.strip_prefix(from) else {
+                    continue;
+                };
+                let destination = to.join(relative);
+                if let Some(entry) = state.files.remove(&path) {
+                    state.files.insert(destination, entry);
+                }
+            }
+            let moved: Vec<_> = state
+                .dirs
+                .keys()
+                .filter(|path| path.as_path() != to && path.starts_with(from))
+                .cloned()
+                .collect();
+            for path in moved {
+                let Ok(relative) = path.strip_prefix(from) else {
+                    continue;
+                };
+                let destination = to.join(relative);
+                if let Some(entry) = state.dirs.remove(&path) {
+                    state.dirs.insert(destination, entry);
+                }
+            }
+            // As FSEvents: the two names, not the subtree that moved with them.
             state.changed(from);
             state.changed(to);
-            return Ok(());
-        }
-        let Some(entry) = state.dirs.remove(from) else {
-            return Err(io(from, ErrorKind::NotFound));
+            Ok(())
         };
-        state.dirs.insert(to.to_path_buf(), entry);
-
-        let moved: Vec<_> = state
-            .files
-            .keys()
-            .filter(|path| path.starts_with(from))
-            .cloned()
-            .collect();
-        for path in moved {
-            let Ok(relative) = path.strip_prefix(from) else {
-                continue;
-            };
-            let destination = to.join(relative);
-            if let Some(entry) = state.files.remove(&path) {
-                state.files.insert(destination, entry);
-            }
+        let blocked = result
+            .is_ok()
+            .then(|| self.state().blocked_after_renames.remove(from))
+            .flatten();
+        if let Some(wait) = blocked {
+            let _ = wait.await;
         }
-        let moved: Vec<_> = state
-            .dirs
-            .keys()
-            .filter(|path| path.as_path() != to && path.starts_with(from))
-            .cloned()
-            .collect();
-        for path in moved {
-            let Ok(relative) = path.strip_prefix(from) else {
-                continue;
-            };
-            let destination = to.join(relative);
-            if let Some(entry) = state.dirs.remove(&path) {
-                state.dirs.insert(destination, entry);
-            }
-        }
-        // As FSEvents: the two names, not the subtree that moved with them.
-        state.changed(from);
-        state.changed(to);
-        Ok(())
+        result
     }
 
     async fn trash(&self, path: &Path) -> Result<()> {
@@ -386,3 +397,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod watch_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod fault_tests;

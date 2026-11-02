@@ -1,6 +1,6 @@
 # Quit and failures: close is quit, the chained flush, visible failures
 
-Status: **S1 and S2 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2 and S3 built 2026-11-02.** Later slices append their sections here.
 
 ## Why
 
@@ -137,11 +137,47 @@ prompt is open does nothing.
 writes and collects each `Err`. A `None`, a write overtaken by a newer one, is
 not an error.
 
+### Q7. A rename's new path, before its rescan lands
+
+`NoteStore.moves` holds our own rename until its rescan swaps in. `None`
+means `Fs::rename` runs and no path is safe. `Some(path)` is the new path
+while the vault still lists the old one. `NoteStore::path_of` reads `moves`
+first, then the vault. Every fs op on a note resolves its path through
+`path_of`: `write_path`, `trash_target`, a rename's source and `open_note`.
+
+- **The rename's chain link ends after `Fs::rename`.** It records the new
+  path in `moves` and requests the rescan in the same turn. A write, a trash
+  or a second rename queued behind it runs at once, at the new path. The
+  autosave no longer waits for the rescan.
+- **The rename's own rescan drops the move.** A detached task waits for that
+  rescan and removes the move when it swaps in, unless a later rename
+  replaced it. The `Task<bool>` the caller gets resolves after that rescan,
+  as before. Dropping it never skips the cleanup: it mirrors `queue`'s
+  oneshot.
+- **`flush_all` skips a `None` move.** It cannot join the chain, so a note
+  whose rename runs has no safe path. Its text stays unsaved. `write` cannot
+  meet a `None` move: it runs on the chain, after the rename's link.
+- **A failed `Fs::rename` restores** the move that was there before it.
+
+Edge cases left:
+
+- A note inside a renamed folder resolves the old folder until the swap.
+  This is unchanged: such a note was never chained to the folder's rename.
+- A failed rescan keeps the move. The next swap that lists the note does not
+  drop it; only the rename's own rescan does.
+- An external move between our rename and its rescan is handled: that rescan
+  is authoritative, and the move goes when it swaps in.
+
+`MemFs::block_after_rename` parks a rename after the move, the gate
+`the_quit_flush_while_the_rename_runs_writes_nothing` needs. `mem_fs.rs` ends
+near 400 lines and is not split here; its new test lives in
+`mem_fs/fault_tests.rs`, because `mem_fs/tests.rs` is over 500.
+
 ## Accepted limits
 
 - **Dock quit, app-menu quit, logout and restart** run only `flush_all` and
-  the session's `on_app_quit`, with 200 ms. A write behind a pending rename
-  can recreate the old name, and a slow disk can lose the write. Closing this
+  the session's `on_app_quit`, with 200 ms. A slow disk can lose the write,
+  and a note whose rename runs is skipped (Q7). Closing this
   needs `applicationShouldTerminate:` in the vendored `gpui_macos`.
 - **The quit's tests cannot see `cx.quit()`.** gpui's test platform quits as a
   no-op (`gpui/src/platform/test/platform.rs:435`). A test sees the step after
@@ -169,3 +205,14 @@ not an error.
 - `logger.rs`, `bootstrap.rs`: the logger, installed first in `run`.
 - `shell/tests/quitting.rs`: the prompt, Cancel, a second `⌘Q`, Quit Anyway.
   The hung-save test now asserts the prompt at `QUIT_WAIT`, not the task's end.
+
+## As built (S3)
+
+- `vault/store.rs`: `NoteStore.moves`; `open_note` resolves through `path_of`.
+- `vault/tree_ops.rs`: `path_of`, `trash_target` through it, and `rename`'s
+  short chain link with its detached cleanup.
+- `vault/save.rs`: `write_path` resolves through `path_of`.
+- `inkra-vault`'s `MemFs`: `block_after_rename`, and its test in
+  `mem_fs/fault_tests.rs`.
+- `vault/tests/moves.rs`: the autosave, the quit flush during the rescan and
+  during the rename, a trash, an open, two renames, and the dropped task.

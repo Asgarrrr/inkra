@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::channel::oneshot;
 use gpui::{App, Context, Task, prelude::*};
 use inkra_vault::{EntryId, Fs, Kind};
 
@@ -56,10 +57,18 @@ impl NoteStore {
         })
     }
 
+    /// A None move means no path is safe; callers skip.
+    pub(super) fn path_of(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
+        match self.moves.get(&id) {
+            Some(moved) => moved.clone(),
+            None => self.vault.as_ref()?.read(cx).absolute(id),
+        }
+    }
+
     /// `None`: nothing on disk is the note's. With no entry, only the file at a gone note's last path
     /// may be: a trashing note claims nothing at a swap, so the vault may never see what the note's own save wrote.
     fn trash_target(&self, id: EntryId, cx: &App) -> Option<TrashTarget> {
-        if let Some(path) = self.vault.as_ref()?.read(cx).absolute(id) {
+        if let Some(path) = self.path_of(id, cx) {
             return Some(TrashTarget::Entry(path));
         }
         let (path, note) = self.sessions.get(id)?.life.last_write()?;
@@ -125,36 +134,64 @@ impl NoteStore {
         }
         let name = name.to_owned();
         let fs = Arc::clone(&self.fs);
-        self.queue(id, PendingSave::Write, cx, async move |this, cx| {
+        let (rescanned, rescan_rx) = oneshot::channel();
+        let queued = self.queue(id, PendingSave::Write, cx, async move |this, cx| {
             // Resolved here, not at issue time: an operation queued behind
             // a rename must act on the moved name.
-            let Ok(Some((from, to))) = this.update(cx, |this, cx| {
+            let Ok(Some((from, to, before))) = this.update(cx, |this, cx| {
                 let vault = this.vault.as_ref()?.read(cx);
-                let from = vault.absolute(id)?;
+                let from = this.path_of(id, cx)?;
                 let file_name = vault.entry(id)?.kind.file_name(&name);
-                let to = from.parent()?.join(&file_name);
-                Some((from, to))
+                let to = from.parent()?.join(file_name);
+                let before = this.moves.insert(id, None);
+                Some((from, to, before))
             }) else {
                 return false;
             };
 
             let moved = cx
-                .background_spawn(async move { fs.rename(&from, &to).await })
+                .background_spawn({
+                    let to = to.clone();
+                    async move { fs.rename(&from, &to).await }
+                })
                 .await;
 
-            if moved.is_err() {
-                let _ = this.update(cx, |_, cx| cx.emit(RenameFailed(id)));
-                return false;
+            this.update(cx, |this, cx| {
+                if moved.is_err() {
+                    match before {
+                        Some(prev) => this.moves.insert(id, prev),
+                        None => this.moves.remove(&id),
+                    };
+                    cx.emit(RenameFailed(id));
+                    return false;
+                }
+                this.moves.insert(id, Some(to.clone()));
+                let _ = rescanned.send((to, this.rescan(cx)));
+                true
+            })
+            .unwrap_or(false)
+        });
+
+        let (done, wait) = oneshot::channel();
+        cx.spawn(async move |this, cx| {
+            let moved = queued.await;
+            let mut ok = moved;
+            if moved && let Ok((to, applied)) = rescan_rx.await {
+                let landed = applied.await.is_ok();
+                let _ = this.update(cx, |this, cx| {
+                    if landed && this.moves.get(&id) == Some(&Some(to)) {
+                        this.moves.remove(&id);
+                    }
+                    cx.notify();
+                });
+            } else if moved {
+                ok = false;
             }
-            // Awaited inside the chain link: a write released before this
-            // lands would resolve the old path and recreate the note there.
-            let Ok(applied) = this.update(cx, Self::rescan) else {
-                return false;
-            };
-            let _ = applied.await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-            true
+            let _ = done.send(ok);
         })
+        .detach();
+        cx.foreground_executor()
+            .spawn(async move { wait.await == Ok(true) })
     }
 }
 

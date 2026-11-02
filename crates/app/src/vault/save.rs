@@ -128,7 +128,7 @@ impl NoteStore {
 
     fn write_path(&self, id: EntryId, location: &Location, cx: &App) -> Option<PathBuf> {
         match location {
-            Location::Vault => self.vault.as_ref()?.read(cx).absolute(id),
+            Location::Vault => self.path_of(id, cx),
             Location::Detached(path) | Location::Gone(path) => Some(path.clone()),
         }
     }

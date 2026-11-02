@@ -62,6 +62,8 @@ async fn a_rename_queued_behind_another_keeps_the_chain(cx: &mut TestAppContext)
     let fs = vault(&["b.md"]);
     let notes = scan_notes(cx, fs.clone());
     let b = entry_id(&notes, cx, "b");
+    // Parks the second link: the first ends before its rescan, which `first` waits for.
+    let gate = fs.block_after_rename("/vault/b2.md");
 
     let first = notes.update(cx, |notes, cx| notes.rename(b, "b2", cx));
     let second = notes.update(cx, |notes, cx| notes.rename(b, "b3", cx));
@@ -73,6 +75,7 @@ async fn a_rename_queued_behind_another_keeps_the_chain(cx: &mut TestAppContext)
             "the second rename still waits on it"
         );
     });
+    gate.release();
     assert!(second.await);
     cx.run_until_parked();
 
