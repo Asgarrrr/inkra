@@ -398,6 +398,30 @@ Median 1.149 us. gpui's `shape_line` cache serves the six markers. Dropped.
 `empty, 20 recent` takes 315 us on one core, and 50k SipHash lookups take
 0.269 ms. The audit says FxHash. See the deviation below.
 
+### As built (S6)
+
+`NoteQuery::recent` is `HashMap<EntryId, usize, foldhash::fast::RandomState>`.
+Nothing iterates the map: ranking only calls `get`, so the per-process seed
+cannot reorder results. `foldhash` is already a dependency of `inkra-index`
+(`note_words.rs`, `segment.rs`), so FxHash would add a crate for no gain.
+
+`cargo bench -p inkra-index --bench find -- "one core/empty"`, full run, same
+session, `--baseline` against the SipHash build:
+
+| bench | SipHash | foldhash | change |
+|---|---|---|---|
+| zipf, one core, empty, 20 recent | 208.6 us | 55.7 us | -73.2% |
+| 40 words, one core, empty, 20 recent | 311.0 us | 70.3 us | -77.2% |
+
+A second run gave -73.2% and -78.7%. Re-running the SipHash build against its
+own baseline gave +1.2% and +5.7%, so the noise floor is about 6%. Both
+figures are far above it. The `--quick` runs read 381 us and 387 us for the
+SipHash build, so quick mode is too noisy for this item.
+
+The saving (about 150 us, not the 0.269 ms estimate) comes from the lookup
+only: a 20-entry map hashed with SipHash 1-3 once per candidate note.
+FxHash was not measured, since the dependency is not present.
+
 ## Deviations from Zed
 
 - Item 1: Zed shapes the visible rows every frame, which keeps gpui's cache

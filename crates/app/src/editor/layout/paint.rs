@@ -57,6 +57,7 @@ impl DocumentLayout {
             }
         }
     }
+
     /// The lines reaching `top..bottom` in layout space, one more each side: a glyph can overhang its row.
     fn visible_lines(&self, top: Pixels, bottom: Pixels) -> Range<usize> {
         let start = self

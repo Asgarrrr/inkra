@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use foldhash::fast::RandomState;
 use inkra_vault::EntryId;
 
 use super::{TERM_MAX_CHARS, cap, fold, word_spans};
@@ -14,7 +15,7 @@ pub struct NoteQuery {
     /// Each typed word, repeats kept, as its index in `terms`.
     typed: Vec<usize>,
     showing: Option<EntryId>,
-    recent: HashMap<EntryId, usize>,
+    recent: HashMap<EntryId, usize, RandomState>,
 }
 
 impl NoteQuery {
