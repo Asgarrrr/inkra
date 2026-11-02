@@ -31,29 +31,34 @@ actions!(
 #[action(namespace = tabs, no_json)]
 pub(crate) struct ActivateTab(pub(crate) usize);
 
-/// What a tab shows; `note: None` is an empty tab.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct Place {
-    pub(super) note: Option<EntryId>,
-    pub(super) view: Option<ViewState>,
+/// A tab on a note; `view: None` opens it at the top.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct OnNote<V> {
+    pub(super) note: EntryId,
+    pub(super) view: Option<V>,
 }
+
+/// What a tab shows; `None` is an empty tab.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct Place(pub(super) Option<OnNote<ViewState>>);
 
 impl inkra_tabs::Place for Place {
     type Note = EntryId;
 
     fn note(&self) -> Option<EntryId> {
-        self.note
+        self.0.as_ref().map(|on| on.note)
     }
 }
 
 /// The place being left; `Tabs` calls this only when the active tab really is left.
 pub(super) fn capture(shown: &Shown, cx: &mut App) -> Place {
-    Place {
-        note: shown.note(),
-        view: shown
-            .bound()
-            .map(|bound| bound.editor.update(cx, |editor, cx| editor.capture(cx))),
-    }
+    let Some(note) = shown.note() else {
+        return Place::default();
+    };
+    let view = shown
+        .bound()
+        .map(|bound| bound.editor.update(cx, |editor, cx| editor.capture(cx)));
+    Place(Some(OnNote { note, view }))
 }
 
 impl AppShell {
@@ -239,10 +244,10 @@ impl AppShell {
         if let Shown::Trashing(note) = self.shown
             && note == id
         {
-            let place = Place {
-                note: Some(id),
+            let place = Place(Some(OnNote {
+                note: id,
                 view: None,
-            };
+            }));
             self.display(place, window, cx);
             self.focus_note_from_root(window, cx);
             cx.notify();
@@ -280,17 +285,22 @@ impl AppShell {
     /// One update sets the editor, `showing` and `current`, so none is seen without the others.
     fn display(&mut self, place: Place, window: &mut Window, cx: &mut Context<Self>) {
         let since = self.tree_cursor(cx);
-        let loaded = place
-            .note
-            .and_then(|id| Some((id, self.notes.read(cx).buffer_for(id)?.clone())));
-        if let Some((id, buffer)) = loaded {
-            self.bind(id, buffer, place.view, since, cx);
-        } else {
-            // A place's note has no buffer only while its trash is pending; its tabs keep it until `NoteClosed`.
-            let shown = place.note.map_or(Shown::Empty, Shown::Trashing);
-            self.unfocus_editor(window, cx);
-            self.set_shown(shown, since, cx);
-            self.notes.update(cx, NoteStore::clear_current);
+        let buffer = place
+            .0
+            .as_ref()
+            .and_then(|on| self.notes.read(cx).buffer_for(on.note))
+            .cloned();
+        match (place.0, buffer) {
+            (Some(on), Some(buffer)) => {
+                self.bind(on.note, buffer, on.view, since, cx);
+            }
+            (on, _) => {
+                // A place's note has no buffer only while its trash is pending; its tabs keep it until `NoteClosed`.
+                let shown = on.map_or(Shown::Empty, |on| Shown::Trashing(on.note));
+                self.unfocus_editor(window, cx);
+                self.set_shown(shown, since, cx);
+                self.notes.update(cx, NoteStore::clear_current);
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 # Type safety and hygiene: batches 3 and 4 of the 2026-11-02 audit
 
-Status: **S1 and S2 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2 and S3 built 2026-11-02.** Later slices append their sections here.
 
 ## Method
 
@@ -102,6 +102,43 @@ The audit found two holes in `Buffer`:
   `version: u32` and the index revision are different things and stay.
 - `version_moves_whenever_a_timed_edit_changes_the_text` keeps every earlier
   version and asserts that the new one is not among them, instead of `>`.
+
+## T4 DETACHED and T6 OnNote
+
+The audit found two sentinels:
+
+- `EntryId::DETACHED` had three meanings: the id of a note opened by path, a
+  found row that `mint` has not given an id yet, and "no source" for a link
+  resolved from a detached note.
+- `Place` and `Parked` held a `note: Option<EntryId>` beside a
+  `view: Option<..>`, so a view with no note was representable.
+
+### As built (S3)
+
+- `Vault::applied` builds private `Row`s (`vault.rs`) with `id: Option<EntryId>`.
+  A kept entry has `Some(id)`. A found file has `None` until `mint` gives it an
+  id. `sorted` takes and returns `Vec<Row>`.
+- `mint` (`vault/identity.rs`) consumes the rows and returns
+  `(Vec<(Entry, FileIdentity)>, u32)`: the entries and the next id to mint.
+  It keeps the old order and the old decisions: a `None` row is dropped when
+  its identity is already claimed (hard links), else it takes the known id,
+  else the replaced one, else a new one. `replaced` filters `row.id.is_none()`.
+- `Key::of(entry)` is gone. `Key::new(path, kind)` builds every key, so
+  `reclaim.rs` and the oracle tests build no `Entry` to sort.
+- `NoteIndex::resolve` and `resolve_link` take `source: Option<EntryId>`, and
+  so do the table's `resolve`, `query` and `join`. A source outside the table,
+  `None` or an id the table does not hold, resolves names and absolute paths
+  but no relative link. A test pins that `None` and `Some(EntryId::DETACHED)`
+  resolve the same. `backlinks` passes `Some(source)`.
+- `AppShell::follow` passes `self.showing()`, not `unwrap_or(DETACHED)`.
+- `DETACHED` now means only the id of a note opened by path. The guards in
+  `reidentify`, `reclaim` and `Scans`'s claims stay for that meaning.
+- `OnNote<V> { note, view: Option<V> }` (`shell/tabs.rs`) is a tab on a note.
+  `Place(Option<OnNote<ViewState>>)` and `Parked(Option<OnNote<ParkedView>>)`
+  wrap it, so a view with no note does not compile. `Place::default()` is the
+  empty tab. The tabs spec's "`Parked` holds `(EntryId, Option<ParkedView>)`"
+  now holds by type.
+- The session file format and the restore are unchanged.
 
 ## Deviations from Zed
 

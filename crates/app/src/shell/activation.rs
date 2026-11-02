@@ -151,10 +151,11 @@ impl AppShell {
     /// Resolved against the note showing, before any tab changes; a detached note resolves only URLs.
     pub(super) fn follow(&mut self, link: &Link, open: Open, cx: &mut Context<Self>) {
         let resolution = match &self.panes {
-            Some(panes) => {
-                let source = self.showing().unwrap_or(EntryId::DETACHED);
-                panes.links.read(cx).index().resolve_link(source, link)
-            }
+            Some(panes) => panes
+                .links
+                .read(cx)
+                .index()
+                .resolve_link(self.showing(), link),
             None => match Target::parse(link) {
                 Target::External(url) => Resolution::External(url),
                 _ => Resolution::Unresolved,

@@ -254,7 +254,7 @@ fn resolve_link_parses_then_resolves() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let found = links("[[Plan]] <https://x.org>");
-    let src = id(&vault, "src.md");
+    let src = Some(id(&vault, "src.md"));
 
     assert_eq!(
         index.resolve_link(src, &found[0]),

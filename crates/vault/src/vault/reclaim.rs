@@ -10,15 +10,12 @@ impl Vault {
     /// The note at `path`; `None` for a folder, whatever its name.
     #[must_use]
     pub(crate) fn id_at(&self, path: &RelPath) -> Option<EntryId> {
-        let query = Key {
-            components: path.as_path().components().collect(),
-            kind: Kind::Note,
-        };
+        let query = Key::new(path, Kind::Note);
         // `compare` reads a kind only where components diverge, so a row at exactly `path` is `Equal`.
         let at = self
             .state
             .entries
-            .binary_search_by(|entry| compare(&Key::of(entry), &query))
+            .binary_search_by(|entry| compare(&Key::new(&entry.path, entry.kind), &query))
             .ok()?;
         let entry = &self.state.entries[at];
         (entry.kind == Kind::Note).then_some(entry.id)

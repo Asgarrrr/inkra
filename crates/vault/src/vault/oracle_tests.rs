@@ -48,7 +48,12 @@ impl Reference {
     /// the watcher spec's F5; the rest is today's `apply`, verbatim.
     fn apply(&mut self, mut children: Vec<DirEntry>) {
         let root = Path::new(ROOT);
-        children.sort_by(|a, b| compare(&Key::of(&probe(root, a)), &Key::of(&probe(root, b))));
+        children.sort_by(|a, b| {
+            compare(
+                &Key::new(&probe(root, a), a.kind),
+                &Key::new(&probe(root, b), b.kind),
+            )
+        });
         let claimed: HashSet<EntryId> = children
             .iter()
             .filter_map(|child| self.by_identity.get(&child.identity).copied())
@@ -81,25 +86,19 @@ impl Reference {
                 mtime: child.mtime,
             });
         }
-        found.sort_by(|a, b| compare(&Key::of(a), &Key::of(b)));
+        found.sort_by(|a, b| compare(&Key::new(&a.path, a.kind), &Key::new(&b.path, b.kind)));
         self.by_identity = next_by_identity;
         self.entries = found;
     }
 }
 
-fn probe(root: &Path, child: &DirEntry) -> Entry {
-    let path = child
+fn probe(root: &Path, child: &DirEntry) -> RelPath {
+    child
         .path
         .strip_prefix(root)
         .ok()
         .and_then(RelPath::new)
-        .unwrap_or_else(RelPath::root);
-    Entry {
-        id: EntryId::DETACHED,
-        path,
-        kind: child.kind,
-        mtime: child.mtime,
-    }
+        .unwrap_or_else(RelPath::root)
 }
 
 pub(super) type Rows = Vec<(EntryId, PathBuf, Kind, Mtime)>;

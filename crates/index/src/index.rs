@@ -196,12 +196,12 @@ impl NoteIndex {
     }
 
     #[must_use]
-    pub fn resolve(&self, source: EntryId, target: &Target) -> Resolution {
+    pub fn resolve(&self, source: Option<EntryId>, target: &Target) -> Resolution {
         self.notes.resolve(source, target)
     }
 
     #[must_use]
-    pub fn resolve_link(&self, source: EntryId, link: &Link) -> Resolution {
+    pub fn resolve_link(&self, source: Option<EntryId>, link: &Link) -> Resolution {
         self.resolve(source, &Target::parse(link))
     }
 
@@ -225,9 +225,9 @@ impl NoteIndex {
             let resolution = match &link.target {
                 Target::Note { path, style, .. } if *style != Style::Relative => by_text
                     .entry((path, *style))
-                    .or_insert_with(|| self.resolve(source, &link.target))
+                    .or_insert_with(|| self.resolve(Some(source), &link.target))
                     .clone(),
-                target => match self.notes.query(source, target) {
+                target => match self.notes.query(Some(source), target) {
                     Ok(query) => by_query
                         .entry(query)
                         .or_insert_with_key(|query| self.notes.search(query))
