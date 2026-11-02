@@ -147,9 +147,8 @@ impl DocumentLayout {
     /// (`NameField` shapes only in `prepaint`), so a stale caret beats an OOB index.
     fn line_for_offset(&self, offset: ByteOffset) -> usize {
         self.lines
-            .iter()
-            .position(|line| offset <= line.range.end)
-            .unwrap_or(self.lines.len() - 1)
+            .partition_point(|line| line.range.end < offset)
+            .min(self.lines.len() - 1)
     }
 
     pub(crate) fn row_for_offset(&self, offset: ByteOffset) -> usize {
