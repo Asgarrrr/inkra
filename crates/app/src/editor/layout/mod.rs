@@ -7,6 +7,8 @@ mod rows;
 mod runs;
 mod shape;
 
+#[cfg(test)]
+pub(crate) use paint::painted;
 pub(crate) use shape::shape_document;
 #[cfg(test)]
 pub(crate) use shape::{line_shape_count, shape_count};
@@ -69,7 +71,8 @@ pub(crate) struct DocumentLayout {
     lines: Vec<LineLayout>,
     row_count: usize,
     height: Pixels,
-    /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3).
+    /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3),
+    /// in line order, so sorted by top.
     bars: Vec<Bounds<Pixels>>,
     body_row_height: Pixels,
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.

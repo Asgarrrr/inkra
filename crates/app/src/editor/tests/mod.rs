@@ -20,6 +20,7 @@ mod hanging;
 mod headings;
 mod margin;
 mod markdown;
+mod paint;
 mod protocol;
 mod restore;
 mod scroll;
