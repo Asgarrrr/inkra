@@ -36,20 +36,20 @@ impl SessionWriter {
         }
     }
 
-    /// A tab whose note has no entry or no UTF-8 path saves empty; `None` only on a root that is not UTF-8.
+    /// A tab whose note has no path (`path_of`) or no UTF-8 path saves empty; `None` only on a root that is not UTF-8.
     pub(crate) fn write(
         &mut self,
         vault: &Vault,
         tabs: impl Iterator<Item = (Option<EntryId>, Option<ViewState>)>,
+        path_of: impl Fn(EntryId) -> Option<PathBuf>,
         active: usize,
         cx: &App,
     ) -> Option<Task<()>> {
         let tabs = tabs
             .map(|(note, view)| {
                 let note = note
-                    .and_then(|id| vault.entry(id))
-                    .and_then(|entry| entry.path.as_path().to_str())
-                    .map(str::to_owned);
+                    .and_then(&path_of)
+                    .and_then(|path| path.to_str().map(str::to_owned));
                 let view = view
                     .as_ref()
                     .filter(|_| note.is_some())
@@ -59,7 +59,7 @@ impl SessionWriter {
             .collect();
         let text = Session::new(vault.root().to_path_buf(), active, tabs)
             .encode()
-            .inspect_err(|error| eprintln!("session not saved: {error}"))
+            .inspect_err(|error| log::warn!("session not saved: {error}"))
             .ok()?;
         self.next_seq += 1;
         Some(cx.background_spawn(replace_in_order(
@@ -78,12 +78,12 @@ pub(crate) async fn read(fs: Arc<dyn Fs>, file: PathBuf, root: PathBuf) -> Optio
         Ok(loaded) => loaded,
         Err(VaultError::Io { source, .. }) if source.kind() == ErrorKind::NotFound => return None,
         Err(error) => {
-            eprintln!("session not restored: {error}");
+            log::warn!("session not restored: {error}");
             return None;
         }
     };
     Session::decode(&loaded.text, &root)
-        .inspect_err(|rejected| eprintln!("session not restored: {}: {rejected}", file.display()))
+        .inspect_err(|rejected| log::warn!("session not restored: {}: {rejected}", file.display()))
         .ok()
 }
 
@@ -102,7 +102,7 @@ async fn replace_in_order(
     match fs.replace(&file, &text).await {
         // A failed write leaves the mark, as `write_through`'s.
         Ok(()) => *written = seq,
-        Err(error) => eprintln!("session not saved: {error}"),
+        Err(error) => log::warn!("session not saved: {error}"),
     }
 }
 

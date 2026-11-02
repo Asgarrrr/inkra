@@ -149,7 +149,7 @@ impl IndexDelegate for QuickOpenDelegate {
                 self.logged += 1;
             }
             if cfg!(not(debug_assertions)) {
-                eprintln!(
+                log::warn!(
                     "quick open: {} matches, {:?} from the edit",
                     self.list.rows.len(),
                     begun.elapsed()

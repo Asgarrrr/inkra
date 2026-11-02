@@ -97,7 +97,7 @@ pub(crate) fn shape_document(
             let wrapped = window
                 .text_system()
                 .shape_text(shown.clone(), font_size, &runs, wrap, None)
-                .map_err(|err| eprintln!("failed to shape line at {start}: {err}"))
+                .map_err(|err| log::warn!("failed to shape line at {start}: {err}"))
                 .ok()
                 .and_then(|mut shaped| shaped.pop())
                 .unwrap_or_default();

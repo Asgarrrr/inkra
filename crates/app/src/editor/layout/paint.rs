@@ -21,7 +21,7 @@ impl DocumentLayout {
                 window,
                 cx,
             ) {
-                eprintln!("failed to paint line {index}: {err}");
+                log::warn!("failed to paint line {index}: {err}");
             }
             if let Some((shaped, x)) = line.prefix.as_ref().and_then(Prefix::shown)
                 && let Err(err) = shaped.paint(
@@ -33,7 +33,7 @@ impl DocumentLayout {
                     cx,
                 )
             {
-                eprintln!("failed to paint the prefix of line {index}: {err}");
+                log::warn!("failed to paint the prefix of line {index}: {err}");
             }
         }
     }

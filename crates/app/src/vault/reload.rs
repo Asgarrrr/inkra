@@ -22,7 +22,11 @@ impl NoteStore {
                 let before = previous.entry(id).map(|entry| entry.mtime);
                 (live.entry(id).map(|entry| entry.mtime), before)
             },
-            |id| previous.absolute(id),
+            // A rename's `moves` entry is ahead of `previous` until its rescan lands.
+            |id| match self.moves.get(&id) {
+                Some(moved) => moved.clone(),
+                None => previous.absolute(id),
+            },
         );
         for (id, _) in swaps.iter().filter(|(_, swap)| swap.flipped) {
             cx.emit(GoneChanged(*id));
@@ -67,7 +71,7 @@ impl NoteStore {
                 let loaded = fs
                     .load(&path)
                     .await
-                    .inspect_err(|error| eprintln!("vault reload: {error}"))
+                    .inspect_err(|error| log::warn!("vault reload: {error}"))
                     .ok()?;
                 (loaded.stamp != expected).then_some(loaded)
             })

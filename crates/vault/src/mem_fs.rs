@@ -50,6 +50,7 @@ struct State {
     /// Listings started per path, found or not.
     read_dirs: BTreeMap<PathBuf, usize>,
     watches: Vec<watch::Watching>,
+    unwatchable: BTreeSet<PathBuf>,
     failing_saves: BTreeMap<PathBuf, (u32, ErrorKind)>,
     failing_after_preserve: BTreeMap<PathBuf, (u32, ErrorKind)>,
 }
@@ -399,6 +400,7 @@ impl Fs for MemFs {
     }
 
     fn watch(&self, root: &Path) -> Result<Watch> {
+        self.state().refused_watch(root)?;
         Ok(self.start_watch(root))
     }
 }

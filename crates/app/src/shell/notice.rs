@@ -118,7 +118,7 @@ impl AppShell {
 }
 
 /// The OS's words, without the path: the notice names the note by its title.
-fn reason(error: &VaultError) -> String {
+pub(super) fn reason(error: &VaultError) -> String {
     match error {
         VaultError::Io { source, .. } => source.to_string(),
         VaultError::NotUtf8 { .. } => "not valid UTF-8".into(),

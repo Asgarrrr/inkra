@@ -241,6 +241,24 @@ another view.
 `MemFs::make_unreadable` now covers a file's load as well as a folder's
 listing, for the `open-failed` scene and its test.
 
+### Q10. The refused watch and the refused create
+
+- **The refused watch.** `NoteStore::watch` returns its error. The store logs
+  it and keeps it in `unwatched`. `AppShell::new` takes it once and opens with
+  the notice "Inkra can't follow changes made outside the app: <reason>". The
+  store is built before the shell, so an event would be missed.
+- **A create keeps its field open until it resolves.** `EditState.creating`
+  ignores a second Enter, so a second create cannot hit `AlreadyExists` on the
+  first. `NoteStore::create` returns `Fs::create`'s error. `AlreadyExists`
+  shows the Duplicate message; any other error shows `Rejection::Refused`
+  ("The file could not be created.") and a warning log. Escape during a create
+  closes the field; the create still lands and is selected.
+- **Deviation from closing at once.** The field now stays open until the
+  rescan lands, which costs one rescan of latency before the row shows.
+- **Logging.** Every `eprintln!` outside tests became `log::warn!` (the launch
+  failure, `log::error!`, as Q6 has it). Two sites stay on stderr by design:
+  `timeline.rs` and `shot/mod.rs`.
+
 ## Accepted limits
 
 - **Dock quit, app-menu quit, logout and restart** run only `flush_all` and
@@ -311,3 +329,16 @@ listing, for the `open-failed` scene and its test.
 - `shell/tests/notices.rs`: the six notices, dismiss and clear. The conflict
   test types a second edit, so a notice cleared by any `NoteSaved` fails it.
 - `shot/scenes/failures.rs`: `open_failed`; `save-failed` shows the notice too.
+
+## As built (S6)
+
+- `vault/watch.rs`, `vault/store.rs`, `shell.rs`: the refused watch (Q10).
+  `reason` in `shell/notice.rs` is `pub(super)` for the opening notice.
+- `inkra-vault`'s `MemFs`: `make_unwatchable`, with its test in
+  `mem_fs/fault_tests.rs`.
+- `vault/tree_ops.rs`, `sidebar/edit.rs`: `create` returns the result;
+  `Sidebar::created` lands it. The tests use the existing
+  `rejection_message`, not a new accessor.
+- `shot/stage.rs`, `shot/scenes/failures.rs`: `unwatched` and `create-refused`.
+- Sites outside the contract's list that call `create` and now unwrap its
+  result: `vault/tests/scans.rs`.

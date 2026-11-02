@@ -282,11 +282,6 @@ fn guarded_rename(from: &Path, to: &Path) -> Result<()> {
     fs::rename(from, to).map_err(|source| io_error(to, source))
 }
 
-/// Copies the bytes currently at `path` to a sibling conflict file.
-///
-/// Read and write rather than `fs::copy`, for the `sync_all`: these bytes
-/// must survive a crash during the replace that follows. Copied raw, never
-/// through `normalize_line_endings` — a conflict file is an exact record.
 /// `save`'s write after the conflict check, and the stamp and identity it left.
 fn overwrite(
     path: &Path,
@@ -309,6 +304,11 @@ fn overwrite(
     Ok((stamp_of(path, &metadata)?, identity_of(&metadata)))
 }
 
+/// Copies the bytes currently at `path` to a sibling conflict file.
+///
+/// Read and write rather than `fs::copy`, for the `sync_all`: these bytes
+/// must survive a crash during the replace that follows. Copied raw, never
+/// through `normalize_line_endings` — a conflict file is an exact record.
 fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
     let destination = conflict_path(path, mtime_of(path, metadata)?, |candidate| {
         candidate.exists()

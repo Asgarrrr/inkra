@@ -1,12 +1,14 @@
 //! The one line reporting a failure: failed saves, renames and opens, and a preserved conflict (quit-and-failures spec, Q9).
 
 use std::io::ErrorKind;
+use std::path::Path;
+use std::time::Duration;
 
 use gpui::{Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 
 use super::session_writes::wait;
-use super::{ab_focused, open};
+use super::{ab_focused, open, shell_focused};
 use crate::shell::AppShell;
 use crate::test_support::conflicts;
 use crate::vault::AUTOSAVE_DELAY;
@@ -123,6 +125,38 @@ fn a_preserved_conflict_shows_a_notice_naming_the_copy(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn a_kept_conflict_notice_survives_the_retry_that_follows_the_failure(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = ab_focused(cx);
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let (preserved, _guard) = conflicts(&notes, cx);
+    open(&window, &mut visual, a);
+    fs.insert_file("/vault/a.md", "theirs");
+    fs.fail_next_saves_after_preserve("/vault/a.md", 1, ErrorKind::Interrupted);
+
+    visual.simulate_input("x");
+    wait(&mut visual, AUTOSAVE_DELAY);
+    wait(&mut visual, Duration::from_secs(1));
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("alphax")
+    );
+    let copy = preserved.borrow()[0]
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        notice(&window, &mut visual),
+        Some(format!(
+            "“a” changed on disk while you edited it. The disk version is kept as “{copy}”."
+        ))
+    );
+}
+
+#[gpui::test]
 fn a_note_that_cannot_be_read_shows_a_notice(cx: &mut TestAppContext) {
     let (fs, window, mut visual, a, _b) = ab_focused(cx);
     fs.make_unreadable("/vault/a.md");
@@ -132,5 +166,19 @@ fn a_note_that_cannot_be_read_shows_a_notice(cx: &mut TestAppContext) {
     assert_eq!(
         notice(&window, &mut visual).as_deref(),
         Some("Couldn't open “a”: permission denied")
+    );
+}
+
+#[gpui::test]
+fn a_refused_watch_shows_a_notice_at_start(cx: &mut TestAppContext) {
+    let fs = std::sync::Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.make_unwatchable("/vault");
+
+    let (window, _notes, mut visual) = shell_focused(cx, &fs);
+
+    assert_eq!(
+        notice(&window, &mut visual).as_deref(),
+        Some("Inkra can't follow changes made outside the app: permission denied")
     );
 }

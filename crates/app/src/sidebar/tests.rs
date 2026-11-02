@@ -181,7 +181,7 @@ fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert!(
-        created.now_or_never().flatten().is_some(),
+        matches!(created.now_or_never(), Some(Ok(Some(_)))),
         "the scan swapped in"
     );
     assert_eq!(labels(&sidebar, cx), ["0", "a", "b"]);

@@ -170,3 +170,27 @@ async fn the_move_is_dropped_once_the_rename_rescan_lands(cx: &mut TestAppContex
         "a dropped rename task must not skip the cleanup"
     );
 }
+
+#[gpui::test]
+async fn a_note_removed_after_its_rename_is_gone_at_the_new_name(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (store, a, _b) = two_notes(cx, &fs);
+    let buffer = opened(&store, cx, a).await;
+    let gate = fs.block_read_dir("/vault");
+
+    let renamed = store.update(cx, |store, cx| store.rename(a, "z", cx));
+    cx.run_until_parked();
+    fs.remove(Path::new("/vault/z.md"));
+    gate.release();
+    let _ = renamed.await;
+    cx.run_until_parked();
+    edit(&buffer, cx, "X");
+    cx.executor().advance_clock(AUTOSAVE_DELAY);
+    cx.run_until_parked();
+
+    assert_eq!(fs.read_to_string(Path::new("/vault/a.md")), None);
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/z.md")).as_deref(),
+        Some("Xalpha")
+    );
+}

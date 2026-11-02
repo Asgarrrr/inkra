@@ -26,7 +26,7 @@ mod title_bar;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
-use notice::Notice;
+use notice::{Notice, reason};
 use panes::VaultPanes;
 use parked::Parked;
 use session::{Restore, SessionFile};
@@ -152,6 +152,7 @@ impl AppShell {
         Self::watch_failures(&notes, cx);
         Self::quit_on_close(window, cx);
         let first = notes.read(cx).current();
+        let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
         let (session, restore) = Self::open_session(session, &notes, cx);
         Self {
             // `root` adopts the note it launches with, so its editor comes with `current`.
@@ -171,7 +172,14 @@ impl AppShell {
             restore,
             title_drag_armed: false,
             quitting: false,
-            notice: None,
+            notice: unwatched.map(|error| Notice {
+                text: format!(
+                    "Inkra can't follow changes made outside the app: {}",
+                    reason(&error)
+                )
+                .into(),
+                cleared_by_save: None,
+            }),
         }
     }
 

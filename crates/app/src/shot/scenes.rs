@@ -211,6 +211,16 @@ const CATALOGUE: &[Scene] = &[
         open: failures::open_failed,
     },
     Scene {
+        name: "unwatched",
+        shows: "a vault the platform refuses to watch: the notice line over the editor from the first frame",
+        open: failures::unwatched,
+    },
+    Scene {
+        name: "create-refused",
+        shows: "the new-note field kept open with `plan`, the refusal message under it",
+        open: failures::create_refused,
+    },
+    Scene {
         name: "backlinks",
         shows: "the panel right of the editor under its `Backlinks` header, below the title row, level with the `vault` header and ruled like it: two sources, one linking twice, each link in the link colour",
         open: backlinks,

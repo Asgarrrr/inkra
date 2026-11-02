@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use gpui::{Context, Task};
-use inkra_vault::{Fs, Pending};
+use inkra_vault::{Fs, Pending, VaultError};
 
 use super::NoteStore;
 
@@ -17,16 +17,14 @@ const WATCH_LATENCY: Duration = Duration::from_millis(100);
 const WATCH_LATENCY: Duration = Duration::ZERO;
 
 impl NoteStore {
-    /// Held by the store: dropping the task drops the watch. `None` if the platform refuses it.
-    pub(super) fn watch(fs: &dyn Fs, root: &Path, cx: &mut Context<Self>) -> Option<Task<()>> {
-        let mut watch = match fs.watch(root) {
-            Ok(watch) => watch,
-            Err(error) => {
-                eprintln!("vault watch: {error}");
-                return None;
-            }
-        };
-        Some(cx.spawn(async move |this, cx| {
+    /// Held by the store: dropping the task drops the watch. An error if the platform refuses it.
+    pub(super) fn watch(
+        fs: &dyn Fs,
+        root: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<Task<()>, VaultError> {
+        let mut watch = fs.watch(root)?;
+        Ok(cx.spawn(async move |this, cx| {
             while let Some(first) = watch.events.next().await {
                 cx.background_executor().timer(WATCH_LATENCY).await;
                 let mut batch = Pending::default();

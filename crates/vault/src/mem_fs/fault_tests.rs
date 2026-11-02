@@ -97,3 +97,19 @@ fn make_unreadable_refuses_a_load_of_that_file() {
     );
     block_on(fs.load(Path::new("/vault/b.md"))).expect("b still loads");
 }
+
+#[test]
+fn make_unwatchable_refuses_the_watch() {
+    let fs = MemFs::new();
+    fs.make_unwatchable("/vault");
+
+    let error = fs.watch(Path::new("/vault")).err().expect("refused");
+    assert!(
+        matches!(&error, VaultError::Io { source, .. } if source.kind() == ErrorKind::PermissionDenied),
+        "{error}"
+    );
+    assert!(
+        fs.watch(Path::new("/other")).is_ok(),
+        "only the listed root"
+    );
+}

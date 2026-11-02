@@ -2,7 +2,9 @@ use gpui::{
     App, AppContext as _, Context, Entity, Focusable, PromptLevel, ScrollStrategy, Subscription,
     Window,
 };
-use inkra_vault::{EntryId, Kind, NameProblem};
+use std::io::ErrorKind;
+
+use inkra_vault::{EntryId, Kind, NameProblem, VaultError};
 
 use crate::field::{Cancelled, Confirmed, NameField};
 
@@ -15,6 +17,8 @@ pub(super) struct EditState {
     pub(super) field: Entity<NameField>,
     /// Must not disappear silently on a refusal — Zed's own confirm does that.
     pub(super) rejected: Option<Rejection>,
+    /// A create in flight keeps the field open and ignores a second Enter.
+    creating: bool,
     _subscriptions: [Subscription; 2],
 }
 
@@ -22,6 +26,7 @@ pub(super) struct EditState {
 pub(super) enum Rejection {
     Name(NameProblem),
     Duplicate,
+    Refused,
 }
 
 impl Rejection {
@@ -34,6 +39,7 @@ impl Rejection {
             Self::Name(NameProblem::LinkSyntax) => "A name cannot contain #, |, ^, [ or ].",
             Self::Name(NameProblem::TooLong) => "That name is too long.",
             Self::Duplicate => "That name is already taken.",
+            Self::Refused => "The file could not be created.",
         }
     }
 }
@@ -122,6 +128,7 @@ impl Sidebar {
             depth,
             field,
             rejected: None,
+            creating: false,
             _subscriptions: subscriptions,
         }
     }
@@ -200,6 +207,9 @@ impl Sidebar {
         let Some(edit) = self.rows.edit() else {
             return;
         };
+        if edit.creating {
+            return;
+        }
         let (target, parent, kind) = (self.rows.target(), edit.parent, edit.kind);
         // Before `check_name`: a note made outside the app may hold a name it now refuses.
         if self.is_current_name(target, name, cx) {
@@ -224,24 +234,54 @@ impl Sidebar {
             return;
         }
 
-        self.rows.close();
         let name = name.to_owned();
         if let Some(id) = target {
+            self.rows.close();
             self.notes
                 .update(cx, |notes, cx| notes.rename(id, &name, cx))
                 .detach();
         } else {
+            if let Some(edit) = self.rows.edit_mut() {
+                edit.creating = true;
+                edit.rejected = None;
+            }
             let created = self
                 .notes
                 .update(cx, |notes, cx| notes.create(parent, kind, &name, cx));
             cx.spawn(async move |sidebar, cx| {
-                let Some(id) = created.await else { return };
+                let created = created.await;
                 let _ = sidebar.update(cx, |sidebar, cx| {
-                    sidebar.select(Some(id));
-                    cx.notify();
+                    sidebar.created(created, cx);
                 });
             })
             .detach();
+        }
+        cx.notify();
+    }
+
+    /// Escape during a create closed the field already: `creating` tells the field of this create from a later one.
+    fn created(&mut self, created: inkra_vault::Result<Option<EntryId>>, cx: &mut Context<Self>) {
+        let creating = self.rows.edit().is_some_and(|edit| edit.creating);
+        match created {
+            Ok(id) => {
+                if creating {
+                    self.rows.close();
+                }
+                if id.is_some() {
+                    self.select(id);
+                }
+            }
+            Err(error) => {
+                log::warn!("create: {error}");
+                if let Some(edit) = self.rows.edit_mut().filter(|edit| edit.creating) {
+                    edit.creating = false;
+                    edit.rejected = Some(if is_already_exists(&error) {
+                        Rejection::Duplicate
+                    } else {
+                        Rejection::Refused
+                    });
+                }
+            }
         }
         cx.notify();
     }
@@ -251,4 +291,8 @@ impl Sidebar {
             .and_then(|id| self.vault.read(cx).entry(id))
             .is_some_and(|entry| entry.path.display_name() == name.trim())
     }
+}
+
+fn is_already_exists(error: &VaultError) -> bool {
+    matches!(error, VaultError::Io { source, .. } if source.kind() == ErrorKind::AlreadyExists)
 }

@@ -65,6 +65,15 @@ impl NoteStore {
         }
     }
 
+    /// The note's path under the vault root, following a rename ahead of its rescan; the session file's name for it.
+    pub(crate) fn vault_path(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
+        let vault = self.vault.as_ref()?.read(cx);
+        match self.moves.get(&id) {
+            Some(Some(moved)) => moved.strip_prefix(vault.root()).ok().map(PathBuf::from),
+            _ => Some(vault.entry(id)?.path.as_path().to_path_buf()),
+        }
+    }
+
     /// `None`: nothing on disk is the note's. With no entry, only the file at a gone note's last path
     /// may be: a trashing note claims nothing at a swap, so the vault may never see what the note's own save wrote.
     fn trash_target(&self, id: EntryId, cx: &App) -> Option<TrashTarget> {
@@ -83,12 +92,12 @@ impl NoteStore {
         kind: Kind,
         name: &str,
         cx: &mut Context<Self>,
-    ) -> Task<Option<EntryId>> {
+    ) -> Task<inkra_vault::Result<Option<EntryId>>> {
         let Some(vault) = self.vault.clone() else {
-            return Task::ready(None);
+            return Task::ready(Ok(None));
         };
         if inkra_vault::check_name(name).is_some() {
-            return Task::ready(None);
+            return Task::ready(Ok(None));
         }
         let file_name = kind.file_name(name);
 
@@ -100,7 +109,7 @@ impl NoteStore {
                     Some(entry) if entry.kind == Kind::Dir => {
                         vault.absolute(parent).unwrap_or_default()
                     }
-                    _ => return Task::ready(None),
+                    _ => return Task::ready(Ok(None)),
                 },
             }
         };
@@ -110,18 +119,23 @@ impl NoteStore {
         cx.spawn(async move |this, cx| {
             let made = cx
                 .background_spawn(async move { fs.create(&path, kind).await })
-                .await
-                .ok()?;
+                .await?;
 
-            let applied = this.update(cx, Self::rescan).ok()?;
-            applied.await.ok()?;
+            let Ok(applied) = this.update(cx, Self::rescan) else {
+                return Ok(None);
+            };
+            if applied.await.is_err() {
+                return Ok(None);
+            }
 
-            this.update(cx, |this, cx| {
-                let id = this.vault.as_ref()?.read(cx).id_for(made);
-                cx.notify();
-                id
-            })
-            .ok()?
+            Ok(this
+                .update(cx, |this, cx| {
+                    let id = this.vault.as_ref()?.read(cx).id_for(made);
+                    cx.notify();
+                    id
+                })
+                .ok()
+                .flatten())
         })
     }
 

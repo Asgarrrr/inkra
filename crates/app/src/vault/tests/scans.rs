@@ -45,6 +45,8 @@ fn a_create_during_a_held_scan_keeps_its_id_and_every_file_keeps_one(cx: &mut Te
     let c = created
         .now_or_never()
         .expect("landed by the last run_until_parked")
+        .ok()
+        .flatten()
         .expect("the create lands");
     assert_eq!(first.now_or_never(), Some(Ok(())));
     let after = ids(&notes, cx);
@@ -79,6 +81,8 @@ fn a_create_during_the_initial_scan_keeps_its_id(cx: &mut TestAppContext) {
     let c = created
         .now_or_never()
         .expect("landed by the last run_until_parked")
+        .ok()
+        .flatten()
         .expect("the create lands");
     let after = ids(&notes, cx);
     assert!(after.contains(&("c.md".to_owned(), c)));

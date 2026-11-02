@@ -115,9 +115,13 @@ impl AppShell {
             }),
             Some(parked) => (parked.note(), parked.peek(cx)),
         });
-        session
-            .writer
-            .write(vault, tabs, self.tabs.active_index(), cx)
+        session.writer.write(
+            vault,
+            tabs,
+            |id| notes.vault_path(id, cx),
+            self.tabs.active_index(),
+            cx,
+        )
     }
 
     /// Until `Done`, the empty state says nothing: the restore may still fill it.

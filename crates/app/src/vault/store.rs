@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::Buffer;
-use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault};
+use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault, VaultError};
 
 use super::OpenFailed;
 use super::session::{Lifecycle, Location, OpenNote, Sessions};
@@ -24,6 +24,8 @@ pub(crate) struct NoteStore {
     /// Our own rename, until its rescan swaps in: `None` while `Fs::rename` runs, then the new path.
     pub(super) moves: HashMap<EntryId, Option<PathBuf>>,
     _watch: Option<Task<()>>,
+    /// Why there is no watch; the shell takes it once, for the opening notice.
+    unwatched: Option<VaultError>,
     /// Parks the next reload between its diff and its apply (watcher spec, test 11b).
     #[cfg(test)]
     pub(super) held_reload: Option<futures::channel::oneshot::Receiver<()>>,
@@ -42,7 +44,14 @@ impl NoteStore {
         let root = vault
             .as_ref()
             .map(|vault| vault.read(cx).root().to_path_buf());
-        let watch = root.and_then(|root| Self::watch(&*fs, &root, cx));
+        let (watch, unwatched) = match root.map(|root| Self::watch(&*fs, &root, cx)) {
+            Some(Ok(task)) => (Some(task), None),
+            Some(Err(error)) => {
+                log::warn!("vault watch: {error}");
+                (None, Some(error))
+            }
+            None => (None, None),
+        };
         let mut store = Self {
             fs,
             vault,
@@ -52,6 +61,7 @@ impl NoteStore {
             scans: Scans::default(),
             moves: HashMap::new(),
             _watch: watch,
+            unwatched,
             #[cfg(test)]
             held_reload: None,
             _quit: cx.on_app_quit(|store, cx| {
@@ -100,6 +110,10 @@ impl NoteStore {
 
     pub(crate) fn fs(&self) -> Arc<dyn Fs> {
         Arc::clone(&self.fs)
+    }
+
+    pub(crate) fn take_unwatched(&mut self) -> Option<VaultError> {
+        self.unwatched.take()
     }
 
     pub(crate) fn vault(&self) -> Option<&Entity<Vault>> {
