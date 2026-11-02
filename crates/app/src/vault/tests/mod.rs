@@ -13,6 +13,7 @@ use super::NoteStore;
 mod autosave;
 mod gone;
 mod lifecycle;
+mod moves;
 mod quit;
 mod reload;
 mod rescan;

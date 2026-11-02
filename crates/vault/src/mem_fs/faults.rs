@@ -50,6 +50,13 @@ impl MemFs {
         self.state().blocked_after_saves.insert(path.into(), wait);
         Gate(release)
     }
+
+    /// Parks the next rename of `from` after the move: the file is already at its new path.
+    pub fn block_after_rename(&self, from: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_after_renames.insert(from.into(), wait);
+        Gate(release)
+    }
 }
 
 /// Holds one parked `MemFs` operation. Releasing or dropping it lets that
