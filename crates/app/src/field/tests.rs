@@ -5,7 +5,7 @@ use gpui::{Entity, Focusable, Subscription, TestAppContext, VisualTestContext, p
 use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
-use super::{Cancelled, Confirmed, Edited, NameField, shape_document};
+use super::{Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
 
@@ -158,15 +158,15 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
         view.update(cx, |field, cx| {
             let marked = field.input().state().marked_range();
             let style = window.text_style();
-            let layout = shape_document(
-                field.input().buffer().read(cx),
-                &Markdown::default(),
-                &field.input().state().selection().range(),
-                marked.as_ref(),
-                &style,
-                None,
-                window,
-            );
+            let inputs = LayoutInputs {
+                buffer: field.input().buffer().read(cx),
+                markdown: &Markdown::default(),
+                selection: &field.input().state().selection().range(),
+                marked: marked.as_ref(),
+                style: &style,
+                wrap_width: None,
+            };
+            let layout = shape_document(&inputs, None, window);
 
             assert_eq!(layout.row_count(), 1);
             assert_eq!(layout.top_for_row(0), px(0.));

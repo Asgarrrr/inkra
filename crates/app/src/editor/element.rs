@@ -10,7 +10,7 @@ use gpui::{
 use inkra_markdown::Styles;
 
 use super::EditorView;
-use super::layout::{DocumentLayout, shape_document};
+use super::layout::{DocumentLayout, LayoutInputs, shape_document};
 use crate::text_input::{self, Prepainted, Quads};
 use crate::theme;
 
@@ -107,29 +107,20 @@ impl Element for TextElement {
                 {
                     return size(reported, layout.height());
                 }
-                let buffer = editor.input.buffer().read(cx);
                 let selection = editor.input.state().selection().range();
                 let marked = editor.input.state().marked_range();
-                let layout = match editor.input.last_layout().filter(|layout| {
-                    layout.is_shaped_from(
-                        buffer,
-                        editor.markdown(),
-                        &selection,
-                        marked.as_ref(),
-                        &text_style,
-                        Some(text),
-                    )
-                }) {
+                let inputs = LayoutInputs {
+                    buffer: editor.input.buffer().read(cx),
+                    markdown: editor.markdown(),
+                    selection: &selection,
+                    marked: marked.as_ref(),
+                    style: &text_style,
+                    wrap_width: Some(text),
+                };
+                let previous = editor.input.last_layout();
+                let layout = match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
                     Some(last) => Rc::clone(last),
-                    None => Rc::new(shape_document(
-                        buffer,
-                        editor.markdown(),
-                        &selection,
-                        marked.as_ref(),
-                        &text_style,
-                        Some(text),
-                        window,
-                    )),
+                    None => Rc::new(shape_document(&inputs, previous.map(Rc::as_ref), window)),
                 };
                 let height = layout.height();
                 stash.push(layout);
@@ -155,13 +146,17 @@ impl Element for TextElement {
             let editor = self.editor.read(cx);
             let marked = editor.input.state().marked_range();
             let style = window.text_style();
+            let inputs = LayoutInputs {
+                buffer: editor.input.buffer().read(cx),
+                markdown: editor.markdown(),
+                selection: &editor.input.state().selection().range(),
+                marked: marked.as_ref(),
+                style: &style,
+                wrap_width: Some(text.size.width),
+            };
             Rc::new(shape_document(
-                editor.input.buffer().read(cx),
-                editor.markdown(),
-                &editor.input.state().selection().range(),
-                marked.as_ref(),
-                &style,
-                Some(text.size.width),
+                &inputs,
+                editor.input.last_layout().map(Rc::as_ref),
                 window,
             ))
         });

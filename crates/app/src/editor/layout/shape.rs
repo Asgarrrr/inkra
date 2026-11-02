@@ -1,17 +1,19 @@
 use std::ops::Range;
+use std::rc::Rc;
 
-use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextStyle, Window, point, px};
-use inkra_markdown::{Conceal, DisplayLine, Gutter, Markdown, Span, is_active};
-use inkra_text::{Buffer, ByteOffset};
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
+use inkra_markdown::{Conceal, DisplayLine, Gutter, Heading, Span, is_active};
+use inkra_text::ByteOffset;
 
 use super::prefix::{GutterCarry, Hanging, Prefix, indent};
 use super::runs::{RunStyles, line_runs};
-use super::{DocumentLayout, LineLayout, rows::rows};
+use super::{DocumentLayout, LayoutInputs, LineLayout, rows::rows};
 use crate::theme;
 
 #[cfg(test)]
 thread_local! {
     static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Whole-document shapes so far on this thread; a keystroke's budget is one.
@@ -20,19 +22,80 @@ pub(crate) fn shape_count() -> usize {
     SHAPES.with(std::cell::Cell::get)
 }
 
+/// Lines handed to `shape_text` so far on this thread.
+#[cfg(test)]
+pub(crate) fn line_shape_count() -> usize {
+    LINES.with(std::cell::Cell::get)
+}
+
+/// One line's `shape_text` output and every argument it took; a later layout reuses it only when all match.
+pub(super) struct LineShape {
+    pub(super) wrapped: WrappedLine,
+    text: SharedString,
+    font_size: Pixels,
+    runs: Vec<TextRun>,
+    wrap: Option<Pixels>,
+}
+
+impl LineShape {
+    fn new(
+        text: SharedString,
+        font_size: Pixels,
+        runs: Vec<TextRun>,
+        wrap: Option<Pixels>,
+        start: ByteOffset,
+        window: &mut Window,
+    ) -> Self {
+        #[cfg(test)]
+        LINES.with(|lines| lines.set(lines.get() + 1));
+        let wrapped = window
+            .text_system()
+            .shape_text(text.clone(), font_size, &runs, wrap, None)
+            .map_err(|err| log::warn!("failed to shape line at {start}: {err}"))
+            .ok()
+            .and_then(|mut shaped| shaped.pop())
+            .unwrap_or_default();
+        Self {
+            wrapped,
+            text,
+            font_size,
+            runs,
+            wrap,
+        }
+    }
+
+    fn shaped_from(
+        &self,
+        text: &str,
+        font_size: Pixels,
+        runs: &[TextRun],
+        wrap: Option<Pixels>,
+    ) -> bool {
+        self.font_size == font_size
+            && self.wrap == wrap
+            && self.text.as_ref() == text
+            && self.runs == runs
+    }
+}
+
 /// Takes `style` explicitly since the editor also shapes outside any draw,
 /// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
+/// Line `i` carries `previous`'s line `i` when every `shape_text` argument matches.
 pub(crate) fn shape_document(
-    buffer: &Buffer,
-    markdown: &Markdown,
-    selection: &Range<ByteOffset>,
-    marked: Option<&Range<ByteOffset>>,
-    style: &TextStyle,
-    wrap_width: Option<Pixels>,
+    inputs: &LayoutInputs<'_>,
+    previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
     #[cfg(test)]
     SHAPES.with(|shapes| shapes.set(shapes.get() + 1));
+    let &LayoutInputs {
+        buffer,
+        markdown,
+        selection,
+        marked,
+        style,
+        wrap_width,
+    } = inputs;
     let mut styles = RunStyles::new(style);
     let body_size = style.font_size.to_pixels(window.rem_size());
     let body_height = style.line_height_in_pixels(window.rem_size());
@@ -48,18 +111,10 @@ pub(crate) fn shape_document(
     let mut carry = GutterCarry::new(body_size);
     let lines = buffer
         .lines()
-        .map(|(start, text)| {
+        .enumerate()
+        .map(|(index, (start, text))| {
             let range = start..ByteOffset(start.0 + text.len());
-            // A setext heading spans lines: it stays first until a line starts past its end.
-            while headings
-                .first()
-                .is_some_and(|heading| heading.range.end < range.start)
-            {
-                headings = &headings[1..];
-            }
-            let heading = headings
-                .first()
-                .filter(|heading| heading.range.start <= range.end);
+            let heading = line_heading(&mut headings, &range);
             // Inside a container the marker keeps its inline conceal: no margin exists there.
             let opening = heading
                 .and_then(|heading| heading.marker.clone())
@@ -91,17 +146,16 @@ pub(crate) fn shape_document(
                 prefix.as_ref().map(Prefix::range),
                 selection,
             );
-            let shown = SharedString::from(display.text(text).into_owned());
+            let shown = display.text(text);
             let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
             let wrap = wrap_width.map(|width| (width - indent(prefix.as_ref())).max(px(0.)));
-            let wrapped = window
-                .text_system()
-                .shape_text(shown.clone(), font_size, &runs, wrap, None)
-                .map_err(|err| log::warn!("failed to shape line at {start}: {err}"))
-                .ok()
-                .and_then(|mut shaped| shaped.pop())
-                .unwrap_or_default();
-            let rows = rows(&shown, &wrapped, &range, &display);
+            let shape = previous
+                .and_then(|previous| previous.carried(index, &shown, font_size, &runs, wrap))
+                .unwrap_or_else(|| {
+                    let text = SharedString::from(shown.to_string());
+                    Rc::new(LineShape::new(text, font_size, runs, wrap, start, window))
+                });
+            let rows = rows(&shown, &shape.wrapped, &range, &display);
             let first_row = row_count;
             row_count += rows.len();
             let line_top = top;
@@ -110,7 +164,7 @@ pub(crate) fn shape_document(
             top += row_height * row_total;
             bars.extend(line_bars(prefix.as_ref(), line_top, top));
             LineLayout {
-                wrapped,
+                shape,
                 range,
                 display,
                 first_row,
@@ -134,6 +188,36 @@ pub(crate) fn shape_document(
         selection: selection.clone(),
         marked: marked.cloned(),
     }
+}
+
+impl DocumentLayout {
+    /// Line `index`'s shape, when it took exactly these `shape_text` arguments.
+    fn carried(
+        &self,
+        index: usize,
+        text: &str,
+        font_size: Pixels,
+        runs: &[TextRun],
+        wrap: Option<Pixels>,
+    ) -> Option<Rc<LineShape>> {
+        let shape = &self.lines.get(index)?.shape;
+        shape
+            .shaped_from(text, font_size, runs, wrap)
+            .then(|| Rc::clone(shape))
+    }
+}
+
+/// The heading that holds the line at `range`; `rest` moves past the headings before it. A setext
+/// heading spans lines: it stays first until a line starts past its end.
+fn line_heading<'a>(rest: &mut &'a [Heading], range: &Range<ByteOffset>) -> Option<&'a Heading> {
+    while rest
+        .first()
+        .is_some_and(|heading| heading.range.end < range.start)
+    {
+        *rest = &rest[1..];
+    }
+    rest.first()
+        .filter(|heading| heading.range.start <= range.end)
 }
 
 /// One bar per quote level, from the line's top to the next line's, so a quote's bars meet.

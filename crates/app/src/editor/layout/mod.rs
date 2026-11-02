@@ -7,16 +7,18 @@ mod rows;
 mod runs;
 mod shape;
 
-#[cfg(test)]
-pub(crate) use shape::shape_count;
 pub(crate) use shape::shape_document;
+#[cfg(test)]
+pub(crate) use shape::{line_shape_count, shape_count};
 
 use std::ops::{Range, RangeInclusive};
+use std::rc::Rc;
 
-use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, WrappedLine, fill, point, px, size};
+use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset};
 use prefix::Prefix;
+use shape::LineShape;
 
 use crate::theme;
 
@@ -24,7 +26,7 @@ const NEWLINE_STUB: f32 = 0.25;
 const CARET_WIDTH: Pixels = px(2.);
 
 struct LineLayout {
-    wrapped: WrappedLine,
+    shape: Rc<LineShape>,
     range: Range<ByteOffset>,
     display: DisplayLine,
     first_row: usize,
@@ -48,6 +50,17 @@ struct Row {
     start: ByteOffset,
     caret_end: ByteOffset,
     start_x: Pixels,
+}
+
+/// What a `DocumentLayout` is shaped from: `shape_document` takes it, `is_shaped_from` compares it.
+#[derive(Clone, Copy)]
+pub(crate) struct LayoutInputs<'a> {
+    pub(crate) buffer: &'a Buffer,
+    pub(crate) markdown: &'a Markdown,
+    pub(crate) selection: &'a Range<ByteOffset>,
+    pub(crate) marked: Option<&'a Range<ByteOffset>>,
+    pub(crate) style: &'a TextStyle,
+    pub(crate) wrap_width: Option<Pixels>,
 }
 
 /// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
@@ -78,21 +91,13 @@ impl DocumentLayout {
 
     /// Whether `shape_document` would give this layout back. The selection counts only
     /// through the elements it reveals, so a caret move within the same ones reuses it.
-    pub(crate) fn is_shaped_from(
-        &self,
-        buffer: &Buffer,
-        markdown: &Markdown,
-        selection: &Range<ByteOffset>,
-        marked: Option<&Range<ByteOffset>>,
-        style: &TextStyle,
-        wrap_width: Option<Pixels>,
-    ) -> bool {
-        self.version == buffer.version()
-            && self.wrap_width == wrap_width
-            && self.marked.as_ref() == marked
-            && self.style == *style
-            && touched(&markdown.conceals, &self.selection)
-                .eq(touched(&markdown.conceals, selection))
+    pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
+        self.version == inputs.buffer.version()
+            && self.wrap_width == inputs.wrap_width
+            && self.marked.as_ref() == inputs.marked
+            && self.style == *inputs.style
+            && touched(&inputs.markdown.conceals, &self.selection)
+                .eq(touched(&inputs.markdown.conceals, inputs.selection))
     }
 
     pub(crate) fn row_count(&self) -> usize {
@@ -110,7 +115,7 @@ impl DocumentLayout {
     /// The text line `line` was shaped from.
     #[cfg(test)]
     pub(crate) fn shown(&self, line: usize) -> &str {
-        &self.lines[line].wrapped.text
+        &self.lines[line].shape.wrapped.text
     }
 
     #[cfg(test)]
@@ -195,7 +200,8 @@ impl DocumentLayout {
             return x;
         }
         let index = line.display.to_display(offset).0;
-        line.indent() + line.wrapped.unwrapped_layout.x_for_index(index) - line.rows[within].start_x
+        line.indent() + line.shape.wrapped.unwrapped_layout.x_for_index(index)
+            - line.rows[within].start_x
     }
 
     fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
@@ -244,7 +250,7 @@ impl DocumentLayout {
         if let Some(prefix) = prefix.filter(|prefix| x < prefix.indent()) {
             return prefix.offset_for_x(x).clamp(target.start, target.caret_end);
         }
-        let layout = &line.wrapped.unwrapped_layout;
+        let layout = &line.shape.wrapped.unwrapped_layout;
         let index = layout.closest_index_for_x(x - line.indent() + target.start_x);
         // At or past the display end, land after a hidden suffix (live-preview spec, D5).
         let bias = if index >= layout.len {

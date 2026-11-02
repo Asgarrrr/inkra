@@ -13,7 +13,7 @@ impl DocumentLayout {
         }
         for (index, line) in self.lines.iter().enumerate() {
             let line_origin = origin + point(px(0.), line.top);
-            if let Err(err) = line.wrapped.paint(
+            if let Err(err) = line.shape.wrapped.paint(
                 line_origin + point(line.indent(), px(0.)),
                 line.row_height,
                 TextAlign::Left,

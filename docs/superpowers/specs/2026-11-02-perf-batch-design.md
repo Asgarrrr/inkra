@@ -1,6 +1,7 @@
 # Performance batch 2: measure, then change
 
 Status: **in progress 2026-11-02.** S1 records the baseline and lands item 3.
+S2 corrects the item 1 probe, reverses its drop, and carries shaped lines.
 Later slices add their own `### As built (Sx)` under the item they change.
 
 The 2026-11-02 Rust audit listed ten per-frame and per-edit costs. CLAUDE.md
@@ -24,6 +25,12 @@ with its number and its reason.
   - cold-x and cold-enter: the same, after three draws instead of one. gpui's
     `LineLayoutCache` keeps two frames, so it is empty after two frames that shape nothing.
   - idle: the mean of 20 draws with no input.
+  - typed-warm-x and typed-cold-x (added in S2): start the clock, press `x`, stop the
+    clock, after zero or two draws. The key's own settle draws once.
+- The warm series are not warm. In test mode gpui draws a dirty window when
+  effects flush, so the key already draws once. The explicit draw after the key
+  is a second frame that shapes nothing, and the next series' draw is a third.
+  Every warm-x and warm-enter key therefore finds an empty cache. Only typed-warm-x is warm.
 - The sample is plain prose, a `#` heading, a setext heading, emphasis, bold,
   code, a wikilink, a three-line quote, a task and a 300-char wrapping paragraph.
 - Items 4, 5, 6, 7, 8 and 10 take the audit's `cargo bench` and counted-test
@@ -35,7 +42,7 @@ with its number and its reason.
 
 | item | measured cost | keep/drop | slice |
 |---|---|---|---|
-| 1 cold reshape after an idle redraw | cold-x 2.719 ms vs warm-x 2.744 ms at 50 KB (0.99x) | drop | cancelled (S2, S3) |
+| 1 cold reshape after an idle redraw | typed-cold-x 2.512 ms vs typed-warm-x 1.093 ms at 50 KB (2.3x) | keep | S2, S3 |
 | 2 paint only the visible lines | idle draw 0.163 ms at 50 KB, 1.310 ms at 500 KB (8.0x for 10x the text) | keep | S4 |
 | 3 `line_for_offset` by bisection | O(lines) per lookup, several lookups per frame | keep | S1 |
 | 4 UTF-16 conversions from byte 0 | `to_utf16` near the end 15.3 us / 154 us / 1.57 ms at 1k / 10k / 100k lines | keep | not in S1 |
@@ -60,11 +67,91 @@ Measured (median of 3 runs, ms per key plus draw):
 | 500KB | 16.032 | 15.722 | 15.889 | 15.841 |
 
 Guard: drop the item if cold-x is at most 1.2x warm-x at 50 KB. It is 0.99x.
-Dropped. The shaped lines live in `DocumentLayout`, and an edit reshapes only
-the lines it touches, so gpui's cache is not on the path. S2 and S3 are cancelled.
+S1 dropped the item on that number. S2 found the number wrong: both series
+are cold (see Method). `shape_document` hands every line to `shape_text` on each
+reshape, and only gpui's cache keeps an unchanged line off CoreText.
 
-The 16 ms an edit costs at 500 KB is not shaping from a cold cache: warm and
-cold agree. Its cause is a separate question, outside this batch.
+Corrected (S2, before any code change, median of 3 runs, ms):
+
+| size | typed-warm-x | typed-cold-x | ratio |
+|---|---|---|---|
+| 5KB | 0.318 | 1.734 | 5.5x |
+| 50KB | 1.093 | 2.512 | 2.3x |
+| 500KB | 13.356 | 14.486 | 1.08x |
+
+Kept: a keystroke after an idle pause costs 2.3x a keystroke while typing at 50 KB.
+In the app a caret-blink frame shapes nothing, so two blinks empty the cache.
+
+The 13 ms an edit costs at 500 KB is mostly not shaping: warm and cold differ
+by 8%. Its cause is a separate question, outside this batch.
+
+### As built (S2)
+
+`shape_document` takes `LayoutInputs` and `previous: Option<&DocumentLayout>`.
+Line `i` reuses `previous`'s line `i` shape (`Rc<LineShape>`) when every
+`shape_text` argument is equal: text, font size, runs and wrap width.
+`line_clamp` is always `None`. An argument added later joins the key.
+Prefix shapes (`show`, gutter prefixes) are not carried; gpui's cache serves them.
+
+- The editor passes its last layout: `reshape`, the measure closure and the
+  prepaint fallback. `NameField` passes `None`: it reshapes every prepaint,
+  which keeps gpui's cache warm, and it holds one line.
+- A line reuses a shape only when its inputs match, so a previous layout from
+  another note or another width only misses the carry; it is never wrong.
+- A failed shape stores a default `WrappedLine` under the requested text, as before.
+- S2 handles only the same-index candidate. An edit that changes the line
+  count misses every line after it; S3 adds that candidate.
+- The carry pushed `shape_document` past clippy's `too_many_lines`. The lookup
+  is `DocumentLayout::carried`, and the heading cursor moved to `line_heading`, beside `line_items`.
+
+Measured (release probe, median of 3 runs, ms):
+
+| size | series | before | after |
+|---|---|---|---|
+| 5KB | warm-x | 1.890 | 0.501 |
+| 5KB | cold-x | 1.834 | 0.440 |
+| 5KB | typed-warm-x | 0.318 | 0.232 |
+| 5KB | typed-cold-x | 1.734 | 0.303 |
+| 5KB | warm-enter | 1.732 | 1.736 |
+| 5KB | cold-enter | 1.699 | 1.658 |
+| 50KB | warm-x | 2.731 | 1.221 |
+| 50KB | cold-x | 2.661 | 1.188 |
+| 50KB | typed-warm-x | 1.093 | 0.880 |
+| 50KB | typed-cold-x | 2.512 | 0.949 |
+| 50KB | warm-enter | 2.601 | 2.648 |
+| 50KB | cold-enter | 2.570 | 2.591 |
+| 500KB | warm-x | 15.916 | 13.219 |
+| 500KB | cold-x | 16.125 | 14.013 |
+| 500KB | typed-warm-x | 13.356 | 12.308 |
+| 500KB | typed-cold-x | 14.486 | 13.128 |
+| 500KB | warm-enter | 16.066 | 17.859 |
+| 500KB | cold-enter | 15.818 | 17.622 |
+
+Idle draws did not move (0.061, 0.157 and 1.289 ms after).
+
+Acceptance:
+
+- cold-x at 50 KB after, 1.188 ms, is at most 1.1 × warm-x at 50 KB before (3.004 ms).
+  On the corrected series, typed-cold-x after, 0.949 ms, is at most 1.1 ×
+  typed-warm-x before (1.202 ms): a key after a pause now costs what a key while typing did.
+- warm-x after is below warm-x before at every size, and so is typed-warm-x.
+
+Regression: `enter` at 500 KB costs 11% more (16.066 to 17.859 ms warm). An
+enter changes the line count, so every line after it misses the carry and pays
+the comparison, an `Rc` and the kept runs on top of the old cost. S3's
+changed-line-count candidate targets this case.
+
+Memory: each line keeps its `Vec<TextRun>`, 144 bytes per run
+(`size_of::<TextRun>()`), plus an `Rc` header. The text is shared with the
+`WrappedLine`: `shape_text` keeps a one-line `SharedString` as given. A 1000-line
+note with two runs per line keeps about 0.3 MB more.
+
+Fonts: gpui's cache drops its entries when the font generation changes. A
+carried shape does not see that. Inkra has no runtime `add_fonts`, so no font
+can arrive after a layout today. If one does, carried lines keep the old
+fallback until their inputs change.
+
+Shots: all 54 scenes are byte-identical before and after (`cmp`).
 
 ## Item 2: paint only the visible lines
 
@@ -159,8 +246,10 @@ Median 1.149 us. gpui's `shape_line` cache serves the six markers. Dropped.
 ## Deviations from Zed
 
 - Item 1: Zed shapes the visible rows every frame, which keeps gpui's cache
-  warm. Inkra carries whole-note shapes across layouts until Virtualization.
-  The probe shows the cache is not on Inkra's path, so no change follows.
+  warm. Inkra shapes the whole note, only on a reshape, so an idle frame keeps
+  nothing warm. Following Zed needs Virtualization, which is deferred. Inkra
+  instead carries each line's shape from the previous `DocumentLayout` when every
+  `shape_text` argument is equal (S2).
 - Item 2: Zed culls by scroll position plus one row. Inkra culls by gpui's
   content mask, because the div owns the scroll.
 - Item 4: Zed's rope keeps UTF-16 lengths in chunk summaries. Inkra keeps a
@@ -199,7 +288,7 @@ index 34da50c..037d90f 100644
          // Wide enough to centre the column between two margins; D12 reserves only the left one.
          let widest = inset.column + inset.margin * 2.;
 diff --git a/crates/app/src/shot/scenes.rs b/crates/app/src/shot/scenes.rs
-index ee2481e..c702557 100644
+index ee2481e..29957cd 100644
 --- a/crates/app/src/shot/scenes.rs
 +++ b/crates/app/src/shot/scenes.rs
 @@ -85,6 +85,11 @@ const LINKED: &[(&str, &str)] = &[
@@ -214,7 +303,7 @@ index ee2481e..c702557 100644
      Scene {
          name: "empty-no-vault",
          shows: "launch with no argument: the empty state, and no editor at all",
-@@ -514,3 +519,62 @@ fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
+@@ -514,3 +519,77 @@ fn backlinks(stage: &mut Stage) -> WindowHandle<AppShell> {
      stage.click_tree_row(window, 0.);
      window
  }
@@ -261,6 +350,21 @@ index ee2481e..c702557 100644
 +        let cold_x = run(stage, 2, "x");
 +        let warm_enter = run(stage, 0, "enter");
 +        let cold_enter = run(stage, 2, "enter");
++        // The key's settle draws once: no explicit draw after it, so 0 idle frames is truly warm.
++        let typed = |stage: &mut Stage, idle_frames: usize, key: &str| -> f64 {
++            let mut total = 0.;
++            for _ in 0..20 {
++                for _ in 0..idle_frames {
++                    stage.draw(window);
++                }
++                let t0 = Instant::now();
++                stage.keys(window, key);
++                total += t0.elapsed().as_secs_f64() * 1e3;
++            }
++            total / 20.
++        };
++        let typed_warm = typed(stage, 0, "x");
++        let typed_cold = typed(stage, 2, "x");
 +        let mut idle = 0.;
 +        eprintln!("idle-begin {kb}");
 +        for _ in 0..20 {
@@ -271,7 +375,7 @@ index ee2481e..c702557 100644
 +        eprintln!("idle-end {kb}");
 +        idle /= 20.;
 +        println!(
-+            "probe {kb}KB warm-x {warm_x:.3} cold-x {cold_x:.3} warm-enter {warm_enter:.3} cold-enter {cold_enter:.3} idle {idle:.3}"
++            "probe {kb}KB warm-x {warm_x:.3} cold-x {cold_x:.3} warm-enter {warm_enter:.3} cold-enter {cold_enter:.3} idle {idle:.3} typed-warm-x {typed_warm:.3} typed-cold-x {typed_cold:.3}"
 +        );
 +        last = Some(window);
 +    }
