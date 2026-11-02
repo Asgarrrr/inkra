@@ -161,27 +161,19 @@ impl EditorView {
         let (style, wrap_width) = (last.style().clone(), last.wrap_width());
         let state = self.input.state();
         let (selection, marked) = (state.selection().range(), state.marked_range());
-        let buffer = self.input.buffer().read(cx);
-        // A whole-document shape: skipped when the inputs still give this layout.
-        if last.is_shaped_from(
-            buffer,
-            &self.markdown,
-            &selection,
-            marked.as_ref(),
-            &style,
+        let inputs = layout::LayoutInputs {
+            buffer: self.input.buffer().read(cx),
+            markdown: &self.markdown,
+            selection: &selection,
+            marked: marked.as_ref(),
+            style: &style,
             wrap_width,
-        ) {
+        };
+        // A whole-document shape: skipped when the inputs still give this layout.
+        if last.is_shaped_from(&inputs) {
             return;
         }
-        let layout = Rc::new(layout::shape_document(
-            buffer,
-            &self.markdown,
-            &selection,
-            marked.as_ref(),
-            &style,
-            wrap_width,
-            window,
-        ));
+        let layout = Rc::new(layout::shape_document(&inputs, Some(last), window));
         self.input.set_layout(layout);
     }
 

@@ -12,7 +12,7 @@ use inkra_editor::Selection;
 use inkra_markdown::Markdown;
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::editor::layout::shape_document;
+use crate::editor::layout::{LayoutInputs, shape_document};
 use crate::text_input::{self, FIELD_CONTEXT, InputHost, Mode, Prepainted, Quads, TextInput};
 use crate::theme;
 
@@ -150,15 +150,15 @@ impl Element for FieldElement {
         let range = input.state().selection().range();
         let marked = input.state().marked_range();
         let style = window.text_style();
-        let layout = shape_document(
-            input.buffer().read(cx),
-            &Markdown::default(),
-            &range,
-            marked.as_ref(),
-            &style,
-            None,
-            window,
-        );
+        let inputs = LayoutInputs {
+            buffer: input.buffer().read(cx),
+            markdown: &Markdown::default(),
+            selection: &range,
+            marked: marked.as_ref(),
+            style: &style,
+            wrap_width: None,
+        };
+        let layout = shape_document(&inputs, None, window);
         let quads = Quads::new(&layout, &range, bounds.origin);
         Some((Rc::new(layout), quads))
     }
