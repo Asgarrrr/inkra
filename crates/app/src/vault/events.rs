@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::EventEmitter;
-use inkra_vault::{EntryId, Stamp};
+use inkra_vault::{EntryId, Stamp, VaultError};
 
 use super::NoteStore;
 
@@ -16,8 +16,12 @@ pub(crate) struct NoteSaved {
 
 impl EventEmitter<NoteSaved> for NoteStore {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SaveFailed(pub(crate) EntryId);
+/// A write failed; `error` is `None` when the note has no path in the vault.
+#[derive(Debug)]
+pub(crate) struct SaveFailed {
+    pub(crate) id: EntryId,
+    pub(crate) error: Option<VaultError>,
+}
 
 impl EventEmitter<SaveFailed> for NoteStore {}
 

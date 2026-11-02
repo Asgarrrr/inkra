@@ -72,18 +72,20 @@ impl AppShell {
         let active = self.tabs.active();
         let notes = self.notes.read(cx);
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
-        let dirty: Vec<bool> = self
+        let indicators: Vec<Option<Indicator>> = self
             .tab_notes()
-            .map(|note| note.is_some_and(|id| notes.is_dirty(id, cx)))
+            .map(|note| {
+                note.and_then(|id| Indicator::of(notes.is_dirty(id, cx), notes.save_failed(id)))
+            })
             .collect();
         let tabs: Vec<_> = self
             .tabs
             .iter()
             .zip(self.tab_titles(cx))
-            .zip(dirty)
+            .zip(indicators)
             .enumerate()
-            .map(|(ix, ((tab, title), dirty))| {
-                Self::render_tab(ix, tab.id(), title, tab.id() == active, dirty, cx)
+            .map(|(ix, ((tab, title), indicator))| {
+                Self::render_tab(ix, tab.id(), title, tab.id() == active, indicator, cx)
             })
             .collect();
         div()
@@ -108,7 +110,7 @@ impl AppShell {
         id: TabId,
         title: SharedString,
         is_active: bool,
-        dirty: bool,
+        indicator: Option<Indicator>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let dragged = DraggedTab {
@@ -119,11 +121,11 @@ impl AppShell {
         };
         Tab::new(("tab", ix))
             .active(is_active)
-            .when(dirty, |tab| {
+            .when_some(indicator, |tab, indicator| {
                 tab.start(
                     div()
-                        .debug_selector(move || format!("tab-dot-{ix}"))
-                        .child(Indicator),
+                        .debug_selector(move || indicator.selector("tab", ix))
+                        .child(indicator),
                 )
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press_tab))

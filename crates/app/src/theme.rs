@@ -107,6 +107,11 @@ pub(crate) fn dirty_dot() -> Rgba {
     rgb(0x8a8a8a)
 }
 
+/// A note whose last write failed, on its tab and its tree row.
+pub(crate) fn failed_dot() -> Rgba {
+    rgb(0xd16969)
+}
+
 pub(crate) const DOT_SIZE: Pixels = px(6.);
 
 /// A list item's left and right padding.

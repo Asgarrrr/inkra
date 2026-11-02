@@ -141,6 +141,10 @@ impl NoteStore {
         self.sessions.note(id).is_some_and(|note| note.is_dirty(cx))
     }
 
+    pub(crate) fn save_failed(&self, id: EntryId) -> bool {
+        self.sessions.note(id).is_some_and(OpenNote::has_failed)
+    }
+
     /// Does not set `current`: it resolves on the load's schedule, not screen order.
     pub(crate) fn open_note(
         &mut self,

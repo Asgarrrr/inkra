@@ -19,8 +19,9 @@ use super::edit::Rejection;
 use super::rows::Item;
 use super::{Kind, Row, Sidebar};
 use crate::open::{NoteActivated, Open};
-use crate::test_support::{opened, vault_of};
-use crate::vault::NoteStore;
+use crate::test_support::{edit, opened, vault_of};
+use crate::ui::Indicator;
+use crate::vault::{AUTOSAVE_DELAY, NoteStore};
 
 impl Sidebar {
     #[cfg(test)]
@@ -273,13 +274,13 @@ fn label(row: &Row) -> String {
     }
 }
 
-/// The names of the rows `row_is_dirty` marks.
+/// The names of the rows `row_indicator` marks dirty.
 fn dirty_rows(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
     sidebar.update(cx, |sidebar, cx| {
         sidebar
             .visible_rows()
             .into_iter()
-            .filter(|row| sidebar.row_is_dirty(row, cx))
+            .filter(|row| sidebar.row_indicator(row, cx) == Some(Indicator::Dirty))
             .map(|row| row.name)
             .collect()
     })
@@ -469,6 +470,23 @@ async fn an_edited_note_is_marked_in_the_tree_until_it_is_saved(cx: &mut TestApp
         Vec::<String>::new(),
         "the write caught the file up, so the note is no longer modified"
     );
+}
+
+#[gpui::test]
+async fn a_failed_save_marks_its_tree_row_failed(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.make_unwritable("/vault/a.md");
+
+    let (sidebar, notes) = open_with_store(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let a = row(&sidebar, cx, "a");
+    let buffer = opened(&notes, cx, a.id).await;
+    edit(&buffer, cx, "X");
+    cx.executor().advance_clock(AUTOSAVE_DELAY);
+    cx.run_until_parked();
+
+    let indicator = sidebar.update(cx, |sidebar, cx| sidebar.row_indicator(&a, cx));
+    assert_eq!(indicator, Some(Indicator::Failed));
 }
 
 #[gpui::test]

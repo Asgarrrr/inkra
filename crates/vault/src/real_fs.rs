@@ -139,31 +139,30 @@ impl Fs for RealFs {
 
         // A missing file is not a conflict: no bytes to preserve.
         let preserved = match existing.as_ref() {
-            Some(metadata) if stamp_of(path, metadata)? != expected => {
-                Some(preserve(path, metadata)?)
+            Some(metadata) => {
+                let stamp = stamp_of(path, metadata)?;
+                if stamp == expected {
+                    None
+                } else {
+                    Some((preserve(path, metadata)?, stamp))
+                }
             }
-            _ => None,
+            None => None,
         };
 
-        // A hard-linked note is written in place: replacing it would give
-        // this path a new inode and strand the other link on stale text. A
-        // symlink is written through for the same reason, targeting the file
-        // it points at rather than replacing the link itself.
-        let in_place = existing
-            .as_ref()
-            .is_some_and(|metadata| metadata.nlink() > 1)
-            || fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
-        if in_place {
-            fs::write(path, text).map_err(|source| io_error(path, source))?;
-        } else {
-            replace(path, text, existing.as_ref())?;
-        }
-
-        let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
+        let (stamp, identity) =
+            overwrite(path, text, existing.as_ref()).map_err(|source| match preserved.clone() {
+                Some((preserved, stamp)) => VaultError::Unwritten {
+                    preserved,
+                    stamp,
+                    source: Box::new(source),
+                },
+                None => source,
+            })?;
         Ok(Saved {
-            stamp: stamp_of(path, &metadata)?,
-            identity: identity_of(&metadata),
-            preserved,
+            stamp,
+            identity,
+            preserved: preserved.map(|(preserved, _)| preserved),
         })
     }
 
@@ -288,6 +287,28 @@ fn guarded_rename(from: &Path, to: &Path) -> Result<()> {
 /// Read and write rather than `fs::copy`, for the `sync_all`: these bytes
 /// must survive a crash during the replace that follows. Copied raw, never
 /// through `normalize_line_endings` — a conflict file is an exact record.
+/// `save`'s write after the conflict check, and the stamp and identity it left.
+fn overwrite(
+    path: &Path,
+    text: &str,
+    existing: Option<&fs::Metadata>,
+) -> Result<(Stamp, FileIdentity)> {
+    // A hard-linked note is written in place: replacing it would give
+    // this path a new inode and strand the other link on stale text. A
+    // symlink is written through for the same reason, targeting the file
+    // it points at rather than replacing the link itself.
+    let in_place = existing.is_some_and(|metadata| metadata.nlink() > 1)
+        || fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
+    if in_place {
+        fs::write(path, text).map_err(|source| io_error(path, source))?;
+    } else {
+        replace(path, text, existing)?;
+    }
+
+    let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
+    Ok((stamp_of(path, &metadata)?, identity_of(&metadata)))
+}
+
 fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
     let destination = conflict_path(path, mtime_of(path, metadata)?, |candidate| {
         candidate.exists()

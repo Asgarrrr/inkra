@@ -7,7 +7,7 @@ use crate::editor::EditorView;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{Cursor, NewFolder, NewNote};
-use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, SaveFailed, TrashFailed};
+use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
@@ -125,10 +125,6 @@ impl AppShell {
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }
-        cx.subscribe(&notes, |_shell, _notes, event: &SaveFailed, _cx| {
-            eprintln!("save failed for {:?}", event.0);
-        })
-        .detach();
         cx.subscribe(&notes, |shell, _notes, event: &GoneChanged, cx| {
             if shell.showing() == Some(event.0) {
                 cx.notify();

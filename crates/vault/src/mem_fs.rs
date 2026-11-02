@@ -15,7 +15,9 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::channel::oneshot;
 
-use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp};
+use crate::fs::{
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
+};
 use crate::temp::temp_path;
 use crate::watch::Watch;
 
@@ -48,6 +50,8 @@ struct State {
     /// Listings started per path, found or not.
     read_dirs: BTreeMap<PathBuf, usize>,
     watches: Vec<watch::Watching>,
+    failing_saves: BTreeMap<PathBuf, (u32, ErrorKind)>,
+    failing_after_preserve: BTreeMap<PathBuf, (u32, ErrorKind)>,
 }
 
 impl State {
@@ -205,7 +209,8 @@ impl Fs for MemFs {
             let _ = wait.await;
         }
         {
-            let state = self.state();
+            let mut state = self.state();
+            state.injected_save_failure(path)?;
             if state.unwritable.contains(path) {
                 return Err(io(path, ErrorKind::PermissionDenied));
             }
@@ -226,13 +231,20 @@ impl Fs for MemFs {
                     let destination = crate::conflict::conflict_path(path, *mtime, |candidate| {
                         state.files.contains_key(candidate)
                     });
-                    Some((destination, existing.clone()))
+                    Some((destination, existing.clone(), stamp_of(existing, *mtime)))
                 }
                 _ => None,
             }
         };
-        if let Some((destination, bytes)) = preserved.clone() {
-            self.insert_file(destination, bytes);
+        if let Some((destination, bytes, stamp)) = preserved.clone() {
+            self.insert_file(destination.clone(), bytes);
+            if let Err(source) = self.state().injected_failure_after_preserve(path) {
+                return Err(VaultError::Unwritten {
+                    preserved: destination,
+                    stamp,
+                    source: Box::new(source),
+                });
+            }
         }
 
         Self::put_file(&mut self.state(), path.to_path_buf(), text.to_owned(), None);
@@ -259,7 +271,7 @@ impl Fs for MemFs {
         Ok(Saved {
             stamp,
             identity,
-            preserved: preserved.map(|(destination, _)| destination),
+            preserved: preserved.map(|(destination, _, _)| destination),
         })
     }
 

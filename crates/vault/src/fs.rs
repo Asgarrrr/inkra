@@ -78,6 +78,13 @@ pub enum VaultError {
     Io { path: PathBuf, source: io::Error },
     #[error("{path}: not valid UTF-8")]
     NotUtf8 { path: PathBuf },
+    /// The save preserved the note's bytes, then failed to write: `stamp` is the kept bytes'.
+    #[error("{source} (the text on disk was kept at {preserved})")]
+    Unwritten {
+        preserved: PathBuf,
+        stamp: Stamp,
+        source: Box<VaultError>,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, VaultError>;

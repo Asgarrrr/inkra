@@ -17,6 +17,7 @@ mod moves;
 mod quit;
 mod reload;
 mod rescan;
+mod retry;
 mod scans;
 mod sessions;
 mod trash;

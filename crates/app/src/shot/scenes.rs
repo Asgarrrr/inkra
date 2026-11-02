@@ -1,6 +1,7 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
 mod command_palette;
+mod failures;
 mod gone;
 mod hover;
 mod markdown_blocks;
@@ -198,6 +199,11 @@ const CATALOGUE: &[Scene] = &[
         name: "gone-from-disk",
         shows: "the note showing deleted on disk: one line over the editor says so, its text kept, gone from the tree",
         open: gone::banner,
+    },
+    Scene {
+        name: "save-failed",
+        shows: "the note showing could not be written: the failed dot in the failed colour before its tab title and at its tree row's right edge",
+        open: failures::save_failed,
     },
     Scene {
         name: "backlinks",
