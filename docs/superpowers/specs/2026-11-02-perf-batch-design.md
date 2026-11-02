@@ -4,6 +4,7 @@ Status: **in progress 2026-11-02.** S1 records the baseline and lands item 3.
 S2 corrects the item 1 probe, reverses its drop, and carries shaped lines.
 S3 carries them across a change in line count.
 S4 paints only the lines and quote bars inside the content mask.
+S5 walks UTF-16 conversions from a checkpoint. S6 hashes `recent` with foldhash.
 Later slices add their own `### As built (Sx)` under the item they change.
 
 The 2026-11-02 Rust audit listed ten per-frame and per-edit costs. CLAUDE.md
@@ -47,13 +48,13 @@ with its number and its reason.
 | 1 cold reshape after an idle redraw | typed-cold-x 2.512 ms vs typed-warm-x 1.093 ms at 50 KB (2.3x) | keep | S2, S3 |
 | 2 paint only the visible lines | idle draw 0.163 ms at 50 KB, 1.310 ms at 500 KB (8.0x for 10x the text) | keep | S4 |
 | 3 `line_for_offset` by bisection | O(lines) per lookup, several lookups per frame | keep | S1 |
-| 4 UTF-16 conversions from byte 0 | `to_utf16` near the end 15.3 us / 154 us / 1.57 ms at 1k / 10k / 100k lines | keep | not in S1 |
+| 4 UTF-16 conversions from byte 0 | `to_utf16` near the end 15.3 us / 154 us / 1.57 ms at 1k / 10k / 100k lines | keep | S5 |
 | 5 `reveal::touched` scans twice | one lockstep pass already | drop | none |
 | 6 anchor slots never reused | +0.7 us per edit at 3000 tombstones | drop | none |
 | 7 sidebar builds 3 Strings per row | about 4 us per frame, constant in vault size | drop | none |
 | 8 `Layout::new` 2 allocations per note | 1.67 ms of 63.17 ms at 50k notes (2.6%), on a background job | drop | none |
 | 9 `margin_width` every frame | 1.14 us per call at 50 KB (limit 50 us) | drop | none |
-| 10 `recent` SipHash | `empty, 20 recent` 315 us on one core; 50k SipHash lookups 0.269 ms | keep | not in S1 |
+| 10 `recent` SipHash | `empty, 20 recent` 315 us on one core; 50k SipHash lookups 0.269 ms | keep | S6 |
 
 ## Item 1: cold reshape after an idle redraw
 
@@ -199,7 +200,7 @@ cold-x 1.198, typed-cold-x 0.971; idle 0.059, 0.155 and 1.285 ms).
 Acceptance: cold-enter at 50 KB, 1.044 ms, is at most 1.1 × warm-x at 50 KB
 after S2 (1.188 ms, so 1.307 ms). It is 0.88x.
 
-Shots: all 55 scenes are byte-identical to S2's (`cmp`). A scene shapes with no
+Shots: all 54 scenes are byte-identical to S2's (`cmp`). A scene shapes with no
 previous layout, so it never reaches the carry; `markdown-blocks` was viewed.
 `cargo mutants` does not cover `inkra-app`, so none ran.
 
@@ -305,6 +306,55 @@ text from byte 0. Audit bench, near the end of the text:
 The platform's input protocol calls these on marked-text and caret queries.
 Kept: the cost is linear in the distance from byte 0, and the goal is a cost
 proportional to the distance from a line start or one cached checkpoint.
+
+### As built (S5)
+
+`Buffer` keeps the last conversion's answer in `utf16: Cell<(ByteOffset, Utf16Offset)>`.
+`to_utf16` and `from_utf16` walk from it, forward or backward, and leave it at their answer.
+Invariant: its byte is a char boundary of the text, and its UTF-16 position is
+the count of the text before that byte.
+
+`splice(at, removed, inserted)` is the one text mutation. `replace` and `apply`
+(undo and redo) call it, so the anchors and the checkpoint follow every edit.
+It shifts a checkpoint `(b, u)` in O(edit):
+
+- `b <= at`: unchanged.
+- `b >= at + removed.len()`: by the byte and UTF-16 length difference of the edit.
+- Otherwise, inside the removed text: to `(at, u - utf16_len(removed[..b - at]))`.
+
+The checkpoint is a `Cell`, so `Buffer` is not `Sync`. No caller shares a
+`Buffer` across threads. `buffer.rs` stays over 400 lines until batch 4.
+
+`buffer_utf16_after_insert` measures the IME round trip after a keystroke:
+insert one char near the end, then `to_utf16` and `from_utf16` at the caret.
+The setup primes the checkpoint outside the timing. Before is the `--quick`
+baseline from commit 1; after is a full-sample run against it (p = 0.00).
+
+| bench | lines | before | after |
+|---|---|---|---|
+| `buffer_utf16_after_insert` | 1k | 35.8 us | 903 ns |
+| `buffer_utf16_after_insert` | 10k | 354 us | 133 ns |
+| `buffer_utf16_after_insert` | 100k | 3.71 ms | 21.8 us |
+| `buffer_to_utf16` | 100k | 1.60 ms | 1.7 ns |
+| `buffer_from_utf16` | 100k | 1.99 ms | 1.4 ns |
+
+The 100k residual is the insert itself. The same routine with both conversions
+removed reads 946 ns / 144 ns / 21.5 us. `buffer_to_utf16` and
+`buffer_from_utf16` repeat one offset, so after this change they measure an empty walk.
+A `--quick` comparison prints `No change in performance detected` at
+p = 0.05 despite the −99% change, probably because its short run gives too few
+samples to reach p < 0.05.
+
+A range conversion converts its start through the checkpoint and walks to its
+end from that answer, leaving the checkpoint at the start. Moving it to both
+ends made each call walk the whole range twice. `buffer_utf16_range` repeats a
+select-all's `to_utf16_range` and `from_utf16_range`, full runs:
+
+| lines | main | checkpoint at both ends | checkpoint at the start |
+|---|---|---|---|
+| 1k | 35.3 us | 80.0 us | 35.6 us |
+| 10k | 365 us | 793 us | 366 us |
+| 100k | 3.70 ms | 8.17 ms | 3.62 ms |
 
 ## Item 5: `reveal::touched` scans twice
 

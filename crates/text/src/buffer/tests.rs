@@ -347,6 +347,42 @@ fn utf16_offset_past_the_end_clamps_to_the_end() {
 }
 
 #[test]
+fn a_conversion_leaves_the_checkpoint_at_its_answer() {
+    let buf = Buffer::new("a😀b\nc");
+    let _ = buf.to_utf16(at(5));
+    assert_eq!(buf.utf16.get(), (at(5), Utf16Offset(3)));
+    assert_eq!(buf.from_utf16(Utf16Offset(1)), at(1));
+    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset(1)));
+    let _ = buf.from_utf16(Utf16Offset(99));
+    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset(6)));
+}
+
+#[test]
+fn an_edit_before_the_checkpoint_shifts_it() {
+    let mut buf = Buffer::new("ab\ncd");
+    let _ = buf.to_utf16(at(4));
+    buf.insert(at(0), "😀");
+    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset(6)));
+}
+
+#[test]
+fn an_edit_across_the_checkpoint_moves_it_to_the_edit_start() {
+    let mut buf = Buffer::new("ab😀cd");
+    let _ = buf.to_utf16(at(6));
+    buf.delete(at(1)..at(7));
+    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset(1)));
+}
+
+#[test]
+fn an_edit_at_or_after_the_checkpoint_leaves_it() {
+    let mut buf = Buffer::new("abcd");
+    let _ = buf.to_utf16(at(2));
+    buf.insert(at(2), "😀");
+    buf.insert(at(7), "é");
+    assert_eq!(buf.utf16.get(), (at(2), Utf16Offset(2)));
+}
+
+#[test]
 fn grapheme_steps_cross_a_combining_mark_as_one_unit() {
     let buf = Buffer::new("e\u{301}x");
     assert_eq!(buf.next_grapheme(at(0)), at(3));
