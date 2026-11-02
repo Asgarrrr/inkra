@@ -139,5 +139,4 @@ pub fn run() {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests;

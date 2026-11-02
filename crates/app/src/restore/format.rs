@@ -96,5 +96,4 @@ pub(crate) fn session_file(home: &Path, root: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests;

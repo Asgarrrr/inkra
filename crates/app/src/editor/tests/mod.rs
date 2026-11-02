@@ -1,5 +1,3 @@
-#![cfg_attr(test, allow(clippy::unwrap_used))]
-
 use std::cell::Cell;
 use std::rc::Rc;
 

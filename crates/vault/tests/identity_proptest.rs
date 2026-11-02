@@ -2,8 +2,6 @@
 //! fail this: a rename is a delete plus an insert, so the id would change
 //! exactly when it must not.
 
-#![allow(clippy::expect_used)]
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

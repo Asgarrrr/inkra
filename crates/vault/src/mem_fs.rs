@@ -406,13 +406,10 @@ impl Fs for MemFs {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod watch_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod fault_tests;

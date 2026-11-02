@@ -225,25 +225,19 @@ impl IndexSync {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod corpus_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod startup_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod loading_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod scanning_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod words_tests;

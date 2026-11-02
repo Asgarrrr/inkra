@@ -6,11 +6,14 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 ## `check.sh`
 
-- **`cargo fmt -p …`, never `--all`.** `--all` formats path dependencies, and
-  gpui is one. In `--check` mode it couples the gate to Zed's formatting. Run
-  bare, it rewrites the vendored source and breaks its match with the pinned
-  commit.
-- **The gpui isolation check.** It must catch gpui below `app` by any route:
+- **`cargo fmt`, never `--all`.** Without a flag, from the root, it formats every workspace
+  member and nothing else: its file set equals the old `-p` list's. `--all`
+  also formats path dependencies, and gpui is one. In `--check` mode it couples
+  the gate to Zed's formatting. Run bare, it rewrites the vendored source and
+  breaks its match with the pinned commit.
+- **The gpui isolation check.** It must catch gpui below `app` by any route.
+  One `cargo tree --workspace --exclude inkra-app` covers every member but
+  `app`, so a new crate is checked without an edit to the script:
   - `-e normal,build,dev`: a gpui dev-dependency defeats headless tests as much
     as a normal one.
   - `--target=all`: `cargo tree` otherwise omits dependencies gated on another
@@ -22,7 +25,8 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   - The match uses a here-string, not `echo … | grep -q`. `grep -q` exits on
     its first match and closes the pipe. `echo` then gets SIGPIPE (141), which
     `pipefail` reports over grep's success, and a real match passes silently.
-  - A new crate below `app` joins the loop, or it loses the guarantee.
+  - On a match the script prints `cargo tree -i gpui`, the path that brings
+    gpui in.
 
 ## Toolchain
 
@@ -69,3 +73,13 @@ drops a whole file's tests and still compiles green.
 The feature keeps `MemFs` out of release binaries. `check.sh` runs
 `cargo test --workspace` without `--all-features`, so the crate enables it on
 itself through a self dev-dependency. `app` uses the same pattern for gpui.
+The self dev-dependency is not redundant: in `cargo test --workspace` another
+member could enable the feature, but `cargo test -p inkra-vault` alone needs it.
+
+## Lints in tests
+
+`clippy.toml` sets `allow-unwrap-in-tests` and `allow-expect-in-tests`. Clippy
+applies them inside `#[test]` functions and `#[cfg(test)]` modules, so test
+code carries no `#[allow]`. The deny on `unwrap_used` and `expect_used` stays
+for every other line. Integration tests and benches are not `#[cfg(test)]`
+modules: a helper there outside a `#[test]` keeps a file-level `#[allow]`.

@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;

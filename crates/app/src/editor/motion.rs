@@ -119,5 +119,4 @@ pub(super) fn vertical(
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::unwrap_used))]
 mod tests;

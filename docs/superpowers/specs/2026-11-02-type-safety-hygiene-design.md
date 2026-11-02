@@ -1,6 +1,6 @@
 # Type safety and hygiene: batches 3 and 4 of the 2026-11-02 audit
 
-Status: **S1, S2, S3, S4 and S5 built 2026-11-02.** Later slices append their sections here.
+Status: **S1 to S6 built 2026-11-02.**
 
 ## Method
 
@@ -226,6 +226,37 @@ code. No signature, visibility of a public item or behaviour changes.
   function). It drops from 90 lines to 37. `vault.rs` ends at exactly 400 lines;
   the next addition to it splits a module.
 - The shots before and after are byte-identical (`cmp`).
+
+## H3-H5 tooling
+
+### As built (S6)
+
+- **H3.** A root `clippy.toml` sets `allow-unwrap-in-tests` and
+  `allow-expect-in-tests`. It replaces 46 of the 49 `#[allow]` attributes for
+  `unwrap_used` and `expect_used`, in 28 files. Each sat on a `#[cfg(test)]`
+  module or inside a file compiled only as one. The workspace deny on both lints
+  is unchanged, and clippy still runs `-D warnings` on every target. Without
+  `clippy.toml` the same tree fails clippy with 297 errors.
+- Three allows stay, file-level, where the config does not reach:
+  `crates/vault/benches/vault.rs`, `crates/vault/tests/real_fs.rs` and
+  `crates/vault/tests/conflict_proptest.rs`. A bench or an integration-test
+  helper outside a `#[test]` is not test code to clippy, and clippy flags all
+  three without their allow.
+  `crates/vault/tests/identity_proptest.rs` loses its allow: clippy passes
+  without it.
+- **H4.** `crates/vault/Cargo.toml` drops the `futures` dev-dependency, a
+  duplicate of the normal one. The self dev-dependency stays. The audit called
+  it redundant, but without it `cargo test -p inkra-vault` alone fails to
+  compile (`unresolved import inkra_vault::mem_fs`). In `cargo test --workspace`
+  `app` and `index` enable `test-support` already, which hides the need.
+- **H5.** `check.sh` lists no crate. `cargo fmt -- --check` formats the
+  workspace members: its file set equals the old `-p` list's (`cargo fmt -v`),
+  and no file under `vendor/`. The gpui check runs one
+  `cargo tree --workspace --exclude inkra-app` with the same flags and the same
+  here-string. On a match it prints `cargo tree -i gpui` and exits 1. A
+  `cargo tree` failure trips `set -e` at the assignment, so the check fails
+  closed.
+- `CLAUDE.md` drops the rule that a new member joins two lists by hand.
 
 ## Deviations from Zed
 

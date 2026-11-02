@@ -364,37 +364,28 @@ fn sorted(rows: Vec<Row>) -> Vec<Row> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 pub(crate) mod test_helpers;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod walk_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod parallel_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod oracle_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod changed_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod replay_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod reclaim_tests;
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod names_tests;

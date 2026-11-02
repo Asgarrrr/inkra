@@ -120,7 +120,6 @@ impl RelPath {
 }
 
 #[cfg(test)]
-#[cfg_attr(test, allow(clippy::unwrap_used))]
 mod tests;
 
 #[cfg(test)]
