@@ -23,7 +23,7 @@ impl Plain {
         };
         let dropped: Vec<Range<usize>> = markup(&context[indent..], at_line_start)
             .into_iter()
-            .map(|range| range.start.0 + indent..range.end.0 + indent)
+            .map(|range| range.start.get() + indent..range.end.get() + indent)
             .map(|range| range.start.max(piece.start)..range.end.min(piece.end))
             .filter(|range| range.start < range.end)
             .map(|range| range.start - piece.start..range.end - piece.start)

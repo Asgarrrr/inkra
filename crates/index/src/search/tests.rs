@@ -62,7 +62,7 @@ fn lit<'a>(texts: &[Option<&'a str>], query: &str) -> Vec<(usize, &'a str)> {
             let Some(text) = texts[at] else {
                 panic!("a hit is in a loaded note");
             };
-            (at, &text[hit.range.start.0..hit.range.end.0])
+            (at, &text[hit.range.start.get()..hit.range.end.get()])
         })
         .collect()
 }
@@ -79,7 +79,7 @@ fn hits_come_in_vault_order_and_skip_notes_not_loaded() {
     let (ids, index) = indexed(&[Some("x plan"), None, Some("plan plan")]);
     let found = all(&index, "plan", 10);
     let at: Vec<(EntryId, usize)> = hits(&found)
-        .map(|(note, hit)| (note, hit.range.start.0))
+        .map(|(note, hit)| (note, hit.range.start.get()))
         .collect();
     assert_eq!(at, [(ids[0], 2), (ids[2], 0), (ids[2], 5)]);
     assert!(!found.limit_reached);
@@ -136,7 +136,7 @@ fn a_hit_touching_the_last_one_at_the_limit_still_merges_into_it() {
     let text = "a\u{1F3FB}\u{301}b";
     let found = run(&[Some(text)], "a b", 1);
     let ranges: Vec<(usize, usize)> = hits(&found)
-        .map(|(_, hit)| (hit.range.start.0, hit.range.end.0))
+        .map(|(_, hit)| (hit.range.start.get(), hit.range.end.get()))
         .collect();
     assert_eq!(ranges, [(0, text.len())]);
 }

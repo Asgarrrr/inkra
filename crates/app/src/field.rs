@@ -40,7 +40,7 @@ impl NameField {
     pub(crate) fn new(initial: &str, cx: &mut Context<Self>) -> Self {
         let buffer = cx.new(|_| Buffer::new(initial));
         let end = buffer.read(cx).len();
-        let mut selection = Selection::at(ByteOffset(0));
+        let mut selection = Selection::at(ByteOffset::new(0));
         selection.set_head(end, inkra_editor::Goal::None);
         Self {
             input: TextInput::new(buffer, selection, Mode::SingleLine, cx),

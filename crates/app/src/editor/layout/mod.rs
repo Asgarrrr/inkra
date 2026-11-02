@@ -201,7 +201,7 @@ impl DocumentLayout {
         {
             return x;
         }
-        let index = line.display.to_display(offset).0;
+        let index = line.display.to_display(offset).get();
         line.indent() + line.shape.wrapped.unwrapped_layout.x_for_index(index)
             - line.rows[within].start_x
     }
@@ -262,7 +262,7 @@ impl DocumentLayout {
         };
         let offset = line
             .display
-            .to_buffer(DisplayOffset(index), bias)
+            .to_buffer(DisplayOffset::new(index), bias)
             .clamp(target.start, target.caret_end);
         prefix.map_or(offset, |prefix| offset.max(prefix.range().end))
     }

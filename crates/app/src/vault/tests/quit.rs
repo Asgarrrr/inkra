@@ -94,7 +94,7 @@ fn quitting_writes_every_dirty_note(cx: &mut TestAppContext) {
             let buffer = store.buffer_for(id).cloned().expect("the note is open");
             buffer.update(cx, |buffer, _| {
                 buffer.transact_at(Instant::now(), |buffer| {
-                    buffer.insert(ByteOffset(0), "EDITED ");
+                    buffer.insert(ByteOffset::new(0), "EDITED ");
                 });
             });
         });

@@ -25,7 +25,7 @@ impl EditorView {
         links(self.input.buffer().read(cx).text())
             .into_iter()
             .filter(spans)
-            .min_by_key(|link| link.range.end.0 - link.range.start.0)
+            .min_by_key(|link| link.range.end - link.range.start)
     }
 
     pub(super) fn on_mouse_down(

@@ -171,7 +171,7 @@ fn numbered_notes(
 fn line_at(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, offset: ByteOffset) -> String {
     let note = showing(window, cx).unwrap();
     let text = text_of(window, cx, note);
-    text[offset.0..]
+    text[offset.get()..]
         .lines()
         .next()
         .unwrap_or_default()

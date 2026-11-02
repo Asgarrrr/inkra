@@ -1,7 +1,7 @@
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn an_offset_inside_the_removed_span_collapses_to_its_bias_side() {
         assert_eq!(transform(at(2), Bias::Left, at(1), 3, inserted_len), at(1));
         assert_eq!(
             transform(at(2), Bias::Right, at(1), 3, inserted_len),
-            ByteOffset(1 + inserted_len)
+            ByteOffset::new(1 + inserted_len)
         );
     }
 }

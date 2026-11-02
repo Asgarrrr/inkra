@@ -16,7 +16,7 @@ pub(super) fn rows(
     display: &DisplayLine,
 ) -> Vec<Row> {
     let layout = &wrapped.unwrapped_layout;
-    let at = |index: usize| display.to_buffer(DisplayOffset(index), Bias::Left);
+    let at = |index: usize| display.to_buffer(DisplayOffset::new(index), Bias::Left);
 
     let mut starts = vec![(0, px(0.))];
     for boundary in wrapped.wrap_boundaries() {

@@ -84,7 +84,7 @@ pub(super) fn tall_document() -> String {
 }
 
 pub(super) fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 pub(super) fn assert_x(actual: Pixels, expected: f32) {

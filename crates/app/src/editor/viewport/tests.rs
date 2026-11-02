@@ -15,7 +15,7 @@ fn line(n: f32) -> Range<Pixels> {
 
 fn top_line(offset: usize) -> TopLine {
     TopLine {
-        offset: ByteOffset(offset),
+        offset: ByteOffset::new(offset),
         below: px(0.),
     }
 }
@@ -28,7 +28,7 @@ fn top(offset: usize) -> ScrollTo {
 fn a_reveal_before_the_first_paint_waits_for_it() {
     let mut viewport = Viewport::default();
 
-    viewport.reveal(None, ByteOffset(0), Reveal::Center);
+    viewport.reveal(None, ByteOffset::new(0), Reveal::Center);
 
     assert_eq!(
         viewport.take_pending(),
@@ -68,7 +68,7 @@ fn a_capture_reads_a_waiting_top_line() {
     let mut viewport = Viewport::default();
     viewport.request(top(50));
 
-    assert_eq!(viewport.capture(None, ByteOffset(7)), top_line(50));
+    assert_eq!(viewport.capture(None, ByteOffset::new(7)), top_line(50));
 }
 
 #[test]
@@ -76,13 +76,13 @@ fn a_capture_behind_a_waiting_reveal_puts_the_caret_on_top() {
     let mut viewport = Viewport::default();
     viewport.request(ScrollTo::Cursor(Reveal::Center));
 
-    assert_eq!(viewport.capture(None, ByteOffset(7)), top_line(7));
+    assert_eq!(viewport.capture(None, ByteOffset::new(7)), top_line(7));
 }
 
 #[test]
 fn an_unscrolled_capture_is_the_note_top() {
     assert_eq!(
-        Viewport::default().capture(None, ByteOffset(7)),
+        Viewport::default().capture(None, ByteOffset::new(7)),
         TopLine::default()
     );
 }
@@ -139,7 +139,7 @@ fn a_first_reload_maps_its_own_top_line() {
 /// A top line on "one", nine pixels into its row, parked before `old` becomes `new`.
 fn parked_through(old: &str, new: &str) -> (TopLine, TopLine) {
     let top = TopLine {
-        offset: ByteOffset(5),
+        offset: ByteOffset::new(5),
         below: px(9.),
     };
     let mut buffer = Buffer::new(old);
@@ -159,7 +159,11 @@ fn a_parked_top_line_follows_a_diff_as_mapped_does() {
 
     let (unparked, mapped) = parked_through(old, "zero\ntwo\n");
     assert_eq!(unparked, mapped);
-    assert_eq!(unparked.offset(), ByteOffset(5), "the deleted row's start");
+    assert_eq!(
+        unparked.offset(),
+        ByteOffset::new(5),
+        "the deleted row's start"
+    );
     assert_eq!(unparked.below(), px(9.));
 }
 
@@ -167,7 +171,7 @@ fn a_parked_top_line_follows_a_diff_as_mapped_does() {
 #[should_panic(expected = "not live")]
 fn a_parked_top_line_forgets_its_anchor() {
     let mut buffer = Buffer::new("one\ntwo\n");
-    let parked = TopLine::at(ByteOffset(4)).park(&mut buffer);
+    let parked = TopLine::at(ByteOffset::new(4)).park(&mut buffer);
     let anchor = parked.offset;
     let _ = parked.unpark(&mut buffer);
     let _ = buffer.resolve(anchor);

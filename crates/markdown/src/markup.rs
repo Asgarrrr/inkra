@@ -54,7 +54,7 @@ pub fn markup(line: &str, at_line_start: bool) -> Vec<Range<ByteOffset>> {
     }
     out.ranges
         .into_iter()
-        .map(|range| ByteOffset(range.start - shift)..ByteOffset(range.end - shift))
+        .map(|range| ByteOffset::new(range.start - shift)..ByteOffset::new(range.end - shift))
         .collect()
 }
 

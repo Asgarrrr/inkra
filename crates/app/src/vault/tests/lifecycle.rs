@@ -40,7 +40,7 @@ fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
         let buffer = store.buffer_for(a).cloned().expect("a is open");
         buffer.update(cx, |buffer, _| {
             buffer.transact_at(Instant::now(), |buffer| {
-                buffer.insert(ByteOffset(0), "UNSAVED ");
+                buffer.insert(ByteOffset::new(0), "UNSAVED ");
             });
         });
     });
@@ -73,7 +73,7 @@ fn switching_notes_writes_the_one_being_left(cx: &mut TestAppContext) {
         let buffer = store.buffer_for(a).cloned().expect("a is open");
         buffer.update(cx, |buffer, _| {
             buffer.transact_at(Instant::now(), |buffer| {
-                buffer.insert(ByteOffset(0), "EDITED ");
+                buffer.insert(ByteOffset::new(0), "EDITED ");
             });
         });
     });

@@ -97,21 +97,21 @@ fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
     let count = buf.line_count();
     prop_assert_eq!(buf.lines().count(), count);
 
-    let mut expected_start = ByteOffset(0);
+    let mut expected_start = ByteOffset::new(0);
     for line in 0..count {
         let range = buf.line_range(line);
 
         prop_assert_eq!(range.start, expected_start, "line {} starts late", line);
         prop_assert!(range.start <= range.end, "line {} is inverted", line);
         prop_assert!(
-            !buf.text()[range.start.0..range.end.0].contains('\n'),
+            !buf.slice(range.start..range.end).contains('\n'),
             "line {} holds a newline",
             line
         );
         prop_assert_eq!(buf.line_for_offset(range.start), line);
         prop_assert_eq!(buf.line_for_offset(range.end), line);
 
-        expected_start = ByteOffset(range.end.0 + 1);
+        expected_start = range.end + 1;
     }
     prop_assert_eq!(buf.line_range(count - 1).end, buf.len());
 
@@ -138,7 +138,7 @@ proptest! {
                     let at = boundary(&model, at);
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.insert(ByteOffset(at), &text);
+                    buf.insert(ByteOffset::new(at), &text);
                     model.insert_str(at, &text);
                 }
                 Op::Delete(start, end) => {
@@ -148,7 +148,7 @@ proptest! {
                     }
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.delete(ByteOffset(start)..ByteOffset(end));
+                    buf.delete(ByteOffset::new(start)..ByteOffset::new(end));
                     model.replace_range(start..end, "");
                 }
                 Op::ReplaceInTransaction(start, end, text) => {
@@ -156,8 +156,8 @@ proptest! {
                     model_undo.push(model.clone());
                     model_redo.clear();
                     buf.transact(|buf| {
-                        buf.delete(ByteOffset(start)..ByteOffset(end));
-                        buf.insert(ByteOffset(start), &text);
+                        buf.delete(ByteOffset::new(start)..ByteOffset::new(end));
+                        buf.insert(ByteOffset::new(start), &text);
                     });
                     model.replace_range(start..end, &text);
                 }
@@ -172,8 +172,8 @@ proptest! {
                     expected.insert_str(second_at, &second);
 
                     buf.transact(|buf| {
-                        buf.insert(ByteOffset(first_at), &first);
-                        buf.insert(ByteOffset(second_at), &second);
+                        buf.insert(ByteOffset::new(first_at), &first);
+                        buf.insert(ByteOffset::new(second_at), &second);
                     });
                     model = expected;
                 }
@@ -232,7 +232,7 @@ proptest! {
             now += Duration::from_millis(delay);
 
             // Every generated string is non-empty, so every insert moves the text and owes a new version.
-            buf.transact_at(now, |buf| buf.insert(ByteOffset(at), &text));
+            buf.transact_at(now, |buf| buf.insert(ByteOffset::new(at), &text));
 
             prop_assert!(
                 buf.version() > before,
@@ -249,12 +249,12 @@ proptest! {
     ) {
         let buf = Buffer::new(parts.concat());
         for (byte, _) in buf.text().char_indices().chain(std::iter::once((buf.text().len(), ' '))) {
-            let offset = ByteOffset(byte);
+            let offset = ByteOffset::new(byte);
             prop_assert_eq!(buf.from_utf16(buf.to_utf16(offset)), offset);
         }
         prop_assert_eq!(
             buf.to_utf16(buf.len()),
-            Utf16Offset(buf.text().encode_utf16().count())
+            Utf16Offset::new(buf.text().encode_utf16().count())
         );
     }
 
@@ -270,7 +270,7 @@ proptest! {
                     let count = buf.text().char_indices().count() + 1;
                     let start = at % count;
                     let (start, end) = ordered_boundaries(buf.text(), start, (start + len).min(count - 1));
-                    buf.transact(|buf| buf.replace(ByteOffset(start)..ByteOffset(end), text));
+                    buf.transact(|buf| buf.replace(ByteOffset::new(start)..ByteOffset::new(end), text));
                 }
                 Utf16Op::Undo => {
                     buf.undo();
@@ -281,12 +281,12 @@ proptest! {
                 Utf16Op::To(n) => {
                     let byte = boundary(buf.text(), n);
                     let expected = buf.text()[..byte].encode_utf16().count();
-                    prop_assert_eq!(buf.to_utf16(ByteOffset(byte)), Utf16Offset(expected));
+                    prop_assert_eq!(buf.to_utf16(ByteOffset::new(byte)), Utf16Offset::new(expected));
                 }
                 Utf16Op::From(n) => {
                     let target = n % (buf.text().encode_utf16().count() + 3);
                     let expected = from_utf16_from_start(buf.text(), target);
-                    prop_assert_eq!(buf.from_utf16(Utf16Offset(target)), ByteOffset(expected));
+                    prop_assert_eq!(buf.from_utf16(Utf16Offset::new(target)), ByteOffset::new(expected));
                 }
             }
         }
@@ -302,7 +302,7 @@ proptest! {
 
         for (at, text) in edits {
             let at = boundary(buf.text(), at);
-            buf.insert(ByteOffset(at), &text);
+            buf.insert(ByteOffset::new(at), &text);
             check_line_index(&buf)?;
         }
 
@@ -317,16 +317,16 @@ proptest! {
     ) {
         let buf = Buffer::new(parts.concat());
 
-        let mut offset = ByteOffset(0);
+        let mut offset = ByteOffset::new(0);
         let mut steps = 0;
         while offset < buf.len() {
             let next = buf.next_grapheme(offset);
             prop_assert!(next > offset, "next_grapheme must advance");
-            prop_assert!(buf.text().is_char_boundary(next.0));
+            prop_assert!(buf.text().is_char_boundary(next.get()));
             prop_assert_eq!(buf.previous_grapheme(next), offset);
             offset = next;
             steps += 1;
-            prop_assert!(steps <= buf.len().0, "grapheme walk failed to terminate");
+            prop_assert!(steps <= buf.len().get(), "grapheme walk failed to terminate");
         }
         prop_assert_eq!(offset, buf.len());
     }

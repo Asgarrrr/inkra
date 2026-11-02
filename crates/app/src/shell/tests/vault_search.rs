@@ -169,7 +169,7 @@ fn long_note(hit: usize) -> String {
 
 fn range_of(text: &str, word: &str) -> Range<ByteOffset> {
     let start = text.find(word).expect("the word is in the text");
-    ByteOffset(start)..ByteOffset(start + word.len())
+    ByteOffset::new(start)..ByteOffset::new(start + word.len())
 }
 
 fn vault_search(
@@ -249,14 +249,14 @@ fn a_hit_past_the_end_of_an_edited_note_is_clipped(cx: &mut TestAppContext) {
     picker.update(&mut visual, |_, cx| {
         cx.emit(HitActivated {
             note: a,
-            range: ByteOffset(6)..ByteOffset(10),
+            range: ByteOffset::new(6)..ByteOffset::new(10),
             open: Open::Here,
         });
     });
     visual.run_until_parked();
 
     editor(&window, &mut visual).update(&mut visual, |editor, _| {
-        assert_eq!(editor.selected(), ByteOffset(6)..ByteOffset(8));
+        assert_eq!(editor.selected(), ByteOffset::new(6)..ByteOffset::new(8));
     });
 }
 

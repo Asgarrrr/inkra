@@ -6,8 +6,8 @@ fn plain(line: &str) -> String {
     let mut shown = String::new();
     let mut at = 0;
     for range in markup(line, true) {
-        shown.push_str(&line[at..range.start.0]);
-        at = range.end.0;
+        shown.push_str(&line[at..range.start.get()]);
+        at = range.end.get();
     }
     shown + &line[at..]
 }
@@ -16,8 +16,8 @@ fn plain_inside(piece: &str) -> String {
     let mut shown = String::new();
     let mut at = 0;
     for range in markup(piece, false) {
-        shown.push_str(&piece[at..range.start.0]);
-        at = range.end.0;
+        shown.push_str(&piece[at..range.start.get()]);
+        at = range.end.get();
     }
     shown + &piece[at..]
 }
@@ -114,7 +114,11 @@ fn ranges_are_sorted_disjoint_and_never_empty() {
                 ranges.windows(2).all(|pair| pair[0].end <= pair[1].start),
                 "{line:?}"
             );
-            assert!(ranges.last().is_none_or(|range| range.end.0 <= line.len()));
+            assert!(
+                ranges
+                    .last()
+                    .is_none_or(|range| range.end.get() <= line.len())
+            );
         }
     }
 }
@@ -128,8 +132,8 @@ proptest! {
         let ranges = markup(&line, at_line_start);
         for range in &ranges {
             prop_assert!(range.start < range.end);
-            prop_assert!(range.end.0 <= line.len());
-            prop_assert!(line.is_char_boundary(range.start.0) && line.is_char_boundary(range.end.0));
+            prop_assert!(range.end.get() <= line.len());
+            prop_assert!(line.is_char_boundary(range.start.get()) && line.is_char_boundary(range.end.get()));
         }
         prop_assert!(ranges.windows(2).all(|pair| pair[0].end < pair[1].start));
     }

@@ -18,7 +18,7 @@ pub struct Hit {
 
 impl Hit {
     pub(crate) fn new(text: &str, range: Range<ByteOffset>, line: usize) -> Self {
-        let (start, end) = (range.start.0, range.end.0);
+        let (start, end) = (range.start.get(), range.end.get());
         let window = around(text, start..end);
         Self {
             range,

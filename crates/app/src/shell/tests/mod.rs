@@ -241,7 +241,7 @@ pub(super) fn open(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id:
 }
 
 pub(super) fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 /// Each tab's note, and the active tab's index.
@@ -273,7 +273,11 @@ pub(super) fn select(
         .update(cx, |shell, window, cx| {
             let editor = shell.editor().cloned().expect("a note is showing");
             editor.update(cx, |editor, cx| {
-                editor.select_range(ByteOffset(range.start)..ByteOffset(range.end), window, cx);
+                editor.select_range(
+                    ByteOffset::new(range.start)..ByteOffset::new(range.end),
+                    window,
+                    cx,
+                );
             });
         })
         .unwrap();
@@ -332,7 +336,7 @@ pub(super) fn scroll_to(
     offset: usize,
 ) -> ByteOffset {
     editor(window, cx).update(cx, |editor, cx| {
-        editor.scroll_to_top(ByteOffset(offset), cx);
+        editor.scroll_to_top(ByteOffset::new(offset), cx);
     });
     cx.run_until_parked();
     editor(window, cx).update(cx, |editor, _| editor.offset_at_top())

@@ -6,7 +6,7 @@ use proptest::prelude::*;
 use super::{DisplayLine, DisplayOffset};
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 fn hide(start: usize, end: usize) -> (Range<ByteOffset>, &'static str) {
@@ -145,7 +145,7 @@ proptest! {
         for d in (0..=shown.len()).filter(|&d| shown.is_char_boundary(d)) {
             for bias in [Bias::Left, Bias::Right] {
                 let o = line.to_buffer(DisplayOffset(d), bias);
-                prop_assert!(!inside(o.0 - start), "to_buffer landed inside a hidden range");
+                prop_assert!(!inside(o.get() - start), "to_buffer landed inside a hidden range");
                 prop_assert_eq!(line.to_display(o), DisplayOffset(d));
             }
         }

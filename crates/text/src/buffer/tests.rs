@@ -3,7 +3,7 @@
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
-    ByteOffset(offset)
+    ByteOffset::new(offset)
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn undo_keeps_only_the_edited_text_not_a_buffer_snapshot() {
 fn version_starts_at_zero_and_moves_with_an_edit() {
     let mut buffer = Buffer::new("abc");
     assert_eq!(buffer.version(), 0);
-    buffer.insert(ByteOffset(3), "x");
+    buffer.insert(ByteOffset::new(3), "x");
     assert_ne!(buffer.version(), 0);
 }
 
@@ -274,11 +274,11 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
 fn version_moves_when_an_edit_merges_into_the_previous_transaction() {
     let mut buffer = Buffer::new("abc");
     let t0 = Instant::now();
-    buffer.transact_at(t0, |b| b.insert(ByteOffset(3), "x"));
+    buffer.transact_at(t0, |b| b.insert(ByteOffset::new(3), "x"));
     let saved = buffer.version();
 
     buffer.transact_at(t0 + Duration::from_millis(120), |b| {
-        b.insert(ByteOffset(4), "y");
+        b.insert(ByteOffset::new(4), "y");
     });
 
     assert_eq!(buffer.text(), "abcxy");
@@ -293,10 +293,10 @@ fn version_moves_when_an_edit_merges_into_the_previous_transaction() {
 #[test]
 fn undo_returns_the_version_to_its_earlier_value() {
     let mut buffer = Buffer::new("abc");
-    buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+    buffer.transact(|b| b.insert(ByteOffset::new(3), "x"));
     let after_first = buffer.version();
     buffer.finalize_transaction();
-    buffer.transact(|b| b.insert(ByteOffset(4), "y"));
+    buffer.transact(|b| b.insert(ByteOffset::new(4), "y"));
 
     buffer.undo();
 
@@ -307,7 +307,7 @@ fn undo_returns_the_version_to_its_earlier_value() {
 #[test]
 fn redo_restores_the_same_version() {
     let mut buffer = Buffer::new("abc");
-    buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+    buffer.transact(|b| b.insert(ByteOffset::new(3), "x"));
     let after_edit = buffer.version();
     buffer.undo();
     buffer.redo();
@@ -317,10 +317,10 @@ fn redo_restores_the_same_version() {
 #[test]
 fn a_divergent_edit_after_undo_cannot_collide_with_the_history_it_replaced() {
     let mut buffer = Buffer::new("abc");
-    buffer.transact(|b| b.insert(ByteOffset(3), "x"));
+    buffer.transact(|b| b.insert(ByteOffset::new(3), "x"));
     let replaced = buffer.version();
     buffer.undo();
-    buffer.transact(|b| b.insert(ByteOffset(3), "z"));
+    buffer.transact(|b| b.insert(ByteOffset::new(3), "z"));
 
     assert_eq!(buffer.text(), "abcz");
     assert_ne!(buffer.version(), replaced);
@@ -329,32 +329,32 @@ fn a_divergent_edit_after_undo_cannot_collide_with_the_history_it_replaced() {
 #[test]
 fn utf16_offsets_round_trip_across_a_surrogate_pair() {
     let buf = Buffer::new("a😀b");
-    assert_eq!(buf.to_utf16(at(5)), Utf16Offset(3));
-    assert_eq!(buf.from_utf16(Utf16Offset(3)), at(5));
-    assert_eq!(buf.to_utf16(buf.len()), Utf16Offset(4));
+    assert_eq!(buf.to_utf16(at(5)), Utf16Offset::new(3));
+    assert_eq!(buf.from_utf16(Utf16Offset::new(3)), at(5));
+    assert_eq!(buf.to_utf16(buf.len()), Utf16Offset::new(4));
 }
 
 #[test]
 fn a_utf16_offset_inside_a_surrogate_pair_snaps_forward() {
     let buf = Buffer::new("a😀b");
-    assert_eq!(buf.from_utf16(Utf16Offset(2)), at(5));
+    assert_eq!(buf.from_utf16(Utf16Offset::new(2)), at(5));
 }
 
 #[test]
 fn utf16_offset_past_the_end_clamps_to_the_end() {
     let buf = Buffer::new("ab");
-    assert_eq!(buf.from_utf16(Utf16Offset(99)), at(2));
+    assert_eq!(buf.from_utf16(Utf16Offset::new(99)), at(2));
 }
 
 #[test]
 fn a_conversion_leaves_the_checkpoint_at_its_answer() {
     let buf = Buffer::new("a😀b\nc");
     let _ = buf.to_utf16(at(5));
-    assert_eq!(buf.utf16.get(), (at(5), Utf16Offset(3)));
-    assert_eq!(buf.from_utf16(Utf16Offset(1)), at(1));
-    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset(1)));
-    let _ = buf.from_utf16(Utf16Offset(99));
-    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset(6)));
+    assert_eq!(buf.utf16.get(), (at(5), Utf16Offset::new(3)));
+    assert_eq!(buf.from_utf16(Utf16Offset::new(1)), at(1));
+    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset::new(1)));
+    let _ = buf.from_utf16(Utf16Offset::new(99));
+    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset::new(6)));
 }
 
 #[test]
@@ -362,7 +362,7 @@ fn an_edit_before_the_checkpoint_shifts_it() {
     let mut buf = Buffer::new("ab\ncd");
     let _ = buf.to_utf16(at(4));
     buf.insert(at(0), "😀");
-    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset(6)));
+    assert_eq!(buf.utf16.get(), (at(8), Utf16Offset::new(6)));
 }
 
 #[test]
@@ -370,7 +370,7 @@ fn an_edit_across_the_checkpoint_moves_it_to_the_edit_start() {
     let mut buf = Buffer::new("ab😀cd");
     let _ = buf.to_utf16(at(6));
     buf.delete(at(1)..at(7));
-    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset(1)));
+    assert_eq!(buf.utf16.get(), (at(1), Utf16Offset::new(1)));
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn an_edit_at_or_after_the_checkpoint_leaves_it() {
     let _ = buf.to_utf16(at(2));
     buf.insert(at(2), "😀");
     buf.insert(at(7), "é");
-    assert_eq!(buf.utf16.get(), (at(2), Utf16Offset(2)));
+    assert_eq!(buf.utf16.get(), (at(2), Utf16Offset::new(2)));
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn lines_agrees_with_line_range() {
     for (line, (start, text)) in buf.lines().enumerate() {
         let range = buf.line_range(line);
         assert_eq!(start, range.start, "line {line} start");
-        assert_eq!(text, &buf.text()[range.start.0..range.end.0], "line {line}");
+        assert_eq!(text, buf.slice(range.start..range.end), "line {line}");
     }
     assert_eq!(buf.lines().count(), buf.line_count());
 }
@@ -515,7 +515,7 @@ mod anchors {
         assert_eq!(buf.resolve(anchor), at(6));
         buf.delete(at(0)..at(3));
         assert_eq!(buf.resolve(anchor), at(3));
-        assert_eq!(&buf.text()[buf.resolve(anchor).0..], "e");
+        assert_eq!(&buf.text()[buf.resolve(anchor).get()..], "e");
     }
 
     #[test]
@@ -569,7 +569,7 @@ mod anchors {
             let offset = buf.resolve(anchor);
             assert!(offset <= buf.len(), "{offset} escapes {:?}", buf.text());
             assert!(
-                buf.text().is_char_boundary(offset.0),
+                buf.text().is_char_boundary(offset.get()),
                 "{offset} splits a char in {:?}",
                 buf.text()
             );
@@ -735,10 +735,10 @@ mod anchors {
         if removed_len == 0 {
             return true;
         }
-        let touched_end = at.0 + removed_len;
-        let strictly_inside = offset.0 > at.0 && offset.0 < touched_end;
-        let right_at_start = offset.0 == at.0 && bias == Bias::Right;
-        let left_at_end = inserted_len == 0 && offset.0 == touched_end && bias == Bias::Left;
+        let touched_end = at.get() + removed_len;
+        let strictly_inside = offset.get() > at.get() && offset.get() < touched_end;
+        let right_at_start = offset.get() == at.get() && bias == Bias::Right;
+        let left_at_end = inserted_len == 0 && offset.get() == touched_end && bias == Bias::Left;
         !(strictly_inside || right_at_start || left_at_end)
     }
 
@@ -747,13 +747,13 @@ mod anchors {
         if removed_len == 0 && text.is_empty() {
             return;
         }
-        let at = ByteOffset(range.start);
+        let at = ByteOffset::new(range.start);
         for entry in tracked.iter_mut().filter(|entry| entry.live) {
             entry.restorable &=
                 survives_undo(entry.predicted, entry.bias, at, removed_len, text.len());
             entry.predicted = transform(entry.predicted, entry.bias, at, removed_len, text.len());
         }
-        buf.replace(at..ByteOffset(range.end), text);
+        buf.replace(at..ByteOffset::new(range.end), text);
     }
 
     fn run(buf: &mut Buffer, tracked: &mut Vec<Tracked>, op: Op) {
@@ -773,7 +773,7 @@ mod anchors {
                 });
             }
             Op::Anchor(offset, bias) => {
-                let offset = ByteOffset(boundary(buf.text(), offset));
+                let offset = ByteOffset::new(boundary(buf.text(), offset));
                 let anchor = buf.anchor(offset, bias);
                 tracked.push(Tracked {
                     anchor,
@@ -812,7 +812,7 @@ mod anchors {
             let offset = buf.resolve(entry.anchor);
             prop_assert!(offset <= buf.len(), "{} escapes {:?}", offset, buf.text());
             prop_assert!(
-                buf.text().is_char_boundary(offset.0),
+                buf.text().is_char_boundary(offset.get()),
                 "{} splits a char in {:?}",
                 offset,
                 buf.text()
@@ -982,8 +982,8 @@ mod grapheme_steps {
         ) {
             let buffer = Buffer::new(&text);
             for offset in 0..=text.len() + 2 {
-                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Left).0, at_or_before_by_scan(&text, offset));
-                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Right).0, at_or_after_by_scan(&text, offset));
+                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Left).get(), at_or_before_by_scan(&text, offset));
+                prop_assert_eq!(buffer.clip_grapheme(at(offset), Bias::Right).get(), at_or_after_by_scan(&text, offset));
             }
         }
 
@@ -993,8 +993,8 @@ mod grapheme_steps {
         ) {
             let buffer = Buffer::new(&text);
             for offset in 0..=text.len() + 2 {
-                prop_assert_eq!(buffer.previous_grapheme(at(offset)).0, previous_by_scan(&text, offset));
-                prop_assert_eq!(buffer.next_grapheme(at(offset)).0, next_by_scan(&text, offset));
+                prop_assert_eq!(buffer.previous_grapheme(at(offset)).get(), previous_by_scan(&text, offset));
+                prop_assert_eq!(buffer.next_grapheme(at(offset)).get(), next_by_scan(&text, offset));
             }
         }
     }

@@ -10,9 +10,9 @@ use crate::editor::{TopLine, ViewState};
 impl From<&ViewState> for SavedView {
     fn from(view: &ViewState) -> Self {
         Self {
-            tail: view.selection.tail().0,
-            head: view.selection.head().0,
-            top: view.top.offset().0,
+            tail: view.selection.tail().get(),
+            head: view.selection.head().get(),
+            top: view.top.offset().get(),
             below: view.top.below().into(),
         }
     }
@@ -21,11 +21,11 @@ impl From<&ViewState> for SavedView {
 /// Unclipped: the note may have changed since, so the binding clips it.
 impl From<SavedView> for ViewState {
     fn from(saved: SavedView) -> Self {
-        let mut selection = Selection::at(ByteOffset(saved.tail));
-        selection.set_head(ByteOffset(saved.head), Goal::None);
+        let mut selection = Selection::at(ByteOffset::new(saved.tail));
+        selection.set_head(ByteOffset::new(saved.head), Goal::None);
         Self {
             selection,
-            top: TopLine::new(ByteOffset(saved.top), px(saved.below)),
+            top: TopLine::new(ByteOffset::new(saved.top), px(saved.below)),
         }
     }
 }

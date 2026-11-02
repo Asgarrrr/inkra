@@ -109,7 +109,7 @@ pub(super) fn editor_focused(window: &WindowHandle<AppShell>, cx: &mut VisualTes
 }
 
 pub(super) fn at(range: Range<usize>) -> Range<ByteOffset> {
-    ByteOffset(range.start)..ByteOffset(range.end)
+    ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
 #[gpui::test]

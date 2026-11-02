@@ -74,7 +74,7 @@ pub(super) fn line_runs(
     let mut runs = Vec::with_capacity(cuts.len());
     for pair in cuts.windows(2) {
         let (start, end) = (pair[0], pair[1]);
-        let len = display.to_display(end).0 - display.to_display(start).0;
+        let len = display.to_display(end).get() - display.to_display(start).get();
         if len == 0 {
             continue;
         }

@@ -114,7 +114,7 @@ pub(crate) fn shape_document(
         .lines()
         .enumerate()
         .map(|(index, (start, text))| {
-            let range = start..ByteOffset(start.0 + text.len());
+            let range = start..start + text.len();
             let heading = line_heading(&mut headings, &range);
             // Inside a container the marker keeps its inline conceal: no margin exists there.
             let opening = heading
@@ -131,7 +131,7 @@ pub(crate) fn shape_document(
             let line_gutters = line_items(&mut gutters, |gutter| gutter.range.start <= range.end);
             let gutter = line_gutters
                 .first()
-                .map(|gutter| (gutter, &text[..gutter.range.end.0 - start.0]));
+                .map(|gutter| (gutter, &text[..gutter.range.end - start]));
             let (prefix, text_conceals) = line_prefix(
                 gutter,
                 &mut carry,
@@ -218,11 +218,11 @@ fn candidates(
     let moved = previous
         .lines
         .last()
-        .and_then(|last| (start.0 + last.range.end.0).checked_sub(len.0))
+        .and_then(|last| (start.get() + last.range.end.get()).checked_sub(len.get()))
         .and_then(|target| {
             previous
                 .lines
-                .binary_search_by_key(&ByteOffset(target), |line| line.range.start)
+                .binary_search_by_key(&ByteOffset::new(target), |line| line.range.start)
                 .ok()
         });
     [Some(index), moved]
@@ -338,7 +338,7 @@ fn show(
 ) -> ShapedLine {
     let identity = DisplayLine::new(range.clone(), []);
     let runs = line_runs(range, spans, marked, &identity, styles);
-    let text = SharedString::from(line[..range.end.0 - range.start.0].to_owned());
+    let text = SharedString::from(line[..range.end - range.start].to_owned());
     window
         .text_system()
         .shape_line(text, font_size, &runs, None)

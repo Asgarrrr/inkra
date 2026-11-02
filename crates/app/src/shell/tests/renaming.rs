@@ -55,7 +55,7 @@ async fn a_rename_issued_during_a_write_moves_the_written_text(cx: &mut TestAppC
     let gate = fs.block_save("/vault/a.md");
     buffer.update(cx, |buffer, _| {
         buffer.transact_at(std::time::Instant::now(), |buffer| {
-            buffer.insert(inkra_text::ByteOffset(0), "EDITED ");
+            buffer.insert(inkra_text::ByteOffset::new(0), "EDITED ");
         });
     });
     notes.update(cx, NoteStore::save_current);
@@ -101,7 +101,7 @@ async fn a_note_edited_after_a_rename_is_written_to_its_new_path(cx: &mut TestAp
         .expect("the note is still open under the same id");
     buffer.update(cx, |buffer, _| {
         buffer.transact_at(std::time::Instant::now(), |buffer| {
-            buffer.insert(inkra_text::ByteOffset(0), "AFTER ");
+            buffer.insert(inkra_text::ByteOffset::new(0), "AFTER ");
         });
     });
     notes.update(cx, NoteStore::save_current);

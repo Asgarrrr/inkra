@@ -112,7 +112,7 @@ fn a_wrapped_top_row_keeps_its_offset_within_the_row(cx: &mut TestAppContext) {
     let before = drawn(window, &mut cx);
 
     assert!(view.top.below() > px(0.), "the capture lost the part-row");
-    let offset = view.top.offset().0;
+    let offset = view.top.offset().get();
     assert!(
         offset > 0 && !text[..offset].ends_with('\n'),
         "the top row should be a wrapped one, not a line start"

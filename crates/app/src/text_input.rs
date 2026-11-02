@@ -20,7 +20,7 @@ use gpui::{
     Window,
 };
 use inkra_editor::{EditorState, Selection};
-use inkra_text::{Buffer, ByteOffset, Diff};
+use inkra_text::{Buffer, ByteOffset, Diff, Utf16Offset};
 
 use crate::editor::layout::DocumentLayout;
 
@@ -220,9 +220,9 @@ pub(crate) trait InputHost: Render + Sized {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let buffer = self.input().buffer.read(cx);
-        let range = buffer.from_utf16_range(&range_utf16);
-        actual_range.replace(buffer.to_utf16_range(&range));
-        Some(buffer.text()[range.start.0..range.end.0].to_string())
+        let range = buffer.from_utf16_range(&to_typed(&range_utf16));
+        actual_range.replace(to_raw(buffer.to_utf16_range(&range)));
+        Some(buffer.slice(range).to_string())
     }
 
     fn selected_text_range(
@@ -234,7 +234,7 @@ pub(crate) trait InputHost: Render + Sized {
         let input = self.input();
         let selection = input.state.selection();
         Some(UTF16Selection {
-            range: input.buffer.read(cx).to_utf16_range(&selection.range()),
+            range: to_raw(input.buffer.read(cx).to_utf16_range(&selection.range())),
             reversed: selection.reversed(),
         })
     }
@@ -242,7 +242,7 @@ pub(crate) trait InputHost: Render + Sized {
     fn marked_text_range(&self, _: &mut Window, cx: &mut Context<Self>) -> Option<Range<usize>> {
         let input = self.input();
         let range = input.state.marked_range()?;
-        Some(input.buffer.read(cx).to_utf16_range(&range))
+        Some(to_raw(input.buffer.read(cx).to_utf16_range(&range)))
     }
 
     /// Not an edit: no hook runs. It still repaints, since the underline goes.
@@ -261,7 +261,12 @@ pub(crate) trait InputHost: Render + Sized {
         let text = self.input().mode.admit(new_text);
         let now = Instant::now();
         self.edit_buffer(window, cx, |state, buffer| {
-            state.replace_in_range(buffer, now, range_utf16.as_ref(), &text);
+            state.replace_in_range(
+                buffer,
+                now,
+                range_utf16.as_ref().map(to_typed).as_ref(),
+                &text,
+            );
         });
     }
 
@@ -279,7 +284,7 @@ pub(crate) trait InputHost: Render + Sized {
             state.mark_and_replace_in_range(
                 buffer,
                 now,
-                range_utf16.as_ref(),
+                range_utf16.as_ref().map(to_typed).as_ref(),
                 &text,
                 new_selected_range_utf16,
             );
@@ -295,7 +300,10 @@ pub(crate) trait InputHost: Render + Sized {
     ) -> Option<Bounds<Pixels>> {
         let input = self.input();
         let layout = input.last_layout.as_ref()?;
-        let range = input.buffer.read(cx).from_utf16_range(&range_utf16);
+        let range = input
+            .buffer
+            .read(cx)
+            .from_utf16_range(&to_typed(&range_utf16));
         // `range_bounds` is element-relative and already clamped to the row
         // holding `range.start`; the platform wants window coordinates.
         let local = layout.range_bounds(&range);
@@ -314,6 +322,15 @@ pub(crate) trait InputHost: Render + Sized {
         let input = self.input();
         let offset = input.offset_at(position)?;
         let buffer = input.buffer.read(cx);
-        Some(buffer.to_utf16(buffer.clip(offset)).0)
+        Some(buffer.to_utf16(buffer.clip(offset)).get())
     }
+}
+
+// The protocol speaks `Range<usize>` in UTF-16 units; the buffer speaks `Utf16Offset`.
+fn to_typed(range: &Range<usize>) -> Range<Utf16Offset> {
+    Utf16Offset::new(range.start)..Utf16Offset::new(range.end)
+}
+
+fn to_raw(range: Range<Utf16Offset>) -> Range<usize> {
+    range.start.get()..range.end.get()
 }

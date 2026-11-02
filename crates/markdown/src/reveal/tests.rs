@@ -5,7 +5,7 @@ use inkra_text::ByteOffset;
 use super::{Conceal, is_active, touched};
 
 fn range(start: usize, end: usize) -> Range<ByteOffset> {
-    ByteOffset(start)..ByteOffset(end)
+    ByteOffset::new(start)..ByteOffset::new(end)
 }
 
 fn bold() -> Conceal {

@@ -83,8 +83,8 @@ fn assert_addressable(buffer: &Buffer, state: &EditorState) -> Result<(), TestCa
         buffer.len()
     );
     prop_assert!(
-        buffer.text().is_char_boundary(selection.start().0)
-            && buffer.text().is_char_boundary(selection.end().0),
+        buffer.text().is_char_boundary(selection.start().get())
+            && buffer.text().is_char_boundary(selection.end().get()),
         "selection {}..{} splits a character in {:?}",
         selection.start(),
         selection.end(),
@@ -100,15 +100,15 @@ fn assert_addressable(buffer: &Buffer, state: &EditorState) -> Result<(), TestCa
             buffer.len()
         );
         prop_assert!(
-            buffer.text().is_char_boundary(marked.start.0)
-                && buffer.text().is_char_boundary(marked.end.0),
+            buffer.text().is_char_boundary(marked.start.get())
+                && buffer.text().is_char_boundary(marked.end.get()),
             "composing region {}..{} splits a character",
             marked.start,
             marked.end
         );
     }
 
-    let _ = &buffer.text()[selection.start().0..selection.end().0];
+    let _ = buffer.slice(selection.start()..selection.end());
     Ok(())
 }
 
@@ -138,7 +138,7 @@ proptest! {
                     state.move_(&buffer, movement.into(), extend);
                 }
                 Gesture::MoveTo(at, extend) => {
-                    state.move_to(&buffer, ByteOffset(at % (buffer.len().0 + 1)), extend);
+                    state.move_to(&buffer, ByteOffset::new(at % (buffer.len().get() + 1)), extend);
                 }
                 Gesture::SelectAll => state.select_all(&buffer),
                 Gesture::Undo => {
@@ -162,19 +162,19 @@ proptest! {
     ) {
         let text = parts.concat();
         let mut buffer = Buffer::new(text.clone());
-        let mut state = EditorState::new(Selection::at(ByteOffset(0)));
+        let mut state = EditorState::new(Selection::at(ByteOffset::new(0)));
 
-        state.move_to(&buffer, ByteOffset(anchor % (text.len() + 1)), false);
-        state.move_to(&buffer, ByteOffset(head % (text.len() + 1)), true);
+        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false);
+        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true);
 
         let range = state.selection().range();
         let mut expected = text.clone();
-        expected.replace_range(range.start.0..range.end.0, &typed);
+        expected.replace_range(range.start.get()..range.end.get(), &typed);
 
         state.edit(&mut buffer, Instant::now(), range.clone(), &typed);
 
         prop_assert_eq!(buffer.text(), expected.as_str());
-        prop_assert_eq!(state.cursor(), ByteOffset(range.start.0 + typed.len()));
+        prop_assert_eq!(state.cursor(), range.start + typed.len());
         prop_assert!(state.selection().is_empty());
     }
 
@@ -191,9 +191,9 @@ proptest! {
         }
 
         let mut buffer = Buffer::new(text.clone());
-        let mut state = EditorState::new(Selection::at(ByteOffset(0)));
-        state.move_to(&buffer, ByteOffset(anchor % (text.len() + 1)), false);
-        state.move_to(&buffer, ByteOffset(head % (text.len() + 1)), true);
+        let mut state = EditorState::new(Selection::at(ByteOffset::new(0)));
+        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false);
+        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true);
 
         let selection = state.selection().range();
         let line = buffer.line_range(buffer.line_for_offset(state.cursor()));
@@ -237,7 +237,7 @@ fn boundary(text: &str, pick: usize) -> ByteOffset {
         .map(|(index, _)| index)
         .chain([text.len()])
         .collect();
-    ByteOffset(boundaries[pick % boundaries.len()])
+    ByteOffset::new(boundaries[pick % boundaries.len()])
 }
 
 /// A selection from `tail` to `head`, carrying a goal so a kept or dropped goal shows.

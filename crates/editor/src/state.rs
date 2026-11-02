@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use inkra_text::{Bias, Buffer, ByteOffset, Diff};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff, Utf16Offset};
 
 use crate::selection::{Goal, Selection};
 
@@ -72,8 +72,7 @@ impl EditorState {
         let start = range.start;
         buffer.transact_at(now, |buffer| buffer.replace(range, text));
         // An edit moves the text under the caret, so a remembered column no longer describes it.
-        self.selection
-            .collapse_to(ByteOffset(start.0 + text.len()), Goal::None);
+        self.selection.collapse_to(start + text.len(), Goal::None);
         self.marked_range = None;
     }
 
@@ -86,7 +85,7 @@ impl EditorState {
     pub fn target_range(
         &self,
         buffer: &Buffer,
-        range_utf16: Option<&Range<usize>>,
+        range_utf16: Option<&Range<Utf16Offset>>,
     ) -> Range<ByteOffset> {
         range_utf16
             .map(|range| buffer.from_utf16_range(range))
@@ -98,7 +97,7 @@ impl EditorState {
         &mut self,
         buffer: &mut Buffer,
         now: Instant,
-        range_utf16: Option<&Range<usize>>,
+        range_utf16: Option<&Range<Utf16Offset>>,
         text: &str,
     ) {
         let range = self.target_range(buffer, range_utf16);
@@ -110,7 +109,7 @@ impl EditorState {
         &mut self,
         buffer: &mut Buffer,
         now: Instant,
-        range_utf16: Option<&Range<usize>>,
+        range_utf16: Option<&Range<Utf16Offset>>,
         text: &str,
         selected_utf16: Option<Range<usize>>,
     ) {
@@ -118,11 +117,11 @@ impl EditorState {
         let start = range.start;
         self.edit(buffer, now, range, text);
 
-        self.set_marked_range((!text.is_empty()).then(|| start..ByteOffset(start.0 + text.len())));
+        self.set_marked_range((!text.is_empty()).then(|| start..start + text.len()));
 
         if let Some(selected) = selected_utf16 {
-            let inserted_at = buffer.to_utf16(start).0;
-            let cursor = buffer.from_utf16(inkra_text::Utf16Offset(inserted_at + selected.end));
+            let inserted_at = buffer.to_utf16(start);
+            let cursor = buffer.from_utf16(inserted_at + selected.end);
             self.move_to(buffer, cursor, false);
         }
     }
@@ -161,7 +160,7 @@ impl EditorState {
             self.edit(buffer, now, start..start, &copied.text);
             // The insertion sits before the caret, so it keeps its column; `edit` alone would reset it to line start.
             self.selection
-                .collapse_to(ByteOffset(caret.0 + copied.text.len()), Goal::None);
+                .collapse_to(caret + copied.text.len(), Goal::None);
         } else {
             self.insert(buffer, now, &copied.text);
         }
@@ -173,7 +172,7 @@ impl EditorState {
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
         if !self.selection.is_empty() {
             let range = self.selection.range();
-            let text = buffer.text()[range.start.0..range.end.0].to_string();
+            let text = buffer.slice(range.start..range.end).to_string();
             return (
                 range,
                 Copied {
@@ -186,12 +185,8 @@ impl EditorState {
         let line = self.line(buffer);
         // `line_range` stops before the newline, so at most one terminator byte follows it.
         let terminated = line.end < buffer.len();
-        let end = if terminated {
-            ByteOffset(line.end.0 + 1)
-        } else {
-            line.end
-        };
-        let mut text = buffer.text()[line.start.0..end.0].to_string();
+        let end = if terminated { line.end + 1 } else { line.end };
+        let mut text = buffer.slice(line.start..end).to_string();
         if !terminated {
             text.push('\n');
         }
@@ -239,7 +234,7 @@ impl EditorState {
             // From the head, so Home after a shift-selection lands on the caret's line, not the anchor's.
             LogicalMovement::LineStart => self.line(buffer).start,
             LogicalMovement::LineEnd => self.line(buffer).end,
-            LogicalMovement::DocStart => ByteOffset(0),
+            LogicalMovement::DocStart => ByteOffset::new(0),
             LogicalMovement::DocEnd => buffer.len(),
         };
         self.move_to(buffer, target, extend);
@@ -274,7 +269,7 @@ impl EditorState {
     }
 
     pub fn select_all(&mut self, buffer: &Buffer) {
-        self.selection = Selection::new(ByteOffset(0)..buffer.len(), false);
+        self.selection = Selection::new(ByteOffset::new(0)..buffer.len(), false);
     }
 
     /// Not a repaint gate: the app notifies unconditionally regardless; the bool only tells callers apart.

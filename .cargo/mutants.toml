@@ -14,7 +14,7 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Matched by column, not line, so edits above it do not silently re-enable it.
 # Equivalent. `removed_len` is a `usize`, so `>= 0` is always true. When
 # `removed_len == 0`, `touched_end == at`, and this branch has `offset >= at`,
-# so `offset.0 < touched_end` is false and the conjunction is false either way.
+# so `offset < touched_end` is false and the conjunction is false either way.
 #
 # Matched by function, not line, for the same reason.
 # Equivalent. The `Options` flags in `options` are pairwise disjoint bits in
@@ -54,7 +54,7 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
 # one after another, so the first drains the queue: 0 and 1 give the same walk.
 exclude_re = [
-    "^crates/text/src/anchor\\.rs:[0-9]+:48: replace > with >= in transform$",
+    "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
     "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in NoteIndex::backlinks$",
     "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",

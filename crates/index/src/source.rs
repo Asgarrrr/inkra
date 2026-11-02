@@ -34,7 +34,7 @@ impl Source {
                 let target = Target::parse(&link);
                 matches!(target, Target::Note { .. }).then(|| {
                     let (context, context_link) =
-                        context(text, link.range.start.0..link.range.end.0);
+                        context(text, link.range.start.get()..link.range.end.get());
                     SourceLink {
                         target,
                         range: link.range,

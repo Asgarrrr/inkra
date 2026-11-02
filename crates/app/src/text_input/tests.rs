@@ -222,7 +222,7 @@ fn the_ime_rectangle_hit_tests_back_to_its_range(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_hit_test_while_scrolled_uses_the_painted_bounds(cx: &mut TestAppContext) {
     let (view, mut visual) = editor(cx, &"line\n".repeat(300));
-    let line_120 = ByteOffset(120 * "line\n".len());
+    let line_120 = ByteOffset::new(120 * "line\n".len());
     view.update(&mut visual, |view, cx| view.scroll_to_top(line_120, cx));
     visual.run_until_parked();
 

@@ -171,7 +171,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
             assert_eq!(layout.row_count(), 1);
             assert_eq!(layout.top_for_row(0), px(0.));
 
-            let mid = ByteOffset(5); // the boundary between "hello" and " world"
+            let mid = ByteOffset::new(5); // the boundary between "hello" and " world"
             let x = layout.x_for_offset(mid);
             assert_eq!(layout.offset_for_position(point(x, px(0.))), mid);
         });

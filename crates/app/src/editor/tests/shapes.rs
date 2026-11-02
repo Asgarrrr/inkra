@@ -138,7 +138,7 @@ fn a_write_outside_the_gates_reaches_the_next_paint(cx: &mut TestAppContext) {
 
     buffer.update(cx, |buffer, cx| {
         buffer.transact_at(std::time::Instant::now(), |buffer| {
-            buffer.insert(ByteOffset(1), "c");
+            buffer.insert(ByteOffset::new(1), "c");
         });
         cx.notify();
     });

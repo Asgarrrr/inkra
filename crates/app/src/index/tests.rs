@@ -74,7 +74,7 @@ pub(super) async fn saved_edit(
         .expect("the note opens");
     buffer.update(cx, |buffer, cx| {
         buffer.transact_at(Instant::now(), |buffer| {
-            let all = ByteOffset(0)..buffer.len();
+            let all = ByteOffset::new(0)..buffer.len();
             buffer.replace(all, text);
         });
         cx.notify();
