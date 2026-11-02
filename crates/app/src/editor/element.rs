@@ -71,23 +71,7 @@ impl Element for TextElement {
         let measured = stash.clone();
         let layout_id =
             window.request_measured_layout(style, move |known, available, window, cx| {
-                // The sizing pass hands `known` unclamped by max_size; only the
-                // layout pass clamps, so the widest width is reapplied here.
-                let definite = known
-                    .width
-                    .or(match available.width {
-                        AvailableSpace::Definite(width) => Some(width),
-                        _ => None,
-                    })
-                    .map(|width| width.min(widest));
-
-                // Wrapped text has no minimum width; reporting a width here
-                // would become the flex item's automatic minimum and push it past a narrower pane.
-                let reported = match (known.width, available.width) {
-                    (None, AvailableSpace::MinContent) => px(0.),
-                    _ => definite.unwrap_or(widest),
-                };
-
+                let (definite, reported) = widths(known.width, available.width, widest);
                 let editor = editor.read(cx);
                 // An intrinsic query asks only for a width, so it reuses the last one's layout.
                 let text = definite.map_or_else(
@@ -107,21 +91,7 @@ impl Element for TextElement {
                 {
                     return size(reported, layout.height());
                 }
-                let selection = editor.input.state().selection().range();
-                let marked = editor.input.state().marked_range();
-                let inputs = LayoutInputs {
-                    buffer: editor.input.buffer().read(cx),
-                    markdown: editor.markdown(),
-                    selection: &selection,
-                    marked: marked.as_ref(),
-                    style: &text_style,
-                    wrap_width: Some(text),
-                };
-                let previous = editor.input.last_layout();
-                let layout = match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
-                    Some(last) => Rc::clone(last),
-                    None => Rc::new(shape_document(&inputs, previous.map(Rc::as_ref), window)),
-                };
+                let layout = layout_at(editor, &text_style, text, window, cx);
                 let height = layout.height();
                 stash.push(layout);
                 size(reported, height)
@@ -199,6 +169,55 @@ pub(super) struct EditorPrepaint {
     painted: Prepainted,
     /// Shifted by the offset prepaint resolved, so paint places the text where the next frame will.
     text: Bounds<Pixels>,
+}
+
+/// The width to lay out at, if the pass gave one, and the width to report.
+fn widths(
+    known: Option<Pixels>,
+    available: AvailableSpace,
+    widest: Pixels,
+) -> (Option<Pixels>, Pixels) {
+    // The sizing pass hands `known` unclamped by max_size; only the
+    // layout pass clamps, so the widest width is reapplied here.
+    let definite = known
+        .or(match available {
+            AvailableSpace::Definite(width) => Some(width),
+            _ => None,
+        })
+        .map(|width| width.min(widest));
+
+    // Wrapped text has no minimum width; reporting a width here
+    // would become the flex item's automatic minimum and push it past a narrower pane.
+    let reported = match (known, available) {
+        (None, AvailableSpace::MinContent) => px(0.),
+        _ => definite.unwrap_or(widest),
+    };
+    (definite, reported)
+}
+
+/// The last layout when it still fits these inputs, else a new shape.
+fn layout_at(
+    editor: &EditorView,
+    text_style: &TextStyle,
+    text: Pixels,
+    window: &mut Window,
+    cx: &App,
+) -> Rc<DocumentLayout> {
+    let selection = editor.input.state().selection().range();
+    let marked = editor.input.state().marked_range();
+    let inputs = LayoutInputs {
+        buffer: editor.input.buffer().read(cx),
+        markdown: editor.markdown(),
+        selection: &selection,
+        marked: marked.as_ref(),
+        style: text_style,
+        wrap_width: Some(text),
+    };
+    let previous = editor.input.last_layout();
+    match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
+        Some(last) => Rc::clone(last),
+        None => Rc::new(shape_document(&inputs, previous.map(Rc::as_ref), window)),
+    }
 }
 
 /// The measured layout nearest the element's width — not equal, since bounds

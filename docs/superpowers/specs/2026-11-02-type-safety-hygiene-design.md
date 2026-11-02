@@ -1,6 +1,6 @@
 # Type safety and hygiene: batches 3 and 4 of the 2026-11-02 audit
 
-Status: **S1, S2, S3 and S4 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2, S3, S4 and S5 built 2026-11-02.** Later slices append their sections here.
 
 ## Method
 
@@ -184,6 +184,48 @@ The audit found three more loose types:
   `# Panics` docs are unchanged. `unwrap_or_else(|error| panic!(..))` on a
   `Result` stays, because it prints the error. `closed.rs`'s match arm and
   `lib.rs`'s `assert!` stay: neither unwraps an `Option`.
+
+## H1 and H2
+
+`buffer.rs` held every concern of `Buffer` in 570 lines. Three bodies ran past 80
+lines: `shape_document`, `request_layout` and `Vault::applied`. Both changes move
+code. No signature, visibility of a public item or behaviour changes.
+
+### As built (S5)
+
+- `buffer.rs` keeps `Buffer`, its fields, `new`, `text`, `len`, `is_empty`,
+  `slice` and `splice`, and re-exports `GROUP_INTERVAL`, `Txn` and `Version`.
+  One child module holds each other concern, in `impl Buffer` blocks, after the
+  `sidebar/{tree,edit,render}.rs` pattern:
+  - `history.rs`: `Edit`, `Transaction`, `Version`, `Txn`, `version`, the
+    `transact` family, `undo`, `redo`
+  - `utf16.rs`: the UTF-16 conversions and the checkpoint walk
+  - `lines.rs`: line counts and ranges
+  - `graphemes.rs`: grapheme steps and clipping
+  - `anchors.rs`: `anchor`, `resolve`, `forget`
+- A child sees the private fields of `Buffer` already. Three items widen to
+  `pub(super)` because `splice` stays in the parent and `tests.rs` reads them:
+  `shift_anchors`, `utf16_len`, and the fields `Edit::removed`, `Edit::inserted`
+  and `Transaction::edits` (one test counts the bytes an undo stack records).
+  `Edit` and `Transaction` become `pub(super)` so the parent can name them in
+  `Buffer`'s fields. Nothing is visible outside the `buffer` module.
+- `tests.rs` imports `Bias`, `Anchor`, `transform`, `Duration` and `Instant`
+  itself, since the parent no longer imports them.
+- `Buffer::clip` keeps its path, so the `.cargo/mutants.toml` note stays true.
+  No mutants exclude names `buffer.rs`.
+- `./scripts/test-names.sh` before and after differs only in the `(line N)`
+  suffix of the nine moved doctests.
+- `request_layout` gains `widths` (the width to lay out at and the width to
+  report) and `layout_at` (reuse the last layout or shape). It drops from 87
+  lines to 56.
+- `shape_document` gains `line_metrics`, `heading_opening`, `rows_height` and
+  `carry_or_shape`, which replaces `carried`. It drops from 110 lines to 97, not
+  to 60: the line cursors and the row totals are one running state, and folding
+  them into a function needs a type, which this slice does not add.
+- `Vault::applied` gains `collect_rows` (a method) and `kept_folders` (a free
+  function). It drops from 90 lines to 37. `vault.rs` ends at exactly 400 lines;
+  the next addition to it splits a module.
+- The shots before and after are byte-identical (`cmp`).
 
 ## Deviations from Zed
 

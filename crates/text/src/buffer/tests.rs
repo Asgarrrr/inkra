@@ -1,6 +1,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use std::time::{Duration, Instant};
+
 use super::*;
+use crate::anchor::{Anchor, Bias, transform};
 
 fn at(offset: usize) -> ByteOffset {
     ByteOffset::new(offset)
