@@ -144,6 +144,15 @@ pub(crate) fn gone_banner_text() -> Rgba {
     rgb(0xe0b27a)
 }
 
+/// The one line reporting a failure (quit-and-failures spec).
+pub(crate) fn notice_background() -> Rgba {
+    rgb(0x3b2424)
+}
+
+pub(crate) fn notice_text() -> Rgba {
+    rgb(0xe8a0a0)
+}
+
 /// The tab bar over the note column (tabs spec, A5): the sidebar's shade, the active tab the editor's.
 pub(crate) fn tab_bar_background() -> Rgba {
     rgb(0x181818)

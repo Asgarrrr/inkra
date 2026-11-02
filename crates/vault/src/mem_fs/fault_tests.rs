@@ -81,3 +81,19 @@ fn fail_next_saves_after_preserve_keeps_one_copy_and_reports_unwritten() {
         .count();
     assert_eq!(copies, 1);
 }
+
+#[test]
+fn make_unreadable_refuses_a_load_of_that_file() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+
+    fs.make_unreadable("/vault/a.md");
+
+    let error = block_on(fs.load(Path::new("/vault/a.md"))).expect_err("a is unreadable");
+    assert!(
+        matches!(&error, VaultError::Io { source, .. } if source.kind() == ErrorKind::PermissionDenied),
+        "{error}"
+    );
+    block_on(fs.load(Path::new("/vault/b.md"))).expect("b still loads");
+}

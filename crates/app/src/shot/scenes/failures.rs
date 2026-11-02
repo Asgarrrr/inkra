@@ -14,3 +14,10 @@ pub(super) fn save_failed(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.wait(AUTOSAVE_DELAY);
     window
 }
+
+pub(super) fn open_failed(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(&[("index.md", "# Index\n"), ("note.md", SAMPLE)]);
+    stage.fs().make_unreadable("/vault/note.md");
+    stage.click_tree_row(window, 1.);
+    window
+}

@@ -9,6 +9,7 @@ use super::{MemFs, State};
 use crate::fs::Result;
 
 impl MemFs {
+    /// A folder's listing and a file's load fail with `PermissionDenied`.
     pub fn make_unreadable(&self, path: impl Into<PathBuf>) {
         self.state().unreadable = Some(path.into());
     }
@@ -83,6 +84,13 @@ impl MemFs {
 }
 
 impl State {
+    pub(super) fn refused_load(&self, path: &Path) -> Result<()> {
+        if self.unreadable.as_deref() == Some(path) {
+            return Err(io(path, ErrorKind::PermissionDenied));
+        }
+        Ok(())
+    }
+
     pub(super) fn injected_save_failure(&mut self, path: &Path) -> Result<()> {
         injected(&mut self.failing_saves, path)
     }

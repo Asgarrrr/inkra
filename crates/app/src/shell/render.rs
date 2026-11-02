@@ -92,6 +92,7 @@ impl AppShell {
                     .flex()
                     .flex_col()
                     .children(self.render_gone_banner(cx))
+                    .children(self.render_notice(cx))
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
                     .child(div().flex_1().min_h_0().child(match self.editor() {
                         Some(editor) => editor.clone().into_any_element(),
