@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::RelPath;
-use crate::fs::{FileIdentity, Fs, Kind, Mtime, Result};
+use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Mtime, Result};
 use crate::jobs::Serial;
 
 mod identity;
@@ -202,63 +202,10 @@ impl Vault {
         let state = &self.state;
         let whole = walk.reach == Reach::Whole;
         let read: HashSet<&Path> = walk.read.iter().map(RelPath::as_path).collect();
-        let mut rows: Vec<Row> = walk
-            .found
-            .into_iter()
-            .filter_map(|child| {
-                Some(Row {
-                    id: None,
-                    path: RelPath::new(child.path.strip_prefix(&state.root).ok()?)?,
-                    kind: child.kind,
-                    mtime: child.mtime,
-                    identity: child.identity,
-                })
-            })
-            .collect();
-        // A file the walk found claims its inode from an entry kept under a folder it did not read.
-        let unclaimed: HashSet<FileIdentity> = rows.iter().map(|row| row.identity).collect();
-        for (identity, id) in &state.by_identity {
-            if unclaimed.contains(identity) {
-                continue;
-            }
-            let Some(entry) = self.entry(*id) else {
-                continue;
-            };
-            if entry
-                .path
-                .as_path()
-                .parent()
-                .is_some_and(|parent| read.contains(parent))
-            {
-                continue;
-            }
-            rows.push(Row {
-                id: Some(entry.id),
-                path: entry.path.clone(),
-                kind: entry.kind,
-                mtime: entry.mtime,
-                identity: *identity,
-            });
-        }
+        let (rows, unclaimed) = self.collect_rows(walk.found, &read);
         // Path order, not the walk's: a parallel walk reads folders in no fixed order.
         let (rows, next_id) = self.mint(sorted(rows), unclaimed);
-
-        // A folder sorts before its subtree, so one pass knows every surviving folder.
-        let keep: Vec<bool> = {
-            let mut folders: HashSet<&Path> = HashSet::new();
-            rows.iter()
-                .map(|(entry, _)| {
-                    let path = entry.path.as_path();
-                    let kept = path.parent().is_none_or(|parent| {
-                        parent.as_os_str().is_empty() || folders.contains(parent)
-                    });
-                    if kept && entry.kind == Kind::Dir {
-                        folders.insert(path);
-                    }
-                    kept
-                })
-                .collect()
-        };
+        let keep = surviving_rows(&rows);
         let mut by_identity = HashMap::with_capacity(rows.len());
         let mut entries = Vec::with_capacity(rows.len());
         for ((entry, identity), kept) in rows.into_iter().zip(keep) {
@@ -287,6 +234,53 @@ impl Vault {
                 read_whole: state.read_whole || whole,
             }),
         }
+    }
+
+    /// The rows a walk answers with (what it found, and the entries kept under a folder it did not
+    /// read), and the found files' identities.
+    fn collect_rows(
+        &self,
+        found: Vec<DirEntry>,
+        read: &HashSet<&Path>,
+    ) -> (Vec<Row>, HashSet<FileIdentity>) {
+        let mut rows: Vec<Row> = found
+            .into_iter()
+            .filter_map(|child| {
+                Some(Row {
+                    id: None,
+                    path: RelPath::new(child.path.strip_prefix(&self.state.root).ok()?)?,
+                    kind: child.kind,
+                    mtime: child.mtime,
+                    identity: child.identity,
+                })
+            })
+            .collect();
+        // A file the walk found claims its inode from an entry kept under a folder it did not read.
+        let unclaimed: HashSet<FileIdentity> = rows.iter().map(|row| row.identity).collect();
+        for (identity, id) in &self.state.by_identity {
+            if unclaimed.contains(identity) {
+                continue;
+            }
+            let Some(entry) = self.entry(*id) else {
+                continue;
+            };
+            if entry
+                .path
+                .as_path()
+                .parent()
+                .is_some_and(|parent| read.contains(parent))
+            {
+                continue;
+            }
+            rows.push(Row {
+                id: Some(entry.id),
+                path: entry.path.clone(),
+                kind: entry.kind,
+                mtime: entry.mtime,
+                identity: *identity,
+            });
+        }
+        (rows, unclaimed)
     }
 
     #[must_use]
@@ -336,6 +330,23 @@ struct Row {
     kind: Kind,
     mtime: Mtime,
     identity: FileIdentity,
+}
+
+/// Whether each row's parent folder survives; a folder sorts before its subtree, so one pass knows.
+fn surviving_rows(rows: &[(Entry, FileIdentity)]) -> Vec<bool> {
+    let mut folders: HashSet<&Path> = HashSet::new();
+    rows.iter()
+        .map(|(entry, _)| {
+            let path = entry.path.as_path();
+            let kept = path
+                .parent()
+                .is_none_or(|parent| parent.as_os_str().is_empty() || folders.contains(parent));
+            if kept && entry.kind == Kind::Dir {
+                folders.insert(path);
+            }
+            kept
+        })
+        .collect()
 }
 
 fn sorted(rows: Vec<Row>) -> Vec<Row> {

@@ -116,15 +116,8 @@ pub(crate) fn shape_document(
         .map(|(index, (start, text))| {
             let range = start..start + text.len();
             let heading = line_heading(&mut headings, &range);
-            // Inside a container the marker keeps its inline conceal: no margin exists there.
-            let opening = heading
-                .and_then(|heading| heading.marker.clone())
-                .filter(|marker| marker.start == range.start);
-            let (font_size, row_height) = heading
-                .map(|heading| theme::heading_metrics(heading.level))
-                .map_or((body_size, body_height), |metrics| {
-                    (metrics.size, metrics.line_height)
-                });
+            let opening = heading_opening(heading, &range);
+            let (font_size, row_height) = line_metrics(heading, (body_size, body_height));
             let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
             let line_conceals =
                 line_items(&mut conceals, |conceal| conceal.marker.start <= range.end);
@@ -150,21 +143,15 @@ pub(crate) fn shape_document(
             let shown = display.text(text);
             let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
             let wrap = wrap_width.map(|width| (width - indent(prefix.as_ref())).max(px(0.)));
-            let shape = previous
-                .and_then(|previous| {
-                    let lines = candidates(previous, index, start, buffer.len());
-                    carried(lines, &shown, font_size, &runs, wrap)
-                })
-                .unwrap_or_else(|| {
-                    Rc::new(LineShape::new(&shown, font_size, runs, wrap, start, window))
-                });
+            let near = previous
+                .into_iter()
+                .flat_map(|previous| candidates(previous, index, start, buffer.len()));
+            let shape = carry_or_shape(near, &shown, font_size, runs, wrap, start, window);
             let rows = rows(&shown, &shape.wrapped, &range, &display);
             let first_row = row_count;
             row_count += rows.len();
             let line_top = top;
-            #[allow(clippy::cast_precision_loss)]
-            let row_total = rows.len() as f32;
-            top += row_height * row_total;
+            top += rows_height(rows.len(), row_height);
             bars.extend(line_bars(prefix.as_ref(), line_top, top));
             LineLayout {
                 shape,
@@ -193,18 +180,39 @@ pub(crate) fn shape_document(
     }
 }
 
-/// The first candidate's shape that took exactly these `shape_text` arguments.
-fn carried<'p>(
+/// The first candidate's shape that took exactly these `shape_text` arguments, else a new one.
+fn carry_or_shape<'p>(
     candidates: impl Iterator<Item = &'p LineLayout>,
     text: &str,
     font_size: Pixels,
-    runs: &[TextRun],
+    runs: Vec<TextRun>,
     wrap: Option<Pixels>,
-) -> Option<Rc<LineShape>> {
-    candidates
-        .map(|line| &line.shape)
-        .find(|shape| shape.shaped_from(text, font_size, runs, wrap))
-        .map(Rc::clone)
+    start: ByteOffset,
+    window: &mut Window,
+) -> Rc<LineShape> {
+    let mut shapes = candidates.map(|line| &line.shape);
+    match shapes.find(|shape| shape.shaped_from(text, font_size, &runs, wrap)) {
+        Some(shape) => Rc::clone(shape),
+        None => Rc::new(LineShape::new(text, font_size, runs, wrap, start, window)),
+    }
+}
+
+/// The marker that opens the line as a margin. Inside a container it keeps its inline conceal:
+/// no margin exists there.
+fn heading_opening(
+    heading: Option<&Heading>,
+    range: &Range<ByteOffset>,
+) -> Option<Range<ByteOffset>> {
+    heading
+        .and_then(|heading| heading.marker.clone())
+        .filter(|marker| marker.start == range.start)
+}
+
+/// A heading line takes its level's size and row height; any other line takes the body's.
+fn line_metrics(heading: Option<&Heading>, body: (Pixels, Pixels)) -> (Pixels, Pixels) {
+    heading
+        .map(|heading| theme::heading_metrics(heading.level))
+        .map_or(body, |metrics| (metrics.size, metrics.line_height))
 }
 
 /// The previous layout's line at `index`, then the one the edit moved to `start`, as reuse candidates.
@@ -229,6 +237,12 @@ fn candidates(
         .into_iter()
         .flatten()
         .filter_map(|index| previous.lines.get(index))
+}
+
+fn rows_height(rows: usize, row_height: Pixels) -> Pixels {
+    #[allow(clippy::cast_precision_loss)]
+    let rows = rows as f32;
+    row_height * rows
 }
 
 /// The heading that holds the line at `range`; `rest` moves past the headings before it. A setext
