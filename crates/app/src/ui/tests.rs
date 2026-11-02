@@ -9,10 +9,9 @@ use super::{Assets, IconName};
 #[test]
 fn every_icon_loads() {
     for name in IconName::ALL {
-        let bytes = Assets
-            .load(name.path())
-            .expect("load")
-            .unwrap_or_else(|| panic!("{name:?} has no file"));
+        let Some(bytes) = Assets.load(name.path()).expect("load") else {
+            panic!("{name:?} has no file");
+        };
         assert!(bytes.starts_with(b"<svg"), "{name:?} is not an svg");
     }
 }

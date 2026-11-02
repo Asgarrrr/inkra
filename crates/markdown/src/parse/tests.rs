@@ -1,5 +1,6 @@
 use super::{Markdown, parse};
-use crate::Styles;
+use crate::HeadingLevel::{H1, H2};
+use crate::{HeadingLevel, Styles};
 
 const S: Styles = Styles::STRONG;
 const E: Styles = Styles::EMPHASIS;
@@ -103,27 +104,27 @@ const L: Styles = Styles::LINK;
 const Q: Styles = Styles::QUOTE;
 const F: Styles = Styles::FRONTMATTER;
 
-fn h(level: u8) -> Styles {
+fn h(level: HeadingLevel) -> Styles {
     Styles::heading(level)
 }
 
 #[test]
 fn atx_headings_mark_their_hashes() {
-    assert_eq!(styled("# T"), vec![("# ", h(1) | M), ("T", h(1))]);
+    assert_eq!(styled("# T"), vec![("# ", h(H1) | M), ("T", h(H1))]);
     assert_eq!(
         styled("# T ##"),
-        vec![("# ", h(1) | M), ("T", h(1)), (" ##", h(1) | M)]
+        vec![("# ", h(H1) | M), ("T", h(H1)), (" ##", h(H1) | M)]
     );
 }
 
 #[test]
 fn a_heading_stops_at_its_line_ending() {
-    assert_eq!(styled("## T\nx"), vec![("## ", h(2) | M), ("T", h(2))]);
+    assert_eq!(styled("## T\nx"), vec![("## ", h(H2) | M), ("T", h(H2))]);
 }
 
 #[test]
 fn a_setext_heading_marks_its_underline() {
-    assert_eq!(styled("T\n==="), vec![("T", h(1)), ("===", h(1) | M)]);
+    assert_eq!(styled("T\n==="), vec![("T", h(H1)), ("===", h(H1) | M)]);
 }
 
 #[test]
@@ -131,10 +132,10 @@ fn a_heading_carries_its_inline_styles() {
     assert_eq!(
         styled("# **b**"),
         vec![
-            ("# ", h(1) | M),
-            ("**", h(1) | S | M),
-            ("b", h(1) | S),
-            ("**", h(1) | S | M),
+            ("# ", h(H1) | M),
+            ("**", h(H1) | S | M),
+            ("b", h(H1) | S),
+            ("**", h(H1) | S | M),
         ]
     );
 }
@@ -343,15 +344,15 @@ fn atx_headings_conceal_their_hashes_but_setext_does_not() {
 
 #[test]
 fn a_heading_hides_its_opening_sequence_only() {
-    assert_eq!(styled("# #"), vec![("# #", h(1) | M)]);
+    assert_eq!(styled("# #"), vec![("# #", h(H1) | M)]);
     assert_eq!(concealed("# #"), vec![("# ", "# #", "")]);
     assert_eq!(
         styled("# a\\*b"),
         vec![
-            ("# ", h(1) | M),
-            ("a", h(1)),
-            ("\\", h(1) | M),
-            ("*b", h(1))
+            ("# ", h(H1) | M),
+            ("a", h(H1)),
+            ("\\", h(H1) | M),
+            ("*b", h(H1))
         ]
     );
     assert_eq!(concealed("# a\\*b"), vec![("# ", "# a\\*b", "")]);

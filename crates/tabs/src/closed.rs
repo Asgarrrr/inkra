@@ -78,10 +78,9 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
         let shown = was_active.then(|| {
             self.active = self.mru[0];
             let index = self.active_index();
-            let place = self.list[index]
-                .place
-                .take()
-                .unwrap_or_else(|| panic!("H8: the tab taking over held no place"));
+            let Some(place) = self.list[index].place.take() else {
+                panic!("H8: the tab taking over held no place");
+            };
             (self.active, place)
         });
         Some(Closed {

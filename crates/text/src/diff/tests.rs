@@ -216,7 +216,12 @@ fn an_anchor_at_a_hunk_end_stays_on_the_text_after_it_with_either_bias() {
 fn anchors_outside_the_hunks_stay_on_their_text() {
     let old = "keep one\nthe red fox\nkeep two\n";
     let mut buffer = Buffer::new(old);
-    let at = |word| ByteOffset::new(old.find(word).unwrap_or_else(|| panic!("no {word}")));
+    let at = |word| {
+        let Some(offset) = old.find(word) else {
+            panic!("no {word}");
+        };
+        ByteOffset::new(offset)
+    };
     let one = buffer.anchor(at("one"), Bias::Left);
     let two = buffer.anchor(at("two"), Bias::Right);
     reload(

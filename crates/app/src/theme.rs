@@ -3,7 +3,7 @@
 use gpui::{
     FontStyle, FontWeight, Pixels, Point, Rgba, StrikethroughStyle, TextStyle, point, px, rgb, rgba,
 };
-use inkra_markdown::Styles;
+use inkra_markdown::{HeadingLevel, Styles};
 
 pub(crate) const BODY_TEXT_SIZE: Pixels = px(18.);
 pub(crate) const BODY_LINE_HEIGHT: Pixels = px(28.);
@@ -15,13 +15,13 @@ pub(crate) struct HeadingMetrics {
 }
 
 /// Zed's preview scale over our body (`markdown.rs` `apply_heading_style`); H5 and H6 floor at the body size.
-pub(crate) fn heading_metrics(level: u8) -> HeadingMetrics {
+pub(crate) fn heading_metrics(level: HeadingLevel) -> HeadingMetrics {
     let (size, line_height) = match level {
-        1 => (px(34.), px(44.)),
-        2 => (px(27.), px(36.)),
-        3 => (px(22.), px(30.)),
-        4 => (px(20.), px(28.)),
-        _ => (BODY_TEXT_SIZE, BODY_LINE_HEIGHT),
+        HeadingLevel::H1 => (px(34.), px(44.)),
+        HeadingLevel::H2 => (px(27.), px(36.)),
+        HeadingLevel::H3 => (px(22.), px(30.)),
+        HeadingLevel::H4 => (px(20.), px(28.)),
+        HeadingLevel::H5 | HeadingLevel::H6 => (BODY_TEXT_SIZE, BODY_LINE_HEIGHT),
     };
     HeadingMetrics { size, line_height }
 }

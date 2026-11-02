@@ -1,11 +1,23 @@
 use std::ops::{BitOr, BitOrAssign};
 
+use pulldown_cmark::HeadingLevel;
+
 /// Semantic tags only; colour, font and size belong to `app`'s theme.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Styles(u16);
 
 /// The low three bits hold a heading level, 1 to 6; zero means no heading.
 const LEVEL: u16 = 0b111;
+
+/// pulldown-cmark's six levels, `H1` first.
+pub const HEADING_LEVELS: [HeadingLevel; 6] = [
+    HeadingLevel::H1,
+    HeadingLevel::H2,
+    HeadingLevel::H3,
+    HeadingLevel::H4,
+    HeadingLevel::H5,
+    HeadingLevel::H6,
+];
 
 impl Styles {
     pub const NONE: Self = Self(0);
@@ -18,24 +30,14 @@ impl Styles {
     pub const QUOTE: Self = Self(1 << 9);
     pub const FRONTMATTER: Self = Self(1 << 10);
 
-    /// # Panics
-    ///
-    /// When `level` is not 1 to 6: a caller bug, since pulldown-cmark has six levels.
     #[must_use]
-    pub fn heading(level: u8) -> Self {
-        assert!(
-            (1..=6).contains(&level),
-            "heading level {level} out of 1..=6"
-        );
-        Self(u16::from(level))
+    pub fn heading(level: HeadingLevel) -> Self {
+        Self(level as u16)
     }
 
     #[must_use]
-    pub fn heading_level(self) -> Option<u8> {
-        match self.0 & LEVEL {
-            0 => None,
-            level => u8::try_from(level).ok(),
-        }
+    pub fn heading_level(self) -> Option<HeadingLevel> {
+        HeadingLevel::try_from(usize::from(self.0 & LEVEL)).ok()
     }
 
     #[must_use]

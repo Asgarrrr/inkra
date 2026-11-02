@@ -3,6 +3,8 @@
 Status: **built 2026-09-30** (As built, below). Refactor: quick open, vault search and the
 command palette behave as before; a query answered at once lands inside the
 refresh that asked for it.
+Since 2026-11-02, a private `Phase` enum replaces `awaiting_matches`, `confirm_on_update` and
+`confirmed`, and the delegate confirms at most once (type-safety spec, T7).
 
 ## Problem
 

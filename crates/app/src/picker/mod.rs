@@ -55,6 +55,17 @@ impl Arrival {
     }
 }
 
+/// Where the rows stand against the query; the delegate confirms at most once per picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// The rows answer the current query.
+    Current,
+    /// Until an answer lands, the rows answer an older query; `queued` is an `enter` or `⌘↵` meanwhile.
+    Awaiting { queued: Option<Open> },
+    /// A row was confirmed: the picker is dismissing, so a deferred refresh has nothing to refresh.
+    Confirmed,
+}
+
 pub(crate) trait PickerDelegate: Sized + 'static {
     /// One answer, from `update_matches` to `apply_matches`.
     type Matches: 'static;
@@ -103,12 +114,7 @@ pub(crate) struct Picker<D: PickerDelegate> {
     scroll: UniformListScrollHandle,
     /// Held, never detached: replacing it drops the previous query's task.
     pending: Option<Task<()>>,
-    /// Until an answer lands, the rows answer an older query.
-    awaiting_matches: bool,
-    /// `enter` or `⌘↵` landed while `awaiting_matches`: confirm once the rows answer the current query.
-    confirm_on_update: Option<Open>,
-    /// A row was confirmed: the picker is dismissing, so a deferred refresh has nothing to refresh.
-    confirmed: bool,
+    phase: Phase,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -139,9 +145,7 @@ impl<D: PickerDelegate> Picker<D> {
             selected: None,
             scroll: UniformListScrollHandle::new(),
             pending: None,
-            awaiting_matches: false,
-            confirm_on_update: None,
-            confirmed: false,
+            phase: Phase::Current,
             _subscriptions: subscriptions,
         };
         picker.refresh(cx);
@@ -160,7 +164,9 @@ impl<D: PickerDelegate> Picker<D> {
 
     /// Re-runs the query as it stands.
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.awaiting_matches = true;
+        if self.phase == Phase::Current {
+            self.phase = Phase::Awaiting { queued: None };
+        }
         self.refresh_in_background(cx);
     }
 
@@ -189,18 +195,24 @@ impl<D: PickerDelegate> Picker<D> {
         self.land(arrival, cx);
     }
 
-    /// Select, scroll, clear the flag, the queued confirm, then the re-run: this order is the Interface.
+    /// Select, scroll, leave `Awaiting`, the queued confirm, then the re-run: this order is the Interface.
     fn land(&mut self, arrival: Arrival, cx: &mut Context<Self>) {
         self.select_from(arrival.row);
         if !arrival.keep_scroll {
             self.reveal_selected();
         }
-        self.awaiting_matches = false;
+        let queued = match self.phase {
+            Phase::Awaiting { queued } => {
+                self.phase = Phase::Current;
+                queued
+            }
+            Phase::Current | Phase::Confirmed => None,
+        };
         cx.notify();
-        if let Some(open) = self.confirm_on_update.take() {
+        if let Some(open) = queued {
             self.confirm_selected(open, cx);
         }
-        if arrival.rerun && !self.confirmed {
+        if arrival.rerun && self.phase != Phase::Confirmed {
             self.refresh_in_background(cx);
         }
     }
@@ -255,18 +267,18 @@ impl<D: PickerDelegate> Picker<D> {
 
     /// As Zed's `confirm_on_update`: `enter` typed right after a key confirms that key's result.
     fn confirm(&mut self, open: Open, cx: &mut Context<Self>) {
-        if self.awaiting_matches {
-            self.confirm_on_update = Some(open);
-        } else {
-            self.confirm_selected(open, cx);
+        match self.phase {
+            Phase::Current => self.confirm_selected(open, cx),
+            Phase::Awaiting { .. } => self.phase = Phase::Awaiting { queued: Some(open) },
+            Phase::Confirmed => {}
         }
     }
 
     fn confirm_selected(&mut self, open: Open, cx: &mut Context<Self>) {
-        let Some(ix) = self.selected else {
+        let Some(ix) = self.selected.filter(|_| self.phase != Phase::Confirmed) else {
             return;
         };
-        self.confirmed = true;
+        self.phase = Phase::Confirmed;
         self.delegate.confirm(ix, open, cx);
         cx.emit(Dismissed);
     }

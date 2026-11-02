@@ -503,11 +503,10 @@ impl Buffer {
     /// If `anchor` has been forgotten, or was created by another buffer.
     #[must_use]
     pub fn resolve(&self, anchor: Anchor) -> ByteOffset {
-        self.anchors
-            .get(anchor.0)
-            .and_then(Option::as_ref)
-            .unwrap_or_else(|| panic!("anchor {} is not live in this buffer", anchor.0))
-            .offset
+        let Some(state) = self.anchors.get(anchor.0).and_then(Option::as_ref) else {
+            panic!("anchor {} is not live in this buffer", anchor.0);
+        };
+        state.offset
     }
 
     /// Drops an anchor; the slot is tombstoned, never reused, so a stale handle can't silently resolve to a new one.

@@ -98,8 +98,10 @@ impl<P, Q> Tabs<P, Q> {
     /// Only on a broken invariant: the active id is always a tab.
     #[must_use]
     pub fn active_index(&self) -> usize {
-        self.index_of(self.active)
-            .unwrap_or_else(|| panic!("the active id is always a tab"))
+        let Some(index) = self.index_of(self.active) else {
+            panic!("the active id is always a tab");
+        };
+        index
     }
 
     #[must_use]
@@ -121,10 +123,10 @@ impl<P, Q> Tabs<P, Q> {
     /// Only on a broken invariant: there is always a tab.
     #[must_use]
     pub fn last(&self) -> TabId {
-        self.list
-            .last()
-            .unwrap_or_else(|| panic!("there is always a tab"))
-            .id
+        let Some(tab) = self.list.last() else {
+            panic!("there is always a tab");
+        };
+        tab.id
     }
 
     /// The tab beside the active one, wrapping at either end.
