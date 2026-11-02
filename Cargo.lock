@@ -2707,6 +2707,7 @@ dependencies = [
  "inkra-tabs",
  "inkra-text",
  "inkra-vault",
+ "log",
  "proptest 1.11.0",
  "serde",
  "serde_json",

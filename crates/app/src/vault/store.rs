@@ -49,7 +49,14 @@ impl NoteStore {
             _watch: watch,
             #[cfg(test)]
             held_reload: None,
-            _quit: cx.on_app_quit(Self::flush_all),
+            _quit: cx.on_app_quit(|store, cx| {
+                let flush = store.flush_all(cx);
+                async move {
+                    for error in flush.await {
+                        log::error!("quit flush: {error}");
+                    }
+                }
+            }),
         };
         if store
             .vault

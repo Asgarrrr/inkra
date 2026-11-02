@@ -1,6 +1,6 @@
 # Quit and failures: close is quit, the chained flush, visible failures
 
-Status: **S1 built 2026-11-02.** Later slices append their sections here.
+Status: **S1 and S2 built 2026-11-02.** Later slices append their sections here.
 
 ## Why
 
@@ -51,10 +51,8 @@ close button all reach `AppShell::quit`:
    nothing, so a second `⌘Q` or close starts no second flush.
 2. It writes the session through the one writer, `write_session`.
 3. It starts `NoteStore::flush` (Q2).
-4. It waits for both, bounded by `QUIT_WAIT` (3 s), then calls `cx.quit()`.
-   A save that hangs on a dead disk must not hold the app open. The timer
-   bounds the quit, not the write: the write keeps running until the process
-   exits.
+4. It waits for both, bounded by `QUIT_WAIT` (Q4). Then it quits, or asks
+   first when a note is still unsaved (Q5).
 
 Two fallbacks stay:
 
@@ -90,6 +88,55 @@ So for those quits, `on_app_quit(flush_all)` is the main path, not a rare last
 resort. It is off-chain (Q2) and bounded at 200 ms. `gpui_macos` is vendored
 and stays unpatched.
 
+### Q4. `QUIT_WAIT`: the quit waits 3 s at most
+
+`quit` races the session write and `NoteStore::flush` against a
+`QUIT_WAIT` timer, 3 s. A local save takes milliseconds, so 3 s passes only
+when the disk hangs: a network volume gone, a sleeping drive. Waiting longer
+holds a frozen-looking app; waiting less gives up on a slow but live disk.
+
+The timer bounds the quit, not the write. The flush is not cancelled: a write
+that lands after the timer still lands, until the process exits.
+
+### Q5. The prompt: only when something is still unsaved
+
+After the wait, `quit` reads `NoteStore::unsaved`. Empty: it quits, with no
+prompt. A failed or still-hung write leaves its note unsaved, so the prompt
+lists exactly the notes whose text is not on disk:
+
+- A native warning alert, "Some changes are not saved.", with the detail
+  "Not on disk: “a”, “b”." The titles are `NoteStore::title`, sorted;
+  "Untitled" when a note has none.
+- **Quit Anyway** quits, and leaves `quitting` set: the app is going away.
+- **Cancel**, or a prompt dismissed without an answer, clears `quitting`, so
+  the next quit flushes and asks again.
+
+`quitting` also keeps one prompt at a time: a second `⌘Q` while the first
+prompt is open does nothing.
+
+### Q6. The logger: the `log` facade, filtered by target, stderr
+
+`logger.rs` holds the process's only `log::Log`. `run` installs it first.
+`NoteStore`'s `on_app_quit` logs each write `flush_all` reports as failed
+(`log::error!("quit flush: …")`): a Dock quit has no window left to ask in.
+
+- **The `log` facade**, which gpui already uses: gpui's own errors reach
+  the same stderr.
+- **By target, no environment filter.** `inkra*` targets print from `Warn`,
+  every other target from `Error` only: gpui warns of a duplicate font on
+  every launch, and a line must mean something failed. Zed's `zlog` reads
+  `ZED_LOG`/`RUST_LOG`, filters per scope and writes a log file; Inkra has
+  one user-facing failure channel, the notice, and needs none of that yet.
+- **A launch failure is a `log::error!`** in `run`, then exit 1.
+  `tests/cli.rs` asserts its `ERROR inkra_app…` line, so a `run` that
+  installs no logger fails a test.
+- **One line, never a panic:** `LEVEL target: message`, written with
+  `writeln!` and its error ignored. `eprintln!` panics on a closed stderr.
+
+`flush_all` keeps its synchronous copy (Q2). Its future joins the background
+writes and collects each `Err`. A `None`, a write overtaken by a newer one, is
+not an error.
+
 ## Accepted limits
 
 - **Dock quit, app-menu quit, logout and restart** run only `flush_all` and
@@ -97,9 +144,9 @@ and stays unpatched.
   can recreate the old name, and a slow disk can lose the write. Closing this
   needs `applicationShouldTerminate:` in the vendored `gpui_macos`.
 - **The quit's tests cannot see `cx.quit()`.** gpui's test platform quits as a
-  no-op (`gpui/src/platform/test/platform.rs:435`). `quit` therefore runs
-  through `begin_quit`, which returns the quit's task: it resolves only after
-  `cx.quit()`, so a test sees the step after `QUIT_WAIT` as the task's end.
+  no-op (`gpui/src/platform/test/platform.rs:435`). A test sees the step after
+  `QUIT_WAIT` through the prompt (`pending_prompt`), and a quit with nothing
+  unsaved through its writes.
 
 ## As built (S1)
 
@@ -112,3 +159,13 @@ and stays unpatched.
   contract's call to `write_session` from `quit.rs` requires the change.
 - `shell/tests/quitting.rs`: the close, `⌘Q`, a quit behind a rename, a second
   `⌘Q`, and a hung save past `QUIT_WAIT`.
+
+## As built (S2)
+
+- `shell/quit.rs`: `begin_quit` folded back into `quit`. The prompt makes the
+  step after `QUIT_WAIT` observable, so no test needs the quit's task.
+- `vault/save.rs`: `flush_all` returns the writes' errors.
+- `vault/store.rs`: the `on_app_quit` wrapper logs them.
+- `logger.rs`, `bootstrap.rs`: the logger, installed first in `run`.
+- `shell/tests/quitting.rs`: the prompt, Cancel, a second `⌘Q`, Quit Anyway.
+  The hung-save test now asserts the prompt at `QUIT_WAIT`, not the task's end.
