@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use inkra_text::{Buffer, ByteOffset, Utf16Offset};
+use inkra_text::{Buffer, ByteOffset, Utf16Offset, Version};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -130,7 +130,7 @@ proptest! {
         let mut model = String::new();
         let mut model_undo: Vec<String> = Vec::new();
         let mut model_redo: Vec<String> = Vec::new();
-        let mut observations: Vec<(u64, String)> = Vec::new();
+        let mut observations: Vec<(Version, String)> = Vec::new();
 
         for op in ops {
             match op {
@@ -138,7 +138,7 @@ proptest! {
                     let at = boundary(&model, at);
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.insert(ByteOffset::new(at), &text);
+                    buf.transact(|buf| buf.insert(ByteOffset::new(at), &text));
                     model.insert_str(at, &text);
                 }
                 Op::Delete(start, end) => {
@@ -148,7 +148,7 @@ proptest! {
                     }
                     model_undo.push(model.clone());
                     model_redo.clear();
-                    buf.delete(ByteOffset::new(start)..ByteOffset::new(end));
+                    buf.transact(|buf| buf.delete(ByteOffset::new(start)..ByteOffset::new(end)));
                     model.replace_range(start..end, "");
                 }
                 Op::ReplaceInTransaction(start, end, text) => {
@@ -225,21 +225,22 @@ proptest! {
     ) {
         let mut buf = Buffer::new("");
         let mut now = Instant::now();
+        let mut seen = vec![buf.version()];
 
         for (at, text, delay) in edits {
             let at = boundary(buf.text(), at);
-            let before = buf.version();
             now += Duration::from_millis(delay);
 
             // Every generated string is non-empty, so every insert moves the text and owes a new version.
             buf.transact_at(now, |buf| buf.insert(ByteOffset::new(at), &text));
 
             prop_assert!(
-                buf.version() > before,
-                "version {} did not advance past {}",
+                !seen.contains(&buf.version()),
+                "version {:?} repeats one of {:?}",
                 buf.version(),
-                before
+                seen
             );
+            seen.push(buf.version());
         }
     }
 
@@ -302,7 +303,7 @@ proptest! {
 
         for (at, text) in edits {
             let at = boundary(buf.text(), at);
-            buf.insert(ByteOffset::new(at), &text);
+            buf.transact(|buf| buf.insert(ByteOffset::new(at), &text));
             check_line_index(&buf)?;
         }
 

@@ -32,8 +32,11 @@ platform probing an arbitrary position never yields a split character.
 
 ## Editing
 
-`replace(Range<ByteOffset>, &str)` is the single primitive. `insert` and
-`delete` are wrappers. Every other operation in the system reduces to it.
+Every edit happens inside `transact` or `transact_at`. The closure gets a
+`Txn`, the only value with edit methods. `Txn::replace(Range<ByteOffset>, &str)`
+is the single primitive, and `insert` and `delete` are wrappers. Every other
+operation in the system reduces to it. A `Txn` derefs to `&Buffer`, so the
+closure reads its own edits.
 
 An out-of-range or non-boundary offset is a caller bug, not a runtime
 condition: `debug_assert!` and panic, no `Result`. The stdlib's own slicing
@@ -65,27 +68,34 @@ injection one.
 
 ### Re-entrancy
 
-`undo` and `redo` panic if called while a transaction is open. This is a real
-`assert!`, not `debug_assert!`.
+Re-entrancy is unrepresentable. A `Txn` derefs to `&Buffer` and never to
+`&mut Buffer`, so the closure cannot call `undo`, `redo`, `transact` or
+`anchor`. Each of these takes `&mut Buffer`. `Buffer` itself has no edit
+method, so no edit happens outside a transaction.
 
-`apply` addresses edits by absolute byte offset, which is sound only while
-"top of the undo stack" is also "most recent change to the text". An open
-transaction breaks that: its edits have mutated the text but are not yet on the
-stack, so the transaction below them describes an older state. Applying it
-deletes the wrong bytes.
+The hazard this removes: `apply` addresses edits by absolute byte offset. That
+is sound only while "top of the undo stack" is also "most recent change to the
+text". An open transaction breaks that: its edits have mutated the text but are
+not yet on the stack, so the transaction below them describes an older state.
+An undo inside it would delete the wrong bytes:
 
 ```rust
-let mut buf = Buffer::new("abc");
-buf.insert(ByteOffset::new(3), "1");   // "abc1"
-buf.transact(|buf| {
-    buf.insert(ByteOffset::new(0), "X"); // "Xabc1"
-    buf.undo();                        // → "Xab1" without the guard
+let mut buf = Buffer::new("abc1");
+buf.transact(|txn| {
+    txn.insert(ByteOffset::new(0), "X"); // "Xabc1"
+    txn.undo();                          // does not compile
 });
 ```
 
-It is a real `assert!` because nothing else catches it. Unlike an out-of-range
-offset, there is no stdlib bounds check underneath, so a release build would
-silently corrupt text instead of panicking.
+Before the `Txn`, a depth counter joined nested transactions, and `undo` and
+`redo` asserted that the depth was zero. The `compile_fail` doctests on
+`Buffer::transact` replace those runtime checks.
+
+### Version
+
+`Buffer::version` returns a `Version`: the id of the last edit on the undo
+stack. Equal versions mean equal text. A `Version` has no `Ord`: an undo moves
+the version back to an older id, so a smaller version can name the newer text.
 
 ### The range undo and redo return
 
@@ -107,7 +117,7 @@ transaction id (`editor.rs:1437-1450`), deliberately not inside the buffer.
 
 A position that survives edits. `Buffer::anchor(offset, bias)` returns an
 `Anchor`; `resolve` reads it back as a `ByteOffset`, `forget` drops it. Every
-mutation of the text — `replace`, and the edits `undo` and `redo` replay —
+mutation of the text — `Txn::replace`, and the edits `undo` and `redo` replay —
 runs each live anchor through `transform` in `anchor.rs`. That function is the
 whole model: shift past the edit, or, at the edit's own start, let `Bias` pick
 a side.

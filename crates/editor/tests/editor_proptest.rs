@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use inkra_editor::{EditorState, Goal, LogicalMovement, ParkedSelection, Selection};
-use inkra_text::{Buffer, ByteOffset, Hunk, diff};
+use inkra_text::{Buffer, ByteOffset, Hunk, Version, diff};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -260,7 +260,7 @@ proptest! {
     ) {
         let selection = selection_on(&old, tail, head);
         let mut oracle = EditorState::new(selection.clone());
-        oracle.map_through(&diff(0, &old, &new));
+        oracle.map_through(&diff(Version::default(), &old, &new));
 
         let mut buffer = Buffer::new(old.clone());
         let parked = ParkedSelection::park(&selection, &mut buffer);

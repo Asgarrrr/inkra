@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::time::{Duration, Instant};
 
 use unicode_segmentation::GraphemeCursor;
@@ -13,7 +13,7 @@ pub const GROUP_INTERVAL: Duration = Duration::from_millis(300);
 struct Edit {
     /// Monotonic across the buffer's life; `Buffer::version` is the id of the last applied edit.
     /// Lives on the edit, not the `Transaction`: `close` merges by extending `previous.edits` in place.
-    id: u64,
+    id: Version,
     at: ByteOffset,
     removed: String,
     inserted: String,
@@ -40,12 +40,26 @@ struct Transaction {
     last_edit_at: Option<Instant>,
 }
 
+/// An edit stamp: two equal versions mean the same text, and no version orders another.
+///
+/// ```compile_fail
+/// let buffer = inkra_text::Buffer::new("ab");
+/// let (before, after) = (buffer.version(), buffer.version());
+/// let _ = before < after;
+/// ```
+///
+/// ```
+/// let buffer = inkra_text::Buffer::new("ab");
+/// let (before, after) = (buffer.version(), buffer.version());
+/// let _ = before == after;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Version(u64);
+
 pub struct Buffer {
     text: String,
     undo_stack: Vec<Transaction>,
     redo_stack: Vec<Transaction>,
-    open: Option<Vec<Edit>>,
-    depth: usize,
     grouping_blocked: bool,
     next_edit_id: u64,
     /// Every anchor ever created, `None` once forgotten; slots are never reused.
@@ -60,8 +74,6 @@ impl Buffer {
             text: text.into(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            open: None,
-            depth: 0,
             grouping_blocked: false,
             next_edit_id: 1,
             anchors: Vec::new(),
@@ -92,18 +104,53 @@ impl Buffer {
     }
 
     #[must_use]
-    pub fn version(&self) -> u64 {
+    pub fn version(&self) -> Version {
         self.undo_stack
             .last()
             .and_then(|transaction| transaction.edits.last())
-            .map_or(0, |edit| edit.id)
+            .map_or(Version::default(), |edit| edit.id)
     }
 
-    pub fn transact<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+    /// The only way to edit: the closure's `Txn` edits and reads, and can neither undo, redo,
+    /// nor open another transaction.
+    ///
+    /// ```
+    /// use inkra_text::ByteOffset;
+    /// let mut buffer = inkra_text::Buffer::new("ab");
+    /// let before = buffer.version();
+    /// buffer.transact(|txn| txn.text().len());
+    /// assert_eq!(buffer.version(), before);
+    /// buffer.transact(|txn| {
+    ///     txn.insert(ByteOffset::new(2), "c");
+    ///     assert_eq!(txn.text(), "abc");
+    /// });
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use inkra_text::ByteOffset;
+    /// let mut buffer = inkra_text::Buffer::new("ab");
+    /// buffer.insert(ByteOffset::new(2), "c");
+    /// ```
+    ///
+    /// ```compile_fail
+    /// let mut buffer = inkra_text::Buffer::new("ab");
+    /// buffer.transact(|txn| txn.undo());
+    /// ```
+    ///
+    /// ```compile_fail
+    /// let mut buffer = inkra_text::Buffer::new("ab");
+    /// buffer.transact(|txn| txn.redo());
+    /// ```
+    ///
+    /// ```compile_fail
+    /// let mut buffer = inkra_text::Buffer::new("ab");
+    /// buffer.transact(|txn| txn.transact(|_| {}));
+    /// ```
+    pub fn transact<R>(&mut self, f: impl FnOnce(&mut Txn<'_>) -> R) -> R {
         self.transact_inner(None, f)
     }
 
-    pub fn transact_at<R>(&mut self, now: Instant, f: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn transact_at<R>(&mut self, now: Instant, f: impl FnOnce(&mut Txn<'_>) -> R) -> R {
         self.transact_inner(Some(now), f)
     }
 
@@ -111,25 +158,18 @@ impl Buffer {
         self.grouping_blocked = true;
     }
 
-    fn transact_inner<R>(&mut self, now: Option<Instant>, f: impl FnOnce(&mut Self) -> R) -> R {
-        if self.depth == 0 {
-            self.open = Some(Vec::new());
-        }
-        self.depth += 1;
-
-        let result = f(self);
-
-        self.depth -= 1;
-        if self.depth == 0 {
-            self.close(now);
-        }
+    fn transact_inner<R>(&mut self, now: Option<Instant>, f: impl FnOnce(&mut Txn<'_>) -> R) -> R {
+        let mut txn = Txn {
+            buffer: self,
+            edits: Vec::new(),
+        };
+        let result = f(&mut txn);
+        let edits = txn.edits;
+        self.close(now, edits);
         result
     }
 
-    fn close(&mut self, now: Option<Instant>) {
-        let Some(edits) = self.open.take() else {
-            return;
-        };
+    fn close(&mut self, now: Option<Instant>, edits: Vec<Edit>) {
         if edits.is_empty() {
             return;
         }
@@ -153,8 +193,8 @@ impl Buffer {
         });
     }
 
-    /// The one editing primitive: everything else is a `replace`.
-    pub fn replace(&mut self, range: Range<ByteOffset>, text: &str) {
+    /// The one editing primitive: `None` when the edit changes nothing.
+    fn edit(&mut self, range: Range<ByteOffset>, text: &str) -> Option<Edit> {
         debug_assert!(
             range.start <= range.end,
             "replace range start {} must not exceed end {}",
@@ -171,44 +211,21 @@ impl Buffer {
 
         let removed = self.slice(range.clone()).to_string();
         if removed.is_empty() && text.is_empty() {
-            return;
+            return None;
         }
 
         self.splice(range.start, &removed, text);
-        let id = self.next_edit_id;
+        let id = Version(self.next_edit_id);
         self.next_edit_id += 1;
-        self.record(Edit {
+        Some(Edit {
             id,
             at: range.start,
             removed,
             inserted: text.to_string(),
-        });
+        })
     }
 
-    pub fn insert(&mut self, at: ByteOffset, text: &str) {
-        self.replace(at..at, text);
-    }
-
-    pub fn delete(&mut self, range: Range<ByteOffset>) {
-        self.replace(range, "");
-    }
-
-    fn record(&mut self, edit: Edit) {
-        if let Some(edits) = &mut self.open {
-            edits.push(edit);
-        } else {
-            self.undo_stack.push(Transaction {
-                edits: vec![edit],
-                last_edit_at: None,
-            });
-            self.redo_stack.clear();
-        }
-    }
-
-    /// # Panics
-    /// If a transaction is open — its edits aren't on the undo stack yet.
     pub fn undo(&mut self) -> Option<Range<ByteOffset>> {
-        assert!(self.depth == 0, "undo() inside an open transaction");
         let transaction = self.undo_stack.pop()?;
         let mut affected = None;
         for edit in transaction.edits.iter().rev() {
@@ -218,10 +235,7 @@ impl Buffer {
         affected
     }
 
-    /// # Panics
-    /// If a transaction is open — see [`Buffer::undo`].
     pub fn redo(&mut self) -> Option<Range<ByteOffset>> {
-        assert!(self.depth == 0, "redo() inside an open transaction");
         let transaction = self.redo_stack.pop()?;
         let mut affected = None;
         for edit in &transaction.edits {
@@ -513,6 +527,40 @@ impl Buffer {
         for state in self.anchors.iter_mut().flatten() {
             state.offset = transform(state.offset, state.bias, at, removed_len, inserted_len);
         }
+    }
+}
+
+/// One open transaction's edits; derefs to the buffer for reads, and holds the only edit methods.
+pub struct Txn<'a> {
+    buffer: &'a mut Buffer,
+    edits: Vec<Edit>,
+}
+
+impl Deref for Txn<'_> {
+    type Target = Buffer;
+
+    fn deref(&self) -> &Buffer {
+        self.buffer
+    }
+}
+
+impl Txn<'_> {
+    /// # Panics
+    /// If `range` is out of bounds or a bound splits a char; in debug builds, also if it is inverted.
+    pub fn replace(&mut self, range: Range<ByteOffset>, text: &str) {
+        self.edits.extend(self.buffer.edit(range, text));
+    }
+
+    /// # Panics
+    /// See [`Txn::replace`].
+    pub fn insert(&mut self, at: ByteOffset, text: &str) {
+        self.replace(at..at, text);
+    }
+
+    /// # Panics
+    /// See [`Txn::replace`].
+    pub fn delete(&mut self, range: Range<ByteOffset>) {
+        self.replace(range, "");
     }
 }
 

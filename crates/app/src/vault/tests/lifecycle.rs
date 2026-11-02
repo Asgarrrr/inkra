@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{Entity, TestAppContext};
-use inkra_text::ByteOffset;
+use inkra_text::{ByteOffset, Version};
 use inkra_vault::mem_fs::MemFs;
 
 use crate::test_support::two_notes;
@@ -54,7 +54,7 @@ fn switching_away_and_back_preserves_unsaved_text(cx: &mut TestAppContext) {
         let buffer = store.buffer_for(a).expect("the buffer must still exist");
         assert_eq!(buffer.read(cx).text(), "UNSAVED alpha");
         assert!(
-            buffer.read(cx).version() != 0,
+            buffer.read(cx).version() != Version::default(),
             "the undo history survived too"
         );
     });

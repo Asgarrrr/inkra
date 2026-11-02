@@ -20,14 +20,14 @@ fn is_empty_tracks_whether_the_text_is_empty() {
 #[test]
 fn insert_places_text_at_byte_offset() {
     let mut buf = Buffer::new("héllo");
-    buf.insert(at(3), "X");
+    buf.transact(|buf| buf.insert(at(3), "X"));
     assert_eq!(buf.text(), "héXllo");
 }
 
 #[test]
 fn delete_removes_a_byte_range() {
     let mut buf = Buffer::new("héllo");
-    buf.delete(at(1)..at(4));
+    buf.transact(|buf| buf.delete(at(1)..at(4)));
     assert_eq!(buf.text(), "hlo");
 }
 
@@ -35,20 +35,20 @@ fn delete_removes_a_byte_range() {
 #[should_panic(expected = "char boundaries")]
 fn replace_panics_when_a_bound_splits_a_char() {
     let mut buf = Buffer::new("héllo");
-    buf.insert(at(2), "X");
+    buf.transact(|buf| buf.insert(at(2), "X"));
 }
 
 #[test]
 fn no_op_replace_records_nothing() {
     let mut buf = Buffer::new("abc");
-    buf.replace(at(1)..at(1), "");
+    buf.transact(|buf| buf.replace(at(1)..at(1), ""));
     assert!(buf.undo().is_none());
 }
 
 #[test]
 fn undo_reverts_the_last_edit_and_reports_the_restored_range() {
     let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "d");
+    buf.transact(|buf| buf.insert(at(3), "d"));
     assert_eq!(buf.text(), "abcd");
     assert_eq!(buf.undo(), Some(at(3)..at(3)));
     assert_eq!(buf.text(), "abc");
@@ -62,7 +62,7 @@ fn undo_with_empty_history_returns_none() {
 #[test]
 fn redo_reapplies_the_undone_edit() {
     let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "d");
+    buf.transact(|buf| buf.insert(at(3), "d"));
     buf.undo();
     assert_eq!(buf.redo(), Some(at(3)..at(4)));
     assert_eq!(buf.text(), "abcd");
@@ -71,9 +71,9 @@ fn redo_reapplies_the_undone_edit() {
 #[test]
 fn new_edit_after_undo_clears_the_redo_stack() {
     let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "d");
+    buf.transact(|buf| buf.insert(at(3), "d"));
     buf.undo();
-    buf.insert(at(0), "X");
+    buf.transact(|buf| buf.insert(at(0), "X"));
     assert!(buf.redo().is_none());
 }
 
@@ -91,22 +91,9 @@ fn a_transaction_undoes_as_one_step() {
 }
 
 #[test]
-fn nested_transactions_join_the_outermost_step() {
-    let mut buf = Buffer::new("");
-    buf.transact(|buf| {
-        buf.insert(at(0), "a");
-        buf.transact(|buf| buf.insert(at(1), "b"));
-    });
-    assert_eq!(buf.text(), "ab");
-    buf.undo();
-    assert_eq!(buf.text(), "");
-    assert!(buf.undo().is_none());
-}
-
-#[test]
 fn an_empty_transaction_records_nothing() {
     let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "d");
+    buf.transact(|buf| buf.insert(at(3), "d"));
     buf.transact(|_| {});
     buf.undo();
     assert_eq!(buf.text(), "abc");
@@ -115,34 +102,10 @@ fn an_empty_transaction_records_nothing() {
 #[test]
 fn a_transaction_does_not_clear_redo_until_it_records_an_edit() {
     let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "d");
+    buf.transact(|buf| buf.insert(at(3), "d"));
     buf.undo();
     buf.transact(|_| {});
     assert_eq!(buf.redo(), Some(at(3)..at(4)));
-}
-
-#[test]
-#[should_panic(expected = "undo() inside an open transaction")]
-fn undo_inside_an_open_transaction_is_refused() {
-    let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "1");
-    buf.transact(|buf| {
-        buf.insert(at(0), "X");
-        // Without the guard this pops the older transaction and applies its now-stale offsets.
-        buf.undo();
-    });
-}
-
-#[test]
-#[should_panic(expected = "redo() inside an open transaction")]
-fn redo_inside_an_open_transaction_is_refused() {
-    let mut buf = Buffer::new("abc");
-    buf.insert(at(3), "1");
-    buf.undo();
-    buf.transact(|buf| {
-        buf.insert(at(0), "X");
-        buf.redo();
-    });
 }
 
 #[test]
@@ -250,7 +213,7 @@ fn an_ungrouped_transaction_never_absorbs_a_later_one() {
 #[test]
 fn undo_keeps_only_the_edited_text_not_a_buffer_snapshot() {
     let mut buf = Buffer::new("x".repeat(10_000));
-    buf.insert(at(0), "a");
+    buf.transact(|buf| buf.insert(at(0), "a"));
     let recorded: usize = buf
         .undo_stack
         .iter()
@@ -263,9 +226,9 @@ fn undo_keeps_only_the_edited_text_not_a_buffer_snapshot() {
 #[test]
 fn version_starts_at_zero_and_moves_with_an_edit() {
     let mut buffer = Buffer::new("abc");
-    assert_eq!(buffer.version(), 0);
-    buffer.insert(ByteOffset::new(3), "x");
-    assert_ne!(buffer.version(), 0);
+    assert_eq!(buffer.version(), Version::default());
+    buffer.transact(|buffer| buffer.insert(ByteOffset::new(3), "x"));
+    assert_ne!(buffer.version(), Version::default());
 }
 
 /// Regression pin: `close` merges by extending the previous transaction, so its id must live
@@ -361,7 +324,7 @@ fn a_conversion_leaves_the_checkpoint_at_its_answer() {
 fn an_edit_before_the_checkpoint_shifts_it() {
     let mut buf = Buffer::new("ab\ncd");
     let _ = buf.to_utf16(at(4));
-    buf.insert(at(0), "😀");
+    buf.transact(|buf| buf.insert(at(0), "😀"));
     assert_eq!(buf.utf16.get(), (at(8), Utf16Offset::new(6)));
 }
 
@@ -369,7 +332,7 @@ fn an_edit_before_the_checkpoint_shifts_it() {
 fn an_edit_across_the_checkpoint_moves_it_to_the_edit_start() {
     let mut buf = Buffer::new("ab😀cd");
     let _ = buf.to_utf16(at(6));
-    buf.delete(at(1)..at(7));
+    buf.transact(|buf| buf.delete(at(1)..at(7)));
     assert_eq!(buf.utf16.get(), (at(1), Utf16Offset::new(1)));
 }
 
@@ -377,8 +340,8 @@ fn an_edit_across_the_checkpoint_moves_it_to_the_edit_start() {
 fn an_edit_at_or_after_the_checkpoint_leaves_it() {
     let mut buf = Buffer::new("abcd");
     let _ = buf.to_utf16(at(2));
-    buf.insert(at(2), "😀");
-    buf.insert(at(7), "é");
+    buf.transact(|buf| buf.insert(at(2), "😀"));
+    buf.transact(|buf| buf.insert(at(7), "é"));
     assert_eq!(buf.utf16.get(), (at(2), Utf16Offset::new(2)));
 }
 
@@ -486,7 +449,7 @@ fn lines_agrees_with_line_range() {
 fn the_line_index_follows_an_edit() {
     let mut buf = Buffer::new("ab");
     assert_eq!(buf.line_count(), 1);
-    buf.insert(at(1), "\n");
+    buf.transact(|buf| buf.insert(at(1), "\n"));
     assert_eq!(buf.line_count(), 2);
     assert_eq!(buf.line_range(1), at(2)..at(3));
     buf.undo();
@@ -511,9 +474,9 @@ mod anchors {
         let mut buf = Buffer::new("abcde");
         let anchor = buf.anchor(at(4), Bias::Left);
 
-        buf.insert(at(0), "XY");
+        buf.transact(|buf| buf.insert(at(0), "XY"));
         assert_eq!(buf.resolve(anchor), at(6));
-        buf.delete(at(0)..at(3));
+        buf.transact(|buf| buf.delete(at(0)..at(3)));
         assert_eq!(buf.resolve(anchor), at(3));
         assert_eq!(&buf.text()[buf.resolve(anchor).get()..], "e");
     }
@@ -524,7 +487,7 @@ mod anchors {
         let left = buf.anchor(at(1), Bias::Left);
         let right = buf.anchor(at(1), Bias::Right);
 
-        buf.insert(at(1), "XY");
+        buf.transact(|buf| buf.insert(at(1), "XY"));
         assert_eq!(buf.resolve(left), at(1));
         assert_eq!(buf.resolve(right), at(3));
     }
@@ -554,7 +517,7 @@ mod anchors {
         let mut buf = Buffer::new("abcde");
         let anchor = buf.anchor(at(4), Bias::Left);
 
-        buf.insert(at(1), "XYZ");
+        buf.transact(|buf| buf.insert(at(1), "XYZ"));
         assert_eq!(buf.resolve(anchor), at(7));
         buf.undo();
         assert_eq!(buf.resolve(anchor), at(4));
@@ -578,7 +541,7 @@ mod anchors {
         buf.transact(|buf| buf.replace(at(1)..at(3), "🎉"));
         addressable(&buf);
         let end = buf.len();
-        buf.insert(end, "!");
+        buf.transact(|buf| buf.insert(end, "!"));
         addressable(&buf);
         buf.undo();
         addressable(&buf);
@@ -601,7 +564,7 @@ mod anchors {
             let left = buf.anchor(at(2), Bias::Left);
             let right = buf.anchor(at(2), Bias::Right);
 
-            buf.replace(at(1)..at(4), "XY");
+            buf.transact(|buf| buf.replace(at(1)..at(4), "XY"));
             assert_eq!(buf.text(), "aXYe");
             assert_eq!(buf.resolve(left), at(1));
             assert_eq!(buf.resolve(right), at(3));
@@ -617,7 +580,7 @@ mod anchors {
             let mut buf = Buffer::new("abc");
             let anchor = buf.anchor(at(1), Bias::Right);
 
-            buf.delete(at(0)..at(1));
+            buf.transact(|buf| buf.delete(at(0)..at(1)));
             assert_eq!(buf.resolve(anchor), at(0));
             buf.undo();
             assert_eq!(buf.text(), "abc");
@@ -742,7 +705,7 @@ mod anchors {
         !(strictly_inside || right_at_start || left_at_end)
     }
 
-    fn apply_edit(buf: &mut Buffer, tracked: &mut [Tracked], range: Range<usize>, text: &str) {
+    fn apply_edit(buf: &mut Txn<'_>, tracked: &mut [Tracked], range: Range<usize>, text: &str) {
         let removed_len = range.end - range.start;
         if removed_len == 0 && text.is_empty() {
             return;
@@ -760,7 +723,7 @@ mod anchors {
         match op {
             Op::Edit(a, b, text) => {
                 let range = ordered_boundaries(buf.text(), a, b);
-                apply_edit(buf, tracked, range, &text);
+                buf.transact(|buf| apply_edit(buf, tracked, range, &text));
             }
             Op::Transaction(a, b, replaced, c, inserted) => {
                 let first = ordered_boundaries(buf.text(), a, b);

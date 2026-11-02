@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use futures::channel::oneshot;
 use gpui::{App, Entity, Subscription};
-use inkra_text::{Buffer, Diff};
+use inkra_text::{Buffer, Diff, Version};
 use inkra_vault::{Claims, EntryId, Mtime, Stamp};
 
 pub(super) use lifecycle::{Lifecycle, Location, PendingSave, Swap};
@@ -23,7 +23,7 @@ use crate::buffer_events::Reloaded;
 pub(super) struct OpenNote {
     buffer: Entity<Buffer>,
     /// Paired with the `Writer`'s stamp: `landed` and `did_reload` are its only writers.
-    saved_version: u64,
+    saved_version: Version,
     /// Failed writes since `saved_version` last moved.
     failures: u32,
     /// Shared with the quit flush too — a second `Writer` reintroduces the write race.
@@ -37,7 +37,7 @@ impl OpenNote {
     pub(super) fn new(buffer: Entity<Buffer>, stamp: Stamp, observer: Subscription) -> Self {
         Self {
             buffer,
-            saved_version: 0,
+            saved_version: Version::default(),
             failures: 0,
             writer: Arc::new(Writer::new(stamp)),
             _observer: observer,
@@ -49,7 +49,7 @@ impl OpenNote {
     }
 
     /// Closes the open transaction; the text and its version, unless that version is saved.
-    pub(super) fn unsaved(&self, cx: &mut App) -> Option<(Arc<str>, u64)> {
+    pub(super) fn unsaved(&self, cx: &mut App) -> Option<(Arc<str>, Version)> {
         // `update`, never `as_mut`: the latter notifies on drop even
         // though `finalize_transaction` changes no text.
         let (text, version) = self.buffer.update(cx, |buffer, _| {
@@ -60,7 +60,7 @@ impl OpenNote {
     }
 
     /// A write of `version` landed; `write_through` moved the stamp under the `Writer`'s lock.
-    pub(super) fn landed(&mut self, version: u64) {
+    pub(super) fn landed(&mut self, version: Version) {
         self.saved_version = version;
         self.failures = 0;
     }
@@ -80,7 +80,7 @@ impl OpenNote {
     }
 
     /// The text and its version, read together: a diff of the text applies only at that version.
-    pub(super) fn snapshot(&self, cx: &App) -> (Arc<str>, u64) {
+    pub(super) fn snapshot(&self, cx: &App) -> (Arc<str>, Version) {
         let buffer = self.buffer.read(cx);
         (Arc::from(buffer.text()), buffer.version())
     }
@@ -113,7 +113,7 @@ impl OpenNote {
     }
 
     #[cfg(test)]
-    pub(super) fn saved_version(&self) -> u64 {
+    pub(super) fn saved_version(&self) -> Version {
         self.saved_version
     }
 }

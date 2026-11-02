@@ -110,7 +110,9 @@ fn two_tabs_on_one_note_keep_their_own_carets(cx: &mut TestAppContext) {
             let (buffer, parsed_at) = editor.read_with(cx, |editor, _| {
                 (editor.buffer().clone(), editor.parsed_at())
             });
-            buffer.update(cx, |buffer, _| buffer.insert(buffer.len(), "!"));
+            buffer.update(cx, |buffer, _| {
+                buffer.transact(|buffer| buffer.insert(buffer.len(), "!"));
+            });
             shell.next_tab(&NextTab, window, cx);
             editor.read_with(cx, |editor, _| {
                 assert_eq!(editor.parsed_at(), parsed_at, "a same-note switch rebound");

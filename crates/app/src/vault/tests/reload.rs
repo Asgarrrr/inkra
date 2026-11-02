@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{Entity, Subscription, TestAppContext};
-use inkra_text::Buffer;
+use inkra_text::{Buffer, Version};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Stamp};
 
@@ -47,11 +47,11 @@ fn text(buffer: &Entity<Buffer>, cx: &mut TestAppContext) -> String {
     buffer.read_with(cx, |buffer, _| buffer.text().to_owned())
 }
 
-fn version(buffer: &Entity<Buffer>, cx: &mut TestAppContext) -> u64 {
+fn version(buffer: &Entity<Buffer>, cx: &mut TestAppContext) -> Version {
     buffer.read_with(cx, |buffer, _| buffer.version())
 }
 
-fn saved_version(notes: &Entity<NoteStore>, cx: &mut TestAppContext, id: EntryId) -> u64 {
+fn saved_version(notes: &Entity<NoteStore>, cx: &mut TestAppContext, id: EntryId) -> Version {
     notes.read_with(cx, |notes, _| {
         notes.sessions.note(id).unwrap().saved_version()
     })

@@ -1,6 +1,6 @@
 # Type safety and hygiene: batches 3 and 4 of the 2026-11-02 audit
 
-Status: **S1 built 2026-11-02.** Later slices append their sections here.
+Status: **S1 and S2 built 2026-11-02.** Later slices append their sections here.
 
 ## Method
 
@@ -65,6 +65,44 @@ The audit found three ways to misuse an offset:
 - `.cargo/mutants.toml` matches the equivalent `transform` mutant by column.
   The column moved from 48 to 44 when `offset.0` became `offset`.
 
+## T3 Txn and T5 Version
+
+The audit found two holes in `Buffer`:
+
+- `replace`, `insert` and `delete` were `pub` on `Buffer`. An edit outside any
+  transaction recorded its own step, and an `undo` inside an open transaction
+  needed a runtime `assert!` to stop it applying stale offsets.
+- `version()` returned a `u64`. Code could order two versions, but an undo
+  moves the version back, so the order meant nothing.
+
+### As built (S2)
+
+- `Txn<'a>` (`text/src/buffer.rs`) holds `&mut Buffer` and the transaction's
+  edits. It has `replace`, `insert` and `delete`, and derefs to `&Buffer` for
+  reads. It has no `DerefMut`, so the closure cannot call `undo`, `redo`,
+  `transact` or `anchor`.
+- `transact` and `transact_at` pass `&mut Txn<'_>` to the closure. After the
+  closure, `close` records the edits with today's merge rule: within
+  `GROUP_INTERVAL` unless `finalize_transaction` blocked grouping.
+- The private `Buffer::edit` holds the old `replace` body and returns `None`
+  for a no-op edit. An empty transaction records no step and does not move the
+  version.
+- The `open` and `depth` fields, `record`, and the `assert!`s in `undo` and
+  `redo` are gone. `compile_fail` doctests on `Buffer::transact` replace three
+  tests: nested transactions, undo inside a transaction, and redo inside a
+  transaction.
+- A former bare edit now runs in an untimed `transact`. Both record one step
+  that no later edit merges into, so the undo history is unchanged.
+- `Version(u64)` derives `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and
+  `Default`. `Version::default()` is the version of a buffer with no edit,
+  which was `0`. It has no `Ord`, `Display` or `Hash`: no holder needs them.
+- Retyped holders: `Diff.base_version` and `diff()`, `ParkedSelection.version`,
+  `DocumentLayout.version`, `EditorView.parsed_at`, `OpenNote.saved_version`,
+  and the save and reload paths in `app/src/vault`. The session file's
+  `version: u32` and the index revision are different things and stay.
+- `version_moves_whenever_a_timed_edit_changes_the_text` keeps every earlier
+  version and asserts that the new one is not among them, instead of `>`.
+
 ## Deviations from Zed
 
 1. **Private fields.** Zed's offsets have a `pub` field: `MultiBufferOffset`,
@@ -80,6 +118,16 @@ The audit found three ways to misuse an offset:
    `editor/src/input.rs` (`text_for_range` builds
    `MultiBufferOffsetUtf16(OffsetUtf16(..))` inline). Inkra converts in two
    named functions, because both hosts share one `TextInput`.
+4. **A closure guard, not a depth counter.** Zed's `History` counts
+   `transaction_depth` in `start_transaction` and `end_transaction`
+   (`text/src/text.rs:238-275`), so nested editor operations join the
+   outermost transaction. A note app has no nested editor operation that needs
+   the counter. Inkra hands the closure a `Txn` instead, and nesting does not
+   compile.
+5. **An opaque stamp, not a vector clock.** Zed's `version()` is a
+   `clock::Global` (`text/src/text.rs:829`) with a partial order, for
+   concurrent replicas. `Buffer` has one writer, so a `Version` compares only
+   for equality.
 
 ## Non-goals
 

@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use inkra_text::{Bias, Buffer, ByteOffset, Hunk, diff};
+use inkra_text::{Bias, Buffer, ByteOffset, Hunk, Version, diff};
 use proptest::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -101,7 +101,7 @@ proptest! {
     #[test]
     fn every_hunk_starts_and_ends_on_graphemes_of_both_texts((old, new) in old_and_new()) {
         let mut shift = 0isize;
-        for Hunk { range, text } in diff(0, &old, &new).hunks() {
+        for Hunk { range, text } in diff(Version::default(), &old, &new).hunks() {
             prop_assert!(grapheme_boundary(&old, range.start.get()), "old {:?} at {:?}", old, range);
             prop_assert!(grapheme_boundary(&old, range.end.get()), "old {:?} at {:?}", old, range);
             let start = range.start.get().strict_add_signed(shift);
@@ -173,7 +173,7 @@ proptest! {
     fn a_mapped_offset_moves_by_the_hunks_before_it_or_to_its_hunks_edge(
         (old, new) in old_and_new(),
     ) {
-        let diff = diff(0, &old, &new);
+        let diff = diff(Version::default(), &old, &new);
         let hunks = diff.hunks();
         let offsets = old.char_indices().map(|(offset, _)| offset).chain([old.len()]);
         for offset in offsets {

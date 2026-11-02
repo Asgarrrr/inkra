@@ -1,4 +1,4 @@
-use inkra_text::{Anchor, Bias, Buffer};
+use inkra_text::{Anchor, Bias, Buffer, Version};
 
 use crate::selection::Selection;
 
@@ -8,7 +8,7 @@ pub struct ParkedSelection {
     start: Anchor,
     end: Anchor,
     captured: Selection,
-    version: u64,
+    version: Version,
 }
 
 impl ParkedSelection {
