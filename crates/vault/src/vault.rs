@@ -202,22 +202,21 @@ impl Vault {
         let state = &self.state;
         let whole = walk.reach == Reach::Whole;
         let read: HashSet<&Path> = walk.read.iter().map(RelPath::as_path).collect();
-        let mut rows: Vec<(Entry, FileIdentity)> = walk
+        let mut rows: Vec<Row> = walk
             .found
             .into_iter()
             .filter_map(|child| {
-                let path = RelPath::new(child.path.strip_prefix(&state.root).ok()?)?;
-                let entry = Entry {
-                    id: EntryId::DETACHED,
-                    path,
+                Some(Row {
+                    id: None,
+                    path: RelPath::new(child.path.strip_prefix(&state.root).ok()?)?,
                     kind: child.kind,
                     mtime: child.mtime,
-                };
-                Some((entry, child.identity))
+                    identity: child.identity,
+                })
             })
             .collect();
         // A file the walk found claims its inode from an entry kept under a folder it did not read.
-        let unclaimed: HashSet<FileIdentity> = rows.iter().map(|(_, identity)| *identity).collect();
+        let unclaimed: HashSet<FileIdentity> = rows.iter().map(|row| row.identity).collect();
         for (identity, id) in &state.by_identity {
             if unclaimed.contains(identity) {
                 continue;
@@ -233,11 +232,16 @@ impl Vault {
             {
                 continue;
             }
-            rows.push((entry.clone(), *identity));
+            rows.push(Row {
+                id: Some(entry.id),
+                path: entry.path.clone(),
+                kind: entry.kind,
+                mtime: entry.mtime,
+                identity: *identity,
+            });
         }
         // Path order, not the walk's: a parallel walk reads folders in no fixed order.
-        let mut rows = sorted(rows);
-        let next_id = self.mint(&mut rows, unclaimed);
+        let (rows, next_id) = self.mint(sorted(rows), unclaimed);
 
         // A folder sorts before its subtree, so one pass knows every surviving folder.
         let keep: Vec<bool> = {
@@ -317,22 +321,34 @@ struct Key<'a> {
 }
 
 impl<'a> Key<'a> {
-    fn of(entry: &'a Entry) -> Self {
+    fn new(path: &'a RelPath, kind: Kind) -> Self {
         Self {
-            components: entry.path.as_path().components().collect(),
-            kind: entry.kind,
+            components: path.as_path().components().collect(),
+            kind,
         }
     }
 }
 
-fn sorted(rows: Vec<(Entry, FileIdentity)>) -> Vec<(Entry, FileIdentity)> {
+/// A row of a walk being applied: a kept entry has its id, a found file has `None` until minted.
+struct Row {
+    id: Option<EntryId>,
+    path: RelPath,
+    kind: Kind,
+    mtime: Mtime,
+    identity: FileIdentity,
+}
+
+fn sorted(rows: Vec<Row>) -> Vec<Row> {
     let order: Vec<usize> = {
-        let keys: Vec<Key<'_>> = rows.iter().map(|(entry, _)| Key::of(entry)).collect();
+        let keys: Vec<Key<'_>> = rows
+            .iter()
+            .map(|row| Key::new(&row.path, row.kind))
+            .collect();
         let mut order: Vec<usize> = (0..rows.len()).collect();
         order.sort_by(|&a, &b| compare(&keys[a], &keys[b]));
         order
     };
-    let mut rows: Vec<Option<(Entry, FileIdentity)>> = rows.into_iter().map(Some).collect();
+    let mut rows: Vec<Option<Row>> = rows.into_iter().map(Some).collect();
     order.into_iter().filter_map(|at| rows[at].take()).collect()
 }
 

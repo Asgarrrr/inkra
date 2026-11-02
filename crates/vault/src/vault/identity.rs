@@ -2,40 +2,48 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Entry, EntryId, Key, Vault, compare};
+use super::{Entry, EntryId, Key, Row, Vault, compare};
 use crate::RelPath;
 use crate::fs::FileIdentity;
 
 impl Vault {
-    /// Gives each found row its id, in path order; returns the next id to mint.
+    /// Gives each found row its id, in path order; returns the rows as entries and the next id to mint.
     pub(super) fn mint(
         &self,
-        rows: &mut Vec<(Entry, FileIdentity)>,
+        rows: Vec<Row>,
         mut unclaimed: HashSet<FileIdentity>,
-    ) -> u32 {
+    ) -> (Vec<(Entry, FileIdentity)>, u32) {
         let state = &self.state;
-        let replaced = self.replaced(rows);
+        let replaced = self.replaced(&rows);
 
         let mut next_id = state.next_id;
-        // A found row holds `DETACHED` until minted; a kept entry never does.
-        rows.retain_mut(|(entry, identity)| {
-            if entry.id != EntryId::DETACHED {
-                return true;
-            }
-            // Hard links collapse to the path that sorts first.
-            if !unclaimed.remove(identity) {
-                return false;
-            }
-            let known = state.by_identity.get(identity);
-            let taken = known.or_else(|| replaced.get(&entry.path)).copied();
-            entry.id = taken.unwrap_or_else(|| {
-                let id = EntryId(next_id);
-                next_id += 1;
-                id
-            });
-            true
-        });
-        next_id
+        let entries = rows
+            .into_iter()
+            .filter_map(|row| {
+                let id = match row.id {
+                    Some(id) => id,
+                    // Hard links collapse to the path that sorts first.
+                    None if !unclaimed.remove(&row.identity) => return None,
+                    None => {
+                        let known = state.by_identity.get(&row.identity);
+                        let taken = known.or_else(|| replaced.get(&row.path)).copied();
+                        taken.unwrap_or_else(|| {
+                            let id = EntryId(next_id);
+                            next_id += 1;
+                            id
+                        })
+                    }
+                };
+                let entry = Entry {
+                    id,
+                    path: row.path,
+                    kind: row.kind,
+                    mtime: row.mtime,
+                };
+                Some((entry, row.identity))
+            })
+            .collect();
+        (entries, next_id)
     }
 
     /// Keeps the identities of ids no entry holds, for a walk that is not whole.
@@ -56,27 +64,24 @@ impl Vault {
     }
 
     /// Ids found files take over: a new inode at a path whose old inode this walk found nowhere (watcher spec, F5).
-    fn replaced(&self, rows: &[(Entry, FileIdentity)]) -> HashMap<RelPath, EntryId> {
+    fn replaced(&self, rows: &[Row]) -> HashMap<RelPath, EntryId> {
         let state = &self.state;
-        let found = || {
-            rows.iter()
-                .filter(|(entry, _)| entry.id == EntryId::DETACHED)
-        };
+        let found = || rows.iter().filter(|row| row.id.is_none());
         let mut replaced: HashMap<RelPath, EntryId> = found()
-            .filter(|(_, identity)| !state.by_identity.contains_key(identity))
-            .filter_map(|(entry, _)| {
-                let key = Key::of(entry);
+            .filter(|row| !state.by_identity.contains_key(&row.identity))
+            .filter_map(|row| {
+                let key = Key::new(&row.path, row.kind);
                 let at = state
                     .entries
-                    .binary_search_by(|old| compare(&Key::of(old), &key))
+                    .binary_search_by(|old| compare(&Key::new(&old.path, old.kind), &key))
                     .ok()?;
                 let old = &state.entries[at];
-                (old.kind == entry.kind).then(|| (entry.path.clone(), old.id))
+                (old.kind == row.kind).then(|| (row.path.clone(), old.id))
             })
             .collect();
         if !replaced.is_empty() {
             let claimed: HashSet<EntryId> = found()
-                .filter_map(|(_, identity)| state.by_identity.get(identity).copied())
+                .filter_map(|row| state.by_identity.get(&row.identity).copied())
                 .collect();
             replaced.retain(|_, id| !claimed.contains(id));
         }

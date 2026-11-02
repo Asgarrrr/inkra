@@ -339,7 +339,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
     for (source, parsed) in sources {
         for link in &parsed.links {
             assert_eq!(
-                index.resolve(*source, &link.target),
+                index.resolve(Some(*source), &link.target),
                 model.resolve(*source, &link.target),
                 "{:?} from {source:?}",
                 link.target

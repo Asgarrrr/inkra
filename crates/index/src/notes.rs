@@ -91,7 +91,7 @@ impl NoteTable {
         self.notes.get(&id).map_or(usize::MAX, |note| note.order)
     }
 
-    pub(crate) fn resolve(&self, source: EntryId, target: &Target) -> Resolution {
+    pub(crate) fn resolve(&self, source: Option<EntryId>, target: &Target) -> Resolution {
         match self.query(source, target) {
             Ok(query) => self.search(&query),
             Err(resolution) => resolution,
@@ -99,7 +99,11 @@ impl NoteTable {
     }
 
     /// What `search` needs: it no longer depends on the source, so results can be shared.
-    pub(crate) fn query(&self, source: EntryId, target: &Target) -> Result<Query, Resolution> {
+    pub(crate) fn query(
+        &self,
+        source: Option<EntryId>,
+        target: &Target,
+    ) -> Result<Query, Resolution> {
         let (path, style) = match target {
             Target::Note { path, style, .. } => (path, *style),
             Target::External(url) => return Err(Resolution::External(url.clone())),
@@ -142,10 +146,10 @@ impl NoteTable {
 
     /// `path` from the source's folder, or from the root after a leading `/`; `None` above the
     /// root, or when the source is not a note of this vault.
-    fn join(&self, source: EntryId, path: &str) -> Option<String> {
+    fn join(&self, source: Option<EntryId>, path: &str) -> Option<String> {
         let mut parts: Vec<&str> = Vec::new();
         if !path.starts_with('/') {
-            let folder = self.notes.get(&source)?.folder();
+            let folder = source.and_then(|source| self.notes.get(&source))?.folder();
             parts.extend(folder.split('/').filter(|part| !part.is_empty()));
         }
         for part in path.split('/') {

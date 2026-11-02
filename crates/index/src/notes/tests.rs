@@ -4,7 +4,7 @@ use crate::test_support::{id, table, target, vault};
 fn resolves(files: &[&str], from: &str, link: &str) -> Option<String> {
     let (_fs, vault) = vault(files);
     let table = table(&vault);
-    match table.resolve(id(&vault, from), &target(link)) {
+    match table.resolve(Some(id(&vault, from)), &target(link)) {
         Resolution::Note(found) => vault
             .entries()
             .find(|entry| entry.id == found)
@@ -208,7 +208,7 @@ fn a_relative_collision_breaks_ties_like_a_name() {
 fn a_source_outside_the_table_resolves_names_but_not_relatives() {
     let (_fs, vault) = vault(&["Plan.md"]);
     let table = table(&vault);
-    let outside = inkra_vault::EntryId::DETACHED;
+    let outside = Some(inkra_vault::EntryId::DETACHED);
     assert_eq!(
         table.resolve(outside, &target("[[Plan]]")),
         Resolution::Note(id(&vault, "Plan.md"))
@@ -224,10 +224,28 @@ fn a_source_outside_the_table_resolves_names_but_not_relatives() {
 }
 
 #[test]
+fn no_source_resolves_as_a_source_outside_the_table() {
+    let (_fs, vault) = vault(&["Plan.md", "sub/Plan.md"]);
+    let table = table(&vault);
+    for link in [
+        "[[Plan]]",
+        "[x](Plan.md)",
+        "[x](/sub/Plan.md)",
+        "[x](../Plan.md)",
+    ] {
+        assert_eq!(
+            table.resolve(None, &target(link)),
+            table.resolve(Some(inkra_vault::EntryId::DETACHED), &target(link)),
+            "{link}"
+        );
+    }
+}
+
+#[test]
 fn urls_and_self_links_pass_through() {
     let (_fs, vault) = vault(&["src.md"]);
     let table = table(&vault);
-    let source = id(&vault, "src.md");
+    let source = Some(id(&vault, "src.md"));
     assert_eq!(
         table.resolve(source, &target("<https://x.org>")),
         Resolution::External("https://x.org".to_owned())
