@@ -202,8 +202,13 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "save-failed",
-        shows: "the note showing could not be written: the failed dot in the failed colour before its tab title and at its tree row's right edge",
+        shows: "the note showing could not be written: the failed dot in the failed colour before its tab title and at its tree row's right edge, and one line over the editor naming the note and the reason, a × at its right",
         open: failures::save_failed,
+    },
+    Scene {
+        name: "open-failed",
+        shows: "a note that cannot be read: one line over the editor names it and the reason, a × at its right",
+        open: failures::open_failed,
     },
     Scene {
         name: "backlinks",

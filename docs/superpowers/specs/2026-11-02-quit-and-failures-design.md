@@ -1,6 +1,6 @@
 # Quit and failures: close is quit, the chained flush, visible failures
 
-Status: **S1, S2, S3 and S4 built 2026-11-02.** Later slices append their sections here.
+Status: **S1, S2, S3, S4 and S5 built 2026-11-02.** Later slices append their sections here.
 
 ## Why
 
@@ -213,6 +213,34 @@ moves.
 `MemFs::fail_next_saves` and `MemFs::fail_next_saves_after_preserve` are the
 fault seams. The second fires only on a save that preserved.
 
+### Q9. The notice: one line, the latest failure
+
+`shell/notice.rs` holds `Notice` and `AppShell.notice`, the one failure
+surface. The store reports a failure as an event; the shell subscribes
+(detached, as its other subscriptions) and words it. A view never holds
+another view.
+
+- **Five events.** `SaveFailed`, `RenameFailed`, `OpenFailed` and
+  `ConflictPreserved` each set the notice. `NoteSaved` clears it.
+  `RenameFailed` carries its `VaultError`. `OpenFailed` is new: `open_note`
+  no longer drops a load error with `.ok()?`.
+- **One line, no path.** The text names the note by its title and gives the
+  OS reason (`reason`): "Couldn't save “a”: permission denied". A
+  `VaultError::Unwritten` shows its cause's reason. The line is truncated,
+  never wrapped, under the gone banner and above the editor.
+- **Latest wins; two ways out.** A new failure replaces the notice. The
+  dismiss button (`IconButton`) clears it. A `SaveFailed` notice also clears
+  when a write of that note lands (`Notice.cleared_by_save`). Other notices
+  have no such note, so a later save leaves them. `write` emits `NoteSaved`
+  before `ConflictPreserved`, so a conflict notice survives its own write.
+- **Deviation from Zed.** Zed stacks workspace toasts. A note app reports
+  rarely, and two stacked failures would hide the note. One line stays.
+- **Colours.** `theme::notice_background` and `notice_text`; the
+  `save-failed` and `open-failed` shots show the contrast is readable.
+
+`MemFs::make_unreadable` now covers a file's load as well as a folder's
+listing, for the `open-failed` scene and its test.
+
 ## Accepted limits
 
 - **Dock quit, app-menu quit, logout and restart** run only `flush_all` and
@@ -272,3 +300,14 @@ fault seams. The second fires only on a save that preserved.
 - `a_failing_note_stops_retrying_after_the_limit` injects 1 + `RETRY_LIMIT`
   faults, not 20, and counts `SaveFailed` events: one more retry would land
   the edit, so the limit shows without reading the fault's remaining count.
+
+## As built (S5)
+
+- `shell/notice.rs`: `Notice`, `watch_failures`, `render_notice`; `shell.rs`
+  holds `notice`, `render.rs` draws it under the gone banner.
+- `vault/events.rs`: `RenameFailed { id, error }`, `OpenFailed`. `rename` and
+  `open_note` emit them.
+- `inkra-vault`'s `MemFs`: `refused_load`, called by `load`.
+- `shell/tests/notices.rs`: the six notices, dismiss and clear. The conflict
+  test types a second edit, so a notice cleared by any `NoteSaved` fails it.
+- `shot/scenes/failures.rs`: `open_failed`; `save-failed` shows the notice too.

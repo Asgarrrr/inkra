@@ -191,6 +191,7 @@ impl Fs for MemFs {
         }
 
         let state = self.state();
+        state.refused_load(path)?;
         let Some((text, mtime, identity)) = state.files.get(path) else {
             return Err(io(path, ErrorKind::NotFound));
         };

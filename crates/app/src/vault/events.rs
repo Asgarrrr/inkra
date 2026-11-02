@@ -45,10 +45,22 @@ pub(crate) struct TrashFailed(pub(crate) EntryId);
 
 impl EventEmitter<TrashFailed> for NoteStore {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RenameFailed(pub(crate) EntryId);
+#[derive(Debug)]
+pub(crate) struct RenameFailed {
+    pub(crate) id: EntryId,
+    pub(crate) error: VaultError,
+}
 
 impl EventEmitter<RenameFailed> for NoteStore {}
+
+/// A note's load failed; the tab stays as it was.
+#[derive(Debug)]
+pub(crate) struct OpenFailed {
+    pub(crate) id: EntryId,
+    pub(crate) error: VaultError,
+}
+
+impl EventEmitter<OpenFailed> for NoteStore {}
 
 /// The note's file left the vault, or came back (watcher spec, F9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

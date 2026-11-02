@@ -12,6 +12,7 @@ use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
 mod modal;
+mod notice;
 mod palette;
 mod panels;
 mod panes;
@@ -25,6 +26,7 @@ mod title_bar;
 
 use inkra_tabs::Tabs;
 use modal::Modal;
+use notice::Notice;
 use panes::VaultPanes;
 use parked::Parked;
 use session::{Restore, SessionFile};
@@ -107,6 +109,8 @@ pub(crate) struct AppShell {
     title_drag_armed: bool,
     /// A quit is under way: a second one does nothing.
     quitting: bool,
+    /// The latest failure, until dismissed (quit-and-failures spec, Q9).
+    notice: Option<Notice>,
 }
 
 impl AppShell {
@@ -145,6 +149,7 @@ impl AppShell {
             },
         )
         .detach();
+        Self::watch_failures(&notes, cx);
         Self::quit_on_close(window, cx);
         let first = notes.read(cx).current();
         let (session, restore) = Self::open_session(session, &notes, cx);
@@ -166,6 +171,7 @@ impl AppShell {
             restore,
             title_drag_armed: false,
             quitting: false,
+            notice: None,
         }
     }
 

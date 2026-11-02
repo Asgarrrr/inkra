@@ -7,6 +7,7 @@ use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault};
 
+use super::OpenFailed;
 use super::session::{Lifecycle, Location, OpenNote, Sessions};
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
@@ -163,10 +164,16 @@ impl NoteStore {
         let fs = Arc::clone(&self.fs);
 
         cx.spawn(async move |this, cx| {
-            let loaded = cx
+            let loaded = match cx
                 .background_spawn(async move { fs.load(&path).await })
                 .await
-                .ok()?;
+            {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    let _ = this.update(cx, |_, cx| cx.emit(OpenFailed { id, error }));
+                    return None;
+                }
+            };
             this.update(cx, |this, cx| {
                 // Two clicks on one unopened note race; the second must not
                 // replace a buffer already typed into.

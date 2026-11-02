@@ -254,7 +254,7 @@ async fn a_failed_rename_is_reported(cx: &mut TestAppContext) {
     let _guard = cx.update(|cx| {
         let failed = Rc::clone(&failed);
         cx.subscribe(&notes, move |_, event: &RenameFailed, _| {
-            failed.borrow_mut().push(*event);
+            failed.borrow_mut().push(event.id);
         })
     });
 
@@ -265,7 +265,7 @@ async fn a_failed_rename_is_reported(cx: &mut TestAppContext) {
     );
     visual.run_until_parked();
 
-    assert_eq!(*failed.borrow(), [RenameFailed(a)]);
+    assert_eq!(*failed.borrow(), [a]);
     assert_eq!(
         vault_names(&notes, cx),
         ["a.md", "b.md"],

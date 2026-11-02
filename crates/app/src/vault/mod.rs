@@ -19,7 +19,8 @@ mod tests;
 actions!(vault, [Save]);
 
 pub(crate) use events::{
-    ConflictPreserved, GoneChanged, NoteClosed, NoteSaved, RenameFailed, SaveFailed, TrashFailed,
+    ConflictPreserved, GoneChanged, NoteClosed, NoteSaved, OpenFailed, RenameFailed, SaveFailed,
+    TrashFailed,
 };
 #[cfg(any(test, feature = "shot"))]
 pub(crate) use store::AUTOSAVE_DELAY;

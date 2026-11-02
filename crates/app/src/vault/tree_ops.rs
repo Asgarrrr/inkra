@@ -157,12 +157,12 @@ impl NoteStore {
                 .await;
 
             this.update(cx, |this, cx| {
-                if moved.is_err() {
+                if let Err(error) = moved {
                     match before {
                         Some(prev) => this.moves.insert(id, prev),
                         None => this.moves.remove(&id),
                     };
-                    cx.emit(RenameFailed(id));
+                    cx.emit(RenameFailed { id, error });
                     return false;
                 }
                 this.moves.insert(id, Some(to.clone()));
