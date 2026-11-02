@@ -2,6 +2,7 @@
 
 Status: **in progress 2026-11-02.** S1 records the baseline and lands item 3.
 S2 corrects the item 1 probe, reverses its drop, and carries shaped lines.
+S3 carries them across a change in line count.
 Later slices add their own `### As built (Sx)` under the item they change.
 
 The 2026-11-02 Rust audit listed ten per-frame and per-edit costs. CLAUDE.md
@@ -153,6 +154,54 @@ fallback until their inputs change.
 
 Shots: all 54 scenes are byte-identical before and after (`cmp`).
 
+### As built (S3)
+
+`candidates` yields up to two lines of `previous` per new line: the one at the
+same index (S2), then the one the edit moved to the new line's start. After one
+contiguous edit, every line below it starts `previous length - length` bytes
+from where it started, so the moved candidate is the previous line whose
+`range.start` is `start + previous length - length`. `binary_search_by_key` on
+`range.start` finds it in O(log lines) per line. `Buffer::line_count` would add
+a whole-text scan per keystroke, which CLAUDE.md forbids. `carried` takes the
+first candidate whose `shaped_from` holds, so a wrong candidate costs one shape
+and never a wrong layout. A target below zero has no candidate. When the line
+count does not change, both candidates can be the same line; the second
+comparison is then redundant and harmless.
+
+Several separate edits (a reload diff with many hunks) carry only the lines
+before the first hunk and after the last. That is correct and only slower.
+
+`LineShape::new` takes `&str` and builds the `SharedString` itself. Its caller
+had to stay under clippy's `too_many_lines` after the carry call grew by a few lines.
+
+Tests: `a_newline_hands_only_its_own_line_to_shape_text` and
+`joining_two_lines_hands_only_the_joined_line_to_shape_text` open ten distinct
+lines, so a same-index match cannot pass by coincidence. Both count one line
+handed to `shape_text`. Without the moved candidate they count 10 and 9. With the
+arithmetic flipped to `start + length - previous length` they count 9 and 10.
+
+Measured (release probe, median of 3 runs, ms):
+
+| size | series | before (S2) | after |
+|---|---|---|---|
+| 5KB | warm-enter | 1.736 | 0.322 |
+| 5KB | cold-enter | 1.658 | 0.278 |
+| 50KB | warm-enter | 2.648 | 1.081 |
+| 50KB | cold-enter | 2.591 | 1.044 |
+| 500KB | warm-enter | 17.859 | 13.443 |
+| 500KB | cold-enter | 17.622 | 14.166 |
+
+The S2 regression is gone: `enter` at 500 KB costs 13.443 ms warm, below the
+16.066 ms it cost before S2. The other series did not move (50 KB warm-x 1.236,
+cold-x 1.198, typed-cold-x 0.971; idle 0.059, 0.155 and 1.285 ms).
+
+Acceptance: cold-enter at 50 KB, 1.044 ms, is at most 1.1 × warm-x at 50 KB
+after S2 (1.188 ms, so 1.307 ms). It is 0.88x.
+
+Shots: all 55 scenes are byte-identical to S2's (`cmp`). A scene shapes with no
+previous layout, so it never reaches the carry; `markdown-blocks` was viewed.
+`cargo mutants` does not cover `inkra-app`, so none ran.
+
 ## Item 2: paint only the visible lines
 
 Audit claim: `paint.rs:14` paints the whole document.
@@ -249,7 +298,8 @@ Median 1.149 us. gpui's `shape_line` cache serves the six markers. Dropped.
   warm. Inkra shapes the whole note, only on a reshape, so an idle frame keeps
   nothing warm. Following Zed needs Virtualization, which is deferred. Inkra
   instead carries each line's shape from the previous `DocumentLayout` when every
-  `shape_text` argument is equal (S2).
+  `shape_text` argument is equal (S2), at the same index or at the start an
+  edit moved the line to (S3).
 - Item 2: Zed culls by scroll position plus one row. Inkra culls by gpui's
   content mask, because the div owns the scroll.
 - Item 4: Zed's rope keeps UTF-16 lengths in chunk summaries. Inkra keeps a

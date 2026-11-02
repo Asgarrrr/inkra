@@ -32,6 +32,34 @@ fn a_keystroke_hands_only_its_line_to_shape_text(cx: &mut TestAppContext) {
     assert_eq!(line_shape_count() - before, 1);
 }
 
+/// Ten distinct lines, so a same-index match cannot pass by coincidence.
+const TEN_LINES: &str =
+    "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\n";
+
+#[gpui::test]
+fn a_newline_hands_only_its_own_line_to_shape_text(cx: &mut TestAppContext) {
+    let (_window, mut cx) = dispatching(cx, TEN_LINES);
+    cx.simulate_keystrokes("cmd-up down down");
+    cx.run_until_parked();
+
+    let before = line_shape_count();
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(line_shape_count() - before, 1);
+}
+
+#[gpui::test]
+fn joining_two_lines_hands_only_the_joined_line_to_shape_text(cx: &mut TestAppContext) {
+    let (_window, mut cx) = dispatching(cx, TEN_LINES);
+    cx.simulate_keystrokes("cmd-up down down");
+    cx.run_until_parked();
+
+    let before = line_shape_count();
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    assert_eq!(line_shape_count() - before, 1);
+}
+
 /// `text` shaped from scratch, or carrying what it can from `previous`.
 fn shape(
     text: &str,
