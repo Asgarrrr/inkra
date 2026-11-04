@@ -63,6 +63,25 @@ fn the_field_row_has_the_tree_rows_height(cx: &mut TestAppContext) {
     assert_eq!(field.size.height, plain.size.height);
 }
 
+/// The reference's rows: inset from the column's edges, `TREE_ROW_HEIGHT` tall, a row's bottom the next one's top (D5).
+#[gpui::test]
+fn a_tree_row_is_inset_and_tree_row_height_tall(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+
+    let (_sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    visual.simulate_resize(size(px(220.), px(400.)));
+
+    let first = bounds(&mut visual, "tree-row-0");
+    let second = bounds(&mut visual, "tree-row-1");
+    assert_eq!(first.size.height, theme::TREE_ROW_HEIGHT);
+    assert_eq!(first.left(), theme::ROW_INSET);
+    assert_eq!(first.right(), px(220.) - theme::ROW_INSET);
+    assert_eq!(first.top(), theme::TREE_TOP_GAP);
+    assert_eq!(second.top(), first.bottom());
+}
+
 /// The shell's sidebar column is 220 px wide; a nowrap name inside the content cell would push the dot out.
 #[gpui::test]
 async fn a_dirty_rows_dot_survives_a_long_name(cx: &mut TestAppContext) {

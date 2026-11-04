@@ -64,6 +64,7 @@ impl StatefulInteractiveElement for Tab {}
 impl RenderOnce for Tab {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let active = self.active;
+        let hover = theme::row_hover_background();
         let tab = self
             .base
             .group(TAB_GROUP)
@@ -79,7 +80,7 @@ impl RenderOnce for Tab {
             } else {
                 theme::tab_inactive_text()
             });
-        selectable(tab, self.active.then(theme::tab_active_background))
+        selectable(tab, self.active.then(theme::tab_active_background), hover)
             .children(self.start.map(|start| div().flex_none().child(start)))
             .child(
                 div()

@@ -197,20 +197,15 @@ fn no_vault_draws_no_sidebar_column(cx: &mut TestAppContext) {
     assert_eq!(note.origin, point(px(0.), row.bottom()));
 }
 
-/// A tree click lands where `row_center` reads; a header of the wrong height moves every row.
+/// The backlinks header sits under the title row; the sidebar has none (D5).
 #[gpui::test]
 fn the_panel_headers_line_up_under_the_title_row(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
     let row = cx.debug_bounds("tab-row").unwrap();
-    for header in ["panel-header-sidebar", "panel-header-backlinks"] {
-        let bounds = cx.debug_bounds(header).unwrap();
-        assert_eq!(bounds.top(), row.bottom(), "{header}");
-        assert_eq!(
-            bounds.bottom(),
-            row.bottom() + theme::PANEL_HEADER_HEIGHT,
-            "{header}"
-        );
-    }
+    let bounds = cx.debug_bounds("panel-header-backlinks").unwrap();
+    assert_eq!(bounds.top(), row.bottom());
+    assert_eq!(bounds.bottom(), row.bottom() + theme::PANEL_HEADER_HEIGHT);
+    assert!(cx.debug_bounds("panel-header-sidebar").is_none());
 }
 
 #[gpui::test]

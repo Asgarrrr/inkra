@@ -4,10 +4,11 @@ use gpui::{TestAppContext, VisualTestContext, px, size};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{activate, editor, open_vault};
+use super::{ab_focused, activate, editor, open_vault};
 use crate::editor::layout::shape_count;
 use crate::keymap::key_bindings;
 use crate::test_support;
+use crate::theme;
 
 /// Rooted at `AppShell`: only a flex parent asks the element for its min-content width.
 #[gpui::test]
@@ -49,4 +50,20 @@ fn a_keystroke_in_a_narrow_pane_shapes_the_note_once(cx: &mut TestAppContext) {
     visual.simulate_input("x");
     visual.run_until_parked();
     assert_eq!(shape_count() - before, 1);
+}
+
+/// The columns end in a hairline against the note, and their content sits inside it.
+#[gpui::test]
+fn the_chrome_columns_are_ruled_against_the_note(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    let sidebar = cx.debug_bounds("sidebar-column").unwrap();
+    let row = cx.debug_bounds("tree-row-0").unwrap();
+    assert_eq!(
+        row.right(),
+        sidebar.right() - theme::RULE_WIDTH - theme::ROW_INSET
+    );
+
+    let backlinks = cx.debug_bounds("backlinks-column").unwrap();
+    let header = cx.debug_bounds("panel-header-backlinks").unwrap();
+    assert_eq!(header.left(), backlinks.left() + theme::RULE_WIDTH);
 }

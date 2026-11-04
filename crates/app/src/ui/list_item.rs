@@ -1,6 +1,6 @@
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
-    RenderOnce, Stateful, StatefulInteractiveElement, Styled, Window, div,
+    RenderOnce, Stateful, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::{UiText, h_flex, identified, selectable};
@@ -16,6 +16,7 @@ pub(crate) struct ListItem {
     children: Vec<AnyElement>,
     end: Option<AnyElement>,
     selected: bool,
+    inset: bool,
 }
 
 impl ListItem {
@@ -27,6 +28,7 @@ impl ListItem {
             children: Vec::new(),
             end: None,
             selected: false,
+            inset: false,
         }
     }
 
@@ -47,6 +49,12 @@ impl ListItem {
 
     pub(crate) fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// The tree row's shape: `TREE_ROW_HEIGHT` tall, rounded, lit with the chrome's row colour.
+    pub(crate) fn inset(mut self) -> Self {
+        self.inset = true;
         self
     }
 }
@@ -72,11 +80,25 @@ impl RenderOnce for ListItem {
             .base
             // Load-bearing: an `auto` width is clickable only where the text reaches.
             .w_full()
-            // No height: the row is its line box (`a_click_far_down_the_list_lands_on_the_row_it_names`).
+            // A non-inset row is its line box; an inset row is `TREE_ROW_HEIGHT` tall, the pitch `row_center` reads.
             .ui_text()
             .pl(theme::ROW_INSET + theme::INDENT_STEP * depth)
-            .pr(theme::ROW_INSET);
-        selectable(row, self.selected.then(theme::selected_row_background))
+            .pr(theme::ROW_INSET)
+            .when(self.inset, |row| {
+                row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS)
+            });
+        let (selected, hover) = if self.inset {
+            (
+                theme::chrome_row_background(),
+                theme::chrome_row_background(),
+            )
+        } else {
+            (
+                theme::selected_row_background(),
+                theme::row_hover_background(),
+            )
+        };
+        selectable(row, self.selected.then_some(selected), hover)
             .children(self.start.map(|start| div().flex_none().child(start)))
             .child(
                 div()

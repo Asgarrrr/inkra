@@ -60,8 +60,9 @@ paths:
   cursor is still `since`: a synchronous op reads `since` in its own update;
   an async landing captures it at spawn. `None` and a name being typed leave
   it.
-- A chrome row states its `UI_LINE_HEIGHT` and takes no height of its own, so it
-  cannot clip its text.
+- A picker or backlink row states its `UI_LINE_HEIGHT` and takes no height of its
+  own, so it cannot clip its text; a tree row is `ListItem::inset`,
+  `TREE_ROW_HEIGHT` tall, the pitch `row_center` reads.
 - The restore lands in `Restore`'s `Landing`, never in `activation`: a user open
   replaces `activation` and must not cancel it. It applies only while the user
   holds nothing (one tab, `Shown::Empty`, no `activation`, no closed tab). It

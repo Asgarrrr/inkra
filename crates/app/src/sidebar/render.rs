@@ -27,6 +27,7 @@ impl Sidebar {
     fn render_field(item: usize, edit: &EditState) -> AnyElement {
         ListItem::new(("tree-row", item))
             .role(Role::TreeItem)
+            .inset()
             .indent(edit.depth)
             .start(spacer())
             .selected(true)
@@ -65,6 +66,7 @@ impl Sidebar {
         ListItem::new(("tree-row", item))
             .role(Role::TreeItem)
             .aria_selected(selected)
+            .inset()
             .when_some(expanded, StatefulInteractiveElement::aria_expanded)
             .indent(row.depth)
             .start(start)
@@ -82,7 +84,11 @@ impl Sidebar {
                 div()
                     .debug_selector(|| format!("tree-name-{item}"))
                     .whitespace_nowrap()
-                    .text_color(theme::sidebar_text())
+                    .text_color(if selected {
+                        theme::selected_row_text()
+                    } else {
+                        theme::sidebar_text()
+                    })
                     .child(label),
             )
             .when_some(indicator, |list_item, indicator| {
@@ -105,6 +111,6 @@ fn spacer() -> Div {
 impl Sidebar {
     /// The stated pitch, not the drawn one: a drift between them misplaces the click, which a test catches.
     pub(crate) fn row_center(&self, ix: f32) -> Option<Point<Pixels>> {
-        crate::ui::list_row_center(&self.scroll, theme::UI_LINE_HEIGHT, ix)
+        crate::ui::list_row_center(&self.scroll, theme::TREE_ROW_HEIGHT, ix)
     }
 }

@@ -388,9 +388,8 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     );
 }
 
-/// Pinned at row 29 of 30 so drift passes a whole row before this catches
-/// it: deleting `line_height` alone first misplaces a click at row 3, and
-/// deleting `text_size` alone stays green correctly (16px still fits).
+/// Pinned at row 29 of 30 so drift from the `TREE_ROW_HEIGHT` pitch passes a
+/// whole row before this catches it.
 #[gpui::test]
 fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
@@ -411,7 +410,7 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
             note: last.id,
             open: Open::Here
         }],
-        "the rendered pitch has drifted from the stated line height"
+        "the drawn pitch has drifted from `TREE_ROW_HEIGHT`"
     );
 }
 

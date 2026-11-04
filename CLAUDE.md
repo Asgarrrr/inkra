@@ -174,6 +174,7 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
   `Tab`, `Icon`, `Indicator`, `IconButton`, `PanelHeader`, `Assets`), row overlays, Lucide
   icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices
+- `docs/superpowers/specs/2026-11-04-obsidian-chrome-design.md` — Obsidian chrome: surfaces, the split title row, browser tabs, the nav row, the backlinks header
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-11-02-quit-and-failures-design.md` — close is quit, the chained pre-quit flush, the unsaved prompt, `moves`, save retries, the notice
