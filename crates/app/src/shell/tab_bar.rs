@@ -92,7 +92,8 @@ impl AppShell {
             .min_w_0()
             .h_full()
             .items_end()
-            .pl(theme::TAB_GAP)
+            // Room for the active tab's feet, which the scroll would clip.
+            .px(theme::TAB_CURVE)
             .gap(theme::TAB_GAP)
             .overflow_x_scroll()
             .track_scroll(&self.tab_scroll)
@@ -151,6 +152,7 @@ impl AppShell {
             .child(title)
             .end(
                 IconButton::new(("tab-close", ix), IconName::X, "Close tab")
+                    .square(theme::TAB_CLOSE_SIZE)
                     .radius(theme::TAB_CLOSE_RADIUS)
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         // One click, one action: the tab under the × must not also see it.
@@ -166,7 +168,9 @@ impl AppShell {
             .flex_none()
             .self_end()
             .h(theme::TAB_HEIGHT)
-            .pl(theme::TAB_GAP)
+            // On the tabs' content centreline.
+            .pt(theme::RULE_WIDTH)
+            .pb(theme::TAB_HOVER_INSET)
             .child(
                 IconButton::new("tab-new", IconName::Plus, NEW_TAB).on_click(cx.listener(
                     |shell, _, window, cx| {

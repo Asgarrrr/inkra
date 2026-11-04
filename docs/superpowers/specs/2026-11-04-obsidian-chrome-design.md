@@ -1,6 +1,6 @@
 # Obsidian chrome: surfaces, split title row, browser tabs
 
-Status: **approved 2026-11-04** in a brainstorm on HTML mocks. Not built.
+Status: **built 2026-11-04**; approved 2026-11-04 in a brainstorm on HTML mocks.
 
 ## Why
 
@@ -26,7 +26,7 @@ References, both gitignored:
   sidebar's right edge. Over the note column: the tabs, a `+` (`NewTab`), the
   drag space, then the backlinks toggle at the right end.
 - **D3. Tabs look like browser tabs.** The active tab has the note's colour, a
-  hairline on top and sides, 8 px top corners, and joins the note with no rule
+  hairline on top and sides, 10 px top corners, and joins the note with no rule
   under it. An inactive tab has muted text and no background.
 - **D4. A navigation row under the tabs.** 34 px, fixed at the top of the note
   column, holding `←` `→` bound to `GoBack` and `GoForward`. An arrow with no
@@ -41,28 +41,44 @@ body's styling (headings, code blocks: markdown blocks S2), a tab list menu.
 
 ## D1. Surfaces
 
-Sampled from the reference capture, converted to sRGB. The capture's colour
-space makes them approximate: render the `tabs` scene and compare it beside
-the reference before freezing them.
+Read from the reference's theme variables (`obsidian eval`, Flexoki dark).
+The reference's chrome is translucent: `#100f0f` at 70 % over the window's
+vibrancy, so its colour on screen depends on the desktop behind it. Inkra does
+the same on the user's request (2026-11-04): the window is
+`WindowBackgroundAppearance::Blurred` and the chrome `#181717` at 95 %: the user
+wants a hint of the desktop without discerning it, and gpui's blur, stripped of
+its dark tint, shows more than the reference's. The base was matched by the
+user's eye beside the reference: `#201f1f`, tuned to the reference's measured
+`#2a2929`, read too light. The note
+and the active tab stay opaque. Compare on a full-screen capture: a one-window
+capture (`screencapture -l`) draws the blur over nothing. An off-screen shot has
+no blur either, so the stage paints `shot_backdrop` under the root; the chrome
+then shows opaque `#181717`.
 
 | Token | Value | Replaces |
 |---|---|---|
-| note, active tab | `#131212` | `editor_background` `#1e1e1e`, `tab_active_background` |
-| chrome | `#2a2929` | `sidebar_background`, `tab_bar_background` `#181818` |
-| hairline | `#353332` | `tab_rule`, the panel header rule |
-| hover, selected row | `#383737` | the white overlays, on chrome only |
-| text | `#d7d6ce` | `sidebar_text`, `tab_text` |
-| muted text, icons | `#8f8d88` | `tab_inactive_text`, `icon_muted` |
+| note, active tab | `#100f0f` | `editor_background` `#1e1e1e`, `tab_active_background` |
+| chrome | `#181717` at 95 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
+| hairline | `#282726` | `tab_rule`, the panel header rule |
+| hover, selected row | `rgba(254,252,240,.05)` over the chrome | the white overlays, on chrome only |
+| text | `#cecdc3` | `sidebar_text`, `tab_text` |
+| muted text, icons | `#878580` | `tab_inactive_text`, `icon_muted` |
 
 Every value lives in `theme.rs`. Modals, banners and markdown colours keep their
 values unless the comparison shows a clash; record any change here.
 
 ## D2. Title row
 
-- Height `TITLE_BAR_HEIGHT` 34 → 39 px; re-derive `TRAFFIC_LIGHT_POSITION` from
-  it (its doc comment gives the formula).
-- The sidebar's segment is the sidebar's width; the tab segment fills the rest.
-  One hairline under the whole row, broken by the active tab.
+- Height `TITLE_BAR_HEIGHT` 34 → 40 px, the reference's `--header-height`;
+  `TRAFFIC_LIGHT_POSITION` is (14, 12), which puts the red light's centre at the
+  reference's (20.75, 18.75) pt, measured on two captures. The sidebar's first
+  button starts 88 px in, as the reference's container padding.
+- The sidebar's segment is the sidebar's width; with the backlinks shown, a
+  segment as wide as them ends the row and holds their toggle at its right end;
+  the tab segment fills the rest. One hairline under the tab segment only,
+  broken by the active tab: both side panels run unbroken to the window's top,
+  as the reference's (user request, 2026-11-04).
+- Backlinks hidden: their toggle ends the tab segment.
 - Sidebar hidden: the traffic lights' padding and the sidebar toggle lead the
   tab segment, as in S3's `panels-hidden`.
 - The drag regions of S3-D3 still hold: empty space in either segment moves the
@@ -70,8 +86,17 @@ values unless the comparison shows a clash; record any change here.
 
 ## D3. Tabs
 
-- Height 34 px inside the 39 px row, bottom-aligned. `TAB_MAX_WIDTH` and the
+- Height 34 px inside the 40 px row, bottom-aligned, 10 px top corners (`--tab-radius-active`). `TAB_MAX_WIDTH` and the
   drop indicator are unchanged.
+- The active tab spreads into the note with two concave feet outside its bottom
+  corners, 10 px (`--tab-curve`; user request, 2026-11-04). Its side hairlines
+  curve out along them. Each foot is a ring in the note's colour clipped to the
+  corner's square; the chrome shows through the ring's hole.
+- A hovered inactive tab shows a pill, not a full tab: inset 1 px from the top
+  and 4 px from the sides and bottom, 8 px corners (`--tab-radius`), the hover
+  token; its text stays muted (user request, 2026-11-04). The title starts
+  10 px in, the pill's inset plus the reference's 6 px inner padding. A tab's
+  content and `+` centre on the pill, not on the taller tab, as the reference's.
 - The × shows on the active tab and on the hovered one, as today. The dirty and
   failed dots are unchanged.
 - `+` after the last tab dispatches `NewTab`.
@@ -85,7 +110,7 @@ values unless the comparison shows a clash; record any change here.
 
 ## D5. Sidebar
 
-- No header. Rows 27 px, 6 px radius, 8 px inset from the sidebar's edges, text
+- No header. Rows 27 px, 8 px radius (`--nav-item-radius`), 8 px inset from the sidebar's edges, text
   at `UI_TEXT_SIZE`. Chevrons and indentation unchanged.
 - Selected and hovered rows use the hover token, not a full-width band.
 
@@ -108,7 +133,7 @@ on its left edge against the note.
 - **Borders for structure only**: hairlines separate surfaces and mark the
   active tab; nothing gets a border to fake depth.
 - **Hit areas**: icon buttons keep at least a 28 × 26 px target, the reference's
-  size. The skills' 40 × 40 px desktop minimum does not fit a 39 px row; this
+  size. The skills' 40 × 40 px desktop minimum does not fit a 40 px row; this
   is a recorded deviation, not an oversight.
 - Web-only rules (CSS transitions, `will-change`, font smoothing, `@media
   (hover)`) have no gpui counterpart and do not apply.
@@ -156,14 +181,22 @@ S2, the split title row:
 
 S3, browser tabs:
 
-- `TAB_GAP` (6 px) also precedes `+`. The mock uses 4; one term is kept.
-- The × radius is 4 px, by the concentric rule (`TAB_RADIUS - (TAB_HEIGHT - ICON_BUTTON_HEIGHT) / 2`).
+- The bar pads `TAB_CURVE` (10 px) before the first tab and after `+`, so its scroll never clips a foot; this matches the reference's ~10 pt inset. `TAB_GAP` (6 px) parts the tabs and `+`; the mock uses 4.
+- The tab's × is the reference's 20 px box, below the 28 × 26 hit-area rule: a full-size button filled the 29 px hover pill. Its radius, 3.5 px, is concentric with the pill.
 - The drag preview always shows the active look: an inactive tab has no background to float on.
 - The active tab's hairline is a paint-only overlay, so a layout border does not shift the title or take the drop indicator's colour.
-- The title row's bottom rule is a paint-only layer listed first, under every segment: the active tab, painted later, breaks it.
+- The title row's bottom rule is a paint-only layer listed first in the tab segment: the active tab, painted later, breaks it.
 
 S4, the backlinks header:
 
 - The header keeps the `ROW_INSET` padding, so the title lines up with the backlink rows. The mock pads 16.
 - The count is 11.5 px muted text on the hover token.
+- No count with no backlinks: "No backlinks" under the header already says it.
 - The panel's left hairline was drawn in S1.
+
+S5, the navigation row:
+
+- Enabled arrows use `icon_muted`, one colour for every button. The mock's #616161 is dropped.
+- Dimmed means 45% opacity.
+- The vendored gpui has no aria-disabled, so a dimmed arrow is inert but announced as a plain button.
+- The nav row's left padding is 12 px, from the reference.

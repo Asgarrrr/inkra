@@ -44,19 +44,20 @@ pub(crate) fn ui_digit_width() -> Pixels {
 }
 
 pub(crate) fn editor_background() -> Rgba {
-    rgb(0x131212)
+    rgb(0x100f0f)
 }
 
 pub(crate) fn editor_text() -> Rgba {
     rgb(0xffffff)
 }
 
+/// At 95 % over the window's blur: a hint of the desktop, never its shapes; matched to the reference by eye.
 pub(crate) fn sidebar_background() -> Rgba {
-    rgb(0x2a2929)
+    rgba(0x181717f2)
 }
 
 pub(crate) fn sidebar_text() -> Rgba {
-    rgb(0xd7d6ce)
+    rgb(0xcecdc3)
 }
 
 /// A selected tree row's name (the mock's `.row.on`).
@@ -97,12 +98,12 @@ pub(crate) fn button_hover_background() -> Rgba {
 }
 
 pub(crate) fn icon_muted() -> Rgba {
-    rgb(0x8f8d88)
+    rgb(0x878580)
 }
 
 /// A toggled icon button's icon: the panel it names is shown.
 pub(crate) fn icon_active() -> Rgba {
-    rgb(0xd7d6ce)
+    rgb(0xcecdc3)
 }
 
 pub(crate) const ICON_SIZE: Pixels = px(14.);
@@ -121,7 +122,7 @@ pub(crate) const DOT_SIZE: Pixels = px(6.);
 
 /// A hovered or selected tree row on chrome (D1).
 pub(crate) fn chrome_row_background() -> Rgba {
-    rgb(0x383737)
+    rgba(0xfefcf00d)
 }
 
 /// A list item's left and right padding.
@@ -130,7 +131,7 @@ pub(crate) const ROW_INSET: Pixels = px(8.);
 /// A tree row's height, and the pitch `Sidebar::row_center` reads.
 pub(crate) const TREE_ROW_HEIGHT: Pixels = px(27.);
 
-pub(crate) const ROW_RADIUS: Pixels = px(6.);
+pub(crate) const ROW_RADIUS: Pixels = px(8.);
 
 /// The reference's gap above the tree's first row.
 pub(crate) const TREE_TOP_GAP: Pixels = px(4.);
@@ -171,54 +172,66 @@ pub(crate) fn notice_text() -> Rgba {
     rgb(0xe8a0a0)
 }
 
+/// The blur's stand-in in a shot: the chrome's own colour, so the shot shows it opaque.
+#[cfg(feature = "shot")]
+pub(crate) fn shot_backdrop() -> Rgba {
+    rgb(0x181717)
+}
+
 /// The tab bar over the note column (tabs spec, A5): the sidebar's shade, the active tab the editor's.
 pub(crate) fn tab_bar_background() -> Rgba {
-    rgb(0x2a2929)
+    sidebar_background()
 }
 
 pub(crate) fn tab_active_background() -> Rgba {
-    rgb(0x131212)
+    rgb(0x100f0f)
 }
 
 pub(crate) fn tab_text() -> Rgba {
-    rgb(0xd7d6ce)
+    rgb(0xcecdc3)
 }
 
 pub(crate) fn tab_inactive_text() -> Rgba {
-    rgb(0x8f8d88)
+    rgb(0x878580)
 }
 
 pub(crate) fn tab_rule() -> Rgba {
-    rgb(0x353332)
+    rgb(0x282726)
 }
 
 /// The backlinks count on its pill: the muted text (D6).
 pub(crate) fn header_count_text() -> Rgba {
-    rgb(0x8f8d88)
+    rgb(0x878580)
 }
 
 /// The mock's backlinks header; the nav row is level with it (D4).
 pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(34.);
+
+/// Level with the backlinks header (D4).
+pub(crate) const NAV_ROW_HEIGHT: Pixels = PANEL_HEADER_HEIGHT;
 
 pub(crate) const HEADER_COUNT_TEXT_SIZE: Pixels = px(11.5);
 
 pub(crate) const HEADER_COUNT_LINE_HEIGHT: Pixels = px(16.);
 
 /// The reference's title row.
-pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(39.);
+pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(40.);
 
-/// The traffic lights' width and margins, on the macOS 26 SDK (Zed's `TRAFFIC_LIGHT_PADDING`).
-pub(crate) const TRAFFIC_LIGHT_PADDING: Pixels = px(78.);
+/// The reference's inset before the sidebar's first button: the lights and their margins.
+pub(crate) const TRAFFIC_LIGHT_PADDING: Pixels = px(88.);
 
 /// `(TITLE_BAR_HEIGHT - 16) / 2`: gpui centres the 16 px buttons in a `16 + 2y` container.
-pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(9.), px(11.5));
+pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(14.), px(12.));
 
 /// An icon button's hit area, the reference's 28 x 26 (Polish rules: hit areas).
 pub(crate) const ICON_BUTTON_WIDTH: Pixels = px(28.);
 
 pub(crate) const ICON_BUTTON_HEIGHT: Pixels = px(26.);
 
-pub(crate) const BUTTON_RADIUS: Pixels = px(6.);
+pub(crate) const BUTTON_RADIUS: Pixels = px(8.);
+
+/// A dimmed, inert button (the mock's `.off`).
+pub(crate) const DISABLED_OPACITY: f32 = 0.45;
 
 /// The empty title row after the tabs never shrinks below this, so the window can always move.
 pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
@@ -226,18 +239,33 @@ pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
 
-/// Inside the 39 px row, bottom-aligned (D3).
+/// Inside the 40 px row, bottom-aligned (D3).
 pub(crate) const TAB_HEIGHT: Pixels = px(34.);
 
-/// Before each tab and before `+`.
+/// Between two tabs, and before `+`.
 pub(crate) const TAB_GAP: Pixels = px(6.);
 
-pub(crate) const TAB_RADIUS: Pixels = px(8.);
+pub(crate) const TAB_RADIUS: Pixels = px(10.);
 
-/// `TAB_RADIUS - (TAB_HEIGHT - ICON_BUTTON_HEIGHT) / 2`: concentric with the tab.
-pub(crate) const TAB_CLOSE_RADIUS: Pixels = px(4.);
+/// The active tab's concave feet at its bottom corners, the reference's `--tab-curve`.
+pub(crate) const TAB_CURVE: Pixels = px(10.);
 
-/// `ICON_BUTTON_WIDTH`, the ×'s box: a tab's centre lies left of its × by the gap.
+/// An inactive tab's hover pill, inset from the tab's sides and bottom.
+pub(crate) const TAB_HOVER_INSET: Pixels = px(4.);
+
+/// The reference's `--tab-radius`, on every corner of the hover pill.
+pub(crate) const TAB_HOVER_RADIUS: Pixels = px(8.);
+
+/// The title's inset from the tab's left edge: the hover pill's inset plus the reference's 6 px inner padding.
+pub(crate) const TAB_TEXT_INSET: Pixels = px(10.);
+
+/// The ×'s box on a tab, the reference's 20 px: a full-size button would fill the hover pill.
+pub(crate) const TAB_CLOSE_SIZE: Pixels = px(20.);
+
+/// Concentric with the hover pill: its radius less the ×'s inset in it.
+pub(crate) const TAB_CLOSE_RADIUS: Pixels = px(3.5);
+
+/// Wider than the ×'s box: a tab's centre lies left of its × by the gap.
 pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 
 /// The tab a dragged tab is over: the caret's blue, faint behind it and full on the edge it lands at.

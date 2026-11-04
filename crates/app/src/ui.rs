@@ -10,7 +10,9 @@ mod tab;
 #[cfg(test)]
 mod tests;
 
-use gpui::{Div, ElementId, InteractiveElement, Rgba, Stateful, Styled, div};
+use gpui::{
+    App, Div, ElementId, InteractiveElement, MouseDownEvent, Rgba, Stateful, Styled, Window, div,
+};
 
 pub(crate) use assets::{Assets, IconName};
 pub(crate) use icon::Icon;
@@ -34,6 +36,11 @@ pub(crate) fn v_flex() -> Div {
 pub(crate) fn identified(base: Div, id: impl Into<ElementId>) -> Stateful<Div> {
     let id = id.into();
     base.debug_selector(|| id.to_string()).id(id)
+}
+
+/// A left-press listener for chrome that is not a text target: the root would take focus from the editor on the press (`div.rs:2765-2780`).
+pub(crate) fn keep_focus(_: &MouseDownEvent, window: &mut Window, _: &mut App) {
+    window.prevent_default();
 }
 
 /// One background or a hover, never both: a hover refinement repaints the base (`div.rs:3451`).

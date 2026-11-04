@@ -14,6 +14,7 @@ use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
 use crate::restore::{SavedTab, Session};
 use crate::shell::AppShell;
+use crate::theme;
 use crate::ui::Assets;
 
 const VAULT_ROOT: &str = "/vault";
@@ -170,6 +171,11 @@ impl Stage {
             .cx
             .open_offscreen_window(WINDOW_SIZE, |window, cx| root(fs, launched, window, cx))
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
+        window
+            .update(&mut self.cx, |view, _, _| {
+                view.set_backdrop(theme::shot_backdrop());
+            })
+            .unwrap_or_else(|error| panic!("set the backdrop: {error}"));
         self.settle();
         window
     }

@@ -29,6 +29,7 @@ mod following;
 mod gone;
 mod history;
 mod modal;
+mod nav_row;
 mod notices;
 mod open;
 mod open_first;

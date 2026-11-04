@@ -1,6 +1,6 @@
 //! Showing and hiding the sidebar and the backlinks, and the toggles that do it (shell chrome spec, S2a-D3).
 
-use gpui::{Context, Focusable, IntoElement, StatefulInteractiveElement, Window, actions};
+use gpui::{Context, Focusable, IntoElement, Window, actions};
 
 use super::AppShell;
 use crate::sidebar::Sidebar;

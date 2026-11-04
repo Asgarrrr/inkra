@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use gpui::{
     App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, px, size,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
 };
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
@@ -113,6 +113,8 @@ pub fn run() {
                 }),
                 // The app moves the window from its drag regions; AppKit never drags it from a tab.
                 app_owns_titlebar_drag: true,
+                // The chrome is translucent over this blur; the note paints itself opaque.
+                window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
             |window, cx| root(Arc::new(RealFs), launched, window, cx),

@@ -125,7 +125,7 @@ fn the_active_tab_reaches_the_row_bottom(cx: &mut TestAppContext) {
     assert_eq!(second.size.height, theme::TAB_HEIGHT);
     assert_eq!(second.bottom(), row.bottom());
     assert_eq!(first.bottom(), row.bottom());
-    assert_eq!(first.left(), bar.left() + theme::TAB_GAP);
+    assert_eq!(first.left(), bar.left() + theme::TAB_CURVE);
     assert_eq!(second.left(), first.right() + theme::TAB_GAP);
 }
 
@@ -135,11 +135,9 @@ fn the_new_tab_button_sits_on_the_tabs_centreline(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
 
     let new = cx.debug_bounds("tab-new").unwrap();
-    assert_eq!(new.center().y, cx.debug_bounds("tab-0").unwrap().center().y);
-    assert_eq!(
-        new.left(),
-        cx.debug_bounds("tab-bar").unwrap().right() + theme::TAB_GAP
-    );
+    let close = cx.debug_bounds("tab-close-0").unwrap();
+    assert_eq!(new.center().y, close.center().y);
+    assert_eq!(new.left(), cx.debug_bounds("tab-bar").unwrap().right());
 }
 
 #[gpui::test]
@@ -156,6 +154,39 @@ fn the_new_tab_button_opens_a_tab(cx: &mut TestAppContext) {
 fn the_tab_close_radius_is_concentric() {
     assert_eq!(
         theme::TAB_CLOSE_RADIUS,
-        theme::TAB_RADIUS - (theme::TAB_HEIGHT - theme::ICON_BUTTON_HEIGHT) / 2.
+        theme::TAB_HOVER_RADIUS
+            - (theme::TAB_HEIGHT
+                - theme::RULE_WIDTH
+                - theme::TAB_HOVER_INSET
+                - theme::TAB_CLOSE_SIZE)
+                / 2.
     );
+}
+
+/// An inactive tab's hover is a pill inset in the tab, clear of the row's bottom, as the reference's.
+#[gpui::test]
+fn an_inactive_tabs_hover_is_an_inset_pill(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+
+    let tab = cx.debug_bounds("tab-0").unwrap();
+    let pill = cx.debug_bounds("tab-hover").unwrap();
+    assert_eq!(pill.left(), tab.left() + theme::TAB_HOVER_INSET);
+    assert_eq!(pill.right(), tab.right() - theme::TAB_HOVER_INSET);
+    assert_eq!(pill.top(), tab.top() + theme::RULE_WIDTH);
+    assert_eq!(pill.bottom(), tab.bottom() - theme::TAB_HOVER_INSET);
+}
+
+/// The title and the × centre on the hover pill, not on the taller tab, as the reference's.
+#[gpui::test]
+fn an_inactive_tabs_content_centres_on_its_pill(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+
+    let pill = cx.debug_bounds("tab-hover").unwrap();
+    let close = cx.debug_bounds("tab-close-0").unwrap();
+    assert_eq!(close.size.height, theme::TAB_CLOSE_SIZE);
+    assert_eq!(close.center().y, pill.center().y);
 }
