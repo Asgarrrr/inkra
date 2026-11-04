@@ -227,7 +227,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs",
-        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 8 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
+        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
         open: tabs::dirty,
     },
     Scene {
@@ -242,12 +242,12 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs-hover",
-        shows: "the pointer on the inactive `reading`: the row hover behind its 34 px tab, 8 px top corners, and its × shown; the other inactive tabs show no background and no ×; the `+` after the last tab",
+        shows: "the pointer on the inactive `reading`: a pill in the row hover inset 1 px from its top and 4 px from its sides and bottom, 8 px corners, its text still muted, its × shown on the pill; the other inactive tabs show no background and no ×; the `+` after the last tab",
         open: tabs::hover,
     },
     Scene {
         name: "tabs-dragging",
-        shows: "`index` dragged onto the third tab, button held: that tab lit in the drop colour with a 2 px right edge, the preview under the pointer in the active look (note colour, hairline, 8 px top corners); the bar's order unchanged until the drop; the `+` after the last tab",
+        shows: "`index` dragged onto the third tab, button held: that tab lit in the drop colour with a 2 px right edge, the preview under the pointer in the active look (note colour, hairline, 10 px top corners); the bar's order unchanged until the drop; the `+` after the last tab",
         open: tabs::dragging,
     },
     Scene {
@@ -259,6 +259,11 @@ const CATALOGUE: &[Scene] = &[
         name: "tabs-restored",
         shows: "a relaunch: `index`, `reading` and `today` back in the bar, `reading` active (34 px, note colour, hairline on top and sides, no rule under it) with `Books to read,` selected; a `+` after the last tab; `reading` highlighted in the sidebar; no \"Select a note.\"",
         open: tabs::restored,
+    },
+    Scene {
+        name: "nav-row",
+        shows: "the nav row atop the note column, level with the `Backlinks` header: `←` lit after tab 1 moved from `index` to `today`, `→` dimmed",
+        open: tabs::nav_row,
     },
     Scene {
         name: "quick-open-results",

@@ -218,6 +218,19 @@ fn back_with_nothing_behind_calls_no_leaving() {
 }
 
 #[test]
+fn a_stack_holding_only_the_note_showing_reaches_nothing() {
+    let mut harness = Harness::new();
+    let active = harness.tabs.active();
+    assert!(harness.commit(active, Some(1)));
+    assert!(harness.commit(active, Some(1)));
+
+    assert!(!harness.tabs.can_go_back(Some(1)));
+    assert!(harness.tabs.can_go_back(Some(2)));
+    assert!(!harness.tabs.can_go_forward(Some(1)));
+    assert_eq!(harness.walk(true).0, None);
+}
+
+#[test]
 fn an_empty_place_left_is_not_pushed() {
     let mut harness = Harness::new();
     let tab = harness.tabs.active();

@@ -95,6 +95,11 @@ impl Harness {
     /// `back` or `forward` from the note showing; the arrival and the place left, if any.
     pub(super) fn walk(&mut self, back: bool) -> (Option<Fake>, Option<Fake>) {
         let showing = self.showing.note;
+        let can = if back {
+            self.tabs.can_go_back(showing)
+        } else {
+            self.tabs.can_go_forward(showing)
+        };
         let (arrived, left) = self.with_leaving(|tabs, leaving| {
             if back {
                 tabs.back(showing, leaving)
@@ -102,6 +107,7 @@ impl Harness {
                 tabs.forward(showing, leaving)
             }
         });
+        assert_eq!(can, arrived.is_some(), "can_go_* disagrees with the walk");
         if let Some(place) = &arrived {
             self.showing = place.clone();
         }

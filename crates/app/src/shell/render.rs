@@ -2,11 +2,12 @@
 
 use gpui::{
     App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render,
-    Styled, Window, div,
+    Styled, Window, div, prelude::FluentBuilder,
 };
 
-use super::{AppShell, BACKLINKS_WIDTH, SIDEBAR_WIDTH};
+use super::{AppShell, BACKLINKS_WIDTH, GoBack, GoForward, SIDEBAR_WIDTH};
 use crate::theme;
+use crate::ui::{IconButton, IconName, h_flex, keep_focus};
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -54,6 +55,33 @@ impl AppShell {
                 .child("Deleted from disk. Typing restores it.")
         })
     }
+
+    /// Atop the note column, out of the editor's scroll; each arrow is lit when its walk would arrive (D4).
+    fn render_nav_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let showing = self.active_note();
+        h_flex()
+            .debug_selector(|| "nav-row".into())
+            .flex_none()
+            .h(theme::NAV_ROW_HEIGHT)
+            .pl_3()
+            .bg(theme::editor_background())
+            // A press on the strip beside the arrows leaves the editor focused.
+            .on_mouse_down(MouseButton::Left, keep_focus)
+            .child(
+                IconButton::new("nav-back", IconName::ArrowLeft, "Go back")
+                    .disabled(!self.tabs.can_go_back(showing))
+                    .on_click(cx.listener(|shell, _, window, cx| {
+                        shell.go_back(&GoBack, window, cx);
+                    })),
+            )
+            .child(
+                IconButton::new("nav-forward", IconName::ArrowRight, "Go forward")
+                    .disabled(!self.tabs.can_go_forward(showing))
+                    .on_click(cx.listener(|shell, _, window, cx| {
+                        shell.go_forward(&GoForward, window, cx);
+                    })),
+            )
+    }
 }
 
 /// A side panel's column: fixed width, the body's full height.
@@ -93,6 +121,7 @@ impl AppShell {
                     .h_full()
                     .flex()
                     .flex_col()
+                    .child(self.render_nav_row(cx))
                     .children(self.render_gone_banner(cx))
                     .children(self.render_notice(cx))
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
@@ -141,6 +170,7 @@ impl Render for AppShell {
             .flex()
             .flex_col()
             .size_full()
+            .when_some(self.backdrop, Styled::bg)
             .child(self.render_tab_row(window, cx))
             .child(self.render_columns(cx))
             .children(self.render_modal(cx))

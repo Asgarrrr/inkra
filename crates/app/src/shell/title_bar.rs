@@ -9,7 +9,7 @@ use gpui::{
 use super::AppShell;
 use crate::sidebar::NewNote;
 use crate::theme;
-use crate::ui::{IconButton, IconName, h_flex, identified};
+use crate::ui::{IconButton, IconName, h_flex, identified, keep_focus};
 use crate::vault_search::SearchVault;
 
 impl AppShell {
@@ -19,7 +19,9 @@ impl AppShell {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let sidebar_shown = self.panes.as_ref().is_some_and(|panes| panes.shown.sidebar);
+        let shown = self.panes.as_ref().map(|panes| panes.shown);
+        let sidebar_shown = shown.is_some_and(|shown| shown.sidebar);
+        let backlinks_shown = shown.is_some_and(|shown| shown.backlinks);
         let (sidebar_toggle, backlinks_toggle) = self.render_panel_toggles(cx).unzip();
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
@@ -35,12 +37,32 @@ impl AppShell {
         } else {
             (None, Some(sidebar_toggle))
         };
+        let (title_backlinks, trailing_toggle) = if backlinks_shown {
+            (
+                Some(Self::render_title_backlinks(backlinks_toggle, cx)),
+                None,
+            )
+        } else {
+            (None, backlinks_toggle)
+        };
         let title_tabs = h_flex()
             .debug_selector(|| "title-tabs".into())
+            .on_mouse_down(MouseButton::Left, keep_focus)
+            .relative()
             .flex_1()
             .min_w_0()
             .h_full()
-            .pr(theme::ROW_INSET)
+            .when(!backlinks_shown, |segment| segment.pr(theme::ROW_INSET))
+            // Under the tabs only, so the side panels run to the window's top; the active tab, painted later, breaks it (D3).
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .border_b(theme::RULE_WIDTH)
+                    .border_color(theme::tab_rule()),
+            )
             .when_some(leading_toggle, |segment, toggle| {
                 segment
                     .child(
@@ -57,25 +79,34 @@ impl AppShell {
                     .flex_1()
                     .min_w(theme::TITLE_DRAG_MIN_WIDTH),
             )
-            .children(backlinks_toggle);
+            .children(trailing_toggle);
         h_flex()
             .debug_selector(|| "tab-row".into())
             .relative()
             .flex_none()
             .h(theme::TITLE_BAR_HEIGHT)
             .bg(theme::tab_bar_background())
-            // Under every segment: the active tab, painted later, breaks it (D3).
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .border_b(theme::RULE_WIDTH)
-                    .border_color(theme::tab_rule()),
-            )
             .children(title_sidebar)
             .child(title_tabs)
+            .children(title_backlinks)
+    }
+
+    /// Over the backlinks: a drag region, then their toggle at the window's right edge.
+    fn render_title_backlinks<Toggle: IntoElement>(
+        toggle: Option<Toggle>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<Toggle> {
+        h_flex()
+            .debug_selector(|| "title-backlinks".into())
+            .on_mouse_down(MouseButton::Left, keep_focus)
+            .flex_none()
+            .w(super::BACKLINKS_WIDTH)
+            .h_full()
+            .pr(theme::ROW_INSET)
+            .border_l(theme::RULE_WIDTH)
+            .border_color(theme::tab_rule())
+            .child(Self::render_drag_region("title-drag-backlinks", cx).flex_1())
+            .children(toggle)
     }
 
     /// Over the sidebar: the lights, its buttons, then its toggle at its right edge (D2).
@@ -86,6 +117,7 @@ impl AppShell {
     ) -> impl IntoElement + use<Toggle> {
         h_flex()
             .debug_selector(|| "title-sidebar".into())
+            .on_mouse_down(MouseButton::Left, keep_focus)
             .flex_none()
             .w(super::SIDEBAR_WIDTH)
             .h_full()

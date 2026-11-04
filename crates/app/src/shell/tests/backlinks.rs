@@ -205,6 +205,7 @@ fn the_header_counts_the_sources(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
-    assert!(visual.debug_bounds("panel-header-count-0").is_some());
+    // "No backlinks" already says it: no `0` pill beside it.
+    assert!(visual.debug_bounds("panel-header-count-0").is_none());
     assert!(visual.debug_bounds("panel-header-count-2").is_none());
 }

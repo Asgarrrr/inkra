@@ -101,7 +101,6 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
         "sidebar-new-note",
         "panel-toggle-sidebar",
         "panel-toggle-backlinks",
-        "tab-close-0",
     ] {
         let bounds = cx.debug_bounds(button).unwrap();
         assert_eq!(
@@ -169,10 +168,53 @@ fn the_space_after_the_tabs_is_a_drag_region(cx: &mut TestAppContext) {
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let region = cx.debug_bounds("title-drag-end").unwrap();
     let new = cx.debug_bounds("tab-new").unwrap();
-    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
-    assert_eq!(bar.right(), cx.debug_bounds("tab-1").unwrap().right());
+    let backlinks = cx.debug_bounds("title-backlinks").unwrap();
+    assert_eq!(
+        bar.right(),
+        cx.debug_bounds("tab-1").unwrap().right() + theme::TAB_CURVE
+    );
     assert_eq!(region.left(), new.right());
+    assert_eq!(region.right(), backlinks.left());
+}
+
+/// The backlinks run to the window's top, as the sidebar does: their toggle sits over them.
+#[gpui::test]
+fn the_backlinks_toggle_sits_over_the_backlinks(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    let segment = cx.debug_bounds("title-backlinks").unwrap();
+    let column = cx.debug_bounds("backlinks-column").unwrap();
+    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    assert_eq!(segment.left(), column.left());
+    assert_eq!(segment.right(), column.right());
+    assert!(toggle.left() >= segment.left() && toggle.right() <= segment.right());
+}
+
+/// Hidden, the backlinks leave no segment, and their toggle ends the tab segment.
+#[gpui::test]
+fn hidden_backlinks_put_their_toggle_after_the_tabs(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-|");
+
+    assert!(cx.debug_bounds("title-backlinks").is_none());
+    let region = cx.debug_bounds("title-drag-end").unwrap();
+    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
     assert_eq!(region.right(), toggle.left());
+}
+
+#[gpui::test]
+fn a_press_on_the_backlinks_drag_region_arms_the_move(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let at = cx.debug_bounds("title-drag-backlinks").unwrap().center();
+
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    assert!(armed(&window, &mut cx));
+    assert!(editor_focused(&window, &mut cx));
 }
 
 #[gpui::test]
@@ -211,6 +253,35 @@ fn a_press_on_a_drag_region_keeps_the_editors_focus(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
     assert!(!armed(&window, &mut cx));
+}
+
+#[gpui::test]
+fn a_press_between_the_sidebar_buttons_keeps_the_editors_focus(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let search = cx.debug_bounds("sidebar-search").unwrap();
+    let at = point(search.right() + px(1.), search.center().y);
+
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    assert!(editor_focused(&window, &mut cx));
+    assert!(!armed(&window, &mut cx));
+}
+
+#[gpui::test]
+fn a_press_after_the_backlinks_toggle_keeps_the_editors_focus(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let at = point(toggle.right() + px(1.), toggle.center().y);
+
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    assert!(editor_focused(&window, &mut cx));
 }
 
 #[gpui::test]

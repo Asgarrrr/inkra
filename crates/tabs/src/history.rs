@@ -45,6 +45,11 @@ impl<P: Place> Stack<P> {
         self.0.clear();
     }
 
+    /// Whether `pop(showing)` returns a place: some entry is off the note `showing`.
+    pub(crate) fn reaches(&self, showing: Option<P::Note>) -> bool {
+        self.0.iter().any(|place| place.note() != showing)
+    }
+
     /// The newest entry off the note `showing`; the entries on it above that one are dropped.
     pub(crate) fn pop(&mut self, showing: Option<P::Note>) -> Option<P> {
         std::iter::from_fn(|| self.0.pop_back()).find(|place| place.note() != showing)
@@ -61,6 +66,18 @@ impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
     /// As `back`, the other way.
     pub fn forward(&mut self, showing: Option<P::Note>, capture: impl FnOnce() -> P) -> Option<P> {
         self.walk(showing, capture, |tab| (&mut tab.forward, &mut tab.back))
+    }
+
+    /// Whether `back(showing, _)` arrives; it reads and captures nothing.
+    #[must_use]
+    pub fn can_go_back(&self, showing: Option<P::Note>) -> bool {
+        self.list[self.active_index()].back.reaches(showing)
+    }
+
+    /// As `can_go_back`, the other way.
+    #[must_use]
+    pub fn can_go_forward(&self, showing: Option<P::Note>) -> bool {
+        self.list[self.active_index()].forward.reaches(showing)
     }
 
     /// Drops `note` from every inactive tab, closed tab and stack; the active tab's place is the caller's.

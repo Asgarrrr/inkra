@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, ScrollHandle, Task, Window, px};
+use gpui::{
+    App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, ScrollHandle, Task, Window, px,
+};
 use inkra_vault::{EntryId, Kind};
 
 use crate::editor::EditorView;
@@ -111,6 +113,8 @@ pub(crate) struct AppShell {
     quitting: bool,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
     notice: Option<Notice>,
+    /// Painted under everything where the window has no blur: an off-screen shot.
+    backdrop: Option<Rgba>,
 }
 
 impl AppShell {
@@ -180,7 +184,13 @@ impl AppShell {
                 .into(),
                 cleared_by_save: None,
             }),
+            backdrop: None,
         }
+    }
+
+    #[cfg(feature = "shot")]
+    pub(crate) fn set_backdrop(&mut self, backdrop: Rgba) {
+        self.backdrop = Some(backdrop);
     }
 
     /// The note bound in the editor; `None` on a tab whose note is being trashed.

@@ -4,7 +4,7 @@ use gpui::{
     prelude::FluentBuilder,
 };
 
-use super::{UiText, h_flex, identified, selectable};
+use super::{UiText, h_flex, identified};
 use crate::theme;
 
 /// A tab's end slot reads this group to show on the tab's hover; gpui resolves it to the nearest tab.
@@ -64,7 +64,6 @@ impl StatefulInteractiveElement for Tab {}
 impl RenderOnce for Tab {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let active = self.active;
-        let hover = theme::row_hover_background();
         let tab = self
             .base
             .group(TAB_GROUP)
@@ -76,14 +75,19 @@ impl RenderOnce for Tab {
             .rounded_t(theme::TAB_RADIUS)
             .gap_2()
             .max_w(theme::TAB_MAX_WIDTH)
-            .px(theme::ROW_INSET)
+            // The content centres on the hover pill, as the reference's.
+            .pt(theme::RULE_WIDTH)
+            .pb(theme::TAB_HOVER_INSET)
+            .pl(theme::TAB_TEXT_INSET)
+            .pr(theme::ROW_INSET)
             .ui_text()
             .text_color(if self.active {
                 theme::tab_text()
             } else {
                 theme::tab_inactive_text()
             });
-        selectable(tab, self.active.then(theme::tab_active_background), hover)
+        tab.when(active, |tab| tab.bg(theme::tab_active_background()))
+            .when(!active, |tab| tab.child(hover_pill()))
             .children(self.start.map(|start| div().flex_none().child(start)))
             .child(
                 div()
@@ -108,13 +112,74 @@ impl RenderOnce for Tab {
                         .absolute()
                         .top_0()
                         .left_0()
-                        .size_full()
+                        .right_0()
+                        // The feet's curves carry the sides down to the row's bottom.
+                        .bottom(theme::TAB_CURVE)
                         .rounded_t(theme::TAB_RADIUS)
                         .border_t(theme::RULE_WIDTH)
                         .border_l(theme::RULE_WIDTH)
                         .border_r(theme::RULE_WIDTH)
                         .border_color(theme::tab_rule()),
                 )
+                .child(foot(Side::Left))
+                .child(foot(Side::Right))
             })
     }
+}
+
+/// An inactive tab's hover: a pill inset in the tab, clear of the row's bottom (the reference's tab padding `1px 4px 4px`).
+fn hover_pill() -> impl IntoElement {
+    div()
+        .debug_selector(|| "tab-hover".into())
+        .absolute()
+        .top(theme::RULE_WIDTH)
+        .left(theme::TAB_HOVER_INSET)
+        .right(theme::TAB_HOVER_INSET)
+        .bottom(theme::TAB_HOVER_INSET)
+        .rounded(theme::TAB_HOVER_RADIUS)
+        .group_hover(TAB_GROUP, |style| style.bg(theme::chrome_row_background()))
+}
+
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+}
+
+/// The active tab's concave foot outside one bottom corner, joining it to the note (the reference's `--tab-curve`).
+/// A ring in the note's colour, clipped to the corner's square, leaves the chrome showing through its hole.
+fn foot(side: Side) -> impl IntoElement {
+    let curve = theme::TAB_CURVE;
+    let rule = theme::RULE_WIDTH;
+    // The square overlaps the tab's edge by the rule, so the curve's hairline meets the side's hairline.
+    let (square, centre) = match side {
+        Side::Left => (div().left(-curve), rule),
+        Side::Right => (div().right(-curve), curve),
+    };
+    square
+        .absolute()
+        .bottom_0()
+        .w(curve + rule)
+        .h(curve)
+        .overflow_hidden()
+        .child(
+            div()
+                .absolute()
+                .left(centre - curve * 2.)
+                .top(-curve * 2.)
+                .size(curve * 4.)
+                .rounded_full()
+                .border(curve)
+                .border_color(theme::tab_active_background()),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(centre - curve)
+                .top(-curve)
+                .size(curve * 2.)
+                .rounded_full()
+                .border(rule)
+                .border_color(theme::tab_rule()),
+        )
 }

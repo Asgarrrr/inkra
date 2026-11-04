@@ -76,3 +76,9 @@ pub(super) fn restored(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     window
 }
+
+pub(super) fn nav_row(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    stage.click_tree_row(window, 2.);
+    window
+}

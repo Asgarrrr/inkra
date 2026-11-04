@@ -1,8 +1,7 @@
 //! The one line reporting a failure: a save, a rename or an open that failed, or a conflict copy kept (quit-and-failures spec, Q9).
 
 use gpui::{
-    App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div,
+    App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString, Styled, div,
 };
 use inkra_vault::{EntryId, VaultError};
 

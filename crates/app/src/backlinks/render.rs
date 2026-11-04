@@ -47,7 +47,7 @@ impl Render for BacklinksPanel {
             (true, false) => Some("No backlinks"),
             (false, _) => None,
         };
-        let count = (!self.rows.is_empty() || !self.building).then_some(self.rows.len());
+        let count = (!self.rows.is_empty()).then_some(self.rows.len());
         v_flex()
             .size_full()
             .bg(theme::sidebar_background())
