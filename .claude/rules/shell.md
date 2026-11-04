@@ -21,7 +21,7 @@ paths:
 - A drop in the bar (`move_tab`) calls no closure: it captures, parks and
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not
-  take focus from the editor. An `IconButton` (a panel toggle, the ×, the sidebar's search and new-note buttons) prevents it on
+  take focus from the editor. An `IconButton` (a panel toggle, the ×, the `+`, the sidebar's search and new-note buttons) prevents it on
   a left press itself, so a click on one leaves focus where it was.
 - The window moves only from the three leaf drag regions of the title row
   (`title-drag-start`, `title-drag-sidebar`, `title-drag-end`): only a region's left press sets

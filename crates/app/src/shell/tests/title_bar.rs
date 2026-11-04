@@ -159,7 +159,7 @@ fn the_traffic_lights_sit_mid_row() {
     );
 }
 
-/// The bar is as wide as its tabs, so the row's empty space is the region's, not the bar's.
+/// The bar is as wide as its tabs and `+` follows it, so the row's empty space after `+` is the region's.
 #[gpui::test]
 fn the_space_after_the_tabs_is_a_drag_region(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
@@ -168,9 +168,10 @@ fn the_space_after_the_tabs_is_a_drag_region(cx: &mut TestAppContext) {
 
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let region = cx.debug_bounds("title-drag-end").unwrap();
+    let new = cx.debug_bounds("tab-new").unwrap();
     let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
     assert_eq!(bar.right(), cx.debug_bounds("tab-1").unwrap().right());
-    assert_eq!(region.left(), bar.right());
+    assert_eq!(region.left(), new.right());
     assert_eq!(region.right(), toggle.left());
 }
 

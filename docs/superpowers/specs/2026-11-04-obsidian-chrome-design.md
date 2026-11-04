@@ -153,3 +153,11 @@ S2, the split title row:
 - An on toggle takes no background: the reference shows none, so the mock's `.ib.on` is dropped.
 - `TAB_MIN_WIDTH` follows the ×'s 28 px box, so a short tab's centre still misses its ×.
 - The 26 px dismiss button grows the notice line from 22 to 26 px: in `save-failed` the text and the × stay centred on it.
+
+S3, browser tabs:
+
+- `TAB_GAP` (6 px) also precedes `+`. The mock uses 4; one term is kept.
+- The × radius is 4 px, by the concentric rule (`TAB_RADIUS - (TAB_HEIGHT - ICON_BUTTON_HEIGHT) / 2`).
+- The drag preview always shows the active look: an inactive tab has no background to float on.
+- The active tab's hairline is a paint-only overlay, so a layout border does not shift the title or take the drop indicator's colour.
+- The title row's bottom rule is a paint-only layer listed first, under every segment: the active tab, painted later, breaks it.

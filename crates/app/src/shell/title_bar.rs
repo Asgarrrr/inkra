@@ -51,6 +51,7 @@ impl AppShell {
                     .children(toggle)
             })
             .child(self.render_tab_bar(cx))
+            .child(Self::render_new_tab(cx))
             .child(
                 Self::render_drag_region("title-drag-end", cx)
                     .flex_1()
@@ -59,11 +60,20 @@ impl AppShell {
             .children(backlinks_toggle);
         h_flex()
             .debug_selector(|| "tab-row".into())
+            .relative()
             .flex_none()
             .h(theme::TITLE_BAR_HEIGHT)
             .bg(theme::tab_bar_background())
-            .border_b(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
+            // Under every segment: the active tab, painted later, breaks it (D3).
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .border_b(theme::RULE_WIDTH)
+                    .border_color(theme::tab_rule()),
+            )
             .children(title_sidebar)
             .child(title_tabs)
     }

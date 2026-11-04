@@ -10,10 +10,10 @@ use gpui::{
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
-use super::AppShell;
+use super::{AppShell, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
-use crate::ui::{IconButton, IconName, Indicator, Tab, UiText};
+use crate::ui::{IconButton, IconName, Indicator, Tab, UiText, h_flex};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
@@ -24,22 +24,15 @@ pub(super) struct DraggedTab {
     id: TabId,
     index: usize,
     title: SharedString,
-    active: bool,
 }
 
 impl Render for DraggedTab {
-    /// Drawn at the window root, so it inherits nothing; an inactive `Tab` has no background, so this paints one.
+    /// Drawn at the window root, so it inherits nothing.
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // As tall as a tab in the bar, which stretches its tabs to the row inside its rule.
-        div()
-            .flex()
-            .h(theme::TITLE_BAR_HEIGHT - theme::RULE_WIDTH)
-            .bg(theme::tab_active_background())
-            .child(
-                Tab::new("tab-preview")
-                    .active(self.active)
-                    .child(self.title.clone()),
-            )
+        // Always the active look: an inactive tab has no background to float on.
+        Tab::new("tab-preview")
+            .active(true)
+            .child(self.title.clone())
     }
 }
 
@@ -97,8 +90,10 @@ impl AppShell {
             // As wide as its tabs, so the row's space after them is the drag region's.
             .flex_initial()
             .min_w_0()
-            // Its tabs stretch to the row's height, so a tab's background runs from the top to the rule.
             .h_full()
+            .items_end()
+            .pl(theme::TAB_GAP)
+            .gap(theme::TAB_GAP)
             .overflow_x_scroll()
             .track_scroll(&self.tab_scroll)
             .ui_text()
@@ -117,7 +112,6 @@ impl AppShell {
             id,
             index: ix,
             title: title.clone(),
-            active: is_active,
         };
         Tab::new(("tab", ix))
             .active(is_active)
@@ -156,11 +150,27 @@ impl AppShell {
             }))
             .child(title)
             .end(
-                IconButton::new(("tab-close", ix), IconName::X, "Close tab").on_click(cx.listener(
-                    move |shell, _, window, cx| {
+                IconButton::new(("tab-close", ix), IconName::X, "Close tab")
+                    .radius(theme::TAB_CLOSE_RADIUS)
+                    .on_click(cx.listener(move |shell, _, window, cx| {
                         // One click, one action: the tab under the × must not also see it.
                         cx.stop_propagation();
                         shell.close_tab(id, window, cx);
+                    })),
+            )
+    }
+
+    /// After the bar, not in it: `scroll_to_item` indexes the bar's children, which are tabs only.
+    pub(super) fn render_new_tab(cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .flex_none()
+            .self_end()
+            .h(theme::TAB_HEIGHT)
+            .pl(theme::TAB_GAP)
+            .child(
+                IconButton::new("tab-new", IconName::Plus, NEW_TAB).on_click(cx.listener(
+                    |shell, _, window, cx| {
+                        shell.new_tab(&NewTab, window, cx);
                     },
                 )),
             )
