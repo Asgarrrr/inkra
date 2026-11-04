@@ -260,12 +260,6 @@ impl Stage {
         center
     }
 
-    pub(crate) fn sidebar_toggle_point(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
-        window
-            .update(&mut self.cx, |shell, _, _| shell.sidebar_toggle_point())
-            .unwrap_or_else(|error| panic!("read the sidebar toggle: {error}"))
-    }
-
     pub(crate) fn click_tree_row(&mut self, window: WindowHandle<AppShell>, ix: f32) {
         let at = self.tree_row_center(window, ix);
         self.click(window, at);

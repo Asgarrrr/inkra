@@ -195,14 +195,21 @@ pub(crate) fn tab_rule() -> Rgba {
 /// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH` (`px` has no const add).
 pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(23.);
 
-/// The title row, which holds the tabs: Zed's macOS title bar height.
-pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(34.);
+/// The reference's title row.
+pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(39.);
 
 /// The traffic lights' width and margins, on the macOS 26 SDK (Zed's `TRAFFIC_LIGHT_PADDING`).
 pub(crate) const TRAFFIC_LIGHT_PADDING: Pixels = px(78.);
 
 /// `(TITLE_BAR_HEIGHT - 16) / 2`: gpui centres the 16 px buttons in a `16 + 2y` container.
-pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(9.), px(9.));
+pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(9.), px(11.5));
+
+/// An icon button's hit area, the reference's 28 x 26 (Polish rules: hit areas).
+pub(crate) const ICON_BUTTON_WIDTH: Pixels = px(28.);
+
+pub(crate) const ICON_BUTTON_HEIGHT: Pixels = px(26.);
+
+pub(crate) const BUTTON_RADIUS: Pixels = px(6.);
 
 /// The empty title row after the tabs never shrinks below this, so the window can always move.
 pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
@@ -210,8 +217,8 @@ pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
 
-/// A title cell: the ×'s 18 px box, so a tab's centre lies left of its × by the gap.
-pub(crate) const TAB_MIN_WIDTH: Pixels = px(18.);
+/// `ICON_BUTTON_WIDTH`, the ×'s box: a tab's centre lies left of its × by the gap.
+pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 
 /// The tab a dragged tab is over: the caret's blue, faint behind it and full on the edge it lands at.
 pub(crate) fn tab_drop_background() -> Rgba {

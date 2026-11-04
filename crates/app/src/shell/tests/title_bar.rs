@@ -4,6 +4,7 @@ use gpui::{
     Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle, point, px, size,
 };
 
+use super::tab_bar::click;
 use super::{
     AppShell, ab_focused, click_row, editor_focused, four_notes, keys, no_vault, open, selected,
     tab_notes,
@@ -46,9 +47,9 @@ fn the_tab_row_spans_the_window_above_every_column(cx: &mut TestAppContext) {
 fn the_traffic_lights_have_their_space(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
     let lights = cx.debug_bounds("title-drag-start").unwrap();
-    let toggle = cx.debug_bounds("panel-toggle-sidebar").unwrap();
+    let search = cx.debug_bounds("sidebar-search").unwrap();
     assert_eq!(lights.size.width, theme::TRAFFIC_LIGHT_PADDING);
-    assert_eq!(toggle.left(), lights.right());
+    assert_eq!(search.left(), lights.right());
 
     window
         .update(&mut cx, |_, window, _| {
@@ -60,6 +61,102 @@ fn the_traffic_lights_have_their_space(cx: &mut TestAppContext) {
 
     let lights = cx.debug_bounds("title-drag-start").unwrap();
     assert_eq!(lights.size.width, theme::ROW_INSET);
+}
+
+#[gpui::test]
+fn with_the_sidebar_hidden_the_toggle_follows_the_lights(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    keys(&mut cx, "cmd-\\");
+
+    assert!(cx.debug_bounds("title-sidebar").is_none());
+    assert_eq!(cx.debug_bounds("title-tabs").unwrap().left(), px(0.));
+    let lights = cx.debug_bounds("title-drag-start").unwrap();
+    assert_eq!(lights.size.width, theme::TRAFFIC_LIGHT_PADDING);
+    let toggle = cx.debug_bounds("panel-toggle-sidebar").unwrap();
+    assert_eq!(toggle.left(), lights.right());
+}
+
+#[gpui::test]
+fn the_sidebar_segment_spans_the_sidebar(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    let segment = cx.debug_bounds("title-sidebar").unwrap();
+    let column = cx.debug_bounds("sidebar-column").unwrap();
+    assert_eq!(segment.origin.x, px(0.));
+    assert_eq!(segment.size.width, column.size.width);
+    assert_eq!(segment.right(), column.right());
+    assert_eq!(
+        cx.debug_bounds("title-tabs").unwrap().left(),
+        segment.right()
+    );
+}
+
+#[gpui::test]
+fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    for button in [
+        "sidebar-search",
+        "sidebar-new-note",
+        "panel-toggle-sidebar",
+        "panel-toggle-backlinks",
+        "tab-close-0",
+    ] {
+        let bounds = cx.debug_bounds(button).unwrap();
+        assert_eq!(
+            bounds.size,
+            size(theme::ICON_BUTTON_WIDTH, theme::ICON_BUTTON_HEIGHT),
+            "{button}"
+        );
+    }
+}
+
+#[gpui::test]
+fn the_search_button_opens_vault_search(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+
+    click(&mut cx, "sidebar-search");
+
+    let open = window
+        .update(&mut cx, |shell, _, _| {
+            shell.modal_is::<crate::vault_search::VaultSearchDelegate>()
+        })
+        .unwrap();
+    assert!(open);
+}
+
+#[gpui::test]
+fn the_new_note_button_opens_a_name_field(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+
+    click(&mut cx, "sidebar-new-note");
+
+    let editing = window
+        .update(&mut cx, |shell, _, cx| {
+            shell.panes().sidebar.read(cx).is_editing()
+        })
+        .unwrap();
+    assert!(editing);
+}
+
+#[gpui::test]
+fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    let toggle = cx.debug_bounds("panel-toggle-sidebar").unwrap();
+    assert!(
+        toggle.contains(&AppShell::sidebar_toggle_point()),
+        "{toggle:?}"
+    );
+}
+
+#[test]
+fn the_traffic_lights_sit_mid_row() {
+    assert_eq!(
+        theme::TRAFFIC_LIGHT_POSITION.y,
+        (theme::TITLE_BAR_HEIGHT - px(16.)) / 2.
+    );
 }
 
 /// The bar is as wide as its tabs, so the row's empty space is the region's, not the bar's.
@@ -113,6 +210,35 @@ fn a_press_on_a_drag_region_keeps_the_editors_focus(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
     assert!(!armed(&window, &mut cx));
+}
+
+#[gpui::test]
+fn a_press_on_the_sidebars_drag_region_arms_the_move(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let at = cx.debug_bounds("title-drag-sidebar").unwrap().center();
+
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+    assert!(armed(&window, &mut cx));
+    assert!(editor_focused(&window, &mut cx));
+
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+    assert!(!armed(&window, &mut cx));
+}
+
+#[gpui::test]
+fn a_press_on_a_sidebar_button_arms_no_move(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let at = cx.debug_bounds("sidebar-search").unwrap().center();
+
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    assert!(!armed(&window, &mut cx));
+    assert!(editor_focused(&window, &mut cx));
 }
 
 /// A release outside the window reaches no listener; the next move, with no button held, must not move it.

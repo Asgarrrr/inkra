@@ -55,8 +55,12 @@ impl RenderOnce for IconButton {
         };
         self.base
             .flex_none()
-            .p_0p5()
-            .rounded_sm()
+            .w(theme::ICON_BUTTON_WIDTH)
+            .h(theme::ICON_BUTTON_HEIGHT)
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(theme::BUTTON_RADIUS)
             .hover(|style| style.bg(theme::button_hover_background()))
             .role(Role::Button)
             .aria_label(self.label)

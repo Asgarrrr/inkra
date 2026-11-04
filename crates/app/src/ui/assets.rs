@@ -36,6 +36,8 @@ icons! {
     ChevronRight => "chevron-right",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",
+    PenLine => "pen-line",
+    Search => "search",
     X => "x",
 }
 
