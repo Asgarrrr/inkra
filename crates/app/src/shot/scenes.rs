@@ -222,7 +222,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "backlinks",
-        shows: "the panel right of the editor under its `Backlinks` header, below the title row and ruled on its left against the note: two sources, one linking twice, each link in the link colour",
+        shows: "the panel right of the editor, below the title row and ruled on its left against the note: a 34 px `Backlinks` header in medium weight with a `2` pill, a hairline under it and on the panel's left edge; two sources, one linking twice, each link in the link colour",
         open: backlinks,
     },
     Scene {

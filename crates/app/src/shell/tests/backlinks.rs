@@ -178,3 +178,33 @@ fn backlink_excerpts_still_wrap(cx: &mut TestAppContext) {
         row.size.height
     );
 }
+
+#[gpui::test]
+fn the_header_counts_the_sources(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[c]]");
+    fs.insert_file("/vault/b.md", "[[c]]");
+    fs.insert_file("/vault/c.md", "");
+    let (window, sidebar, notes) = open_vault(cx, fs as Arc<dyn Fs>);
+    cx.run_until_parked();
+    let c = entry_id(&notes, cx, "c");
+    activate(&sidebar, cx, c);
+    cx.run_until_parked();
+
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let header = visual.debug_bounds("panel-header-backlinks").unwrap();
+    let count = visual
+        .debug_bounds("panel-header-count-2")
+        .expect("two notes link to c");
+    assert!(header.contains(&count.center()));
+
+    drop(visual);
+    let a = entry_id(&notes, cx, "a");
+    activate(&sidebar, cx, a);
+    cx.run_until_parked();
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("panel-header-count-0").is_some());
+    assert!(visual.debug_bounds("panel-header-count-2").is_none());
+}
