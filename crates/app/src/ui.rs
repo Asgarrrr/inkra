@@ -37,10 +37,14 @@ pub(crate) fn identified(base: Div, id: impl Into<ElementId>) -> Stateful<Div> {
 }
 
 /// One background or a hover, never both: a hover refinement repaints the base (`div.rs:3451`).
-pub(crate) fn selectable(base: Stateful<Div>, selected: Option<Rgba>) -> Stateful<Div> {
+pub(crate) fn selectable(
+    base: Stateful<Div>,
+    selected: Option<Rgba>,
+    hover: Rgba,
+) -> Stateful<Div> {
     match selected {
         Some(background) => base.bg(background),
-        None => base.hover(|style| style.bg(theme::row_hover_background())),
+        None => base.hover(|style| style.bg(hover)),
     }
 }
 

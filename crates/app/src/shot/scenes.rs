@@ -147,7 +147,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-vault",
-        shows: "the tree under its `vault` header, below the title row, level with the `Backlinks` header and ruled like it: directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
+        shows: "the tree 4 px under the title row, with no header, ruled against the note on its right: 27 px rounded rows inset 8 px, directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
         open: sidebar_vault,
     },
     Scene {
@@ -177,12 +177,12 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-hover",
-        shows: "the pointer on `index`, an unselected row: the hover background, fainter than the selected `projects`",
+        shows: "the pointer on `index`, an unselected row: a 27 px rounded row lit #383737, the same as the selected `projects`, whose name is brighter",
         open: hover::sidebar,
     },
     Scene {
         name: "sidebar-hover-selected",
-        shows: "the pointer on the selected `index`: it keeps the selected background, no hover colour over it",
+        shows: "the pointer on the selected `index`: the 27 px rounded row keeps its #383737, no hover colour over it",
         open: hover::sidebar_selected,
     },
     Scene {
@@ -222,12 +222,12 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "backlinks",
-        shows: "the panel right of the editor under its `Backlinks` header, below the title row, level with the `vault` header and ruled like it: two sources, one linking twice, each link in the link colour",
+        shows: "the panel right of the editor under its `Backlinks` header, below the title row and ruled on its left against the note: two sources, one linking twice, each link in the link colour",
         open: backlinks,
     },
     Scene {
         name: "tabs",
-        shows: "the title row across the window, the traffic lights' space empty at its left: the sidebar toggle, four tabs as tall as the row, the empty drag space, the backlinks toggle; `index` active, lit from the row's top to its rule and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the `vault` and `Backlinks` headers level under the row, ruled like it",
+        shows: "the title row across the window, the traffic lights' space empty at its left: the sidebar toggle, four tabs as tall as the row, the empty drag space, the backlinks toggle; `index` active, lit from the row's top to its rule and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
         open: tabs::dirty,
     },
     Scene {

@@ -80,6 +80,8 @@ impl AppShell {
             .children(panes.filter(|panes| panes.shown.sidebar).map(|panes| {
                 side_column("sidebar-column", SIDEBAR_WIDTH)
                     .bg(theme::sidebar_background())
+                    .border_r(theme::RULE_WIDTH)
+                    .border_color(theme::tab_rule())
                     .child(panes.sidebar.clone())
             }))
             .child(
@@ -101,7 +103,10 @@ impl AppShell {
             )
             // Shown for an empty tab too, so a switch does not move the note column by the panel's width.
             .children(panes.filter(|panes| panes.shown.backlinks).map(|panes| {
-                side_column("backlinks-column", BACKLINKS_WIDTH).child(panes.backlinks.clone())
+                side_column("backlinks-column", BACKLINKS_WIDTH)
+                    .border_l(theme::RULE_WIDTH)
+                    .border_color(theme::tab_rule())
+                    .child(panes.backlinks.clone())
             }))
     }
 }

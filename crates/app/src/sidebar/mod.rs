@@ -10,7 +10,7 @@ use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::NoteActivated;
 use crate::theme;
-use crate::ui::{PanelHeader, UiText};
+use crate::ui::UiText;
 use crate::vault::NoteStore;
 
 mod edit;
@@ -45,7 +45,7 @@ pub(crate) struct Sidebar {
     /// Bumped by every tree write of `selected` (`select`), never by `follow`.
     cursor: Cursor,
     focus_handle: FocusHandle,
-    /// The vault root's folder name, for the header and the tree's label.
+    /// The vault root's folder name, for the tree's label.
     title: SharedString,
     rows: Rows<EditState>,
     /// Load-bearing: `uniform_list` only renders the visible range, and an
@@ -122,7 +122,7 @@ impl Render for Sidebar {
             .flex()
             .flex_col()
             .size_full()
-            .child(PanelHeader::new("panel-header-sidebar", self.title.clone()))
+            .pt(theme::TREE_TOP_GAP)
             .child(
                 uniform_list(
                     "vault-tree",
@@ -132,6 +132,8 @@ impl Render for Sidebar {
                 // `w_full`: `ListSizingBehavior::Auto` otherwise paints nothing (`elements/list.rs:192-193`).
                 .flex_1()
                 .w_full()
+                // Horizontal only: `list_row_center` reads the list's top.
+                .px(theme::ROW_INSET)
                 .track_scroll(&self.scroll),
             )
             .children(
@@ -142,7 +144,7 @@ impl Render for Sidebar {
                         div()
                             .w_full()
                             .ui_text()
-                            .pl(theme::ROW_INSET)
+                            .px(theme::ROW_INSET * 2.)
                             .text_color(theme::rejected_text())
                             .child(rejected.message())
                     }),

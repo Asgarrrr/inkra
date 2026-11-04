@@ -34,8 +34,8 @@ pub(crate) const CODE_FONT_FAMILY: &str = "Menlo";
 /// Chrome: the sidebar today, a status line or tab bar later. Stated, not
 /// inherited — gpui's default line box (`phi()` on 16px) is taller than a 22px row.
 pub(crate) const UI_TEXT_SIZE: Pixels = px(14.);
-/// One line of chrome text, and therefore exactly one sidebar row: a row that
-/// is its own line box cannot clip it.
+/// One line of chrome text, and therefore exactly one picker or backlink row: a
+/// row that is its own line box cannot clip it.
 pub(crate) const UI_LINE_HEIGHT: Pixels = px(22.);
 
 /// A digit of `UI_TEXT_SIZE`, at least: a number column is this per digit, as Zed's rems per digit.
@@ -44,7 +44,7 @@ pub(crate) fn ui_digit_width() -> Pixels {
 }
 
 pub(crate) fn editor_background() -> Rgba {
-    rgb(0x1e1e1e)
+    rgb(0x131212)
 }
 
 pub(crate) fn editor_text() -> Rgba {
@@ -52,11 +52,16 @@ pub(crate) fn editor_text() -> Rgba {
 }
 
 pub(crate) fn sidebar_background() -> Rgba {
-    rgb(0x181818)
+    rgb(0x2a2929)
 }
 
 pub(crate) fn sidebar_text() -> Rgba {
-    rgb(0xd0d0d0)
+    rgb(0xd7d6ce)
+}
+
+/// A selected tree row's name (the mock's `.row.on`).
+pub(crate) fn selected_row_text() -> Rgba {
+    rgb(0xf0efe8)
 }
 
 /// Not reused from `sidebar_text`: that one is calibrated against a different background.
@@ -92,12 +97,12 @@ pub(crate) fn button_hover_background() -> Rgba {
 }
 
 pub(crate) fn icon_muted() -> Rgba {
-    rgb(0x8a8a8a)
+    rgb(0x8f8d88)
 }
 
 /// A toggled icon button's icon: the panel it names is shown.
 pub(crate) fn icon_active() -> Rgba {
-    rgb(0xd0d0d0)
+    rgb(0xd7d6ce)
 }
 
 pub(crate) const ICON_SIZE: Pixels = px(14.);
@@ -114,8 +119,21 @@ pub(crate) fn failed_dot() -> Rgba {
 
 pub(crate) const DOT_SIZE: Pixels = px(6.);
 
+/// A hovered or selected tree row on chrome (D1).
+pub(crate) fn chrome_row_background() -> Rgba {
+    rgb(0x383737)
+}
+
 /// A list item's left and right padding.
 pub(crate) const ROW_INSET: Pixels = px(8.);
+
+/// A tree row's height, and the pitch `Sidebar::row_center` reads.
+pub(crate) const TREE_ROW_HEIGHT: Pixels = px(27.);
+
+pub(crate) const ROW_RADIUS: Pixels = px(6.);
+
+/// The reference's gap above the tree's first row.
+pub(crate) const TREE_TOP_GAP: Pixels = px(4.);
 
 /// One level of the tree.
 pub(crate) const INDENT_STEP: Pixels = px(12.);
@@ -155,23 +173,23 @@ pub(crate) fn notice_text() -> Rgba {
 
 /// The tab bar over the note column (tabs spec, A5): the sidebar's shade, the active tab the editor's.
 pub(crate) fn tab_bar_background() -> Rgba {
-    rgb(0x181818)
+    rgb(0x2a2929)
 }
 
 pub(crate) fn tab_active_background() -> Rgba {
-    rgb(0x1e1e1e)
+    rgb(0x131212)
 }
 
 pub(crate) fn tab_text() -> Rgba {
-    rgb(0xd0d0d0)
+    rgb(0xd7d6ce)
 }
 
 pub(crate) fn tab_inactive_text() -> Rgba {
-    rgb(0x8a8a8a)
+    rgb(0x8f8d88)
 }
 
 pub(crate) fn tab_rule() -> Rgba {
-    rgb(0x3c3c3c)
+    rgb(0x353332)
 }
 
 /// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH` (`px` has no const add).
