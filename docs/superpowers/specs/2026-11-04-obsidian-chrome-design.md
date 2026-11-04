@@ -161,3 +161,9 @@ S3, browser tabs:
 - The drag preview always shows the active look: an inactive tab has no background to float on.
 - The active tab's hairline is a paint-only overlay, so a layout border does not shift the title or take the drop indicator's colour.
 - The title row's bottom rule is a paint-only layer listed first, under every segment: the active tab, painted later, breaks it.
+
+S4, the backlinks header:
+
+- The header keeps the `ROW_INSET` padding, so the title lines up with the backlink rows. The mock pads 16.
+- The count is 11.5 px muted text on the hover token.
+- The panel's left hairline was drawn in S1.

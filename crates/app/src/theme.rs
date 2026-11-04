@@ -192,8 +192,17 @@ pub(crate) fn tab_rule() -> Rgba {
     rgb(0x353332)
 }
 
-/// A panel header's height: `UI_LINE_HEIGHT + RULE_WIDTH` (`px` has no const add).
-pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(23.);
+/// The backlinks count on its pill: the muted text (D6).
+pub(crate) fn header_count_text() -> Rgba {
+    rgb(0x8f8d88)
+}
+
+/// The mock's backlinks header; the nav row is level with it (D4).
+pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(34.);
+
+pub(crate) const HEADER_COUNT_TEXT_SIZE: Pixels = px(11.5);
+
+pub(crate) const HEADER_COUNT_LINE_HEIGHT: Pixels = px(16.);
 
 /// The reference's title row.
 pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(39.);

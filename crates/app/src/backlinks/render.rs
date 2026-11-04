@@ -1,6 +1,6 @@
 use gpui::{
     Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Window, div,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::{BacklinksPanel, Row};
@@ -47,12 +47,16 @@ impl Render for BacklinksPanel {
             (true, false) => Some("No backlinks"),
             (false, _) => None,
         };
+        let count = (!self.rows.is_empty() || !self.building).then_some(self.rows.len());
         v_flex()
             .size_full()
             .bg(theme::sidebar_background())
             .ui_text()
             // Outside the scroll, so the header stays level with the tab bar.
-            .child(PanelHeader::new("panel-header-backlinks", "Backlinks"))
+            .child(
+                PanelHeader::new("panel-header-backlinks", "Backlinks")
+                    .when_some(count, PanelHeader::count),
+            )
             .child(
                 v_flex()
                     .id("backlinks")
