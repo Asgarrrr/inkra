@@ -285,12 +285,6 @@ impl AppShell {
             .map(|bounds| bounds.center())
     }
 
-    /// A point on the sidebar toggle as drawn last: it ends where the bar begins, centred on the same row.
-    pub(crate) fn sidebar_toggle_point(&self) -> gpui::Point<Pixels> {
-        let bar = self.tab_scroll.bounds();
-        gpui::point(bar.left() - px(1.), bar.center().y)
-    }
-
     /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.
     pub(crate) fn quick_open_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
         self.modal_picker::<QuickOpenDelegate>()?

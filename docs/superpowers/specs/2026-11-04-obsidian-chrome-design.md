@@ -146,3 +146,10 @@ S1, surfaces and the headerless sidebar:
 - `SIDEBAR_WIDTH` stays 220 (the reference is about 267, the mock 260).
 - The rejected-name message starts at the row's padding edge (16 px), not at the name text (30 px, after the chevron slot).
 - The shot comparison froze every D1 value unchanged: the `tabs` and `sidebar-*` scenes match the mock's variables.
+
+S2, the split title row:
+
+- Search and New note sit 30 px apart (`gap_0p5`); the reference is about 31.
+- An on toggle takes no background: the reference shows none, so the mock's `.ib.on` is dropped.
+- `TAB_MIN_WIDTH` follows the ×'s 28 px box, so a short tab's centre still misses its ×.
+- The 26 px dismiss button grows the notice line from 22 to 26 px: in `save-failed` the text and the × stay centred on it.

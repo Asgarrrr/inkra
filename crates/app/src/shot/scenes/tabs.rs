@@ -36,8 +36,7 @@ pub(super) fn panels_hidden(stage: &mut Stage) -> WindowHandle<AppShell> {
 
 pub(super) fn toggle_hover(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
-    let toggle = stage.sidebar_toggle_point(window);
-    stage.hover(window, toggle);
+    stage.hover(window, AppShell::sidebar_toggle_point());
     window
 }
 

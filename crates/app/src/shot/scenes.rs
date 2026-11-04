@@ -227,17 +227,17 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs",
-        shows: "the title row across the window, the traffic lights' space empty at its left: the sidebar toggle, four tabs as tall as the row, the empty drag space, the backlinks toggle; `index` active, lit from the row's top to its rule and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
+        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four tabs as tall as the row, the empty drag space, the backlinks toggle; `index` active, lit from the row's top to its rule and typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
         open: tabs::dirty,
     },
     Scene {
         name: "panels-hidden",
-        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width under the title row; both toggles muted, the sidebar's after the traffic lights' space and the backlinks' at the row's right end",
+        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width under the title row; no sidebar segment, no search or new-note button; both toggles muted, the sidebar's after the traffic lights' space leading the tabs and the backlinks' at the row's right end",
         open: tabs::panels_hidden,
     },
     Scene {
         name: "toggle-hover",
-        shows: "the pointer on the sidebar toggle: the button hover behind its lit icon",
+        shows: "the pointer on the sidebar toggle at the sidebar segment's right edge: the 28 x 26 button hover behind its lit icon, mid-row; search and new note unhovered to its left",
         open: tabs::toggle_hover,
     },
     Scene {
@@ -252,7 +252,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs-overflow",
-        shows: "30 tabs in the title row, the last one active (`cmd-9`) and scrolled into view; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle",
+        shows: "30 tabs over the note, the last one active (`cmd-9`) and scrolled into view; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle; the sidebar segment unchanged: the lights, search and new note, the toggle at its right edge, its hairline",
         open: tabs::overflow,
     },
     Scene {

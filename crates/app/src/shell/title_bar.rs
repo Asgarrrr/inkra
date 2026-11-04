@@ -2,12 +2,15 @@
 
 use gpui::{
     ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Stateful, StatefulInteractiveElement, Styled, Window, div,
+    MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 
 use super::AppShell;
+use crate::sidebar::NewNote;
 use crate::theme;
-use crate::ui::{h_flex, identified};
+use crate::ui::{IconButton, IconName, h_flex, identified};
+use crate::vault_search::SearchVault;
 
 impl AppShell {
     /// Toggles and tabs keep their own presses: only a leaf region moves the window (S3-D3).
@@ -16,34 +19,93 @@ impl AppShell {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (sidebar, backlinks) = self.render_panel_toggles(cx).unzip();
+        let sidebar_shown = self.panes.as_ref().is_some_and(|panes| panes.shown.sidebar);
+        let (sidebar_toggle, backlinks_toggle) = self.render_panel_toggles(cx).unzip();
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
         } else {
             theme::TRAFFIC_LIGHT_PADDING
         };
-        h_flex()
-            .debug_selector(|| "tab-row".into())
-            .flex_none()
-            .h(theme::TITLE_BAR_HEIGHT)
-            .pr_1()
-            .bg(theme::tab_bar_background())
-            .border_b(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
-            .child(
-                Self::render_drag_region("title-drag-start", cx)
-                    .flex_none()
-                    .w(lights),
+        let (title_sidebar, leading_toggle) = if sidebar_shown {
+            (
+                Some(Self::render_title_sidebar(lights, sidebar_toggle, cx)),
+                None,
             )
-            .children(sidebar)
+        } else {
+            (None, Some(sidebar_toggle))
+        };
+        let title_tabs = h_flex()
+            .debug_selector(|| "title-tabs".into())
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .pr(theme::ROW_INSET)
+            .when_some(leading_toggle, |segment, toggle| {
+                segment
+                    .child(
+                        Self::render_drag_region("title-drag-start", cx)
+                            .flex_none()
+                            .w(lights),
+                    )
+                    .children(toggle)
+            })
             .child(self.render_tab_bar(cx))
             .child(
                 Self::render_drag_region("title-drag-end", cx)
                     .flex_1()
                     .min_w(theme::TITLE_DRAG_MIN_WIDTH),
             )
-            .children(backlinks)
+            .children(backlinks_toggle);
+        h_flex()
+            .debug_selector(|| "tab-row".into())
+            .flex_none()
+            .h(theme::TITLE_BAR_HEIGHT)
+            .bg(theme::tab_bar_background())
+            .border_b(theme::RULE_WIDTH)
+            .border_color(theme::tab_rule())
+            .children(title_sidebar)
+            .child(title_tabs)
+    }
+
+    /// Over the sidebar: the lights, its buttons, then its toggle at its right edge (D2).
+    fn render_title_sidebar<Toggle: IntoElement>(
+        lights: Pixels,
+        toggle: Option<Toggle>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<Toggle> {
+        h_flex()
+            .debug_selector(|| "title-sidebar".into())
+            .flex_none()
+            .w(super::SIDEBAR_WIDTH)
+            .h_full()
+            .pr(theme::ROW_INSET)
+            .border_r(theme::RULE_WIDTH)
+            .border_color(theme::tab_rule())
+            .child(
+                Self::render_drag_region("title-drag-start", cx)
+                    .flex_none()
+                    .w(lights),
+            )
+            .child(
+                h_flex()
+                    .flex_none()
+                    .gap_0p5()
+                    .child(
+                        IconButton::new("sidebar-search", IconName::Search, "Search vault")
+                            .on_click(cx.listener(|shell, _, window, cx| {
+                                shell.search_vault(&SearchVault, window, cx);
+                            })),
+                    )
+                    .child(
+                        IconButton::new("sidebar-new-note", IconName::PenLine, "New note")
+                            .on_click(cx.listener(|shell, _, window, cx| {
+                                shell.new_note(&NewNote, window, cx);
+                            })),
+                    ),
+            )
+            .child(Self::render_drag_region("title-drag-sidebar", cx).flex_1())
+            .children(toggle)
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.
@@ -85,5 +147,19 @@ impl AppShell {
         _: &mut Context<Self>,
     ) {
         self.title_drag_armed = false;
+    }
+}
+
+#[cfg(any(test, feature = "shot"))]
+impl AppShell {
+    /// The sidebar toggle's centre. Valid while the sidebar shows.
+    pub(crate) fn sidebar_toggle_point() -> gpui::Point<Pixels> {
+        gpui::point(
+            super::SIDEBAR_WIDTH
+                - theme::RULE_WIDTH
+                - theme::ROW_INSET
+                - theme::ICON_BUTTON_WIDTH / 2.,
+            theme::TITLE_BAR_HEIGHT / 2.,
+        )
     }
 }
