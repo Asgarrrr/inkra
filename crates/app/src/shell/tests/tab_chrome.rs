@@ -5,6 +5,7 @@ use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
 use super::session_writes::wait;
 use super::tab_bar::click;
 use super::{ab_focused, keys, open, tab_notes};
+use crate::theme;
 use crate::vault::AUTOSAVE_DELAY;
 
 /// No mouse move first: an `invisible()` × registers no listener until a hover frame draws it (`div.rs:2529`).
@@ -108,4 +109,53 @@ fn the_preview_matches_the_tab(cx: &mut TestAppContext) {
         .debug_bounds("tab-preview")
         .expect("the preview is drawn");
     assert_eq!(preview.size.height, tab.size.height);
+}
+
+/// Every tab stands on the row's floor, so the active one runs on into the note (D3).
+#[gpui::test]
+fn the_active_tab_reaches_the_row_bottom(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+
+    let row = cx.debug_bounds("tab-row").unwrap();
+    let bar = cx.debug_bounds("tab-bar").unwrap();
+    let first = cx.debug_bounds("tab-0").unwrap();
+    let second = cx.debug_bounds("tab-1").unwrap();
+    assert_eq!(second.size.height, theme::TAB_HEIGHT);
+    assert_eq!(second.bottom(), row.bottom());
+    assert_eq!(first.bottom(), row.bottom());
+    assert_eq!(first.left(), bar.left() + theme::TAB_GAP);
+    assert_eq!(second.left(), first.right() + theme::TAB_GAP);
+}
+
+#[gpui::test]
+fn the_new_tab_button_sits_on_the_tabs_centreline(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    let new = cx.debug_bounds("tab-new").unwrap();
+    assert_eq!(new.center().y, cx.debug_bounds("tab-0").unwrap().center().y);
+    assert_eq!(
+        new.left(),
+        cx.debug_bounds("tab-bar").unwrap().right() + theme::TAB_GAP
+    );
+}
+
+#[gpui::test]
+fn the_new_tab_button_opens_a_tab(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    click(&mut cx, "tab-new");
+
+    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 1));
+}
+
+#[test]
+fn the_tab_close_radius_is_concentric() {
+    assert_eq!(
+        theme::TAB_CLOSE_RADIUS,
+        theme::TAB_RADIUS - (theme::TAB_HEIGHT - theme::ICON_BUTTON_HEIGHT) / 2.
+    );
 }

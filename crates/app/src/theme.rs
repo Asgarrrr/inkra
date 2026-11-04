@@ -217,6 +217,17 @@ pub(crate) const TITLE_DRAG_MIN_WIDTH: Pixels = px(32.);
 /// A long note name truncates rather than crowd out the other tabs.
 pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
 
+/// Inside the 39 px row, bottom-aligned (D3).
+pub(crate) const TAB_HEIGHT: Pixels = px(34.);
+
+/// Before each tab and before `+`.
+pub(crate) const TAB_GAP: Pixels = px(6.);
+
+pub(crate) const TAB_RADIUS: Pixels = px(8.);
+
+/// `TAB_RADIUS - (TAB_HEIGHT - ICON_BUTTON_HEIGHT) / 2`: concentric with the tab.
+pub(crate) const TAB_CLOSE_RADIUS: Pixels = px(4.);
+
 /// `ICON_BUTTON_WIDTH`, the ×'s box: a tab's centre lies left of its × by the gap.
 pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 

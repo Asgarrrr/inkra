@@ -1,7 +1,7 @@
 use gpui::{
     App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, MouseButton,
-    ParentElement, RenderOnce, Role, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Window, div, prelude::FluentBuilder,
+    ParentElement, Pixels, RenderOnce, Role, SharedString, Stateful, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::{Icon, IconName, identified};
@@ -16,6 +16,7 @@ pub(crate) struct IconButton {
     label: SharedString,
     /// `None` for a plain button; `Some(on)` for a toggle, whose icon is at full strength when on.
     toggled: Option<bool>,
+    radius: Pixels,
 }
 
 impl IconButton {
@@ -29,11 +30,17 @@ impl IconButton {
             icon,
             label: label.into(),
             toggled: None,
+            radius: theme::BUTTON_RADIUS,
         }
     }
 
     pub(crate) fn toggled(mut self, on: bool) -> Self {
         self.toggled = Some(on);
+        self
+    }
+
+    pub(crate) fn radius(mut self, radius: Pixels) -> Self {
+        self.radius = radius;
         self
     }
 }
@@ -60,7 +67,7 @@ impl RenderOnce for IconButton {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(theme::BUTTON_RADIUS)
+            .rounded(self.radius)
             .hover(|style| style.bg(theme::button_hover_background()))
             .role(Role::Button)
             .aria_label(self.label)

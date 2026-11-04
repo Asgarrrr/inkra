@@ -37,6 +37,7 @@ icons! {
     PanelLeft => "panel-left",
     PanelRight => "panel-right",
     PenLine => "pen-line",
+    Plus => "plus",
     Search => "search",
     X => "x",
 }

@@ -70,7 +70,10 @@ impl RenderOnce for Tab {
             .group(TAB_GROUP)
             .role(Role::Tab)
             .aria_selected(self.active)
+            .relative()
             .flex_none()
+            .h(theme::TAB_HEIGHT)
+            .rounded_t(theme::TAB_RADIUS)
             .gap_2()
             .max_w(theme::TAB_MAX_WIDTH)
             .px(theme::ROW_INSET)
@@ -98,5 +101,20 @@ impl RenderOnce for Tab {
                     })
                     .child(end)
             }))
+            .when(active, |tab| {
+                // Paint-only: a layout border would shift the title on activation and take the drop indicator's colour.
+                tab.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .rounded_t(theme::TAB_RADIUS)
+                        .border_t(theme::RULE_WIDTH)
+                        .border_l(theme::RULE_WIDTH)
+                        .border_r(theme::RULE_WIDTH)
+                        .border_color(theme::tab_rule()),
+                )
+            })
     }
 }
