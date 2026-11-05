@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use gpui::WindowHandle;
+use gpui::{WindowHandle, point};
 use inkra_layout::Side;
 
+use crate::bootstrap::WINDOW_SIZE;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -32,5 +33,17 @@ pub(super) fn menu(stage: &mut Stage) -> WindowHandle<AppShell> {
     let header = stage.dock_icon_point(window, Side::Left, 0);
     stage.right_click(window, header);
     stage.keys(window, "down");
+    window
+}
+
+/// Backlinks' header held mid-height over the left dock's body, the button down.
+pub(super) fn drag(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    let header = stage.dock_icon_point(window, Side::Right, 0);
+    let body = point(
+        stage.dock_icon_point(window, Side::Left, 0).x,
+        WINDOW_SIZE.height / 2.,
+    );
+    stage.drag_holding(window, header, body);
     window
 }

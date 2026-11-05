@@ -36,6 +36,7 @@ paths:
   a drag handler on the row: a tab's press would bubble to it.
 - With no vault, no dock is drawn; the note column starts at x 0.
 - `VaultPanes.docks` changes only through `change_docks`: it lands focus when Files stops being visible and cancels an open name field.
+- A drop on a dock icon moves the view to that icon's index; a drop on a dock column appends (`Docks::append`). Both go through `change_docks`.
 - `Tabs` holds no place for the active tab (H8): `active_note()` is its note
   (`showing()` is the note bound in the editor, `None` while `Trashing`), and
   `leaving` hands `Tabs` the place when the tab is left.

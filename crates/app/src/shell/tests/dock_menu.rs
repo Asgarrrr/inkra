@@ -46,7 +46,7 @@ fn highlighted(cx: &mut VisualTestContext) -> Option<usize> {
     .position(|selector| drawn(cx, selector))
 }
 
-fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
+pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
     window
         .update(cx, |shell, _, _| shell.panes().docks.clone())
         .unwrap()

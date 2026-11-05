@@ -183,6 +183,12 @@ impl Docks {
         target.shown = true;
     }
 
+    /// Moves `view` to the end of `side`'s dock, as `move_view` does.
+    pub fn append(&mut self, view: View, side: Side) {
+        let index = self.dock(side).views.len() - usize::from(self.side_of(view) == side);
+        self.move_view(view, side, index);
+    }
+
     /// Its dock is drawn and it is that dock's active view.
     #[must_use]
     pub fn is_visible(&self, view: View) -> bool {
