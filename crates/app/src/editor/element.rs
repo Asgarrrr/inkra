@@ -10,7 +10,7 @@ use gpui::{
 use inkra_markdown::{HEADING_LEVELS, Styles};
 
 use super::EditorView;
-use super::layout::{DocumentLayout, LayoutInputs, shape_document};
+use super::layout::DocumentLayout;
 use crate::text_input::{self, Prepainted, Quads};
 use crate::theme::{self, Theme};
 
@@ -91,7 +91,7 @@ impl Element for TextElement {
                 {
                     return size(reported, layout.height());
                 }
-                let layout = layout_at(editor, &text_style, text, window, cx);
+                let layout = editor.layout_at(&text_style, Some(text), window, cx);
                 let height = layout.height();
                 stash.push(layout);
                 size(reported, height)
@@ -113,23 +113,10 @@ impl Element for TextElement {
             // One frame stale height; corrects next frame. gpui's own `Text`
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
             log::warn!("no layout measured at width {}", text.size.width);
-            let editor = self.editor.read(cx);
-            let marked = editor.input.state().marked_range();
             let style = window.text_style();
-            let inputs = LayoutInputs {
-                buffer: editor.input.buffer().read(cx),
-                markdown: editor.markdown(),
-                selection: &editor.input.state().selection().range(),
-                marked: marked.as_ref(),
-                style: &style,
-                wrap_width: Some(text.size.width),
-                theme: theme::current(cx),
-            };
-            Rc::new(shape_document(
-                &inputs,
-                editor.input.last_layout().map(Rc::as_ref),
-                window,
-            ))
+            self.editor
+                .read(cx)
+                .layout_at(&style, Some(text.size.width), window, cx)
         });
 
         let applied = window.element_offset().y;
@@ -194,32 +181,6 @@ fn widths(
         _ => definite.unwrap_or(widest),
     };
     (definite, reported)
-}
-
-/// The last layout when it still fits these inputs, else a new shape.
-fn layout_at(
-    editor: &EditorView,
-    text_style: &TextStyle,
-    text: Pixels,
-    window: &mut Window,
-    cx: &App,
-) -> Rc<DocumentLayout> {
-    let selection = editor.input.state().selection().range();
-    let marked = editor.input.state().marked_range();
-    let inputs = LayoutInputs {
-        buffer: editor.input.buffer().read(cx),
-        markdown: editor.markdown(),
-        selection: &selection,
-        marked: marked.as_ref(),
-        style: text_style,
-        wrap_width: Some(text),
-        theme: theme::current(cx),
-    };
-    let previous = editor.input.last_layout();
-    match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
-        Some(last) => Rc::clone(last),
-        None => Rc::new(shape_document(&inputs, previous.map(Rc::as_ref), window)),
-    }
 }
 
 /// The measured layout nearest the element's width — not equal, since bounds
