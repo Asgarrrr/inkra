@@ -237,6 +237,11 @@ const CATALOGUE: &[Scene] = &[
         open: docks::both_left,
     },
     Scene {
+        name: "docks-menu",
+        shows: "the menu at the pointer over the Files header: Move to Right Dock highlighted, Hide Dock under it; elevated background, border, shadow, inside the window",
+        open: docks::menu,
+    },
+    Scene {
         name: "tabs",
         shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the `Files` header over the tree and the `Backlinks` header level under the row, ruled like it",
         open: tabs::dirty,

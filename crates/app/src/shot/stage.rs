@@ -258,6 +258,15 @@ impl Stage {
         self.settle();
     }
 
+    pub(crate) fn right_click(&mut self, window: WindowHandle<AppShell>, at: Point<Pixels>) {
+        let (window, none) = (window.into(), Modifiers::default());
+        self.cx
+            .simulate_mouse_down(window, at, MouseButton::Right, none);
+        self.cx
+            .simulate_mouse_up(window, at, MouseButton::Right, none);
+        self.settle();
+    }
+
     pub(crate) fn tab_center(
         &mut self,
         window: WindowHandle<AppShell>,

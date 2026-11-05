@@ -36,6 +36,16 @@ fn a_right_click_on_the_files_header_opens_its_menu(cx: &mut TestAppContext) {
     assert!(menu_focused(&window, &mut cx));
 }
 
+/// The highlighted row, read from the draw: the background itself reaches no test.
+fn highlighted(cx: &mut VisualTestContext) -> Option<usize> {
+    [
+        "context-menu-item-0-selected",
+        "context-menu-item-1-selected",
+    ]
+    .into_iter()
+    .position(|selector| drawn(cx, selector))
+}
+
 fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
     window
         .update(cx, |shell, _, _| shell.panes().docks.clone())
@@ -121,5 +131,74 @@ fn a_dock_toggle_closes_an_open_menu(cx: &mut TestAppContext) {
     keys(&mut cx, "cmd-\\");
 
     assert!(!drawn(&mut cx, "context-menu"));
+    assert!(editor_focused(&window, &mut cx));
+}
+
+#[gpui::test]
+fn down_then_enter_moves_the_view(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    keys(&mut cx, "down enter");
+
+    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+    assert!(!drawn(&mut cx, "context-menu"));
+    assert!(editor_focused(&window, &mut cx));
+}
+
+#[gpui::test]
+fn up_then_enter_hides_the_dock(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    keys(&mut cx, "up enter");
+
+    assert!(!docks(&window, &mut cx).is_visible(View::Files));
+}
+
+#[gpui::test]
+fn down_wraps_to_the_first_entry(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    assert_eq!(highlighted(&mut cx), None);
+    for expected in [0, 1, 0] {
+        keys(&mut cx, "down");
+        assert_eq!(highlighted(&mut cx), Some(expected));
+    }
+    keys(&mut cx, "enter");
+
+    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+}
+
+#[gpui::test]
+fn up_wraps_to_the_last_entry(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    for expected in [1, 0, 1] {
+        keys(&mut cx, "up");
+        assert_eq!(highlighted(&mut cx), Some(expected));
+    }
+    keys(&mut cx, "enter");
+
+    assert!(!docks(&window, &mut cx).is_visible(View::Files));
+}
+
+#[gpui::test]
+fn enter_with_nothing_selected_does_nothing(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    keys(&mut cx, "enter");
+
+    assert!(drawn(&mut cx, "context-menu"));
+    assert!(menu_focused(&window, &mut cx));
+    assert_eq!(docks(&window, &mut cx), Docks::default());
+}
+
+#[gpui::test]
+fn escape_closes_the_menu_and_gives_focus_back(cx: &mut TestAppContext) {
+    let (window, mut cx) = files_menu(cx);
+
+    keys(&mut cx, "escape");
+
+    assert!(!drawn(&mut cx, "context-menu"));
+    assert_eq!(docks(&window, &mut cx), Docks::default());
     assert!(editor_focused(&window, &mut cx));
 }
