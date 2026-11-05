@@ -104,6 +104,8 @@ pub(crate) trait PickerDelegate: Sized + 'static {
     fn row_height(&self) -> Pixels;
     /// Rows about to draw; `uniform_list` also draws row 0 alone each frame to measure it.
     fn rows_shown(&mut self, _range: Range<usize>, _cx: &mut Context<Picker<Self>>) {}
+    /// Row `ix` became the selection: by a key, or when an answer lands.
+    fn selected_changed(&mut self, _ix: usize, _cx: &mut Context<Picker<Self>>) {}
 }
 
 pub(crate) struct Picker<D: PickerDelegate> {
@@ -198,6 +200,9 @@ impl<D: PickerDelegate> Picker<D> {
     /// Select, scroll, leave `Awaiting`, the queued confirm, then the re-run: this order is the Interface.
     fn land(&mut self, arrival: Arrival, cx: &mut Context<Self>) {
         self.select_from(arrival.row);
+        if let Some(ix) = self.selected {
+            self.delegate.selected_changed(ix, cx);
+        }
         if !arrival.keep_scroll {
             self.reveal_selected();
         }
@@ -244,6 +249,7 @@ impl<D: PickerDelegate> Picker<D> {
 
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.selected = Some(ix);
+        self.delegate.selected_changed(ix, cx);
         self.reveal_selected();
         cx.notify();
     }
