@@ -4,7 +4,7 @@ use gpui::{
 };
 use std::io::ErrorKind;
 
-use inkra_vault::{EntryId, Kind, NameProblem, VaultError};
+use inkra_vault::{EntryId, Kind, NameProblem};
 
 use crate::field::{Cancelled, Confirmed, NameField};
 
@@ -275,7 +275,7 @@ impl Sidebar {
                 log::warn!("create: {error}");
                 if let Some(edit) = self.rows.edit_mut().filter(|edit| edit.creating) {
                     edit.creating = false;
-                    edit.rejected = Some(if is_already_exists(&error) {
+                    edit.rejected = Some(if error.io_kind() == Some(ErrorKind::AlreadyExists) {
                         Rejection::Duplicate
                     } else {
                         Rejection::Refused
@@ -291,8 +291,4 @@ impl Sidebar {
             .and_then(|id| self.vault.read(cx).entry(id))
             .is_some_and(|entry| entry.path.display_name() == name.trim())
     }
-}
-
-fn is_already_exists(error: &VaultError) -> bool {
-    matches!(error, VaultError::Io { source, .. } if source.kind() == ErrorKind::AlreadyExists)
 }

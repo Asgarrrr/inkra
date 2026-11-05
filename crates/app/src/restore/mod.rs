@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use futures::lock::Mutex;
 use gpui::{App, AppContext as _, Task};
-use inkra_vault::{EntryId, Fs, Vault, VaultError};
+use inkra_vault::{EntryId, Fs, Vault};
 
 pub(crate) use format::{SavedTab, SavedView, Session, session_file};
 pub(crate) use plan::{Plan, Restored};
@@ -76,7 +76,7 @@ impl SessionWriter {
 pub(crate) async fn read(fs: Arc<dyn Fs>, file: PathBuf, root: PathBuf) -> Option<Session> {
     let loaded = match fs.load(&file).await {
         Ok(loaded) => loaded,
-        Err(VaultError::Io { source, .. }) if source.kind() == ErrorKind::NotFound => return None,
+        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => return None,
         Err(error) => {
             log::warn!("session not restored: {error}");
             return None;

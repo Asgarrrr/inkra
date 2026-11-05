@@ -56,6 +56,11 @@ fn fail_next_saves_after_preserve_keeps_one_copy_and_reports_unwritten() {
 
     fs.fail_next_saves_after_preserve(path, 2, ErrorKind::Interrupted);
     let error = block_on(fs.save(path, "mine", stale)).expect_err("fails after preserving");
+    assert_eq!(
+        error.io_kind(),
+        Some(ErrorKind::Interrupted),
+        "the cause's kind"
+    );
     let VaultError::Unwritten {
         preserved,
         stamp,
