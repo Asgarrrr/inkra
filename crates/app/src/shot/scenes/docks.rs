@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui::{WindowHandle, point};
+use gpui::{WindowHandle, point, px};
 use inkra_layout::Side;
 
 use crate::bootstrap::WINDOW_SIZE;
@@ -45,5 +45,14 @@ pub(super) fn drag(stage: &mut Stage) -> WindowHandle<AppShell> {
         WINDOW_SIZE.height / 2.,
     );
     stage.drag_holding(window, header, body);
+    window
+}
+
+/// Files dragged from the right bar, held at the left edge over its drop strip.
+pub(super) fn drag_empty_side(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    stage.keys(window, "cmd-shift-p m o v e space f i l e s enter");
+    let icon = stage.dock_icon_point(window, Side::Right, 1);
+    stage.drag_holding(window, icon, point(px(20.), WINDOW_SIZE.height / 2.));
     window
 }

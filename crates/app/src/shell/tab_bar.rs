@@ -142,8 +142,8 @@ impl AppShell {
                     .bg(colors.accent_background)
                     .border_color(colors.accent);
                 match ix.cmp(&dragged.index) {
-                    Ordering::Less => style.border_l(theme::TAB_DROP_EDGE),
-                    Ordering::Greater => style.border_r(theme::TAB_DROP_EDGE),
+                    Ordering::Less => style.border_l(theme::DROP_EDGE),
+                    Ordering::Greater => style.border_r(theme::DROP_EDGE),
                     Ordering::Equal => style,
                 }
             })

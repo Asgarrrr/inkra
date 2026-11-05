@@ -229,7 +229,7 @@ pub(crate) const TAB_CLOSE_RADIUS: Pixels = px(3.5);
 /// Wider than the ×'s box: a tab's centre lies left of its × by the gap.
 pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 
-pub(crate) const TAB_DROP_EDGE: Pixels = px(2.);
+pub(crate) const DROP_EDGE: Pixels = px(2.);
 
 pub(crate) const QUOTE_BAR_WIDTH: Pixels = px(2.);
 

@@ -55,10 +55,6 @@ impl NameField {
     fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(Confirmed(self.text(cx)));
     }
-
-    fn cancel(_: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(Cancelled);
-    }
 }
 
 impl InputHost for NameField {
@@ -92,7 +88,7 @@ impl Render for NameField {
             .track_focus(self.input.focus_handle())
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(|_, action, window, cx| Self::cancel(action, window, cx)))
+            .on_action(cx.listener(|_, _: &Cancel, _, cx| cx.emit(Cancelled)))
             .size_full()
             .text_color(Color::Default.rgba(theme::current(cx)))
             .child(FieldElement { field: cx.entity() })
