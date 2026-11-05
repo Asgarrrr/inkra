@@ -214,9 +214,9 @@ impl PickerDelegate for VaultSearchDelegate {
         }
     }
 
-    fn render_row(&self, ix: usize, _: bool, _: &mut Context<Picker<Self>>) -> AnyElement {
+    fn render_row(&self, ix: usize, _: bool, cx: &mut Context<Picker<Self>>) -> AnyElement {
         match self.results.rows.get(ix) {
-            Some(Row::Header(header)) => render::header(header, ix > 0),
+            Some(Row::Header(header)) => render::header(header, ix > 0, cx),
             Some(Row::Hit(hit)) => render::hit(hit, self.results.digits),
             None => div().into_any_element(),
         }

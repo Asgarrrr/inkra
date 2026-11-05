@@ -123,6 +123,7 @@ impl AppShell {
     /// Both layers occlude: gpui's hit test stops only at an occluding hitbox (`gpui/src/window.rs:1106-1123`).
     pub(super) fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let modal = self.modal.as_ref()?;
+        let colors = theme::current(cx).colors;
         Some(
             div()
                 .absolute()
@@ -144,9 +145,9 @@ impl AppShell {
                             div()
                                 .occlude()
                                 .w(MODAL_WIDTH)
-                                .bg(theme::modal_background())
+                                .bg(colors.elevated_background)
                                 .border_1()
-                                .border_color(theme::modal_border())
+                                .border_color(colors.border)
                                 .rounded_md()
                                 .shadow_lg()
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

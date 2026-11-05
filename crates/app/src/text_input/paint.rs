@@ -8,7 +8,6 @@ use inkra_text::ByteOffset;
 
 use super::{InputAdapter, InputHost};
 use crate::editor::layout::DocumentLayout;
-use crate::theme;
 
 /// What a host's prepaint hands to `paint`.
 pub(crate) type Prepainted = Option<(Rc<DocumentLayout>, Quads)>;
@@ -31,7 +30,7 @@ impl Quads {
                 selection: Vec::new(),
                 caret: Some(fill(
                     Bounds::new(origin + caret.origin, caret.size),
-                    theme::cursor(),
+                    layout.theme().colors.accent,
                 )),
             };
         }

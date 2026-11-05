@@ -1,6 +1,7 @@
 //! A frame reuses the layout its inputs already produced (roadmap, "One shape per keystroke").
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use gpui::{Pixels, TestAppContext, TextStyle, Window, prelude::*, px};
 use inkra_text::{Buffer, ByteOffset};
@@ -9,6 +10,7 @@ use super::{at, dispatching, window_on, with_editor};
 use crate::editor::layout::{
     DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
+use crate::theme::{self, Theme, ThemeColors, builtin};
 
 #[gpui::test]
 fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
@@ -78,6 +80,7 @@ fn shape(
         marked,
         style: &style,
         wrap_width,
+        theme: builtin::dark(),
     };
     shape_document(&inputs, previous, window)
 }
@@ -131,6 +134,42 @@ fn a_caret_move_that_reveals_nothing_shapes_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_theme_change_reshapes_the_note_once(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "[a](b)\n");
+    cx.run_until_parked();
+
+    let before = shape_count();
+    let red = Arc::new(Theme {
+        colors: ThemeColors {
+            md_link: gpui::red().into(),
+            ..builtin::dark().colors
+        },
+    });
+    cx.update(|_, cx| theme::apply(red.clone(), cx));
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 1);
+    window
+        .update(&mut cx, |view, _, _| {
+            assert!(Arc::ptr_eq(view.input.last_layout().unwrap().theme(), &red));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn an_equal_theme_changes_nothing(cx: &mut TestAppContext) {
+    let (_window, mut cx) = dispatching(cx, "[a](b)\n");
+    cx.run_until_parked();
+
+    let before = shape_count();
+    cx.update(|_, cx| {
+        theme::apply(Arc::new((**builtin::dark()).clone()), cx);
+        assert!(Arc::ptr_eq(theme::current(cx), builtin::dark()));
+    });
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 0);
+}
+
+#[gpui::test]
 fn a_write_outside_the_gates_reaches_the_next_paint(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("b")));
     let window = window_on(cx, buffer.clone());
@@ -170,6 +209,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     marked: marked.as_ref(),
                     style: &style,
                     wrap_width: width,
+                    theme: builtin::dark(),
                 })
             };
             // `last_layout` still holds the end-of-document caret the window opened with.
@@ -190,6 +230,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     marked: None,
                     style,
                     wrap_width: width,
+                    theme: builtin::dark(),
                 })
             };
             assert!(!other(&bigger), "another style");

@@ -74,7 +74,8 @@ impl InteractiveElement for ListItem {
 impl StatefulInteractiveElement for ListItem {}
 
 impl RenderOnce for ListItem {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let depth = f32::from(u8::try_from(self.indent).unwrap_or(u8::MAX));
         let row = self
             .base
@@ -88,15 +89,9 @@ impl RenderOnce for ListItem {
                 row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS)
             });
         let (selected, hover) = if self.inset {
-            (
-                theme::chrome_row_background(),
-                theme::chrome_row_background(),
-            )
+            (colors.chrome_element_hover, colors.chrome_element_hover)
         } else {
-            (
-                theme::selected_row_background(),
-                theme::row_hover_background(),
-            )
+            (colors.element_selected, colors.element_hover)
         };
         selectable(row, self.selected.then_some(selected), hover)
             .children(self.start.map(|start| div().flex_none().child(start)))

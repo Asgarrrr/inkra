@@ -5,7 +5,7 @@ use inkra_markdown::{DisplayLine, parse};
 use inkra_text::ByteOffset;
 
 use super::{RunStyles, line_runs};
-use crate::theme;
+use crate::theme::builtin::dark;
 
 fn range(start: usize, end: usize) -> Range<ByteOffset> {
     ByteOffset::new(start)..ByteOffset::new(end)
@@ -20,7 +20,7 @@ fn runs_follow_the_spans_and_cover_the_line() {
     let text = "a **b** c";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base);
+    let mut styles = RunStyles::new(&base, dark());
 
     let line = range(0, text.len());
     let display = DisplayLine::new(line.clone(), []);
@@ -29,7 +29,7 @@ fn runs_follow_the_spans_and_cover_the_line() {
 
     assert_eq!(lens(&runs), vec![2, 2, 1, 2, 2]);
     assert_eq!(runs[0].font.weight, base.font_weight);
-    assert_eq!(runs[1].color, Hsla::from(theme::marker_text()));
+    assert_eq!(runs[1].color, Hsla::from(dark().colors.md_marker));
     assert_eq!(runs[2].font.weight, FontWeight::BOLD);
     assert!(runs.iter().all(|run| run.underline.is_none()));
 }
@@ -39,7 +39,7 @@ fn a_composition_inside_bold_stays_bold_and_gains_the_underline() {
     let text = "a **b** c";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base);
+    let mut styles = RunStyles::new(&base, dark());
 
     let line = range(0, text.len());
     let display = DisplayLine::new(line.clone(), []);
@@ -60,7 +60,7 @@ fn runs_are_indexed_from_the_line_start() {
     let text = "ab\n**c**";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base);
+    let mut styles = RunStyles::new(&base, dark());
 
     let line = range(3, 8);
     let display = DisplayLine::new(line.clone(), []);
@@ -73,7 +73,7 @@ fn runs_are_indexed_from_the_line_start() {
 #[test]
 fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base);
+    let mut styles = RunStyles::new(&base, dark());
 
     for (line, expected) in [(range(0, 5), vec![5]), (range(4, 4), vec![0])] {
         let display = DisplayLine::new(line.clone(), []);
@@ -87,7 +87,7 @@ fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
 #[test]
 fn a_stale_span_past_the_line_is_clipped_not_fatal() {
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base);
+    let mut styles = RunStyles::new(&base, dark());
     let spans = parse("**long bold text**").spans;
 
     let line = range(0, 4);

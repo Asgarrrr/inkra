@@ -8,6 +8,7 @@ use inkra_text::ByteOffset;
 use super::{Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
+use crate::theme::builtin;
 
 fn field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
@@ -165,6 +166,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
                 marked: marked.as_ref(),
                 style: &style,
                 wrap_width: None,
+                theme: builtin::dark(),
             };
             let layout = shape_document(&inputs, None, window);
 

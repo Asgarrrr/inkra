@@ -4,7 +4,6 @@ use gpui::{App, Pixels, Point, TextAlign, Window, fill, point, px};
 
 use super::DocumentLayout;
 use super::prefix::Prefix;
-use crate::theme;
 
 #[cfg(test)]
 thread_local! {
@@ -28,7 +27,7 @@ impl DocumentLayout {
         #[cfg(test)]
         PAINTED.with(|painted| *painted.borrow_mut() = (lines.clone(), bars.clone()));
         for bar in &self.bars[bars] {
-            window.paint_quad(fill(*bar + origin, theme::quote_bar()));
+            window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
         }
         for index in lines {
             let line = &self.lines[index];

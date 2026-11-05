@@ -6,7 +6,7 @@ use inkra_markdown::{HEADING_LEVELS, Styles};
 use super::geometry::{HEADING_MARGIN, PADDING};
 use super::{at, dispatching};
 use crate::editor::element::{column_width, margin_width};
-use crate::theme;
+use crate::theme::{self, builtin};
 
 #[gpui::test]
 fn every_heading_marker_fits_the_margin(cx: &mut TestAppContext) {
@@ -16,11 +16,18 @@ fn every_heading_marker_fits_the_margin(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, window, _| {
             let style = view.input.last_layout().unwrap().style().clone();
-            assert_eq!(margin_width(&style, window), px(HEADING_MARGIN));
+            assert_eq!(
+                margin_width(&style, builtin::dark(), window),
+                px(HEADING_MARGIN)
+            );
             for level in HEADING_LEVELS {
                 let marker = format!("{} ", "#".repeat(level as usize));
-                let run = theme::markdown_style(&style, Styles::heading(level) | Styles::MARKER)
-                    .to_run(marker.len());
+                let run = theme::markdown_style(
+                    &style,
+                    Styles::heading(level) | Styles::MARKER,
+                    builtin::dark(),
+                )
+                .to_run(marker.len());
                 let width = window
                     .text_system()
                     .shape_line(

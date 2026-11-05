@@ -102,6 +102,7 @@ pub fn run() {
             }
         };
 
+        theme::apply(theme::builtin::dark().clone(), cx);
         let bounds = Bounds::centered(None, WINDOW_SIZE, cx);
         let window = cx.open_window(
             WindowOptions {

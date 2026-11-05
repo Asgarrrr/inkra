@@ -24,7 +24,8 @@ impl AppShell {
         }
     }
 
-    fn render_empty(&self) -> impl IntoElement {
+    fn render_empty(&self, cx: &App) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let lines = self.empty_lines();
         div()
             .flex()
@@ -33,7 +34,7 @@ impl AppShell {
             .items_center()
             .justify_center()
             // Without this the window default shows through.
-            .bg(theme::editor_background())
+            .bg(colors.editor_background)
             .text_size(theme::UI_TEXT_SIZE)
             .line_height(theme::UI_LINE_HEIGHT)
             .text_color(theme::placeholder_text())
@@ -43,12 +44,13 @@ impl AppShell {
     /// Over the note showing while it is gone from disk (watcher spec, F9).
     fn render_gone_banner(&self, cx: &App) -> Option<impl IntoElement> {
         let showing = self.showing()?;
+        let colors = theme::current(cx).colors;
         self.notes.read(cx).is_gone(showing).then(|| {
             div()
                 .debug_selector(|| "gone-banner".into())
                 .flex_none()
                 .px_4()
-                .bg(theme::gone_banner_background())
+                .bg(colors.warning_background)
                 .text_size(theme::UI_TEXT_SIZE)
                 .line_height(theme::UI_LINE_HEIGHT)
                 .text_color(theme::gone_banner_text())
@@ -59,12 +61,13 @@ impl AppShell {
     /// Atop the note column, out of the editor's scroll; each arrow is lit when its walk would arrive (D4).
     fn render_nav_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let showing = self.active_note();
+        let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "nav-row".into())
             .flex_none()
             .h(theme::NAV_ROW_HEIGHT)
             .pl_3()
-            .bg(theme::editor_background())
+            .bg(colors.editor_background)
             // A press on the strip beside the arrows leaves the editor focused.
             .on_mouse_down(MouseButton::Left, keep_focus)
             .child(
@@ -97,6 +100,7 @@ impl AppShell {
     /// Under the title row: the sidebar, the note column and the backlinks.
     fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let panes = self.panes.as_ref();
+        let colors = theme::current(cx).colors;
         div()
             .flex()
             .flex_row()
@@ -107,9 +111,9 @@ impl AppShell {
             .min_h_0()
             .children(panes.filter(|panes| panes.shown.sidebar).map(|panes| {
                 side_column("sidebar-column", SIDEBAR_WIDTH)
-                    .bg(theme::sidebar_background())
+                    .bg(colors.background)
                     .border_r(theme::RULE_WIDTH)
-                    .border_color(theme::tab_rule())
+                    .border_color(colors.border_variant)
                     .child(panes.sidebar.clone())
             }))
             .child(
@@ -127,14 +131,14 @@ impl AppShell {
                     // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
                     .child(div().flex_1().min_h_0().child(match self.editor() {
                         Some(editor) => editor.clone().into_any_element(),
-                        None => self.render_empty().into_any_element(),
+                        None => self.render_empty(cx).into_any_element(),
                     })),
             )
             // Shown for an empty tab too, so a switch does not move the note column by the panel's width.
             .children(panes.filter(|panes| panes.shown.backlinks).map(|panes| {
                 side_column("backlinks-column", BACKLINKS_WIDTH)
                     .border_l(theme::RULE_WIDTH)
-                    .border_color(theme::tab_rule())
+                    .border_color(colors.border_variant)
                     .child(panes.backlinks.clone())
             }))
     }
