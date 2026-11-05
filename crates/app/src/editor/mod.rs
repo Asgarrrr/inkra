@@ -12,13 +12,13 @@ mod viewport;
 use std::ops::Range;
 use std::rc::Rc;
 
+#[cfg(test)]
+use gpui::Bounds;
 use gpui::{
     App, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window,
-    div,
+    MouseButton, ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription,
+    TextStyle, Window, div,
 };
-#[cfg(test)]
-use gpui::{Bounds, Pixels};
 use inkra_editor::Selection;
 use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset, Version};
@@ -155,27 +155,43 @@ impl EditorView {
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // First: the observer only runs when effects flush, after this reshape.
         self.refresh_markdown(cx);
-        let Some(last) = self.input.last_layout() else {
+        let Some(last) = self.input.last_layout().cloned() else {
             return;
         };
-        let (style, wrap_width) = (last.style().clone(), last.wrap_width());
+        let layout = self.layout_at(last.style(), last.wrap_width(), window, cx);
+        if !Rc::ptr_eq(&layout, &last) {
+            self.input.set_layout(layout);
+        }
+    }
+
+    /// The last layout when it still fits these inputs, else a whole-document shape.
+    fn layout_at(
+        &self,
+        style: &TextStyle,
+        wrap_width: Option<Pixels>,
+        window: &mut Window,
+        cx: &App,
+    ) -> Rc<layout::DocumentLayout> {
         let state = self.input.state();
         let (selection, marked) = (state.selection().range(), state.marked_range());
         let inputs = layout::LayoutInputs {
             buffer: self.input.buffer().read(cx),
-            markdown: &self.markdown,
+            markdown: self.markdown(),
             selection: &selection,
             marked: marked.as_ref(),
-            style: &style,
+            style,
             wrap_width,
             theme: theme::current(cx),
         };
-        // A whole-document shape: skipped when the inputs still give this layout.
-        if last.is_shaped_from(&inputs) {
-            return;
+        let previous = self.input.last_layout();
+        match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
+            Some(last) => Rc::clone(last),
+            None => Rc::new(layout::shape_document(
+                &inputs,
+                previous.map(Rc::as_ref),
+                window,
+            )),
         }
-        let layout = Rc::new(layout::shape_document(&inputs, Some(last), window));
-        self.input.set_layout(layout);
     }
 
     pub(crate) fn cursor(&self) -> ByteOffset {
