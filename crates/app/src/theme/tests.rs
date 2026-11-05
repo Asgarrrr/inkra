@@ -4,7 +4,8 @@ use gpui::{FontStyle, FontWeight, Hsla, TextStyle, WindowAppearance};
 use inkra_markdown::{HEADING_LEVELS, HeadingLevel, Styles};
 
 use super::{
-    Appearance, BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, builtin, heading_metrics,
+    Appearance, BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, Theme, ThemeColors, builtin,
+    current, follow_system, follows_system, heading_metrics, install,
 };
 
 fn markdown_style(base: &TextStyle, styles: Styles) -> TextStyle {
@@ -121,4 +122,25 @@ fn every_window_appearance_picks_its_builtin() {
         builtin::of(Appearance::Light),
         builtin::of(Appearance::Dark)
     ));
+}
+
+#[gpui::test]
+fn a_named_theme_ignores_the_system(cx: &mut gpui::TestAppContext) {
+    let solar = Arc::new(Theme {
+        appearance: Appearance::Light,
+        colors: ThemeColors {
+            accent: gpui::red().into(),
+            ..builtin::of(Appearance::Light).colors
+        },
+    });
+    cx.update(|cx| {
+        install(Some(solar.clone()), cx);
+        follow_system(WindowAppearance::Dark, cx);
+        assert!(Arc::ptr_eq(current(cx), &solar));
+        assert!(!follows_system(cx));
+
+        install(None, cx);
+        assert!(follows_system(cx));
+        assert!(Arc::ptr_eq(current(cx), builtin::of(Appearance::Light)));
+    });
 }

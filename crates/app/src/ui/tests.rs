@@ -96,6 +96,7 @@ fn each_color_reads_its_token() {
     };
     let dark = builtin::dark().colors;
     let theme = Theme {
+        appearance: crate::theme::Appearance::Dark,
         colors: crate::theme::ThemeColors {
             text: token(0),
             text_selected: token(1),

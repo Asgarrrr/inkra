@@ -9,6 +9,7 @@ use super::{Appearance, Theme, ThemeColors};
 /// Flexoki dark, the theme with nothing installed.
 static DARK: LazyLock<Arc<Theme>> = LazyLock::new(|| {
     Arc::new(Theme {
+        appearance: Appearance::Dark,
         colors: ThemeColors {
             // At 95 % over the window's blur: a hint of the desktop, never its shapes; matched to the reference by eye.
             background: rgba(0x181717f2),
@@ -52,6 +53,7 @@ pub(crate) fn dark() -> &'static Arc<Theme> {
 /// Flexoki light, paper over ink.
 static LIGHT: LazyLock<Arc<Theme>> = LazyLock::new(|| {
     Arc::new(Theme {
+        appearance: Appearance::Light,
         colors: ThemeColors {
             background: rgba(0xf2f0e5f2),
             editor_background: rgb(0xfffcf0),
@@ -89,5 +91,14 @@ pub(crate) fn of(appearance: Appearance) -> &'static Arc<Theme> {
     match appearance {
         Appearance::Light => &LIGHT,
         Appearance::Dark => &DARK,
+    }
+}
+
+/// The built-in theme `settings.json` names.
+pub(crate) fn named(name: &str) -> Option<&'static Arc<Theme>> {
+    match name {
+        "Flexoki Dark" => Some(&DARK),
+        "Flexoki Light" => Some(&LIGHT),
+        _ => None,
     }
 }

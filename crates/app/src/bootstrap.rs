@@ -15,7 +15,7 @@ use crate::editor::EditorView;
 use crate::keymap::key_bindings;
 use crate::restore::session_file;
 use crate::shell::AppShell;
-use crate::theme;
+use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
 use crate::ui::Assets;
 use crate::vault::NoteStore;
@@ -102,7 +102,13 @@ pub fn run() {
             }
         };
 
-        theme::follow_system(cx.window_appearance(), cx);
+        let resolved = match &launched {
+            Launch::Vault(vault, _) => {
+                futures::executor::block_on(theme::store::load(&RealFs, vault.root()))
+            }
+            Launch::Nothing | Launch::Note(..) => Resolved::default(),
+        };
+        theme::install(resolved.theme.clone(), cx);
         let bounds = Bounds::centered(None, WINDOW_SIZE, cx);
         let window = cx.open_window(
             WindowOptions {
@@ -128,6 +134,7 @@ pub fn run() {
                     cx.activate(true);
                     // Marks the first draw's start, ~4.5 ms before its present: any later hook waits on AppKit.
                     window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
+                    view.adopt_theme(resolved, cx);
                 });
                 if let Err(err) = focused {
                     log::warn!("failed to focus window: {err}");

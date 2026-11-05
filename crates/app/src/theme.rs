@@ -1,6 +1,8 @@
 pub(crate) mod builtin;
 mod colors;
+mod file;
 mod markdown;
+pub(crate) mod store;
 
 use std::sync::Arc;
 
@@ -12,28 +14,55 @@ pub(crate) use markdown::markdown_style;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Theme {
+    pub(crate) appearance: Appearance,
     pub(crate) colors: ThemeColors,
 }
 
-struct GlobalTheme(Arc<Theme>);
+/// The flag beside the theme, so every writer sets both and the system cannot override a named theme.
+struct GlobalTheme {
+    theme: Arc<Theme>,
+    follows_system: bool,
+}
 
 impl Global for GlobalTheme {}
 
 /// The applied theme, else the built-in dark one, so a test needs no setup.
 pub(crate) fn current(cx: &App) -> &Arc<Theme> {
-    match cx.try_global::<GlobalTheme>() {
-        Some(GlobalTheme(theme)) => theme,
-        None => builtin::dark(),
+    cx.try_global::<GlobalTheme>()
+        .map_or(builtin::dark(), |global| &global.theme)
+}
+
+pub(crate) fn follows_system(cx: &App) -> bool {
+    cx.try_global::<GlobalTheme>()
+        .is_none_or(|global| global.follows_system)
+}
+
+/// Redraws every window; an equal theme keeps the current pointer, so its layouts stay cached.
+fn set(theme: Arc<Theme>, follows_system: bool, cx: &mut App) {
+    let same = **current(cx) == *theme;
+    if same && self::follows_system(cx) == follows_system {
+        return;
+    }
+    let theme = if same { current(cx).clone() } else { theme };
+    cx.set_global(GlobalTheme {
+        theme,
+        follows_system,
+    });
+    if !same {
+        cx.refresh_windows();
     }
 }
 
-/// Redraws every window; an equal theme changes nothing, so its layouts stay cached.
-pub(crate) fn apply(theme: Arc<Theme>, cx: &mut App) {
-    if **current(cx) == *theme {
-        return;
+/// A named theme pins the windows' appearance to its own; `None` follows the system's.
+pub(crate) fn install(theme: Option<Arc<Theme>>, cx: &mut App) {
+    if let Some(theme) = theme {
+        cx.set_window_appearance(Some(theme.appearance.into()));
+        set(theme, false, cx);
+    } else {
+        // Unpinned first, or `window_appearance` reads the last pin rather than the system's.
+        cx.set_window_appearance(None);
+        set(builtin::of(cx.window_appearance().into()).clone(), true, cx);
     }
-    cx.set_global(GlobalTheme(theme));
-    cx.refresh_windows();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +80,20 @@ impl From<WindowAppearance> for Appearance {
     }
 }
 
-/// The built-in theme of the system's appearance.
+impl From<Appearance> for WindowAppearance {
+    fn from(appearance: Appearance) -> Self {
+        match appearance {
+            Appearance::Light => Self::Light,
+            Appearance::Dark => Self::Dark,
+        }
+    }
+}
+
+/// The built-in theme of the system's appearance, unless a named theme is installed.
 pub(crate) fn follow_system(appearance: WindowAppearance, cx: &mut App) {
-    apply(builtin::of(appearance.into()).clone(), cx);
+    if follows_system(cx) {
+        set(builtin::of(appearance.into()).clone(), true, cx);
+    }
 }
 
 /// The blur's stand-in in a shot: the chrome's own colour, so the shot shows it opaque.
