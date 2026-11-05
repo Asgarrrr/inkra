@@ -3,14 +3,14 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use gpui::{Pixels, TestAppContext, TextStyle, Window, prelude::*, px};
+use gpui::{Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude::*, px};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{at, dispatching, window_on, with_editor};
 use crate::editor::layout::{
     DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
-use crate::theme::{self, Theme, ThemeColors, builtin};
+use crate::theme::{self, Appearance, Theme, ThemeColors, builtin};
 
 #[gpui::test]
 fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
@@ -153,6 +153,26 @@ fn a_theme_change_reshapes_the_note_once(cx: &mut TestAppContext) {
             assert!(Arc::ptr_eq(view.input.last_layout().unwrap().theme(), &red));
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn the_system_appearance_reshapes_with_its_theme(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "[a](b)\n");
+    cx.run_until_parked();
+
+    for (system, appearance) in [
+        (WindowAppearance::VibrantLight, Appearance::Light),
+        (WindowAppearance::Dark, Appearance::Dark),
+    ] {
+        cx.update(|_, cx| theme::follow_system(system, cx));
+        cx.run_until_parked();
+        window
+            .update(&mut cx, |view, _, _| {
+                let shown = view.input.last_layout().unwrap().theme();
+                assert!(Arc::ptr_eq(shown, builtin::of(appearance)), "{system:?}");
+            })
+            .unwrap();
+    }
 }
 
 #[gpui::test]

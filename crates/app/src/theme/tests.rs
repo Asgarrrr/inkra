@@ -1,7 +1,11 @@
-use gpui::{FontStyle, FontWeight, Hsla, TextStyle};
+use std::sync::Arc;
+
+use gpui::{FontStyle, FontWeight, Hsla, TextStyle, WindowAppearance};
 use inkra_markdown::{HEADING_LEVELS, HeadingLevel, Styles};
 
-use super::{BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, builtin, heading_metrics};
+use super::{
+    Appearance, BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, builtin, heading_metrics,
+};
 
 fn markdown_style(base: &TextStyle, styles: Styles) -> TextStyle {
     super::markdown_style(base, styles, builtin::dark())
@@ -100,4 +104,21 @@ fn a_heading_line_is_never_shorter_than_body_or_its_own_text() {
         let metrics = heading_metrics(level);
         assert!(metrics.line_height >= metrics.size && metrics.line_height >= BODY_LINE_HEIGHT);
     }
+}
+
+#[test]
+fn every_window_appearance_picks_its_builtin() {
+    for (window, expected) in [
+        (WindowAppearance::Light, Appearance::Light),
+        (WindowAppearance::VibrantLight, Appearance::Light),
+        (WindowAppearance::Dark, Appearance::Dark),
+        (WindowAppearance::VibrantDark, Appearance::Dark),
+    ] {
+        let picked = builtin::of(Appearance::from(window));
+        assert!(Arc::ptr_eq(picked, builtin::of(expected)), "{window:?}");
+    }
+    assert!(!Arc::ptr_eq(
+        builtin::of(Appearance::Light),
+        builtin::of(Appearance::Dark)
+    ));
 }
