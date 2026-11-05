@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/text", "crates/editor", "crates/app", "crates/vault", "crates/markdown", "crates/index", "crates/tabs"]
+members = ["crates/text", "crates/editor", "crates/app", "crates/vault", "crates/markdown", "crates/index", "crates/tabs", "crates/layout"]
 # Else cargo treats the vendored zed checkout as a member of this workspace.
 exclude = ["vendor"]
 
@@ -17,6 +17,7 @@ inkra-vault = { path = "crates/vault" }
 inkra-markdown = { path = "crates/markdown" }
 inkra-index = { path = "crates/index" }
 inkra-tabs = { path = "crates/tabs" }
+inkra-layout = { path = "crates/layout" }
 proptest = "1"
 futures = "0.3"
 unicode-segmentation = "1.13"

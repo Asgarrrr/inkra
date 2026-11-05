@@ -1,6 +1,7 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
 mod command_palette;
+mod docks;
 mod failures;
 mod gone;
 mod hover;
@@ -147,7 +148,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "sidebar-vault",
-        shows: "the tree 4 px under the title row, with no header, ruled against the note on its right: 27 px rounded rows inset 8 px, directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
+        shows: "the tree 4 px under its `Files` header, ruled against the note on its right: 27 px rounded rows inset 8 px, directories first with a chevron (down when open), indents, a nested note; every name at one depth starts at one x",
         open: sidebar_vault,
     },
     Scene {
@@ -226,8 +227,13 @@ const CATALOGUE: &[Scene] = &[
         open: backlinks,
     },
     Scene {
+        name: "docks-default",
+        shows: "Files header over the tree, level with the Backlinks header and the nav row",
+        open: docks::default,
+    },
+    Scene {
         name: "tabs",
-        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the tree 4 px under the row with no header, the `Backlinks` header level under the row, ruled like it",
+        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the `Files` header over the tree and the `Backlinks` header level under the row, ruled like it",
         open: tabs::dirty,
     },
     Scene {

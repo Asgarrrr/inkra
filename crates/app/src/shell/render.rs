@@ -1,11 +1,12 @@
-//! The shell's layout: the title row over the sidebar, note column and backlinks, and the picker over them.
+//! The shell's layout: the title row over the docks and the note column, and the picker over them.
 
 use gpui::{
-    App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render,
-    Styled, Window, div, prelude::FluentBuilder,
+    App, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Styled,
+    Window, div, prelude::FluentBuilder,
 };
+use inkra_layout::Side;
 
-use super::{AppShell, BACKLINKS_WIDTH, GoBack, GoForward, SIDEBAR_WIDTH};
+use super::{AppShell, GoBack, GoForward};
 use crate::theme;
 use crate::ui::{Color, IconButton, IconName, h_flex, keep_focus};
 
@@ -87,20 +88,9 @@ impl AppShell {
     }
 }
 
-/// A side panel's column: fixed width, the body's full height.
-fn side_column(selector: &'static str, width: Pixels) -> Div {
-    div()
-        .debug_selector(move || selector.into())
-        .flex_none()
-        .w(width)
-        .h_full()
-}
-
 impl AppShell {
-    /// Under the title row: the sidebar, the note column and the backlinks.
+    /// Under the title row: the left dock, the note column and the right dock.
     fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let panes = self.panes.as_ref();
-        let colors = theme::current(cx).colors;
         div()
             .flex()
             .flex_row()
@@ -109,13 +99,7 @@ impl AppShell {
             .w_full()
             // `min_h_0`: a flex child's minimum is its content, which would outgrow the window.
             .min_h_0()
-            .children(panes.filter(|panes| panes.shown.sidebar).map(|panes| {
-                side_column("sidebar-column", SIDEBAR_WIDTH)
-                    .bg(colors.background)
-                    .border_r(theme::RULE_WIDTH)
-                    .border_color(colors.border_variant)
-                    .child(panes.sidebar.clone())
-            }))
+            .children(self.render_dock(Side::Left, cx))
             .child(
                 div()
                     .debug_selector(|| "note-column".into())
@@ -134,13 +118,8 @@ impl AppShell {
                         None => self.render_empty(cx).into_any_element(),
                     })),
             )
-            // Shown for an empty tab too, so a switch does not move the note column by the panel's width.
-            .children(panes.filter(|panes| panes.shown.backlinks).map(|panes| {
-                side_column("backlinks-column", BACKLINKS_WIDTH)
-                    .border_l(theme::RULE_WIDTH)
-                    .border_color(colors.border_variant)
-                    .child(panes.backlinks.clone())
-            }))
+            // Shown for an empty tab too, so a switch does not move the note column by the dock's width.
+            .children(self.render_dock(Side::Right, cx))
     }
 }
 
@@ -166,8 +145,8 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::activate_last_tab))
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::go_forward))
-            .on_action(cx.listener(Self::toggle_sidebar))
-            .on_action(cx.listener(Self::toggle_backlinks))
+            .on_action(cx.listener(Self::toggle_left_dock))
+            .on_action(cx.listener(Self::toggle_right_dock))
             .on_action(cx.listener(Self::select_theme))
             .on_action(cx.listener(Self::quit))
             .on_mouse_move(cx.listener(Self::title_drag_move))

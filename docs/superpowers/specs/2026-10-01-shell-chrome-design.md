@@ -729,6 +729,8 @@ The backlinks title is "Backlinks". The backlinks panel drops its own header
 
 ### S2a-D3. Showing and hiding
 
+Superseded by the docks spec: `ToggleLeftDock`/`ToggleRightDock` on the same keys; `Docks` replaces `PanelsShown`; `PanelHeader` takes a left-press listener.
+
 The panel is the sidebar or the backlinks; "hide" covers the key, the toggle
 and the palette entry.
 
@@ -1187,6 +1189,7 @@ S2a text above or fills a gap in it.
    the debug selector from the id.
 5. **`PanelsShown` lives in `VaultPanes`**, as `panes.shown`. With no vault
    there is no panel, so there is no state to hold.
+   Superseded by the docks spec: `ToggleLeftDock`/`ToggleRightDock` on the same keys; `Docks` replaces `PanelsShown`; `PanelHeader` takes a left-press listener.
 6. **`TAB_BAR_HEIGHT` is the literal `px(23.)`.** `px` has no const add. Its
    doc names the sum, and test 4 catches a drift.
 7. **`IconButton` calls `prevent_default` on a left mouse-down**, as a tab's

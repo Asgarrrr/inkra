@@ -56,14 +56,14 @@ fn a_keystroke_in_a_narrow_pane_shapes_the_note_once(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_chrome_columns_are_ruled_against_the_note(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
-    let sidebar = cx.debug_bounds("sidebar-column").unwrap();
+    let sidebar = cx.debug_bounds("dock-left").unwrap();
     let row = cx.debug_bounds("tree-row-0").unwrap();
     assert_eq!(
         row.right(),
         sidebar.right() - theme::RULE_WIDTH - theme::ROW_INSET
     );
 
-    let backlinks = cx.debug_bounds("backlinks-column").unwrap();
+    let backlinks = cx.debug_bounds("dock-right").unwrap();
     let header = cx.debug_bounds("panel-header-backlinks").unwrap();
     assert_eq!(header.left(), backlinks.left() + theme::RULE_WIDTH);
 }

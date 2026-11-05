@@ -7,7 +7,7 @@ use super::{activate, editor, row_point, showing, tree_focused, two_notes};
 use crate::open::Open;
 use crate::picker::Picker;
 use crate::picker::letters::{DELAY, Letters};
-use crate::shell::{AppShell, SIDEBAR_WIDTH};
+use crate::shell::{AppShell, LEFT_DOCK_WIDTH};
 
 const ROWS: &[&str] = &["apple", "apricot", "beet"];
 
@@ -152,7 +152,7 @@ fn a_click_on_a_picker_row_does_not_reach_the_editor(cx: &mut TestAppContext) {
     let before = editor(&window, cx).update(cx, |editor, _| editor.cursor());
     let picker = open_letters::<0>(window, &mut visual).expect("it opened");
     let row = visual.debug_bounds("picker-row-2").expect("row 2 is drawn");
-    assert!(row.left() > SIDEBAR_WIDTH, "the row lies over the editor");
+    assert!(row.left() > LEFT_DOCK_WIDTH, "the row lies over the editor");
 
     visual.simulate_click(row.center(), Modifiers::none());
 

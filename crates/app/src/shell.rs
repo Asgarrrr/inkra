@@ -14,10 +14,10 @@ use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, Tras
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
+mod docks;
 mod modal;
 mod notice;
 mod palette;
-mod panels;
 mod panes;
 mod parked;
 mod quit;
@@ -28,6 +28,7 @@ mod tabs;
 mod themes;
 mod title_bar;
 
+use inkra_layout::View;
 use inkra_tabs::Tabs;
 use modal::Modal;
 use notice::{Notice, reason};
@@ -36,14 +37,14 @@ use parked::Parked;
 use session::{Restore, SessionFile};
 use tabs::Place;
 
-pub(crate) use panels::{ToggleBacklinks, ToggleSidebar};
+pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
 pub(crate) use tabs::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
     ReopenClosedTab,
 };
 
-const SIDEBAR_WIDTH: Pixels = px(220.);
-const BACKLINKS_WIDTH: Pixels = px(260.);
+const LEFT_DOCK_WIDTH: Pixels = px(220.);
+const RIGHT_DOCK_WIDTH: Pixels = px(260.);
 /// The quick-open MRU (search spec D6) and the palette's recent commands (palette spec D3).
 const RECENT: usize = 20;
 
@@ -267,14 +268,13 @@ impl AppShell {
         );
     }
 
-    /// Shows a hidden sidebar first: the name field it focuses must be drawn.
+    /// Reveals the tree first: the name field it focuses must be drawn.
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(panes) = &mut self.panes {
-            panes.shown.sidebar = true;
+        self.change_docks(window, cx, |docks| docks.reveal(View::Files));
+        if let Some(panes) = &self.panes {
             panes.sidebar.update(cx, |sidebar, cx| {
                 sidebar.start_creating(kind, window, cx);
             });
-            cx.notify();
         }
     }
 }

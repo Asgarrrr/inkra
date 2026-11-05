@@ -1,6 +1,6 @@
 use gpui::{
-    App, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    Styled, Window, div, prelude::FluentBuilder,
+    App, Div, FontWeight, InteractiveElement, Interactivity, IntoElement, ParentElement,
+    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::{Color, Label, LabelSize, UiText, h_flex};
@@ -26,6 +26,12 @@ impl PanelHeader {
     pub(crate) fn count(mut self, count: usize) -> Self {
         self.count = Some(count);
         self
+    }
+}
+
+impl InteractiveElement for PanelHeader {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
     }
 }
 

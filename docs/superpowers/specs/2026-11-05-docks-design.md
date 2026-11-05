@@ -1,0 +1,189 @@
+# Docks: movable views
+
+Status: **approved 2026-11-05** in a brainstorm on HTML mocks
+(`.superpowers/brainstorm/62211-1793878872/`, gitignored). Not built.
+
+## Why
+
+The sidebar and the backlinks are hard-wired: `render_columns` draws the tree
+on the left and the backlinks on the right, and `PanelsShown` holds two
+booleans. The user wants to move views at will, modelled on Zed's `Dock` and
+`Panel` (`vendor/zed-reference/crates/workspace/src/dock.rs`). The header rule
+was agreed in the Obsidian chrome spec (D6): a dock with one view shows its
+title, a dock with several shows an icon bar.
+
+Two notes side by side are **splits**, a separate subsystem (Zed's
+`PaneGroup`). The tabs spec deferred them with the trigger "a user wants two
+notes side by side"; the user raised it in this brainstorm. Splits get their
+own spec after this one. The note column stays one pane here.
+
+## Decisions taken
+
+- **D1. Two docks, left and right.** No bottom dock. `Side` is an enum, so a
+  bottom dock can be added later without reshaping the model.
+- **D2. A view moves by menu, by palette, then by drag.** The menu and the
+  palette land first: they settle the model, and the drag only calls it.
+- **D3. A dock's header sits under the title row**, level with the nav row and
+  the backlinks header. The title row does not change.
+- **D4. The layout is session state.** It goes in the session file, beside the
+  tabs, not in `<vault>/.inkra/settings.json`.
+- **D5. A closed set of views and a pure model.** `View` is an enum; the
+  layout rules live in a new gpui-free crate, `inkra-layout`.
+- **D6. One view shows at a time in a dock.** No vertical stacking inside a
+  dock: that is a split inside a dock, deferred to the splits spec.
+
+## Deviations from Zed
+
+| Zed | Here | Why |
+|---|---|---|
+| `trait Panel` + `Arc<dyn PanelHandle>` in a `Dock` entity | `enum View`, a pure `Docks` value, a `match` in `app` | Zed's panels come from a dozen crates and extensions. Ours are two views in one crate; a trait object would be a plugin system ahead of need. A pure model also tests without a `Window`. Revisit when a view comes from outside `inkra-app`. |
+| A panel moves by its button's context menu only | Menu, palette, and drag | The user asked for views movable at will; with a mouse that means drag. |
+| Bottom dock | None | Both views are columns (D1). |
+| Size per panel, resizable | Width per side, fixed | Resize is the chrome spec's S2b, still deferred. |
+| Dock state in the workspace database | The session file | Same intent, our existing store (D4). |
+
+## The model: `inkra-layout`
+
+A new workspace crate. It depends on no workspace crate and has no gpui
+dependency; `check.sh` enforces the latter. `app` depends on it. The splits
+spec will add its pane tree here.
+
+### Data
+
+- `View { Files, Backlinks }`, `Side { Left, Right }`.
+- `Docks { left: Dock, right: Dock }`. A `Dock` holds its views in order, its
+  active view, and whether it is shown.
+- **Invariant: each `View` appears exactly once, in one dock.** Only
+  `move_view(view, side, index)` relocates a view, so the invariant holds by
+  construction.
+
+### Rules
+
+1. **A moved view becomes active in its new dock, and that dock shows.** The
+   user always sees where it went.
+2. **When the active view leaves, its right neighbour becomes active, else its
+   left one.** This is the tabs' rule.
+3. **An empty dock draws nothing**: no column, no title-row segment, no
+   toggle. It keeps its shown flag for when a view comes back.
+4. **A click on an icon activates its view.** A click on the active icon does
+   nothing.
+5. **Width belongs to the side**: 220 px left, 260 px right, as today.
+6. **Default**: `Files` left, `Backlinks` right, both shown. It looks like
+   today plus the `Files` header.
+
+An invalid call (an index out of range) panics: a caller bug, per the project
+rule. The model has no fallible operation.
+
+### Drop index
+
+A pure function maps the pointer's x and the header's icon centres to an
+insertion index. `inkra-tabs` places a dragged tab with the same kind of
+computation; read it before writing this one.
+
+## In `app`
+
+- A `match` binds each `View` to its entity (`Sidebar`, `BacklinksPanel`), its
+  icon, its title, and an optional count (the backlinks').
+- `PanelsShown` goes. `VaultPanes` holds `Docks`.
+- **Focus.**
+  - Hiding a dock that holds focus lands it through the existing `land_focus`.
+    This keeps today's rule: a hidden tree keeps neither focus nor an open
+    name field.
+  - A focused view keeps focus when it changes dock.
+- **Actions.**
+  - `ToggleLeftDock` on `cmd-\` and `ToggleRightDock` on `cmd-|` replace
+    `ToggleSidebar` and `ToggleBacklinks`, same keys.
+  - One action per view: "Docks: Move Files to Other Dock" and "Docks: Move
+    Backlinks to Other Dock", listed in `⌘⇧P`.
+- **Title row.** Unchanged. `SearchVault` and `NewNote` stay over the left
+  dock: they act on the vault, not on the tree, so they do not follow `Files`.
+  A dock's toggle sits where today's panel toggle sits, and goes with rule 3.
+
+### Headers
+
+- One view: `PanelHeader` with the view's title, and its count if any.
+- Several views: an icon bar. The active icon is highlighted, and each icon has
+  a tooltip with the view's name.
+- No per-view tools in the header for now.
+
+The tree gains a `Files` header. This partly reverses the Obsidian chrome
+spec's D5, which removed the tree's `vault` header. It follows from that same
+spec's D6 rule, which the user approved again here.
+
+### Context menu
+
+No menu component exists. `ui::ContextMenu` is new, modelled on Zed's
+(`anchored` and `deferred`), driven by ↑, ↓, ⏎ and Esc. A right-click on a
+header's title or icon opens it with "Move to Left Dock" or "Move to Right
+Dock", and "Hide Dock".
+
+### Drag
+
+- An icon, or the title of a one-view dock, drags a `DraggedView`
+  (`on_drag`, `drag_over`, `on_drop`, as the tabs do).
+- Drop targets:
+  - A dock's header: insert at the drop index. A drop in the same dock
+    reorders.
+  - A dock's body: append.
+  - An empty side: during a drag only, a 40 px drop strip shows at that window
+    edge. Without it an emptied dock could not be refilled by drag.
+- A drop outside any target changes nothing.
+
+## Persistence
+
+- `Session` gains an optional `docks` field. `VERSION` stays 1: an old file
+  reads without it and gets the default layout.
+- Views are stored as strings (`"files"`, `"backlinks"`). A serde enum would
+  fail the whole file on an unknown name, and lose the tabs' restore with it.
+- `Docks::restore` drops unknown names and duplicates, appends each missing
+  view to its default side, and clamps an out-of-range active index. Any file
+  yields a valid layout.
+- The existing writer and its throttle save on every layout change: a move, an
+  activation, a toggle.
+- **The layout applies when the restore ends**, with the tabs. Risk: the
+  default layout shows first, then the restored one replaces it. D2 measures it
+  against `docs/startup-floor.md`. If the jump is visible, the docks wait for
+  the restore, as the empty-note message already does.
+
+## Testing
+
+- `inkra-layout`: a `#[test]` per rule; a `proptest` over random moves,
+  activations and toggles that checks the invariant after each step; the
+  `.proptest-regressions` file committed. `cargo mutants` on the crate, zero
+  missed. Add the crate to the CLAUDE.md mutants list.
+- `Docks::restore`: an unknown name, a duplicate, a missing view, an
+  out-of-range active index, and an absent field each yield a valid layout.
+- `app`, headless `#[gpui::test]` on `MemFs`:
+  - `cmd-\` and `cmd-|` toggle the docks (`simulate_keystrokes`);
+  - both move actions are listed in `⌘⇧P` and move their view;
+  - focus lands on the note when its dock hides; a focused view keeps focus
+    when it moves;
+  - the menu works with ↑, ↓, ⏎ and Esc;
+  - the layout round-trips through the session file;
+  - a simulated drag drops a view at the expected index.
+- Shots, looked at after each slice: `docks-default`, `docks-both-left`,
+  `docks-menu`, `docks-drag-empty-side`.
+
+## Slices
+
+Each slice is vertical and lands as its own PR. D1 is split in two to keep each PR near 150 lines.
+
+| Slice | Content | User sees |
+|---|---|---|
+| D1a | `inkra-layout` with `View`, `Side`, `Dock`, `Docks`, `toggle` and `reveal`; the shell draws its docks from `Docks`; the `Files` header; `ToggleLeftDock`, `ToggleRightDock`; the chrome spec's S2a toggle text updated; CLAUDE.md lines for the crate | The `Files` header |
+| D1b | `move_view`, the empty-dock rule, the icon bar and its tooltips, both move actions in `⌘⇧P` | Moving by palette |
+| D2 | The session's `docks` field, `Docks::restore`, the write, the launch-jump measurement | The layout survives a restart |
+| D3 | `ui::ContextMenu`, the right-click on a header | The menu |
+| D4 | The drag: `DraggedView`, the pure drop index, the empty-side strips | Drag and drop |
+
+## Out of scope
+
+- A bottom dock (D1).
+- The header merged into the title row. The user found it more elegant; it
+  was parked because the traffic lights take ~88 px on the left and the bar
+  would overflow with 4–5 views. Revisit with a fix for both.
+- Vertical stacking inside a dock (D6), with the splits spec.
+- Splits in the note column: the next spec.
+- Resizing a dock (chrome spec, S2b).
+- Per-view tools in a header.
+- `dyn Panel`: revisit when a view comes from outside `inkra-app`.

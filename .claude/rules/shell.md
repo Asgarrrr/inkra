@@ -21,17 +21,18 @@ paths:
 - A drop in the bar (`move_tab`) calls no closure: it captures, parks and
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not
-  take focus from the editor. An `IconButton` (a panel toggle, the ×, the `+`, the sidebar's search and new-note buttons, the nav row's arrows) prevents it on
+  take focus from the editor. An `IconButton` (a dock toggle, the ×, the `+`, the sidebar's search and new-note buttons, the nav row's arrows) prevents it on
   a left press itself, so a click on one leaves focus where it was.
 - A disabled `IconButton` drops its click and is drawn as `{id}-disabled`, which tests read; the arrows' state comes from `Tabs::can_go_back`/`can_go_forward`, never computed in the view.
-- The nav row and every title-row segment (`title-sidebar`, `title-tabs`, `title-backlinks`) call `ui::keep_focus` on a left press, so a press on their gaps leaves the editor focused.
+- The nav row and every title-row segment (`title-left`, `title-tabs`, `title-right`) call `ui::keep_focus` on a left press, so a press on their gaps leaves the editor focused.
 - The window moves only from the four leaf drag regions of the title row
-  (`title-drag-start`, `title-drag-sidebar`, `title-drag-end`, `title-drag-backlinks`): only a region's left press sets
+  (`title-drag-start`, `title-drag-left`, `title-drag-end`, `title-drag-right`): only a region's left press sets
   `title_drag_armed`, and calls `prevent_default` to keep the editor's focus.
   The root's mouse move clears the flag on every move, and starts the move only with the
   left button held: a release outside the window reaches no listener. Never put
   a drag handler on the row: a tab's press would bubble to it.
-- With no vault, no sidebar column is drawn; the note column starts at x 0.
+- With no vault, no dock is drawn; the note column starts at x 0.
+- `VaultPanes.docks` changes only through `change_docks`: it lands focus when Files stops being visible and cancels an open name field.
 - `Tabs` holds no place for the active tab (H8): `active_note()` is its note
   (`showing()` is the note bound in the editor, `None` while `Trashing`), and
   `leaving` hands `Tabs` the place when the tab is left.

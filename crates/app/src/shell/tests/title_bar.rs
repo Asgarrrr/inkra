@@ -37,7 +37,7 @@ fn the_tab_row_spans_the_window_above_every_column(cx: &mut TestAppContext) {
     let row = cx.debug_bounds("tab-row").unwrap();
     assert_eq!(row.origin, point(px(0.), px(0.)));
     assert_eq!(row.size, size(viewport.width, theme::TITLE_BAR_HEIGHT));
-    for column in ["sidebar-column", "note-column", "backlinks-column"] {
+    for column in ["dock-left", "note-column", "dock-right"] {
         let top = cx.debug_bounds(column).unwrap().top();
         assert_eq!(top, row.bottom(), "{column}");
     }
@@ -68,11 +68,11 @@ fn with_the_sidebar_hidden_the_toggle_follows_the_lights(cx: &mut TestAppContext
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
     keys(&mut cx, "cmd-\\");
 
-    assert!(cx.debug_bounds("title-sidebar").is_none());
+    assert!(cx.debug_bounds("title-left").is_none());
     assert_eq!(cx.debug_bounds("title-tabs").unwrap().left(), px(0.));
     let lights = cx.debug_bounds("title-drag-start").unwrap();
     assert_eq!(lights.size.width, theme::TRAFFIC_LIGHT_PADDING);
-    let toggle = cx.debug_bounds("panel-toggle-sidebar").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-left").unwrap();
     assert_eq!(toggle.left(), lights.right());
 }
 
@@ -80,8 +80,8 @@ fn with_the_sidebar_hidden_the_toggle_follows_the_lights(cx: &mut TestAppContext
 fn the_sidebar_segment_spans_the_sidebar(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
 
-    let segment = cx.debug_bounds("title-sidebar").unwrap();
-    let column = cx.debug_bounds("sidebar-column").unwrap();
+    let segment = cx.debug_bounds("title-left").unwrap();
+    let column = cx.debug_bounds("dock-left").unwrap();
     assert_eq!(segment.origin.x, px(0.));
     assert_eq!(segment.size.width, column.size.width);
     assert_eq!(segment.right(), column.right());
@@ -99,8 +99,8 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
     for button in [
         "sidebar-search",
         "sidebar-new-note",
-        "panel-toggle-sidebar",
-        "panel-toggle-backlinks",
+        "dock-toggle-left",
+        "dock-toggle-right",
     ] {
         let bounds = cx.debug_bounds(button).unwrap();
         assert_eq!(
@@ -143,9 +143,9 @@ fn the_new_note_button_opens_a_name_field(cx: &mut TestAppContext) {
 fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
 
-    let toggle = cx.debug_bounds("panel-toggle-sidebar").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-left").unwrap();
     assert!(
-        toggle.contains(&AppShell::sidebar_toggle_point()),
+        toggle.contains(&AppShell::left_toggle_point()),
         "{toggle:?}"
     );
 }
@@ -168,7 +168,7 @@ fn the_space_after_the_tabs_is_a_drag_region(cx: &mut TestAppContext) {
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let region = cx.debug_bounds("title-drag-end").unwrap();
     let new = cx.debug_bounds("tab-new").unwrap();
-    let backlinks = cx.debug_bounds("title-backlinks").unwrap();
+    let backlinks = cx.debug_bounds("title-right").unwrap();
     assert_eq!(
         bar.right(),
         cx.debug_bounds("tab-1").unwrap().right() + theme::TAB_CURVE
@@ -183,9 +183,9 @@ fn the_backlinks_toggle_sits_over_the_backlinks(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
 
-    let segment = cx.debug_bounds("title-backlinks").unwrap();
-    let column = cx.debug_bounds("backlinks-column").unwrap();
-    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let segment = cx.debug_bounds("title-right").unwrap();
+    let column = cx.debug_bounds("dock-right").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-right").unwrap();
     assert_eq!(segment.left(), column.left());
     assert_eq!(segment.right(), column.right());
     assert!(toggle.left() >= segment.left() && toggle.right() <= segment.right());
@@ -198,9 +198,9 @@ fn hidden_backlinks_put_their_toggle_after_the_tabs(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     keys(&mut cx, "cmd-|");
 
-    assert!(cx.debug_bounds("title-backlinks").is_none());
+    assert!(cx.debug_bounds("title-right").is_none());
     let region = cx.debug_bounds("title-drag-end").unwrap();
-    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-right").unwrap();
     assert_eq!(region.right(), toggle.left());
 }
 
@@ -208,7 +208,7 @@ fn hidden_backlinks_put_their_toggle_after_the_tabs(cx: &mut TestAppContext) {
 fn a_press_on_the_backlinks_drag_region_arms_the_move(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
-    let at = cx.debug_bounds("title-drag-backlinks").unwrap().center();
+    let at = cx.debug_bounds("title-drag-right").unwrap().center();
 
     cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
@@ -226,7 +226,7 @@ fn overflowing_tabs_keep_a_drag_region(cx: &mut TestAppContext) {
         region.size.width >= theme::TITLE_DRAG_MIN_WIDTH,
         "{region:?}"
     );
-    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-right").unwrap();
     assert!(
         toggle.right() <= px(700.),
         "the toggle is pushed out: {toggle:?}"
@@ -274,7 +274,7 @@ fn a_press_between_the_sidebar_buttons_keeps_the_editors_focus(cx: &mut TestAppC
 fn a_press_after_the_backlinks_toggle_keeps_the_editors_focus(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
-    let toggle = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-right").unwrap();
     let at = point(toggle.right() + px(1.), toggle.center().y);
 
     cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
@@ -288,7 +288,7 @@ fn a_press_after_the_backlinks_toggle_keeps_the_editors_focus(cx: &mut TestAppCo
 fn a_press_on_the_sidebars_drag_region_arms_the_move(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
-    let at = cx.debug_bounds("title-drag-sidebar").unwrap().center();
+    let at = cx.debug_bounds("title-drag-left").unwrap().center();
 
     cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
@@ -390,7 +390,7 @@ fn no_vault_draws_no_sidebar_column(cx: &mut TestAppContext) {
     let (_window, mut cx) = no_vault(cx);
 
     let row = cx.debug_bounds("tab-row").expect("the row is drawn");
-    assert!(cx.debug_bounds("sidebar-column").is_none());
+    assert!(cx.debug_bounds("dock-left").is_none());
     let note = cx.debug_bounds("note-column").unwrap();
     assert_eq!(note.origin, point(px(0.), row.bottom()));
 }
@@ -403,7 +403,9 @@ fn the_panel_headers_line_up_under_the_title_row(cx: &mut TestAppContext) {
     let bounds = cx.debug_bounds("panel-header-backlinks").unwrap();
     assert_eq!(bounds.top(), row.bottom());
     assert_eq!(bounds.bottom(), row.bottom() + theme::PANEL_HEADER_HEIGHT);
-    assert!(cx.debug_bounds("panel-header-sidebar").is_none());
+    let files = cx.debug_bounds("panel-header-files").unwrap();
+    assert_eq!(files.top(), theme::TITLE_BAR_HEIGHT);
+    assert_eq!(files.top(), bounds.top());
 }
 
 #[gpui::test]

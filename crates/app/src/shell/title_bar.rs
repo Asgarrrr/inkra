@@ -5,6 +5,7 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder,
 };
+use inkra_layout::Side;
 
 use super::AppShell;
 use crate::sidebar::NewNote;
@@ -20,10 +21,10 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::current(cx).colors;
-        let shown = self.panes.as_ref().map(|panes| panes.shown);
-        let sidebar_shown = shown.is_some_and(|shown| shown.sidebar);
-        let backlinks_shown = shown.is_some_and(|shown| shown.backlinks);
-        let (sidebar_toggle, backlinks_toggle) = self.render_panel_toggles(cx).unzip();
+        let docks = self.panes.as_ref().map(|panes| &panes.docks);
+        let sidebar_shown = docks.is_some_and(|docks| docks.dock(Side::Left).is_shown());
+        let backlinks_shown = docks.is_some_and(|docks| docks.dock(Side::Right).is_shown());
+        let (sidebar_toggle, backlinks_toggle) = self.render_dock_toggles(cx).unzip();
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
@@ -92,26 +93,26 @@ impl AppShell {
             .children(title_backlinks)
     }
 
-    /// Over the backlinks: a drag region, then their toggle at the window's right edge.
+    /// Over the right dock: a drag region, then its toggle at the window's right edge.
     fn render_title_backlinks<Toggle: IntoElement>(
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
         let colors = theme::current(cx).colors;
         h_flex()
-            .debug_selector(|| "title-backlinks".into())
+            .debug_selector(|| "title-right".into())
             .on_mouse_down(MouseButton::Left, keep_focus)
             .flex_none()
-            .w(super::BACKLINKS_WIDTH)
+            .w(super::RIGHT_DOCK_WIDTH)
             .h_full()
             .pr(theme::ROW_INSET)
             .border_l(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
-            .child(Self::render_drag_region("title-drag-backlinks", cx).flex_1())
+            .child(Self::render_drag_region("title-drag-right", cx).flex_1())
             .children(toggle)
     }
 
-    /// Over the sidebar: the lights, its buttons, then its toggle at its right edge (D2).
+    /// Over the left dock: the lights, the vault's buttons, then its toggle at its right edge (D2).
     fn render_title_sidebar<Toggle: IntoElement>(
         lights: Pixels,
         toggle: Option<Toggle>,
@@ -119,10 +120,10 @@ impl AppShell {
     ) -> impl IntoElement + use<Toggle> {
         let colors = theme::current(cx).colors;
         h_flex()
-            .debug_selector(|| "title-sidebar".into())
+            .debug_selector(|| "title-left".into())
             .on_mouse_down(MouseButton::Left, keep_focus)
             .flex_none()
-            .w(super::SIDEBAR_WIDTH)
+            .w(super::LEFT_DOCK_WIDTH)
             .h_full()
             .pr(theme::ROW_INSET)
             .border_r(theme::RULE_WIDTH)
@@ -149,7 +150,7 @@ impl AppShell {
                             })),
                     ),
             )
-            .child(Self::render_drag_region("title-drag-sidebar", cx).flex_1())
+            .child(Self::render_drag_region("title-drag-left", cx).flex_1())
             .children(toggle)
     }
 
@@ -197,10 +198,10 @@ impl AppShell {
 
 #[cfg(any(test, feature = "shot"))]
 impl AppShell {
-    /// The sidebar toggle's centre. Valid while the sidebar shows.
-    pub(crate) fn sidebar_toggle_point() -> gpui::Point<Pixels> {
+    /// The left dock toggle's centre. Valid while the left dock shows.
+    pub(crate) fn left_toggle_point() -> gpui::Point<Pixels> {
         gpui::point(
-            super::SIDEBAR_WIDTH
+            super::LEFT_DOCK_WIDTH
                 - theme::RULE_WIDTH
                 - theme::ROW_INSET
                 - theme::ICON_BUTTON_WIDTH / 2.,

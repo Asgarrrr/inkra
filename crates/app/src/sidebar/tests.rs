@@ -360,7 +360,7 @@ fn a_press_on_one_row_does_not_reach_the_others(cx: &mut TestAppContext) {
 /// Discriminates `.w_full()`: headless text measures at 0.6 x `font_size`
 /// per glyph, so an `auto` row around the stem `a` ends at 17.6px and the
 /// list's centre misses. Does not cover `.size_full()`, which needs the real
-/// `SIDEBAR_WIDTH` parent from `shell.rs` to resolve against.
+/// `LEFT_DOCK_WIDTH` dock from `shell.rs` to resolve against.
 #[gpui::test]
 fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());

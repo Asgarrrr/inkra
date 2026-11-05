@@ -75,6 +75,17 @@ fn the_editor_lists_its_commands_not_its_caret_moves(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_palette_lists_both_dock_toggles(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p");
+    visual.run_until_parked();
+    let names = listed(window, &mut visual);
+    for shown in ["Toggle left dock", "Toggle right dock"] {
+        assert!(has(&names, shown), "{shown} missing from {names:?}");
+    }
+}
+
+#[gpui::test]
 fn the_tree_lists_its_commands_not_the_editors(cx: &mut TestAppContext) {
     let (window, _visual, sidebar, _) = editor_focused(cx);
     let mut visual = tree_focused(cx, window, &sidebar);

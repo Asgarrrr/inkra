@@ -4,12 +4,12 @@
 gitignore = false
 
 # The config has no equivalent of `--package`; these globs mutate the same
-# five crates.
-examine_globs = ["crates/text/src/**/*.rs", "crates/editor/src/**/*.rs", "crates/markdown/src/**/*.rs", "crates/index/src/**/*.rs", "crates/tabs/src/**/*.rs"]
+# six crates.
+examine_globs = ["crates/text/src/**/*.rs", "crates/editor/src/**/*.rs", "crates/markdown/src/**/*.rs", "crates/index/src/**/*.rs", "crates/tabs/src/**/*.rs", "crates/layout/src/**/*.rs"]
 
 # `editor` tests exercise `text`, so both suites run against every mutant.
 # This also keeps gpui out of every test run.
-test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "inkra-tabs"]
+test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "inkra-tabs", "inkra-layout"]
 
 # Matched by column, not line, so edits above it do not silently re-enable it.
 # Equivalent. `removed_len` is a `usize`, so `>= 0` is always true. When
