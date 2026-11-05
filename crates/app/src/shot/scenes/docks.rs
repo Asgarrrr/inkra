@@ -25,3 +25,12 @@ pub(super) fn both_left(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.wait(Duration::from_millis(600));
     window
 }
+
+/// The Files header's menu at the pointer, the first entry highlighted.
+pub(super) fn menu(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    let header = stage.dock_icon_point(window, Side::Left, 0);
+    stage.right_click(window, header);
+    stage.keys(window, "down");
+    window
+}

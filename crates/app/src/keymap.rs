@@ -69,6 +69,11 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("down", picker::SelectNext, Some("Picker")),
         // The field binds no `cmd-enter`, so this one fires; the editor's is out of reach.
         KeyBinding::new("cmd-enter", picker::SecondaryConfirm, Some("Picker")),
+        // The menu reuses the picker's and the field's actions, so the palette lists nothing new.
+        KeyBinding::new("up", picker::SelectPrev, Some("ContextMenu")),
+        KeyBinding::new("down", picker::SelectNext, Some("ContextMenu")),
+        KeyBinding::new("enter", Confirm, Some("ContextMenu")),
+        KeyBinding::new("escape", Cancel, Some("ContextMenu")),
         // `enter` confirms here and inserts a newline in the editor.
         KeyBinding::new("enter", Confirm, field),
         KeyBinding::new("escape", Cancel, field),

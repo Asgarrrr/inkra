@@ -126,6 +126,11 @@ and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑
   at a time, a picker or a menu. Every tab action and the palette already
   close it through `dismiss_modal`.
 - It is focused with `window.focus` when it opens, as a picker is.
+- The selection follows Zed's: none at open, ↓ from none selects the first
+  entry, ↑ from none the last, both wrap, and ⏎ with none selected does
+  nothing. The keys bind in a `ContextMenu` key context to `picker::SelectPrev`,
+  `picker::SelectNext`, `Confirm` and `Cancel`: the actions are reused, so the
+  palette lists nothing new.
 - The right press calls `prevent_default`, or the root's focus-on-press takes
   focus from the menu.
 - A choice closes the menu, focus returns, and then the action is dispatched,
@@ -198,7 +203,8 @@ Each slice is vertical and lands as its own PR. D1 is split in two to keep each 
 | D1a | `inkra-layout` with `View`, `Side`, `Dock`, `Docks`, `toggle` and `reveal`; the shell draws its docks from `Docks`; the `Files` header; `ToggleLeftDock`, `ToggleRightDock`; the chrome spec's S2a toggle text updated; CLAUDE.md lines for the crate | The `Files` header |
 | D1b | `move_view`, the empty-dock rule, the icon bar and its tooltips, both move actions in `⌘⇧P` | Moving by palette |
 | D2 | The session's `docks` field, `Docks::restore`, the write, the read before the first frame and its measurement | The layout survives a restart |
-| D3 | `ui::ContextMenu`, the right-click on a header | The menu |
+| D3a | `ui::ContextMenu` in the modal layer, the right-click on a header or an icon, a choice by mouse | The menu |
+| D3b | The menu by keys (↑, ↓, ⏎, Esc) and the `docks-menu` shot | The menu by keyboard |
 | D4 | The drag: `DraggedView`, the pure drop index, the empty-side strips | Drag and drop |
 
 ## Out of scope
