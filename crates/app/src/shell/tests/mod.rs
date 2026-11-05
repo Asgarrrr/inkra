@@ -23,6 +23,7 @@ mod backlinks;
 mod column;
 mod command_palette;
 mod creating;
+mod dock_drag;
 mod dock_menu;
 mod docks;
 mod dragging;

@@ -9,12 +9,12 @@ use super::{
 };
 
 /// Presses on `from`, moves past gpui's 2 px threshold (`div.rs:52`), onto `to`, and releases there.
-fn drag(cx: &mut VisualTestContext, from: &'static str, to: &'static str) {
+pub(super) fn drag(cx: &mut VisualTestContext, from: &'static str, to: &'static str) {
     let to = cx.debug_bounds(to).expect("drawn").center();
     drag_to(cx, from, to);
 }
 
-fn drag_to(cx: &mut VisualTestContext, from: &'static str, to: Point<Pixels>) {
+pub(super) fn drag_to(cx: &mut VisualTestContext, from: &'static str, to: Point<Pixels>) {
     let from = cx.debug_bounds(from).expect("drawn").center();
     cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_move(

@@ -164,6 +164,27 @@ fn an_index_past_the_end_of_its_own_dock_panics() {
     Docks::default().move_view(View::Files, Side::Left, 1);
 }
 
+#[test]
+fn append_on_the_same_side_moves_to_the_end() {
+    let mut docks = Docks::default();
+    docks.move_view(View::Backlinks, Side::Left, 1);
+    docks.append(View::Files, Side::Left);
+    let left = docks.dock(Side::Left);
+    assert_eq!(left.views(), [View::Backlinks, View::Files]);
+    assert_eq!(left.active(), Some(View::Files));
+}
+
+#[test]
+fn append_on_the_other_side_moves_to_the_end() {
+    let mut docks = Docks::default();
+    docks.append(View::Files, Side::Right);
+    let right = docks.dock(Side::Right);
+    assert_eq!(right.views(), [View::Backlinks, View::Files]);
+    assert_eq!(right.active(), Some(View::Files));
+    assert!(right.is_shown());
+    assert!(docks.dock(Side::Left).views().is_empty());
+}
+
 fn state(views: &[View], active: usize, shown: bool) -> DockState {
     DockState {
         views: views.to_vec(),
@@ -233,6 +254,7 @@ enum Op {
     Toggle(Side),
     Reveal(View),
     Move(View, Side, u8),
+    Append(View, Side),
 }
 
 fn side() -> impl Strategy<Value = Side> {
@@ -248,6 +270,7 @@ fn op() -> impl Strategy<Value = Op> {
         side().prop_map(Op::Toggle),
         view().prop_map(Op::Reveal),
         (view(), side(), any::<u8>()).prop_map(|(view, side, seed)| Op::Move(view, side, seed)),
+        (view(), side()).prop_map(|(view, side)| Op::Append(view, side)),
     ]
 }
 
@@ -268,6 +291,12 @@ fn apply(docks: &mut Docks, op: Op) -> Result<(), TestCaseError> {
             };
             docks.move_view(view, side, usize::from(seed) % (len + 1));
             prop_assert_eq!(docks.side_of(view), side);
+            prop_assert_eq!(docks.dock(side).active(), Some(view));
+            prop_assert!(docks.dock(side).is_shown());
+        }
+        Op::Append(view, side) => {
+            docks.append(view, side);
+            prop_assert_eq!(docks.dock(side).views().last(), Some(&view));
             prop_assert_eq!(docks.dock(side).active(), Some(view));
             prop_assert!(docks.dock(side).is_shown());
         }

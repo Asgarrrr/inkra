@@ -76,11 +76,13 @@ spec will add its pane tree here.
 An invalid call (an index out of range) panics: a caller bug, per the project
 rule. The model has no fallible operation.
 
-### Drop index
+### Drop targets
 
-A pure function maps the pointer's x and the header's icon centres to an
-insertion index. `inkra-tabs` places a dragged tab with the same kind of
-computation; read it before writing this one.
+Per-icon drop targets: an icon inserts at its index (`Tabs::move_tab`'s rule,
+counted after the dragged view left); the column appends (`Docks::append`).
+The pointer-x function this section first named is dropped: `inkra-tabs` has
+none to mirror. A tab is placed by the tab it is dropped on, one `on_drop` per
+tab, so a dock icon is too.
 
 ## In `app`
 
@@ -145,9 +147,9 @@ and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑
 - An icon, or the title of a one-view dock, drags a `DraggedView`
   (`on_drag`, `drag_over`, `on_drop`, as the tabs do).
 - Drop targets:
-  - A dock's header: insert at the drop index. A drop in the same dock
-    reorders.
-  - A dock's body: append.
+  - An icon: insert at its index. A drop in the same dock reorders.
+  - The rest of a dock's column (the bar's gaps, a one-view header, the body):
+    the column appends.
   - An empty side: during a drag only, a 40 px drop strip shows at that window
     edge. Without it an emptied dock could not be refilled by drag.
 - A drop outside any target changes nothing.
@@ -205,7 +207,8 @@ Each slice is vertical and lands as its own PR. D1 is split in two to keep each 
 | D2 | The session's `docks` field, `Docks::restore`, the write, the read before the first frame and its measurement | The layout survives a restart |
 | D3a | `ui::ContextMenu` in the modal layer, the right-click on a header or an icon, a choice by mouse | The menu |
 | D3b | The menu by keys (↑, ↓, ⏎, Esc) and the `docks-menu` shot | The menu by keyboard |
-| D4 | The drag: `DraggedView`, the pure drop index, the empty-side strips | Drag and drop |
+| D4a | The drag: `DraggedView`, per-icon drop targets, the column's append (`Docks::append`), the `docks-drag` shot | Drag and drop between docks |
+| D4b | The empty-side strips and the `docks-drag-empty-side` shot | Refilling an emptied dock by drag |
 
 ## Out of scope
 

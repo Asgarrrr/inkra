@@ -13,6 +13,7 @@ use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, Tras
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
+mod dock_drag;
 mod docks;
 mod modal;
 mod notice;

@@ -1,5 +1,7 @@
 //! The two docks: the view each draws under its header, and the toggles that show and hide them (docks spec).
 
+use std::cmp::Ordering;
+
 use gpui::{
     Action, AnyElement, App, AppContext, Context, Div, Focusable, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString,
@@ -7,6 +9,7 @@ use gpui::{
 };
 use inkra_layout::{Docks, Side, View};
 
+use super::dock_drag::DraggedView;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::Sidebar;
 use crate::theme;
@@ -22,14 +25,14 @@ actions!(
     ]
 );
 
-fn title(view: View) -> &'static str {
+pub(super) fn title(view: View) -> &'static str {
     match view {
         View::Files => "Files",
         View::Backlinks => "Backlinks",
     }
 }
 
-fn icon(view: View) -> IconName {
+pub(super) fn icon(view: View) -> IconName {
     match view {
         View::Files => IconName::Files,
         View::Backlinks => IconName::Link,
@@ -212,30 +215,61 @@ impl AppShell {
             .bg(colors.background)
             .border_color(colors.border_variant)
             .flex()
-            .flex_col();
+            .flex_col()
+            .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
+            .on_drop(
+                cx.listener(move |shell, dragged: &DraggedView, window, cx| {
+                    let view = dragged.view;
+                    shell.change_docks(window, cx, |docks| docks.append(view, side));
+                }),
+            );
         let column = match side {
             Side::Left => column.border_r(theme::RULE_WIDTH),
             Side::Right => column.border_l(theme::RULE_WIDTH),
         };
-        let header = match dock.views() {
-            [_] => PanelHeader::new(header_selector(view), title(view))
-                .when_some(count, PanelHeader::count)
-                .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx)),
-            views => PanelHeader::bar(bar_selector(side)).children(
-                views
-                    .iter()
-                    .map(|&held| Self::render_dock_icon(held, held == view, cx)),
-            ),
-        };
+        let header =
+            match dock.views() {
+                [_] => div()
+                    .id(("dock-title-drag", usize::from(side == Side::Right)))
+                    .on_drag(
+                        DraggedView {
+                            view,
+                            side,
+                            index: 0,
+                        },
+                        |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+                    )
+                    .child(
+                        PanelHeader::new(header_selector(view), title(view))
+                            .when_some(count, PanelHeader::count)
+                            .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
+                            .on_mouse_down(MouseButton::Left, keep_focus),
+                    )
+                    .into_any_element(),
+                views => PanelHeader::bar(bar_selector(side))
+                    .children(views.iter().enumerate().map(|(ix, &held)| {
+                        Self::render_dock_icon(held, held == view, side, ix, cx)
+                    }))
+                    .on_mouse_down(MouseButton::Left, keep_focus)
+                    .into_any_element(),
+            };
         Some(
             column
-                .child(header.on_mouse_down(MouseButton::Left, keep_focus))
+                .child(header)
                 .child(div().flex_1().min_h_0().child(body)),
         )
     }
 
     /// Rule 4: a click on the active icon changes nothing, as `change_docks` drops an equal layout.
-    fn render_dock_icon(view: View, active: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// A drop on it inserts at `ix`, counted after the dragged view left (`Tabs::move_tab`'s rule).
+    fn render_dock_icon(
+        view: View,
+        active: bool,
+        side: Side,
+        ix: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::current(cx).colors;
         IconButton::new(icon_id(view), icon(view), title(view))
             .toggled(active)
             .tooltip(Tooltip::text(title(view)))
@@ -243,6 +277,33 @@ impl AppShell {
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.change_docks(window, cx, |docks| docks.reveal(view));
             }))
+            .on_drag(
+                DraggedView {
+                    view,
+                    side,
+                    index: ix,
+                },
+                |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+            )
+            .drag_over::<DraggedView>(move |style, dragged, _, _| {
+                let style = style
+                    .bg(colors.accent_background)
+                    .border_color(colors.accent);
+                if dragged.side != side {
+                    return style.border_l(theme::TAB_DROP_EDGE);
+                }
+                match ix.cmp(&dragged.index) {
+                    Ordering::Less => style.border_l(theme::TAB_DROP_EDGE),
+                    Ordering::Greater => style.border_r(theme::TAB_DROP_EDGE),
+                    Ordering::Equal => style,
+                }
+            })
+            .on_drop(
+                cx.listener(move |shell, dragged: &DraggedView, window, cx| {
+                    let dragged = dragged.view;
+                    shell.change_docks(window, cx, |docks| docks.move_view(dragged, side, ix));
+                }),
+            )
             .into_any_element()
     }
 
