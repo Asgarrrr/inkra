@@ -25,9 +25,11 @@ laisse voir comment Zed gère ça"). Red/blue review may overturn any of them.
    `~/Library/Application Support/Inkra/sessions/`. The open-first spec
    decided this (Deferred, "Reopen the last note"): a state file synced with
    the vault conflicts across devices.
-4. **The first frame does not wait.** The session loads behind the window and
-   applies after the first whole walk that succeeds, as Zed restores items after its window
-   opens.
+4. **The first frame does not wait on the notes.** The session file is read
+   once, before the first frame (docks spec, Persistence: a median 0.30 ms), so
+   the first frame draws the saved layout. The notes still load behind the
+   window, and the tabs apply after the first whole walk that succeeds, as Zed
+   restores items after its window opens.
 5. **The user's working set wins.** If the user has opened a note or a tab
    when the restore lands, the restore is dropped, never merged (R6).
 
@@ -62,6 +64,7 @@ Research on 2026-09-30, in `vendor/zed-reference/crates/`:
 | SQLite, migrations | One JSON file per vault, a `version` field | A few tabs; one document, written whole |
 | Throttle 200 ms, per-item channels | One throttle, 1 s, over one snapshot | One window, one pane; a crash loses at most a second of tab changes, never text (autosave) |
 | Absolute paths | Vault-relative paths | The vault can move; `EntryId`s are per process |
+| The restore read after the window opens | The session file read before the first frame; the notes load after it | The first frame draws the saved docks; the read costs a median 0.30 ms (`docs/startup-floor.md`) |
 | Hot exit of dirty text | None | Autosave and the quit flush already write every note |
 | Restores on any launch | Vault launch only | A single-file launch has no tabs to speak of |
 
@@ -169,21 +172,22 @@ None of it lives in `shell/tabs.rs`.
 
 ### R6. Restoring
 
-States: `Loading` (the file is being read), `Waiting(Session)` (read, the
-vault not yet walked whole), `Landing(Task)` (the active note loading),
-`Done`. Only `Done` writes.
+States: `Waiting(Session)` (read, the vault not yet walked whole),
+`Landing(Task)` (the active note loading), `Done`. No `Loading`: the read
+ends before the shell exists. Only `Done` writes.
 
-1. `AppShell::new` spawns the read on the background executor. A missing or
-   bad file goes straight to `Done`.
-2. **Resolution is level-triggered.** One function, `try_restore`, runs when
-   the read completes and on every vault notify. It acts only on
+1. `bootstrap::root` reads the file with `block_on`, once, and hands the
+   `Opened` to `AppShell::new`, which starts in `Waiting`, or in `Done` on a
+   missing or bad file. A test never gates the file's load: `block_on` would
+   hang.
+2. **Resolution is level-triggered.** One function, `try_restore`, runs on
+   the walk's notify, and on every later vault notify. It acts only on
    `Waiting(session)` and only when `Vault::has_read_whole()` holds (made
    `pub`). That flag is set only by a whole walk that succeeded
    (`vault.rs:281`) and never turns back. `is_scanned()` is not used: a
    failed walk sets it too (`scans.rs:159-166`, O8), and resolving against a
    near-empty vault would drop every tab, then overwrite the saved session.
-   Whichever of the read and the walk finishes second resolves; a later rescan
-   finds the state past `Waiting` and does nothing.
+   A later rescan finds the state past `Waiting` and does nothing.
 3. One pass over `Vault::entries()` maps each saved path to its `EntryId`,
    byte-exact. A tab whose path has no entry is dropped, as Zed drops a gone
    item; an empty saved tab is dropped too. If nothing survives, or the user
@@ -213,7 +217,7 @@ handle holds it (the launch's resting place). A name being typed in the
 sidebar keeps its focus; the note column fills beside it. With a picker open,
 `land_focus` hands the note to the picker's dismissal, as for any open.
 
-While `Loading`, `Waiting` or `Landing`, `render_empty` draws the background
+While `Waiting` or `Landing`, `render_empty` draws the background
 without the "Select a note." line, so the launch does not flash the empty
 state before the note. At 50,000 notes the wait is about 130 ms after the
 first frame (roadmap, row 6: first frame 172–184 ms, names ready 306–318 ms).
@@ -305,7 +309,7 @@ open three tabs, quit, relaunch.
 - `SessionWriter::write` takes `&mut self`: it mints the write's seq on the foreground (S1).
 - `holds_nothing` runs before the loads as well as at landing: a refused restore loads nothing.
 - The active tab saves its bound note, so a tab whose trash is pending saves empty (R5).
-- `Restore::Loading` and `Landing` name their task fields: a tuple field held only for its
+- `Restore::Landing` names its task field: a tuple field held only for its
   `Drop` fails `dead_code`, and lints are not disabled.
 
 ## As built (tab views one owner)

@@ -142,10 +142,16 @@ Dock", and "Hide Dock".
   yields a valid layout.
 - The existing writer and its throttle save on every layout change: a move, an
   activation, a toggle.
-- **The layout applies when the restore ends**, with the tabs. Risk: the
-  default layout shows first, then the restored one replaces it. D2 measures it
-  against `docs/startup-floor.md`. If the jump is visible, the docks wait for
-  the restore, as the empty-note message already does.
+- **The layout applies before the first frame.** `bootstrap::root` reads the
+  session file once, with `block_on`, as it reads the theme. `AppShell::new`
+  builds `VaultPanes` with the saved docks, so the first frame draws them and
+  no layout jumps. The tabs' restore reuses the same `Session`; the notes
+  still load behind the window. The read costs a median 0.30 ms (10 runs,
+  `docs/startup-floor.md`, 2026-11-05).
+- Applying the layout when the async read landed was measured first. The read
+  landed 7.7 to 27.8 ms after the first frame (medians of two batches), so the
+  default layout drew first. Waiting for it would have delayed the first frame
+  instead. Both were rejected for the read before the first frame.
 
 ## Testing
 
@@ -162,6 +168,7 @@ Dock", and "Hide Dock".
     when it moves;
   - the menu works with ↑, ↓, ⏎ and Esc;
   - the layout round-trips through the session file;
+  - the saved layout is drawn by the first frame;
   - a simulated drag drops a view at the expected index.
 - Shots, looked at after each slice: `docks-default`, `docks-both-left`,
   `docks-menu`, `docks-drag-empty-side`.
@@ -174,7 +181,7 @@ Each slice is vertical and lands as its own PR. D1 is split in two to keep each 
 |---|---|---|
 | D1a | `inkra-layout` with `View`, `Side`, `Dock`, `Docks`, `toggle` and `reveal`; the shell draws its docks from `Docks`; the `Files` header; `ToggleLeftDock`, `ToggleRightDock`; the chrome spec's S2a toggle text updated; CLAUDE.md lines for the crate | The `Files` header |
 | D1b | `move_view`, the empty-dock rule, the icon bar and its tooltips, both move actions in `⌘⇧P` | Moving by palette |
-| D2 | The session's `docks` field, `Docks::restore`, the write, the launch-jump measurement | The layout survives a restart |
+| D2 | The session's `docks` field, `Docks::restore`, the write, the read before the first frame and its measurement | The layout survives a restart |
 | D3 | `ui::ContextMenu`, the right-click on a header | The menu |
 | D4 | The drag: `DraggedView`, the pure drop index, the empty-side strips | Drag and drop |
 

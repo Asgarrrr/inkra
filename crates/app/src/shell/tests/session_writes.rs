@@ -5,12 +5,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{TestAppContext, VisualTestContext, WindowHandle};
+use inkra_layout::{Docks, Side};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
-use super::{open, select, start_trash, text_of, trash};
+use super::{keys, open, select, start_trash, text_of, trash};
 use crate::keymap::key_bindings;
-use crate::restore::{SavedTab, SavedView, Session};
+use crate::restore::{Opened, SavedDocks, SavedTab, SavedView, Session};
 use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -34,7 +35,13 @@ pub(super) fn saving(
     let notes = test_support::scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, Some(PathBuf::from(SESSION)), window, cx)
+        move |window, cx| {
+            let opened = Opened {
+                file: PathBuf::from(SESSION),
+                session: None,
+            };
+            AppShell::new(None, notes, Some(opened), window, cx)
+        }
     });
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
@@ -94,8 +101,21 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
             PathBuf::from("/vault"),
             1,
             vec![tab("a.md", 2, 4), tab("b.md", 1, 3), empty],
+            Some(SavedDocks::from(&Docks::default())),
         ))
     );
+}
+
+#[gpui::test]
+fn a_dock_toggle_is_saved(cx: &mut TestAppContext) {
+    let (fs, _window, mut cx, _a, _b) = saving(cx);
+    keys(&mut cx, "cmd-|");
+
+    wait(&mut cx, THROTTLE);
+
+    let docks = saved(&fs).and_then(|session| session.docks);
+    let docks = docks.expect("a saved layout").docks();
+    assert!(!docks.dock(Side::Right).is_shown());
 }
 
 /// A parked view is saved where its anchors are now, not where the tab left it.

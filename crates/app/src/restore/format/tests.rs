@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use super::{Rejected, SavedTab, SavedView, Session, fnv1a, session_file};
+use inkra_layout::{Docks, Side, View};
+use serde_json::json;
+
+use super::{Rejected, SavedDocks, SavedTab, SavedView, Session, fnv1a, session_file};
 
 fn session() -> Session {
     Session::new(
@@ -25,6 +28,7 @@ fn session() -> Session {
                 view: None,
             },
         ],
+        None,
     )
 }
 
@@ -105,6 +109,75 @@ fn another_root_is_rejected() {
         Session::decode(&text, Path::new("/Users/me/Other")),
         Err(Rejected::Root)
     );
+}
+
+/// One tab on `a.md`, then `docks` verbatim as the `docks` field's text.
+fn with_docks(docks: &str) -> String {
+    format!(
+        r#"{{ "version": 1, "root": "/Users/me/Notes", "active": 0, "tabs": [{{ "note": "a.md" }}], "docks": {docks} }}"#
+    )
+}
+
+fn decoded(text: &str) -> Session {
+    Session::decode(text, Path::new("/Users/me/Notes")).expect("a session of this vault")
+}
+
+#[test]
+fn a_file_without_docks_decodes_with_none() {
+    let text =
+        r#"{ "version": 1, "root": "/Users/me/Notes", "active": 0, "tabs": [{ "note": "a.md" }] }"#;
+    assert_eq!(decoded(text).docks, None);
+}
+
+#[test]
+fn a_malformed_docks_field_keeps_the_tabs() {
+    for docks in ["5", "null", r#"{"left":{"views":[1]}}"#] {
+        let session = decoded(&with_docks(docks));
+        assert_eq!(session.docks, None, "{docks}");
+        assert_eq!(session.tabs[0].note.as_deref(), Some("a.md"), "{docks}");
+    }
+}
+
+#[test]
+fn an_unknown_view_name_is_dropped() {
+    let text = with_docks(
+        r#"{
+          "left": { "views": ["graph", "files"], "active": 0, "shown": true },
+          "right": { "views": ["backlinks"], "active": 0, "shown": true }
+        }"#,
+    );
+    let docks = decoded(&text).docks.expect("a docks field").docks();
+    assert_eq!(docks, Docks::default());
+    assert_eq!(docks.side_of(View::Files), Side::Left);
+}
+
+#[test]
+fn docks_round_trip_through_the_file() {
+    let mut docks = Docks::default();
+    docks.move_view(View::Backlinks, Side::Left, 0);
+    docks.toggle(Side::Right);
+    let mut session = session();
+    session.docks = Some(SavedDocks::from(&docks));
+
+    let decoded = decoded(&session.encode().unwrap());
+
+    assert_eq!(decoded, session);
+    assert_eq!(decoded.docks.expect("a docks field").docks(), docks);
+}
+
+#[test]
+fn the_docks_field_is_written_as_names() {
+    let mut session = session();
+    session.docks = Some(SavedDocks::from(&Docks::default()));
+    let value: serde_json::Value = serde_json::from_str(&session.encode().unwrap()).unwrap();
+    assert_eq!(value["docks"]["left"]["views"], json!(["files"]));
+    assert_eq!(value["docks"]["right"]["views"], json!(["backlinks"]));
+}
+
+#[test]
+fn no_docks_writes_no_docks_key() {
+    let text = session().encode().unwrap();
+    assert!(!text.contains("\"docks\""), "{text}");
 }
 
 /// Published FNV-1a 64 vectors: the key must not change between builds.

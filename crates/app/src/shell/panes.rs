@@ -18,7 +18,7 @@ pub(super) struct VaultPanes {
     pub(super) links: Entity<IndexSync>,
     pub(super) sidebar: Entity<Sidebar>,
     pub(super) backlinks: Entity<BacklinksPanel>,
-    /// Here, not on `AppShell`: with no vault there is no dock to show. Written only by `change_docks`.
+    /// Here, not on `AppShell`: with no vault there is no dock to show. Built with the saved layout, then written only by `change_docks`.
     pub(super) docks: Docks,
     /// The two panes' `NoteActivated`, and the vault: tab titles, the session file and a
     /// waiting restore follow it, as the sidebar's rows do.
@@ -29,6 +29,7 @@ impl VaultPanes {
     pub(super) fn new(
         vault: Entity<Vault>,
         notes: &Entity<NoteStore>,
+        docks: Docks,
         cx: &mut Context<AppShell>,
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), vault.clone(), cx));
@@ -53,7 +54,7 @@ impl VaultPanes {
             links,
             sidebar,
             backlinks,
-            docks: Docks::default(),
+            docks,
             _subscriptions: subscriptions,
         }
     }

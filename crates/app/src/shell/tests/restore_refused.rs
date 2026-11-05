@@ -177,12 +177,25 @@ fn a_failed_walk_restores_nothing_and_writes_nothing(cx: &mut TestAppContext) {
     let _ = window;
 }
 
+/// Quit while the restore's own load of a.md is gated: `Landing` must not write.
 #[gpui::test]
-fn a_quit_before_the_restore_lands_writes_nothing(cx: &mut TestAppContext) {
+fn a_quit_while_the_restore_lands_writes_nothing(cx: &mut TestAppContext) {
     let fs = vault();
     let text = save(&fs, 0, vec![tab("a.md", 0, 0)]);
-    let _gate = fs.block_load("/vault/a.md");
+    let walk = fs.block_read_dir("/vault/f");
     let (_window, cx) = launch(cx, &fs);
+    cx.run_until_parked();
+    walk.release();
+    let a = Path::new("/vault/a.md");
+    // The index loads a.md first; gate the second load, the restore's.
+    let mut gate = None;
+    while gate.is_none() {
+        if fs.loads(a) >= 1 {
+            gate = Some(fs.block_load(a));
+        } else {
+            assert!(cx.executor().tick());
+        }
+    }
     cx.run_until_parked();
 
     cx.quit();
@@ -190,16 +203,12 @@ fn a_quit_before_the_restore_lands_writes_nothing(cx: &mut TestAppContext) {
     assert_eq!(fs.read_to_string(Path::new(SESSION)), Some(text));
 }
 
-/// Read after the walk, so no later change arms the throttle: the restore's end must, and the write replaces the file.
+/// Done from the start; the walk's notify arms the throttle.
 #[gpui::test]
 fn a_corrupt_file_restores_nothing(cx: &mut TestAppContext) {
     let fs = vault();
     fs.insert_file(SESSION, "{\"version\": 1, \"tabs\": [");
-    let read = fs.block_load(SESSION);
     let (window, mut cx) = launch(cx, &fs);
-    cx.run_until_parked();
-    wait(&mut cx, THROTTLE);
-    read.release();
     cx.run_until_parked();
     assert_eq!(notes(&window, &mut cx), (vec![None], 0));
 

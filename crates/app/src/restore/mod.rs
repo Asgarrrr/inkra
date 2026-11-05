@@ -12,10 +12,17 @@ use futures::lock::Mutex;
 use gpui::{App, AppContext as _, Task};
 use inkra_vault::{EntryId, Fs, Vault};
 
-pub(crate) use format::{SavedTab, SavedView, Session, session_file};
+pub(crate) use format::{SavedDocks, SavedTab, SavedView, Session, session_file};
 pub(crate) use plan::{Plan, Restored};
 
 use crate::editor::ViewState;
+
+/// The session file of a vault launch, read before the first frame.
+pub(crate) struct Opened {
+    pub(crate) file: PathBuf,
+    /// None: missing, unreadable or rejected.
+    pub(crate) session: Option<Session>,
+}
 
 /// Writes the session file; each write carries the age of its snapshot.
 pub(crate) struct SessionWriter {
@@ -43,6 +50,7 @@ impl SessionWriter {
         tabs: impl Iterator<Item = (Option<EntryId>, Option<ViewState>)>,
         path_of: impl Fn(EntryId) -> Option<PathBuf>,
         active: usize,
+        docks: Option<SavedDocks>,
         cx: &App,
     ) -> Option<Task<()>> {
         let tabs = tabs
@@ -57,7 +65,7 @@ impl SessionWriter {
                 SavedTab { note, view }
             })
             .collect();
-        let text = Session::new(vault.root().to_path_buf(), active, tabs)
+        let text = Session::new(vault.root().to_path_buf(), active, tabs, docks)
             .encode()
             .inspect_err(|error| log::warn!("session not saved: {error}"))
             .ok()?;

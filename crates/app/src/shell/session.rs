@@ -1,9 +1,8 @@
 //! The session file behind the shell: throttled writes, the quit write, and the one-shot restore (restore-tabs spec, R5–R6).
 
-use std::path::PathBuf;
 use std::time::Duration;
 
-use gpui::{App, AppContext as _, Context, Entity, Subscription, Task, Window};
+use gpui::{App, Context, Entity, Subscription, Task, Window};
 use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
 use inkra_text::Buffer;
@@ -11,7 +10,7 @@ use inkra_text::Buffer;
 use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ParkedView;
-use crate::restore::{self, Plan, Restored, Session, SessionWriter};
+use crate::restore::{Opened, Plan, Restored, SavedDocks, Session, SessionWriter};
 use crate::vault::NoteStore;
 
 /// A crash loses at most this much of the tab changes, never text: autosave writes that.
@@ -19,10 +18,6 @@ pub(super) const THROTTLE: Duration = Duration::from_secs(1);
 
 /// Only `Done` writes: an earlier write would replace the saved tabs with the launch's one tab.
 pub(super) enum Restore {
-    // Named: a tuple field held only for its `Drop` fails `dead_code`.
-    Loading {
-        _read: Task<()>,
-    },
     Waiting(Session),
     /// Held outside `activation`: a user open replaces that, and must not cancel the restore.
     Landing {
@@ -40,27 +35,24 @@ pub(super) struct SessionFile {
 }
 
 impl AppShell {
-    /// A vault launch with a session file starts reading it; any other launch is `Done` with no file.
+    /// A vault launch with a session file keeps its writer; it waits on the walk only with a session read.
+    /// Spawns nothing: the vault's notify tries the restore and arms the throttle.
     pub(super) fn open_session(
-        file: Option<PathBuf>,
+        session: Option<Opened>,
         notes: &Entity<NoteStore>,
         cx: &mut Context<Self>,
     ) -> (Option<SessionFile>, Restore) {
-        let (fs, root) = {
+        let (fs, has_vault) = {
             let notes = notes.read(cx);
-            let root = notes
-                .vault()
-                .map(|vault| vault.read(cx).root().to_path_buf());
-            (notes.fs(), root)
+            (notes.fs(), notes.vault().is_some())
         };
-        let (Some(file), Some(root)) = (file, root) else {
+        let Some(Opened {
+            file,
+            session: read,
+        }) = session.filter(|_| has_vault)
+        else {
             return (None, Restore::Done);
         };
-        let read = restore::read(fs.clone(), file.clone(), root);
-        let reading = cx.spawn(async move |shell, cx| {
-            let session = cx.background_spawn(read).await;
-            let _ = shell.update(cx, |shell, cx| shell.session_read(session, cx));
-        });
         let session = SessionFile {
             writer: SessionWriter::new(fs, file),
             throttle: None,
@@ -74,7 +66,7 @@ impl AppShell {
                 }
             }),
         };
-        (Some(session), Restore::Loading { _read: reading })
+        (Some(session), read.map_or(Restore::Done, Restore::Waiting))
     }
 
     /// Every change the session saves calls this: a switch, a tab op, a caret move. O(1).
@@ -120,6 +112,9 @@ impl AppShell {
             tabs,
             |id| notes.vault_path(id, cx),
             self.tabs.active_index(),
+            self.panes
+                .as_ref()
+                .map(|panes| SavedDocks::from(&panes.docks)),
             cx,
         )
     }
@@ -129,17 +124,7 @@ impl AppShell {
         !matches!(self.restore, Restore::Done)
     }
 
-    fn session_read(&mut self, session: Option<Session>, cx: &mut Context<Self>) {
-        match session {
-            Some(session) => {
-                self.restore = Restore::Waiting(session);
-                self.try_restore(cx);
-            }
-            None => self.finish_restore(cx),
-        }
-    }
-
-    /// Level-triggered, on the read and on every vault notify. Never `is_scanned`: a failed walk sets it too.
+    /// Level-triggered, on every vault notify. Never `is_scanned`: a failed walk sets it too.
     pub(super) fn try_restore(&mut self, cx: &mut Context<Self>) {
         let Some(vault) = self.notes.read(cx).vault().cloned() else {
             return;

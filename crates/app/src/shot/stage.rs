@@ -160,7 +160,7 @@ impl Stage {
             fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
         }
         let session = PathBuf::from("/support/session.json");
-        let text = Session::new(VAULT_ROOT.into(), active, tabs)
+        let text = Session::new(VAULT_ROOT.into(), active, tabs, None)
             .encode()
             .unwrap_or_else(|error| panic!("encode the session: {error}"));
         fs.insert_file(session.clone(), text);
