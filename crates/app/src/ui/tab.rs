@@ -4,7 +4,7 @@ use gpui::{
     prelude::FluentBuilder,
 };
 
-use super::{UiText, h_flex, identified};
+use super::{Color, UiText, h_flex, identified};
 use crate::theme::{self, ThemeColors};
 
 /// A tab's end slot reads this group to show on the tab's hover; gpui resolves it to the nearest tab.
@@ -63,7 +63,8 @@ impl StatefulInteractiveElement for Tab {}
 
 impl RenderOnce for Tab {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let colors = theme::current(cx).colors;
+        let theme = theme::current(cx);
+        let colors = theme.colors;
         let active = self.active;
         let tab = self
             .base
@@ -82,11 +83,14 @@ impl RenderOnce for Tab {
             .pl(theme::TAB_TEXT_INSET)
             .pr(theme::ROW_INSET)
             .ui_text()
-            .text_color(if self.active {
-                theme::tab_text()
-            } else {
-                theme::tab_inactive_text()
-            });
+            .text_color(
+                if self.active {
+                    Color::Default
+                } else {
+                    Color::Muted
+                }
+                .rgba(theme),
+            );
         tab.when(active, |tab| tab.bg(colors.editor_background))
             .when(!active, |tab| tab.child(hover_pill(&colors)))
             .children(self.start.map(|start| div().flex_none().child(start)))

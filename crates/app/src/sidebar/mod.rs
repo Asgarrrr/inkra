@@ -10,7 +10,7 @@ use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::NoteActivated;
 use crate::theme;
-use crate::ui::UiText;
+use crate::ui::{Color, UiText};
 use crate::vault::NoteStore;
 
 mod edit;
@@ -145,7 +145,7 @@ impl Render for Sidebar {
                             .w_full()
                             .ui_text()
                             .px(theme::ROW_INSET * 2.)
-                            .text_color(theme::rejected_text())
+                            .text_color(Color::Error.rgba(theme::current(cx)))
                             .child(rejected.message())
                     }),
             )

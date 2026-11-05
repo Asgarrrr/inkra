@@ -224,11 +224,12 @@ impl PickerDelegate for QuickOpenDelegate {
         }
     }
 
-    fn render_row(&self, ix: usize, _: bool, _: &mut Context<Picker<Self>>) -> AnyElement {
-        self.list
-            .rows
-            .get(ix)
-            .map_or_else(|| div().into_any_element(), render::render_row)
+    fn render_row(&self, ix: usize, _: bool, cx: &mut Context<Picker<Self>>) -> AnyElement {
+        let theme = theme::current(cx);
+        self.list.rows.get(ix).map_or_else(
+            || div().into_any_element(),
+            |row| render::render_row(row, theme),
+        )
     }
 
     fn rows_shown(&mut self, range: Range<usize>, cx: &mut Context<Picker<Self>>) {

@@ -7,7 +7,7 @@ use inkra_vault::{EntryId, VaultError};
 
 use super::AppShell;
 use crate::theme;
-use crate::ui::{IconButton, IconName};
+use crate::ui::{Color, IconButton, IconName};
 use crate::vault::{ConflictPreserved, NoteSaved, NoteStore, OpenFailed, RenameFailed, SaveFailed};
 
 pub(super) struct Notice {
@@ -97,7 +97,7 @@ impl AppShell {
                 .bg(colors.error_background)
                 .text_size(theme::UI_TEXT_SIZE)
                 .line_height(theme::UI_LINE_HEIGHT)
-                .text_color(theme::notice_text())
+                .text_color(Color::Error.rgba(theme::current(cx)))
                 .child(
                     div()
                         .flex_1()

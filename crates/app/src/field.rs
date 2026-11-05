@@ -15,6 +15,7 @@ use inkra_text::{Buffer, ByteOffset};
 use crate::editor::layout::{LayoutInputs, shape_document};
 use crate::text_input::{self, FIELD_CONTEXT, InputHost, Mode, Prepainted, Quads, TextInput};
 use crate::theme;
+use crate::ui::Color;
 
 actions!(field, [Confirm, Cancel]);
 
@@ -93,7 +94,7 @@ impl Render for NameField {
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(|_, action, window, cx| Self::cancel(action, window, cx)))
             .size_full()
-            .text_color(theme::sidebar_text())
+            .text_color(Color::Default.rgba(theme::current(cx)))
             .child(FieldElement { field: cx.entity() })
     }
 }

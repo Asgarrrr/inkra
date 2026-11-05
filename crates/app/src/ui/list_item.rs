@@ -6,6 +6,16 @@ use gpui::{
 use super::{UiText, h_flex, identified, selectable};
 use crate::theme;
 
+/// Where a row sits: the surface decides its height, shape and lighting.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ListItemStyle {
+    /// On the chrome: `TREE_ROW_HEIGHT` tall, rounded, lit with the chrome's row colour.
+    Tree,
+    /// On an elevated surface: its own line box, lit with the element colours.
+    #[default]
+    Menu,
+}
+
 /// A row of a list. It owns background, hover and padding; a caller attaches handlers, role,
 /// labels and content, and a caller's `.hover()` trips gpui's "hover style already set" assert.
 #[derive(IntoElement)]
@@ -16,7 +26,7 @@ pub(crate) struct ListItem {
     children: Vec<AnyElement>,
     end: Option<AnyElement>,
     selected: bool,
-    inset: bool,
+    style: ListItemStyle,
 }
 
 impl ListItem {
@@ -28,7 +38,7 @@ impl ListItem {
             children: Vec::new(),
             end: None,
             selected: false,
-            inset: false,
+            style: ListItemStyle::default(),
         }
     }
 
@@ -52,9 +62,8 @@ impl ListItem {
         self
     }
 
-    /// The tree row's shape: `TREE_ROW_HEIGHT` tall, rounded, lit with the chrome's row colour.
-    pub(crate) fn inset(mut self) -> Self {
-        self.inset = true;
+    pub(crate) fn style(mut self, style: ListItemStyle) -> Self {
+        self.style = style;
         self
     }
 }
@@ -81,17 +90,16 @@ impl RenderOnce for ListItem {
             .base
             // Load-bearing: an `auto` width is clickable only where the text reaches.
             .w_full()
-            // A non-inset row is its line box; an inset row is `TREE_ROW_HEIGHT` tall, the pitch `row_center` reads.
+            // A menu row is its line box; a tree row is `TREE_ROW_HEIGHT` tall, the pitch `row_center` reads.
             .ui_text()
             .pl(theme::ROW_INSET + theme::INDENT_STEP * depth)
             .pr(theme::ROW_INSET)
-            .when(self.inset, |row| {
+            .when(self.style == ListItemStyle::Tree, |row| {
                 row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS)
             });
-        let (selected, hover) = if self.inset {
-            (colors.chrome_element_hover, colors.chrome_element_hover)
-        } else {
-            (colors.element_selected, colors.element_hover)
+        let (selected, hover) = match self.style {
+            ListItemStyle::Tree => (colors.chrome_element_hover, colors.chrome_element_hover),
+            ListItemStyle::Menu => (colors.element_selected, colors.element_hover),
         };
         selectable(row, self.selected.then_some(selected), hover)
             .children(self.start.map(|start| div().flex_none().child(start)))

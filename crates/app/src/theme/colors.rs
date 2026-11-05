@@ -26,4 +26,12 @@ pub(crate) struct ThemeColors {
     pub(crate) md_quote: Rgba,
     pub(crate) md_quote_bar: Rgba,
     pub(crate) md_marker: Rgba,
+    pub(crate) text: Rgba,
+    pub(crate) text_selected: Rgba,
+    pub(crate) text_muted: Rgba,
+    pub(crate) text_placeholder: Rgba,
+    /// A search match.
+    pub(crate) text_highlight: Rgba,
+    pub(crate) error: Rgba,
+    pub(crate) warning: Rgba,
 }

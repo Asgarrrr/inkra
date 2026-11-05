@@ -1,5 +1,6 @@
 use gpui::{App, IntoElement, RenderOnce, Styled, Window, div};
 
+use super::Color;
 use crate::theme;
 
 /// A note's unwritten state: edited, or its write failed.
@@ -28,11 +29,14 @@ impl Indicator {
 }
 
 impl RenderOnce for Indicator {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let color = match self {
-            Self::Dirty => theme::dirty_dot(),
-            Self::Failed => theme::failed_dot(),
+            Self::Dirty => Color::Muted,
+            Self::Failed => Color::Error,
         };
-        div().size(theme::DOT_SIZE).rounded_full().bg(color)
+        div()
+            .size(theme::DOT_SIZE)
+            .rounded_full()
+            .bg(color.rgba(theme::current(cx)))
     }
 }

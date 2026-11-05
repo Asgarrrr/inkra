@@ -3,7 +3,8 @@ use inkra_index::{Excerpt, NoteMatch};
 
 use super::list::Row;
 use crate::row_text::{LitText, PathText, name_row, styled};
-use crate::theme;
+use crate::theme::Theme;
+use crate::ui::Color;
 
 #[cfg(test)]
 mod tests;
@@ -52,7 +53,7 @@ impl RowText {
 }
 
 /// Clones the stored text's `SharedString`s and highlights; builds nothing.
-pub(super) fn render_row(row: &Row) -> AnyElement {
+pub(super) fn render_row(row: &Row, theme: &Theme) -> AnyElement {
     #[cfg(test)]
     DRAWS.with(|draws| draws.set(draws.get() + 1));
     let text = &row.text;
@@ -61,14 +62,14 @@ pub(super) fn render_row(row: &Row) -> AnyElement {
         .w_full()
         .overflow_hidden()
         .text_ellipsis()
-        .text_color(theme::placeholder_text())
-        .child(styled(&text.excerpt, theme::match_text().into()));
+        .text_color(Color::Placeholder.rgba(theme))
+        .child(styled(&text.excerpt, Color::Highlight.rgba(theme).into()));
     div()
         .flex()
         .flex_col()
         .w_full()
         .whitespace_nowrap()
-        .child(name_row(&text.path, theme::match_text().into()))
+        .child(name_row(&text.path, theme))
         .child(excerpt)
         .into_any_element()
 }

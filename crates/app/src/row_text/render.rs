@@ -3,7 +3,8 @@ use std::ops::Range;
 use gpui::{Div, HighlightStyle, Hsla, InteractiveElement, ParentElement, Styled, StyledText, div};
 
 use super::{LitText, PathText};
-use crate::theme;
+use crate::theme::Theme;
+use crate::ui::Color;
 
 pub(super) fn highlights(
     lit: &LitText,
@@ -21,7 +22,8 @@ pub(crate) fn styled(lit: &LitText, color: Hsla) -> StyledText {
 }
 
 /// The name, then the folder dimmed; a caller appends children (the hit count).
-pub(crate) fn name_row(path: &PathText, color: Hsla) -> Div {
+pub(crate) fn name_row(path: &PathText, theme: &Theme) -> Div {
+    let color = Color::Highlight.rgba(theme).into();
     div()
         .flex()
         .flex_row()
@@ -44,7 +46,7 @@ pub(crate) fn name_row(path: &PathText, color: Hsla) -> Div {
                 .overflow_hidden()
                 // Cut from the start, so the nearest folder stays visible.
                 .text_ellipsis_start()
-                .text_color(theme::placeholder_text())
+                .text_color(Color::Placeholder.rgba(theme))
                 .child(styled(&path.folder, color)),
         )
 }

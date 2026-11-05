@@ -7,11 +7,17 @@ use super::{BacklinksPanel, Row};
 use crate::open::{NoteActivated, Open};
 use crate::row_text::styled;
 use crate::theme;
-use crate::ui::{ListItem, PanelHeader, UiText, v_flex};
+use crate::ui::{Color, Label, ListItem, PanelHeader, UiText, v_flex};
 
 impl BacklinksPanel {
     fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
         let source = row.source;
+        let theme = theme::current(cx);
+        let (name, context, link) = (
+            Color::Default.rgba(theme),
+            Color::Placeholder.rgba(theme),
+            Color::Accent.rgba(theme),
+        );
         ListItem::new(("backlink", index))
             .on_mouse_down(
                 MouseButton::Left,
@@ -26,15 +32,11 @@ impl BacklinksPanel {
             .child(
                 v_flex()
                     .pb_2()
-                    .child(
-                        div()
-                            .text_color(theme::sidebar_text())
-                            .child(row.name.clone()),
-                    )
+                    .child(div().text_color(name).child(row.name.clone()))
                     .children(row.occurrences.iter().map(|occurrence| {
                         div()
-                            .text_color(theme::placeholder_text())
-                            .child(styled(&occurrence.context, theme::link_text().into()))
+                            .text_color(context)
+                            .child(styled(&occurrence.context, link.into()))
                     })),
             )
     }
@@ -67,8 +69,7 @@ impl Render for BacklinksPanel {
                     .children(message.map(|message| {
                         div()
                             .px(theme::ROW_INSET)
-                            .text_color(theme::placeholder_text())
-                            .child(message)
+                            .child(Label::new(message).color(Color::Placeholder))
                     }))
                     .children(
                         self.rows
