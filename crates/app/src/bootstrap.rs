@@ -13,7 +13,7 @@ use inkra_vault::{Fs, RealFs, Stamp, Vault};
 use crate::Quit;
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
-use crate::restore::session_file;
+use crate::restore::{self, Opened, session_file};
 use crate::shell::AppShell;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
@@ -28,7 +28,7 @@ pub(crate) enum Launch {
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
     Note(PathBuf, String, Stamp),
-    /// Scanned behind the first frame; the session file, if the app keeps one.
+    /// Scanned behind the first frame; the session file, if the app keeps one, read before it.
     Vault(Vault, Option<PathBuf>),
 }
 
@@ -49,11 +49,22 @@ pub(crate) fn root(
             (Some(editor), notes, None)
         }
         Launch::Vault(vault, session) => {
+            // Read once, here: the first frame draws the saved layout, and the tabs' restore reuses it.
+            let opened = session.map(|file| {
+                let started = Instant::now();
+                let session = futures::executor::block_on(restore::read(
+                    Arc::clone(&fs),
+                    file.clone(),
+                    vault.root().to_path_buf(),
+                ));
+                Timeline::session_read(started.elapsed(), cx);
+                Opened { file, session }
+            });
             let vault = cx.new(|_| vault);
             (
                 None,
                 cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
-                session,
+                opened,
             )
         }
     };

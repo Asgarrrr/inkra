@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, ScrollHandle, Task, Window, px,
 };
@@ -8,6 +6,7 @@ use inkra_vault::{EntryId, Kind};
 use crate::editor::EditorView;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
+use crate::restore::{Opened, SavedDocks};
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
 use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
@@ -125,15 +124,21 @@ impl AppShell {
     pub(crate) fn new(
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
-        session: Option<PathBuf>,
+        session: Option<Opened>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let docks = session
+            .as_ref()
+            .and_then(|opened| opened.session.as_ref())
+            .and_then(|session| session.docks.as_ref())
+            .map(SavedDocks::docks)
+            .unwrap_or_default();
         let panes = notes
             .read(cx)
             .vault()
             .cloned()
-            .map(|vault| VaultPanes::new(vault, &notes, cx));
+            .map(|vault| VaultPanes::new(vault, &notes, docks, cx));
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }

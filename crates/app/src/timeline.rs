@@ -42,6 +42,8 @@ struct Indexed {
 pub(crate) struct Timeline {
     started: Instant,
     first_frame: Option<Duration>,
+    /// A span, not a time since `started`: the read blocks the launch before the first frame.
+    session_read: Option<Duration>,
     root: Option<Duration>,
     scanned: Option<Duration>,
     names_ready: Option<Duration>,
@@ -56,6 +58,7 @@ impl Timeline {
         Self {
             started,
             first_frame: None,
+            session_read: None,
             root: None,
             scanned: None,
             names_ready: None,
@@ -80,6 +83,17 @@ impl Timeline {
         if cx.has_global::<Self>() {
             cx.global_mut::<Self>().record_turn(turn);
         }
+    }
+
+    /// How long the session file's read held the launch; does nothing without a timeline.
+    pub(crate) fn session_read(took: Duration, cx: &mut App) {
+        if cx.has_global::<Self>() {
+            cx.global_mut::<Self>().record_session_read(took);
+        }
+    }
+
+    fn record_session_read(&mut self, took: Duration) {
+        _ = self.session_read.get_or_insert(took);
     }
 
     fn record_turn(&mut self, turn: Duration) {
@@ -143,8 +157,11 @@ impl Timeline {
                 )
             },
         );
+        let session_read = self
+            .session_read
+            .map_or_else(|| "-".to_owned(), |took| format!("{took:.2?}"));
         format!(
-            "launch: first frame {}, root {}, scanned {}, names ready {}, indexed {indexed}",
+            "launch: first frame {}, session read {session_read}, root {}, scanned {}, names ready {}, indexed {indexed}",
             at(self.first_frame),
             at(self.root),
             at(self.scanned),

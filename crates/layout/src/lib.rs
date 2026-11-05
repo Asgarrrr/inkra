@@ -6,6 +6,10 @@ pub enum View {
     Backlinks,
 }
 
+impl View {
+    pub const ALL: [View; 2] = [View::Files, View::Backlinks];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Left,
@@ -60,6 +64,14 @@ impl Dock {
     }
 }
 
+/// A dock as stored: any views, any index; `Docks::restore` makes it valid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DockState {
+    pub views: Vec<View>,
+    pub active: usize,
+    pub shown: bool,
+}
+
 /// Invariant: each `View` is in exactly one dock, once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Docks {
@@ -84,6 +96,48 @@ impl Docks {
             Side::Left => &self.left,
             Side::Right => &self.right,
         }
+    }
+
+    #[must_use]
+    pub fn state(&self, side: Side) -> DockState {
+        let dock = self.dock(side);
+        DockState {
+            views: dock.views.clone(),
+            active: dock.active,
+            shown: dock.shown,
+        }
+    }
+
+    /// Keeps each view's first place, left before right; a missing view goes to its default side.
+    #[must_use]
+    pub fn restore(left: DockState, right: DockState) -> Self {
+        let mut held = Vec::with_capacity(View::ALL.len());
+        let [left, right] = [left, right].map(|state| Dock {
+            views: state
+                .views
+                .into_iter()
+                .filter(|&view| {
+                    let first = !held.contains(&view);
+                    if first {
+                        held.push(view);
+                    }
+                    first
+                })
+                .collect(),
+            active: state.active,
+            shown: state.shown,
+        });
+        let mut docks = Self { left, right };
+        let default = Self::default();
+        for view in View::ALL {
+            if !held.contains(&view) {
+                docks.dock_mut(default.side_of(view)).views.push(view);
+            }
+        }
+        for dock in [&mut docks.left, &mut docks.right] {
+            dock.active = dock.active.min(dock.views.len().saturating_sub(1));
+        }
+        docks
     }
 
     pub fn toggle(&mut self, side: Side) {

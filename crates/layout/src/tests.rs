@@ -1,6 +1,6 @@
 use proptest::prelude::*;
 
-use super::{Dock, Docks, Side, View};
+use super::{Dock, DockState, Docks, Side, View};
 
 #[test]
 fn the_default_puts_files_left_and_backlinks_right_both_shown() {
@@ -164,7 +164,71 @@ fn an_index_past_the_end_of_its_own_dock_panics() {
     Docks::default().move_view(View::Files, Side::Left, 1);
 }
 
-#[derive(Debug, Clone)]
+fn state(views: &[View], active: usize, shown: bool) -> DockState {
+    DockState {
+        views: views.to_vec(),
+        active,
+        shown,
+    }
+}
+
+#[test]
+fn a_view_in_both_docks_is_kept_left() {
+    let docks = Docks::restore(
+        state(&[View::Files, View::Backlinks], 1, true),
+        state(&[View::Backlinks], 0, true),
+    );
+    assert_eq!(docks, both_left(1));
+}
+
+#[test]
+fn a_view_twice_in_one_dock_is_kept_first() {
+    let docks = Docks::restore(
+        state(&[View::Files, View::Files], 0, true),
+        state(&[View::Backlinks], 0, true),
+    );
+    assert_eq!(docks, Docks::default());
+}
+
+#[test]
+fn a_missing_view_is_appended_to_its_default_side() {
+    let docks = Docks::restore(state(&[], 0, true), state(&[View::Backlinks], 0, false));
+    assert_eq!(docks.dock(Side::Left).views(), [View::Files]);
+    assert_eq!(docks.dock(Side::Right).views(), [View::Backlinks]);
+    assert!(!docks.dock(Side::Right).is_shown());
+
+    let docks = Docks::restore(state(&[View::Files], 0, true), state(&[], 0, true));
+    assert_eq!(docks, Docks::default());
+}
+
+#[test]
+fn an_active_index_out_of_range_is_clamped() {
+    let docks = Docks::restore(
+        state(&[View::Files, View::Backlinks], 7, true),
+        state(&[], 3, true),
+    );
+    assert_eq!(docks, both_left(1));
+}
+
+#[test]
+fn both_docks_empty_restore_the_default_views_with_their_flags() {
+    let docks = Docks::restore(state(&[], 0, false), state(&[], 0, true));
+    let mut expected = Docks::default();
+    expected.toggle(Side::Left);
+    assert_eq!(docks, expected);
+}
+
+#[test]
+fn state_reads_each_dock() {
+    let docks = both_left(1);
+    assert_eq!(
+        docks.state(Side::Left),
+        state(&[View::Files, View::Backlinks], 1, true)
+    );
+    assert_eq!(docks.state(Side::Right), state(&[], 0, true));
+}
+
+#[derive(Debug, Clone, Copy)]
 enum Op {
     Toggle(Side),
     Reveal(View),
@@ -187,26 +251,45 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
+/// Applies `op` and checks the rule it promises.
+fn apply(docks: &mut Docks, op: Op) -> Result<(), TestCaseError> {
+    match op {
+        Op::Toggle(side) => docks.toggle(side),
+        Op::Reveal(view) => {
+            docks.reveal(view);
+            prop_assert!(docks.is_visible(view));
+        }
+        Op::Move(view, side, seed) => {
+            let len = docks.dock(side).views().len();
+            let len = if docks.side_of(view) == side {
+                len - 1
+            } else {
+                len
+            };
+            docks.move_view(view, side, usize::from(seed) % (len + 1));
+            prop_assert_eq!(docks.side_of(view), side);
+            prop_assert_eq!(docks.dock(side).active(), Some(view));
+            prop_assert!(docks.dock(side).is_shown());
+        }
+    }
+    Ok(())
+}
+
 proptest! {
+    #[test]
+    fn restore_round_trips_any_layout(ops in proptest::collection::vec(op(), 0..64)) {
+        let mut docks = Docks::default();
+        for op in ops {
+            apply(&mut docks, op)?;
+        }
+        prop_assert_eq!(Docks::restore(docks.state(Side::Left), docks.state(Side::Right)), docks);
+    }
+
     #[test]
     fn every_op_keeps_each_view_in_exactly_one_dock(ops in proptest::collection::vec(op(), 0..64)) {
         let mut docks = Docks::default();
         for op in ops {
-            match op {
-                Op::Toggle(side) => docks.toggle(side),
-                Op::Reveal(view) => {
-                    docks.reveal(view);
-                    prop_assert!(docks.is_visible(view));
-                }
-                Op::Move(view, side, seed) => {
-                    let len = docks.dock(side).views().len();
-                    let len = if docks.side_of(view) == side { len - 1 } else { len };
-                    docks.move_view(view, side, usize::from(seed) % (len + 1));
-                    prop_assert_eq!(docks.side_of(view), side);
-                    prop_assert_eq!(docks.dock(side).active(), Some(view));
-                    prop_assert!(docks.dock(side).is_shown());
-                }
-            }
+            apply(&mut docks, op)?;
             let mut views = [docks.dock(Side::Left).views(), docks.dock(Side::Right).views()].concat();
             views.sort_by_key(|&view| view == View::Backlinks);
             prop_assert_eq!(views, [View::Files, View::Backlinks]);

@@ -122,3 +122,32 @@ the WindowServer oracle.
 Not measured: a cold launch after a reboot. The first run after each rebuild
 took 430–600 ms, but that run pays for the new binary's code-signature check
 too, so it is not a cold-launch figure.
+
+## 2026-11-05: the session file read before the first frame
+
+The docks spec saves the dock layout in the session file. The base build read
+that file on the background executor. Its read landed a median 27.8 ms after
+the first frame in the runs below, so the default layout drew first and then
+jumped. The new build reads the file in `bootstrap::root`, once, with
+`block_on`, before the window opens. The tabs' restore reuses the decoded
+session.
+
+Method: `scripts/launch-figure.sh`, release builds of the base (5b16b8d) and
+the new commit, a one-note vault, and a session file holding a moved layout.
+Ten rounds, base and new interleaved, with the fixture copied back before each
+run. `HOME` pointed at a scratch folder. Obsidian was running during the runs.
+
+| Figure | Range | Median |
+|---|---|---|
+| `session read` (new) | 0.15–1.04 ms | 0.30 ms |
+| `first frame`, base | 106.5–136.6 ms | 113.5 ms |
+| `first frame`, new | 100.0–139.0 ms | 109.6 ms |
+
+Verdict: the read adds a median 0.30 ms before the first frame, under the
+0.5 ms budget. The first-frame medians differ by 3.9 ms in the other
+direction, inside the ±10 ms run-to-run noise: no measurable regression. A
+screenshot 250 ms after launch shows the saved layout already drawn.
+
+The layout no longer jumps, but the launch still changes after the first
+frame: the tab row fills when the restore lands, after the walk. At 50,000
+notes that is about 130 ms after the first frame (restore-tabs spec, R6).

@@ -150,6 +150,7 @@ impl AppShell {
             }
         }
         cx.notify();
+        self.save_session_later(cx);
     }
 
     /// `None` with no vault or an undrawn dock. A hidden view keeps its entity, so it comes back as it was left.

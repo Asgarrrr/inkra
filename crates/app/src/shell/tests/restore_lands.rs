@@ -7,6 +7,7 @@ use std::sync::Arc;
 use gpui::{
     Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
 };
+use inkra_layout::{Docks, Side, View};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
@@ -15,7 +16,7 @@ use super::session_writes::{SESSION, saved, tab, wait};
 use super::{check, tab_notes};
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
-use crate::restore::{SavedTab, Session};
+use crate::restore::{SavedDocks, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -30,9 +31,18 @@ pub(super) fn vault() -> Arc<MemFs> {
 }
 
 pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedTab>) -> String {
-    let text = Session::new("/vault".into(), active, tabs)
-        .encode()
-        .unwrap();
+    save_session(fs, &Session::new("/vault".into(), active, tabs, None))
+}
+
+/// One tab on `a.md`, laid out as `docks`.
+fn save_docks(fs: &MemFs, docks: &Docks) {
+    let tabs = vec![tab("a.md", 0, 0)];
+    let docks = Some(SavedDocks::from(docks));
+    save_session(fs, &Session::new("/vault".into(), 0, tabs, docks));
+}
+
+fn save_session(fs: &MemFs, session: &Session) -> String {
+    let text = session.encode().unwrap();
     fs.insert_file(SESSION, text.clone());
     text
 }
@@ -164,21 +174,16 @@ fn a_restored_inactive_view_follows_an_edit_made_in_another_tab(cx: &mut TestApp
     check(&window, &mut cx);
 }
 
-/// Gone between the walk and its load: dropped as a missing note, and the active tab chosen after.
+/// Listed by the walk, refused at its load: dropped as a missing note, and the active tab chosen after.
 #[gpui::test]
 fn a_note_that_fails_to_load_is_dropped(cx: &mut TestAppContext) {
     let fs = vault();
     save(&fs, 1, vec![tab("a.md", 0, 0), tab("b.md", 0, 0)]);
-    let read = fs.block_load(SESSION);
+    let walk = fs.block_read_dir("/vault/f");
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
-    // Set after the index's own loads, so it parks the restore's.
-    let load = fs.block_load("/vault/b.md");
-    read.release();
-    cx.run_until_parked();
-
-    fs.remove(Path::new("/vault/b.md"));
-    load.release();
+    fs.make_unreadable("/vault/b.md");
+    walk.release();
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
@@ -229,22 +234,6 @@ fn all_notes_missing_leave_one_empty_tab_and_writes_resume(cx: &mut TestAppConte
     wait(&mut cx, THROTTLE);
 
     assert_eq!(saved(&fs).unwrap().tabs, [empty(), empty()]);
-}
-
-#[gpui::test]
-fn the_read_finishing_after_the_walk_still_restores(cx: &mut TestAppContext) {
-    let fs = vault();
-    save(&fs, 0, vec![tab("b.md", 0, 0)]);
-    let gate = fs.block_load(SESSION);
-    let (window, mut cx) = launch(cx, &fs);
-    cx.run_until_parked();
-    assert_eq!(notes(&window, &mut cx), (vec![None], 0));
-
-    gate.release();
-    cx.run_until_parked();
-
-    let b = id(&window, &mut cx, "b");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(b)], 0));
 }
 
 /// Opened and dismissed, the picker leaves nothing to replace; focus returns to the root, then to the note.
@@ -357,4 +346,61 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     cx.run_until_parked();
 
     assert!(editor_focused(&window, &mut cx));
+}
+
+fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
+    window
+        .update(cx, |shell, _, _| shell.panes().docks.clone())
+        .unwrap()
+}
+
+fn backlinks_left() -> Docks {
+    let mut docks = Docks::default();
+    docks.move_view(View::Backlinks, Side::Left, 1);
+    docks
+}
+
+#[gpui::test]
+fn a_saved_layout_is_restored(cx: &mut TestAppContext) {
+    let fs = vault();
+    save_docks(&fs, &backlinks_left());
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    assert_eq!(docks(&window, &mut cx).side_of(View::Backlinks), Side::Left);
+    assert!(cx.debug_bounds("dock-bar-left").is_some());
+}
+
+/// Nothing run after the launch: the window's first draw is the only one.
+#[gpui::test]
+fn a_saved_layout_is_drawn_by_the_first_frame(cx: &mut TestAppContext) {
+    let fs = vault();
+    save_docks(&fs, &backlinks_left());
+    let (window, mut cx) = launch(cx, &fs);
+
+    assert!(cx.debug_bounds("dock-bar-left").is_some());
+    assert_eq!(docks(&window, &mut cx).side_of(View::Backlinks), Side::Left);
+}
+
+/// The restore reuses the session `bootstrap::root` read before the first frame.
+#[gpui::test]
+fn the_session_file_is_read_once(cx: &mut TestAppContext) {
+    let fs = vault();
+    save(&fs, 0, vec![tab("a.md", 0, 0)]);
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    let a = id(&window, &mut cx, "a");
+    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(fs.loads(Path::new(SESSION)), 1);
+}
+
+#[gpui::test]
+fn a_file_without_docks_keeps_the_default_layout(cx: &mut TestAppContext) {
+    let fs = vault();
+    save(&fs, 0, vec![tab("a.md", 0, 0)]);
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    assert_eq!(docks(&window, &mut cx), Docks::default());
 }

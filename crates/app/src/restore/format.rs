@@ -3,7 +3,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use inkra_layout::{DockState, Docks, Side, View};
+use serde::{Deserialize, Deserializer, Serialize};
 
 const VERSION: u32 = 1;
 
@@ -15,6 +16,12 @@ pub(crate) struct Session {
     pub(crate) root: PathBuf,
     pub(crate) active: usize,
     pub(crate) tabs: Vec<SavedTab>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub(crate) docks: Option<SavedDocks>,
 }
 
 /// `note` is vault-relative, `None` for an empty tab.
@@ -32,6 +39,74 @@ pub(crate) struct SavedView {
     pub(crate) head: usize,
     pub(crate) top: usize,
     pub(crate) below: f32,
+}
+
+/// Views by name: an unknown one drops alone, where a serde enum would fail the whole file (docks spec).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SavedDocks {
+    pub(crate) left: SavedDock,
+    pub(crate) right: SavedDock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SavedDock {
+    pub(crate) views: Vec<String>,
+    pub(crate) active: usize,
+    pub(crate) shown: bool,
+}
+
+/// A malformed `docks` reads as absent, so the tabs still restore.
+fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SavedDocks>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+fn view_name(view: View) -> &'static str {
+    match view {
+        View::Files => "files",
+        View::Backlinks => "backlinks",
+    }
+}
+
+fn view_named(name: &str) -> Option<View> {
+    View::ALL.into_iter().find(|&view| view_name(view) == name)
+}
+
+impl From<&Docks> for SavedDocks {
+    fn from(docks: &Docks) -> Self {
+        let saved = |side| {
+            let state = docks.state(side);
+            SavedDock {
+                views: state
+                    .views
+                    .into_iter()
+                    .map(|view| view_name(view).to_owned())
+                    .collect(),
+                active: state.active,
+                shown: state.shown,
+            }
+        };
+        Self {
+            left: saved(Side::Left),
+            right: saved(Side::Right),
+        }
+    }
+}
+
+impl SavedDocks {
+    /// Unknown names drop; `Docks::restore` repairs the rest.
+    pub(crate) fn docks(&self) -> Docks {
+        let state = |dock: &SavedDock| DockState {
+            views: dock
+                .views
+                .iter()
+                .filter_map(|name| view_named(name))
+                .collect(),
+            active: dock.active,
+            shown: dock.shown,
+        };
+        Docks::restore(state(&self.left), state(&self.right))
+    }
 }
 
 /// Why a session file restores nothing.
@@ -53,12 +128,18 @@ impl fmt::Display for Rejected {
 }
 
 impl Session {
-    pub(crate) fn new(root: PathBuf, active: usize, tabs: Vec<SavedTab>) -> Self {
+    pub(crate) fn new(
+        root: PathBuf,
+        active: usize,
+        tabs: Vec<SavedTab>,
+        docks: Option<SavedDocks>,
+    ) -> Self {
         Self {
             version: VERSION,
             root,
             active,
             tabs,
+            docks,
         }
     }
 
