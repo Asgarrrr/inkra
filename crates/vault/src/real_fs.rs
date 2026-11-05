@@ -105,6 +105,23 @@ impl Fs for RealFs {
         Ok(entries)
     }
 
+    async fn list_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let reader = fs::read_dir(dir).map_err(|source| io_error(dir, source))?;
+        let mut files = Vec::new();
+        for entry in reader {
+            let path = entry.map_err(|source| io_error(dir, source))?.path();
+            let hidden = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'));
+            if !hidden && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+                files.push(path);
+            }
+        }
+        files.sort();
+        Ok(files)
+    }
+
     /// Opening the folder checks it; iterating would list it.
     async fn check_dir(&self, path: &Path) -> Result<()> {
         fs::read_dir(path)

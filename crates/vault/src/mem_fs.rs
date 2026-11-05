@@ -177,6 +177,24 @@ impl Fs for MemFs {
         Ok(entries)
     }
 
+    /// Counts no listing: `read_dirs` counts the vault's walk.
+    async fn list_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let state = self.state();
+        state.readable_dir(dir)?;
+        Ok(state
+            .files
+            .keys()
+            .filter(|file| file.parent() == Some(dir))
+            .filter(|file| {
+                !file
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+            })
+            .cloned()
+            .collect())
+    }
+
     async fn check_dir(&self, path: &Path) -> Result<()> {
         self.state().readable_dir(path)
     }
@@ -283,6 +301,9 @@ impl Fs for MemFs {
     }
 
     async fn replace(&self, path: &Path, text: &str) -> Result<()> {
+        if self.state().unwritable.contains(path) {
+            return Err(io(path, ErrorKind::PermissionDenied));
+        }
         self.insert_file(path, text);
         Ok(())
     }

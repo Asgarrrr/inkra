@@ -108,6 +108,10 @@ pub trait Fs: Send + Sync {
     /// the walk avoids link loops without detecting them.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
+    /// `dir`'s direct children that are regular files, any extension, no dotfiles or symlinks,
+    /// sorted by path; a missing `dir` is an `Io` `NotFound` error.
+    async fn list_files(&self, dir: &Path) -> Result<Vec<PathBuf>>;
+
     /// Fails unless `path` is a folder this process may list; lists nothing.
     async fn check_dir(&self, path: &Path) -> Result<()>;
 

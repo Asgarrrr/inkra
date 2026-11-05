@@ -58,6 +58,10 @@ impl ThemeDelegate {
         }
     }
 
+    pub(crate) fn set_before(&mut self, before: Option<Arc<Theme>>) {
+        self.before = before;
+    }
+
     fn row(&self, ix: usize) -> Option<&ThemeRow> {
         self.rows.get(*self.shown.get(ix)?)
     }

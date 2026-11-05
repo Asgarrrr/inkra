@@ -112,6 +112,10 @@ impl Fs for PanickingFs {
         self.inner.read_dir(path).await
     }
 
+    async fn list_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        self.inner.list_files(dir).await
+    }
+
     async fn check_dir(&self, path: &Path) -> Result<()> {
         self.inner.check_dir(path).await
     }

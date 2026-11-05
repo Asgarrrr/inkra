@@ -10,7 +10,10 @@ use super::{no_vault, open_vault, shell_focused};
 use crate::picker::PickerDelegate as _;
 use crate::shell::AppShell;
 use crate::theme::picker::ThemeDelegate;
-use crate::theme::{self, Appearance, Theme, builtin, store::load};
+use crate::theme::{
+    self, Appearance, Theme, builtin,
+    store::{list, load},
+};
 
 const SETTINGS: &str = "/vault/.inkra/settings.json";
 const SOLAR: &str = "/vault/.inkra/themes/solar.json";
@@ -182,6 +185,110 @@ fn down_previews_and_escape_restores(cx: &mut TestAppContext) {
 #[gpui::test]
 fn without_a_vault_the_rows_are_the_builtins(cx: &mut TestAppContext) {
     let (window, mut visual) = no_vault(cx);
+
+    open_theme_picker(&mut visual);
+
+    let (labels, _) = theme_picker(window, &mut visual).expect("the theme picker is open");
+    assert_eq!(labels, ["System", "Flexoki Dark", "Flexoki Light"]);
+}
+
+/// A vault holding `solar.json` (accent #123456) and `settings`, keys bound, the root focused.
+fn solar_vault(
+    cx: &mut TestAppContext,
+    settings: &str,
+) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file(SOLAR, solar("#123456"));
+    fs.insert_file(SETTINGS, settings);
+    let (window, _notes, visual) = shell_focused(cx, &fs);
+    (fs, window, visual)
+}
+
+fn solar_theme(fs: &MemFs) -> Arc<Theme> {
+    let listed = block_on(list(fs, Path::new("/vault")));
+    let (_, solar) = listed
+        .into_iter()
+        .find(|(name, _)| name == "solar")
+        .expect("solar");
+    solar
+}
+
+fn pick_solar(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+    open_theme_picker(cx);
+    let (labels, _) = theme_picker(window, cx).expect("the theme picker is open");
+    assert!(labels.iter().any(|label| label == "solar"), "{labels:?}");
+    cx.simulate_input("solar");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn enter_writes_the_choice_and_keeps_other_keys(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = solar_vault(cx, r#"{"font":3}"#);
+
+    pick_solar(window, &mut visual);
+
+    let written = fs.read_to_string(Path::new(SETTINGS)).expect("settings");
+    let settings: serde_json::Value = serde_json::from_str(&written).expect("JSON");
+    assert_eq!(settings, serde_json::json!({"theme": "solar", "font": 3}));
+    assert!(theme_picker(window, &mut visual).is_none());
+    assert_eq!(*current(&mut visual), *solar_theme(&fs));
+}
+
+#[gpui::test]
+fn an_unwritable_settings_file_keeps_the_theme(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = solar_vault(cx, "{}");
+    fs.make_unwritable(SETTINGS);
+
+    pick_solar(window, &mut visual);
+
+    let notice = window
+        .update(&mut visual, |shell, _, _| {
+            shell.notice.as_ref().map(|notice| notice.text.to_string())
+        })
+        .expect("the shell is open")
+        .expect("a notice");
+    assert!(
+        notice.starts_with("Couldn't save the theme choice:"),
+        "{notice}"
+    );
+    assert_eq!(*current(&mut visual), *solar_theme(&fs));
+}
+
+#[gpui::test]
+fn a_reload_under_the_open_picker_is_what_escape_restores(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file(SETTINGS, r#"{"theme":"solar"}"#);
+    fs.insert_file(SOLAR, solar("#111111"));
+    let (window, _notes, mut visual) = shell_focused(cx, &fs);
+    let resolved = block_on(load(&*fs, Path::new("/vault")));
+    window
+        .update(&mut visual, |shell, _, cx| shell.adopt_theme(resolved, cx))
+        .unwrap();
+    open_theme_picker(&mut visual);
+    visual.simulate_keystrokes("up");
+    visual.run_until_parked();
+
+    fs.insert_file(SOLAR, solar("#222222"));
+    visual.run_until_parked();
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+
+    let edited = block_on(load(&*fs, Path::new("/vault")))
+        .theme
+        .expect("solar");
+    assert_eq!(*current(&mut visual), *edited);
+}
+
+#[gpui::test]
+fn a_theme_file_named_system_is_not_a_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/.inkra/themes/system.json", solar("#123456"));
+    fs.insert_file(SETTINGS, "{}");
+    let (window, _notes, mut visual) = shell_focused(cx, &fs);
 
     open_theme_picker(&mut visual);
 
