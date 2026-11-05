@@ -87,6 +87,18 @@ pub enum VaultError {
     },
 }
 
+impl VaultError {
+    /// The failed call's kind; an `Unwritten` save answers its cause's.
+    #[must_use]
+    pub fn io_kind(&self) -> Option<io::ErrorKind> {
+        match self {
+            Self::Io { source, .. } => Some(source.kind()),
+            Self::Unwritten { source, .. } => source.io_kind(),
+            Self::NotUtf8 { .. } => None,
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, VaultError>;
 
 /// Dropping it stops the watch and ends its stream.

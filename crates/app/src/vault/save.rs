@@ -26,17 +26,15 @@ pub(super) fn retry_delay(failures: u32) -> Duration {
 
 /// An error a later attempt can clear by itself; a preserving failure is judged by its cause.
 fn is_transient(error: &VaultError) -> bool {
-    match error {
-        VaultError::Unwritten { source, .. } => is_transient(source),
-        VaultError::Io { source, .. } => matches!(
-            source.kind(),
+    matches!(
+        error.io_kind(),
+        Some(
             ErrorKind::Interrupted
                 | ErrorKind::WouldBlock
                 | ErrorKind::TimedOut
                 | ErrorKind::ResourceBusy
-        ),
-        VaultError::NotUtf8 { .. } => false,
-    }
+        )
+    )
 }
 
 impl NoteStore {

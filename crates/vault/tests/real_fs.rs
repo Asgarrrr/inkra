@@ -4,6 +4,7 @@
 #![allow(clippy::expect_used)]
 
 use std::fs;
+use std::io::ErrorKind;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -11,6 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use futures::StreamExt;
 use futures::executor::block_on;
+use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp, VaultError, Watch};
 
 /// A temp directory that removes itself.
@@ -18,7 +20,8 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("inkra-vault-test-{name}"));
+        let path =
+            std::env::temp_dir().join(format!("inkra-vault-test-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).expect("create temp dir");
         Self(path)
@@ -549,4 +552,65 @@ fn replace_creates_missing_folders_overwrites_and_leaves_no_temp_file() {
 
     assert_eq!(fs::read_to_string(&file).expect("read"), "two");
     assert_eq!(names(&dir.0.join("sessions")), ["a.json"]);
+}
+
+fn kind_of<T>(result: inkra_vault::Result<T>) -> Option<ErrorKind> {
+    result.err().and_then(|error| error.io_kind())
+}
+
+/// The kind of each failure the app or the walk branches on, set up through `fs` alone.
+fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKind>)> {
+    let (a, b, folder) = (root.join("a.md"), root.join("b.md"), root.join("f"));
+    block_on(fs.create(&a, Kind::Note)).expect("create a");
+    block_on(fs.create(&b, Kind::Note)).expect("create b");
+    block_on(fs.create(&folder, Kind::Dir)).expect("create f");
+    vec![
+        (
+            "create onto a note",
+            kind_of(block_on(fs.create(&a, Kind::Note))),
+        ),
+        (
+            "create onto a folder",
+            kind_of(block_on(fs.create(&folder, Kind::Dir))),
+        ),
+        ("rename onto a note", kind_of(block_on(fs.rename(&a, &b)))),
+        (
+            "rename onto a folder",
+            kind_of(block_on(fs.rename(&a, &folder))),
+        ),
+        (
+            "load a missing note",
+            kind_of(block_on(fs.load(&root.join("gone.md")))),
+        ),
+        (
+            "load under a missing folder",
+            kind_of(block_on(fs.load(&root.join("gone").join("a.json")))),
+        ),
+        (
+            "read_dir a missing folder",
+            kind_of(block_on(fs.read_dir(&root.join("gone")))),
+        ),
+        ("read_dir a note", kind_of(block_on(fs.read_dir(&a)))),
+    ]
+}
+
+/// App tests run on `MemFs` only: a kind it reports differently from `RealFs` passes them and breaks on disk.
+#[test]
+fn mem_fs_reports_the_io_kinds_real_fs_does() {
+    let expected = vec![
+        ("create onto a note", Some(ErrorKind::AlreadyExists)),
+        ("create onto a folder", Some(ErrorKind::AlreadyExists)),
+        ("rename onto a note", Some(ErrorKind::AlreadyExists)),
+        ("rename onto a folder", Some(ErrorKind::AlreadyExists)),
+        ("load a missing note", Some(ErrorKind::NotFound)),
+        ("load under a missing folder", Some(ErrorKind::NotFound)),
+        ("read_dir a missing folder", Some(ErrorKind::NotFound)),
+        ("read_dir a note", Some(ErrorKind::NotADirectory)),
+    ];
+    let dir = TempDir::new("io-kinds");
+    let mem = MemFs::new();
+    mem.insert_dir("/vault");
+
+    assert_eq!(failure_kinds(&RealFs, &dir.0), expected, "RealFs");
+    assert_eq!(failure_kinds(&mem, Path::new("/vault")), expected, "MemFs");
 }
