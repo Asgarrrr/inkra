@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use gpui::WindowHandle;
+use inkra_layout::Side;
 
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
@@ -10,5 +13,15 @@ pub(super) fn default(stage: &mut Stage) -> WindowHandle<AppShell> {
         ("reading.md", "Books to read, listed from the [[index]].\n"),
     ]);
     stage.click_tree_row(window, 0.);
+    window
+}
+
+/// Backlinks moved left by the palette, the pointer on its icon past the tooltip's delay.
+pub(super) fn both_left(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    stage.keys(window, "cmd-shift-p m o v e space b a c k l i n k s enter");
+    let icon = stage.dock_icon_point(window, Side::Left, 1);
+    stage.hover(window, icon);
+    stage.wait(Duration::from_millis(600));
     window
 }

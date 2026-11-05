@@ -1,31 +1,46 @@
 use gpui::{
-    App, Div, FontWeight, InteractiveElement, Interactivity, IntoElement, ParentElement,
-    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder,
+    AnyElement, App, Div, FontWeight, InteractiveElement, Interactivity, IntoElement,
+    ParentElement, RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::{Color, Label, LabelSize, UiText, h_flex};
 use crate::theme;
 
-/// A panel's first row: its title and an optional count, ruled like the title row.
+/// A panel's first row, ruled like the title row: a title and an optional count, or a bar of children.
 #[derive(IntoElement)]
 pub(crate) struct PanelHeader {
     base: Div,
-    title: SharedString,
+    title: Option<SharedString>,
     count: Option<usize>,
+    children: Vec<AnyElement>,
 }
 
 impl PanelHeader {
     pub(crate) fn new(selector: &'static str, title: impl Into<SharedString>) -> Self {
         Self {
+            title: Some(title.into()),
+            ..Self::bar(selector)
+        }
+    }
+
+    pub(crate) fn bar(selector: &'static str) -> Self {
+        Self {
             base: h_flex().debug_selector(|| selector.into()),
-            title: title.into(),
+            title: None,
             count: None,
+            children: Vec::new(),
         }
     }
 
     pub(crate) fn count(mut self, count: usize) -> Self {
         self.count = Some(count);
         self
+    }
+}
+
+impl ParentElement for PanelHeader {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.children.extend(elements);
     }
 }
 
@@ -47,14 +62,16 @@ impl RenderOnce for PanelHeader {
             .ui_text()
             .border_b(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(Color::Default.rgba(theme))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.title),
-            )
+            .when_some(self.title, |header, title| {
+                header.child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(Color::Default.rgba(theme))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(title),
+                )
+            })
             .when_some(self.count, |header, count| {
                 header.child(
                     div()
@@ -71,5 +88,6 @@ impl RenderOnce for PanelHeader {
                         ),
                 )
             })
+            .children(self.children)
     }
 }

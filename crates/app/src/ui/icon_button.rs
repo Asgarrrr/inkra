@@ -82,6 +82,8 @@ impl InteractiveElement for IconButton {
     }
 }
 
+impl StatefulInteractiveElement for IconButton {}
+
 impl RenderOnce for IconButton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = theme::current(cx).colors;

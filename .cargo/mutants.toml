@@ -51,6 +51,9 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Equivalent. `Visible::step` takes only 1 or -1 (`select_next`, `select_prev`), so
 # `delta >= 0` and `delta > 0` agree on every call.
 #
+# Equivalent while `View` has two variants: a dock that loses a view holds at most one, so
+# the clamp after the adjust sets `active` to 0 whatever the adjust did.
+#
 # Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
 # one after another, so the first drains the queue: 0 and 1 give the same walk.
 exclude_re = [
@@ -64,5 +67,6 @@ exclude_re = [
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
     "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",
+    "^crates/layout/src/lib\\.rs:[0-9]+:[0-9]+: replace -= with [+/]= in Docks::move_view$",
     "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
 ]

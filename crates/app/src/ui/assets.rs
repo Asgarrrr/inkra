@@ -36,6 +36,8 @@ icons! {
     ArrowRight => "arrow-right",
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
+    Files => "files",
+    Link => "link",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",
     PenLine => "pen-line",

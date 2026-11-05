@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+use inkra_layout::{Side, View};
 use inkra_vault::mem_fs::MemFs;
 
 use super::{activate, editor, no_vault, showing, tab_notes, tree_focused, two_notes, vault_names};
@@ -83,6 +84,30 @@ fn the_palette_lists_both_dock_toggles(cx: &mut TestAppContext) {
     for shown in ["Toggle left dock", "Toggle right dock"] {
         assert!(has(&names, shown), "{shown} missing from {names:?}");
     }
+}
+
+#[gpui::test]
+fn the_palette_lists_both_move_actions(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p");
+    visual.run_until_parked();
+    let names = listed(window, &mut visual);
+    for shown in ["Move files to other dock", "Move backlinks to other dock"] {
+        assert!(has(&names, shown), "{shown} missing from {names:?}");
+    }
+}
+
+#[gpui::test]
+fn choosing_move_files_moves_the_tree_right(cx: &mut TestAppContext) {
+    let (window, mut visual, _, _) = editor_focused(cx);
+    visual.simulate_keystrokes("cmd-shift-p m o v e space f i l e s enter");
+    visual.run_until_parked();
+    let side = window
+        .update(&mut visual, |shell, _, _| {
+            shell.panes().docks.side_of(View::Files)
+        })
+        .unwrap();
+    assert_eq!(side, Side::Right);
 }
 
 #[gpui::test]

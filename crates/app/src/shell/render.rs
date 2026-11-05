@@ -147,6 +147,8 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::toggle_left_dock))
             .on_action(cx.listener(Self::toggle_right_dock))
+            .on_action(cx.listener(Self::move_files_to_other_dock))
+            .on_action(cx.listener(Self::move_backlinks_to_other_dock))
             .on_action(cx.listener(Self::select_theme))
             .on_action(cx.listener(Self::quit))
             .on_mouse_move(cx.listener(Self::title_drag_move))

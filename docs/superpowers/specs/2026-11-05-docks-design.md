@@ -93,8 +93,10 @@ computation; read it before writing this one.
 - **Actions.**
   - `ToggleLeftDock` on `cmd-\` and `ToggleRightDock` on `cmd-|` replace
     `ToggleSidebar` and `ToggleBacklinks`, same keys.
-  - One action per view: "Docks: Move Files to Other Dock" and "Docks: Move
-    Backlinks to Other Dock", listed in `⌘⇧P`.
+  - One action per view, `MoveFilesToOtherDock` and `MoveBacklinksToOtherDock`,
+    listed in `⌘⇧P` as "Move files to other dock" and "Move backlinks to other
+    dock". The palette humanizes every action name the same way, so the names
+    carry no "Docks:" prefix and no title case.
 - **Title row.** Unchanged. `SearchVault` and `NewNote` stay over the left
   dock: they act on the vault, not on the tree, so they do not follow `Files`.
   A dock's toggle sits where today's panel toggle sits, and goes with rule 3.

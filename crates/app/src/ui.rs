@@ -11,6 +11,7 @@ mod panel_header;
 mod tab;
 #[cfg(test)]
 mod tests;
+mod tooltip;
 
 use gpui::{
     App, Div, ElementId, InteractiveElement, MouseDownEvent, Rgba, Stateful, Styled, Window, div,
@@ -25,6 +26,7 @@ pub(crate) use label::{Label, LabelSize};
 pub(crate) use list_item::{ListItem, ListItemStyle};
 pub(crate) use panel_header::PanelHeader;
 pub(crate) use tab::Tab;
+pub(crate) use tooltip::Tooltip;
 
 use crate::theme;
 
