@@ -140,12 +140,13 @@ fn a_theme_change_reshapes_the_note_once(cx: &mut TestAppContext) {
 
     let before = shape_count();
     let red = Arc::new(Theme {
+        appearance: Appearance::Dark,
         colors: ThemeColors {
             md_link: gpui::red().into(),
             ..builtin::dark().colors
         },
     });
-    cx.update(|_, cx| theme::apply(red.clone(), cx));
+    cx.update(|_, cx| theme::install(Some(red.clone()), cx));
     cx.run_until_parked();
     assert_eq!(shape_count() - before, 1);
     window
@@ -182,7 +183,7 @@ fn an_equal_theme_changes_nothing(cx: &mut TestAppContext) {
 
     let before = shape_count();
     cx.update(|_, cx| {
-        theme::apply(Arc::new((**builtin::dark()).clone()), cx);
+        theme::install(Some(Arc::new((**builtin::dark()).clone())), cx);
         assert!(Arc::ptr_eq(theme::current(cx), builtin::dark()));
     });
     cx.run_until_parked();

@@ -25,6 +25,7 @@ mod render;
 mod session;
 mod tab_bar;
 mod tabs;
+mod themes;
 mod title_bar;
 
 use inkra_tabs::Tabs;

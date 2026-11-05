@@ -1,37 +1,68 @@
 use gpui::Rgba;
 
-/// Every colour a theme sets, named by role, not by the place that reads it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ThemeColors {
+/// Lists every token once: the struct, `set` and the test list cannot drift apart.
+macro_rules! tokens {
+    ($($(#[$doc:meta])* $name:ident,)*) => {
+        /// Every colour a theme sets, named by role, not by the place that reads it.
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        pub(crate) struct ThemeColors {
+            $($(#[$doc])* pub(crate) $name: Rgba,)*
+        }
+
+        impl ThemeColors {
+            #[cfg(test)]
+            pub(crate) const NAMES: &[&str] = &[$(stringify!($name)),*];
+
+            /// False for a name no token has.
+            pub(crate) fn set(&mut self, name: &str, color: Rgba) -> bool {
+                match name {
+                    $(stringify!($name) => self.$name = color,)*
+                    _ => return false,
+                }
+                true
+            }
+
+            #[cfg(test)]
+            pub(crate) fn get(&self, name: &str) -> Option<Rgba> {
+                match name {
+                    $(stringify!($name) => Some(self.$name),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+tokens! {
     /// The chrome: sidebar, tab bar, backlinks.
-    pub(crate) background: Rgba,
-    pub(crate) editor_background: Rgba,
+    background,
+    editor_background,
     /// A surface over the others: a modal.
-    pub(crate) elevated_background: Rgba,
-    pub(crate) border: Rgba,
-    pub(crate) border_variant: Rgba,
-    pub(crate) element_hover: Rgba,
-    pub(crate) element_selected: Rgba,
-    pub(crate) chrome_element_hover: Rgba,
-    pub(crate) ghost_element_hover: Rgba,
-    pub(crate) accent: Rgba,
-    pub(crate) accent_background: Rgba,
-    pub(crate) selection: Rgba,
-    pub(crate) error_background: Rgba,
-    pub(crate) warning_background: Rgba,
-    pub(crate) md_text: Rgba,
-    pub(crate) md_heading: Rgba,
-    pub(crate) md_code: Rgba,
-    pub(crate) md_link: Rgba,
-    pub(crate) md_quote: Rgba,
-    pub(crate) md_quote_bar: Rgba,
-    pub(crate) md_marker: Rgba,
-    pub(crate) text: Rgba,
-    pub(crate) text_selected: Rgba,
-    pub(crate) text_muted: Rgba,
-    pub(crate) text_placeholder: Rgba,
+    elevated_background,
+    border,
+    border_variant,
+    element_hover,
+    element_selected,
+    chrome_element_hover,
+    ghost_element_hover,
+    accent,
+    accent_background,
+    selection,
+    error_background,
+    warning_background,
+    md_text,
+    md_heading,
+    md_code,
+    md_link,
+    md_quote,
+    md_quote_bar,
+    md_marker,
+    text,
+    text_selected,
+    text_muted,
+    text_placeholder,
     /// A search match.
-    pub(crate) text_highlight: Rgba,
-    pub(crate) error: Rgba,
-    pub(crate) warning: Rgba,
+    text_highlight,
+    error,
+    warning,
 }

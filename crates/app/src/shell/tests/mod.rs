@@ -48,6 +48,7 @@ mod tab_bar;
 mod tab_chrome;
 mod tab_keys;
 mod tabs;
+mod themes;
 mod title_bar;
 mod trashing;
 mod vault_search;

@@ -175,7 +175,7 @@ impl Stage {
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         // A new window reports the platform's Dark, so the shell's observer just overrode the theme.
         self.cx
-            .update(|cx| theme::apply(theme::builtin::of(self.appearance).clone(), cx));
+            .update(|cx| theme::follow_system(self.appearance.into(), cx));
         window
             .update(&mut self.cx, |view, _, cx| {
                 view.set_backdrop(theme::shot_backdrop(theme::current(cx)));

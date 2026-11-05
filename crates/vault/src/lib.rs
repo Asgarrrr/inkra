@@ -26,3 +26,6 @@ pub use real_fs::RealFs;
 pub use scans::{Claims, Listed, Scan, Scanned, Scans, Swapped};
 pub use vault::{Entry, EntryId, Reach, Vault, Walk};
 pub use watch::{Changed, PathEvent, Pending, Watch};
+
+/// The vault's own settings and themes, under its root.
+pub const CONFIG_DIR: &str = ".inkra";

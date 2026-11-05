@@ -63,7 +63,7 @@ impl AppShell {
         .detach();
     }
 
-    fn show_notice(
+    pub(super) fn show_notice(
         &mut self,
         text: String,
         cleared_by_save: Option<EntryId>,
