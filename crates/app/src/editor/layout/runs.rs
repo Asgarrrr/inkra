@@ -5,29 +5,31 @@ use gpui::{HighlightStyle, TextRun, TextStyle, UnderlineStyle, px};
 use inkra_markdown::{DisplayLine, Span, Styles};
 use inkra_text::ByteOffset;
 
-use crate::theme;
+use crate::theme::{self, Theme};
 
 /// Resolves each `(Styles, composing)` once per `shape_document` call: that
 /// runs every frame, and a `TextStyle` clone per run would be per-frame waste.
 pub(super) struct RunStyles<'a> {
     base: &'a TextStyle,
+    theme: &'a Theme,
     resolved: HashMap<(Styles, bool), TextStyle>,
 }
 
 impl<'a> RunStyles<'a> {
-    pub(super) fn new(base: &'a TextStyle) -> Self {
+    pub(super) fn new(base: &'a TextStyle, theme: &'a Theme) -> Self {
         Self {
             base,
+            theme,
             resolved: HashMap::new(),
         }
     }
 
     fn run(&mut self, styles: Styles, composing: bool, len: usize) -> TextRun {
-        let base = self.base;
+        let (base, theme) = (self.base, self.theme);
         self.resolved
             .entry((styles, composing))
             .or_insert_with(|| {
-                let style = theme::markdown_style(base, styles);
+                let style = theme::markdown_style(base, styles, theme);
                 if composing { underlined(style) } else { style }
             })
             .to_run(len)

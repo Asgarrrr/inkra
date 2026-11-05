@@ -1,5 +1,6 @@
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
 use inkra_markdown::{Conceal, DisplayLine, Gutter, Heading, Span, is_active};
@@ -96,8 +97,9 @@ pub(crate) fn shape_document(
         marked,
         style,
         wrap_width,
+        theme,
     } = inputs;
-    let mut styles = RunStyles::new(style);
+    let mut styles = RunStyles::new(style, theme);
     let body_size = style.font_size.to_pixels(window.rem_size());
     let body_height = style.line_height_in_pixels(window.rem_size());
 
@@ -174,6 +176,7 @@ pub(crate) fn shape_document(
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
+        theme: Arc::clone(theme),
         version: buffer.version(),
         selection: selection.clone(),
         marked: marked.cloned(),

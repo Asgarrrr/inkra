@@ -83,7 +83,8 @@ impl InteractiveElement for IconButton {
 }
 
 impl RenderOnce for IconButton {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let color = if self.toggled == Some(true) {
             theme::icon_active()
         } else {
@@ -111,7 +112,7 @@ impl RenderOnce for IconButton {
                 .cursor_not_allowed()
         } else {
             button
-                .hover(|style| style.bg(theme::button_hover_background()))
+                .hover(|style| style.bg(colors.ghost_element_hover))
                 .when_some(self.on_click, |button, handler| button.on_click(handler))
         }
     }

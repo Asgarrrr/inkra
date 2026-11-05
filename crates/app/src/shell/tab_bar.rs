@@ -109,6 +109,7 @@ impl AppShell {
         indicator: Option<Indicator>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let colors = theme::current(cx).colors;
         let dragged = DraggedTab {
             id,
             index: ix,
@@ -138,8 +139,8 @@ impl AppShell {
             .on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone()))
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
                 let style = style
-                    .bg(theme::tab_drop_background())
-                    .border_color(theme::tab_drop_border());
+                    .bg(colors.accent_background)
+                    .border_color(colors.accent);
                 match ix.cmp(&dragged.index) {
                     Ordering::Less => style.border_l(theme::TAB_DROP_EDGE),
                     Ordering::Greater => style.border_r(theme::TAB_DROP_EDGE),

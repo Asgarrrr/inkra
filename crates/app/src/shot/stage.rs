@@ -172,8 +172,8 @@ impl Stage {
             .open_offscreen_window(WINDOW_SIZE, |window, cx| root(fs, launched, window, cx))
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         window
-            .update(&mut self.cx, |view, _, _| {
-                view.set_backdrop(theme::shot_backdrop());
+            .update(&mut self.cx, |view, _, cx| {
+                view.set_backdrop(theme::shot_backdrop(theme::current(cx)));
             })
             .unwrap_or_else(|error| panic!("set the backdrop: {error}"));
         self.settle();

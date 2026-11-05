@@ -30,7 +30,8 @@ impl PanelHeader {
 }
 
 impl RenderOnce for PanelHeader {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         self.base
             .flex_none()
             // Border-box: the rule sits inside the height.
@@ -38,7 +39,7 @@ impl RenderOnce for PanelHeader {
             .px(theme::ROW_INSET)
             .ui_text()
             .border_b(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
+            .border_color(colors.border_variant)
             .child(
                 div()
                     .min_w_0()
@@ -55,7 +56,7 @@ impl RenderOnce for PanelHeader {
                         .ml_1p5()
                         .px_1p5()
                         .rounded_full()
-                        .bg(theme::chrome_row_background())
+                        .bg(colors.chrome_element_hover)
                         .text_color(theme::header_count_text())
                         .text_size(theme::HEADER_COUNT_TEXT_SIZE)
                         .line_height(theme::HEADER_COUNT_LINE_HEIGHT)

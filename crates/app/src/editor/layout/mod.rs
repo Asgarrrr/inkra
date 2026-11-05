@@ -15,6 +15,7 @@ pub(crate) use shape::{line_shape_count, shape_count};
 
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
@@ -22,7 +23,7 @@ use inkra_text::{Bias, Buffer, ByteOffset, Version};
 use prefix::Prefix;
 use shape::LineShape;
 
-use crate::theme;
+use crate::theme::Theme;
 
 const NEWLINE_STUB: f32 = 0.25;
 const CARET_WIDTH: Pixels = px(2.);
@@ -62,6 +63,7 @@ pub(crate) struct LayoutInputs<'a> {
     pub(crate) marked: Option<&'a Range<ByteOffset>>,
     pub(crate) style: &'a TextStyle,
     pub(crate) wrap_width: Option<Pixels>,
+    pub(crate) theme: &'a Arc<Theme>,
 }
 
 /// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
@@ -77,6 +79,8 @@ pub(crate) struct DocumentLayout {
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
+    /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
+    theme: Arc<Theme>,
     version: Version,
     selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
@@ -91,6 +95,10 @@ impl DocumentLayout {
         self.wrap_width
     }
 
+    pub(crate) fn theme(&self) -> &Arc<Theme> {
+        &self.theme
+    }
+
     /// Whether `shape_document` would give this layout back. The selection counts only
     /// through the elements it reveals, so a caret move within the same ones reuses it.
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
@@ -98,6 +106,7 @@ impl DocumentLayout {
             && self.wrap_width == inputs.wrap_width
             && self.marked.as_ref() == inputs.marked
             && self.style == *inputs.style
+            && Arc::ptr_eq(&self.theme, inputs.theme)
             && touched(&inputs.markdown.conceals, &self.selection)
                 .eq(touched(&inputs.markdown.conceals, inputs.selection))
     }
@@ -319,7 +328,7 @@ impl DocumentLayout {
                 let top = self.top_for_row(row);
                 fill(
                     Bounds::from_corners(point(left, top), point(right, top + line.row_height)),
-                    theme::selection(),
+                    self.theme.colors.selection,
                 )
             })
             .collect()

@@ -42,6 +42,7 @@ impl BacklinksPanel {
 
 impl Render for BacklinksPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let message = match (self.rows.is_empty(), self.building) {
             (true, true) => Some("Indexing…"),
             (true, false) => Some("No backlinks"),
@@ -50,7 +51,7 @@ impl Render for BacklinksPanel {
         let count = (!self.rows.is_empty()).then_some(self.rows.len());
         v_flex()
             .size_full()
-            .bg(theme::sidebar_background())
+            .bg(colors.background)
             .ui_text()
             // Outside the scroll, so the header stays level with the tab bar.
             .child(

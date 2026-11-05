@@ -1,11 +1,12 @@
-use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*};
+use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, div, prelude::*};
 
 use super::rows::{Header, HitRow};
 use crate::row_text::{name_row, styled};
 use crate::theme;
 
 /// The name, its folder dimmed, then the hit count; a hairline sets off a later group.
-pub(super) fn header(header: &Header, after_group: bool) -> AnyElement {
+pub(super) fn header(header: &Header, after_group: bool, cx: &App) -> AnyElement {
+    let colors = theme::current(cx).colors;
     name_row(&header.path, theme::match_text().into())
         .relative()
         .child(
@@ -23,7 +24,7 @@ pub(super) fn header(header: &Header, after_group: bool) -> AnyElement {
                     .left_0()
                     .right_0()
                     .h(theme::RULE_WIDTH)
-                    .bg(theme::group_rule()),
+                    .bg(colors.border),
             )
         })
         .into_any_element()

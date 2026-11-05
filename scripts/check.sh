@@ -8,6 +8,14 @@ echo "==> cargo fmt --check"
 # Every workspace member. Not `--all`: it would format the vendored gpui too.
 cargo fmt -- --check
 
+echo "==> colour literal check"
+# A numeric first argument: `fn rgba(self` and `.rgba(theme)` are not literals.
+if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --include='*.rs' | grep -vE '^crates/app/src/(theme\.rs|theme/|shot/)'); then
+  echo "ERROR: a colour literal outside theme/ and shot/ — add a token in crates/app/src/theme/colors.rs:" >&2
+  echo "$literals" >&2
+  exit 1
+fi
+
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 

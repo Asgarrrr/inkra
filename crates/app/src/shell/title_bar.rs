@@ -19,6 +19,7 @@ impl AppShell {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let shown = self.panes.as_ref().map(|panes| panes.shown);
         let sidebar_shown = shown.is_some_and(|shown| shown.sidebar);
         let backlinks_shown = shown.is_some_and(|shown| shown.backlinks);
@@ -61,7 +62,7 @@ impl AppShell {
                     .left_0()
                     .size_full()
                     .border_b(theme::RULE_WIDTH)
-                    .border_color(theme::tab_rule()),
+                    .border_color(colors.border_variant),
             )
             .when_some(leading_toggle, |segment, toggle| {
                 segment
@@ -85,7 +86,7 @@ impl AppShell {
             .relative()
             .flex_none()
             .h(theme::TITLE_BAR_HEIGHT)
-            .bg(theme::tab_bar_background())
+            .bg(colors.background)
             .children(title_sidebar)
             .child(title_tabs)
             .children(title_backlinks)
@@ -96,6 +97,7 @@ impl AppShell {
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
+        let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-backlinks".into())
             .on_mouse_down(MouseButton::Left, keep_focus)
@@ -104,7 +106,7 @@ impl AppShell {
             .h_full()
             .pr(theme::ROW_INSET)
             .border_l(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
+            .border_color(colors.border_variant)
             .child(Self::render_drag_region("title-drag-backlinks", cx).flex_1())
             .children(toggle)
     }
@@ -115,6 +117,7 @@ impl AppShell {
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
+        let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-sidebar".into())
             .on_mouse_down(MouseButton::Left, keep_focus)
@@ -123,7 +126,7 @@ impl AppShell {
             .h_full()
             .pr(theme::ROW_INSET)
             .border_r(theme::RULE_WIDTH)
-            .border_color(theme::tab_rule())
+            .border_color(colors.border_variant)
             .child(
                 Self::render_drag_region("title-drag-start", cx)
                     .flex_none()

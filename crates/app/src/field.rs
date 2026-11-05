@@ -157,6 +157,7 @@ impl Element for FieldElement {
             marked: marked.as_ref(),
             style: &style,
             wrap_width: None,
+            theme: theme::current(cx),
         };
         let layout = shape_document(&inputs, None, window);
         let quads = Quads::new(&layout, &range, bounds.origin);

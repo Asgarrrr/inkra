@@ -1,10 +1,11 @@
 use gpui::{FontStyle, FontWeight, Hsla, TextStyle};
 use inkra_markdown::{HEADING_LEVELS, HeadingLevel, Styles};
 
-use super::{
-    BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, code_text, heading_metrics, link_text,
-    markdown_style, marker_text, quote_text,
-};
+use super::{BODY_LINE_HEIGHT, BODY_TEXT_SIZE, CODE_FONT_FAMILY, builtin, heading_metrics};
+
+fn markdown_style(base: &TextStyle, styles: Styles) -> TextStyle {
+    super::markdown_style(base, styles, builtin::dark())
+}
 
 #[test]
 fn no_tag_keeps_the_base_style() {
@@ -43,7 +44,7 @@ fn a_heading_is_bold_at_the_body_size() {
 fn code_is_monospace() {
     let style = markdown_style(&TextStyle::default(), Styles::CODE);
     assert_eq!(style.font_family.as_ref(), CODE_FONT_FAMILY);
-    assert_eq!(style.color, Hsla::from(code_text()));
+    assert_eq!(style.color, Hsla::from(builtin::dark().colors.md_code));
 }
 
 #[test]
@@ -51,31 +52,31 @@ fn links_and_quotes_take_their_colours() {
     let base = TextStyle::default();
     assert_eq!(
         markdown_style(&base, Styles::LINK).color,
-        Hsla::from(link_text())
+        Hsla::from(builtin::dark().colors.md_link)
     );
     assert_eq!(
         markdown_style(&base, Styles::QUOTE).color,
-        Hsla::from(quote_text())
+        Hsla::from(builtin::dark().colors.md_quote)
     );
 }
 
 #[test]
 fn a_marker_is_dimmed_but_keeps_its_weight() {
     let style = markdown_style(&TextStyle::default(), Styles::STRONG | Styles::MARKER);
-    assert_eq!(style.color, Hsla::from(marker_text()));
+    assert_eq!(style.color, Hsla::from(builtin::dark().colors.md_marker));
     assert_eq!(style.font_weight, FontWeight::BOLD);
 }
 
 #[test]
 fn a_marker_inside_a_link_is_dimmed_not_linked() {
     let style = markdown_style(&TextStyle::default(), Styles::LINK | Styles::MARKER);
-    assert_eq!(style.color, Hsla::from(marker_text()));
+    assert_eq!(style.color, Hsla::from(builtin::dark().colors.md_marker));
 }
 
 #[test]
 fn frontmatter_is_dimmed() {
     let style = markdown_style(&TextStyle::default(), Styles::FRONTMATTER);
-    assert_eq!(style.color, Hsla::from(marker_text()));
+    assert_eq!(style.color, Hsla::from(builtin::dark().colors.md_marker));
 }
 
 #[test]

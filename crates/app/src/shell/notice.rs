@@ -85,6 +85,7 @@ impl AppShell {
 
     pub(super) fn render_notice(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let notice = self.notice.as_ref()?;
+        let colors = theme::current(cx).colors;
         Some(
             div()
                 .debug_selector(|| "notice".into())
@@ -93,7 +94,7 @@ impl AppShell {
                 .items_center()
                 .gap_2()
                 .px_4()
-                .bg(theme::notice_background())
+                .bg(colors.error_background)
                 .text_size(theme::UI_TEXT_SIZE)
                 .line_height(theme::UI_LINE_HEIGHT)
                 .text_color(theme::notice_text())

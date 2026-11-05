@@ -168,6 +168,7 @@ impl EditorView {
             marked: marked.as_ref(),
             style: &style,
             wrap_width,
+            theme: theme::current(cx),
         };
         // A whole-document shape: skipped when the inputs still give this layout.
         if last.is_shaped_from(&inputs) {
@@ -303,6 +304,7 @@ impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         // A reload applied without a buffer notify would otherwise shape stale spans.
         self.refresh_markdown(cx);
+        let colors = theme::current(cx).colors;
         text_input::on_actions(div(), cx)
             .id("editor")
             .key_context(TextInput::key_context(text_input::EDITOR_CONTEXT))
@@ -334,8 +336,8 @@ impl Render for EditorView {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(self.viewport.handle())
-            .bg(theme::editor_background())
-            .text_color(theme::editor_text())
+            .bg(colors.editor_background)
+            .text_color(colors.md_text)
             .text_size(theme::BODY_TEXT_SIZE)
             .line_height(theme::BODY_LINE_HEIGHT)
             .p_4()

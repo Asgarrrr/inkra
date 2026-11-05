@@ -28,6 +28,9 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   - On a match the script prints `cargo tree -i gpui`, the path that brings
     gpui in.
 
+- **The colour literal check.** `rgb(`, `rgba(` or `hsla(` with a numeric first argument fails
+  outside `theme/` and `shot/`; `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins 1.96.1, the version `check.sh` is green on. Zed

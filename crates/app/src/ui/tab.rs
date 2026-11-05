@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::{UiText, h_flex, identified};
-use crate::theme;
+use crate::theme::{self, ThemeColors};
 
 /// A tab's end slot reads this group to show on the tab's hover; gpui resolves it to the nearest tab.
 const TAB_GROUP: &str = "tab";
@@ -62,7 +62,8 @@ impl InteractiveElement for Tab {
 impl StatefulInteractiveElement for Tab {}
 
 impl RenderOnce for Tab {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = theme::current(cx).colors;
         let active = self.active;
         let tab = self
             .base
@@ -86,8 +87,8 @@ impl RenderOnce for Tab {
             } else {
                 theme::tab_inactive_text()
             });
-        tab.when(active, |tab| tab.bg(theme::tab_active_background()))
-            .when(!active, |tab| tab.child(hover_pill()))
+        tab.when(active, |tab| tab.bg(colors.editor_background))
+            .when(!active, |tab| tab.child(hover_pill(&colors)))
             .children(self.start.map(|start| div().flex_none().child(start)))
             .child(
                 div()
@@ -119,16 +120,16 @@ impl RenderOnce for Tab {
                         .border_t(theme::RULE_WIDTH)
                         .border_l(theme::RULE_WIDTH)
                         .border_r(theme::RULE_WIDTH)
-                        .border_color(theme::tab_rule()),
+                        .border_color(colors.border_variant),
                 )
-                .child(foot(Side::Left))
-                .child(foot(Side::Right))
+                .child(foot(Side::Left, &colors))
+                .child(foot(Side::Right, &colors))
             })
     }
 }
 
 /// An inactive tab's hover: a pill inset in the tab, clear of the row's bottom (the reference's tab padding `1px 4px 4px`).
-fn hover_pill() -> impl IntoElement {
+fn hover_pill(colors: &ThemeColors) -> impl IntoElement {
     div()
         .debug_selector(|| "tab-hover".into())
         .absolute()
@@ -137,7 +138,7 @@ fn hover_pill() -> impl IntoElement {
         .right(theme::TAB_HOVER_INSET)
         .bottom(theme::TAB_HOVER_INSET)
         .rounded(theme::TAB_HOVER_RADIUS)
-        .group_hover(TAB_GROUP, |style| style.bg(theme::chrome_row_background()))
+        .group_hover(TAB_GROUP, |style| style.bg(colors.chrome_element_hover))
 }
 
 #[derive(Clone, Copy)]
@@ -148,7 +149,7 @@ enum Side {
 
 /// The active tab's concave foot outside one bottom corner, joining it to the note (the reference's `--tab-curve`).
 /// A ring in the note's colour, clipped to the corner's square, leaves the chrome showing through its hole.
-fn foot(side: Side) -> impl IntoElement {
+fn foot(side: Side, colors: &ThemeColors) -> impl IntoElement {
     let curve = theme::TAB_CURVE;
     let rule = theme::RULE_WIDTH;
     // The square overlaps the tab's edge by the rule, so the curve's hairline meets the side's hairline.
@@ -170,7 +171,7 @@ fn foot(side: Side) -> impl IntoElement {
                 .size(curve * 4.)
                 .rounded_full()
                 .border(curve)
-                .border_color(theme::tab_active_background()),
+                .border_color(colors.editor_background),
         )
         .child(
             div()
@@ -180,6 +181,6 @@ fn foot(side: Side) -> impl IntoElement {
                 .size(curve * 2.)
                 .rounded_full()
                 .border(rule)
-                .border_color(theme::tab_rule()),
+                .border_color(colors.border_variant),
         )
 }

@@ -12,7 +12,7 @@ use inkra_markdown::{HEADING_LEVELS, Styles};
 use super::EditorView;
 use super::layout::{DocumentLayout, LayoutInputs, shape_document};
 use crate::text_input::{self, Prepainted, Quads};
-use crate::theme;
+use crate::theme::{self, Theme};
 
 pub(super) struct TextElement {
     pub(super) editor: Entity<EditorView>,
@@ -47,14 +47,14 @@ impl Element for TextElement {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         // Read here: the closure runs in `compute_layout`, outside the div's
         // text style, where `window.text_style()` would be the default instead.
         let text_style = window.text_style();
         let inset = Inset {
             column: column_width(&text_style, window),
-            margin: margin_width(&text_style, window),
+            margin: margin_width(&text_style, theme::current(cx), window),
         };
         // Wide enough to centre the column between two margins; D12 reserves only the left one.
         let widest = inset.column + inset.margin * 2.;
@@ -123,6 +123,7 @@ impl Element for TextElement {
                 marked: marked.as_ref(),
                 style: &style,
                 wrap_width: Some(text.size.width),
+                theme: theme::current(cx),
             };
             Rc::new(shape_document(
                 &inputs,
@@ -212,6 +213,7 @@ fn layout_at(
         marked: marked.as_ref(),
         style: text_style,
         wrap_width: Some(text),
+        theme: theme::current(cx),
     };
     let previous = editor.input.last_layout();
     match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
@@ -245,12 +247,12 @@ pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
 }
 
 /// The widest opening heading marker, `#` × n and a space, over every heading level.
-pub(super) fn margin_width(style: &TextStyle, window: &mut Window) -> Pixels {
+pub(super) fn margin_width(style: &TextStyle, theme: &Theme, window: &mut Window) -> Pixels {
     HEADING_LEVELS
         .into_iter()
         .map(|level| {
             let marker = format!("{} ", "#".repeat(level as usize));
-            let run = theme::markdown_style(style, Styles::heading(level) | Styles::MARKER)
+            let run = theme::markdown_style(style, Styles::heading(level) | Styles::MARKER, theme)
                 .to_run(marker.len());
             let size = theme::heading_metrics(level).size;
             window
