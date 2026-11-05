@@ -6,6 +6,7 @@ use gpui::{
     Focusable, Modifiers, MouseButton, Pixels, Point, VisualTestAppContext, WindowHandle, point, px,
 };
 use image::RgbaImage;
+use inkra_layout::Side;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{Fs, Vault};
 
@@ -269,6 +270,19 @@ impl Stage {
             panic!("tab {ix} is drawn");
         };
         center
+    }
+
+    pub(crate) fn dock_icon_point(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        side: Side,
+        index: usize,
+    ) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |_, window, _| {
+                AppShell::dock_icon_point(side, index, window)
+            })
+            .unwrap_or_else(|error| panic!("read dock icon {index}: {error}"))
     }
 
     pub(crate) fn click_tree_row(&mut self, window: WindowHandle<AppShell>, ix: f32) {

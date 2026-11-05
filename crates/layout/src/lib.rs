@@ -12,6 +12,16 @@ pub enum Side {
     Right,
 }
 
+impl Side {
+    #[must_use]
+    pub fn other(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dock {
     views: Vec<View>,
@@ -41,6 +51,12 @@ impl Dock {
     #[must_use]
     pub fn is_shown(&self) -> bool {
         self.shown
+    }
+
+    /// Rule 3: an empty dock draws nothing, and keeps its flag for when a view comes back.
+    #[must_use]
+    pub fn is_drawn(&self) -> bool {
+        self.shown && !self.views.is_empty()
     }
 }
 
@@ -88,25 +104,51 @@ impl Docks {
         dock.shown = true;
     }
 
-    /// Its dock is shown and it is that dock's active view.
+    /// Rules 1 and 2. `index` counts in `side`'s dock after `view` left it.
+    ///
+    /// # Panics
+    /// If `index` exceeds that dock's length after the removal.
+    pub fn move_view(&mut self, view: View, side: Side, index: usize) {
+        let source = self.dock_mut(self.side_of(view));
+        let Some(at) = source.views.iter().position(|&held| held == view) else {
+            panic!("each view is in exactly one dock");
+        };
+        source.views.remove(at);
+        if at < source.active {
+            source.active -= 1;
+        }
+        source.active = source.active.min(source.views.len().saturating_sub(1));
+        let target = self.dock_mut(side);
+        assert!(
+            index <= target.views.len(),
+            "index {index} is past the end of a dock of {}",
+            target.views.len()
+        );
+        target.views.insert(index, view);
+        target.active = index;
+        target.shown = true;
+    }
+
+    /// Its dock is drawn and it is that dock's active view.
     #[must_use]
     pub fn is_visible(&self, view: View) -> bool {
         let dock = self.dock(self.side_of(view));
-        dock.shown && dock.active() == Some(view)
+        dock.is_drawn() && dock.active() == Some(view)
+    }
+
+    #[must_use]
+    pub fn side_of(&self, view: View) -> Side {
+        if self.left.views.contains(&view) {
+            Side::Left
+        } else {
+            Side::Right
+        }
     }
 
     fn dock_mut(&mut self, side: Side) -> &mut Dock {
         match side {
             Side::Left => &mut self.left,
             Side::Right => &mut self.right,
-        }
-    }
-
-    fn side_of(&self, view: View) -> Side {
-        if self.left.views.contains(&view) {
-            Side::Left
-        } else {
-            Side::Right
         }
     }
 }

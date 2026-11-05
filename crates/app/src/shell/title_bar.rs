@@ -22,9 +22,9 @@ impl AppShell {
     ) -> impl IntoElement {
         let colors = theme::current(cx).colors;
         let docks = self.panes.as_ref().map(|panes| &panes.docks);
-        let sidebar_shown = docks.is_some_and(|docks| docks.dock(Side::Left).is_shown());
-        let backlinks_shown = docks.is_some_and(|docks| docks.dock(Side::Right).is_shown());
-        let (sidebar_toggle, backlinks_toggle) = self.render_dock_toggles(cx).unzip();
+        let sidebar_shown = docks.is_some_and(|docks| docks.dock(Side::Left).is_drawn());
+        let backlinks_shown = docks.is_some_and(|docks| docks.dock(Side::Right).is_drawn());
+        let (sidebar_toggle, backlinks_toggle) = self.render_dock_toggles(cx);
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
@@ -206,6 +206,26 @@ impl AppShell {
                 - theme::ROW_INSET
                 - theme::ICON_BUTTON_WIDTH / 2.,
             theme::TITLE_BAR_HEIGHT / 2.,
+        )
+    }
+
+    /// The centre of icon `index` in a dock's bar; for a one-view dock, a point on its title (index 0).
+    pub(crate) fn dock_icon_point(
+        side: Side,
+        index: usize,
+        window: &Window,
+    ) -> gpui::Point<Pixels> {
+        let start = match side {
+            Side::Left => Pixels::ZERO,
+            Side::Right => {
+                window.viewport_size().width - super::RIGHT_DOCK_WIDTH + theme::RULE_WIDTH
+            }
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let index = index as f32;
+        gpui::point(
+            start + theme::ROW_INSET + theme::ICON_BUTTON_WIDTH * (index + 0.5),
+            theme::TITLE_BAR_HEIGHT + (theme::PANEL_HEADER_HEIGHT - theme::RULE_WIDTH) / 2.,
         )
     }
 }

@@ -1,8 +1,10 @@
 //! Hiding and showing the docks, their toggles and their headers (docks spec).
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use gpui::{TestAppContext, VisualTestContext, px, size};
+use gpui::{Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size};
+use inkra_layout::{Side, View};
 use inkra_vault::mem_fs::MemFs;
 
 use super::tab_bar::click;
@@ -10,6 +12,8 @@ use super::{
     ab_focused, editor_focused, focus_tree, keys, no_vault, open, selected, shell_focused,
     tree_focused, two_notes, vault_names,
 };
+use crate::shell::AppShell;
+use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
 use crate::test_support::entry_id;
 
 fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
@@ -212,4 +216,138 @@ fn a_press_on_a_dock_header_keeps_the_editor_focused(cx: &mut TestAppContext) {
     click(&mut cx, "panel-header-files");
 
     assert!(editor_focused(&window, &mut cx));
+}
+
+fn move_view(cx: &mut VisualTestContext, view: View) {
+    match view {
+        View::Files => cx.dispatch_action(MoveFilesToOtherDock),
+        View::Backlinks => cx.dispatch_action(MoveBacklinksToOtherDock),
+    }
+    cx.run_until_parked();
+}
+
+fn active(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, side: Side) -> Option<View> {
+    window
+        .update(cx, |shell, _, _| shell.panes().docks.dock(side).active())
+        .unwrap()
+}
+
+#[gpui::test]
+fn moving_backlinks_left_draws_an_icon_bar_and_no_right_dock(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    move_view(&mut cx, View::Backlinks);
+
+    for shown in ["dock-bar-left", "dock-icon-files", "dock-icon-backlinks"] {
+        assert!(drawn(&mut cx, shown), "{shown}");
+    }
+    assert!(inside(&mut cx, "dock-icon-backlinks", "dock-bar-left"));
+    for hidden in ["dock-right", "title-right", "dock-toggle-right"] {
+        assert!(!drawn(&mut cx, hidden), "{hidden}");
+    }
+}
+
+#[gpui::test]
+fn a_click_on_an_inactive_icon_activates_its_view(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+    move_view(&mut cx, View::Backlinks);
+    assert_eq!(active(&window, &mut cx, Side::Left), Some(View::Backlinks));
+
+    click(&mut cx, "dock-icon-files");
+
+    assert_eq!(active(&window, &mut cx, Side::Left), Some(View::Files));
+    assert!(drawn(&mut cx, "tree-row-0"));
+}
+
+#[gpui::test]
+fn a_click_on_the_active_icon_changes_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+    move_view(&mut cx, View::Backlinks);
+    let before = window
+        .update(&mut cx, |shell, _, _| shell.panes().docks.clone())
+        .unwrap();
+
+    click(&mut cx, "dock-icon-backlinks");
+
+    let after = window
+        .update(&mut cx, |shell, _, _| shell.panes().docks.clone())
+        .unwrap();
+    assert_eq!(after, before);
+}
+
+#[gpui::test]
+fn an_icon_shows_its_name_as_a_tooltip(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    move_view(&mut cx, View::Backlinks);
+    let icon = cx.debug_bounds("dock-icon-backlinks").expect("drawn");
+
+    cx.simulate_mouse_move(icon.center(), None, Modifiers::none());
+    cx.executor().advance_clock(Duration::from_millis(500));
+    cx.run_until_parked();
+
+    assert!(drawn(&mut cx, "tooltip-Backlinks"));
+}
+
+#[gpui::test]
+fn a_focused_tree_keeps_focus_when_it_moves(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    focus_tree(&window, &mut cx);
+
+    move_view(&mut cx, View::Files);
+
+    assert!(inside(&mut cx, "dock-icon-files", "dock-right"));
+    assert_eq!(active(&window, &mut cx, Side::Right), Some(View::Files));
+    let focused = window
+        .update(&mut cx, |shell, window, cx| {
+            shell.tree_focus_handle(cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(focused);
+}
+
+#[gpui::test]
+fn covering_the_focused_tree_lands_focus_on_the_note(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    focus_tree(&window, &mut cx);
+
+    move_view(&mut cx, View::Backlinks);
+
+    assert!(editor_focused(&window, &mut cx));
+}
+
+#[gpui::test]
+fn an_empty_left_dock_draws_no_toggle(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    move_view(&mut cx, View::Files);
+
+    for hidden in ["dock-left", "title-left", "dock-toggle-left"] {
+        assert!(!drawn(&mut cx, hidden), "{hidden}");
+    }
+    assert!(drawn(&mut cx, "title-drag-start"));
+}
+
+#[gpui::test]
+fn the_dock_icon_point_lands_on_the_icon(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    let lands = |cx: &mut VisualTestContext, selector: &'static str, side, index| {
+        let bounds = cx.debug_bounds(selector).expect("drawn");
+        let at = cx.update(|window, _| AppShell::dock_icon_point(side, index, window));
+        assert!(
+            bounds.contains(&at),
+            "{selector}: {at:?} outside {bounds:?}"
+        );
+    };
+    lands(&mut cx, "panel-header-files", Side::Left, 0);
+
+    move_view(&mut cx, View::Backlinks);
+    lands(&mut cx, "dock-icon-files", Side::Left, 0);
+    lands(&mut cx, "dock-icon-backlinks", Side::Left, 1);
+
+    move_view(&mut cx, View::Files);
+    move_view(&mut cx, View::Backlinks);
+    lands(&mut cx, "dock-icon-files", Side::Right, 0);
+    lands(&mut cx, "dock-icon-backlinks", Side::Right, 1);
 }
