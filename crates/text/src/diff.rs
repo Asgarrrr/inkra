@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::time::Instant;
 
 use similar::{Algorithm, DiffTag, capture_diff_slices};
 use unicode_segmentation::UnicodeSegmentation;
@@ -164,21 +163,16 @@ impl Buffer {
     /// Returns false and edits nothing if this buffer's version moved since `diff`'s base:
     /// its hunks would land on the wrong text.
     #[must_use]
-    pub fn apply_diff(&mut self, now: Instant, diff: &Diff) -> bool {
+    pub fn apply_diff(&mut self, diff: &Diff) -> bool {
         if self.version() != diff.base_version {
             return false;
         }
-        if diff.hunks.is_empty() {
-            return true;
-        }
-        self.finalize_transaction();
-        self.transact_at(now, |buffer| {
+        self.transact(|buffer| {
             // Last first, so each edit leaves the ranges before it valid.
             for hunk in diff.hunks.iter().rev() {
                 buffer.replace(hunk.range.clone(), &hunk.text);
             }
         });
-        self.finalize_transaction();
         true
     }
 }

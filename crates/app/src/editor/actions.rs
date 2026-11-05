@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use gpui::{ClipboardItem, Context, Window, actions};
-use inkra_editor::{Copied, LogicalMovement};
+use inkra_editor::{Copied, EditorState, LogicalMovement};
 
 use super::motion::Vertical;
 use super::{EditorView, LinkFollowed};
@@ -63,8 +63,7 @@ impl EditorView {
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        let copied = self.edit_buffer(window, cx, |state, buffer| state.cut(buffer, now));
+        let copied = self.edit_buffer(window, cx, EditorState::cut);
         cx.write_to_clipboard(to_clipboard(copied));
     }
 
@@ -72,9 +71,8 @@ impl EditorView {
         let Some(copied) = cx.read_from_clipboard().as_ref().and_then(from_clipboard) else {
             return;
         };
-        let now = Instant::now();
         self.edit_buffer(window, cx, |state, buffer| {
-            state.paste(buffer, now, &copied);
+            state.paste(buffer, &copied);
         });
     }
 

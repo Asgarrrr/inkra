@@ -61,7 +61,7 @@ impl EditorState {
         self.marked_range = range;
     }
 
-    /// Every buffer mutation goes through here: one gesture is one undo step, and the composing region clears.
+    /// Every grouped buffer mutation goes through here: one gesture is one undo step, and the composing region clears.
     pub fn edit(
         &mut self,
         buffer: &mut Buffer,
@@ -71,6 +71,17 @@ impl EditorState {
     ) {
         let start = range.start;
         buffer.transact_at(now, |buffer| buffer.replace(range, text));
+        self.edited(start, text);
+    }
+
+    /// `edit` as one undo step that merges with the typing on neither side.
+    fn edit_ungrouped(&mut self, buffer: &mut Buffer, range: Range<ByteOffset>, text: &str) {
+        let start = range.start;
+        buffer.transact(|buffer| buffer.replace(range, text));
+        self.edited(start, text);
+    }
+
+    fn edited(&mut self, start: ByteOffset, text: &str) {
         // An edit moves the text under the caret, so a remembered column no longer describes it.
         self.selection.collapse_to(start + text.len(), Goal::None);
         self.marked_range = None;
@@ -132,39 +143,29 @@ impl EditorState {
         self.target(buffer).1
     }
 
-    /// `copy`, then removes what it took; sealed on both sides so it can't swallow adjacent typing.
-    pub fn cut(&mut self, buffer: &mut Buffer, now: Instant) -> Copied {
+    /// `copy`, then removes what it took in a step of its own, so it can't swallow adjacent typing.
+    pub fn cut(&mut self, buffer: &mut Buffer) -> Copied {
         let (range, copied) = self.target(buffer);
-        // An empty range is the empty last line: nothing to remove, so skip the edit — otherwise
-        // `grouping_blocked` is set by a transaction that never lands.
-        if !range.is_empty() {
-            buffer.finalize_transaction();
-            self.edit(buffer, now, range, "");
-            buffer.finalize_transaction();
-        }
+        self.edit_ungrouped(buffer, range, "");
         copied
     }
 
-    /// Finalizing on *both* sides is load-bearing: `close` clears the flag on push, so sealing
-    /// only beforehand leaves the next keystroke free to merge into the paste.
-    pub fn paste(&mut self, buffer: &mut Buffer, now: Instant, copied: &Copied) {
-        // Before the seal: a paste of nothing must not split the surrounding typing run.
+    pub fn paste(&mut self, buffer: &mut Buffer, copied: &Copied) {
+        // An empty paste must not replace the selection with nothing.
         if copied.text.is_empty() {
             return;
         }
 
-        buffer.finalize_transaction();
         if copied.whole_line && self.selection.is_empty() {
             let caret = self.cursor();
             let start = self.line(buffer).start;
-            self.edit(buffer, now, start..start, &copied.text);
-            // The insertion sits before the caret, so it keeps its column; `edit` alone would reset it to line start.
+            self.edit_ungrouped(buffer, start..start, &copied.text);
+            // The insertion sits before the caret, so it keeps its column; `edit_ungrouped` alone would reset it to line start.
             self.selection
                 .collapse_to(caret + copied.text.len(), Goal::None);
         } else {
-            self.insert(buffer, now, &copied.text);
+            self.edit_ungrouped(buffer, self.selection.range(), &copied.text);
         }
-        buffer.finalize_transaction();
     }
 
     /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a

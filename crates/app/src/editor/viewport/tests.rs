@@ -149,7 +149,7 @@ fn parked_through(old: &str, new: &str) -> (TopLine, TopLine) {
     let mut buffer = Buffer::new(old);
     let parked = top.park(&mut buffer);
     let diff = inkra_text::diff(buffer.version(), old, new);
-    assert!(buffer.apply_diff(std::time::Instant::now(), &diff));
+    assert!(buffer.apply_diff(&diff));
     (parked.unpark(&mut buffer), top.mapped(&diff))
 }
 

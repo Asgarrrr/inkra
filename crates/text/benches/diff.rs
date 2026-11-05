@@ -1,5 +1,4 @@
 use std::hint::black_box;
-use std::time::Instant;
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use inkra_text::{Buffer, Version, diff};
@@ -51,12 +50,11 @@ fn bench_case(c: &mut Criterion, name: &str, old: &str, new: &str) {
         b.iter(|| diff(Version::default(), black_box(old), black_box(new)));
     });
     let diff = diff(Version::default(), old, new);
-    let now = Instant::now();
     group.bench_function("apply", |b| {
         b.iter_batched(
             || Buffer::new(old),
             |mut buffer| {
-                assert!(buffer.apply_diff(now, &diff));
+                assert!(buffer.apply_diff(&diff));
                 buffer
             },
             BatchSize::LargeInput,

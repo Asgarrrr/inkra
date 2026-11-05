@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::TestAppContext;
 use inkra_text::Buffer;
@@ -432,7 +431,7 @@ fn scrolled_with_a_reload(
         .update(&mut cx, |view, _, cx| {
             view.input.buffer().update(cx, |buffer, _| {
                 let diff = Arc::new(inkra_text::diff(buffer.version(), &old, &new));
-                assert!(buffer.apply_diff(Instant::now(), &diff));
+                assert!(buffer.apply_diff(&diff));
                 diff
             })
         })

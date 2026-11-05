@@ -198,6 +198,7 @@ Zed does not hit this because its edit goes through the ungrouped
 never be merged into; every mutation we have takes `now` and goes through
 `transact_at`. So both `cut` and `paste` call `finalize_transaction` before the
 edit *and* again after it.
+Superseded: `cut`, `paste` and `apply_diff` now edit through `Buffer::transact`, which needs no seal.
 
 **An empty clipboard must change nothing — and `Some("")` is empty.**
 `item.text()` returns `Option<String>` (`gpui/src/platform.rs:2738`), but a

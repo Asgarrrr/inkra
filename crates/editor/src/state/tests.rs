@@ -275,7 +275,7 @@ fn cut_removes_what_it_put_on_the_clipboard_in_one_undo_step() {
     state.move_to(&buffer, at(0), false);
     state.move_to(&buffer, at(2), true);
 
-    assert_eq!(state.cut(&mut buffer, Instant::now()), span("ab"));
+    assert_eq!(state.cut(&mut buffer), span("ab"));
     assert_eq!(buffer.text(), "c");
 
     assert!(state.undo(&mut buffer));
@@ -287,7 +287,7 @@ fn cut_with_no_selection_removes_the_newline_too() {
     let (mut buffer, mut state) = editor("x\ny");
     state.move_to(&buffer, at(0), false);
 
-    assert_eq!(state.cut(&mut buffer, Instant::now()), line("x\n"));
+    assert_eq!(state.cut(&mut buffer), line("x\n"));
     assert_eq!(buffer.text(), "y");
 }
 
@@ -296,7 +296,7 @@ fn cut_on_an_empty_last_line_copies_a_newline_and_removes_nothing() {
     let (mut buffer, mut state) = editor("x\n");
     state.move_to(&buffer, at(2), false);
 
-    assert_eq!(state.cut(&mut buffer, Instant::now()), line("\n"));
+    assert_eq!(state.cut(&mut buffer), line("\n"));
     assert_eq!(buffer.text(), "x\n");
     assert!(!state.undo(&mut buffer), "an empty removal is not an edit");
 }
@@ -309,7 +309,7 @@ fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
     state.move_to(&buffer, at(0), false);
     state.insert(&mut buffer, start, "a");
     state.move_to(&buffer, buffer.len(), false);
-    state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
+    state.cut(&mut buffer);
     state.move_to(&buffer, at(1), false);
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
     assert_eq!(buffer.text(), "abx\n");
@@ -322,7 +322,7 @@ fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
 fn pasting_a_span_replaces_the_selection() {
     let (mut buffer, mut state) = editor("abc");
     state.select_all(&buffer);
-    state.paste(&mut buffer, Instant::now(), &span("Z"));
+    state.paste(&mut buffer, &span("Z"));
     assert_eq!(buffer.text(), "Z");
 }
 
@@ -330,7 +330,7 @@ fn pasting_a_span_replaces_the_selection() {
 fn pasting_a_line_over_a_selection_replaces_it_like_any_other_text() {
     let (mut buffer, mut state) = editor("abc");
     state.select_all(&buffer);
-    state.paste(&mut buffer, Instant::now(), &line("Z\n"));
+    state.paste(&mut buffer, &line("Z\n"));
     assert_eq!(buffer.text(), "Z\n");
 }
 
@@ -339,7 +339,7 @@ fn pasting_a_line_at_a_bare_caret_inserts_above_and_keeps_the_column() {
     let (mut buffer, mut state) = editor("abc\ndef");
     state.move_to(&buffer, at(5), false);
 
-    state.paste(&mut buffer, Instant::now(), &line("XY\n"));
+    state.paste(&mut buffer, &line("XY\n"));
     assert_eq!(buffer.text(), "abc\nXY\ndef");
     assert_eq!(state.cursor(), at(8));
 }
@@ -350,11 +350,7 @@ fn a_paste_merges_with_the_typing_on_neither_side() {
     let start = Instant::now();
 
     state.insert(&mut buffer, start, "a");
-    state.paste(
-        &mut buffer,
-        start + inkra_text::GROUP_INTERVAL / 2,
-        &span("Z"),
-    );
+    state.paste(&mut buffer, &span("Z"));
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
     assert_eq!(buffer.text(), "aZb");
 
@@ -371,7 +367,7 @@ fn a_cut_merges_with_the_typing_on_neither_side() {
 
     state.insert(&mut buffer, start, "a");
     state.move_(&buffer, LogicalMovement::Left, true);
-    state.cut(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2);
+    state.cut(&mut buffer);
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
     assert_eq!(buffer.text(), "xyb");
 
@@ -387,11 +383,7 @@ fn a_paste_of_nothing_changes_nothing_and_splits_no_run() {
     let start = Instant::now();
 
     state.insert(&mut buffer, start, "a");
-    state.paste(
-        &mut buffer,
-        start + inkra_text::GROUP_INTERVAL / 2,
-        &span(""),
-    );
+    state.paste(&mut buffer, &span(""));
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
     assert_eq!(buffer.text(), "ab");
 
@@ -400,14 +392,22 @@ fn a_paste_of_nothing_changes_nothing_and_splits_no_run() {
 }
 
 #[test]
+fn a_paste_of_nothing_keeps_the_selection_text() {
+    let (mut buffer, mut state) = editor("abc");
+    state.select_all(&buffer);
+    state.paste(&mut buffer, &span(""));
+    assert_eq!(buffer.text(), "abc");
+}
+
+#[test]
 fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
     // Pinned: the stated price of synthesizing the newline in `cut` as well as in `copy`.
     let (mut buffer, mut state) = editor("a");
     state.move_to(&buffer, at(0), false);
 
-    let copied = state.cut(&mut buffer, Instant::now());
+    let copied = state.cut(&mut buffer);
     assert_eq!(buffer.text(), "");
-    state.paste(&mut buffer, Instant::now(), &copied);
+    state.paste(&mut buffer, &copied);
     assert_eq!(buffer.text(), "a\n");
 }
 
