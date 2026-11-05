@@ -9,8 +9,8 @@ use crate::editor::EditorView;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::sidebar::{Cursor, NewFolder, NewNote};
-use crate::theme;
-use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
+use crate::theme::{self, store::ThemeStore};
+use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
@@ -117,6 +117,7 @@ pub(crate) struct AppShell {
     notice: Option<Notice>,
     /// Painted under everything where the window has no blur: an off-screen shot.
     backdrop: Option<Rgba>,
+    themes: ThemeStore,
 }
 
 impl AppShell {
@@ -155,6 +156,10 @@ impl AppShell {
             },
         )
         .detach();
+        cx.subscribe(&notes, |shell, _notes, event: &ConfigChanged, cx| {
+            shell.config_changed(&event.0, cx);
+        })
+        .detach();
         cx.observe_window_appearance(window, |_, window, cx| {
             theme::follow_system(window.appearance(), cx);
         })
@@ -191,6 +196,7 @@ impl AppShell {
                 cleared_by_save: None,
             }),
             backdrop: None,
+            themes: ThemeStore::default(),
         }
     }
 

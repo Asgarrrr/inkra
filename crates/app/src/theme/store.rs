@@ -4,8 +4,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::SharedString;
-use inkra_vault::{CONFIG_DIR, Fs, VaultError};
+use gpui::{SharedString, Task};
+use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
 use super::{Theme, builtin, file};
@@ -20,20 +20,53 @@ pub(crate) enum Choice {
 
 #[derive(Default)]
 pub(crate) struct Resolved {
+    /// As read, even when its theme was not found.
+    pub(crate) choice: Choice,
     /// `None` follows the system.
     pub(crate) theme: Option<Arc<Theme>>,
     pub(crate) notices: Vec<String>,
+}
+
+/// The adopted choice, and the reload that replaces it when its files change.
+#[derive(Default)]
+pub(crate) struct ThemeStore {
+    pub(crate) choice: Choice,
+    /// Held: a newer reload drops it, so a stale one never lands.
+    pub(crate) reload: Option<Task<()>>,
+}
+
+impl ThemeStore {
+    /// Whether a change at `path` can change what `load` resolves.
+    pub(crate) fn concerns(&self, path: &RelPath) -> bool {
+        let config = Path::new(CONFIG_DIR);
+        let path = path.as_path();
+        if path == config || path == config.join("settings.json") {
+            return true;
+        }
+        match &self.choice {
+            Choice::Named(name) if builtin::named(name).is_none() => {
+                let themes = config.join("themes");
+                path == themes || path == themes.join(format!("{name}.json"))
+            }
+            Choice::System | Choice::Named(_) => false,
+        }
+    }
 }
 
 /// Never fails: a missing or broken file falls back to the system theme and says why.
 pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
     let config = root.join(CONFIG_DIR);
     let mut notices = Vec::new();
-    let theme = match choice(fs, &config, &mut notices).await {
+    let choice = choice(fs, &config, &mut notices).await;
+    let theme = match &choice {
         Choice::System => None,
-        Choice::Named(name) => named(fs, &config, &name, &mut notices).await,
+        Choice::Named(name) => named(fs, &config, name, &mut notices).await,
     };
-    Resolved { theme, notices }
+    Resolved {
+        choice,
+        theme,
+        notices,
+    }
 }
 
 async fn choice(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> Choice {

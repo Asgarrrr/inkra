@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::EventEmitter;
-use inkra_vault::{EntryId, Stamp, VaultError};
+use inkra_vault::{EntryId, RelPath, Stamp, VaultError};
 
 use super::NoteStore;
 
@@ -67,3 +67,9 @@ impl EventEmitter<OpenFailed> for NoteStore {}
 pub(crate) struct GoneChanged(pub(crate) EntryId);
 
 impl EventEmitter<GoneChanged> for NoteStore {}
+
+/// Paths under the vault's `CONFIG_DIR` changed, once per batch of the watch's events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigChanged(pub(crate) Vec<RelPath>);
+
+impl EventEmitter<ConfigChanged> for NoteStore {}

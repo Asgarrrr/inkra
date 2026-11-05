@@ -112,6 +112,48 @@ fn a_rescan_event_asks_for_a_rescan() {
 }
 
 #[test]
+fn a_path_under_the_config_folder_is_config() {
+    let config = |path: &str| Some(Changed::Config(rel(path)));
+
+    assert_eq!(
+        changed("/var/vault/.inkra/settings.json"),
+        config(".inkra/settings.json")
+    );
+    assert_eq!(changed("/var/vault/.inkra"), config(".inkra"));
+    assert_eq!(
+        watch().changed(&PathEvent {
+            path: PathBuf::from("/var/vault/.inkra/themes/x.json"),
+            rescan: true,
+        }),
+        config(".inkra/themes/x.json"),
+        "lost events there need no scan"
+    );
+}
+
+#[test]
+fn our_own_temporary_file_in_the_config_folder_is_dropped() {
+    assert_eq!(changed("/var/vault/.inkra/.inkra-1.tmp"), None);
+}
+
+#[test]
+fn only_the_top_config_folder_is_config() {
+    assert_eq!(changed("/var/vault/.obsidian/app.json"), None);
+    assert_eq!(changed("/var/vault/notes/.inkra/settings.json"), None);
+    assert_eq!(changed("/var/vault/.inkra-notes/a.md"), None);
+}
+
+#[test]
+fn a_config_path_makes_nothing_pending() {
+    let mut pending = Pending::default();
+    pending.add(Changed::Config(rel(".inkra/settings.json")));
+    assert!(pending.is_empty());
+
+    let mut pending = Pending::Everything;
+    pending.add(Changed::Config(rel(".inkra")));
+    assert_eq!(pending, Pending::Everything);
+}
+
+#[test]
 fn a_path_makes_its_folder_pending_and_not_itself() {
     let mut pending = Pending::default();
 
