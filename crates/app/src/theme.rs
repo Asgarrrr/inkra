@@ -2,6 +2,7 @@ pub(crate) mod builtin;
 mod colors;
 mod file;
 mod markdown;
+pub(crate) mod picker;
 pub(crate) mod store;
 
 use std::sync::Arc;

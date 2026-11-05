@@ -351,6 +351,11 @@ const CATALOGUE: &[Scene] = &[
         open: command_palette::open,
     },
     Scene {
+        name: "theme-picker",
+        shows: "Select theme from cmd-shift-p, then down: the built-in rows, Flexoki Dark selected and previewed",
+        open: theme_picker,
+    },
+    Scene {
         name: "markdown-blocks",
         shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote",
         open: markdown_blocks::concealed,
@@ -451,6 +456,16 @@ fn editor_heading_revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     let keys = format!("cmd-up {}", "right ".repeat(5));
     stage.keys(window, keys.trim_end());
+    window
+}
+
+fn theme_picker(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(&[("index.md", "# Index\n\nThe front page.\n")]);
+    stage.click_tree_row(window, 0.);
+    stage.focus(window);
+    stage.keys(window, "cmd-shift-p");
+    stage.type_text(window, "theme");
+    stage.keys(window, "enter down");
     window
 }
 

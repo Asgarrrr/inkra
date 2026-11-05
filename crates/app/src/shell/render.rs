@@ -168,6 +168,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_backlinks))
+            .on_action(cx.listener(Self::select_theme))
             .on_action(cx.listener(Self::quit))
             .on_mouse_move(cx.listener(Self::title_drag_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::title_drag_release))

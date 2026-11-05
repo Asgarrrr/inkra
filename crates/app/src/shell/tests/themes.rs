@@ -2,12 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use futures::executor::block_on;
-use gpui::{TestAppContext, WindowHandle};
+use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::open_vault;
+use super::{no_vault, open_vault, shell_focused};
+use crate::picker::PickerDelegate as _;
 use crate::shell::AppShell;
+use crate::theme::picker::ThemeDelegate;
 use crate::theme::{self, Appearance, Theme, builtin, store::load};
 
 const SETTINGS: &str = "/vault/.inkra/settings.json";
@@ -124,4 +126,65 @@ fn a_lost_events_rescan_reloads_the_theme(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!(fs.loads(Path::new(SETTINGS)), loads + 1);
+}
+
+/// The open theme picker's row labels and selected row; `None` when it is not open.
+fn theme_picker(
+    window: WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+) -> Option<(Vec<String>, Option<usize>)> {
+    window
+        .update(cx, |shell, _, cx| {
+            let picker = shell.modal_picker::<ThemeDelegate>()?.read(cx);
+            let labels = (0..picker.delegate.match_count())
+                .map(|ix| picker.delegate.row_label(ix).to_string())
+                .collect();
+            Some((labels, picker.selected()))
+        })
+        .expect("the shell is open")
+}
+
+/// From the palette, as a person picks it.
+fn open_theme_picker(cx: &mut VisualTestContext) {
+    cx.simulate_keystrokes("cmd-shift-p");
+    cx.simulate_input("theme");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn down_previews_and_escape_restores(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    let (window, _notes, mut visual) = shell_focused(cx, &fs);
+    visual.update(|_, cx| theme::install(None, cx));
+    let light = builtin::of(Appearance::Light);
+
+    open_theme_picker(&mut visual);
+    let (_, selected) = theme_picker(window, &mut visual).expect("the theme picker is open");
+    assert_eq!(selected, Some(0), "System");
+    assert!(Arc::ptr_eq(&current(&mut visual), light));
+
+    visual.simulate_keystrokes("down");
+    visual.run_until_parked();
+    assert!(Arc::ptr_eq(
+        &current(&mut visual),
+        builtin::of(Appearance::Dark)
+    ));
+
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    assert!(theme_picker(window, &mut visual).is_none());
+    assert!(Arc::ptr_eq(&current(&mut visual), light));
+    assert!(visual.update(|_, cx| theme::follows_system(cx)));
+}
+
+#[gpui::test]
+fn without_a_vault_the_rows_are_the_builtins(cx: &mut TestAppContext) {
+    let (window, mut visual) = no_vault(cx);
+
+    open_theme_picker(&mut visual);
+
+    let (labels, _) = theme_picker(window, &mut visual).expect("the theme picker is open");
+    assert_eq!(labels, ["System", "Flexoki Dark", "Flexoki Light"]);
 }
