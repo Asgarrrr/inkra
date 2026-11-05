@@ -465,7 +465,8 @@ fn theme_picker(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     stage.keys(window, "cmd-shift-p");
     stage.type_text(window, "theme");
-    stage.keys(window, "enter down");
+    stage.keys(window, "enter");
+    stage.keys(window, "down");
     window
 }
 

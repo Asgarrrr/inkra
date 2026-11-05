@@ -27,12 +27,16 @@ pub(crate) struct Resolved {
     pub(crate) notices: Vec<String>,
 }
 
-/// The adopted choice, and the reload that replaces it when its files change.
+/// The adopted choice, and the tasks that load, list and write it.
 #[derive(Default)]
 pub(crate) struct ThemeStore {
     pub(crate) choice: Choice,
     /// Held: a newer reload drops it, so a stale one never lands.
     pub(crate) reload: Option<Task<()>>,
+    /// The vault's themes, listed before the picker opens.
+    pub(crate) listing: Option<Task<()>>,
+    /// The last write of the choice; the next one awaits it, so two picks land in order.
+    pub(crate) write: Option<Task<()>>,
 }
 
 impl ThemeStore {
@@ -134,6 +138,60 @@ async fn named(
             None
         }
     }
+}
+
+/// The vault's parsable themes by stem, sorted; a built-in's name, `system` and a broken file are left out.
+pub(crate) async fn list(fs: &dyn Fs, root: &Path) -> Vec<(SharedString, Arc<Theme>)> {
+    let Ok(files) = fs.list_files(&root.join(CONFIG_DIR).join("themes")).await else {
+        return Vec::new();
+    };
+    let mut themes = Vec::new();
+    for path in files {
+        let json = path
+            .extension()
+            .is_some_and(|extension| extension == "json");
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        // `load` reads the name "system" as the choice, never as a file.
+        if !json || stem == "system" || builtin::named(stem).is_some() {
+            continue;
+        }
+        let Ok(loaded) = fs.load(&path).await else {
+            continue;
+        };
+        if let Ok(parsed) = file::parse(&loaded.text) {
+            themes.push((SharedString::from(stem.to_owned()), Arc::new(parsed.theme)));
+        }
+    }
+    themes.sort_by(|(a, _), (b, _)| a.cmp(b));
+    themes
+}
+
+/// Sets `theme` in `settings.json` and keeps every other key; a file that is not an object is left alone.
+pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> Result<(), String> {
+    let failed =
+        |reason: &dyn std::fmt::Display| format!("Couldn't save the theme choice: {reason}");
+    let path = root.join(CONFIG_DIR).join("settings.json");
+    let not_an_object = format!("{CONFIG_DIR}/settings.json is not a JSON object");
+    let mut settings = match fs.load(&path).await {
+        Ok(loaded) => serde_json::from_str::<Value>(&loaded.text)
+            .ok()
+            .filter(Value::is_object)
+            .ok_or_else(|| failed(&not_an_object))?,
+        Err(error) if is_not_found(&error) => Value::Object(serde_json::Map::new()),
+        Err(error) => return Err(failed(&error)),
+    };
+    let name = match choice {
+        Choice::System => "system",
+        Choice::Named(name) => name.as_ref(),
+    };
+    settings["theme"] = Value::from(name);
+    let mut text = serde_json::to_string_pretty(&settings).map_err(|error| failed(&error))?;
+    text.push('\n');
+    fs.replace(&path, &text)
+        .await
+        .map_err(|error| failed(&error))
 }
 
 fn is_not_found(error: &VaultError) -> bool {

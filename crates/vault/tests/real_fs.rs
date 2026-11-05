@@ -328,6 +328,22 @@ fn read_dir_skips_other_extensions_and_symlinks() {
 }
 
 #[test]
+fn list_files_skips_dotfiles_dirs_and_symlinks() {
+    let dir = TempDir::new("list-files");
+    fs::write(dir.0.join("b.json"), "b").expect("write");
+    fs::write(dir.0.join("a.txt"), "a").expect("write");
+    fs::write(dir.0.join(".hidden.json"), "h").expect("write");
+    fs::create_dir(dir.0.join("sub")).expect("mkdir");
+    fs::write(dir.0.join("sub/nested.json"), "n").expect("write");
+    std::os::unix::fs::symlink(dir.0.join("b.json"), dir.0.join("link.json"))
+        .expect("create symlink");
+
+    let files = block_on(RealFs.list_files(&dir.0)).expect("list_files");
+
+    assert_eq!(files, vec![dir.0.join("a.txt"), dir.0.join("b.json")]);
+}
+
+#[test]
 fn rename_moves_the_note_and_keeps_its_identity() {
     let dir = TempDir::new("rename-identity");
     let from = dir.0.join("before.md");

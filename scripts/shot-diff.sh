@@ -40,6 +40,8 @@ compare() {
   local before=$1 after=$2
   shift 2
   local allowed=" $* "
+  [ -d "$before" ] && [ -d "$after" ] || { echo "ERROR: $before or $after is not a directory" >&2; exit 1; }
+  [ -n "$(find "$before" -maxdepth 1 -name '*.png' -print -quit)" ] || { echo "ERROR: $before holds no png" >&2; exit 1; }
   local same=0 diff=0 added=0 missing=0 failed=0 png stem
   for png in "$before"/*.png; do
     stem=$(basename "$png" .png)

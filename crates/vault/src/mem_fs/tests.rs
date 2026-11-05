@@ -527,3 +527,50 @@ fn replace_creates_missing_folders_and_overwrites() {
     assert_eq!(fs.read_to_string(path).as_deref(), Some("two"));
     assert!(block_on(fs.check_dir(Path::new("/support/sessions"))).is_ok());
 }
+
+#[test]
+fn list_files_lists_direct_regular_files_sorted() {
+    let fs = MemFs::new();
+    for file in ["b.json", "a.txt", ".hidden", "sub/nested.json"] {
+        fs.insert_file(format!("/vault/themes/{file}"), "x");
+    }
+    let dir = Path::new("/vault/themes");
+    let listed_before = fs.read_dirs(dir);
+
+    let Ok(files) = block_on(fs.list_files(dir)) else {
+        panic!("list_files must succeed");
+    };
+
+    assert_eq!(
+        files,
+        [
+            PathBuf::from("/vault/themes/a.txt"),
+            PathBuf::from("/vault/themes/b.json"),
+        ]
+    );
+    assert_eq!(fs.read_dirs(dir), listed_before, "not a vault listing");
+    let missing = block_on(fs.list_files(Path::new("/vault/gone")));
+    assert!(matches!(
+        missing,
+        Err(VaultError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound
+    ));
+}
+
+#[test]
+fn replace_honours_unwritable() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/.inkra/settings.json", "before");
+    fs.make_unwritable("/vault/.inkra/settings.json");
+
+    let result = block_on(fs.replace(Path::new("/vault/.inkra/settings.json"), "after"));
+
+    assert!(matches!(
+        result,
+        Err(VaultError::Io { source, .. }) if source.kind() == std::io::ErrorKind::PermissionDenied
+    ));
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/.inkra/settings.json"))
+            .as_deref(),
+        Some("before")
+    );
+}
