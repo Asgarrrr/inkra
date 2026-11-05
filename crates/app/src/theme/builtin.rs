@@ -94,11 +94,13 @@ pub(crate) fn of(appearance: Appearance) -> &'static Arc<Theme> {
     }
 }
 
-/// The built-in theme `settings.json` names.
+/// Every built-in by the name `settings.json` gives it, in the picker's order.
+pub(crate) fn all() -> [(&'static str, &'static Arc<Theme>); 2] {
+    [("Flexoki Dark", &*DARK), ("Flexoki Light", &*LIGHT)]
+}
+
 pub(crate) fn named(name: &str) -> Option<&'static Arc<Theme>> {
-    match name {
-        "Flexoki Dark" => Some(&DARK),
-        "Flexoki Light" => Some(&LIGHT),
-        _ => None,
-    }
+    all()
+        .into_iter()
+        .find_map(|(builtin, theme)| (builtin == name).then_some(theme))
 }

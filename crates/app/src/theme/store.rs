@@ -1,10 +1,10 @@
 //! The vault's theme choice in `.inkra/settings.json`, resolved to a theme (D2).
 
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{SharedString, Task};
+use gpui::{AppContext as _, Context, SharedString, Task};
 use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
@@ -16,6 +16,26 @@ pub(crate) enum Choice {
     System,
     /// A built-in's name, else the stem of a file in `.inkra/themes/`.
     Named(SharedString),
+}
+
+impl Choice {
+    /// A theme file by this stem is never listed: its name reads as this choice.
+    const SYSTEM: &str = "system";
+
+    /// `theme` in `settings.json`; a missing one follows the system.
+    fn from_setting(name: Option<&str>) -> Self {
+        match name {
+            Some(name) if name != Self::SYSTEM => Self::Named(name.to_owned().into()),
+            _ => Self::System,
+        }
+    }
+
+    fn setting(&self) -> &str {
+        match self {
+            Self::System => Self::SYSTEM,
+            Self::Named(name) => name,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -30,16 +50,59 @@ pub(crate) struct Resolved {
 /// The adopted choice, and the tasks that load, list and write it.
 #[derive(Default)]
 pub(crate) struct ThemeStore {
-    pub(crate) choice: Choice,
-    /// Held: a newer reload drops it, so a stale one never lands.
-    pub(crate) reload: Option<Task<()>>,
+    choice: Choice,
+    /// Held: a newer reload or a pick drops it, so a stale one never lands.
+    reload: Option<Task<()>>,
     /// The vault's themes, listed before the picker opens.
-    pub(crate) listing: Option<Task<()>>,
+    listing: Option<Task<()>>,
     /// The last write of the choice; the next one awaits it, so two picks land in order.
-    pub(crate) write: Option<Task<()>>,
+    write: Option<Task<()>>,
 }
 
 impl ThemeStore {
+    pub(crate) fn choice(&self) -> &Choice {
+        &self.choice
+    }
+
+    pub(crate) fn adopt(&mut self, choice: Choice) {
+        self.choice = choice;
+    }
+
+    pub(crate) fn reload(&mut self, task: Task<()>) {
+        self.reload = Some(task);
+    }
+
+    pub(crate) fn listing(&mut self, task: Task<()>) {
+        self.listing = Some(task);
+    }
+
+    /// Adopts `choice` over any reload in flight, and writes it to `vault` after the previous write.
+    pub(crate) fn pick<V: 'static>(
+        &mut self,
+        choice: Choice,
+        vault: Option<(Arc<dyn Fs>, PathBuf)>,
+        cx: &mut Context<V>,
+        failed: fn(&mut V, String, &mut Context<V>),
+    ) {
+        self.choice = choice.clone();
+        self.reload = None;
+        let Some((fs, root)) = vault else {
+            return;
+        };
+        let previous = self.write.take();
+        self.write = Some(cx.spawn(async move |view, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let written = cx
+                .background_spawn(async move { write_choice(&*fs, &root, &choice).await })
+                .await;
+            if let Err(text) = written {
+                view.update(cx, |view, cx| failed(view, text, cx)).ok();
+            }
+        }));
+    }
+
     /// Whether a change at `path` can change what `load` resolves.
     pub(crate) fn concerns(&self, path: &RelPath) -> bool {
         let config = Path::new(CONFIG_DIR);
@@ -84,10 +147,7 @@ async fn choice(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> Choice
         }
     };
     match serde_json::from_str::<Value>(&text) {
-        Ok(settings) => match settings.get("theme").and_then(Value::as_str) {
-            Some(name) if name != "system" => Choice::Named(name.to_owned().into()),
-            _ => Choice::System,
-        },
+        Ok(settings) => Choice::from_setting(settings.get("theme").and_then(Value::as_str)),
         Err(error) => {
             notices.push(file::describe(
                 &format!("{CONFIG_DIR}/settings.json"),
@@ -153,8 +213,7 @@ pub(crate) async fn list(fs: &dyn Fs, root: &Path) -> Vec<(SharedString, Arc<The
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
-        // `load` reads the name "system" as the choice, never as a file.
-        if !json || stem == "system" || builtin::named(stem).is_some() {
+        if !json || stem == Choice::SYSTEM || builtin::named(stem).is_some() {
             continue;
         }
         let Ok(loaded) = fs.load(&path).await else {
@@ -182,11 +241,7 @@ pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> R
         Err(error) if is_not_found(&error) => Value::Object(serde_json::Map::new()),
         Err(error) => return Err(failed(&error)),
     };
-    let name = match choice {
-        Choice::System => "system",
-        Choice::Named(name) => name.as_ref(),
-    };
-    settings["theme"] = Value::from(name);
+    settings["theme"] = Value::from(choice.setting());
     let mut text = serde_json::to_string_pretty(&settings).map_err(|error| failed(&error))?;
     text.push('\n');
     fs.replace(&path, &text)

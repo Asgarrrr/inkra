@@ -295,3 +295,44 @@ fn a_theme_file_named_system_is_not_a_row(cx: &mut TestAppContext) {
     let (labels, _) = theme_picker(window, &mut visual).expect("the theme picker is open");
     assert_eq!(labels, ["System", "Flexoki Dark", "Flexoki Light"]);
 }
+
+fn pick(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+    open_theme_picker(cx);
+    assert!(
+        theme_picker(window, cx).is_some(),
+        "the theme picker is open"
+    );
+    cx.simulate_input(name);
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn a_pick_beats_a_reload_in_flight(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = solar_vault(cx, "{}");
+    let reload = fs.block_load(SETTINGS);
+    fs.insert_file(SETTINGS, r#"{"theme":"Flexoki Dark"}"#);
+    visual.run_until_parked();
+    let _write = fs.block_load(SETTINGS);
+
+    pick("solar", window, &mut visual);
+    reload.release();
+    visual.run_until_parked();
+
+    assert_eq!(*current(&mut visual), *solar_theme(&fs));
+}
+
+#[gpui::test]
+fn two_quick_picks_write_the_last(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = solar_vault(cx, "{}");
+    let first = fs.block_load(SETTINGS);
+
+    pick("flexoki dark", window, &mut visual);
+    pick("solar", window, &mut visual);
+    first.release();
+    visual.run_until_parked();
+
+    let written = fs.read_to_string(Path::new(SETTINGS)).expect("settings");
+    let settings: serde_json::Value = serde_json::from_str(&written).expect("JSON");
+    assert_eq!(settings["theme"], "solar");
+}
