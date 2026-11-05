@@ -212,6 +212,7 @@ impl NoteStore {
 enum TrashTarget {
     Entry(PathBuf),
     /// Trashed only if the file there has the stamp its `Writer` expects: the note's last write or load.
+    /// No write lands between that read and the trash: saves run on the note's chain, the quit flush skips a trashing note.
     LastWrite(PathBuf, Arc<Writer>),
 }
 

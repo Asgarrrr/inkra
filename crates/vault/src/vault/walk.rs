@@ -175,10 +175,10 @@ impl Vault {
                     seed.found.extend(children);
                 }
                 // Gone, or replaced by a file: its parent is pending too, and reading it drops the folder.
-                Err(VaultError::Io { source, .. })
+                Err(error)
                     if matches!(
-                        source.kind(),
-                        ErrorKind::NotFound | ErrorKind::NotADirectory
+                        error.io_kind(),
+                        Some(ErrorKind::NotFound | ErrorKind::NotADirectory)
                     ) => {}
                 // Its entries stay until the full scan this asks for.
                 Err(_) => seed.reach = Reach::Incomplete,
