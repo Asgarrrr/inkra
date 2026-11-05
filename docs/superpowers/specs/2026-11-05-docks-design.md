@@ -39,6 +39,8 @@ own spec after this one. The note column stays one pane here.
 | `trait Panel` + `Arc<dyn PanelHandle>` in a `Dock` entity | `enum View`, a pure `Docks` value, a `match` in `app` | Zed's panels come from a dozen crates and extensions. Ours are two views in one crate; a trait object would be a plugin system ahead of need. A pure model also tests without a `Window`. Revisit when a view comes from outside `inkra-app`. |
 | A panel moves by its button's context menu only | Menu, palette, and drag | The user asked for views movable at will; with a mouse that means drag. |
 | Bottom dock | None | Both views are columns (D1). |
+| `right_click_menu`: a `deferred` menu owned by the clicked element, focused two frames later with `on_next_frame` | The shell's modal layer, focused at once with `window.focus` | The modal layer already paints last and already closes on every tab action and the palette, so no `deferred` is needed. A focus in the same frame keeps headless tests working; Zed waits for the deferred draw to link the handle. |
+| `ContextMenu` items carry handlers, toggles, submenus, and asides | `(label, action)` entries | Two entries, both actions; a choice dispatches after the focus returns. |
 | Size per panel, resizable | Width per side, fixed | Resize is the chrome spec's S2b, still deferred. |
 | Dock state in the workspace database | The session file | Same intent, our existing store (D4). |
 
@@ -114,10 +116,24 @@ spec's D6 rule, which the user approved again here.
 
 ### Context menu
 
-No menu component exists. `ui::ContextMenu` is new, modelled on Zed's
-(`anchored` and `deferred`), driven by ↑, ↓, ⏎ and Esc. A right-click on a
-header's title or icon opens it with "Move to Left Dock" or "Move to Right
-Dock", and "Hide Dock".
+No menu component exists. `ui::ContextMenu` is new, modelled on Zed's, and
+holds `(label, action)` entries and nothing more. A right-click on a one-view
+header or on an icon opens it with "Move to Left Dock" or "Move to Right Dock",
+and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑,
+↓, ⏎ and Esc.
+
+- The menu lives in the shell's modal layer, anchored at the press: one modal
+  at a time, a picker or a menu. Every tab action and the palette already
+  close it through `dismiss_modal`.
+- It is focused with `window.focus` when it opens, as a picker is.
+- The right press calls `prevent_default`, or the root's focus-on-press takes
+  focus from the menu.
+- A choice closes the menu, focus returns, and then the action is dispatched,
+  as the palette does: it reaches the view the menu left.
+- A press outside, left or right, closes it, as on macOS.
+- Any `change_docks` closes an open menu: it describes the layout it opened on.
+- The menu's entity exists only after a right-click: launch and frames do no
+  extra work.
 
 ### Drag
 

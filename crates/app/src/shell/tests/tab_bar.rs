@@ -39,7 +39,7 @@ fn focus(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> (bool, 
         .unwrap()
 }
 
-fn press(cx: &mut VisualTestContext, selector: &'static str, button: MouseButton) {
+pub(super) fn press(cx: &mut VisualTestContext, selector: &'static str, button: MouseButton) {
     let at = cx.debug_bounds(selector).expect("drawn").center();
     cx.simulate_mouse_down(at, button, Modifiers::none());
     cx.simulate_mouse_up(at, button, Modifiers::none());
