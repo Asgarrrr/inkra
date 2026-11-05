@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e2d69646faa2f8df0829d90330bb12991e21d08dda28a8cdd81abd5e954ccfb8 # shrinks to left = StoredDock { views: ["", "backlinks"], active: 1, shown: false }, right = StoredDock { views: [], active: 0, shown: false }

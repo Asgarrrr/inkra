@@ -8,6 +8,20 @@ pub enum View {
 
 impl View {
     pub const ALL: [View; 2] = [View::Files, View::Backlinks];
+
+    /// The name the session file stores.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Files => "files",
+            Self::Backlinks => "backlinks",
+        }
+    }
+
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|view| view.name() == name)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,10 +78,10 @@ impl Dock {
     }
 }
 
-/// A dock as stored: any views, any index; `Docks::restore` makes it valid.
+/// A dock as stored: any view names, any index; `Docks::restore` makes it valid.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DockState {
-    pub views: Vec<View>,
+pub struct StoredDock {
+    pub views: Vec<String>,
     pub active: usize,
     pub shown: bool,
 }
@@ -99,33 +113,44 @@ impl Docks {
     }
 
     #[must_use]
-    pub fn state(&self, side: Side) -> DockState {
+    pub fn state(&self, side: Side) -> StoredDock {
         let dock = self.dock(side);
-        DockState {
-            views: dock.views.clone(),
+        StoredDock {
+            views: dock
+                .views
+                .iter()
+                .map(|view| view.name().to_owned())
+                .collect(),
             active: dock.active,
             shown: dock.shown,
         }
     }
 
-    /// Keeps each view's first place, left before right; a missing view goes to its default side.
+    /// Keeps each known view's first place, left before right; a missing view goes to its default side.
     #[must_use]
-    pub fn restore(left: DockState, right: DockState) -> Self {
+    pub fn restore(left: StoredDock, right: StoredDock) -> Self {
         let mut held = Vec::with_capacity(View::ALL.len());
-        let [left, right] = [left, right].map(|state| Dock {
-            views: state
+        let [left, right] = [left, right].map(|stored| {
+            let (views, stored_ixs): (Vec<_>, Vec<_>) = stored
                 .views
-                .into_iter()
-                .filter(|&view| {
-                    let first = !held.contains(&view);
-                    if first {
-                        held.push(view);
-                    }
-                    first
+                .iter()
+                .enumerate()
+                .filter_map(|(stored_ix, name)| {
+                    let view = View::named(name).filter(|view| !held.contains(view))?;
+                    held.push(view);
+                    Some((view, stored_ix))
                 })
-                .collect(),
-            active: state.active,
-            shown: state.shown,
+                .unzip();
+            // The stored active view, else its nearest kept entry to the left, else the first.
+            let active = stored_ixs
+                .iter()
+                .rposition(|&stored_ix| stored_ix <= stored.active)
+                .unwrap_or(0);
+            Dock {
+                views,
+                active,
+                shown: stored.shown,
+            }
         });
         let mut docks = Self { left, right };
         let default = Self::default();
@@ -133,9 +158,6 @@ impl Docks {
             if !held.contains(&view) {
                 docks.dock_mut(default.side_of(view)).views.push(view);
             }
-        }
-        for dock in [&mut docks.left, &mut docks.right] {
-            dock.active = dock.active.min(dock.views.len().saturating_sub(1));
         }
         docks
     }

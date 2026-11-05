@@ -1,6 +1,6 @@
 use proptest::prelude::*;
 
-use super::{Dock, DockState, Docks, Side, View};
+use super::{Dock, Docks, Side, StoredDock, View};
 
 #[test]
 fn the_default_puts_files_left_and_backlinks_right_both_shown() {
@@ -185,9 +185,9 @@ fn append_on_the_other_side_moves_to_the_end() {
     assert!(docks.dock(Side::Left).views().is_empty());
 }
 
-fn state(views: &[View], active: usize, shown: bool) -> DockState {
-    DockState {
-        views: views.to_vec(),
+fn state(views: &[View], active: usize, shown: bool) -> StoredDock {
+    StoredDock {
+        views: views.iter().map(|view| view.name().to_owned()).collect(),
         active,
         shown,
     }
@@ -249,6 +249,36 @@ fn state_reads_each_dock() {
     assert_eq!(docks.state(Side::Right), state(&[], 0, true));
 }
 
+fn stored(names: &[&str], active: usize) -> StoredDock {
+    StoredDock {
+        views: names.iter().map(|&name| name.to_owned()).collect(),
+        active,
+        shown: true,
+    }
+}
+
+#[test]
+fn an_unknown_name_before_the_active_keeps_the_active_view() {
+    let docks = Docks::restore(stored(&["graph", "files", "backlinks"], 1), stored(&[], 0));
+    assert_eq!(docks.dock(Side::Left).active(), Some(View::Files));
+}
+
+#[test]
+fn an_active_duplicate_maps_to_its_kept_view() {
+    let docks = Docks::restore(stored(&["files", "files", "backlinks"], 1), stored(&[], 0));
+    assert_eq!(docks.dock(Side::Left).active(), Some(View::Files));
+}
+
+#[test]
+fn views_are_stored_by_these_names() {
+    assert_eq!(View::Files.name(), "files");
+    assert_eq!(View::Backlinks.name(), "backlinks");
+    for view in View::ALL {
+        assert_eq!(View::named(view.name()), Some(view));
+    }
+    assert_eq!(View::named("graph"), None);
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Op {
     Toggle(Side),
@@ -304,7 +334,51 @@ fn apply(docks: &mut Docks, op: Op) -> Result<(), TestCaseError> {
     Ok(())
 }
 
+fn name() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just("files".to_owned()),
+        Just("backlinks".to_owned()),
+        "[a-z]{0,9}",
+    ]
+}
+
+fn stored_dock() -> impl Strategy<Value = StoredDock> {
+    (
+        proptest::collection::vec(name(), 0..6),
+        0..8usize,
+        any::<bool>(),
+    )
+        .prop_map(|(views, active, shown)| StoredDock {
+            views,
+            active,
+            shown,
+        })
+}
+
 proptest! {
+    #[test]
+    fn restore_repairs_any_stored_names(left in stored_dock(), right in stored_dock()) {
+        let docks = Docks::restore(left.clone(), right.clone());
+        let mut views = [docks.dock(Side::Left).views(), docks.dock(Side::Right).views()].concat();
+        views.sort_by_key(|&view| view == View::Backlinks);
+        prop_assert_eq!(views, [View::Files, View::Backlinks]);
+
+        let entries: Vec<_> = [(Side::Left, &left), (Side::Right, &right)]
+            .into_iter()
+            .flat_map(|(side, stored)| stored.views.iter().enumerate().map(move |(ix, name)| (side, ix, name)))
+            .collect();
+        for (side, stored) in [(Side::Left, &left), (Side::Right, &right)] {
+            let dock = docks.dock(side);
+            prop_assert_eq!(dock.active().is_some(), !dock.views().is_empty());
+            let Some(name) = stored.views.get(stored.active) else { continue };
+            let Some(view) = View::named(name) else { continue };
+            let first = entries.iter().find(|(_, _, held)| *held == name);
+            if first == Some(&(side, stored.active, name)) {
+                prop_assert_eq!(dock.active(), Some(view));
+            }
+        }
+    }
+
     #[test]
     fn restore_round_trips_any_layout(ops in proptest::collection::vec(op(), 0..64)) {
         let mut docks = Docks::default();
