@@ -1,16 +1,16 @@
 //! The two docks: the view each draws under its header, and the toggles that show and hide them (docks spec).
 
 use gpui::{
-    AnyElement, Context, Div, Focusable, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, StatefulInteractiveElement, Styled, Window, actions, div,
-    prelude::FluentBuilder,
+    Action, AnyElement, App, AppContext, Context, Div, Focusable, InteractiveElement, IntoElement,
+    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString,
+    StatefulInteractiveElement, Styled, Window, actions, div, prelude::FluentBuilder,
 };
 use inkra_layout::{Docks, Side, View};
 
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::Sidebar;
 use crate::theme;
-use crate::ui::{IconButton, IconName, PanelHeader, Tooltip, keep_focus};
+use crate::ui::{ContextMenu, IconButton, IconName, PanelHeader, Tooltip, keep_focus};
 
 actions!(
     docks,
@@ -125,14 +125,49 @@ impl AppShell {
         });
     }
 
+    /// `view`'s menu: move it to the other dock, or hide its own.
+    fn open_dock_menu(
+        &mut self,
+        view: View,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(panes) = &self.panes else {
+            return;
+        };
+        let side = panes.docks.side_of(view);
+        let move_label = match side.other() {
+            Side::Left => "Move to Left Dock",
+            Side::Right => "Move to Right Dock",
+        };
+        let move_action: Box<dyn Action> = match view {
+            View::Files => Box::new(MoveFilesToOtherDock),
+            View::Backlinks => Box::new(MoveBacklinksToOtherDock),
+        };
+        let hide_action: Box<dyn Action> = match side {
+            Side::Left => Box::new(ToggleLeftDock),
+            Side::Right => Box::new(ToggleRightDock),
+        };
+        let entries = vec![
+            (SharedString::from(move_label), move_action),
+            (SharedString::from("Hide Dock"), hide_action),
+        ];
+        let menu = cx.new(|cx| ContextMenu::new(entries, cx));
+        self.open_menu(menu, at, window, cx);
+    }
+
     /// The one writer of `docks`. A hidden tree keeps neither focus nor an open name field: either
-    /// would take keys out of sight.
+    /// would take keys out of sight. An open menu closes: it describes the layout it opened on.
     pub(super) fn change_docks(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
         change: impl FnOnce(&mut Docks),
     ) {
+        if self.modal_menu().is_some() {
+            self.dismiss_modal(window, cx);
+        }
         let Some(panes) = &mut self.panes else {
             return;
         };
@@ -184,7 +219,8 @@ impl AppShell {
         };
         let header = match dock.views() {
             [_] => PanelHeader::new(header_selector(view), title(view))
-                .when_some(count, PanelHeader::count),
+                .when_some(count, PanelHeader::count)
+                .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx)),
             views => PanelHeader::bar(bar_selector(side)).children(
                 views
                     .iter()
@@ -203,10 +239,22 @@ impl AppShell {
         IconButton::new(icon_id(view), icon(view), title(view))
             .toggled(active)
             .tooltip(Tooltip::text(title(view)))
+            .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.change_docks(window, cx, |docks| docks.reveal(view));
             }))
             .into_any_element()
+    }
+
+    /// `prevent_default`: the root would take focus from the menu on the press (`div.rs:2765-2780`).
+    fn open_menu_on_press(
+        view: View,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+        cx.listener(move |shell, event: &MouseDownEvent, window, cx| {
+            window.prevent_default();
+            shell.open_dock_menu(view, event.position, window, cx);
+        })
     }
 
     /// `None` with no vault or an empty dock: there is no dock to toggle (rule 3).

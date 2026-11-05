@@ -15,6 +15,9 @@ paths:
   `render_empty` fills the slot. `set_shown` is its one writer. A note leaves
   the tabs only on `NoteClosed`; `TrashFailed` rebinds a `Trashing` tab.
 - Every tab action dismisses the picker first (`dismiss_modal`).
+- One modal at a time: a picker or a `ContextMenu`. A right press that opens a
+  menu calls `prevent_default`, or the root takes the focus. `change_docks`
+  closes an open menu.
 - An inactive tab's slot in `Tabs<Place, Parked>` holds its `Parked` view, so
   each op's closure type picks `Parked::park` or `capture`; bind a `Parked` only
   through `unpark`, or its anchors leak.
