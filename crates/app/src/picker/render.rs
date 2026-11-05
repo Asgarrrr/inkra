@@ -8,7 +8,7 @@ use gpui::{
 use super::{Picker, PickerDelegate};
 use crate::open::Open;
 use crate::theme;
-use crate::ui::{ListItem, UiText};
+use crate::ui::{Color, Label, ListItem, UiText};
 
 /// Past this the list scrolls.
 const MAX_ROWS: u8 = 10;
@@ -56,13 +56,18 @@ impl<D: PickerDelegate> Render for Picker<D> {
         let mut context = KeyContext::default();
         context.add("Picker");
         context.add(self.delegate.key_context());
+        let theme = theme::current(cx);
+        let (text, placeholder) = (Color::Default.rgba(theme), Color::Placeholder.rgba(theme));
         let count = self.delegate.match_count();
         let shown = u8::try_from(count).unwrap_or(u8::MAX).min(MAX_ROWS);
         let body = if count == 0 {
             div()
                 .px(theme::ROW_INSET)
-                .text_color(theme::placeholder_text())
-                .children(self.delegate.empty_text(cx))
+                .children(
+                    self.delegate
+                        .empty_text(cx)
+                        .map(|empty| Label::new(empty).color(Color::Placeholder)),
+                )
                 .into_any_element()
         } else {
             div()
@@ -82,7 +87,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             div()
                 .debug_selector(|| "picker-footer".into())
                 .px(theme::ROW_INSET)
-                .text_color(theme::placeholder_text())
+                .text_color(placeholder)
                 .child(footer)
         });
         div()
@@ -98,7 +103,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .w_full()
             .py_1()
             .ui_text()
-            .text_color(theme::sidebar_text())
+            .text_color(text)
             .child(
                 div()
                     .debug_selector(|| "picker-field".into())
@@ -107,12 +112,9 @@ impl<D: PickerDelegate> Render for Picker<D> {
                     .pb_1()
                     .child(self.field.clone())
                     .children(self.query.is_empty().then(|| {
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .px(theme::ROW_INSET)
-                            .text_color(theme::placeholder_text())
-                            .child(self.delegate.placeholder())
+                        div().absolute().inset_0().px(theme::ROW_INSET).child(
+                            Label::new(self.delegate.placeholder()).color(Color::Placeholder),
+                        )
                     })),
             )
             .child(body)

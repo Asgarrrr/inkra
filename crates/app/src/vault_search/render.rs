@@ -2,17 +2,19 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, div, prelude::*}
 
 use super::rows::{Header, HitRow};
 use crate::row_text::{name_row, styled};
-use crate::theme;
+use crate::theme::{self, Theme};
+use crate::ui::Color;
 
 /// The name, its folder dimmed, then the hit count; a hairline sets off a later group.
 pub(super) fn header(header: &Header, after_group: bool, cx: &App) -> AnyElement {
-    let colors = theme::current(cx).colors;
-    name_row(&header.path, theme::match_text().into())
+    let theme = theme::current(cx);
+    let colors = theme.colors;
+    name_row(&header.path, theme)
         .relative()
         .child(
             div()
                 .flex_none()
-                .text_color(theme::placeholder_text())
+                .text_color(Color::Placeholder.rgba(theme))
                 .child(header.count.clone()),
         )
         // Absolute, so the row keeps the one height `uniform_list` measures.
@@ -31,7 +33,7 @@ pub(super) fn header(header: &Header, after_group: bool, cx: &App) -> AnyElement
 }
 
 /// The line number, right-aligned in a column as wide as the largest listed, then the context.
-pub(super) fn hit(hit: &HitRow, digits: u8) -> AnyElement {
+pub(super) fn hit(hit: &HitRow, digits: u8, theme: &Theme) -> AnyElement {
     let column = theme::ui_digit_width() * f32::from(digits);
     div()
         .flex()
@@ -47,7 +49,7 @@ pub(super) fn hit(hit: &HitRow, digits: u8) -> AnyElement {
                 .w(column)
                 .flex()
                 .justify_end()
-                .text_color(theme::placeholder_text())
+                .text_color(Color::Placeholder.rgba(theme))
                 .child(hit.line.clone()),
         )
         .child(
@@ -56,7 +58,7 @@ pub(super) fn hit(hit: &HitRow, digits: u8) -> AnyElement {
                 .min_w_0()
                 .overflow_hidden()
                 .text_ellipsis()
-                .child(styled(&hit.context, theme::match_text().into())),
+                .child(styled(&hit.context, Color::Highlight.rgba(theme).into())),
         )
         .into_any_element()
 }

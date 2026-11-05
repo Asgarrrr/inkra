@@ -14,6 +14,7 @@ use crate::open::Open;
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::row_text::{LitText, styled};
 use crate::theme;
+use crate::ui::Color;
 
 pub(crate) use commands::{Command, commands};
 
@@ -114,11 +115,12 @@ impl PickerDelegate for CommandPaletteDelegate {
         }
     }
 
-    fn render_row(&self, ix: usize, _: bool, _: &mut Context<Picker<Self>>) -> AnyElement {
+    fn render_row(&self, ix: usize, _: bool, cx: &mut Context<Picker<Self>>) -> AnyElement {
         let Some(Row { command, name }) = self.rows.get(ix) else {
             return div().into_any_element();
         };
         let key = self.commands[*command].key.clone();
+        let theme = theme::current(cx);
         div()
             .h(self.row_height())
             .w_full()
@@ -132,12 +134,12 @@ impl PickerDelegate for CommandPaletteDelegate {
                     .min_w_0()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(styled(name, theme::match_text().into())),
+                    .child(styled(name, Color::Highlight.rgba(theme).into())),
             )
             .children(key.map(|key| {
                 div()
                     .flex_none()
-                    .text_color(theme::placeholder_text())
+                    .text_color(Color::Placeholder.rgba(theme))
                     .child(key)
             }))
             .into_any_element()

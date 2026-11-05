@@ -4,7 +4,7 @@ use gpui::{
     Styled, Window, div, prelude::FluentBuilder,
 };
 
-use super::{Icon, IconName, identified, keep_focus};
+use super::{Color, Icon, IconName, identified, keep_focus};
 use crate::theme;
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -86,9 +86,9 @@ impl RenderOnce for IconButton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = theme::current(cx).colors;
         let color = if self.toggled == Some(true) {
-            theme::icon_active()
+            Color::Default
         } else {
-            theme::icon_muted()
+            Color::Muted
         };
         let button = self
             .base

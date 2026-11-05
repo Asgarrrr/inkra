@@ -6,6 +6,8 @@ use proptest::prelude::*;
 use super::render::highlights;
 use super::{LitText, PathText};
 use crate::one_line::one_line;
+use crate::theme::builtin;
+use crate::ui::Color;
 
 /// Pieces that put control chars, a `/`, multi-byte chars and a combining mark into a text.
 fn text() -> impl Strategy<Value = String> {
@@ -177,7 +179,7 @@ fn the_indent_is_cut_but_never_past_the_hit() {
 #[test]
 fn highlights_colour_every_range() {
     let lit = LitText::line("ab cd", [0..1, 3..4]);
-    let color = Hsla::from(crate::theme::match_text());
+    let color = Hsla::from(Color::Highlight.rgba(builtin::dark()));
 
     let lit: Vec<_> = highlights(&lit, color).collect();
 

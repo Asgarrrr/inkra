@@ -7,7 +7,7 @@ use gpui::{
 
 use super::{AppShell, BACKLINKS_WIDTH, GoBack, GoForward, SIDEBAR_WIDTH};
 use crate::theme;
-use crate::ui::{IconButton, IconName, h_flex, keep_focus};
+use crate::ui::{Color, IconButton, IconName, h_flex, keep_focus};
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -37,7 +37,7 @@ impl AppShell {
             .bg(colors.editor_background)
             .text_size(theme::UI_TEXT_SIZE)
             .line_height(theme::UI_LINE_HEIGHT)
-            .text_color(theme::placeholder_text())
+            .text_color(Color::Placeholder.rgba(theme::current(cx)))
             .children(lines.iter().map(|line| div().child(*line)))
     }
 
@@ -53,7 +53,7 @@ impl AppShell {
                 .bg(colors.warning_background)
                 .text_size(theme::UI_TEXT_SIZE)
                 .line_height(theme::UI_LINE_HEIGHT)
-                .text_color(theme::gone_banner_text())
+                .text_color(Color::Warning.rgba(theme::current(cx)))
                 .child("Deleted from disk. Typing restores it.")
         })
     }

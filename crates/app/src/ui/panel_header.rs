@@ -3,7 +3,7 @@ use gpui::{
     Styled, Window, div, prelude::FluentBuilder,
 };
 
-use super::{UiText, h_flex};
+use super::{Color, Label, LabelSize, UiText, h_flex};
 use crate::theme;
 
 /// A panel's first row: its title and an optional count, ruled like the title row.
@@ -31,7 +31,8 @@ impl PanelHeader {
 
 impl RenderOnce for PanelHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let colors = theme::current(cx).colors;
+        let theme = theme::current(cx);
+        let colors = theme.colors;
         self.base
             .flex_none()
             // Border-box: the rule sits inside the height.
@@ -44,7 +45,7 @@ impl RenderOnce for PanelHeader {
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_color(theme::sidebar_text())
+                    .text_color(Color::Default.rgba(theme))
                     .font_weight(FontWeight::MEDIUM)
                     .child(self.title),
             )
@@ -57,10 +58,11 @@ impl RenderOnce for PanelHeader {
                         .px_1p5()
                         .rounded_full()
                         .bg(colors.chrome_element_hover)
-                        .text_color(theme::header_count_text())
-                        .text_size(theme::HEADER_COUNT_TEXT_SIZE)
-                        .line_height(theme::HEADER_COUNT_LINE_HEIGHT)
-                        .child(count.to_string()),
+                        .child(
+                            Label::new(count.to_string())
+                                .color(Color::Muted)
+                                .size(LabelSize::Small),
+                        ),
                 )
             })
     }

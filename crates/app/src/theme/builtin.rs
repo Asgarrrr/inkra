@@ -34,6 +34,13 @@ static DARK: LazyLock<Arc<Theme>> = LazyLock::new(|| {
             md_quote: rgb(0xa8a8a8),
             md_quote_bar: rgb(0x4a4a4a),
             md_marker: rgb(0x6a6a6a),
+            text: rgb(0xcecdc3),
+            text_selected: rgb(0xf0efe8),
+            text_muted: rgb(0x878580),
+            text_placeholder: rgb(0x6a6a6a),
+            text_highlight: rgb(0xe5c07b),
+            error: rgb(0xd16969),
+            warning: rgb(0xe0b27a),
         },
     })
 });

@@ -1,12 +1,10 @@
-#![allow(clippy::unreadable_literal)]
-
 pub(crate) mod builtin;
 mod colors;
 mod markdown;
 
 use std::sync::Arc;
 
-use gpui::{App, Global, Pixels, Point, Rgba, point, px, rgb};
+use gpui::{App, Global, Pixels, Point, point, px};
 use inkra_markdown::HeadingLevel;
 
 pub(crate) use colors::ThemeColors;
@@ -40,8 +38,8 @@ pub(crate) fn apply(theme: Arc<Theme>, cx: &mut App) {
 
 /// The blur's stand-in in a shot: the chrome's own colour, so the shot shows it opaque.
 #[cfg(feature = "shot")]
-pub(crate) fn shot_backdrop(theme: &Theme) -> Rgba {
-    Rgba {
+pub(crate) fn shot_backdrop(theme: &Theme) -> gpui::Rgba {
+    gpui::Rgba {
         a: 1.0,
         ..theme.colors.background
     }
@@ -85,44 +83,7 @@ pub(crate) fn ui_digit_width() -> Pixels {
     UI_TEXT_SIZE * 0.6
 }
 
-pub(crate) fn sidebar_text() -> Rgba {
-    rgb(0xcecdc3)
-}
-
-/// A selected tree row's name (the mock's `.row.on`).
-pub(crate) fn selected_row_text() -> Rgba {
-    rgb(0xf0efe8)
-}
-
-/// Not reused from `sidebar_text`: that one is calibrated against a different background.
-pub(crate) fn placeholder_text() -> Rgba {
-    rgb(0x6a6a6a)
-}
-
-pub(crate) fn rejected_text() -> Rgba {
-    rgb(0xe08a7a)
-}
-
-pub(crate) fn icon_muted() -> Rgba {
-    rgb(0x878580)
-}
-
-/// A toggled icon button's icon: the panel it names is shown.
-pub(crate) fn icon_active() -> Rgba {
-    rgb(0xcecdc3)
-}
-
 pub(crate) const ICON_SIZE: Pixels = px(14.);
-
-/// A note edited but not written, on its tab and its tree row.
-pub(crate) fn dirty_dot() -> Rgba {
-    rgb(0x8a8a8a)
-}
-
-/// A note whose last write failed, on its tab and its tree row.
-pub(crate) fn failed_dot() -> Rgba {
-    rgb(0xd16969)
-}
 
 pub(crate) const DOT_SIZE: Pixels = px(6.);
 
@@ -142,27 +103,6 @@ pub(crate) const INDENT_STEP: Pixels = px(12.);
 
 /// The line between two groups of a picker's rows.
 pub(crate) const RULE_WIDTH: Pixels = px(1.);
-
-pub(crate) fn gone_banner_text() -> Rgba {
-    rgb(0xe0b27a)
-}
-
-pub(crate) fn notice_text() -> Rgba {
-    rgb(0xe8a0a0)
-}
-
-pub(crate) fn tab_text() -> Rgba {
-    rgb(0xcecdc3)
-}
-
-pub(crate) fn tab_inactive_text() -> Rgba {
-    rgb(0x878580)
-}
-
-/// The backlinks count on its pill: the muted text (D6).
-pub(crate) fn header_count_text() -> Rgba {
-    rgb(0x878580)
-}
 
 /// The mock's backlinks header; the nav row is level with it (D4).
 pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(34.);
@@ -229,14 +169,6 @@ pub(crate) const TAB_CLOSE_RADIUS: Pixels = px(3.5);
 pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 
 pub(crate) const TAB_DROP_EDGE: Pixels = px(2.);
-
-pub(crate) fn link_text() -> Rgba {
-    rgb(0x4ea1ff)
-}
-
-pub(crate) fn match_text() -> Rgba {
-    rgb(0xe5c07b)
-}
 
 pub(crate) const QUOTE_BAR_WIDTH: Pixels = px(2.);
 

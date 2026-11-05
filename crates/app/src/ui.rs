@@ -1,9 +1,11 @@
 //! The chrome's components: the look lives here, the views keep their handlers.
 
 mod assets;
+mod color;
 mod icon;
 mod icon_button;
 mod indicator;
+mod label;
 mod list_item;
 mod panel_header;
 mod tab;
@@ -15,10 +17,12 @@ use gpui::{
 };
 
 pub(crate) use assets::{Assets, IconName};
+pub(crate) use color::Color;
 pub(crate) use icon::Icon;
 pub(crate) use icon_button::IconButton;
 pub(crate) use indicator::Indicator;
-pub(crate) use list_item::ListItem;
+pub(crate) use label::{Label, LabelSize};
+pub(crate) use list_item::{ListItem, ListItemStyle};
 pub(crate) use panel_header::PanelHeader;
 pub(crate) use tab::Tab;
 

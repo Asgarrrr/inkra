@@ -1,11 +1,12 @@
 use std::{cell::Cell, path::Path, rc::Rc};
 
 use gpui::{
-    AssetSource, Context, IntoElement, Modifiers, ParentElement, Render, Styled, TestAppContext,
-    Window, div,
+    AssetSource, Context, InteractiveElement, IntoElement, Modifiers, ParentElement, Render, Rgba,
+    Styled, TestAppContext, Window, div, px,
 };
 
-use super::{Assets, IconButton, IconName};
+use super::{Assets, Color, IconButton, IconName, Label, LabelSize};
+use crate::theme::{self, Theme, builtin};
 
 #[test]
 fn every_icon_loads() {
@@ -83,4 +84,70 @@ fn clicks(disabled: bool, cx: &mut TestAppContext) -> usize {
 fn a_disabled_icon_button_drops_its_click(cx: &mut TestAppContext) {
     assert_eq!(clicks(false, cx), 1);
     assert_eq!(clicks(true, cx), 0);
+}
+
+#[test]
+fn each_color_reads_its_token() {
+    let token = |n: u8| Rgba {
+        r: f32::from(n) / 16.0,
+        g: 0.,
+        b: 0.,
+        a: 1.,
+    };
+    let dark = builtin::dark().colors;
+    let theme = Theme {
+        colors: crate::theme::ThemeColors {
+            text: token(0),
+            text_selected: token(1),
+            text_muted: token(2),
+            text_placeholder: token(3),
+            text_highlight: token(4),
+            accent: token(5),
+            error: token(6),
+            warning: token(7),
+            ..dark
+        },
+    };
+    let colors = [
+        Color::Default,
+        Color::Selected,
+        Color::Muted,
+        Color::Placeholder,
+        Color::Highlight,
+        Color::Accent,
+        Color::Error,
+        Color::Warning,
+    ];
+    for (n, color) in (0..).zip(colors) {
+        assert_eq!(color.rgba(&theme), token(n), "{color:?}");
+    }
+}
+
+struct LabelProbe(LabelSize);
+
+impl Render for LabelProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // The parent's line box is taller than either size, so a label that inherited it would measure 40.
+        div().line_height(px(40.)).child(
+            div()
+                .debug_selector(|| "label".into())
+                .child(Label::new("Label").size(self.0)),
+        )
+    }
+}
+
+/// The height a label of `size` measures inside a 40 px line box.
+fn label_height(size: LabelSize, cx: &mut TestAppContext) -> gpui::Pixels {
+    let (_, cx) = cx.add_window_view(|_, _| LabelProbe(size));
+    cx.run_until_parked();
+    cx.debug_bounds("label").expect("drawn").size.height
+}
+
+#[gpui::test]
+fn a_label_is_its_own_line_box(cx: &mut TestAppContext) {
+    assert_eq!(label_height(LabelSize::Ui, cx), theme::UI_LINE_HEIGHT);
+    assert_eq!(
+        label_height(LabelSize::Small, cx),
+        theme::HEADER_COUNT_LINE_HEIGHT
+    );
 }

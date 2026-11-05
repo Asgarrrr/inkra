@@ -11,7 +11,7 @@ use inkra_vault::Kind;
 use crate::one_line::one_line;
 use crate::open::Open;
 use crate::theme;
-use crate::ui::{Icon, IconName, Indicator, ListItem};
+use crate::ui::{Color, Icon, IconName, Indicator, ListItem, ListItemStyle};
 
 use super::rows::Item;
 use super::{EditState, Row, Sidebar};
@@ -27,7 +27,7 @@ impl Sidebar {
     fn render_field(item: usize, edit: &EditState) -> AnyElement {
         ListItem::new(("tree-row", item))
             .role(Role::TreeItem)
-            .inset()
+            .style(ListItemStyle::Tree)
             .indent(edit.depth)
             .start(spacer())
             .selected(true)
@@ -66,7 +66,7 @@ impl Sidebar {
         ListItem::new(("tree-row", item))
             .role(Role::TreeItem)
             .aria_selected(selected)
-            .inset()
+            .style(ListItemStyle::Tree)
             .when_some(expanded, StatefulInteractiveElement::aria_expanded)
             .indent(row.depth)
             .start(start)
@@ -84,11 +84,14 @@ impl Sidebar {
                 div()
                     .debug_selector(|| format!("tree-name-{item}"))
                     .whitespace_nowrap()
-                    .text_color(if selected {
-                        theme::selected_row_text()
-                    } else {
-                        theme::sidebar_text()
-                    })
+                    .text_color(
+                        if selected {
+                            Color::Selected
+                        } else {
+                            Color::Default
+                        }
+                        .rgba(theme::current(cx)),
+                    )
                     .child(label),
             )
             .when_some(indicator, |list_item, indicator| {
