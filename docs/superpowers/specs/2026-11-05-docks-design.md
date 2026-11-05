@@ -167,9 +167,10 @@ and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑
   reads without it and gets the default layout.
 - Views are stored as strings (`"files"`, `"backlinks"`). A serde enum would
   fail the whole file on an unknown name, and lose the tabs' restore with it.
-- `Docks::restore` drops unknown names and duplicates, appends each missing
-  view to its default side, and clamps an out-of-range active index. Any file
-  yields a valid layout.
+- `Docks::restore` drops unknown names and duplicates. It appends each missing
+  view to its default side. Each dock activates its last kept entry at or
+  before the stored active index, else its first view. Any file yields a valid
+  layout.
 - The existing writer and its throttle save on every layout change: a move, an
   activation, a toggle.
 - **The layout applies before the first frame.** `bootstrap::root` reads the

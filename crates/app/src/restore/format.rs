@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use inkra_layout::{DockState, Docks, Side, View};
+use inkra_layout::{Docks, Side, StoredDock};
 use serde::{Deserialize, Deserializer, Serialize};
 
 const VERSION: u32 = 1;
@@ -61,29 +61,18 @@ fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SavedDoc
     Ok(serde_json::from_value(value).ok())
 }
 
-fn view_name(view: View) -> &'static str {
-    match view {
-        View::Files => "files",
-        View::Backlinks => "backlinks",
-    }
-}
-
-fn view_named(name: &str) -> Option<View> {
-    View::ALL.into_iter().find(|&view| view_name(view) == name)
-}
-
 impl From<&Docks> for SavedDocks {
     fn from(docks: &Docks) -> Self {
         let saved = |side| {
-            let state = docks.state(side);
+            let StoredDock {
+                views,
+                active,
+                shown,
+            } = docks.state(side);
             SavedDock {
-                views: state
-                    .views
-                    .into_iter()
-                    .map(|view| view_name(view).to_owned())
-                    .collect(),
-                active: state.active,
-                shown: state.shown,
+                views,
+                active,
+                shown,
             }
         };
         Self {
@@ -94,18 +83,13 @@ impl From<&Docks> for SavedDocks {
 }
 
 impl SavedDocks {
-    /// Unknown names drop; `Docks::restore` repairs the rest.
     pub(crate) fn docks(&self) -> Docks {
-        let state = |dock: &SavedDock| DockState {
-            views: dock
-                .views
-                .iter()
-                .filter_map(|name| view_named(name))
-                .collect(),
+        let stored = |dock: &SavedDock| StoredDock {
+            views: dock.views.clone(),
             active: dock.active,
             shown: dock.shown,
         };
-        Docks::restore(state(&self.left), state(&self.right))
+        Docks::restore(stored(&self.left), stored(&self.right))
     }
 }
 
