@@ -13,7 +13,6 @@ use crate::count::thousands;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
-mod building;
 mod loading;
 mod watch;
 
@@ -206,6 +205,12 @@ impl IndexSync {
             names_bytes: index.names().heap_bytes(),
         };
         Timeline::mark(step, cx);
+    }
+
+    /// The vault changed: a turn starts the build once the vault is scanned.
+    fn reconcile(&mut self, cx: &mut Context<Self>) {
+        // Typed, or clippy asks for the path `Turn::vault_changed`, which binds one lifetime and fails the bound.
+        self.turn(cx, |turn: &mut Turn<'_>| turn.vault_changed());
     }
 
     /// Never queued: a write needs no load and must not wait behind the startup queue.
