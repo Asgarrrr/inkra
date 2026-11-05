@@ -156,6 +156,10 @@ and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑
     for a dragged view: a tab drag sees nothing (`group_drag_over` on the
     root's group).
 - A drop outside any target changes nothing.
+- The drop edge an icon draws during a drag compares the drag's start index with the
+  icon's index. This holds only because icons show on a dock that holds every view, so
+  the drag comes from that same dock. With a third view the drop still lands right, but
+  the edge can point the wrong way, and `DraggedView` must then carry its side again.
 
 ## Persistence
 

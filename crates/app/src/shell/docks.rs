@@ -123,8 +123,7 @@ impl AppShell {
     fn move_to_other_dock(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
         self.change_docks(window, cx, |docks| {
             let side = docks.side_of(view).other();
-            let at = docks.dock(side).views().len();
-            docks.move_view(view, side, at);
+            docks.append(view, side);
         });
     }
 
