@@ -54,9 +54,8 @@ impl NoteStore {
                 if !life.is_open() || note.is_dirty(cx) {
                     return None;
                 }
-                let vault = this.vault.as_ref()?.read(cx);
-                let path = vault.absolute(id)?;
-                let mtime = vault.entry(id)?.mtime;
+                let path = this.path_of(id, cx)?;
+                let mtime = this.vault.as_ref()?.read(cx).entry(id)?.mtime;
                 Some((Arc::clone(&this.fs), note.writer(), path, mtime))
             })
             .ok()??;
