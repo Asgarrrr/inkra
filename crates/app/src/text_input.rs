@@ -22,6 +22,7 @@ use inkra_editor::{EditorState, Selection};
 use inkra_text::{Buffer, ByteOffset, Diff, Utf16Offset};
 
 use crate::editor::layout::DocumentLayout;
+use crate::one_line::one_line;
 
 pub(crate) use actions::on_actions;
 pub(crate) use adapter::InputAdapter;
@@ -43,12 +44,12 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    /// Text from the platform. A newline can arrive by paste or IME, not only by
-    /// a key; one line turns it into a space, one UTF-16 unit for one, so ranges stay valid.
+    /// Text from the platform. A control char can arrive by paste or IME, not only by
+    /// a key; one line turns each into a space, one UTF-16 unit for one, so ranges stay valid.
     fn admit(self, text: &str) -> Cow<'_, str> {
         match self {
-            Self::SingleLine if text.contains('\n') => Cow::Owned(text.replace('\n', " ")),
-            Self::SingleLine | Self::Multiline => Cow::Borrowed(text),
+            Self::SingleLine => one_line(text),
+            Self::Multiline => Cow::Borrowed(text),
         }
     }
 }

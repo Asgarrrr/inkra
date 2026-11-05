@@ -1,4 +1,5 @@
-//! A file name drawn in a one-line row: macOS allows a newline in one.
+//! One-line text: a file name drawn in a row (macOS allows a newline in one) and
+//! the text a single-line input admits.
 
 use std::borrow::Cow;
 

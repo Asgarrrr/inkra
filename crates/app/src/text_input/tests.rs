@@ -133,6 +133,21 @@ fn a_single_line_input_turns_a_marked_newline_into_a_space(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn a_single_line_input_turns_every_control_char_into_a_space(cx: &mut TestAppContext) {
+    let (inserted, mut inserted_cx) = field(cx, "");
+    platform(&inserted, &mut inserted_cx, |input, window, cx| {
+        input.replace_text_in_range(None, "a\r\nb\tc", window, cx);
+    });
+    assert_eq!(text(&inserted, &mut inserted_cx), "a  b c");
+
+    let (marked, mut marked_cx) = field(cx, "");
+    platform(&marked, &mut marked_cx, |input, window, cx| {
+        input.replace_and_mark_text_in_range(None, "a\r\nb\tc", None, window, cx);
+    });
+    assert_eq!(text(&marked, &mut marked_cx), "a  b c");
+}
+
+#[gpui::test]
 fn a_multiline_input_keeps_an_inserted_newline(cx: &mut TestAppContext) {
     let (view, mut visual) = editor(cx, "");
 
