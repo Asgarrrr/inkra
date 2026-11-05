@@ -14,13 +14,14 @@ use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
 use crate::restore::{SavedTab, Session};
 use crate::shell::AppShell;
-use crate::theme;
+use crate::theme::{self, Appearance};
 use crate::ui::Assets;
 
 const VAULT_ROOT: &str = "/vault";
 
 pub(crate) struct Stage {
     cx: VisualTestAppContext,
+    appearance: Appearance,
     /// Held walks and loads, released on drop, after the shot.
     gates: Vec<Gate>,
     /// `open_vault`'s, so a scene can change a file after opening.
@@ -30,7 +31,7 @@ pub(crate) struct Stage {
 impl Stage {
     /// Both halves or neither: bindings without the `Quit` handler give a
     /// scene a silent no-op where the real app quits.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(appearance: Appearance) -> Self {
         let mut cx = VisualTestAppContext::with_asset_source(
             gpui_platform::current_platform(false),
             Arc::new(Assets),
@@ -41,6 +42,7 @@ impl Stage {
         });
         Self {
             cx,
+            appearance,
             gates: Vec::new(),
             fs: None,
         }
@@ -171,6 +173,9 @@ impl Stage {
             .cx
             .open_offscreen_window(WINDOW_SIZE, |window, cx| root(fs, launched, window, cx))
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
+        // A new window reports the platform's Dark, so the shell's observer just overrode the theme.
+        self.cx
+            .update(|cx| theme::apply(theme::builtin::of(self.appearance).clone(), cx));
         window
             .update(&mut self.cx, |view, _, cx| {
                 view.set_backdrop(theme::shot_backdrop(theme::current(cx)));

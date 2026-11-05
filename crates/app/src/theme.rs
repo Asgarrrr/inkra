@@ -4,7 +4,7 @@ mod markdown;
 
 use std::sync::Arc;
 
-use gpui::{App, Global, Pixels, Point, point, px};
+use gpui::{App, Global, Pixels, Point, WindowAppearance, point, px};
 use inkra_markdown::HeadingLevel;
 
 pub(crate) use colors::ThemeColors;
@@ -34,6 +34,26 @@ pub(crate) fn apply(theme: Arc<Theme>, cx: &mut App) {
     }
     cx.set_global(GlobalTheme(theme));
     cx.refresh_windows();
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Appearance {
+    Light,
+    Dark,
+}
+
+impl From<WindowAppearance> for Appearance {
+    fn from(appearance: WindowAppearance) -> Self {
+        match appearance {
+            WindowAppearance::Light | WindowAppearance::VibrantLight => Self::Light,
+            WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::Dark,
+        }
+    }
+}
+
+/// The built-in theme of the system's appearance.
+pub(crate) fn follow_system(appearance: WindowAppearance, cx: &mut App) {
+    apply(builtin::of(appearance.into()).clone(), cx);
 }
 
 /// The blur's stand-in in a shot: the chrome's own colour, so the shot shows it opaque.

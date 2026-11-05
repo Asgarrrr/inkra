@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use scenes::{Scene, catalogue};
 use stage::Stage;
 
+use crate::theme::Appearance;
+
 const OUTPUT: &str = "target/shots";
 
 /// Entry point behind `examples/shot.rs`.
@@ -51,23 +53,25 @@ pub fn run() {
 }
 
 fn shoot(scene: &Scene, out: &Path) {
-    // One `Stage` per scene: a shared one carries over clipboard, focus and open windows.
-    let mut stage = Stage::new();
-    let window = (scene.open)(&mut stage);
-    let image = stage.capture(window);
+    for (appearance, suffix) in [(Appearance::Dark, ""), (Appearance::Light, "-light")] {
+        // One `Stage` per scene: a shared one carries over clipboard, focus and open windows.
+        let mut stage = Stage::new(appearance);
+        let window = (scene.open)(&mut stage);
+        let image = stage.capture(window);
 
-    let path = out.join(format!("{}.png", scene.name));
-    image
-        .save(&path)
-        .unwrap_or_else(|error| panic!("save {}: {error}", path.display()));
+        let path = out.join(format!("{}{suffix}.png", scene.name));
+        image
+            .save(&path)
+            .unwrap_or_else(|error| panic!("save {}: {error}", path.display()));
 
-    println!(
-        "{:<18} {}x{}  {}",
-        scene.name,
-        image.width(),
-        image.height(),
-        path.display()
-    );
+        println!(
+            "{:<18} {}x{}  {}",
+            scene.name,
+            image.width(),
+            image.height(),
+            path.display()
+        );
+    }
 }
 
 fn list() {
