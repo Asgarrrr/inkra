@@ -7,7 +7,7 @@ mod writer;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::channel::oneshot;
 use gpui::{App, Entity, Subscription};
@@ -93,7 +93,7 @@ impl OpenNote {
         cx: &mut App,
     ) -> Option<Adopt> {
         let applied = self.buffer.update(cx, |buffer, cx| {
-            let applied = buffer.apply_diff(Instant::now(), diff);
+            let applied = buffer.apply_diff(diff);
             if applied && !diff.hunks().is_empty() {
                 cx.emit(Reloaded(Arc::clone(diff)));
                 cx.notify();

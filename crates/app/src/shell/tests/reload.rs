@@ -5,7 +5,6 @@ use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_text::ByteOffset;
@@ -184,7 +183,7 @@ fn two_reloads_before_a_render_keep_the_top_lines_text_at_the_top(cx: &mut TestA
         for (from, to) in [(&old, &first), (&first, &second)] {
             buffer.update(cx, |buffer, cx| {
                 let diff = Arc::new(inkra_text::diff(buffer.version(), from, to));
-                assert!(buffer.apply_diff(Instant::now(), &diff));
+                assert!(buffer.apply_diff(&diff));
                 cx.emit(Reloaded(diff));
                 cx.notify();
             });

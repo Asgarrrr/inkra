@@ -3,7 +3,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::{Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, WindowHandle, point, px};
 use inkra_editor::{Goal, Selection};
@@ -230,7 +229,7 @@ fn a_restore_onto_a_buffer_reloaded_without_a_notify_reads_the_new_text(cx: &mut
             editor.open_buffer(first.clone(), Some(view), cx);
             first.update(cx, |buffer, _| {
                 let diff = Arc::new(inkra_text::diff(buffer.version(), &old, &new));
-                assert!(buffer.apply_diff(Instant::now(), &diff));
+                assert!(buffer.apply_diff(&diff));
             });
         })
         .unwrap();

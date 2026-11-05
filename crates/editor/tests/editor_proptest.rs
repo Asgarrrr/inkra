@@ -200,8 +200,8 @@ proptest! {
         // Gains a newline only when nothing is selected and the caret's line runs unterminated to the end.
         let gains_a_newline = selection.is_empty() && line.end >= buffer.len();
 
-        let copied = state.cut(&mut buffer, Instant::now());
-        state.paste(&mut buffer, Instant::now(), &copied);
+        let copied = state.cut(&mut buffer);
+        state.paste(&mut buffer, &copied);
 
         let expected = if gains_a_newline {
             format!("{text}\n")
@@ -264,7 +264,7 @@ proptest! {
 
         let mut buffer = Buffer::new(old.clone());
         let parked = ParkedSelection::park(&selection, &mut buffer);
-        prop_assert!(buffer.apply_diff(Instant::now(), &diff(buffer.version(), &old, &new)));
+        prop_assert!(buffer.apply_diff(&diff(buffer.version(), &old, &new)));
         let unparked = parked.unpark(&mut buffer);
 
         prop_assert_eq!(unparked.range(), oracle.selection().range());

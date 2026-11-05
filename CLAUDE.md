@@ -86,9 +86,10 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 - Offsets are `ByteOffset`, `Utf16Offset` and, in layout, `DisplayOffset`;
   never mix them, never add a char offset. Move and delete by grapheme.
-- Mutate a buffer only inside `Buffer::transact_at`, through its `Txn`. Call
-  `finalize_transaction` on **both** sides of a gesture that must not merge
-  (paste, cut), and on neither side when it edits nothing.
+- Mutate a buffer only inside `Buffer::transact_at`, through its `Txn`. A
+  one-step gesture (paste, cut, `apply_diff`) uses `Buffer::transact` instead:
+  it merges with neither neighbour and is a no-op when it edits nothing.
+  `finalize_transaction` is only for sealing without an edit.
   Exception: a tab switch's, an open's, or a back's capture calls it on the
   note left even with no edit, so typing on both sides of `⌃Tab` is two undo steps (tabs spec, A3).
 - `Buffer` assumes LF: text entering from outside (load, paste) goes through

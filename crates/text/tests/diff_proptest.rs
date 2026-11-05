@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::time::Instant;
 
 use inkra_text::{Bias, Buffer, ByteOffset, Hunk, Version, diff};
 use proptest::prelude::*;
@@ -94,7 +93,7 @@ proptest! {
             prop_assert!(pair[0].range.end <= pair[1].range.start, "hunks overlap: {:?}", pair);
         }
 
-        prop_assert!(buffer.apply_diff(Instant::now(), &diff));
+        prop_assert!(buffer.apply_diff(&diff));
         prop_assert_eq!(buffer.text(), new.as_str());
     }
 
@@ -115,7 +114,7 @@ proptest! {
     fn one_undo_after_the_apply_restores_old((old, new) in old_and_new()) {
         let mut buffer = Buffer::new(old.as_str());
         let diff = diff(buffer.version(), &old, &new);
-        prop_assert!(buffer.apply_diff(Instant::now(), &diff));
+        prop_assert!(buffer.apply_diff(&diff));
         buffer.undo();
         prop_assert_eq!(buffer.text(), old.as_str());
     }
@@ -136,7 +135,7 @@ proptest! {
             })
             .collect();
 
-        prop_assert!(buffer.apply_diff(Instant::now(), &diff));
+        prop_assert!(buffer.apply_diff(&diff));
 
         for (offset, anchor) in anchored {
             let shift: isize = hunks
@@ -163,7 +162,7 @@ proptest! {
         let diff = diff(buffer.version(), &old, &new);
         let anchor = buffer.anchor(offset, bias);
 
-        prop_assert!(buffer.apply_diff(Instant::now(), &diff));
+        prop_assert!(buffer.apply_diff(&diff));
 
         prop_assert_eq!(diff.map(offset, bias), buffer.resolve(anchor));
     }
