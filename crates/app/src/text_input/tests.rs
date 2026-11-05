@@ -159,6 +159,21 @@ fn a_multiline_input_keeps_an_inserted_newline(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_multiline_input_turns_every_line_ending_into_lf(cx: &mut TestAppContext) {
+    let (inserted, mut inserted_cx) = editor(cx, "");
+    platform(&inserted, &mut inserted_cx, |input, window, cx| {
+        input.replace_text_in_range(None, "a\r\nb\rc", window, cx);
+    });
+    assert_eq!(text(&inserted, &mut inserted_cx), "a\nb\nc");
+
+    let (marked, mut marked_cx) = editor(cx, "");
+    platform(&marked, &mut marked_cx, |input, window, cx| {
+        input.replace_and_mark_text_in_range(None, "a\r\nb\rc", None, window, cx);
+    });
+    assert_eq!(text(&marked, &mut marked_cx), "a\nb\nc");
+}
+
+#[gpui::test]
 fn the_adapter_prefers_the_ime_for_printable_keys_on_both_hosts(cx: &mut TestAppContext) {
     let (view, mut visual) = field(cx, "plan");
 

@@ -46,9 +46,13 @@ pub(crate) enum Mode {
 impl Mode {
     /// Text from the platform. A control char can arrive by paste or IME, not only by
     /// a key; one line turns each into a space, one UTF-16 unit for one, so ranges stay valid.
+    /// Multiline text keeps its lines but enters as LF, which `Buffer` assumes.
     fn admit(self, text: &str) -> Cow<'_, str> {
         match self {
             Self::SingleLine => one_line(text),
+            Self::Multiline if text.contains('\r') => {
+                Cow::Owned(inkra_vault::normalize_line_endings(text))
+            }
             Self::Multiline => Cow::Borrowed(text),
         }
     }
