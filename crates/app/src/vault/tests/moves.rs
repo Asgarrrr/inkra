@@ -2,9 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::TestAppContext;
+use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use crate::test_support::{edit, opened, two_notes};
+use crate::test_support::{edit, entry_id, opened, scan_notes, two_notes};
 use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
 
@@ -192,5 +193,34 @@ async fn a_note_removed_after_its_rename_is_gone_at_the_new_name(cx: &mut TestAp
     assert_eq!(
         fs.read_to_string(Path::new("/vault/z.md")).as_deref(),
         Some("Xalpha")
+    );
+}
+
+/// The batch's walk reads the root, then waits on `sub`: its swap lists their text at the old name.
+#[gpui::test]
+async fn a_change_whose_walk_ran_before_a_rename_reloads_from_the_new_name(
+    cx: &mut TestAppContext,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/sub/c.md", "gamma");
+    let store = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let a = entry_id(&store, cx, "a");
+    let buffer = opened(&store, cx, a).await;
+    cx.run_until_parked();
+    let gate = fs.block_read_dir("/vault/sub");
+
+    fs.insert_file("/vault/a.md", "theirs");
+    fs.insert_file("/vault/sub/c.md", "gamma!");
+    cx.run_until_parked();
+    let renamed = store.update(cx, |store, cx| store.rename(a, "z", cx));
+    cx.run_until_parked();
+    gate.release();
+    cx.run_until_parked();
+
+    assert!(renamed.await);
+    assert_eq!(
+        buffer.read_with(cx, |buffer, _| buffer.text().to_owned()),
+        "theirs"
     );
 }
