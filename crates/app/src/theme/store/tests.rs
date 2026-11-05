@@ -2,9 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use futures::executor::block_on;
+use inkra_vault::RelPath;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{Resolved, load};
+use super::{Choice, Resolved, ThemeStore, load};
 use crate::theme::{Appearance, builtin};
 
 const SOLAR: &str = r##"{"appearance":"light","colors":{"accent":"#ff0000"}}"##;
@@ -100,4 +101,36 @@ fn skipped_keys_are_reported_and_the_theme_still_applies() {
         resolved.notices,
         [r#"theme "solar.json": skipped accent, nope"#]
     );
+}
+
+#[test]
+fn a_store_concerns_the_settings_and_only_its_own_theme_file() {
+    let store = |choice: Choice| ThemeStore {
+        choice,
+        reload: None,
+    };
+    let paths = [
+        ".inkra",
+        ".inkra/settings.json",
+        ".inkra/themes",
+        ".inkra/themes/solar.json",
+        ".inkra/themes/other.json",
+        ".inkra/settings.json.bak",
+    ];
+    for (choice, expected) in [
+        (Choice::System, [true, true, false, false, false, false]),
+        (
+            Choice::Named("Flexoki Dark".into()),
+            [true, true, false, false, false, false],
+        ),
+        (
+            Choice::Named("solar".into()),
+            [true, true, true, true, false, false],
+        ),
+    ] {
+        let store = store(choice.clone());
+        let concerns =
+            paths.map(|path| store.concerns(&RelPath::new(Path::new(path)).expect("relative")));
+        assert_eq!(concerns, expected, "{choice:?}");
+    }
 }

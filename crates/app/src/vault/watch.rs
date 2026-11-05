@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use gpui::{Context, Task};
-use inkra_vault::{Fs, Pending, VaultError};
+use inkra_vault::{CONFIG_DIR, Changed, Fs, Pending, RelPath, VaultError};
 
-use super::NoteStore;
+use super::{ConfigChanged, NoteStore};
 
 /// Zed's `FS_WATCH_LATENCY`.
 #[cfg(not(test))]
@@ -28,15 +28,28 @@ impl NoteStore {
             while let Some(first) = watch.events.next().await {
                 cx.background_executor().timer(WATCH_LATENCY).await;
                 let mut batch = Pending::default();
+                let mut configs = Vec::new();
                 let mut next = Some(first);
                 while let Some(event) = next {
-                    if let Some(changed) = watch.changed(&event) {
-                        batch.add(changed);
+                    match watch.changed(&event) {
+                        Some(Changed::Config(path)) => configs.push(path),
+                        Some(Changed::Rescan) => {
+                            // The lost events may include `CONFIG_DIR`'s.
+                            configs.extend(RelPath::new(Path::new(CONFIG_DIR)));
+                            batch.add(Changed::Rescan);
+                        }
+                        Some(changed) => batch.add(changed),
+                        None => {}
                     }
                     next = watch.events.try_recv().ok();
                 }
                 if this
-                    .update(cx, |this, cx| this.rescan_changed(batch, cx))
+                    .update(cx, |this, cx| {
+                        if !configs.is_empty() {
+                            cx.emit(ConfigChanged(configs));
+                        }
+                        this.rescan_changed(batch, cx);
+                    })
                     .is_err()
                 {
                     return;

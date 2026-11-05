@@ -5,9 +5,9 @@ use std::path::{Component, PathBuf};
 
 use futures::channel::mpsc::UnboundedReceiver;
 
-use crate::RelPath;
 use crate::fs::Watcher;
 use crate::temp::is_temp;
+use crate::{CONFIG_DIR, RelPath};
 
 /// A guess, to be measured (watcher spec, F4); Zed has no cap.
 const MAX_FOLDERS: usize = 256;
@@ -34,6 +34,8 @@ pub struct Watch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Changed {
     Path(RelPath),
+    /// A path under the vault's `CONFIG_DIR`; it needs no scan.
+    Config(RelPath),
     /// The platform lost events: only a full scan knows what changed.
     Rescan,
 }
@@ -52,7 +54,8 @@ impl Default for Pending {
 }
 
 impl Watch {
-    /// `None` for an event no scan needs: outside the root, hidden, or our own temporary file.
+    /// `None` for an event that counts for nothing: outside the root, hidden but not under
+    /// `CONFIG_DIR`, or our own temporary file.
     #[must_use]
     pub fn changed(&self, event: &PathEvent) -> Option<Changed> {
         let path = event.path.as_path();
@@ -60,11 +63,18 @@ impl Watch {
             .strip_prefix(&self.root)
             .or_else(|_| path.strip_prefix(&self.resolved))
             .ok()?;
+        if relative.file_name().is_some_and(is_temp) {
+            return None;
+        }
+        if matches!(relative.components().next(), Some(Component::Normal(name)) if name == CONFIG_DIR)
+        {
+            return RelPath::new(relative).map(Changed::Config);
+        }
         // As `read_dir`, which lists no dotfile.
         let hidden = relative.components().any(|component| {
             matches!(component, Component::Normal(name) if name.as_encoded_bytes().starts_with(b"."))
         });
-        if hidden || relative.file_name().is_some_and(is_temp) {
+        if hidden {
             return None;
         }
         if event.rescan {
@@ -78,7 +88,7 @@ impl Pending {
     /// A path's folder: reading it finds a folder that appeared at the path (watcher spec, F4).
     pub fn add(&mut self, changed: Changed) {
         match (&mut *self, changed) {
-            (Self::Everything, _) => {}
+            (Self::Everything, _) | (_, Changed::Config(_)) => {}
             (Self::Folders(folders), Changed::Path(path)) if path != RelPath::root() => {
                 folders.extend(path.as_path().parent().and_then(RelPath::new));
                 self.cap();
