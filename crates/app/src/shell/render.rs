@@ -6,6 +6,7 @@ use gpui::{
 };
 use inkra_layout::Side;
 
+use super::dock_drag::SHELL_GROUP;
 use super::{AppShell, GoBack, GoForward};
 use crate::theme;
 use crate::ui::{Color, IconButton, IconName, h_flex, keep_focus};
@@ -92,6 +93,7 @@ impl AppShell {
     /// Under the title row: the left dock, the note column and the right dock.
     fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .relative()
             .flex()
             .flex_row()
             .flex_1()
@@ -120,6 +122,8 @@ impl AppShell {
             )
             // Shown for an empty tab too, so a switch does not move the note column by the dock's width.
             .children(self.render_dock(Side::Right, cx))
+            .children(self.render_drop_strip(Side::Left, cx))
+            .children(self.render_drop_strip(Side::Right, cx))
     }
 }
 
@@ -128,6 +132,7 @@ impl Render for AppShell {
         div()
             // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
             .key_context("AppShell")
+            .group(SHELL_GROUP)
             // Load-bearing: with no editor, focus lives on `self.focus_handle`; untracked, `cmd-s` is unreachable (gpui/src/window.rs:6244-6251).
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))

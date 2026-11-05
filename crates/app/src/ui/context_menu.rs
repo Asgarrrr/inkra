@@ -55,10 +55,6 @@ impl ContextMenu {
             cx.emit(MenuClosed(Some(self.entries[ix].1.boxed_clone())));
         }
     }
-
-    fn cancel(_: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(MenuClosed(None));
-    }
 }
 
 impl Focusable for ContextMenu {
@@ -76,7 +72,7 @@ impl Render for ContextMenu {
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_prev))
             .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(|_, action, window, cx| Self::cancel(action, window, cx)))
+            .on_action(cx.listener(|_, _: &Cancel, _, cx| cx.emit(MenuClosed(None))))
             .debug_selector(|| "context-menu".into())
             .min_w(MENU_MIN_WIDTH)
             .py_1()

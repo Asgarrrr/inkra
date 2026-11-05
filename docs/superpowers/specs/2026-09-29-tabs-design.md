@@ -702,7 +702,7 @@ section. Built as planned, with these facts and deviations:
     drops: one pane, one bar.
   - The indicator is Zed's: the target's background and a 2 px border on the
     side the tab lands, with colours and width from `theme.rs`
-    (`tab_drop_background`, `tab_drop_border`, `TAB_DROP_EDGE`).
+    (`tab_drop_background`, `tab_drop_border`, `DROP_EDGE`).
 - **T4's fifth no-op case.** A drop leaves the active tab and its note, so a
   pending open still lands in it.
 - **The look.** The `tabs-dragging` shot shows the target lit, its right edge

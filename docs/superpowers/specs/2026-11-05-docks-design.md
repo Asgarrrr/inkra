@@ -151,7 +151,10 @@ and "Hide Dock". The bar's gaps open nothing. D3a chooses by mouse; D3b adds ↑
   - The rest of a dock's column (the bar's gaps, a one-view header, the body):
     the column appends.
   - An empty side: during a drag only, a 40 px drop strip shows at that window
-    edge. Without it an emptied dock could not be refilled by drag.
+    edge. Without it an emptied dock could not be refilled by drag. The strip
+    is drawn only during a drag, only for a side with no views, and tinted only
+    for a dragged view: a tab drag sees nothing (`group_drag_over` on the
+    root's group).
 - A drop outside any target changes nothing.
 
 ## Persistence

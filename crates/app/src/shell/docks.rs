@@ -231,14 +231,9 @@ impl AppShell {
             match dock.views() {
                 [_] => div()
                     .id(("dock-title-drag", usize::from(side == Side::Right)))
-                    .on_drag(
-                        DraggedView {
-                            view,
-                            side,
-                            index: 0,
-                        },
-                        |dragged, _, _, cx| cx.new(|_| dragged.clone()),
-                    )
+                    .on_drag(DraggedView { view, index: 0 }, |dragged, _, _, cx| {
+                        cx.new(|_| dragged.clone())
+                    })
                     .child(
                         PanelHeader::new(header_selector(view), title(view))
                             .when_some(count, PanelHeader::count)
@@ -277,24 +272,16 @@ impl AppShell {
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.change_docks(window, cx, |docks| docks.reveal(view));
             }))
-            .on_drag(
-                DraggedView {
-                    view,
-                    side,
-                    index: ix,
-                },
-                |dragged, _, _, cx| cx.new(|_| dragged.clone()),
-            )
+            .on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
+                cx.new(|_| dragged.clone())
+            })
             .drag_over::<DraggedView>(move |style, dragged, _, _| {
                 let style = style
                     .bg(colors.accent_background)
                     .border_color(colors.accent);
-                if dragged.side != side {
-                    return style.border_l(theme::TAB_DROP_EDGE);
-                }
                 match ix.cmp(&dragged.index) {
-                    Ordering::Less => style.border_l(theme::TAB_DROP_EDGE),
-                    Ordering::Greater => style.border_r(theme::TAB_DROP_EDGE),
+                    Ordering::Less => style.border_l(theme::DROP_EDGE),
+                    Ordering::Greater => style.border_r(theme::DROP_EDGE),
                     Ordering::Equal => style,
                 }
             })
