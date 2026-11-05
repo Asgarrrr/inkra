@@ -71,6 +71,11 @@ impl BacklinksPanel {
         self.rows.iter().map(|row| row.name.to_string()).collect()
     }
 
+    /// The header's count; `None` with no rows.
+    pub(crate) fn count(&self) -> Option<usize> {
+        (!self.rows.is_empty()).then_some(self.rows.len())
+    }
+
     pub(crate) fn set_note(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
         self.note = note;
         self.rebuild(cx);

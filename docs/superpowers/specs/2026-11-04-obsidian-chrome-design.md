@@ -110,6 +110,8 @@ values unless the comparison shows a clash; record any change here.
 
 ## D5. Sidebar
 
+Partly reversed by the docks spec: the tree has a `Files` header.
+
 - No header. Rows 27 px, 8 px radius (`--nav-item-radius`), 8 px inset from the sidebar's edges, text
   at `UI_TEXT_SIZE`. Chevrons and indentation unchanged.
 - Selected and hovered rows use the hover token, not a full-width band.

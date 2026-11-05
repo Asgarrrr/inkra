@@ -1,4 +1,4 @@
-//! Hiding and showing the panels, their toggles and their headers (shell chrome spec, S2a).
+//! Hiding and showing the docks, their toggles and their headers (docks spec).
 
 use std::sync::Arc;
 
@@ -19,30 +19,30 @@ fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
 #[gpui::test]
 fn cmd_backslash_hides_and_shows_the_sidebar(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
-    assert!(drawn(&mut cx, "sidebar-column"));
+    assert!(drawn(&mut cx, "dock-left"));
 
     keys(&mut cx, "cmd-\\");
-    assert!(!drawn(&mut cx, "sidebar-column"));
-    assert!(drawn(&mut cx, "backlinks-column"));
+    assert!(!drawn(&mut cx, "dock-left"));
+    assert!(drawn(&mut cx, "dock-right"));
     let row = cx.debug_bounds("tab-row").expect("the tab row is drawn");
     assert_eq!(row.left(), px(0.), "the note column takes the width");
 
     keys(&mut cx, "cmd-\\");
-    assert!(drawn(&mut cx, "sidebar-column"));
+    assert!(drawn(&mut cx, "dock-left"));
 }
 
 /// `cmd-|` is what macOS delivers for ⌘⇧\; a `cmd-shift-\` binding would never fire.
 #[gpui::test]
 fn cmd_pipe_hides_and_shows_the_backlinks(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
-    assert!(drawn(&mut cx, "backlinks-column"));
+    assert!(drawn(&mut cx, "dock-right"));
 
     keys(&mut cx, "cmd-|");
-    assert!(!drawn(&mut cx, "backlinks-column"));
-    assert!(drawn(&mut cx, "sidebar-column"));
+    assert!(!drawn(&mut cx, "dock-right"));
+    assert!(drawn(&mut cx, "dock-left"));
 
     keys(&mut cx, "cmd-|");
-    assert!(drawn(&mut cx, "backlinks-column"));
+    assert!(drawn(&mut cx, "dock-right"));
 }
 
 #[gpui::test]
@@ -69,8 +69,8 @@ fn the_tab_bar_still_scrolls_to_the_active_tab_with_toggles(cx: &mut TestAppCont
     keys(&mut cx, "cmd-9");
 
     let bar = cx.debug_bounds("tab-bar").unwrap();
-    let left = cx.debug_bounds("panel-toggle-sidebar").unwrap();
-    let right = cx.debug_bounds("panel-toggle-backlinks").unwrap();
+    let left = cx.debug_bounds("dock-toggle-left").unwrap();
+    let right = cx.debug_bounds("dock-toggle-right").unwrap();
     assert!(left.right() <= bar.left() && bar.right() <= right.left());
     let last = cx.debug_bounds("tab-29").unwrap();
     assert!(
@@ -128,8 +128,8 @@ fn a_click_on_a_toggle_hides_its_panel(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
     for (toggle, column) in [
-        ("panel-toggle-sidebar", "sidebar-column"),
-        ("panel-toggle-backlinks", "backlinks-column"),
+        ("dock-toggle-left", "dock-left"),
+        ("dock-toggle-right", "dock-right"),
     ] {
         click(&mut cx, toggle);
         assert!(!drawn(&mut cx, column), "{toggle}");
@@ -144,8 +144,8 @@ fn a_click_on_a_toggle_hides_its_panel(cx: &mut TestAppContext) {
 fn no_vault_shows_no_toggle(cx: &mut TestAppContext) {
     let (_window, mut cx) = no_vault(cx);
     assert!(drawn(&mut cx, "tab-row"));
-    assert!(!drawn(&mut cx, "panel-toggle-sidebar"));
-    assert!(!drawn(&mut cx, "panel-toggle-backlinks"));
+    assert!(!drawn(&mut cx, "dock-toggle-left"));
+    assert!(!drawn(&mut cx, "dock-toggle-right"));
 }
 
 /// An undrawn field would take focus and every keystroke, out of sight.
@@ -154,11 +154,11 @@ fn creating_with_the_sidebar_hidden_shows_it(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
     keys(&mut cx, "cmd-\\");
-    assert!(!drawn(&mut cx, "sidebar-column"));
+    assert!(!drawn(&mut cx, "dock-left"));
 
     keys(&mut cx, "cmd-n");
 
-    assert!(drawn(&mut cx, "sidebar-column"));
+    assert!(drawn(&mut cx, "dock-left"));
     let sidebar = window
         .update(&mut cx, |shell, _, _| shell.panes().sidebar.clone())
         .unwrap();
@@ -175,4 +175,41 @@ fn creating_with_the_sidebar_hidden_shows_it(cx: &mut TestAppContext) {
         .update(&mut cx, |shell, _, _| shell.notes.clone())
         .unwrap();
     assert_eq!(vault_names(&notes, &mut cx), ["a.md", "b.md", "plan.md"]);
+}
+
+/// Edges included: `Bounds::is_contained_within` excludes the right and bottom ones.
+fn inside(cx: &mut VisualTestContext, inner: &'static str, outer: &'static str) -> bool {
+    let inner = cx.debug_bounds(inner).expect("drawn");
+    let outer = cx.debug_bounds(outer).expect("drawn");
+    outer.left() <= inner.left()
+        && inner.right() <= outer.right()
+        && outer.top() <= inner.top()
+        && inner.bottom() <= outer.bottom()
+}
+
+#[gpui::test]
+fn the_files_header_tops_the_left_dock(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    assert!(inside(&mut cx, "panel-header-files", "dock-left"));
+    let dock = cx.debug_bounds("dock-left").unwrap();
+    let header = cx.debug_bounds("panel-header-files").unwrap();
+    assert_eq!(header.top(), dock.top());
+}
+
+#[gpui::test]
+fn the_backlinks_header_is_drawn_by_the_dock(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+    assert!(inside(&mut cx, "panel-header-backlinks", "dock-right"));
+}
+
+/// A header takes no focus: the root would take it on the press.
+#[gpui::test]
+fn a_press_on_a_dock_header_keeps_the_editor_focused(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    assert!(editor_focused(&window, &mut cx));
+
+    click(&mut cx, "panel-header-files");
+
+    assert!(editor_focused(&window, &mut cx));
 }

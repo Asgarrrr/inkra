@@ -237,7 +237,7 @@ fn single_file_mode_switches_back_to_its_file(cx: &mut TestAppContext) {
     assert_eq!(showing(&window, &mut cx), Some(EntryId::DETACHED));
     check(&window, &mut cx);
     assert!(
-        cx.debug_bounds("backlinks-column").is_none(),
+        cx.debug_bounds("dock-right").is_none(),
         "no vault, no backlinks column"
     );
 

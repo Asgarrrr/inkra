@@ -44,7 +44,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - run: `cargo run -p inkra-app [path]`
 - tests moved: `./scripts/test-names.sh` — diff before and after splitting a
   file; a forgotten `mod` line drops tests and still compiles green.
-- mutants: `cargo mutants` after changing `text`, `editor`, `markdown`, `index` or `tabs` logic.
+- mutants: `cargo mutants` after changing `text`, `editor`, `markdown`, `index`, `tabs` or `layout` logic.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
@@ -60,8 +60,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   beside the chain: `app` depends on it, it depends on no workspace crate.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
-  `inkra-tabs` depends on no workspace crate; `app` depends on it.
-- `text`, `editor`, `vault`, `markdown`, `index` and `tabs` have no gpui dependency; `check.sh`
+  `inkra-tabs` and `inkra-layout` depend on no workspace crate; `app` depends on both.
+- `text`, `editor`, `vault`, `markdown`, `index`, `tabs` and `layout` have no gpui dependency; `check.sh`
   enforces it for every workspace member except `inkra-app`.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
@@ -70,6 +70,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
   - which tab is active, what a close activates, which place back and forward reach, what `⌘⇧T`
     reopens, where a dragged tab lands → `tabs`; what a place holds → `app`
+  - which dock holds a view, which view is active, which dock shows, where a moved view lands
+    → `layout`; what a view draws → `app`
   - pixels, fonts, a `Window`, a clock, the platform → `app`
   - reading or writing a file → `vault`, behind `Fs`; `app` opens no file
   - binding a file to a `Buffer` → `app` (`NoteStore`); `vault` never sees a `Buffer`
@@ -176,6 +178,8 @@ Read the spec before changing its area:
   `Tab`, `Icon`, `Indicator`, `IconButton`, `PanelHeader`, `Assets`), row overlays, Lucide
   icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices
 - `docs/superpowers/specs/2026-11-04-obsidian-chrome-design.md` — Obsidian chrome: surfaces, the split title row, browser tabs, the nav row, the backlinks header
+- `docs/superpowers/specs/2026-11-05-docks-design.md` — docks: `inkra-layout`, `Docks`, headers and the icon bar,
+  the move actions, the menu, the drag, the session's `docks` field
 - `docs/superpowers/specs/2026-11-04-themes-components-design.md` — semantic tokens, `GlobalTheme`, `ui::Color` and `Label`,
   vault themes in `.inkra/`, `settings.json`, hot reload, the theme picker
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and

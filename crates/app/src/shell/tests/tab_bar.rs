@@ -193,12 +193,12 @@ fn clicking_a_tab_on_an_empty_tab_focuses_the_root(cx: &mut TestAppContext) {
 fn the_backlinks_column_shows_for_an_empty_tab_in_a_vault_only(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
     assert!(
-        cx.debug_bounds("backlinks-column").is_some(),
+        cx.debug_bounds("dock-right").is_some(),
         "a vault, an empty tab"
     );
 
     let (_window, mut cx) = no_vault(&mut cx);
-    assert!(cx.debug_bounds("backlinks-column").is_none(), "no vault");
+    assert!(cx.debug_bounds("dock-right").is_none(), "no vault");
 }
 
 /// 30 tabs cannot fit a 700 px window; `⌘9` must bring the last one into the bar.
@@ -279,7 +279,7 @@ fn many_tabs_never_widen_the_note_column(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-1");
     cx.run_until_parked();
 
-    let backlinks = cx.debug_bounds("backlinks-column").unwrap();
+    let backlinks = cx.debug_bounds("dock-right").unwrap();
     let text = editor(&window, &mut cx).read_with(&cx, |view, _| view.text_bounds().unwrap());
     assert!(
         text.right() <= backlinks.left(),

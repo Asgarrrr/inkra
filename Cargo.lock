@@ -2703,6 +2703,7 @@ dependencies = [
  "image",
  "inkra-editor",
  "inkra-index",
+ "inkra-layout",
  "inkra-markdown",
  "inkra-tabs",
  "inkra-text",
@@ -2738,6 +2739,13 @@ dependencies = [
  "regex-syntax",
  "unicode-normalization",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "inkra-layout"
+version = "0.1.0"
+dependencies = [
+ "proptest 1.11.0",
 ]
 
 [[package]]
