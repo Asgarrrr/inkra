@@ -22,30 +22,27 @@ impl AppShell {
     ) -> impl IntoElement {
         let colors = theme::current(cx).colors;
         let docks = self.panes.as_ref().map(|panes| &panes.docks);
-        let sidebar_shown = docks.is_some_and(|docks| docks.dock(Side::Left).is_drawn());
-        let backlinks_shown = docks.is_some_and(|docks| docks.dock(Side::Right).is_drawn());
-        let (sidebar_toggle, backlinks_toggle) = self.render_dock_toggles(cx);
+        let left_drawn = docks.is_some_and(|docks| docks.dock(Side::Left).is_drawn());
+        let right_drawn = docks.is_some_and(|docks| docks.dock(Side::Right).is_drawn());
+        let (left_toggle, right_toggle) = self.render_dock_toggles(cx);
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
         } else {
             theme::TRAFFIC_LIGHT_PADDING
         };
-        let (title_sidebar, leading_toggle) = if sidebar_shown {
+        let (left_title, leading_toggle) = if left_drawn {
             (
-                Some(Self::render_title_sidebar(lights, sidebar_toggle, cx)),
+                Some(Self::render_title_sidebar(lights, left_toggle, cx)),
                 None,
             )
         } else {
-            (None, Some(sidebar_toggle))
+            (None, Some(left_toggle))
         };
-        let (title_backlinks, trailing_toggle) = if backlinks_shown {
-            (
-                Some(Self::render_title_backlinks(backlinks_toggle, cx)),
-                None,
-            )
+        let (right_title, trailing_toggle) = if right_drawn {
+            (Some(Self::render_title_backlinks(right_toggle, cx)), None)
         } else {
-            (None, backlinks_toggle)
+            (None, right_toggle)
         };
         let title_tabs = h_flex()
             .debug_selector(|| "title-tabs".into())
@@ -54,7 +51,7 @@ impl AppShell {
             .flex_1()
             .min_w_0()
             .h_full()
-            .when(!backlinks_shown, |segment| segment.pr(theme::ROW_INSET))
+            .when(!right_drawn, |segment| segment.pr(theme::ROW_INSET))
             // Under the tabs only, so the side panels run to the window's top; the active tab, painted later, breaks it (D3).
             .child(
                 div()
@@ -88,9 +85,9 @@ impl AppShell {
             .flex_none()
             .h(theme::TITLE_BAR_HEIGHT)
             .bg(colors.background)
-            .children(title_sidebar)
+            .children(left_title)
             .child(title_tabs)
-            .children(title_backlinks)
+            .children(right_title)
     }
 
     /// Over the right dock: a drag region, then its toggle at the window's right edge.

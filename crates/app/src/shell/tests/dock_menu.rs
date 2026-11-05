@@ -4,7 +4,7 @@ use gpui::{Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext,
 use inkra_layout::{Docks, Side, View};
 
 use super::tab_bar::{click, press};
-use super::{ab_focused, editor_focused, keys, open};
+use super::{ab_focused, editor_focused, focus_tree, keys, open};
 use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
 
@@ -201,4 +201,32 @@ fn escape_closes_the_menu_and_gives_focus_back(cx: &mut TestAppContext) {
     assert!(!drawn(&mut cx, "context-menu"));
     assert_eq!(docks(&window, &mut cx), Docks::default());
     assert!(editor_focused(&window, &mut cx));
+}
+
+/// Focus is on the tree, not the editor: the shell's fallback is the editor, so only the menu's own restore lands on the tree.
+#[gpui::test]
+fn a_picker_over_the_menu_keeps_the_menus_focus_return(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    focus_tree(&window, &mut cx);
+    press(&mut cx, "panel-header-files", MouseButton::Right);
+    assert!(menu_focused(&window, &mut cx));
+
+    keys(&mut cx, "cmd-p");
+    let picker_replaced_menu = window
+        .update(&mut cx, |shell, _, _| {
+            shell.modal.is_some() && shell.modal_menu().is_none()
+        })
+        .unwrap();
+    assert!(picker_replaced_menu);
+
+    keys(&mut cx, "escape");
+
+    assert!(!drawn(&mut cx, "context-menu"));
+    let tree_focused = window
+        .update(&mut cx, |shell, window, cx| {
+            shell.tree_focus_handle(cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(tree_focused);
 }
