@@ -199,7 +199,7 @@ impl AppShell {
                             .bg(colors.elevated_background)
                             .border_1()
                             .border_color(colors.border)
-                            .rounded_md()
+                            .rounded(theme::ELEVATED_RADIUS)
                             .shadow_lg()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(modal.view.clone()),

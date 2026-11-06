@@ -11,7 +11,7 @@ use crate::theme;
 pub(crate) enum ListItemStyle {
     /// On the chrome: `TREE_ROW_HEIGHT` tall, rounded, lit with the chrome's row colour.
     Tree,
-    /// On an elevated surface: its own line box, lit with the element colours.
+    /// In a list padded by `MENU_INSET`: its own line box, rounded, lit with the element colours.
     #[default]
     Menu,
 }
@@ -86,16 +86,21 @@ impl RenderOnce for ListItem {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = theme::current(cx).colors;
         let depth = f32::from(u8::try_from(self.indent).unwrap_or(u8::MAX));
+        let (inset, radius) = match self.style {
+            ListItemStyle::Tree => (theme::ROW_INSET, theme::ROW_RADIUS),
+            ListItemStyle::Menu => (theme::ROW_INSET - theme::MENU_INSET, theme::MENU_ROW_RADIUS),
+        };
         let row = self
             .base
             // Load-bearing: an `auto` width is clickable only where the text reaches.
             .w_full()
             // A menu row is its line box; a tree row is `TREE_ROW_HEIGHT` tall, the pitch `row_center` reads.
             .ui_text()
-            .pl(theme::ROW_INSET + theme::INDENT_STEP * depth)
-            .pr(theme::ROW_INSET)
+            .pl(inset + theme::INDENT_STEP * depth)
+            .pr(inset)
+            .rounded(radius)
             .map(|row| match self.style {
-                ListItemStyle::Tree => row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS),
+                ListItemStyle::Tree => row.h(theme::TREE_ROW_HEIGHT),
                 // A menu row's icon is not a tree's chevron slot: it keeps off the label.
                 ListItemStyle::Menu => row.gap_1p5(),
             });

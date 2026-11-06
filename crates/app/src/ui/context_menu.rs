@@ -111,11 +111,11 @@ impl Render for ContextMenu {
             .on_action(cx.listener(|_, _: &Cancel, _, cx| cx.emit(MenuClosed(None))))
             .debug_selector(|| "context-menu".into())
             .min_w(MENU_MIN_WIDTH)
-            .py_1()
+            .p(theme::MENU_INSET)
             .bg(colors.elevated_background)
             .border_1()
             .border_color(colors.border)
-            .rounded_md()
+            .rounded(theme::ELEVATED_RADIUS)
             .shadow_lg()
             .children(self.entries.iter().enumerate().map(|(ix, entry)| {
                 let selected = self.selected == Some(ix);

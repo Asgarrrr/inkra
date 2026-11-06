@@ -37,7 +37,7 @@ impl Render for Tooltip {
                     .bg(colors.elevated_background)
                     .border_1()
                     .border_color(colors.border)
-                    .rounded_md()
+                    .rounded(theme::ELEVATED_RADIUS)
                     .shadow_md()
                     .child(Label::new(self.text.clone()).size(LabelSize::Small)),
             )
