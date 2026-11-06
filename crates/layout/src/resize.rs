@@ -85,21 +85,29 @@ impl Layout {
     }
 }
 
-/// Along `axis`: a row of `axis` needs each child's room, a split across it its widest child's.
+/// Along `axis`: a row of `axis` is long enough for each child at its flex's share, a split
+/// across it for its widest child.
 pub(crate) fn minimum(member: &Member, axis: Axis, min: &impl Fn(GroupId, Axis) -> f32) -> f32 {
     match member {
         Member::Group(group) => min(*group, axis),
         Member::Split {
             axis: inner,
             children,
-            ..
+            flexes,
         } => {
-            let each = children.iter().map(|child| minimum(child, axis, min));
-            if *inner == axis {
-                each.sum()
-            } else {
-                each.fold(0.0, f32::max)
-            }
+            let sum: f32 = flexes.iter().sum();
+            children
+                .iter()
+                .zip(flexes)
+                .map(|(child, flex)| {
+                    let child = minimum(child, axis, min);
+                    if *inner == axis {
+                        child * sum / flex
+                    } else {
+                        child
+                    }
+                })
+                .fold(0.0, f32::max)
         }
     }
 }

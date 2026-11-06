@@ -277,6 +277,7 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S10 | P3 `⌘K` keys: split in four directions, focus the neighbour. | Keyboard splits |
 | S11 | P4 tab moves: `take`/`put` between groups, views into the centre, notes refused on docks. | Drag a tab to another group, Files into the centre |
 | S12 | P4 edge drops that split, P5 `⌘⌥`-click and `⌘⌥↵` into a split. | Drag to split, links to the side |
+| S13 | Review fixes: minimums by flex, a dock body's drop, a centre view's split, a lone view's edge, drags that outlive their target. | Split Right moves a centre view; a view lands in the lower dock group it is dropped on |
 
 The follow-up run covered the rest, all landed:
 
@@ -566,6 +567,28 @@ S12's choices:
   `docks-drag-empty-side` shots show both tints.
 - `dragging.rs`'s R7 test drops in the body's middle, outside the slice's
   files: its old drop point lies in the top band, which now splits.
+
+S13's choices:
+
+- A split's minimum along its own axis is the largest child minimum scaled by
+  the flexes' sum over that child's flex; across its axis, its largest child's.
+  This replaces S9's sum, which let a child at a small flex fall under its own
+  minimum when its parent shrank.
+- A view dropped on a dock group's body lands as that group's last tab. The
+  body no longer calls `append`, which keeps the cases with no known group.
+- Split Right and Split Down on a centre view tab move the view into the fresh
+  group (L1). `split_in` runs `split_view` for a view on any surface, and
+  `split_view` now calls S12's `split_off`, so a centre split activates and
+  focuses the fresh group as a drop's does.
+- A group's only view tab splits nothing *(delegated)*: the keys and the tab
+  menu do nothing there. The dock menu offers no split for a lone view, and a
+  lone tab's own-edge drop shows no zone; the split would leave nothing behind.
+- A view held over its own group's edge follows the tab rule: no zone where it
+  is that group's only tab. `track_drop` takes the dragged tab's group for both
+  payloads.
+- A drag whose tab or separator a tree change removed does nothing. A
+  separator drag ends at its next move; a tab drop finds no tab and is ignored.
+- `DROP_FRACTION` is crate-private: only `drop_zone` reads it.
 
 ## Deferred
 

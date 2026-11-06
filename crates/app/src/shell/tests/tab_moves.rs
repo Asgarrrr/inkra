@@ -1,10 +1,11 @@
 //! A tab dragged between groups, and a view dragged into the centre (splits spec, P4).
 
-use gpui::{TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_layout::{Side, View};
 
 use super::dock_menu::{default_docks, docks};
 use super::dragging::drag;
+use super::edge_drops::hold;
 use super::restore_lands::{launch, vault};
 use super::session_writes::wait;
 use super::splits::{
@@ -186,4 +187,48 @@ fn a_view_in_the_centre_restores_to_its_default_dock(cx: &mut TestAppContext) {
     assert_eq!(shown_view(&window, &mut visual, 0), None);
     check_layout(&window, &mut visual);
     close(&mut visual);
+}
+
+#[gpui::test]
+fn split_right_on_a_centre_view_moves_the_view(cx: &mut TestAppContext) {
+    let (window, mut cx, a, _b) = files_in_the_centre(cx);
+
+    split(&mut cx);
+
+    let groups = centre(&window, &mut cx);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(tabs_in(&window, &mut cx, 0), [Some(a)]);
+    assert_eq!(tabs_in(&window, &mut cx, 1), [None]);
+    assert_eq!(shown_view(&window, &mut cx, 1), Some(View::Files));
+    assert_eq!(last(&window, &mut cx), groups[1]);
+    assert!(files_focused(&window, &mut cx));
+    split(&mut cx);
+    assert_eq!(
+        centre(&window, &mut cx),
+        groups,
+        "a lone view splits nothing"
+    );
+    check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn a_tab_closed_while_held_drops_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+    open(&window, &mut cx, b);
+    split(&mut cx);
+    let middle = cx.debug_bounds("note-column").expect("drawn").center();
+    hold(&mut cx, "tab-0-1", middle);
+
+    keys(&mut cx, "cmd-w");
+    cx.simulate_mouse_move(middle, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(middle, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    assert_eq!(centre(&window, &mut cx).len(), 1);
+    assert_eq!(tabs_in(&window, &mut cx, 0), [Some(a), Some(b)]);
+    check_layout(&window, &mut cx);
+    close(&mut cx);
 }

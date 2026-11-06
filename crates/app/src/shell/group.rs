@@ -198,7 +198,8 @@ impl AppShell {
         Some(panes.sidebar.read(cx).focus_handle(cx))
     }
 
-    /// A dock group splits as its view's menu does: off a group it shares, with room for both.
+    /// A view moves out as its menu splits it: off a group it shares, with room for both. A
+    /// centre group's note shows in both halves.
     fn split_in(
         &mut self,
         group: GroupId,
@@ -206,25 +207,20 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.layout.surface_of(group) {
-            Surface::Center => {
-                let place = self
-                    .group(group)
-                    .shown
-                    .bound()
-                    .map_or(Place::Empty, |bound| {
-                        Place::Note(OnNote {
-                            note: bound.note,
-                            view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
-                        })
-                    });
-                self.split_group(group, direction, place, window, cx);
-            }
-            Surface::Dock(_) => {
-                if let Some(view) = self.group(group).shown.view() {
-                    self.split_view(&SplitView { view, direction }, window, cx);
-                }
-            }
+        if let Some(view) = self.group(group).shown.view() {
+            self.split_view(&SplitView { view, direction }, window, cx);
+        } else if self.layout.surface_of(group) == Surface::Center {
+            let place = self
+                .group(group)
+                .shown
+                .bound()
+                .map_or(Place::Empty, |bound| {
+                    Place::Note(OnNote {
+                        note: bound.note,
+                        view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
+                    })
+                });
+            self.split_group(group, direction, place, window, cx);
         }
     }
 
