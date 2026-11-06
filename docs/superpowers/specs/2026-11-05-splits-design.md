@@ -634,7 +634,7 @@ Slice 2, one tab move for notes and views:
 
 Slice 3, one group column for the centre and the docks:
 
-- `group_column` in `render.rs` builds a group's column on both surfaces: the caller's base
+- `group_column` in `column.rs` builds a group's column on both surfaces: the caller's base
   element, the lower header, its rows, its body and the separator. `group_body` builds the
   body's view drop target and the drop overlay. A pure refactor: ids, selectors and every
   shot are unchanged.
@@ -645,6 +645,22 @@ Slice 3, one group column for the centre and the docks:
   lights and the toggle, the right ends with the toggle and an inset. The rule on the
   centre-facing edge stays a `match` in the title builder and in `render_dock`; a shared
   helper would not shorten either.
+
+Slice 4, the shell's modules by concern; a move, not a rewrite:
+
+- `workspace.rs` holds `change_layout`, `check_layout`, `tab_of` and `tab_state`: the one
+  writer and what it reads and checks. `docks.rs` keeps the toggles, `reveal`, the dock menu
+  and each view's title and icon.
+- `geometry.rs` holds `dock_ends`, `min_sizes`, `room_along`, `surface_size`, `rect_of` and
+  `bounds_of`. `separator.rs` keeps the separator element and its drag.
+- `split.rs` holds the `⌘K` actions, `split_in`, `split_group`, `activate_pane` and `probe`.
+  `group.rs` keeps `Group` and the group's lifecycle. `panes.rs` holds `VaultPanes`, so the keys take `split.rs`
+  *(delegated)*.
+- `column.rs` holds the empty state, the gone banner, the nav row, the note column and the
+  group body that takes drops. `members.rs` holds `Slot`, `render_member` and `render_split`.
+  `render.rs` keeps `Render` and `render_columns`.
+- `probe` reads the caret's place from `bounds_of`, the group's pixel rect on its own surface,
+  no longer from the centre's room. Only a centre group has a caret today, so no shot changes.
 
 ## Deferred
 

@@ -10,7 +10,7 @@ use super::dragging::drag;
 use super::{
     AppShell, EditorView, ab_focused, at, keys, open, select, shell_focused, start_open, trash,
 };
-use crate::shell::group::SplitRight;
+use crate::shell::split::SplitRight;
 use crate::test_support;
 
 pub(super) fn centre(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<GroupId> {

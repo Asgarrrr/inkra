@@ -15,8 +15,8 @@ use crate::restore::{
     Opened, SavedAxis, SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session,
 };
 use crate::shell::AppShell;
-use crate::shell::group::SplitDown;
 use crate::shell::session::THROTTLE;
+use crate::shell::split::SplitDown;
 use crate::test_support;
 
 pub(super) const SESSION: &str = "/support/sessions/vault.json";

@@ -13,7 +13,7 @@ use super::tab_bar::{click, press};
 use super::{ab_focused, keys, open};
 use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
-use crate::shell::group::SplitDown;
+use crate::shell::split::SplitDown;
 use crate::theme;
 
 fn flexes(

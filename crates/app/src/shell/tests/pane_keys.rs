@@ -7,7 +7,7 @@ use super::splits::{centre, close, current, focused, last, shown_in};
 use super::{ab_focused, at, focus_tree, keys, open, select, tall_notes};
 use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
-use crate::shell::group::{SplitDown, SplitRight};
+use crate::shell::split::{SplitDown, SplitRight};
 
 fn root_axis(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Axis {
     window

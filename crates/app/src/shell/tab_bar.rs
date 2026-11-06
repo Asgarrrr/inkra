@@ -13,8 +13,9 @@ use inkra_vault::EntryId;
 
 use super::dock_drag::DraggedView;
 use super::docks::title;
-use super::group::{SplitDown, SplitRight, selector};
+use super::group::selector;
 use super::parked::Parked;
+use super::split::{SplitDown, SplitRight};
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
