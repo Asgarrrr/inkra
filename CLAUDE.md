@@ -139,6 +139,8 @@ Read the spec before changing its area:
   loads, supersede, own-save echo, the startup settle; `IndexSync` spawns
 - `docs/superpowers/specs/2026-09-30-index-turn-effects-design.md` —
   `LiveIndex::turn`: `Turn`, `Effects`, the turn's end, `revision`, when `IndexSync` notifies
+- `docs/superpowers/specs/2026-11-06-persisted-index-design.md` — the cache
+  file, the seed, text read on demand, the writer, Rebuild, the scrub
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
 - `docs/superpowers/specs/2026-09-29-sidebar-rows-design.md` — `Rows`: the
