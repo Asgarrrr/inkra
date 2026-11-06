@@ -662,6 +662,12 @@ Slice 4, the shell's modules by concern; a move, not a rewrite:
 - `probe` reads the caret's place from `bounds_of`, the group's pixel rect on its own surface,
   no longer from the centre's room. Only a centre group has a caret today, so no shot changes.
 
+Slice 5, one history-insert helper in `Tabs`:
+
+- `Tabs::set_active_history` in `lib.rs` is the one place a tab takes the stacks of the tab it
+  stands for; `reopen`, `put` and `detached` call it *(delegated)*. `detached` builds its group
+  with `new`, so the helper sets the active tab's stacks and does not insert.
+
 ## Deferred
 
 | Item | Trigger |

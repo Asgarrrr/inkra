@@ -113,10 +113,7 @@ impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
     pub fn reopen(&mut self, park: impl FnOnce() -> Q) -> Option<P> {
         let entry = self.closed.pop_back()?;
         self.insert(entry.index, park);
-        let index = self.active_index();
-        let tab = &mut self.list[index];
-        tab.back = entry.back;
-        tab.forward = entry.forward;
+        self.set_active_history(entry.back, entry.forward);
         Some(entry.place)
     }
 
