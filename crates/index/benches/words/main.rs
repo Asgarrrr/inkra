@@ -74,9 +74,7 @@ fn bench_memory(_: &mut Criterion) {
         let texts = corpus.texts();
         let mut index = loaded_notes();
         let before = rss_kb();
-        let parsed = texts
-            .iter()
-            .map(|text| NoteContent::parse(Arc::clone(text), EPOCH));
+        let parsed = texts.iter().map(|text| NoteContent::parse(text, EPOCH));
         let _ = build(&mut index, parsed);
         let after = rss_kb();
         let (notes, heap_bytes) = (index.corpus().len(), index.words().heap_bytes());
@@ -100,7 +98,7 @@ fn bench_parse(c: &mut Criterion) {
     for (script, pick) in scripts {
         let text: Arc<str> = prose(&mut Lcg(29), 3_072, pick).into();
         group.bench_function(script, |b| {
-            b.iter_with_large_drop(|| NoteContent::parse(Arc::clone(&text), EPOCH));
+            b.iter_with_large_drop(|| NoteContent::parse(&text, EPOCH));
         });
     }
     group.finish();
@@ -199,7 +197,7 @@ fn inserts(
         if new {
             index.remove(id);
         }
-        let content = NoteContent::parse(Arc::clone(text), EPOCH);
+        let content = NoteContent::parse(text, EPOCH);
         let snapshots = hold.take(index);
         let started = Instant::now();
         index.insert(id, content);

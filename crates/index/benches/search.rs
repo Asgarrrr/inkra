@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::hint::black_box;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -6,9 +7,12 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Searched};
+use inkra_index::{
+    IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Read, Searched,
+    TextSearch,
+};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Serial, Stamp, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
 
 /// The stamp of every text the bench parses: nothing here compares stamps.
 const EPOCH: Stamp = Stamp {
@@ -85,25 +89,30 @@ fn note_text(lcg: &mut Lcg, note: usize) -> String {
     text
 }
 
-/// Every note loaded, with its text; also returns one note and its text for the slot write.
-fn index() -> (NoteIndex, u64, (EntryId, Arc<str>)) {
+/// The text each loaded note holds in memory, as the search reads it.
+type Texts = HashMap<EntryId, Arc<str>>;
+
+/// Every note loaded, and its text; also returns one note and its text for the slot write.
+fn index() -> (NoteIndex, Texts, u64, (EntryId, Arc<str>)) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     let mut lcg = Lcg(13);
     let mut total = 0;
+    let mut texts = Texts::new();
     let mut last = None;
     let notes = ENTRIES.iter().filter(|(_, _, kind, _)| *kind == Kind::Note);
     for (note, (id, ..)) in notes.enumerate() {
         let text: Arc<str> = note_text(&mut lcg, note).into();
         total += text.len();
-        index.insert(*id, NoteContent::parse(Arc::clone(&text), EPOCH));
+        index.insert(*id, NoteContent::parse(&text, EPOCH));
+        texts.insert(*id, Arc::clone(&text));
         last = Some((*id, text));
     }
     let Some(last) = last else {
         panic!("the vault holds {NOTES} notes");
     };
     settle(&mut index);
-    (index, u64::try_from(total).unwrap_or(u64::MAX), last)
+    (index, texts, u64::try_from(total).unwrap_or(u64::MAX), last)
 }
 
 /// Merges every fresh note's words, as the app does once loads calm down.
@@ -114,12 +123,33 @@ fn settle(index: &mut NoteIndex) {
     assert!(index.words_settled(), "the words are merged");
 }
 
-/// One keystroke on one core: the lookup, then `search` over every note.
-fn keystroke(snapshot: &IndexSnapshot, query: &NoteQuery, cancel: &AtomicBool) -> Searched {
-    let Some(found) = block_on(snapshot.search(query, LIMIT, &Serial, cancel)) else {
+/// One keystroke on one core: the candidates, then each one's text in memory searched.
+fn keystroke(
+    snapshot: &IndexSnapshot,
+    texts: &Texts,
+    query: &NoteQuery,
+    cancel: &AtomicBool,
+) -> Searched {
+    let Some(candidates) = snapshot.candidates(query, cancel) else {
         panic!("not cancelled");
     };
-    found
+    let mut search = TextSearch::new(query, LIMIT);
+    for candidate in &candidates {
+        let Some(text) = texts.get(&candidate.id) else {
+            panic!("a candidate has a text");
+        };
+        let read = Read::Text {
+            text: Arc::clone(text),
+            stamp: candidate.stamp,
+        };
+        if !search.read(candidate, read, cancel) {
+            break;
+        }
+    }
+    let Some(found) = search.finish(cancel) else {
+        panic!("not cancelled");
+    };
+    found.searched
 }
 
 fn hit_count(found: &Searched) -> usize {
@@ -127,7 +157,7 @@ fn hit_count(found: &Searched) -> usize {
 }
 
 fn bench_search(c: &mut Criterion) {
-    let (mut index, total, (id, text)) = index();
+    let (mut index, texts, total, (id, text)) = index();
     let corpus = index.corpus();
     eprintln!(
         "corpus: {} notes, {total} text bytes, heap_bytes {}",
@@ -152,9 +182,9 @@ fn bench_search(c: &mut Criterion) {
         ("1 char twice", "e e"),
     ] {
         let query = NoteQuery::new(needle, None, &[]);
-        let hits = hit_count(&keystroke(&snapshot, &query, &cancel));
+        let hits = hit_count(&keystroke(&snapshot, &texts, &query, &cancel));
         group.bench_function(format!("{case}, {needle:?}, {hits} hits"), |b| {
-            b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+            b.iter(|| black_box(keystroke(&snapshot, &texts, &query, &cancel)));
         });
     }
     group.finish();
@@ -168,7 +198,7 @@ fn bench_search(c: &mut Criterion) {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let held = index.corpus();
-                let content = NoteContent::parse(Arc::clone(&text), EPOCH);
+                let content = NoteContent::parse(&text, EPOCH);
                 let start = Instant::now();
                 index.insert(id, content);
                 total += start.elapsed();
@@ -188,7 +218,7 @@ fn long_notes(
     line: Option<usize>,
     copies: usize,
     tail: &str,
-) -> (NoteIndex, u64) {
+) -> (NoteIndex, Texts, u64) {
     let fs = MemFs::new();
     for copy in 0..copies {
         fs.insert_file(format!("/vault/long{copy}.md"), "");
@@ -227,11 +257,13 @@ fn long_notes(
     text.push_str(tail);
     let total = u64::try_from(text.len() * copies).unwrap_or(u64::MAX);
     let text: Arc<str> = text.into();
+    let mut texts = Texts::new();
     for id in ids {
-        index.insert(id, NoteContent::parse(Arc::clone(&text), EPOCH));
+        index.insert(id, NoteContent::parse(&text, EPOCH));
+        texts.insert(id, Arc::clone(&text));
     }
     settle(&mut index);
-    (index, total)
+    (index, texts, total)
 }
 
 fn bench_long_line(c: &mut Criterion) {
@@ -244,26 +276,26 @@ fn bench_long_line(c: &mut Criterion) {
         ("ten 1 MB notes, lines of 80 bytes", Some(80), 1 << 20, 10),
         ("ten 1 MB notes, one line each", None, 1 << 20, 10),
     ] {
-        let (index, total) = long_notes(WORDS, bytes, line, copies, "");
+        let (index, texts, total) = long_notes(WORDS, bytes, line, copies, "");
         let snapshot = index.snapshot();
         group.throughput(Throughput::Bytes(total));
         for needle in ["projet", "zanzibar"] {
             let query = NoteQuery::new(needle, None, &[]);
             group.bench_function(format!("{case}, {needle}"), |b| {
-                b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+                b.iter(|| black_box(keystroke(&snapshot, &texts, &query, &cancel)));
             });
         }
     }
     // The index lists the note, so the walk reads nearly all of it for one hit.
-    let (index, total) = long_notes(WORDS, 10 << 20, Some(80), 1, "zanzibar.\n");
+    let (index, texts, total) = long_notes(WORDS, 10 << 20, Some(80), 1, "zanzibar.\n");
     let snapshot = index.snapshot();
     let query = NoteQuery::new("zanzibar", None, &[]);
-    assert_eq!(hit_count(&keystroke(&snapshot, &query, &cancel)), 1);
+    assert_eq!(hit_count(&keystroke(&snapshot, &texts, &query, &cancel)), 1);
     group.throughput(Throughput::Bytes(total));
     group.bench_function(
         "one 10 MB note, lines of 80 bytes, zanzibar once at its end",
         |b| {
-            b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+            b.iter(|| black_box(keystroke(&snapshot, &texts, &query, &cancel)));
         },
     );
     group.finish();
@@ -323,14 +355,14 @@ fn bench_scripts(c: &mut Criterion) {
         ("greek", GREEK, &["σ", "α", "ο"][..]),
         ("cjk", CJK, &["的", "项", "会"][..]),
     ] {
-        let (index, total) = long_notes(words, 10 << 20, Some(80), 1, "");
+        let (index, texts, total) = long_notes(words, 10 << 20, Some(80), 1, "");
         let snapshot = index.snapshot();
         group.throughput(Throughput::Bytes(total));
         for &needle in needles {
             let query = NoteQuery::new(needle, None, &[]);
-            let hits = hit_count(&keystroke(&snapshot, &query, &cancel));
+            let hits = hit_count(&keystroke(&snapshot, &texts, &query, &cancel));
             group.bench_function(format!("{script}, {needle}, {hits} hits"), |b| {
-                b.iter(|| black_box(keystroke(&snapshot, &query, &cancel)));
+                b.iter(|| black_box(keystroke(&snapshot, &texts, &query, &cancel)));
             });
         }
     }

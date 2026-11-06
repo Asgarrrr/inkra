@@ -16,7 +16,7 @@ fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
     let _ = index.set_notes(note_set(&vault));
     for (name, text) in files {
         if let Some(text) = text {
-            index.insert(id(&vault, name), content(*text, mtime(0)));
+            index.insert(id(&vault, name), content(text, mtime(0)));
         }
     }
     (vault, index)

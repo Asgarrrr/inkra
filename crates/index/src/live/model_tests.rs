@@ -4,14 +4,14 @@
 use std::collections::HashSet;
 
 use futures::executor::block_on;
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Fs, Kind, Stamp};
 use proptest::prelude::*;
 
 use super::diff::notes;
-use super::tests::{Harness, Pending, failure};
+use super::tests::{Harness, Pending, failure, words_of};
 use super::{LiveIndex, Status, Ticket, Turn};
 use crate::NoteContent;
-use crate::test_support::{ROOT, content, texts};
+use crate::test_support::{ROOT, content, loaded};
 
 const SLOTS: usize = 2;
 const NAMES: &[&str] = &["a", "b", "c", "n1", "n2", "r1", "zz"];
@@ -298,27 +298,42 @@ impl Model {
     }
 }
 
-/// What a reader sees of a vault note: whether it is indexed, its text, its backlinks.
-type Answer = (EntryId, bool, Option<String>, Vec<(EntryId, usize)>);
+/// What a reader sees of a vault note: its path, whether it is indexed, its stamp, its
+/// `(word, count)`s, its backlinks.
+type Answer = (
+    String,
+    bool,
+    Option<Stamp>,
+    Vec<(String, u32)>,
+    Vec<(EntryId, usize)>,
+);
 
 fn answers(h: &Harness) -> Vec<Answer> {
     let index = h.live.index();
-    let held = texts(&index.corpus());
+    let stamps = loaded(&index.snapshot());
+    let words = index.words().entries();
     h.vault
         .entries()
         .filter(|entry| entry.kind == Kind::Note)
         .map(|entry| {
             let id = entry.id;
-            let text = held
+            let stamp = stamps
                 .iter()
                 .find(|(held, _)| *held == id)
-                .map(|(_, text)| text.clone());
+                .map(|(_, stamp)| *stamp);
             let backlinks = index
                 .backlinks(id)
                 .into_iter()
                 .map(|backlink| (backlink.source, backlink.links.len()))
                 .collect();
-            (id, index.is_indexed(id), text, backlinks)
+            let path = entry.path.as_path().to_string_lossy().into_owned();
+            (
+                path,
+                index.is_indexed(id),
+                stamp,
+                words_of(&words, id),
+                backlinks,
+            )
         })
         .collect()
 }

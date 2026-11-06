@@ -1,7 +1,6 @@
-//! `search` against a naive word-start model, and against `find_notes`: the two boxes agree.
+//! Vault search over the candidates' texts against a naive word-start model, and against `find_notes`: the two boxes agree.
 
 use std::ops::Range;
-use std::sync::atomic::AtomicBool;
 
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
@@ -10,11 +9,10 @@ use proptest::sample::Index;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
 
-use super::tests::searched;
-use crate::find::model_cases::{self, Built, Case, build, split, terms, typed, words};
+use crate::find::model_cases::{self, Built, Case, build, terms, typed, words};
 use crate::find::{boundaries, prefix};
-use crate::test_support::{find_all, indexed};
-use crate::{Group, HITS_PER_NOTE, Hit, NoteHits, Searched};
+use crate::test_support::{find_all, indexed, search_texts, text_map};
+use crate::{Group, HITS_PER_NOTE, Hit, NoteHits, NoteQuery, Searched};
 
 /// Whether every term starts a folded word of `text`; never for no term.
 fn holds(text: &str, terms: &[String]) -> bool {
@@ -96,7 +94,7 @@ struct Drawn {
 }
 
 /// Hits and notes equal the model's, and `find_notes` agrees.
-fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseError> {
+fn agrees(case: &Case, limit: usize) -> Result<Drawn, TestCaseError> {
     let Built {
         index,
         notes,
@@ -104,21 +102,18 @@ fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseEr
         ..
     } = build(case);
     let snapshot = index.snapshot();
-    let cancel = AtomicBool::new(false);
     let texts: Vec<(EntryId, Option<&str>)> = notes
         .iter()
         .map(|note| (note.id, note.text.as_deref()))
         .collect();
+    let (ids, refs): (Vec<EntryId>, Vec<Option<&str>>) = texts.iter().copied().unzip();
+    let read = text_map(&ids, &refs);
 
-    let found = searched(&snapshot, 0..notes.len(), &case.query, &cancel, usize::MAX);
+    let plain = NoteQuery::new(&case.query, None, &[]);
+    let found = search_texts(&snapshot, &read, &plain, usize::MAX);
     prop_assert_eq!(&found, &model(&texts, &case.query, usize::MAX));
-
-    let parts = split(notes.len(), cuts)
-        .into_iter()
-        .map(|range| searched(&snapshot, range, &case.query, &cancel, limit))
-        .collect();
     prop_assert_eq!(
-        Searched::merge(parts, limit),
+        search_texts(&snapshot, &read, &plain, limit),
         model(&texts, &case.query, limit)
     );
 
@@ -154,7 +149,7 @@ fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseEr
 
 /// Cases whose query is often cut from loaded texts: from a word start it matches, from inside
 /// a word it tests the word-start rule; two cuts from two notes often split the notes.
-pub(super) fn case() -> impl Strategy<Value = Case> {
+fn case() -> impl Strategy<Value = Case> {
     let cut = || (any::<Index>(), any::<Index>(), 1..8_usize);
     let cuts = prop::collection::vec(cut(), 1..3);
     (model_cases::case(), prop::option::weighted(0.8, cuts)).prop_map(|(mut case, cuts)| {
@@ -195,10 +190,9 @@ proptest! {
     #[test]
     fn the_two_boxes_agree(
         case in case(),
-        cuts in prop::collection::vec(any::<Index>(), 0..3),
         limit in 0..10_usize,
     ) {
-        agrees(&case, &cuts, limit)?;
+        agrees(&case, limit)?;
     }
 
     #[test]
@@ -209,7 +203,8 @@ proptest! {
     ) {
         let refs: Vec<Option<&str>> = texts.iter().map(Option::as_deref).collect();
         let (ids, index) = indexed(&refs);
-        let found = searched(&index.snapshot(), 0..ids.len(), &query, &AtomicBool::new(false), limit);
+        let note_query = NoteQuery::new(&query, None, &[]);
+        let found = search_texts(&index.snapshot(), &text_map(&ids, &refs), &note_query, limit);
         let texts: Vec<(EntryId, Option<&str>)> = ids.into_iter().zip(refs).collect();
         prop_assert_eq!(found, model(&texts, &query, limit));
     }
@@ -223,7 +218,7 @@ fn the_drawn_cases_hold_notes_matched_and_notes_missed() {
         let Ok(case) = case().new_tree(&mut runner) else {
             panic!("the strategy draws a case");
         };
-        let Ok(drawn) = agrees(&case.current(), &[], usize::MAX) else {
+        let Ok(drawn) = agrees(&case.current(), usize::MAX) else {
             panic!("the property holds");
         };
         total.matched += drawn.matched;

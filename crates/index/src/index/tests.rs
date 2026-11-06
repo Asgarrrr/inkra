@@ -1,7 +1,7 @@
 use inkra_markdown::links;
 
 use super::NoteIndex;
-use crate::test_support::{entries, find_all, id, load, note_set, rename, texts, vault};
+use crate::test_support::{entries, find_all, id, load, loaded, note_set, rename, vault};
 use crate::{Group, NoteQuery, Resolution};
 
 /// Each backlink as (source path, the linked text of each occurrence).
@@ -267,7 +267,7 @@ fn resolve_link_parses_then_resolves() {
 }
 
 #[test]
-fn an_insert_after_its_note_left_leaves_no_links_and_no_text() {
+fn an_insert_after_its_note_left_leaves_no_links_and_no_stamp() {
     let (fs, mut vault) = vault(&["src.md", "Plan.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
@@ -285,7 +285,7 @@ fn an_insert_after_its_note_left_leaves_no_links_and_no_text() {
 
     assert!(!index.is_indexed(src));
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
-    assert_eq!(texts(&index.corpus()), []);
+    assert_eq!(loaded(&index.snapshot()), []);
 }
 
 /// The paths of the notes whose name matches `query`.

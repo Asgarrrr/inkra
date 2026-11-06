@@ -1,9 +1,10 @@
-//! `⌘⇧F` over a `bench_vault` vault on disk: resident texts against reads on `READERS` threads.
+//! `⌘⇧F` over a `bench_vault` vault on disk: texts in memory against reads on `READERS` threads.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hint::black_box;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread;
 
@@ -13,7 +14,7 @@ use inkra_index::{
     Candidate, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Read,
     TextFound, TextSearch,
 };
-use inkra_vault::{Fs as _, Kind, RealFs, Serial, Vault, VaultError};
+use inkra_vault::{EntryId, Fs as _, Kind, RealFs, Vault, VaultError};
 
 const LIMIT: usize = 1_000;
 const TARGET_DF: usize = 1_000;
@@ -87,6 +88,36 @@ fn read4(
             })
             .collect()
     });
+    search(query, &candidates, reads, cancel)
+}
+
+/// The candidates' texts taken from memory, in order, as long as the search wants them.
+fn resident(
+    snapshot: &IndexSnapshot,
+    texts: &HashMap<EntryId, Arc<str>>,
+    query: &NoteQuery,
+    cancel: &AtomicBool,
+) -> Option<TextFound> {
+    let candidates = snapshot.candidates(query, cancel)?;
+    let reads = candidates.iter().map(|candidate| {
+        let Some(text) = texts.get(&candidate.id) else {
+            panic!("a candidate has a text");
+        };
+        Read::Text {
+            text: Arc::clone(text),
+            stamp: candidate.stamp,
+        }
+    });
+    search(query, &candidates, reads, cancel)
+}
+
+/// `reads` fed to one search in candidate order, until it wants no more.
+fn search(
+    query: &NoteQuery,
+    candidates: &[Candidate],
+    reads: impl IntoIterator<Item = Read>,
+    cancel: &AtomicBool,
+) -> Option<TextFound> {
     let mut search = TextSearch::new(query, LIMIT);
     for (candidate, read) in candidates.iter().zip(reads) {
         if !search.read(candidate, read, cancel) {
@@ -119,6 +150,7 @@ fn bench_read_search(c: &mut Criterion) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(entries.collect()));
     let mut df = BTreeMap::new();
+    let mut texts = HashMap::new();
     let notes = vault.entries().filter(|entry| entry.kind == Kind::Note);
     for entry in notes {
         let Some(path) = vault.absolute(entry.id) else {
@@ -128,10 +160,9 @@ fn bench_read_search(c: &mut Criterion) {
             panic!("{} loads", path.display());
         };
         count_tokens(&loaded.text, &mut df);
-        index.insert(
-            entry.id,
-            NoteContent::parse(loaded.text.into(), loaded.stamp),
-        );
+        let text: Arc<str> = loaded.text.into();
+        index.insert(entry.id, NoteContent::parse(&text, loaded.stamp));
+        texts.insert(entry.id, text);
     }
     settle(&mut index);
     let Some((term, notes)) = df
@@ -146,12 +177,12 @@ fn bench_read_search(c: &mut Criterion) {
     let cancel = AtomicBool::new(false);
     let snapshot = index.snapshot();
     let read = read4(&snapshot, &root, &query, &cancel).map(|found| found.searched);
-    let resident = block_on(snapshot.search(&query, LIMIT, &Serial, &cancel));
-    assert_eq!(read, resident, "the reads find what the resident texts do");
+    let held = resident(&snapshot, &texts, &query, &cancel).map(|found| found.searched);
+    assert_eq!(read, held, "the reads find what the texts in memory do");
     let mut group = c.benchmark_group("read_search");
     group.sample_size(10);
     group.bench_function("resident", |b| {
-        b.iter(|| black_box(block_on(snapshot.search(&query, LIMIT, &Serial, &cancel))));
+        b.iter(|| black_box(resident(&snapshot, &texts, &query, &cancel)));
     });
     group.bench_function("read4", |b| {
         b.iter(|| black_box(read4(&snapshot, &root, &query, &cancel)));

@@ -299,7 +299,7 @@ fn bench_adversarial(c: &mut Criterion) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(entries));
     for (&id, (_, _, text)) in NOTE_IDS.iter().zip(&notes) {
-        index.insert(id, NoteContent::parse(text.as_str().into(), EPOCH));
+        index.insert(id, NoteContent::parse(text, EPOCH));
     }
     let snapshot = settle(&mut index);
     let cancel = AtomicBool::new(false);

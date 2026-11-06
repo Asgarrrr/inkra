@@ -7,9 +7,8 @@ use inkra_vault::{Job, Jobs};
 
 use crate::find::{find_in, merge_found};
 use crate::index::IndexSnapshot;
-use crate::search::search_in;
 use crate::words::{Lookup, NoteQuery};
-use crate::{Candidate, NoteMatch, Searched};
+use crate::{Candidate, NoteMatch};
 
 impl IndexSnapshot {
     /// Quick open's rows: the best `limit` notes, best first. `None` once `cancel` is set.
@@ -22,20 +21,6 @@ impl IndexSnapshot {
     ) -> Option<Vec<NoteMatch>> {
         let scan = |lookup: &Lookup, range| find_in(self, lookup, range, query, cancel, limit);
         let merge = |found| merge_found(self, found, query, limit);
-        fan_out(self, query, jobs, cancel, scan, merge).await
-    }
-
-    /// Vault search's hits: the first `limit` word starts, grouped by note in vault order.
-    /// `None` once `cancel` is set.
-    pub async fn search(
-        &self,
-        query: &NoteQuery,
-        limit: usize,
-        jobs: &dyn Jobs,
-        cancel: &AtomicBool,
-    ) -> Option<Searched> {
-        let scan = |lookup: &Lookup, range| search_in(self, lookup, range, query, cancel, limit);
-        let merge = |found| Searched::merge(found, limit);
         fan_out(self, query, jobs, cancel, scan, merge).await
     }
 

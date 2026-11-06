@@ -1,11 +1,18 @@
-use std::sync::Arc;
+use inkra_vault::Stamp;
 
 use super::NoteIndex;
-use crate::corpus::TEXT_HEADER_BYTES;
-use crate::test_support::{ROOT, content, id, load, mtime, note_set, rename, texts, vault};
+use crate::test_support::{ROOT, content, id, load, loaded, mtime, note_set, rename, vault};
+
+/// The stamp `load` gives a text of `size` bytes.
+fn at0(size: u64) -> Stamp {
+    Stamp {
+        mtime: mtime(0),
+        size,
+    }
+}
 
 #[test]
-fn insert_stores_the_text_and_remove_clears_it() {
+fn insert_stores_the_stamp_and_remove_clears_it() {
     let (_fs, vault) = vault(&["a.md", "b.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
@@ -14,25 +21,19 @@ fn insert_stores_the_text_and_remove_clears_it() {
 
     load(&mut index, b, "bee");
     load(&mut index, a, "[[b]]");
-    assert_eq!(
-        texts(&index.corpus()),
-        [(a, "[[b]]".to_owned()), (b, "bee".to_owned())]
-    );
-    assert_eq!(
-        index.corpus().heap_bytes(),
-        empty + 2 * TEXT_HEADER_BYTES + 8
-    );
+    assert_eq!(loaded(&index.snapshot()), [(a, at0(5)), (b, at0(3))]);
+    assert_eq!(index.corpus().heap_bytes(), empty, "a slot per note");
 
     load(&mut index, a, "x");
     index.remove(b);
-    assert_eq!(texts(&index.corpus()), [(a, "x".to_owned())]);
-    assert_eq!(index.corpus().heap_bytes(), empty + TEXT_HEADER_BYTES + 1);
+    assert_eq!(loaded(&index.snapshot()), [(a, at0(1))]);
     index.remove(b);
     assert_eq!(
-        index.corpus().heap_bytes(),
-        empty + TEXT_HEADER_BYTES + 1,
+        loaded(&index.snapshot()),
+        [(a, at0(1))],
         "a second remove changes nothing"
     );
+    assert_eq!(index.corpus().heap_bytes(), empty);
 }
 
 #[test]
@@ -41,11 +42,11 @@ fn a_text_for_a_non_note_is_ignored() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     load(&mut index, inkra_vault::EntryId::DETACHED, "x");
-    assert_eq!(texts(&index.corpus()), []);
+    assert_eq!(loaded(&index.snapshot()), []);
 }
 
 #[test]
-fn set_notes_keeps_each_note_s_text_across_a_create_rename_and_trash() {
+fn set_notes_keeps_each_note_s_stamp_across_a_create_rename_and_trash() {
     let (fs, mut vault) = vault(&["b.md", "d.md", "gone.md"]);
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
@@ -55,22 +56,19 @@ fn set_notes_keeps_each_note_s_text_across_a_create_rename_and_trash() {
         id(&vault, "gone.md"),
     );
     load(&mut index, b, "bee");
-    load(&mut index, d, "dee");
+    load(&mut index, d, "deee");
     load(&mut index, gone, "gone");
 
     fs.insert_file(format!("{ROOT}/a.md"), "");
     fs.remove(std::path::Path::new(&format!("{ROOT}/gone.md")));
     rename(&fs, &mut vault, "d.md", "c.md");
-    let held = index.corpus();
+    let held = index.snapshot();
     let _ = index.set_notes(note_set(&vault));
 
     assert_eq!(id(&vault, "c.md"), d, "a rename keeps the id");
-    assert_eq!(
-        texts(&index.corpus()),
-        [(b, "bee".to_owned()), (d, "dee".to_owned())]
-    );
+    assert_eq!(loaded(&index.snapshot()), [(b, at0(3)), (d, at0(4))]);
     assert_eq!(index.corpus().len(), 3, "a, b, c");
-    assert_eq!(texts(&held).len(), 3, "the held snapshot is untouched");
+    assert_eq!(loaded(&held).len(), 3, "the held snapshot is untouched");
 }
 
 #[test]
@@ -79,30 +77,15 @@ fn a_held_snapshot_never_sees_a_later_insert() {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(note_set(&vault));
     let a = id(&vault, "a.md");
-    load(&mut index, a, "old");
-    let held = index.corpus();
-    load(&mut index, a, "new");
-    assert_eq!(texts(&held), [(a, "old".to_owned())]);
-    assert_eq!(texts(&index.corpus()), [(a, "new".to_owned())]);
-}
-
-#[test]
-fn a_gone_note_s_text_is_freed_with_the_previous_set() {
-    let (fs, mut vault) = vault(&["a.md", "gone.md"]);
-    let mut index = NoteIndex::default();
-    let _ = index.set_notes(note_set(&vault));
-    let text: Arc<str> = "gone".into();
-    let weak = Arc::downgrade(&text);
-    index.insert(id(&vault, "gone.md"), content(text, mtime(0)));
-
-    fs.remove(std::path::Path::new(&format!("{ROOT}/gone.md")));
-    let Ok(()) = futures::executor::block_on(vault.rescan(&fs)) else {
-        panic!("rescan");
+    index.insert(a, content("old", mtime(1)));
+    let held = index.snapshot();
+    index.insert(a, content("new", mtime(2)));
+    let at = |n| Stamp {
+        mtime: mtime(n),
+        size: 3,
     };
-    let previous = index.set_notes(note_set(&vault));
-    assert!(weak.upgrade().is_some(), "the previous set holds the text");
-    drop(previous);
-    assert!(weak.upgrade().is_none());
+    assert_eq!(loaded(&held), [(a, at(1))]);
+    assert_eq!(loaded(&index.snapshot()), [(a, at(2))]);
 }
 
 #[test]
@@ -124,5 +107,9 @@ fn a_save_moves_the_note_s_mtime_without_a_rescan() {
         scanned(b),
         "a note not written keeps its scan's"
     );
-    assert_eq!(texts(&corpus), [(a, "saved".to_owned())]);
+    let saved = Stamp {
+        mtime: mtime(2),
+        size: 5,
+    };
+    assert_eq!(loaded(&index.snapshot()), [(a, saved)]);
 }

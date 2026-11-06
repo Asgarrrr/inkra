@@ -1,14 +1,16 @@
 //! `LiveIndex` driven by hand: each input, and each race between them.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Mtime, Vault, VaultError};
+use inkra_vault::{EntryId, Fs, Mtime, Vault, VaultError};
 
 use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
 use crate::NoteContent;
-use crate::test_support::{ROOT, content, id, texts};
+use crate::test_support::{ROOT, content, id, loaded};
+use crate::words::{NoteWords, Words};
 
 /// Enough slots that no test below the slot tests waits for one.
 const SLOTS: usize = 64;
@@ -88,7 +90,7 @@ impl Harness {
 
     pub(super) fn read(&self, load: &Load) -> inkra_vault::Result<NoteContent> {
         block_on(self.fs.load(&load.path))
-            .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp))
+            .map(|loaded| NoteContent::parse(&loaded.text, loaded.stamp))
     }
 
     /// Lands `loaded` in its own turn; true when an answer moved.
@@ -148,13 +150,16 @@ impl Harness {
         id(&self.vault, file)
     }
 
-    /// The text the index holds for `file`; `None` when it holds none.
-    fn text(&self, file: &str) -> Option<String> {
+    /// The size and words the index holds for `file`; `None` when it holds no stamp.
+    fn held(&self, file: &str) -> Option<Held> {
         let id = self.id(file);
-        texts(&self.live.index().corpus())
+        let (_, stamp) = loaded(&self.live.index().snapshot())
             .into_iter()
-            .find(|(held, _)| *held == id)
-            .map(|(_, text)| text)
+            .find(|(held, _)| *held == id)?;
+        Some((
+            stamp.size,
+            words_of(&self.live.index().words().entries(), id),
+        ))
     }
 
     fn loads(&self, file: &str) -> usize {
@@ -231,6 +236,29 @@ impl Harness {
     pub(super) fn idle_turn(&mut self) -> Effects {
         self.turn(|_| ()).1
     }
+}
+
+/// A note's size and its `(word, count)`s.
+type Held = (u64, Vec<(String, u32)>);
+
+/// What a load of `text` gives the index to hold.
+fn parsed(text: &str) -> Held {
+    let mut words = Words::default();
+    words.set(EntryId::DETACHED, NoteWords::parse(text));
+    let entries = words.snapshot().entries();
+    (text.len() as u64, words_of(&entries, EntryId::DETACHED))
+}
+
+/// `id`'s `(word, count)`s among `entries`.
+pub(super) fn words_of(
+    entries: &BTreeMap<(String, EntryId), u32>,
+    id: EntryId,
+) -> Vec<(String, u32)> {
+    entries
+        .iter()
+        .filter(|((_, note), _)| *note == id)
+        .map(|((word, _), count)| (word.clone(), *count))
+        .collect()
 }
 
 pub(super) fn path(file: &str) -> PathBuf {
@@ -334,7 +362,7 @@ fn an_mtime_only_change_queues_that_note_and_keeps_the_set() {
     assert_eq!(load.path, path("a.md"));
     assert!(h.pending.loads.is_empty(), "only a moved");
     assert!(h.land(&load));
-    assert_eq!(h.text("a.md").as_deref(), Some("new"));
+    assert_eq!(h.held("a.md"), Some(parsed("new")));
 }
 
 #[test]
@@ -350,7 +378,7 @@ fn a_save_since_the_build_read_is_not_queued() {
         h.pending.loads.is_empty(),
         "the save is newer than the read"
     );
-    assert_eq!(h.text("a.md").as_deref(), Some("saved"));
+    assert_eq!(h.held("a.md"), Some(parsed("saved")));
 }
 
 #[test]
@@ -376,7 +404,7 @@ fn a_load_landing_after_a_newer_save_is_dropped() {
     h.save("a.md", "saved");
 
     assert!(!h.landed(load.ticket, read));
-    assert_eq!(h.text("a.md").as_deref(), Some("saved"));
+    assert_eq!(h.held("a.md"), Some(parsed("saved")));
 }
 
 #[test]
@@ -389,7 +417,7 @@ fn a_stale_failure_keeps_the_newer_mtime() {
 
     assert!(!h.fail(load.ticket));
 
-    assert_eq!(h.text("a.md").as_deref(), Some("saved"));
+    assert_eq!(h.held("a.md"), Some(parsed("saved")));
     h.rescan();
     let _ = h.built();
     assert!(
@@ -418,7 +446,7 @@ fn a_note_queued_twice_is_loaded_once() {
         2,
         "the first queue entry for b was superseded"
     );
-    assert_eq!(h.text("b.md").as_deref(), Some("[[c]]"));
+    assert_eq!(h.held("b.md"), Some(parsed("[[c]]")));
 }
 
 #[test]
@@ -443,7 +471,7 @@ fn a_note_queued_while_it_loads_waits_for_its_load() {
     assert_eq!(second.path, path("a.md"));
     h.land(&second);
     assert_eq!(h.live.progress(), (2, 2));
-    assert_eq!(h.text("a.md").as_deref(), Some("[[b]]"));
+    assert_eq!(h.held("a.md"), Some(parsed("[[b]]")));
 }
 
 #[test]
@@ -506,7 +534,7 @@ fn a_note_reloading_during_its_load_counts_once() {
     h.land(&first);
     h.load_all();
     assert_eq!(h.live.progress(), (4, 4));
-    assert_eq!(h.text("a.md").as_deref(), Some("[[b]]"));
+    assert_eq!(h.held("a.md"), Some(parsed("[[b]]")));
 }
 
 #[test]
@@ -525,7 +553,7 @@ fn a_load_failing_after_a_layout_is_retried() {
     let retry = h.start();
     assert_eq!(retry.path, path("a.md"));
     h.land(&retry);
-    assert_eq!(h.text("a.md").as_deref(), Some("new"));
+    assert_eq!(h.held("a.md"), Some(parsed("new")));
 }
 
 #[test]
@@ -540,7 +568,7 @@ fn a_load_failing_after_only_mtimes_forgets_the_note() {
 
     assert!(h.fail(load.ticket));
 
-    assert_eq!(h.text("a.md"), None, "its text is dropped");
+    assert_eq!(h.held("a.md"), None, "its stamp is dropped");
     assert!(!h.live.index().is_indexed(h.id("a.md")));
     assert!(
         h.pending.loads.is_empty(),
@@ -563,8 +591,8 @@ fn a_forgotten_note_is_queued_at_the_next_apply_of_either_kind() {
     assert!(!h.built().layout);
     h.load_all();
     assert_eq!(
-        h.text("a.md").as_deref(),
-        Some("new"),
+        h.held("a.md"),
+        Some(parsed("new")),
         "an mtime apply retries it"
     );
 
@@ -581,8 +609,8 @@ fn a_forgotten_note_is_queued_at_the_next_apply_of_either_kind() {
     assert!(h.built().layout);
     h.load_all();
     assert_eq!(
-        h.text("a.md").as_deref(),
-        Some("newer"),
+        h.held("a.md"),
+        Some(parsed("newer")),
         "a layout apply retries it"
     );
 }
@@ -602,7 +630,7 @@ fn a_failed_load_behind_a_save_still_parsing_keeps_the_note() {
 
     assert!(!h.fail(load.ticket));
 
-    assert_eq!(h.text("a.md").as_deref(), Some("old words"));
+    assert_eq!(h.held("a.md"), Some(parsed("old words")));
     assert!(h.pending.loads.is_empty(), "the save brings the text");
 }
 
@@ -621,7 +649,7 @@ fn a_failed_load_behind_a_queued_reload_keeps_the_note() {
 
     assert!(!h.fail(first.ticket));
 
-    assert_eq!(h.text("a.md").as_deref(), Some("[[b]] old"));
+    assert_eq!(h.held("a.md"), Some(parsed("[[b]] old")));
     assert!(
         paths(&h.pending.loads).contains(&path("a.md")),
         "the queued reload still runs"
@@ -639,7 +667,7 @@ fn a_save_landing_before_its_note_joins_is_reloaded_by_the_next_build() {
     let _ = h.built();
     h.load_all();
 
-    assert_eq!(h.text("a.md").as_deref(), Some("[[b]]"));
+    assert_eq!(h.held("a.md"), Some(parsed("[[b]]")));
     assert_eq!(h.loads("a.md"), 1, "the build reloads it");
 }
 

@@ -8,13 +8,12 @@ use std::time::{Instant, SystemTime};
 
 use futures::FutureExt as _;
 use futures::channel::oneshot;
-use futures::executor::block_on;
 use gpui::{Entity, Subscription, TestAppContext};
 use inkra_index::live::Status;
-use inkra_index::{NoteQuery, TermHit};
+use inkra_index::{Candidate, NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
 
 use super::{IndexSync, NotesChanged};
 use crate::test_support::{entry_id, index_sync, named, scan_notes, vault_of};
@@ -135,26 +134,32 @@ pub(super) fn indexing(loaded: usize, total: usize) -> Status {
     Status::Indexing { loaded, total }
 }
 
-/// Each word start of `text`'s terms in the notes holding them all, with the hit's context.
+/// The notes holding `word`, as `⌘⇧F` would read them now.
+pub(super) fn candidates(
+    cx: &mut TestAppContext,
+    links: &Entity<IndexSync>,
+    word: &str,
+) -> Vec<Candidate> {
+    links.read_with(cx, |links, _| {
+        let query = NoteQuery::new(word, None, &[]);
+        let candidates = links
+            .index()
+            .snapshot()
+            .candidates(&query, &AtomicBool::new(false));
+        candidates.expect("not cancelled")
+    })
+}
+
+/// The notes whose indexed words hold every term of `text`, in vault order.
 pub(super) fn found(
     cx: &mut TestAppContext,
     links: &Entity<IndexSync>,
     text: &str,
-) -> Vec<(EntryId, String)> {
-    links.read_with(cx, |links, _| {
-        let snapshot = links.index().snapshot();
-        let query = NoteQuery::new(text, None, &[]);
-        let cancel = AtomicBool::new(false);
-        block_on(snapshot.search(&query, 100, &Serial, &cancel))
-            .expect("not cancelled")
-            .notes
-            .into_iter()
-            .flat_map(|group| {
-                let note = group.note;
-                group.hits.into_iter().map(move |hit| (note, hit.context))
-            })
-            .collect()
-    })
+) -> Vec<EntryId> {
+    candidates(cx, links, text)
+        .into_iter()
+        .map(|candidate| candidate.id)
+        .collect()
 }
 
 #[gpui::test]
@@ -298,7 +303,7 @@ fn a_save_during_a_build_is_not_reloaded_when_the_build_applies(cx: &mut TestApp
     cx.run_until_parked();
 
     assert_eq!(fs.loads(path), loads);
-    assert_eq!(found(cx, &links, "saved"), [(a, "saved".to_owned())]);
+    assert_eq!(found(cx, &links, "saved"), [a]);
     rescan(cx, &fs, &notes);
     assert_eq!(fs.loads(path), loads, "the save's mtime is the one indexed");
 }
@@ -322,7 +327,7 @@ async fn an_in_place_write_the_held_walk_read_is_reloaded_after_its_swap(cx: &mu
     // The index's reload, and the open note's (watcher spec, F8).
     assert_eq!(fs.loads(Path::new("/vault/a.md")), loads + 2);
     let a = entry_id(&notes, cx, "a");
-    assert_eq!(found(cx, &links, "outside"), [(a, "outside".to_owned())]);
+    assert_eq!(found(cx, &links, "outside"), [a]);
 }
 
 #[gpui::test]
@@ -426,24 +431,24 @@ fn a_load_finishing_after_a_newer_write_is_dropped(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn a_load_and_a_save_put_their_text_in_the_corpus(cx: &mut TestAppContext) {
+async fn a_load_and_a_save_put_their_stamp_in_the_corpus(cx: &mut TestAppContext) {
     let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "loaded words"), ("b.md", "")]);
     cx.run_until_parked();
     let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
-    assert_eq!(found(cx, &links, "words"), [(a, "loaded words".to_owned())]);
+    let sizes = |cx: &mut TestAppContext| -> Vec<(EntryId, u64)> {
+        candidates(cx, &links, "words")
+            .into_iter()
+            .map(|candidate| (candidate.id, candidate.stamp.size))
+            .collect()
+    };
+    assert_eq!(sizes(cx), [(a, 12)]);
 
     saved_edit(cx, &notes, "b", "saved words").await;
 
-    assert_eq!(
-        found(cx, &links, "words"),
-        [
-            (a, "loaded words".to_owned()),
-            (b, "saved words".to_owned())
-        ]
-    );
+    assert_eq!(sizes(cx), [(a, 12), (b, 11)]);
 }
 
-/// Passes against an `apply` that stores no text: the load test above pins the write.
+/// Passes against an `apply` that stores no stamp: the load test above pins the write.
 #[gpui::test]
 fn a_load_finishing_after_a_trash_leaves_no_text(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "old"), ("b.md", "")]);
@@ -594,17 +599,13 @@ fn a_note_reloading_during_its_load_counts_once(cx: &mut TestAppContext) {
     assert_eq!(backlinks(cx, &notes, &links, "c"), Vec::<String>::new());
 }
 
-/// The corpus size tells an empty text from none.
-type Snapshot = (
-    Vec<(
-        String,
-        bool,
-        Vec<(EntryId, usize)>,
-        Option<String>,
-        Vec<Option<TermHit>>,
-    )>,
-    usize,
-);
+type Snapshot = Vec<(
+    String,
+    bool,
+    Vec<(EntryId, usize)>,
+    Option<Stamp>,
+    Vec<Option<TermHit>>,
+)>;
 
 /// Prefixes of every word the random texts hold.
 const TERMS: [&str; 7] = ["a", "b", "c", "e", "n", "r", "zz"];
@@ -624,7 +625,7 @@ fn snapshot(
     });
     links.read_with(cx, |links, _| {
         let index = links.index();
-        let corpus = index.corpus();
+        let snapshot = index.snapshot();
         let words = index.words();
         let lookups: Vec<_> = TERMS
             .iter()
@@ -634,12 +635,11 @@ fn snapshot(
                     .expect("not cancelled")
             })
             .collect();
-        let mut texts: HashMap<EntryId, String> = (0..corpus.len())
-            .filter_map(|order| corpus.text(order))
-            .map(|(id, text)| (id, text.to_owned()))
+        let mut stamps: HashMap<EntryId, Stamp> = (0..index.names().len())
+            .filter_map(|order| snapshot.candidate(order))
+            .map(|candidate| (candidate.id, candidate.stamp))
             .collect();
-        let rows = ids
-            .into_iter()
+        ids.into_iter()
             .map(|(id, path)| {
                 let backlinks = index
                     .backlinks(id)
@@ -647,12 +647,11 @@ fn snapshot(
                     .map(|backlink| (backlink.source, backlink.links.len()))
                     .collect();
                 let indexed = index.is_indexed(id);
-                let text = indexed.then(|| texts.remove(&id).unwrap_or_default());
+                let stamp = stamps.remove(&id);
                 let hits = lookups.iter().map(|lookup| lookup.get(0, id)).collect();
-                (path, indexed, backlinks, text, hits)
+                (path, indexed, backlinks, stamp, hits)
             })
-            .collect();
-        (rows, corpus.heap_bytes())
+            .collect()
     })
 }
 

@@ -1,13 +1,9 @@
-//! `TextSearch` over texts read now: the resident answer, read failures, the stale rules.
+//! `TextSearch` over texts read now: read failures, the limit, the stale rules.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use futures::executor::block_on;
-use inkra_vault::{EntryId, Serial, Stamp};
-use proptest::prelude::*;
+use inkra_vault::{EntryId, Stamp};
 
-use super::model_tests::case;
-use crate::find::model_cases::{Built, build};
 use crate::test_support::{indexed, mtime};
 use crate::{Candidate, IndexSnapshot, NoteQuery, READ_FAILURES, Read, TextFound, TextSearch};
 
@@ -63,30 +59,6 @@ fn alphas(n: usize) -> (Vec<EntryId>, NoteQuery, Vec<Candidate>) {
     let candidates = candidates(&index.snapshot(), &query);
     assert_eq!(candidates.len(), n);
     (ids, query, candidates)
-}
-
-proptest! {
-    #[test]
-    fn matches_resident_search(
-        case in case(),
-        limit in prop_oneof![0..=5_usize, Just(1_000)],
-    ) {
-        let Built { index, notes, query, .. } = build(&case);
-        let snapshot = index.snapshot();
-        let found = drive(&query, limit, &candidates(&snapshot, &query), |_, candidate| {
-            let Some(text) = notes
-                .iter()
-                .find(|note| note.id == candidate.id)
-                .and_then(|note| note.text.as_deref())
-            else {
-                panic!("a candidate is loaded");
-            };
-            unchanged(text, candidate)
-        });
-        let resident = block_on(snapshot.search(&query, limit, &Serial, &AtomicBool::new(false)));
-        prop_assert_eq!(Some(found.searched), resident);
-        prop_assert!(found.stale.is_empty());
-    }
 }
 
 #[test]

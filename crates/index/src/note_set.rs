@@ -15,8 +15,6 @@ pub struct NoteSet {
     pub(crate) ids: Arc<[EntryId]>,
     /// Each note's scanned mtime, in vault order.
     pub(crate) mtimes: Arc<[Mtime]>,
-    /// The texts of the notes this set's successor dropped, freed with it.
-    pub(crate) _retired: Vec<Arc<str>>,
 }
 
 impl NoteSet {
@@ -35,7 +33,6 @@ impl NoteSet {
             names: NamesSnapshot::build(notes, files),
             ids,
             mtimes: mtimes.into(),
-            _retired: Vec::new(),
         }
     }
 }

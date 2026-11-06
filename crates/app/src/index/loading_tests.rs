@@ -95,7 +95,7 @@ fn land_at_once(
                 mtime,
                 size: text.len() as u64,
             };
-            let loaded = Ok(NoteContent::parse(Arc::from(text), stamp));
+            let loaded = Ok(NoteContent::parse(text, stamp));
             links
                 .landed
                 .unbounded_send(Landed { ticket, loaded })
@@ -173,7 +173,7 @@ fn a_note_renamed_while_it_loads_is_loaded_at_its_new_path(cx: &mut TestAppConte
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
+    assert_eq!(found(cx, &links, "new"), [a]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["z"]);
     assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(
@@ -201,7 +201,7 @@ fn a_load_failing_after_a_build_is_retried_at_the_same_path(cx: &mut TestAppCont
     futures::executor::block_on(fs.rename(at_z, at_a)).expect("rename back");
     cx.run_until_parked();
 
-    assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
+    assert_eq!(found(cx, &links, "new"), [a]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
     assert_eq!(status(cx, &links), Status::Ready);
     assert_eq!(
@@ -257,7 +257,7 @@ fn a_forgotten_note_is_reloaded_at_a_rescan_moving_another_notes_mtime(cx: &mut 
     fs.insert_file("/vault/b.md", "");
     rescan(cx, &fs, &notes);
 
-    assert_eq!(found(cx, &links, "new"), [(a, "[[b]] new".to_owned())]);
+    assert_eq!(found(cx, &links, "new"), [a]);
     assert_eq!(backlinks(cx, &notes, &links, "b"), ["a"]);
 }
 
@@ -281,7 +281,7 @@ fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppCo
     cx.run_until_parked();
 
     assert_eq!(fs.loads(Path::new("/vault/z.md")), 0);
-    assert_eq!(found(cx, &links, "old"), [(a, "old".to_owned())]);
+    assert_eq!(found(cx, &links, "old"), [a]);
 }
 
 /// The watch's scoped scan lands while both loads are held: the removed note goes, the renamed one reloads.
@@ -316,7 +316,7 @@ fn a_scoped_scan_landing_during_loads_leaves_the_index_consistent(cx: &mut TestA
     cx.run_until_parked();
 
     assert_eq!(found(cx, &links, "alpha"), []);
-    assert_eq!(found(cx, &links, "beta"), [(b, "[[c]] beta".to_owned())]);
+    assert_eq!(found(cx, &links, "beta"), [b]);
     assert_eq!(found(cx, &links, "old"), []);
     assert_eq!(backlinks(cx, &notes, &links, "c"), ["z"]);
     assert_eq!(status(cx, &links), Status::Ready);

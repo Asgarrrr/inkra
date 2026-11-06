@@ -59,7 +59,7 @@ fn bench_set_notes(c: &mut Criterion) {
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, _, kind, _) in ENTRIES.iter() {
         if *kind == Kind::Note {
-            index.insert(*id, NoteContent::parse("".into(), EPOCH));
+            index.insert(*id, NoteContent::parse("", EPOCH));
         }
     }
     let mut group = c.benchmark_group("set_notes");
@@ -90,7 +90,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, text) in notes.iter().zip(&texts) {
-        index.insert(*id, NoteContent::parse(Arc::clone(text), EPOCH));
+        index.insert(*id, NoteContent::parse(text, EPOCH));
     }
 
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -133,7 +133,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
                     total += start.elapsed();
                     partial = Some(index.set_notes(full));
                     for (id, text) in notes[..count].iter().zip(&texts) {
-                        index.insert(*id, NoteContent::parse(Arc::clone(text), EPOCH));
+                        index.insert(*id, NoteContent::parse(text, EPOCH));
                     }
                 }
                 total
@@ -142,7 +142,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     }
 }
 
-/// Every note holds a text, so `set_notes` moves 50k slots; with a snapshot held, it first
+/// Every note is loaded, so `set_notes` moves 50k slots; with a snapshot held, it first
 /// copies the pointers.
 fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
@@ -150,7 +150,7 @@ fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     for (n, (id, _, kind, _)) in ENTRIES.iter().enumerate() {
         if *kind == Kind::Note {
             let text = format!("note {n}\n");
-            index.insert(*id, NoteContent::parse(text.into(), EPOCH));
+            index.insert(*id, NoteContent::parse(&text, EPOCH));
         }
     }
     let mut other = Some(NoteSet::build(ENTRIES.clone()));

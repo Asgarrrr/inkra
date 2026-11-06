@@ -45,26 +45,3 @@ pub struct Searched {
     /// At least `limit` hits exist; there may be more.
     pub limit_reached: bool,
 }
-
-impl Searched {
-    /// Joins the ranges' results in range order; equals one `search` over their union.
-    #[must_use]
-    pub(crate) fn merge(chunks: Vec<Searched>, limit: usize) -> Searched {
-        // The ranges are disjoint and in order, so one note's group sits in one chunk.
-        let mut notes = Vec::new();
-        let mut room = limit;
-        for mut group in chunks.into_iter().flat_map(|chunk| chunk.notes) {
-            if room == 0 {
-                break;
-            }
-            group.capped |= group.hits.len() > room;
-            group.hits.truncate(room);
-            room -= group.hits.len();
-            notes.push(group);
-        }
-        Searched {
-            notes,
-            limit_reached: room == 0,
-        }
-    }
-}

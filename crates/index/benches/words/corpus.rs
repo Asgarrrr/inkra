@@ -209,7 +209,7 @@ fn parse(texts: &[Arc<str>]) -> Vec<NoteContent> {
                 scope.spawn(move || {
                     texts
                         .iter()
-                        .map(|text| NoteContent::parse(Arc::clone(text), EPOCH))
+                        .map(|text| NoteContent::parse(text, EPOCH))
                         .collect::<Vec<_>>()
                 })
             })

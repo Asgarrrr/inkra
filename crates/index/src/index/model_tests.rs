@@ -1,7 +1,7 @@
 //! `NoteIndex` against a model that scans every note and every link, sharing only `Key`
 //! folding and `Target::parse` with the code under test.
 
-use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
 use proptest::prelude::*;
 use unicode_normalization::UnicodeNormalization;
 
@@ -52,14 +52,14 @@ proptest! {
     #[test]
     fn the_corpus_agrees_with_a_model_across_vault_changes(ops in prop::collection::vec(op(), 0..40)) {
         use std::collections::HashMap;
-        use crate::corpus::{SLOT_BYTES, TEXT_HEADER_BYTES};
-        use crate::test_support::{ROOT, texts};
+        use crate::corpus::SLOT_BYTES;
+        use crate::test_support::ROOT;
         use crate::words::{NoteWords, Words};
         let (fs, mut vault) = vault(&["a.md"]);
         let mut index = NoteIndex::default();
         let _ = index.set_notes(note_set(&vault));
         let mut table: Vec<EntryId> = Model::new(&vault).notes.iter().map(|n| n.0).collect();
-        let mut model: HashMap<EntryId, String> = HashMap::new();
+        let mut model: HashMap<EntryId, (String, Stamp)> = HashMap::new();
         let mut modified: HashMap<EntryId, Mtime> = scanned(&vault).collect();
         let mut held = Vec::new();
         let mut held_words = Vec::new();
@@ -82,9 +82,10 @@ proptest! {
                 }
                 Op::Load(path, text, at) => {
                     if let Some(id) = find(&vault, &path) {
+                        let stamp = Stamp { mtime: mtime(at), size: text.len() as u64 };
                         index.insert(id, content(text.as_str(), mtime(at)));
                         if table.contains(&id) {
-                            model.insert(id, text);
+                            model.insert(id, (text, stamp));
                             modified.insert(id, mtime(at));
                         }
                     }
@@ -99,14 +100,14 @@ proptest! {
                     let _ = index.set_notes(note_set(&vault));
                     table = Model::new(&vault).notes.iter().map(|n| n.0).collect();
                     model.retain(|id, _| table.contains(id));
-                    // A note keeping its text keeps that text's mtime; the others take the scan's.
+                    // A note keeping its stamp keeps that stamp's mtime; the others take the scan's.
                     modified = scanned(&vault)
                         .map(|(id, scan)| (id, if model.contains_key(&id) { modified[&id] } else { scan }))
                         .collect();
                 }
                 Op::Hold => {
                     let snap = index.corpus();
-                    let seen = (texts(&snap), mtimes(&snap));
+                    let seen = (stamps(&snap), mtimes(&snap));
                     held.push((snap, seen));
                     let words = index.words();
                     let seen = words.entries();
@@ -126,22 +127,18 @@ proptest! {
                 Op::DropMerge => drop(running.take()),
             }
             let corpus = index.corpus();
-            let expected: Vec<(EntryId, String)> = table
-                .iter()
-                .filter_map(|id| Some((*id, model.get(id)?.clone())))
-                .collect();
-            prop_assert_eq!(texts(&corpus), expected);
+            let expected: Vec<Option<Stamp>> = table.iter().map(|id| model.get(id).map(|(_, stamp)| *stamp)).collect();
+            prop_assert_eq!(stamps(&corpus), expected);
             prop_assert_eq!(corpus.len(), table.len());
             let expected: Vec<Option<Mtime>> = table.iter().map(|id| modified.get(id).copied()).collect();
             prop_assert_eq!(mtimes(&corpus), expected);
-            let bytes: usize = model.values().map(String::len).sum();
-            prop_assert_eq!(corpus.heap_bytes(), table.len() * SLOT_BYTES + model.len() * TEXT_HEADER_BYTES + bytes);
+            prop_assert_eq!(corpus.heap_bytes(), table.len() * SLOT_BYTES);
             for (snap, seen) in &held {
-                prop_assert_eq!(&(texts(snap), mtimes(snap)), seen);
+                prop_assert_eq!(&(stamps(snap), mtimes(snap)), seen);
             }
             let fresh = {
                 let mut words = Words::default();
-                for (id, text) in &model {
+                for (id, (text, _)) in &model {
                     words.set(*id, NoteWords::parse(text));
                 }
                 words.snapshot().entries()
@@ -182,7 +179,7 @@ fn external_edits_keep_each_old_mtime_until_the_reload() {
             Some(mtime(2)),
             Some(scan[&d])
         ],
-        "each text keeps its mtime; d has no text yet"
+        "each stamp keeps its mtime; d has no stamp yet"
     );
 
     index.insert(c, content("edited", scan[&c]));
@@ -220,6 +217,10 @@ fn scanned(vault: &Vault) -> impl Iterator<Item = (EntryId, Mtime)> {
 
 fn mtimes(corpus: &CorpusSnapshot) -> Vec<Option<Mtime>> {
     (0..corpus.len()).map(|at| corpus.modified(at)).collect()
+}
+
+fn stamps(corpus: &CorpusSnapshot) -> Vec<Option<Stamp>> {
+    (0..corpus.len()).map(|at| corpus.stamp(at)).collect()
 }
 
 struct Model {

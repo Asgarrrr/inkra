@@ -335,3 +335,10 @@ Each slice appends what it did differently from this spec, and why.
 - Slice 2b: P12 as written. A note leaves the `Sessions` live set only
   through our trash, which also drops it from the index, so the pin test
   watches the unpinned text make room for another note's.
+- Slice 2d: `Slot` keeps `stamp` beside `modified` (P9 lists only
+  `modified`): a candidate carries it, and the stale rule compares a read
+  against it. `NoteContent::parse` borrows the text, so no `NoteContent`
+  holds one. `NoteIndex`'s model test drives loads at mtimes no file has, so
+  it checks each slot's stamp and the words against its own model, each step,
+  not against a cold build; `LiveIndex`'s model test compares against a cold
+  build of the final `MemFs`.
