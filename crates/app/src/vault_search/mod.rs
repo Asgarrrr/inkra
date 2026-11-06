@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
@@ -29,6 +30,18 @@ actions!(vault_search, [SearchVault]);
 
 /// Search spec D9: past it the footer asks for a narrower query.
 const LIMIT: usize = 1_000;
+
+/// A run's answer and when it was ready, for the release log line.
+pub(crate) struct Found {
+    searched: Searched,
+    started: Instant,
+    first_hits: Duration,
+}
+
+/// The release log line of one answer; `read` counts the notes read from disk.
+pub(crate) fn search_line(first_hits: Duration, landed: Duration, read: usize) -> String {
+    format!("search: first hits {first_hits:?}, landed {landed:?}, read {read}")
+}
 
 /// A hit was confirmed; the shell opens its note with `range` selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +109,7 @@ impl VaultSearchDelegate {
 }
 
 impl IndexDelegate for VaultSearchDelegate {
-    type Found = Searched;
+    type Found = Found;
     type Key = HitKey;
 
     fn runs(&mut self) -> &mut Runs {
@@ -125,13 +138,24 @@ impl IndexDelegate for VaultSearchDelegate {
         query: &NoteQuery,
         jobs: &dyn Jobs,
         cancel: &AtomicBool,
-    ) -> Option<Searched> {
-        snapshot.search(query, LIMIT, jobs, cancel).await
+    ) -> Option<Found> {
+        let started = Instant::now();
+        let searched = snapshot.search(query, LIMIT, jobs, cancel).await?;
+        Some(Found {
+            searched,
+            started,
+            first_hits: started.elapsed(),
+        })
     }
 
-    fn show(&mut self, landed: Landed<Searched>, cx: &mut Context<Picker<Self>>) {
+    fn show(&mut self, landed: Landed<Found>, cx: &mut Context<Picker<Self>>) {
+        let found = landed.found;
+        let elapsed = found.started.elapsed();
+        if cfg!(not(debug_assertions)) {
+            eprintln!("{}", search_line(found.first_hits, elapsed, 0));
+        }
         let vault = self.vault.read(cx);
-        self.results = Results::new(landed.found, |note| {
+        self.results = Results::new(found.searched, |note| {
             vault.entry(note).map(|entry| &entry.path)
         });
         self.answered = Answered::Query;

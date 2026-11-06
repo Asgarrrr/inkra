@@ -1,11 +1,12 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{Entity, Focusable, TestAppContext, VisualTestContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::VaultSearchDelegate;
 use super::rows::Row;
+use super::{VaultSearchDelegate, search_line};
 use crate::keymap::key_bindings;
 use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::picker::{Picker, PickerDelegate as _};
@@ -177,4 +178,12 @@ fn any_core_count_lists_the_same_rows(cx: &mut TestAppContext) {
     assert_eq!(lists[0].len(), 46);
     assert_eq!(lists[0], lists[1]);
     assert_eq!(lists[0], lists[2]);
+}
+
+#[test]
+fn the_search_line_names_both_timings_and_the_reads() {
+    assert_eq!(
+        search_line(Duration::from_millis(1), Duration::from_millis(2), 0),
+        "search: first hits 1ms, landed 2ms, read 0"
+    );
 }

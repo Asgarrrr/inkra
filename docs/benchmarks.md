@@ -186,3 +186,28 @@ What the run shows, and what it does not:
   window, which the run measured but did not explain.
 - The first warm Obsidian run at 50,000 was still indexing (busy 161 s); the
   median of 5 absorbs it.
+
+## Persisted index baseline (2026-11-06)
+
+What the persisted index (docs/superpowers/specs/2026-11-06-persisted-index-design.md) is gated
+against. Release build of `08afc2a8` plus the slice-0 log line, Apple M5 Pro, 48 GB, macOS 26.5.
+
+Warm launch, 50,000-note `startup_vault` vault, 5 runs. The command was
+`scripts/launch-figure.sh --home "$TMPDIR/inkra-home" target/release/inkra-app "$V" 5`; the first run is the slowest,
+likely a cooler page cache. `phys_footprint` is the figure the spec compares.
+
+```
+launch: first frame 115.9ms, session read 28.50µs, root 143.8ms, scanned 1.0s, names ready 1.1s, indexed 2.08s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 340160 kB | phys_footprint 399213528 B
+launch: first frame 86.3ms, session read 129.96µs, root 111.2ms, scanned 202.6ms, names ready 218.6ms, indexed 1.09s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 342672 kB | phys_footprint 309363648 B
+launch: first frame 84.2ms, session read 74.54µs, root 92.1ms, scanned 183.3ms, names ready 198.0ms, indexed 1.13s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 344192 kB | phys_footprint 403276760 B
+launch: first frame 77.8ms, session read 82.29µs, root 103.1ms, scanned 211.5ms, names ready 227.1ms, indexed 1.04s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 3.2ms) | rss 344176 kB | phys_footprint 310903744 B
+launch: first frame 81.9ms, session read 73.58µs, root 106.5ms, scanned 197.8ms, names ready 213.4ms, indexed 1.30s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.3ms) | rss 348288 kB | phys_footprint 407454656 B
+```
+
+`⌘⇧F` with the whole corpus resident, `cargo bench -p inkra-index --bench read_search`, on the
+`bench_vault -- 50000` vault read from disk with `RealFs`: term `penrara` (1,000 notes), resident
+median 8.19 ms (95% interval 8.14 to 8.79 ms, 10 samples). The slice 2d gate is this figure plus
+50 ms.
+
+Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent has no passwordless
+`sudo`, so the user runs them and adds the lines to this section.

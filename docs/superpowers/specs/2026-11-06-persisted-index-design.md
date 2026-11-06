@@ -59,7 +59,9 @@ stamp with old words, and the old words would survive every later launch.
 
 - **Format version**: bumped by hand on any layout change.
 - **Fold fingerprint**: the Unicode versions of the normalization and
-  segmentation crates, plus a crc32 of folded probe strings.
+  segmentation crates and `char::UNICODE_VERSION` (the fold calls
+  `char::to_lowercase`), each widened to `u64`, plus a crc32 of folded probe
+  strings.
 - **Derivation fingerprint**: a crc32 of `NoteContent::parse` output on a
   fixed probe corpus. It changes when the parse changes, not on every build;
   a build id would invalidate the cache at each compile.
@@ -70,8 +72,9 @@ stamp with old words, and the old words would survive every later launch.
 
 ### P4. Where the file lives
 
-In Application Support, named from the vault path by `session_file`'s key
-function. It is never in the vault: sync clients would copy it, and the
+In `~/Library/Caches/Inkra/index/`, named from the vault path by
+`session_file`'s key function. Caches, not Application Support: the file is
+re-creatable, and Time Machine skips Caches. An evicted file is "missing". It is never in the vault: sync clients would copy it, and the
 watcher would see it. It is per machine. Two instances: the last rename wins,
 and the stamps validate everything at the next launch. No `HOME`: outcome
 "missing", and no writer.
@@ -116,9 +119,13 @@ visible.
 
 ### P8. Racy notes
 
-At snapshot time, the writer marks racy every note loaded less than 2 s
-before, both instants from the app's `Instant`. A racy note reloads at the
-next launch. No filesystem mtime is ordered against a clock.
+A stamp whose mtime has no sub-second part is racy, and a racy stamp never
+matches in P5: the note reloads at every launch. A filesystem with 1-2 s
+ticks (HFS+, FAT, SMB) can take a same-size write in the tick after a load,
+and no stamp tells it apart. On APFS a load outlasts a tick. No filesystem
+mtime is ordered against a clock. An earlier rule (loaded less than 2 s
+before the snapshot) checked the wrong interval: the hazard is a write
+after the load, in the same tick.
 
 ### P9. No resident text
 
@@ -128,7 +135,10 @@ holds text only while parsing.
 ### P10. ⌘⇧F reads its candidates
 
 - The snapshot returns the lookup's candidates in vault order, from names and
-  words, not from `corpus.notes`.
+  words, not from `corpus.notes`. A candidate carries the note's
+  vault-relative path as scanned (extension kept, no NFC), held by
+  `NamesSnapshot` beside the find name: the find name is not a file name.
+  P2's per-note table uses the same path.
 - An app job reads them with at most 4 readers, through the LRU, then
   `Fs::read`. Four matches the `open()` peak.
 - A pure `locate` runs over each text. A note with no hit is skipped, so
@@ -241,8 +251,9 @@ arithmetic wraps silently.
 - `replace_bytes` reuses the temp + rename path; its `TempFile` guard
   removes the temp on any error.
 - A crash between create and rename leaves an orphan of about 30 MB. The
-  first write of a launch removes temps that carry this file's key and the
-  pid of a dead process; it never touches another live instance's temp.
+  first write of a launch removes temps that carry this file's key and that
+  no process holds: the writer keeps `File::try_lock` on its temp, and a lock
+  the sweeper acquires marks an orphan. No pid check, so no `libc`.
 - Disk full or permission denied: the old file stays; backoff; one log line.
 
 **Edge cases**
@@ -286,9 +297,9 @@ key test must catch.
 | 3a | Header, crc32, lengths = size, `Root`, `Rejected`, `read_checked`. Golden constants. | `<` for `<=`; crc over the wrong range; a fingerprint not compared. |
 | 3b | Per-note table, `Sources`. | `Sources` keyed by the old `EntryId`. |
 | 3c | Segment, alive, BM25. Round-trip proptest equal to `entries()`; mutate-and-reseal proptest, where an `Ok` must survive `entries()`, every lookup and one merge. `benches/persist.rs`. `cargo test -p inkra-index --release` added to `check.sh`. | A resealed body accepted, then a panic at lookup. Gate: decode ≤ 60 ms. |
-| 4a | `Seed` in `index`, maps built off the foreground; ghost ordinals; `or_insert`; `size` and identity on `Entry`. `Op::Relaunch` (encode, fresh scan, decode, seed) joins the interleaving proptest. A size-only change reloads. | A ghost ordinal kept; `insert` for `or_insert`; a stale `by_stem`; a rename with an edit; a reused inode with another stamp. |
+| 4a | `Seed` in `index`, maps built off the foreground; ghost ordinals; `or_insert`; `size` and identity on `Entry`. `Op::Relaunch` (encode, fresh scan, decode, seed) joins the interleaving proptest. A size-only change reloads; a whole-second stamp (P8) never matches. | A racy stamp reused; a ghost ordinal kept; `insert` for `or_insert`; a stale `by_stem`; a rename with an edit; a reused inode with another stamp. |
 | 4b | App decode ∥ scan, outcome as a turn input, `Timeline` step. Tests insert `0.md` between launches so ids shift. | A cache keyed by `EntryId`; `queue_changed` before the outcome. Gates: `indexed` ≤ 0.35 s; seed turn ≤ 8 ms, named in the line. |
-| 5a | Writer: snapshot, `merge(alive, fresh)`, seq, racy mark, orphan temps, `replace_bytes`, `remove_file`. Test "second launch: decoded, zero loads". | Fresh tier dropped (save after the settle, advance 60 s, relaunch, assert the hit); stamp from `indexed` (held reload, write, relaunch, assert a reload). |
+| 5a | Writer: snapshot, `merge(alive, fresh)`, seq, orphan temps, `replace_bytes`, `remove_file`. Test "second launch: decoded, zero loads". | Fresh tier dropped (save after the settle, advance 60 s, relaunch, assert the hit); stamp from `indexed` (held reload, write, relaunch, assert a reload). |
 | 5b | 60 s and 500 windows, backoff, disk full. A plain `#[test]` for seq order; quit through `TestAppContext::quit`. | 500 vs 501; a write at quit; an older seq over a newer one. |
 | 5c | `RebuildIndex`, tested through the palette (`cmd-shift-p`, "rebuild index", `enter`). | The removal ordered after an in-flight write; `indexed` not cleared. |
 | 5d | Scrub, 64 notes in one batch, seed = file crc32. | A mismatch that does not requeue. |
@@ -301,5 +312,21 @@ plus `F_FULLFSYNC`) and the file size at 50k.
 
 - Detect dataless placeholders (`SF_DATALESS`) before reading.
 - Collect orphan cache files when the folder exceeds N files.
+- Cold-cache figures (`launch-figure.sh --cold`) need root for `purge`; the
+  user takes them. After a reboot the first ⌘⇧F reads from a cold page
+  cache; measure it there before calling the gate met.
 - Stream ⌘⇧F answers, if the slice-0 gate fails; needs both picker specs
   amended.
+
+## Deviations
+
+Each slice appends what it did differently from this spec, and why.
+
+- Slice 0: `--cold` refuses without passwordless sudo, so cold figures are user-run.
+- After vetting (2026-11-06): P3 adds `char::UNICODE_VERSION`; P4 moves the
+  file to Caches; P8 judges a stamp's tick, not the load's age; P10's
+  candidates carry the scanned path; orphan temps are judged by a file lock.
+  Slices 4b and 5a change `shell/panes.rs` (`IndexSync::new`) and
+  `restore/`, which the open splits stack rewrites: they start after the
+  splits merge. 2a's "loads delta is 0" reads "the delta is the search's
+  reads": `MemFs` counts every read.
