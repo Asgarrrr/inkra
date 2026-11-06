@@ -205,12 +205,48 @@ Paused on 2026-09-26 by the user: slices 5–7 took the first frame from
 489–514 ms to 125–138 ms and indexing from 5.5–10.2 s to about 0.95 s at
 50,000 notes (figures in `superpowers/specs/2026-09-24-search-design.md`,
 `2026-09-25-open-first-design.md` and `2026-09-25-smart-quick-open-design.md`).
-Two levers are identified and left, each with its trigger.
+Two levers were identified: one is refuted, the other is a product choice.
 
 | Item | Trigger | Estimate |
 |---|---|---|
-| Overlap loads with parsing: `LOADS_PER_CORE` 2, or free a load slot when its read lands rather than when the foreground applies it. The pipeline is latency-bound per slot (~450 µs a cycle, slice 7's profile); 1 per core was set in slice 5, before the word parse made a load heavier. Probably 20–40 % off indexing, not measured | Indexing a real vault is noticed, or search results arrive late after launch | 0.5 d, with the release timeline before and after |
+| ~~Overlap loads with parsing~~ | **Refuted 2026-11-06 by measurement**: the loads are bound by macOS's `open`, not by slot latency. See Loads measured, below | Only reading fewer files helps: row 6 of the audit table, with the corpus loaded lazily |
 | ~~The window start-up floor~~ | **Profiled 2026-09-28**: a bare AppKit window with one Metal frame is on screen 156–167 ms after spawn; Inkra is 1–11 ms above it. The time is macOS's, not gpui's or the vault's, and `first frame` read ~27 ms late (it marked the second frame). **Mark fixed 2026-09-29**: it marks the first draw's start. See `startup-floor.md` | Keeping the process resident is the only lever left, a product choice |
+
+### Loads measured, 2026-11-06
+
+Release build, the 50,000-note `startup_vault`, warm cache, Apple M5 Pro
+(6 performance and 12 efficiency cores), 5 launches per setting. A throwaway
+probe timed each phase; it is not in the tree. Other builds ran on the machine
+during the runs, so spreads are wide.
+
+The loads run from about 230 ms, the scan's end, to about 1.0 s. In that
+window the foreground is busy 119 ms, a landed load waits 8 µs on average
+before its apply, the parse costs about 1 s of CPU across cores, and the
+words merge 5 ms. Reading takes the rest: about 220 µs a file at 18 loads
+at once, against about 30 µs at 2. A stack sample of the window has 7,136
+samples in `__open`, about 220 in `NoteWords::parse`, 165 in `stat` and 100
+in `read`.
+
+| Setting | `indexed` |
+|---|---|
+| `LOADS_PER_CORE` 1, 2, 3, 4 | medians 1.29, 1.21, 1.27, 1.46 s |
+| 2, 4, 6, 8, 12, 18 slots in total | 1.6 s at 2; 0.99–1.19 s from 4 up |
+| Loads at `Priority::Medium` instead of `Low` | 2–8 % faster, inside the spread |
+| 3, 4 or 6 reads at once behind a semaphore, parse outside it, 18 or 36 slots | 0.98–1.26 s, as without it |
+
+A standalone program that reads the same 50,000 files, outside the app, takes
+846 ms on 1 thread, 515–786 ms on 4 and 600–640 ms on 18. One `open` and an
+`fstat` in place of `metadata` and `read` changes nothing. Public reports
+match: warm-cache `open` on macOS is lock-bound and peaks at about 4 threads
+(edi-parse issue 20, oops PR 14, ripgrep issue 2925). `openat`, `mmap`,
+`F_RDAHEAD`, `F_NOCACHE` and inode order are measured null or negative
+elsewhere. Inkra's ~770 ms of loads sits at that floor: no slot count,
+priority or reader limit moves it.
+
+What does move it is reading fewer files. Obsidian, Zettlr, JetBrains and
+Sublime persist their index and reread only files whose stamp changed; Zed
+keeps no corpus and reads only a search's candidate files. That is row 6 of
+the audit table below, which also needs the resident corpus to load lazily.
 
 ## Index and search: the 2026-09-27 audit
 
