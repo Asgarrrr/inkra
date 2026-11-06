@@ -102,14 +102,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let view = self.group(group).shown.view();
-        let body = self
-            .panes
-            .as_ref()
-            .zip(view)
-            .map(|(panes, view)| match view {
-                View::Files => panes.sidebar.clone().into_any_element(),
-                View::Backlinks => panes.backlinks.clone().into_any_element(),
-            });
+        let body = view.and_then(|view| self.render_view_body(view));
         slot.size(
             div().debug_selector(move || selector(format_args!("dock-{}-group", name(side)), k)),
         )
@@ -127,8 +120,17 @@ impl AppShell {
         .children(Self::render_separator(path, slot, k, cx))
     }
 
+    /// What `view` draws under its header; `None` with no vault.
+    pub(super) fn render_view_body(&self, view: View) -> Option<AnyElement> {
+        let panes = self.panes.as_ref()?;
+        Some(match view {
+            View::Files => panes.sidebar.clone().into_any_element(),
+            View::Backlinks => panes.backlinks.clone().into_any_element(),
+        })
+    }
+
     /// The view's own first row. A press keeps the focus, as every header's does.
-    fn render_view_header(&self, view: View, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_view_header(&self, view: View, cx: &mut Context<Self>) -> AnyElement {
         match view {
             View::Files => {
                 PanelHeader::bar("panel-header-files")

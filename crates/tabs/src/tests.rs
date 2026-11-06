@@ -7,6 +7,7 @@ use super::{Closed, Direction, HISTORY, Place, Stack, TabId, Tabs};
 use harness::Harness;
 
 mod closed;
+mod detached;
 mod harness;
 mod history;
 mod moving;

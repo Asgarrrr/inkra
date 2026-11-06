@@ -6,7 +6,6 @@ use inkra_layout::GroupId;
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
-use super::dragging::drag;
 use super::{
     AppShell, EditorView, ab_focused, at, keys, open, select, shell_focused, start_open, trash,
 };
@@ -279,24 +278,6 @@ fn cmd_s_saves_the_active_groups_note(cx: &mut TestAppContext) {
 
     assert_eq!(disk("/vault/b.md").as_deref(), Some("betaY"));
     assert_eq!(disk("/vault/a.md").as_deref(), Some("alphaX"));
-    close(&mut cx);
-}
-
-#[gpui::test]
-fn a_tab_from_another_group_is_refused(cx: &mut TestAppContext) {
-    let (_fs, window, mut cx, a, b) = ab_focused(cx);
-    open(&window, &mut cx, a);
-    keys(&mut cx, "cmd-t");
-    open(&window, &mut cx, b);
-    split(&mut cx);
-    keys(&mut cx, "cmd-t");
-
-    // Each group numbers its own tabs, so the dragged tab's id is also one of the right group's.
-    drag(&mut cx, "tab-1", "tab-0-1");
-
-    assert_eq!(tabs_in(&window, &mut cx, 0), [Some(a), Some(b)]);
-    assert_eq!(tabs_in(&window, &mut cx, 1), [Some(b), None]);
-    check_layout(&window, &mut cx);
     close(&mut cx);
 }
 

@@ -6,8 +6,9 @@ use gpui::{
 };
 use inkra_layout::{Axis, GroupId, Member, Side, SplitPath, Surface};
 
-use super::dock_drag::SHELL_GROUP;
+use super::dock_drag::{DraggedView, SHELL_GROUP};
 use super::group::selector;
+use super::tab_bar::DraggedTab;
 use super::{AppShell, GoBack, GoForward};
 use crate::theme;
 use crate::ui::{Color, IconButton, IconName, h_flex, keep_focus};
@@ -142,10 +143,63 @@ impl AppShell {
             .debug_selector(move || selector("group-header", k))
             .child(self.render_tab_bar(k, group, cx))
             .child(Self::render_new_tab(k, cx))
+            .on_drop(Self::view_drop(group, cx))
+    }
+
+    /// A view dropped on a centre group's strip or body lands as its last tab.
+    pub(super) fn view_drop(
+        group: GroupId,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
+        cx.listener(move |shell, dragged: &DraggedView, window, cx| {
+            shell.drop_view_at_end(dragged.view, group, window, cx);
+        })
+    }
+
+    /// The view and its header, else the note or the empty state. A view or a tab from another
+    /// group dropped here lands as the last tab.
+    fn render_group_body(&self, group: GroupId, cx: &mut Context<Self>) -> Div {
+        let colors = theme::current(cx).colors;
+        let view = self.group(group).shown.view();
+        // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
+            .on_drop(Self::view_drop(group, cx))
+            .drag_over::<DraggedTab>(move |style, dragged, _, _| {
+                if dragged.group == group {
+                    style
+                } else {
+                    style.bg(colors.accent_background)
+                }
+            })
+            .on_drop(cx.listener(move |shell, dragged: &DraggedTab, window, cx| {
+                if dragged.group != group {
+                    let at = shell.group(group).tabs.count();
+                    shell.move_tab_to(dragged.group, dragged.id, group, at, window, cx);
+                }
+            }));
+        match view {
+            Some(view) => body
+                .flex()
+                .flex_col()
+                .child(self.render_view_header(view, cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .children(self.render_view_body(view)),
+                ),
+            None => body.child(match self.editor_of(group) {
+                Some(editor) => editor.clone().into_any_element(),
+                None => self.render_empty(cx).into_any_element(),
+            }),
+        }
     }
 
     /// Centre group `k`'s column: its header if it is lower, its nav row, its banner, the notice if
-    /// it is the last active, and its note.
+    /// it is the last active, and its body.
     fn render_note_column(
         &self,
         k: usize,
@@ -174,11 +228,7 @@ impl AppShell {
                 .then(|| self.render_notice(cx))
                 .flatten(),
         )
-        // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
-        .child(div().flex_1().min_h_0().child(match self.editor_of(group) {
-            Some(editor) => editor.clone().into_any_element(),
-            None => self.render_empty(cx).into_any_element(),
-        }))
+        .child(self.render_group_body(group, cx))
         .children(Self::render_separator(path, slot, k, cx))
     }
 

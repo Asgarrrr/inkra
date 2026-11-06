@@ -140,7 +140,8 @@ fn shape(member: SavedMember, groups: &mut Vec<SavedGroup>) -> Shape {
     }
 }
 
-/// A view tab names no note: the centre drops it until P4.
+/// A view tab names no note: the centre drops it and the view returns to its default dock, since
+/// the centre lands after the walk and Files must show during it.
 fn path(tab: &SavedTab) -> Option<&OsStr> {
     match tab {
         SavedTab::Note(SavedNoteTab { note, .. }) => note.as_deref().map(OsStr::new),

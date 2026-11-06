@@ -70,7 +70,7 @@ impl Group {
             && !self.tabs.has_closed()
     }
 
-    fn with(tabs: Tabs<Place, Parked>, shown: Shown) -> Self {
+    pub(super) fn with(tabs: Tabs<Place, Parked>, shown: Shown) -> Self {
         Self {
             tabs,
             shown,
@@ -190,7 +190,7 @@ impl AppShell {
         }
     }
 
-    fn tree_focus(&self, cx: &App) -> Option<FocusHandle> {
+    pub(super) fn tree_focus(&self, cx: &App) -> Option<FocusHandle> {
         let panes = self.panes.as_ref()?;
         Some(panes.sidebar.read(cx).focus_handle(cx))
     }
@@ -326,24 +326,40 @@ impl AppShell {
         self.change_layout(window, cx, |shell, window, cx| {
             let Group { tabs, shown, .. } = shell.group_mut(group);
             tabs.close(id, |_| capture(shown, cx));
-            let closed = tabs.take_closed();
-            if was_last {
-                shell.unfocus_editor(group, window, cx);
-            } else if let Some(editor) = shell.editor_of(group) {
-                editor.update(cx, EditorView::unpin);
-            }
-            let Some(heir) = shell.layout.remove(group) else {
-                panic!("a centre group has an heir");
-            };
-            shell.groups.remove(&group);
-            shell.group_mut(heir).tabs.extend_closed(closed);
-            if was_last {
-                shell.enter_group(heir, cx);
-            }
+            shell.remove_group(group, window, cx);
         });
         if was_last && let Some(focus) = self.land_focus(cx) {
             window.focus(&focus, cx);
         }
+    }
+
+    /// Takes `group` out of the layout; its heir takes its room, its closed stack and, if it was
+    /// `last_center`, that place (L6). A dock's only group leaves no heir.
+    pub(super) fn remove_group(
+        &mut self,
+        group: GroupId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Group {
+        let was_last = group == self.layout.last_center();
+        if was_last {
+            self.unfocus_editor(group, window, cx);
+        } else if let Some(editor) = self.editor_of(group) {
+            editor.update(cx, EditorView::unpin);
+        }
+        let heir = self.layout.remove(group);
+        let Some(mut removed) = self.groups.remove(&group) else {
+            panic!("{group:?} has no group");
+        };
+        if let Some(heir) = heir {
+            self.group_mut(heir)
+                .tabs
+                .extend_closed(removed.tabs.take_closed());
+            if was_last {
+                self.enter_group(heir, cx);
+            }
+        }
+        removed
     }
 
     pub(super) fn switch_group(&mut self, group: GroupId, cx: &mut Context<Self>) {

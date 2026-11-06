@@ -27,6 +27,7 @@ mod render;
 mod separator;
 mod session;
 mod tab_bar;
+mod tab_moves;
 mod tabs;
 mod themes;
 mod title_bar;

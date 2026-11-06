@@ -52,7 +52,7 @@ fn a_drop_outside_any_target_changes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
 
-    drag(&mut cx, "dock-icon-files", "note-column");
+    drag(&mut cx, "dock-icon-files", "title-drag-left");
 
     assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));

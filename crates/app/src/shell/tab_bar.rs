@@ -5,13 +5,16 @@ use std::cmp::Ordering;
 use gpui::{
     Action, App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
-use inkra_layout::GroupId;
+use inkra_layout::{GroupId, View};
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
+use super::dock_drag::DraggedView;
+use super::docks::title;
 use super::group::{SplitDown, SplitRight, selector};
+use super::parked::Parked;
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
@@ -23,10 +26,19 @@ const NEW_TAB: &str = "New tab";
 /// The tab under the pointer; also its preview. `index` is where it stood when the drag began.
 #[derive(Clone)]
 pub(super) struct DraggedTab {
-    id: TabId,
+    pub(super) id: TabId,
     index: usize,
     title: SharedString,
-    group: GroupId,
+    pub(super) group: GroupId,
+}
+
+/// One tab as its bar draws it; `view` is the view it holds, if any.
+struct TabEntry {
+    id: TabId,
+    title: SharedString,
+    is_active: bool,
+    indicator: Option<Indicator>,
+    view: Option<View>,
 }
 
 /// The centre group a strip draws: `k` is its place in the row, for the selectors.
@@ -65,11 +77,24 @@ impl AppShell {
             .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::note))
     }
 
+    /// The view each tab holds; `None` for a note's or an empty tab.
+    fn tab_views(&self, group: GroupId) -> impl Iterator<Item = Option<View>> + '_ {
+        let group = self.group(group);
+        group
+            .tabs
+            .iter()
+            .map(|tab| tab.place().map_or_else(|| group.shown.view(), Parked::view))
+    }
+
     /// Every tab's title, reading the store once.
     pub(super) fn tab_titles(&self, group: GroupId, cx: &App) -> Vec<SharedString> {
         let notes = self.notes.read(cx);
         self.tab_notes(group)
-            .map(|note| tab_title(note, notes, cx))
+            .zip(self.tab_views(group))
+            .map(|(note, view)| match view {
+                Some(view) => SharedString::new_static(title(view)),
+                None => tab_title(note, notes, cx),
+            })
             .collect()
     }
 
@@ -94,23 +119,25 @@ impl AppShell {
                 note.and_then(|id| Indicator::of(notes.is_dirty(id, cx), notes.save_failed(id)))
             })
             .collect();
+        let views: Vec<_> = self.tab_views(group).collect();
+        let held: Vec<View> = views.iter().copied().flatten().collect();
         let tabs: Vec<_> = self
             .group(group)
             .tabs
             .iter()
             .zip(self.tab_titles(group, cx))
             .zip(indicators)
+            .zip(views)
             .enumerate()
-            .map(|(ix, ((tab, title), indicator))| {
-                Self::render_tab(
-                    strip,
-                    ix,
-                    tab.id(),
+            .map(|(ix, (((tab, title), indicator), view))| {
+                let entry = TabEntry {
+                    id: tab.id(),
                     title,
-                    tab.id() == active,
+                    is_active: tab.id() == active,
                     indicator,
-                    cx,
-                )
+                    view,
+                };
+                Self::render_tab(strip, ix, entry, held.clone(), cx)
             })
             .collect();
         div()
@@ -133,13 +160,18 @@ impl AppShell {
             .children(tabs)
     }
 
+    /// `held` is the group's views: a view dragged from among them reorders, as a tab dragged in its own bar does.
     fn render_tab(
         strip: Strip,
         ix: usize,
-        id: TabId,
-        title: SharedString,
-        is_active: bool,
-        indicator: Option<Indicator>,
+        TabEntry {
+            id,
+            title,
+            is_active,
+            indicator,
+            view,
+        }: TabEntry,
+        held: Vec<View>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let colors = theme::current(cx).colors;
@@ -150,6 +182,16 @@ impl AppShell {
             group: strip.group,
         };
         let group = strip.group;
+        let landing = move |style: StyleRefinement, own: Option<usize>| {
+            let style = style
+                .bg(colors.accent_background)
+                .border_color(colors.accent);
+            match own.map_or(Ordering::Less, |index| ix.cmp(&index)) {
+                Ordering::Less => style.border_l(theme::DROP_EDGE),
+                Ordering::Greater => style.border_r(theme::DROP_EDGE),
+                Ordering::Equal => style,
+            }
+        };
         Tab::new(("tab", ix))
             .debug_selector(move || selector(format_args!("tab-{ix}"), strip.k))
             .active(is_active)
@@ -178,26 +220,26 @@ impl AppShell {
                     shell.close_tab(group, id, window, cx);
                 }
             }))
-            .on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone()))
-            .drag_over::<DraggedTab>(move |style, dragged, _, _| {
-                // P4 moves tabs across groups; until then a foreign tab has no landing here.
-                if dragged.group != group {
-                    return style;
-                }
-                let style = style
-                    .bg(colors.accent_background)
-                    .border_color(colors.accent);
-                match ix.cmp(&dragged.index) {
-                    Ordering::Less => style.border_l(theme::DROP_EDGE),
-                    Ordering::Greater => style.border_r(theme::DROP_EDGE),
-                    Ordering::Equal => style,
-                }
+            .map(|tab| match view {
+                Some(view) => tab.on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
+                    cx.new(|_| dragged.clone())
+                }),
+                None => tab.on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone())),
             })
-            .on_drop(cx.listener(move |shell, dragged: &DraggedTab, _, cx| {
-                if dragged.group == group {
-                    shell.move_tab(group, dragged.id, ix, cx);
-                }
+            .drag_over::<DraggedTab>(move |style, dragged, _, _| {
+                landing(style, (dragged.group == group).then_some(dragged.index))
+            })
+            .on_drop(cx.listener(move |shell, dragged: &DraggedTab, window, cx| {
+                shell.move_tab_to(dragged.group, dragged.id, group, ix, window, cx);
             }))
+            .drag_over::<DraggedView>(move |style, dragged, _, _| {
+                landing(style, held.contains(&dragged.view).then_some(dragged.index))
+            })
+            .on_drop(
+                cx.listener(move |shell, dragged: &DraggedView, window, cx| {
+                    shell.move_view(dragged.view, group, ix, window, cx);
+                }),
+            )
             .map(|tab| {
                 if is_active && !strip.active {
                     tab.child(Label::new(title).color(Color::Muted))

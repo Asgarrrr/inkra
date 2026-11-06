@@ -6,6 +6,7 @@ use inkra_layout::Side;
 use crate::bootstrap::WINDOW_SIZE;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
+use crate::theme;
 
 /// `index` open, so the right dock lists `reading`.
 pub(super) fn default(stage: &mut Stage) -> WindowHandle<AppShell> {
@@ -64,5 +65,14 @@ pub(super) fn split(stage: &mut Stage) -> WindowHandle<AppShell> {
     let icon = stage.dock_icon_point(window, Side::Left, 1);
     stage.right_click(window, icon);
     stage.keys(window, "down down down enter");
+    window
+}
+
+/// Files dragged from its icon and dropped on the centre's strip: its tab after `index`'s.
+pub(super) fn view_in_center(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    let icon = stage.dock_icon_point(window, Side::Left, 0);
+    let strip = point(WINDOW_SIZE.width / 2., theme::TITLE_BAR_HEIGHT / 2.);
+    stage.drag_drop(window, icon, strip);
     window
 }

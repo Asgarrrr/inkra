@@ -258,6 +258,11 @@ const CATALOGUE: &[Scene] = &[
         open: docks::split,
     },
     Scene {
+        name: "view-in-center",
+        shows: "no left dock; over the note column the tabs `index` and `Files`, `Files` active in the note colour; under the title row the nav row, the Files header with new note, new folder and search, then the tree with `index` highlighted; the right dock unchanged",
+        open: docks::view_in_center,
+    },
+    Scene {
         name: "tabs",
         shows: "the title row split in two. Over the sidebar: the traffic lights' space, the sidebar toggle, the Files icon, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the Files header under the row with new note, new folder and search, and the `Backlinks` header level with it, ruled like the row",
         open: tabs::dirty,

@@ -60,6 +60,7 @@ impl AppShell {
                     .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {
                         shell.activate_group(group, window, cx);
                     }))
+                    .on_drop(Self::view_drop(group, cx))
                     .when_some(leading_toggle.take(), |segment, toggle| {
                         segment
                             .child(
