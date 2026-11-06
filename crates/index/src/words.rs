@@ -17,12 +17,16 @@ pub(crate) use fold::{cap, fold, word_spans};
 pub use lookup::{Lookup, TermHit};
 pub(crate) use name_words::NameWords;
 pub(crate) use note_words::NoteWords;
+pub(crate) use ordinal::{Alive, Ordinal};
 #[cfg(test)]
 pub(crate) use policy::FRESH_MIN;
 pub use policy::MergeWhen;
 pub use query::NoteQuery;
 #[cfg(test)]
 pub(crate) use score::{bm25, idf};
+pub(crate) use segment::Segment;
+#[cfg(test)]
+pub(crate) use store::Ordinals;
 pub(crate) use store::Words;
 pub use store::{MergedWords, RetiredWords, WordsMerge, WordsSnapshot};
 
@@ -31,7 +35,7 @@ pub use store::{MergedWords, RetiredWords, WordsMerge, WordsSnapshot};
 pub(crate) const WORD_MAX_CHARS: usize = TERM_MAX_CHARS + 1;
 pub(crate) const TERM_MAX_CHARS: usize = 64;
 
-fn wide(n: u32) -> usize {
+pub(crate) fn wide(n: u32) -> usize {
     let Ok(n) = usize::try_from(n) else {
         panic!("a u32 fits a usize on every supported target");
     };

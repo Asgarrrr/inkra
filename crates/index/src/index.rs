@@ -139,6 +139,13 @@ impl NoteIndex {
         self.words.merge_all();
     }
 
+    /// `self` with `words` in place of its own.
+    #[cfg(test)]
+    pub(crate) fn with_words(mut self, words: Words) -> Self {
+        self.words = words;
+        self
+    }
+
     /// Replaces `id`'s links, stamp and words. Ignored for an id that is not a note, so a load
     /// finishing after its note was trashed leaves nothing behind.
     pub fn insert(&mut self, id: EntryId, content: NoteContent) {
@@ -188,12 +195,12 @@ impl NoteIndex {
         }
     }
 
-    /// Each loaded note in vault order: its file as scanned, the read its words came from, and
-    /// its links.
+    /// Each loaded note in vault order: its id, its file as scanned, the read its words came
+    /// from, and its links.
     ///
     /// # Panics
     /// If a note was loaded but holds no source.
-    pub(crate) fn loaded(&self) -> impl Iterator<Item = (&Arc<str>, FileRead, &Source)> {
+    pub(crate) fn loaded(&self) -> impl Iterator<Item = (EntryId, &Arc<str>, FileRead, &Source)> {
         let corpus = self.corpus.snapshot();
         (0..self.names.len()).filter_map(move |order| {
             let read = corpus.read(order)?;
@@ -201,7 +208,7 @@ impl NoteIndex {
             let Some(source) = self.sources.get(&id) else {
                 panic!("note {id:?} was loaded but holds no source");
             };
-            Some((self.names.file(order), read, source))
+            Some((id, self.names.file(order), read, source))
         })
     }
 

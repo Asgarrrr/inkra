@@ -8,14 +8,14 @@ use std::time::{Duration, SystemTime};
 
 use foldhash::fast::RandomState;
 use inkra_text::ByteOffset;
-use inkra_vault::{FileIdentity, Mtime, Stamp};
+use inkra_vault::{EntryId, FileIdentity, Mtime, Stamp};
 
 use super::Rejected;
-use crate::words::varint;
+use crate::words::{Ordinal, varint};
 use crate::{NoteIndex, Source, SourceLink, Style, Target};
 
-/// A record's path length, flags, device, inode and link count, at their smallest.
-const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1;
+/// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
+const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
 /// The flags bit of a record holding a stamp.
 const STAMPED: u8 = 1;
 
@@ -26,16 +26,18 @@ pub struct CachedNote {
     /// `None` when the stamp cannot be written: the note always reloads.
     pub stamp: Option<Stamp>,
     pub identity: FileIdentity,
+    /// Its words' ordinal in section 2; `None` when it has no words there.
+    pub(crate) ordinal: Option<Ordinal>,
     pub source: Source,
 }
 
-/// Each loaded note of `index`, in vault order.
-pub(super) fn encode(index: &NoteIndex) -> Vec<u8> {
+/// Each loaded note of `index`, in vault order, with its words' `ordinal` in section 2.
+pub(super) fn encode(index: &NoteIndex, ordinal: impl Fn(EntryId) -> Option<Ordinal>) -> Vec<u8> {
     let notes: Vec<_> = index.loaded().collect();
     let mut out = Vec::new();
     let mut links = Vec::new();
     varint::push(&mut out, super::header::narrow(notes.len()));
-    for (path, read, source) in notes {
+    for (id, path, read, source) in notes {
         let Some(()) = put_str(&mut out, path) else {
             panic!("a note path of {} bytes", path.len());
         };
@@ -56,6 +58,7 @@ pub(super) fn encode(index: &NoteIndex) -> Vec<u8> {
         }
         out.extend_from_slice(&read.identity.device.to_le_bytes());
         out.extend_from_slice(&read.identity.inode.to_le_bytes());
+        varint::push(&mut out, ordinal(id).map_or(0, |ordinal| ordinal.get() + 1));
         out.extend_from_slice(&links);
     }
     out
@@ -148,6 +151,10 @@ fn record(bytes: &mut &[u8]) -> Result<CachedNote, Rejected> {
     };
     let device = u64::from_le_bytes(take(bytes)?);
     let inode = u64::from_le_bytes(take(bytes)?);
+    let ordinal = varint::read_checked(bytes)
+        .ok_or(Rejected::Corrupt("varint"))?
+        .checked_sub(1)
+        .map(Ordinal::new);
     let mut links = Vec::new();
     for _ in 0..len(bytes)? {
         links.push(link(bytes)?);
@@ -156,6 +163,7 @@ fn record(bytes: &mut &[u8]) -> Result<CachedNote, Rejected> {
         path,
         stamp,
         identity: FileIdentity { device, inode },
+        ordinal,
         source: Source { links },
     })
 }
@@ -216,16 +224,21 @@ fn range(bytes: &mut &[u8]) -> Result<Range<usize>, Rejected> {
     Ok(start..end)
 }
 
-fn string<'a>(bytes: &mut &'a [u8]) -> Result<&'a str, Rejected> {
+pub(super) fn string<'a>(bytes: &mut &'a [u8]) -> Result<&'a str, Rejected> {
+    str::from_utf8(blob(bytes)?).map_err(|_| Rejected::Corrupt("utf8"))
+}
+
+/// A varint length, then that many bytes.
+pub(super) fn blob<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], Rejected> {
     let len = len(bytes)?;
-    let (text, rest) = bytes
+    let (blob, rest) = bytes
         .split_at_checked(len)
         .ok_or(Rejected::Corrupt("truncated"))?;
     *bytes = rest;
-    str::from_utf8(text).map_err(|_| Rejected::Corrupt("utf8"))
+    Ok(blob)
 }
 
-fn len(bytes: &mut &[u8]) -> Result<usize, Rejected> {
+pub(super) fn len(bytes: &mut &[u8]) -> Result<usize, Rejected> {
     varint::read_checked(bytes)
         .and_then(|value| usize::try_from(value).ok())
         .ok_or(Rejected::Corrupt("varint"))
@@ -235,7 +248,7 @@ fn byte(bytes: &mut &[u8]) -> Result<u8, Rejected> {
     take(bytes).map(|[byte]| byte)
 }
 
-fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], Rejected> {
+pub(super) fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], Rejected> {
     let (taken, rest) = bytes
         .split_first_chunk::<N>()
         .ok_or(Rejected::Corrupt("truncated"))?;

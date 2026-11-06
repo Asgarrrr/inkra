@@ -357,3 +357,17 @@ Each slice appends what it did differently from this spec, and why.
   bytes after it, so a 19-byte minimal record proves `>` against `>=`. The
   derivation probe gained a link out of path order, so a fingerprint that
   skips the sort changes.
+- Slice 3c: `CachedWords` and `Decoded.words` are `pub`, not `pub(crate)`:
+  `Decoded` is public, and a `pub(crate)` field nothing reads before 4a
+  fails `dead_code`. `CachedWords`' fields stay `pub(crate)`. A record's
+  ordinal varint follows the inode, and an unstamped record writes it too.
+  Beyond rule 6,
+  decode checks what `entries()` and a merge rely on: the segment's `notes`
+  equals the distinct ordinals its postings hold (`notes`), each alive
+  ordinal is held (`unheld`), each record's ordinal is alive (`dead`) and
+  its own (`shared`), and each alive ordinal is named (`unnamed`). Every
+  bound, not only the first, lies on a char boundary, and `starts` begins
+  at 0 and ends at the postings' length (`starts`). The other names are
+  `alive`, `bounds`, `sorted`, `gap`, `overflow`, `ordinal`, `frequency`,
+  `lengths`, `total`, `trailing`, and 3b's `truncated`, `varint`, `utf8`.
+  `FORMAT_VERSION` stays 1.

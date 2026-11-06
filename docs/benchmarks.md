@@ -231,3 +231,7 @@ resident 7.44 ms (7.44 to 7.47 ms), `read4` 14.31 ms (14.29 to 14.31 ms), under 
 
 Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent has no passwordless
 `sudo`, so the user runs them and adds the lines to this section.
+
+Slice 3c adds `cargo bench -p inkra-index --bench persist -- --quick`: a synthetic index of 50,000
+notes of 1 to 5 KB, one link each, words merged; an 8,709,437-byte file. `persist/decode` median
+10.39 ms (10.36 to 10.49 ms), under the 60 ms gate; `persist/encode` 13.43 ms (13.33 to 13.81 ms).
