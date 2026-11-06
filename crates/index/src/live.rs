@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use inkra_vault::{Entry, EntryId, Mtime};
+use inkra_vault::{Entry, EntryId, Stamp};
 
 use crate::index::NoteIndex;
 
@@ -21,7 +21,7 @@ pub use loads::{Load, Ticket};
 pub use startup::{Merge, Merged};
 pub use turn::{Effects, Turn};
 
-use builds::{Applied, Build};
+use builds::{Applied, Build, Cache};
 use loads::Loading;
 use startup::{Startup, TurnEnd};
 
@@ -46,8 +46,8 @@ impl Status {
 /// A `NoteIndex` kept current: which notes to load, which load is superseded, when the words merge.
 pub struct LiveIndex {
     index: NoteIndex,
-    /// The mtime each note was indexed at, or is queued to be.
-    indexed: HashMap<EntryId, Mtime>,
+    /// The stamp each note was indexed at, or is queued to be.
+    indexed: HashMap<EntryId, Stamp>,
     /// One counter orders loads and saves.
     next_seq: u64,
     /// The latest seq minted per note: only a ticket carrying it acts; an older one is superseded.
@@ -55,11 +55,12 @@ pub struct LiveIndex {
     queue: VecDeque<(EntryId, u64)>,
     /// The seq of each note's live queue entry; an older entry for it is skipped.
     queued: HashMap<EntryId, u64>,
-    /// Notes a failed load forgot; every apply queues them again, since an `Mtimes` change may not list them.
+    /// Notes a failed load forgot; every apply queues them again, since a `Stamps` change may not list them.
     forgotten: HashSet<EntryId>,
     /// Each load started and not landed yet.
     loading: Vec<Loading>,
     build: Build,
+    cache: Cache,
     /// The vault entries the last applied build was read from; `None` until the first applies.
     last: Option<Arc<[Entry]>>,
     /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
@@ -89,6 +90,7 @@ impl LiveIndex {
             forgotten: HashSet::new(),
             loading: Vec::new(),
             build: Build::default(),
+            cache: Cache::default(),
             last: None,
             note_sets: 0,
             revision: 0,
@@ -108,17 +110,19 @@ impl LiveIndex {
         self.revision
     }
 
-    /// `(loaded, total)`: the notes of the last build, less those queued or loading.
+    /// `(loaded, total)`: the notes of the last build, less those queued or loading; the cache
+    /// wait counts as one note pending, so an empty vault is not `Ready` before it ends.
     #[must_use]
     pub(crate) fn progress(&self) -> (usize, usize) {
-        let total = self.index.names().len();
+        let wait = usize::from(self.cache.waits());
+        let total = self.index.names().len() + wait;
         // A note loading and queued again is one note pending.
         let loading = self
             .loading
             .iter()
             .filter(|load| load.live && !self.queued.contains_key(&load.id))
             .count();
-        let pending = self.queued.len() + loading;
+        let pending = self.queued.len() + loading + wait;
         (total.saturating_sub(pending), total)
     }
 
@@ -163,3 +167,6 @@ mod model_tests;
 
 #[cfg(test)]
 mod diff_tests;
+
+#[cfg(test)]
+mod cache_tests;

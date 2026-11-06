@@ -5,7 +5,7 @@ use std::sync::Arc;
 use futures::channel::oneshot;
 use gpui::{Context, Entity, Priority, prelude::*};
 use inkra_vault::{
-    Claims, EntryId, FileIdentity, Listed, Mtime, Pending, Scan, Scanned, Scans, Swapped, Vault,
+    Claims, EntryId, FileIdentity, Listed, Pending, Scan, Scanned, Scans, Stamp, Swapped, Vault,
 };
 
 use super::NoteStore;
@@ -37,7 +37,7 @@ impl NoteStore {
         &mut self,
         id: EntryId,
         identity: FileIdentity,
-        mtime: Mtime,
+        stamp: Stamp,
         cx: &mut Context<Self>,
     ) {
         let Some(vault) = self.vault.clone() else {
@@ -45,7 +45,7 @@ impl NoteStore {
         };
         let scans = &mut self.scans;
         vault.update(cx, |live, cx| {
-            if scans.reidentify(live, id, identity, mtime) {
+            if scans.reidentify(live, id, identity, stamp) {
                 cx.notify();
             }
         });

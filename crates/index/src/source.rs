@@ -3,6 +3,7 @@ use std::ops::Range;
 use inkra_markdown::links;
 use inkra_text::ByteOffset;
 
+use crate::key::Key;
 use crate::target::Target;
 
 /// Bytes of a link's line kept for the backlinks panel, and how many of them precede the link.
@@ -45,6 +46,17 @@ impl Source {
             })
             .collect();
         Self { links }
+    }
+
+    /// Each link to a note: its index into `links` and its target's stem key.
+    pub(crate) fn note_stems(&self) -> impl Iterator<Item = (usize, Key)> + '_ {
+        self.links
+            .iter()
+            .enumerate()
+            .filter_map(|(at, link)| match &link.target {
+                Target::Note { path, .. } => Some((at, Key::stem(path))),
+                _ => None,
+            })
     }
 }
 

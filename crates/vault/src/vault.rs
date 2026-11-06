@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::RelPath;
-use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Mtime, Result};
+use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Mtime, Result, Stamp};
 use crate::jobs::Serial;
 
 mod identity;
@@ -32,8 +32,20 @@ pub struct Entry {
     pub id: EntryId,
     pub path: RelPath,
     pub kind: Kind,
-    /// What `IndexSync` compares to reload a note; conflict detection compares a `Stamp`.
     pub mtime: Mtime,
+    pub size: u64,
+    pub identity: FileIdentity,
+}
+
+impl Entry {
+    /// What `IndexSync` compares to reload a note, as conflict detection does.
+    #[must_use]
+    pub fn stamp(&self) -> Stamp {
+        Stamp {
+            mtime: self.mtime,
+            size: self.size,
+        }
+    }
 }
 
 /// Cloning is an `Arc` bump: a scan applies onto a clone off the foreground (open-first spec, O1).
@@ -123,7 +135,7 @@ impl Vault {
 
     /// Re-keys `id` after a save; whether an entry's id moved (open-first spec, O2).
     #[must_use]
-    pub fn reidentify(&mut self, id: EntryId, identity: FileIdentity, mtime: Mtime) -> bool {
+    pub fn reidentify(&mut self, id: EntryId, identity: FileIdentity, stamp: Stamp) -> bool {
         if id == EntryId::DETACHED {
             return false;
         }
@@ -148,11 +160,13 @@ impl Vault {
         let saved = minted.is_none_or(|minted| minted == id);
         let entry = &state.entries[at];
         // A build may share the entries: copying them is foreground time.
-        if entry.id != id || (saved && entry.mtime != mtime) {
+        if entry.id != id || entry.identity != identity || (saved && entry.stamp() != stamp) {
             let entry = &mut Arc::make_mut(&mut state.entries)[at];
             entry.id = id;
+            entry.identity = identity;
             if saved {
-                entry.mtime = mtime;
+                entry.mtime = stamp.mtime;
+                entry.size = stamp.size;
             }
         }
         live.is_none()
@@ -164,14 +178,14 @@ impl Vault {
         &mut self,
         id: EntryId,
         identity: FileIdentity,
-        mtime: Mtime,
+        stamp: Stamp,
         in_place: bool,
     ) -> bool {
         // A moved inode the walk mapped to `id` was read at or after the save; a kept one maybe before (watcher spec, F5).
         if !in_place && self.id_for(identity) == Some(id) {
             return false;
         }
-        self.reidentify(id, identity, mtime)
+        self.reidentify(id, identity, stamp)
     }
 
     /// # Errors
@@ -251,6 +265,7 @@ impl Vault {
                     path: RelPath::new(child.path.strip_prefix(&self.state.root).ok()?)?,
                     kind: child.kind,
                     mtime: child.mtime,
+                    size: child.size,
                     identity: child.identity,
                 })
             })
@@ -277,6 +292,7 @@ impl Vault {
                 path: entry.path.clone(),
                 kind: entry.kind,
                 mtime: entry.mtime,
+                size: entry.size,
                 identity: *identity,
             });
         }
@@ -329,6 +345,7 @@ struct Row {
     path: RelPath,
     kind: Kind,
     mtime: Mtime,
+    size: u64,
     identity: FileIdentity,
 }
 

@@ -39,13 +39,14 @@ const LIMIT: usize = 1_000;
 pub(crate) struct Found {
     searched: Searched,
     stale: Vec<EntryId>,
-    /// The notes read from disk.
-    read: usize,
-    first_hits: Duration,
+    /// The candidates read, from disk or the text cache.
+    reads: usize,
     started: Instant,
+    /// When the first hit was read; until answers stream, it shows only when the search is done.
+    first_hits: Duration,
 }
 
-/// The release log line of one answer; `read` counts the notes read from disk.
+/// The release log line of one answer; `read` counts the candidates read, from disk or the text cache.
 pub(crate) fn search_line(first_hits: Duration, landed: Duration, read: usize) -> String {
     format!("search: first hits {first_hits:?}, landed {landed:?}, read {read}")
 }
@@ -174,9 +175,9 @@ impl IndexDelegate for VaultSearchDelegate {
         Some(Found {
             searched,
             stale,
-            read: reads,
-            first_hits: first_hits.unwrap_or_else(|| started.elapsed()),
+            reads,
             started,
+            first_hits: first_hits.unwrap_or_else(|| started.elapsed()),
         })
     }
 
@@ -184,7 +185,7 @@ impl IndexDelegate for VaultSearchDelegate {
         let found = landed.found;
         let elapsed = found.started.elapsed();
         if cfg!(not(debug_assertions)) {
-            eprintln!("{}", search_line(found.first_hits, elapsed, found.read));
+            eprintln!("{}", search_line(found.first_hits, elapsed, found.reads));
         }
         if !found.stale.is_empty() {
             self.links

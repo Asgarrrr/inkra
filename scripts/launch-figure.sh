@@ -26,6 +26,7 @@ for i in $(seq 1 "$runs"); do
   sleep 1
   rss=$(ps -o rss= -p "$pid")
   footprint=$(footprint -p "$pid" --noCategories -f bytes | awk '/phys_footprint:/ {print $2; exit}')
+  [ -n "$footprint" ] || footprint='?'
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
   echo "$(grep '^launch:' "$log" || echo 'no launch line') | rss ${rss} kB | phys_footprint ${footprint} B"; rm -f "$log"
   sleep 1

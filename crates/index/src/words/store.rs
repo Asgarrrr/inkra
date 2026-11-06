@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::sync::{Arc, Weak};
 
@@ -190,7 +190,6 @@ impl Words {
     /// # Panics
     ///
     /// If the parts break an invariant the store keeps.
-    #[cfg(test)]
     pub(crate) fn restore(
         segment: Segment,
         alive: Alive,
@@ -224,6 +223,19 @@ impl Words {
             total,
             running: None,
         }
+    }
+
+    /// Each note's words while none is merged: what a seed puts back over the cache's.
+    ///
+    /// # Panics
+    ///
+    /// If a merge applied: its notes' words are no longer apart.
+    pub(crate) fn into_fresh(self) -> HashMap<EntryId, NoteWords> {
+        assert_eq!(self.segment.notes(), 0, "no merge applies before the seed");
+        self.ordinals
+            .iter()
+            .filter_map(|(&id, &ordinal)| Some((id, NoteWords::clone(self.fresh.get(ordinal)?))))
+            .collect()
     }
 
     /// Starts a merge, due or not, unless one runs or there is nothing to do.

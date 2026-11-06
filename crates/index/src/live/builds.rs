@@ -1,15 +1,17 @@
 //! Builds: one at a time (L6), each applied, pruning what the vault no longer lists (L4) and
-//! queuing each note whose mtime moved, unless a save holds a newer one (L2).
+//! queuing each note whose stamp moved, unless a save holds a newer one (L2).
 
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
 
-use inkra_vault::{Entry, EntryId, Mtime, Vault};
+use inkra_vault::{Entry, EntryId, Stamp, Vault};
 
 use super::LiveIndex;
 use super::diff::{Change, notes};
 use crate::note_set::NoteSet;
+use crate::persist::{Decoded, Outcome};
+use crate::seed::Seed;
 use crate::words::RetiredWords;
 
 /// One build at a time: an input during it marks it `Dirty` rather than starting another.
@@ -22,12 +24,25 @@ pub(super) enum Build {
     Dirty,
 }
 
+/// The cache outcome `queue_changed` and merges wait for, then the build that carries it (P7).
+#[derive(Default)]
+pub(super) enum Cache {
+    #[default]
+    Off,
+    Awaited,
+    /// The next build takes it; `None` for a file rejected or missing.
+    Landed(Option<Decoded>),
+    /// A build carries it; its apply ends the wait.
+    Carried,
+}
+
 /// The diff of two entry snapshots; `run` it off the foreground.
 pub struct BuildJob {
     /// The seq counter when the entries were read.
     seq: u64,
     last: Option<Arc<[Entry]>>,
     entries: Arc<[Entry]>,
+    cache: Option<Decoded>,
 }
 
 /// A build's result, for `LiveIndex::apply_build`.
@@ -35,13 +50,14 @@ pub struct Built {
     seq: u64,
     entries: Arc<[Entry]>,
     change: Change,
+    seed: Option<Seed>,
 }
 
 /// A note set built off the foreground, with what `apply_build` queues and prunes by.
 pub(super) struct Layout {
     pub(super) notes: NoteSet,
-    /// Every note's id and mtime, in vault order.
-    mtimes: Vec<(EntryId, Mtime)>,
+    /// Every note's id and stamp, in vault order.
+    stamps: Vec<(EntryId, Stamp)>,
     live: HashSet<EntryId>,
 }
 
@@ -64,13 +80,30 @@ pub struct Retired {
 }
 
 impl BuildJob {
+    /// # Panics
+    ///
+    /// If the decoded words break an invariant the store keeps.
     #[must_use]
     pub fn run(self) -> Built {
+        let change = Change::between(self.last.as_deref(), &self.entries);
+        let seed = self.cache.map(|decoded| {
+            let Change::Layout(layout) = &change else {
+                panic!("a build carrying the cache has no last entries, so it is a layout");
+            };
+            Seed::build(decoded, notes(&self.entries), &layout.notes)
+        });
         Built {
             seq: self.seq,
-            change: Change::between(self.last.as_deref(), &self.entries),
             entries: self.entries,
+            change,
+            seed,
         }
+    }
+}
+
+impl Cache {
+    pub(super) fn waits(&self) -> bool {
+        !matches!(self, Self::Off)
     }
 }
 
@@ -94,19 +127,40 @@ impl Layout {
                 (entry.id, path, entry.kind, entry.mtime)
             })
             .collect();
-        let mtimes: Vec<(EntryId, Mtime)> = notes(entries)
-            .map(|entry| (entry.id, entry.mtime))
+        let stamps: Vec<(EntryId, Stamp)> = notes(entries)
+            .map(|entry| (entry.id, entry.stamp()))
             .collect();
-        let live = mtimes.iter().map(|(id, _)| *id).collect();
+        let live = stamps.iter().map(|(id, _)| *id).collect();
         Self {
             notes: NoteSet::build(named),
-            mtimes,
+            stamps,
             live,
         }
     }
 }
 
 impl LiveIndex {
+    /// Holds every queue and merge until `Turn::cached` lands the cache outcome (P7). Call it
+    /// before the first turn.
+    pub fn await_cache(&mut self) {
+        self.cache = Cache::Awaited;
+    }
+
+    /// The cache outcome landed: the next build carries it.
+    ///
+    /// # Panics
+    /// If no outcome is awaited.
+    pub(super) fn cached(&mut self, outcome: Outcome) {
+        assert!(
+            matches!(self.cache, Cache::Awaited),
+            "a cache outcome lands once, after `await_cache`"
+        );
+        self.cache = Cache::Landed(match outcome {
+            Outcome::Decoded(decoded) => Some(decoded),
+            Outcome::Rejected(_) | Outcome::Missing => None,
+        });
+    }
+
     /// Vault entries changed. `None` while a build runs; that build's apply then returns `dirty`.
     #[must_use]
     pub(super) fn start_build(&mut self, entries: Arc<[Entry]>) -> Option<BuildJob> {
@@ -116,10 +170,22 @@ impl LiveIndex {
             return None;
         }
         self.build = Build::Running;
+        let (last, cache) = match mem::take(&mut self.cache) {
+            // No `last`: the wait queued nothing, so this build queues every note.
+            Cache::Landed(cache) => {
+                self.cache = Cache::Carried;
+                (None, cache)
+            }
+            other => {
+                self.cache = other;
+                (self.last.clone(), None)
+            }
+        };
         Some(BuildJob {
             seq: self.next_seq,
-            last: self.last.clone(),
+            last,
             entries,
+            cache,
         })
     }
 
@@ -129,12 +195,16 @@ impl LiveIndex {
             seq,
             entries,
             change,
+            seed,
         } = built;
         let dirty = mem::take(&mut self.build) == Build::Dirty;
         let last = self.last.replace(entries);
+        if matches!(self.cache, Cache::Carried) {
+            self.cache = Cache::Off;
+        }
         let retired_notes = match change {
-            Change::Layout(layout) => Some(self.apply_notes(seq, *layout)),
-            Change::Mtimes(moved) => {
+            Change::Layout(layout) => Some(self.apply_notes(seq, *layout, seed)),
+            Change::Stamps(moved) => {
                 self.queue_changed(seq, moved);
                 None
             }
@@ -152,10 +222,15 @@ impl LiveIndex {
     }
 
     /// Swaps in a build's notes, dropping what it no longer lists; the previous set and the live set.
-    fn apply_notes(&mut self, seq: u64, layout: Layout) -> (NoteSet, HashSet<EntryId>) {
+    fn apply_notes(
+        &mut self,
+        seq: u64,
+        layout: Layout,
+        seed: Option<Seed>,
+    ) -> (NoteSet, HashSet<EntryId>) {
         let Layout {
             notes,
-            mtimes,
+            stamps,
             live,
         } = layout;
         self.note_sets += 1;
@@ -169,13 +244,21 @@ impl LiveIndex {
         for load in &mut self.loading {
             load.live &= live.contains(&load.id);
         }
+        if let Some(seed) = seed {
+            for (id, stamp) in self.index.seed(seed) {
+                // A save since launch holds a newer stamp than the cache's, or must reload (P6).
+                if !self.latest.contains_key(&id) {
+                    self.indexed.insert(id, stamp);
+                }
+            }
+        }
         // Reserved for the notes not yet indexed, so no insert rehashes (open-first spec, O7).
-        let missing = mtimes.len().saturating_sub(self.indexed.len());
+        let missing = stamps.len().saturating_sub(self.indexed.len());
         self.indexed.reserve(missing);
         self.latest.reserve(missing);
         self.queued.reserve(missing);
         self.queue.reserve(missing);
-        self.queue_changed(seq, mtimes);
+        self.queue_changed(seq, stamps);
         (previous, live)
     }
 
@@ -186,20 +269,23 @@ impl LiveIndex {
             .forgotten
             .iter()
             .filter_map(|&id| vault.entry(id))
-            .map(|entry| (entry.id, entry.mtime))
+            .map(|entry| (entry.id, entry.stamp()))
             .collect();
         self.queue_changed(seq, retry);
     }
 
-    /// Queues each note whose mtime is not the one indexed; `seq` is the counter at the build's read.
-    fn queue_changed(&mut self, seq: u64, mtimes: Vec<(EntryId, Mtime)>) {
-        for (id, mtime) in mtimes {
-            // A save since the build read the vault holds a newer mtime than the build's.
+    /// Queues each note whose stamp is not the one indexed; `seq` is the counter at the build's read.
+    fn queue_changed(&mut self, seq: u64, stamps: Vec<(EntryId, Stamp)>) {
+        if self.cache.waits() {
+            return;
+        }
+        for (id, stamp) in stamps {
+            // A save since the build read the vault holds a newer stamp than the build's.
             let current = self.indexed.get(&id).is_some_and(|&indexed| {
-                indexed == mtime || self.latest.get(&id).is_some_and(|&latest| latest > seq)
+                indexed == stamp || self.latest.get(&id).is_some_and(|&latest| latest > seq)
             });
             if !current {
-                self.indexed.insert(id, mtime);
+                self.indexed.insert(id, stamp);
                 self.queue_load(id);
             }
         }

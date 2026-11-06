@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Entry, EntryId, Mtime, RelPath, Vault};
+use inkra_vault::{Entry, EntryId, Mtime, RelPath, Stamp, Vault};
 use proptest::prelude::*;
 
 use super::diff::{Change, notes};
@@ -25,9 +25,9 @@ fn snapshot() -> Vec<Entry> {
 }
 
 /// `None` for a `Layout`.
-fn mtimes(last: Option<&[Entry]>, entries: &[Entry]) -> Option<Vec<(EntryId, Mtime)>> {
+fn stamps(last: Option<&[Entry]>, entries: &[Entry]) -> Option<Vec<(EntryId, Stamp)>> {
     match Change::between(last, entries) {
-        Change::Mtimes(moved) => Some(moved),
+        Change::Stamps(moved) => Some(moved),
         Change::Layout(_) => None,
     }
 }
@@ -45,18 +45,18 @@ fn position(entries: &[Entry], path: &str) -> usize {
 
 #[test]
 fn no_last_snapshot_is_a_layout() {
-    assert_eq!(mtimes(None, &snapshot()), None);
+    assert_eq!(stamps(None, &snapshot()), None);
     assert_eq!(
-        mtimes(None, &[]),
+        stamps(None, &[]),
         None,
         "a vault with no notes still builds once"
     );
 }
 
 #[test]
-fn the_same_snapshot_moves_no_mtime() {
+fn the_same_snapshot_moves_no_stamp() {
     let last = snapshot();
-    assert_eq!(mtimes(Some(&last), &last), Some(Vec::new()));
+    assert_eq!(stamps(Some(&last), &last), Some(Vec::new()));
 }
 
 #[test]
@@ -66,18 +66,30 @@ fn one_mtime_moved_is_that_note() {
     let c = position(&entries, "f/c.md");
     entries[c].mtime = mtime(7);
     assert_eq!(
-        mtimes(Some(&last), &entries),
-        Some(vec![(entries[c].id, mtime(7))])
+        stamps(Some(&last), &entries),
+        Some(vec![(entries[c].id, entries[c].stamp())])
     );
 }
 
 #[test]
-fn a_folder_added_or_removed_moves_no_mtime() {
+fn a_size_only_change_is_that_note() {
+    let last = snapshot();
+    let mut entries = last.clone();
+    let c = position(&entries, "f/c.md");
+    entries[c].size = 9;
+    assert_eq!(
+        stamps(Some(&last), &entries),
+        Some(vec![(entries[c].id, entries[c].stamp())])
+    );
+}
+
+#[test]
+fn a_folder_added_or_removed_moves_no_stamp() {
     let last = snapshot();
     let mut entries = last.clone();
     entries.remove(position(&entries, "empty"));
-    assert_eq!(mtimes(Some(&last), &entries), Some(Vec::new()), "removed");
-    assert_eq!(mtimes(Some(&entries), &last), Some(Vec::new()), "added");
+    assert_eq!(stamps(Some(&last), &entries), Some(Vec::new()), "removed");
+    assert_eq!(stamps(Some(&entries), &last), Some(Vec::new()), "added");
 }
 
 #[test]
@@ -87,25 +99,26 @@ fn a_note_path_id_count_or_order_change_is_a_layout() {
 
     let mut moved = last.clone();
     moved[a].path = RelPath::new(Path::new("z.md")).expect("a relative path");
-    assert_eq!(mtimes(Some(&last), &moved), None, "path");
+    assert_eq!(stamps(Some(&last), &moved), None, "path");
 
     let mut rekeyed = last.clone();
     rekeyed[a].id = EntryId::DETACHED;
-    assert_eq!(mtimes(Some(&last), &rekeyed), None, "id");
+    assert_eq!(stamps(Some(&last), &rekeyed), None, "id");
 
     let mut fewer = last.clone();
     fewer.remove(b);
-    assert_eq!(mtimes(Some(&last), &fewer), None, "count");
-    assert_eq!(mtimes(Some(&fewer), &last), None, "count");
+    assert_eq!(stamps(Some(&last), &fewer), None, "count");
+    assert_eq!(stamps(Some(&fewer), &last), None, "count");
 
     let mut swapped = last.clone();
     swapped.swap(a, b);
-    assert_eq!(mtimes(Some(&last), &swapped), None, "order");
+    assert_eq!(stamps(Some(&last), &swapped), None, "order");
 }
 
 #[derive(Debug, Clone)]
 enum Edit {
     Mtime(usize, u64),
+    Size(usize, u64),
     Path(usize, usize),
     Id(usize, usize),
     Remove(usize),
@@ -116,6 +129,7 @@ enum Edit {
 fn edit(entries: usize) -> impl Strategy<Value = Edit> {
     prop_oneof![
         4 => (0..entries, 0..3u64).prop_map(|(at, secs)| Edit::Mtime(at, secs)),
+        2 => (0..entries, 0..3u64).prop_map(|(at, size)| Edit::Size(at, size)),
         1 => (0..entries, 0..entries).prop_map(|(at, from)| Edit::Path(at, from)),
         1 => (0..entries, 0..entries).prop_map(|(at, from)| Edit::Id(at, from)),
         1 => (0..entries).prop_map(Edit::Remove),
@@ -132,6 +146,7 @@ fn apply(entries: &mut Vec<Entry>, edit: &Edit) {
     }
     match *edit {
         Edit::Mtime(at, secs) => entries[at % len].mtime = mtime(secs),
+        Edit::Size(at, size) => entries[at % len].size = size,
         Edit::Path(at, from) => entries[at % len].path = entries[from % len].path.clone(),
         Edit::Id(at, from) => entries[at % len].id = entries[from % len].id,
         Edit::Remove(at) => {
@@ -177,10 +192,10 @@ fn names(entries: &[Entry]) -> Vec<(EntryId, String)> {
 }
 
 proptest! {
-    /// `Mtimes` exactly when the notes' ids and paths are equal position by position, holding
-    /// the notes whose mtime differs.
+    /// `Stamps` exactly when the notes' ids and paths are equal position by position, holding
+    /// the notes whose stamp differs.
     #[test]
-    fn mtimes_exactly_when_the_notes_ids_and_paths_match(
+    fn stamps_exactly_when_the_notes_ids_and_paths_match(
         edits in prop::collection::vec(edit(snapshot().len()), 0..4),
     ) {
         let (last, entries) = edited(&edits);
@@ -195,21 +210,21 @@ proptest! {
             before
                 .iter()
                 .zip(&after)
-                .filter(|(old, new)| old.mtime != new.mtime)
-                .map(|(_, new)| (new.id, new.mtime))
+                .filter(|(old, new)| old.stamp() != new.stamp())
+                .map(|(_, new)| (new.id, new.stamp()))
                 .collect()
         });
-        prop_assert_eq!(mtimes(Some(&last), &entries), expected);
+        prop_assert_eq!(stamps(Some(&last), &entries), expected);
     }
 
     /// Whenever the diff skips the build, a build would have made the same names.
     #[test]
-    fn mtimes_only_when_a_build_would_make_the_same_names(
+    fn stamps_only_when_a_build_would_make_the_same_names(
         edits in prop::collection::vec(edit(snapshot().len()), 0..4),
     ) {
         let (last, entries) = edited(&edits);
 
-        if mtimes(Some(&last), &entries).is_some() {
+        if stamps(Some(&last), &entries).is_some() {
             prop_assert_eq!(names(&last), names(&entries));
         }
     }

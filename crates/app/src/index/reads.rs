@@ -1,14 +1,13 @@
 //! `⌘⇧F`'s reads: each candidate from the text cache, else from disk now, at most `READERS` at
 //! once, in order.
 
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use futures::{Stream, StreamExt as _};
 use gpui::{App, BackgroundExecutor};
 use inkra_index::{Candidate, Read, TextCache};
-use inkra_vault::{Fs, VaultError};
+use inkra_vault::Fs;
 
 use super::IndexSync;
 
@@ -75,21 +74,13 @@ async fn read(fs: &dyn Fs, texts: &Mutex<TextCache>, candidate: &Candidate, path
             stamp: candidate.stamp,
         };
     }
-    match fs.load(path).await {
-        Ok(loaded) => {
-            let text: Arc<str> = loaded.text.into();
-            if loaded.stamp == candidate.stamp {
-                lock(texts).insert(candidate.id, Arc::clone(&text), loaded.stamp);
-            }
-            Read::Text {
-                text,
-                stamp: loaded.stamp,
-            }
-        }
-        Err(VaultError::NotUtf8 { .. }) => Read::NotUtf8,
-        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => Read::Gone,
-        Err(_) => Read::Failed,
+    let read = Read::from(fs.load(path).await);
+    if let Read::Text { text, stamp } = &read
+        && *stamp == candidate.stamp
+    {
+        lock(texts).insert(candidate.id, Arc::clone(text), *stamp);
     }
+    read
 }
 
 impl IndexSync {

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Mtime, Vault, VaultError};
+use inkra_vault::{EntryId, Fs, Stamp, Vault, VaultError};
 
 use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
 use crate::test_support::{ROOT, content, id, loaded};
@@ -13,7 +13,7 @@ use crate::words::{NoteWords, Words};
 use crate::{FileRead, NoteContent};
 
 /// Enough slots that no test below the slot tests waits for one.
-const SLOTS: usize = 64;
+pub(super) const SLOTS: usize = 64;
 
 pub(super) struct Harness {
     pub(super) fs: MemFs,
@@ -125,10 +125,10 @@ impl Harness {
     /// What `IndexSync::saved` does: the file is written, and the index takes the text it wrote.
     fn saving(&mut self, file: &str, text: &str) -> (Ticket, NoteContent) {
         self.fs.insert_file(path(file), text);
-        let mtime = self.mtime_on_disk(file);
+        let stamp = self.stamp_on_disk(file);
         let id = self.id(file);
-        let (ticket, _) = self.turn(|t| t.saved(id, mtime));
-        (ticket, content(text, mtime))
+        let (ticket, _) = self.turn(|t| t.saved(id, stamp));
+        (ticket, content(text, stamp.mtime))
     }
 
     fn save(&mut self, file: &str, text: &str) {
@@ -137,7 +137,7 @@ impl Harness {
     }
 
     /// Read from the folder listing, so `MemFs::loads` counts no load.
-    fn mtime_on_disk(&self, file: &str) -> Mtime {
+    fn stamp_on_disk(&self, file: &str) -> Stamp {
         let path = path(file);
         let Some(dir) = path.parent() else {
             panic!("{file} is under the root");
@@ -148,7 +148,10 @@ impl Harness {
         let Some(entry) = listed.into_iter().find(|entry| entry.path == path) else {
             panic!("{file} is on disk");
         };
-        entry.mtime
+        Stamp {
+            mtime: entry.mtime,
+            size: entry.size,
+        }
     }
 
     pub(super) fn id(&self, file: &str) -> inkra_vault::EntryId {
@@ -665,10 +668,10 @@ fn a_failed_load_behind_a_queued_reload_keeps_the_note() {
 fn a_save_landing_before_its_note_joins_is_reloaded_by_the_next_build() {
     let mut h = Harness::new(&[("a.md", "[[b]]"), ("b.md", "")]);
     let a = h.id("a.md");
-    let mtime = h.mtime_on_disk("a.md");
-    let (ticket, _) = h.turn(|t| t.saved(a, mtime));
+    let stamp = h.stamp_on_disk("a.md");
+    let (ticket, _) = h.turn(|t| t.saved(a, stamp));
 
-    h.landed(ticket, Ok(content("[[b]]", mtime)));
+    h.landed(ticket, Ok(content("[[b]]", stamp.mtime)));
     let _ = h.built();
     h.load_all();
 

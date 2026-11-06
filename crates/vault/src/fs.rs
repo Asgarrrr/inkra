@@ -52,6 +52,7 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub kind: Kind,
     pub mtime: Mtime,
+    pub size: u64,
     pub identity: FileIdentity,
 }
 

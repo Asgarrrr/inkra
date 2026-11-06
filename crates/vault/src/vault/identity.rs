@@ -39,6 +39,8 @@ impl Vault {
                     path: row.path,
                     kind: row.kind,
                     mtime: row.mtime,
+                    size: row.size,
+                    identity: row.identity,
                 };
                 Some((entry, row.identity))
             })

@@ -37,11 +37,10 @@ impl TextCache {
         }
     }
 
-    /// The text at `stamp`; a text at any other stamp is dropped.
+    /// The text at `stamp`; a text at any other stamp stays, as a save may be newer than the search.
     pub fn get(&mut self, id: EntryId, stamp: Stamp) -> Option<Arc<str>> {
         let cached = self.entries.get_mut(&id)?;
         if cached.stamp != stamp {
-            self.remove(id);
             return None;
         }
         self.recency.remove(&cached.tick);

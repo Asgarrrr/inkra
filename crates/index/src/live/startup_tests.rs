@@ -60,7 +60,7 @@ fn a_save_during_the_settle_stays_fresh_and_indexed_is_reported() {
     let a = h.id("a.md");
     let during = content("during", crate::test_support::mtime(9));
     let ((), end) = h.turn(|t| {
-        let ticket = t.saved(a, crate::test_support::mtime(9));
+        let ticket = t.saved(a, during.read.stamp);
         t.landed(ticket, Ok(during));
     });
     assert!(

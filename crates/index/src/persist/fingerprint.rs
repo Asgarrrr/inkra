@@ -6,7 +6,7 @@ use crc32fast::Hasher;
 use inkra_vault::{FileIdentity, Mtime, Stamp};
 
 use super::notes::style_code;
-use crate::words::fold;
+use crate::words::{WORD_MAX_CHARS, fold};
 use crate::{FileRead, NoteContent, Target};
 
 /// Accents, a ligature, final sigma, Turkish i, CJK and emoji.
@@ -55,7 +55,19 @@ pub(crate) fn fold_fingerprint() -> u32 {
     hasher.finalize()
 }
 
-/// Each probe note's words, as `NoteContent::parse` sorts them, then its link targets, sorted.
+/// The probe notes, plus a word past `WORD_MAX_CHARS` and a link deep inside a long line.
+fn probe_notes() -> Vec<String> {
+    let mut notes: Vec<String> = PROBE_NOTES.iter().map(|note| (*note).to_owned()).collect();
+    notes.push(format!("{} short", "w".repeat(WORD_MAX_CHARS + 5)));
+    notes.push(format!(
+        "{} [[far/target#Part]] {}",
+        "x ".repeat(90),
+        "y ".repeat(90)
+    ));
+    notes
+}
+
+/// Each probe note's words and counts, then every persisted field of its links, in order.
 pub(crate) fn derivation_fingerprint() -> u32 {
     let file = FileRead {
         stamp: Stamp {
@@ -68,34 +80,37 @@ pub(crate) fn derivation_fingerprint() -> u32 {
         },
     };
     let mut hasher = Hasher::new();
-    for note in PROBE_NOTES {
-        let content = NoteContent::parse(note, file);
-        for (word, _) in content.words.iter() {
+    for note in probe_notes() {
+        let content = NoteContent::parse(&note, file);
+        for (word, count) in content.words.iter() {
             terminated(&mut hasher, word);
+            hasher.update(&count.to_le_bytes());
         }
-        let mut targets: Vec<_> = content
-            .source
-            .links
-            .iter()
-            .filter_map(|link| match &link.target {
-                Target::Note {
-                    path,
-                    fragment,
-                    style,
-                } => Some((path, fragment, style_code(*style))),
-                Target::External(_) | Target::SelfLink => None,
-            })
-            .collect();
-        targets.sort_unstable();
-        for (path, fragment, style) in targets {
-            terminated(&mut hasher, path);
-            if let Some(fragment) = fragment {
-                hasher.update(&[1]);
-                terminated(&mut hasher, fragment);
-            } else {
-                hasher.update(&[0]);
+        for link in &content.source.links {
+            if let Target::Note {
+                path,
+                fragment,
+                style,
+            } = &link.target
+            {
+                terminated(&mut hasher, path);
+                if let Some(fragment) = fragment {
+                    hasher.update(&[1]);
+                    terminated(&mut hasher, fragment);
+                } else {
+                    hasher.update(&[0]);
+                }
+                hasher.update(&[style_code(*style)]);
             }
-            hasher.update(&[style]);
+            for at in [
+                link.range.start.get(),
+                link.range.end.get(),
+                link.context_link.start,
+                link.context_link.end,
+            ] {
+                hasher.update(&(at as u64).to_le_bytes());
+            }
+            terminated(&mut hasher, &link.context);
         }
     }
     hasher.finalize()

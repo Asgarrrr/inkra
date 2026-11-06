@@ -28,8 +28,8 @@ impl Reference {
         }
     }
 
-    /// `reidentify` without the reclaim: a no-op for a dead id, with the same mtime rule (O2).
-    fn reidentify(&mut self, id: EntryId, identity: FileIdentity, mtime: Mtime) {
+    /// `reidentify` without the reclaim: a no-op for a dead id, with the same stamp rule (O2).
+    fn reidentify(&mut self, id: EntryId, identity: FileIdentity, stamp: Stamp) {
         let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) else {
             return;
         };
@@ -38,8 +38,10 @@ impl Reference {
             .get(&identity)
             .is_none_or(|minted| *minted == id)
         {
-            entry.mtime = mtime;
+            entry.mtime = stamp.mtime;
+            entry.size = stamp.size;
         }
+        entry.identity = identity;
         self.by_identity.retain(|_, mapped| *mapped != id);
         self.by_identity.insert(identity, id);
     }
@@ -84,6 +86,8 @@ impl Reference {
                 path,
                 kind: child.kind,
                 mtime: child.mtime,
+                size: child.size,
+                identity: child.identity,
             });
         }
         found.sort_by(|a, b| compare(&Key::new(&a.path, a.kind), &Key::new(&b.path, b.kind)));
@@ -101,11 +105,14 @@ fn probe(root: &Path, child: &DirEntry) -> RelPath {
         .unwrap_or_else(RelPath::root)
 }
 
-pub(super) type Rows = Vec<(EntryId, PathBuf, Kind, Mtime)>;
+pub(super) type Rows = Vec<(EntryId, PathBuf, Kind, Stamp, FileIdentity)>;
 
 pub(super) fn rows<'a>(entries: impl Iterator<Item = &'a Entry>) -> Rows {
     entries
-        .map(|e| (e.id, e.path.as_path().to_path_buf(), e.kind, e.mtime))
+        .map(|e| {
+            let path = e.path.as_path().to_path_buf();
+            (e.id, path, e.kind, e.stamp(), e.identity)
+        })
         .collect()
 }
 
@@ -193,7 +200,7 @@ pub(super) fn run(
     vault: &Vault,
     under: &Path,
     op: &Op,
-    rekey: &mut dyn FnMut(EntryId, FileIdentity, Mtime),
+    rekey: &mut dyn FnMut(EntryId, FileIdentity, Stamp),
 ) {
     let folders = folders(vault, under);
     let picks = picks(vault, under);
@@ -246,14 +253,14 @@ pub(super) fn run(
                 && let Ok(loaded) = block_on(fs.load(path))
                 && let Ok(saved) = block_on(fs.save(path, "written", loaded.stamp))
             {
-                rekey(*id, saved.identity, saved.stamp.mtime);
+                rekey(*id, saved.identity, saved.stamp);
             }
         }
         Op::SaveInPlace(pick) => {
             if let Some((id, path, Kind::Note)) = picks.get(pick) {
                 fs.insert_file(path.clone(), "in place");
                 if let Ok(saved) = block_on(fs.load(path)) {
-                    rekey(*id, saved.identity, saved.stamp.mtime);
+                    rekey(*id, saved.identity, saved.stamp);
                 }
             }
         }
@@ -346,12 +353,12 @@ proptest! {
         let mut reference = Reference::new();
         for op in &ops {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, Path::new(""), op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
-                reference.reidentify(id, identity, mtime);
+            run(&fs, &vault, Path::new(""), op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
+                reference.reidentify(id, identity, stamp);
             }
-            // A walk overwrites every mtime a re-key set: compare before it.
+            // A walk overwrites every stamp a re-key set: compare before it.
             prop_assert_eq!(rows(vault.entries()), rows(reference.entries.iter()));
             let found = walk(&fs, Path::new(""));
             reference.apply(found.found.clone());
@@ -378,9 +385,9 @@ proptest! {
         let mut vault = Vault::new(Path::new(ROOT));
         for op in &setup {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, Path::new(""), op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
+            run(&fs, &vault, Path::new(""), op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
             }
             vault = vault.applied(walk(&fs, Path::new("")));
         }
@@ -391,9 +398,9 @@ proptest! {
         // Every change stays below `under`: a walk from it reads all of them.
         for op in &inside {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, &under, op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
+            run(&fs, &vault, &under, op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
             }
         }
         let partial = vault.applied(walk(&fs, &under));
@@ -424,9 +431,9 @@ proptest! {
         let mut vault = Vault::new(Path::new(ROOT));
         for op in &setup {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, Path::new(""), op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
+            run(&fs, &vault, Path::new(""), op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
             }
             vault = vault.applied(walk(&fs, Path::new("")));
         }
@@ -467,9 +474,9 @@ proptest! {
         let mut vault = Vault::new(Path::new(ROOT));
         for op in &setup {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, Path::new(""), op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
+            run(&fs, &vault, Path::new(""), op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
             }
             vault = vault.applied(walk(&fs, Path::new("")));
         }
@@ -483,9 +490,9 @@ proptest! {
         fs.make_unreadable(Path::new(ROOT).join(&failed));
         for op in &after {
             let mut rekeys = Vec::new();
-            run(&fs, &vault, Path::new(""), op, &mut |id, identity, mtime| rekeys.push((id, identity, mtime)));
-            for (id, identity, mtime) in rekeys {
-                let _ = vault.reidentify(id, identity, mtime);
+            run(&fs, &vault, Path::new(""), op, &mut |id, identity, stamp| rekeys.push((id, identity, stamp)));
+            for (id, identity, stamp) in rekeys {
+                let _ = vault.reidentify(id, identity, stamp);
             }
         }
         let before = vault.clone();

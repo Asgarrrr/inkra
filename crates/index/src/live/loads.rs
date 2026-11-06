@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use inkra_vault::{EntryId, Mtime, Vault};
+use inkra_vault::{EntryId, Stamp, Vault};
 
 use super::LiveIndex;
 use crate::content::NoteContent;
@@ -32,11 +32,11 @@ pub(super) struct Loading {
 }
 
 impl LiveIndex {
-    /// A note saved: `mtime` is the one indexed, and the parse of its text applies through `landed`.
+    /// A note saved: `stamp` is the one indexed, and the parse of its text applies through `landed`.
     #[must_use]
-    pub(super) fn saved(&mut self, id: EntryId, mtime: Mtime) -> Ticket {
+    pub(super) fn saved(&mut self, id: EntryId, stamp: Stamp) -> Ticket {
         let seq = self.next_seq(id);
-        self.indexed.insert(id, mtime);
+        self.indexed.insert(id, stamp);
         self.ticket(id, seq)
     }
 
@@ -148,7 +148,7 @@ impl LiveIndex {
         true
     }
 
-    /// A build since the load started may have moved the note; a rename keeps its mtime, so no rescan reloads it.
+    /// A build since the load started may have moved the note; a rename keeps its stamp, so no rescan reloads it.
     fn failed(&mut self, id: EntryId, seq: u64, note_sets: u64, vault: &Vault) -> bool {
         let present = vault.entry(id).is_some();
         if note_sets != self.note_sets && present && self.is_latest(id, seq) {

@@ -150,7 +150,7 @@ fn a_save_keeps_the_entry_id_across_a_rescan() {
         .expect("load")
         .stamp;
     let saved = block_on(fs.save(Path::new("/vault/a.md"), "after", stamp)).expect("save");
-    assert!(!vault.reidentify(id, saved.identity, saved.stamp.mtime));
+    assert!(!vault.reidentify(id, saved.identity, saved.stamp));
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(
@@ -193,7 +193,7 @@ fn reidentify_reclaims_the_id_for_the_inode_our_save_produced() {
     // The scan read the saved file, moved, before the re-key reached the vault: a fresh id.
     block_on(vault.rescan(&fs)).expect("rescan");
     assert!(vault.entry(ours).is_none());
-    assert!(vault.reidentify(ours, saved.identity, saved.stamp.mtime));
+    assert!(vault.reidentify(ours, saved.identity, saved.stamp));
 
     assert_eq!(
         vault.entry(ours).map(|e| e.path.display_name()).as_deref(),
@@ -218,7 +218,7 @@ fn reidentify_of_detached_leaves_the_vault_unchanged() {
     let mut vault = scan(&fs);
     let minted = vault.entries().next().expect("one entry").id;
 
-    assert!(!vault.reidentify(EntryId::DETACHED, saved.identity, saved.stamp.mtime));
+    assert!(!vault.reidentify(EntryId::DETACHED, saved.identity, saved.stamp));
 
     assert_eq!(vault.entries().map(|e| e.id).collect::<Vec<_>>(), [minted]);
     assert_eq!(vault.id_for(saved.identity), Some(minted));
@@ -236,10 +236,10 @@ fn a_scan_between_a_save_and_its_re_key_keeps_the_note_for_the_next_save() {
     let first = block_on(fs.save(path, "two", stamp)).expect("save");
     block_on(vault.rescan(&fs)).expect("rescan");
     // The scan gave the saved inode the path's id already: no id moves.
-    assert!(!vault.reidentify(ours, first.identity, first.stamp.mtime));
+    assert!(!vault.reidentify(ours, first.identity, first.stamp));
 
     let second = block_on(fs.save(path, "three", first.stamp)).expect("the next save");
-    assert!(!vault.reidentify(ours, second.identity, second.stamp.mtime));
+    assert!(!vault.reidentify(ours, second.identity, second.stamp));
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(vault.absolute(ours).as_deref(), Some(path));
@@ -261,7 +261,7 @@ fn an_in_place_saves_re_key_sets_its_mtime() {
         Some(a),
         "the save kept the inode"
     );
-    assert!(!vault.reidentify(a, saved.identity, saved.stamp.mtime));
+    assert!(!vault.reidentify(a, saved.identity, saved.stamp));
 
     assert_eq!(vault.entry(a).expect("kept").mtime, saved.stamp.mtime);
 }
@@ -279,7 +279,7 @@ fn a_re_key_that_changes_no_entry_leaves_the_entries_shared() {
     let saved = block_on(fs.load(path)).expect("load");
     let held = vault.shared_entries();
 
-    assert!(!vault.reidentify(a, saved.identity, saved.stamp.mtime));
+    assert!(!vault.reidentify(a, saved.identity, saved.stamp));
 
     assert!(Arc::ptr_eq(&held, &vault.shared_entries()));
 }
@@ -299,7 +299,10 @@ fn reidentify_of_a_dead_id_and_an_unknown_identity_changes_nothing() {
     assert!(!vault.reidentify(
         EntryId(u32::MAX),
         unknown,
-        Mtime(std::time::SystemTime::UNIX_EPOCH),
+        Stamp {
+            mtime: Mtime(std::time::SystemTime::UNIX_EPOCH),
+            size: 0,
+        },
     ));
 
     let after: Vec<_> = vault.entries().map(|e| (e.id, e.path.clone())).collect();
@@ -393,4 +396,45 @@ fn every_directorys_descendants_are_contiguous() {
             );
         }
     }
+}
+
+#[test]
+fn an_entry_carries_the_files_size_and_identity() {
+    let fs = MemFs::new();
+    let identity = FileIdentity {
+        device: 7,
+        inode: 42,
+    };
+    fs.insert_file_with_identity("/vault/a.md", "hello", identity);
+    let vault = scan(&fs);
+
+    let entry = vault.entries().next().expect("one entry");
+    assert_eq!((entry.size, entry.identity), (5, identity));
+    assert_eq!(
+        entry.stamp(),
+        Stamp {
+            mtime: entry.mtime,
+            size: 5
+        }
+    );
+}
+
+#[test]
+fn reidentify_sets_the_saved_stamp_and_identity() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "before");
+    let mut vault = scan(&fs);
+    let id = vault.entries().next().expect("one entry").id;
+
+    let stamp = block_on(fs.load(Path::new("/vault/a.md")))
+        .expect("load")
+        .stamp;
+    let saved = block_on(fs.save(Path::new("/vault/a.md"), "longer after", stamp)).expect("save");
+    assert!(!vault.reidentify(id, saved.identity, saved.stamp));
+
+    let entry = vault.entry(id).expect("the entry");
+    assert_eq!(
+        (entry.stamp(), entry.identity),
+        (saved.stamp, saved.identity)
+    );
 }

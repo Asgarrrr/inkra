@@ -6,7 +6,7 @@ use inkra_vault::Vault;
 
 use super::LiveIndex;
 use super::tests::{Harness, path, paths};
-use crate::test_support::{ROOT, mtime};
+use crate::test_support::{ROOT, stamp};
 
 /// Built, every note loaded, and the settle applied, each in its own turn.
 fn indexed(files: &[(&str, &str)]) -> Harness {
@@ -99,7 +99,7 @@ fn a_save_minted_in_its_own_turn_does_no_work() {
     let mut h = indexed(&[("a.md", "alpha"), ("b.md", "beta")]);
     let a = h.id("a.md");
 
-    let (_, minted) = h.turn(|t| t.saved(a, mtime(9)));
+    let (_, minted) = h.turn(|t| t.saved(a, stamp(9)));
 
     assert!(minted.loads.is_empty());
     assert!(h.pending.build.is_none(), "no build");
@@ -119,7 +119,7 @@ fn a_save_minted_with_a_free_slot_refills_it() {
     drop(h.live.apply_build(job.run(), &h.vault).retired);
     let b = h.id("b.md");
 
-    let (_, minted) = h.turn(|t| t.saved(b, mtime(9)));
+    let (_, minted) = h.turn(|t| t.saved(b, stamp(9)));
 
     assert_eq!(paths(&minted.loads), [path("a.md")]);
 }

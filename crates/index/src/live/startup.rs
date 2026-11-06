@@ -58,10 +58,14 @@ impl LiveIndex {
         } else {
             MergeWhen::Due
         };
-        let merge = self
-            .index
-            .words_merge(when)
-            .map(|words| Merge { words, settle });
+        // The seed replaces the words whole, so a merge before it would be lost.
+        let merge = if self.cache.waits() {
+            None
+        } else {
+            self.index
+                .words_merge(when)
+                .map(|words| Merge { words, settle })
+        };
         // Else a merge runs, and the settle starts once it applies.
         if merge.is_none() && settle && self.index.words_settled() {
             self.startup = Startup::Settled;

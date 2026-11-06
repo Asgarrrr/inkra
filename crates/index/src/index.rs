@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use inkra_markdown::Link;
-use inkra_vault::{EntryId, Mtime};
+use inkra_vault::{EntryId, Mtime, Stamp};
 
 use crate::content::{FileRead, NoteContent};
 use crate::corpus::{Corpus, CorpusSnapshot};
@@ -13,6 +13,7 @@ use crate::key::Key;
 use crate::names::NamesSnapshot;
 use crate::note_set::NoteSet;
 use crate::notes::{NoteTable, Query, Resolution};
+use crate::seed::Seed;
 use crate::source::{Source, SourceLink};
 use crate::target::{Style, Target};
 use crate::words::{
@@ -146,6 +147,42 @@ impl NoteIndex {
         self
     }
 
+    /// Moves a seed's words, corpus, sources and stems in, then puts back each note loaded or
+    /// saved before it, so its own read and links win (P6). Returns the stamps to pre-fill
+    /// `indexed` with.
+    ///
+    /// # Panics
+    ///
+    /// If a merge applied before the seed, or a held note has no read.
+    pub(crate) fn seed(&mut self, seed: Seed) -> Vec<(EntryId, Stamp)> {
+        let Seed {
+            words,
+            corpus,
+            sources,
+            by_stem,
+            stamps,
+        } = seed;
+        let mut held_words = mem::replace(&mut self.words, words).into_fresh();
+        let held_reads = mem::replace(&mut self.corpus, corpus).snapshot();
+        let held = mem::replace(&mut self.sources, sources);
+        self.by_stem = by_stem;
+        for (id, source) in held {
+            let Some(read) = held_reads.read(self.notes.order(id)) else {
+                panic!("a held note has no read");
+            };
+            let words = held_words.remove(&id).unwrap_or_default();
+            self.insert(
+                id,
+                NoteContent {
+                    source,
+                    words,
+                    read,
+                },
+            );
+        }
+        stamps
+    }
+
     /// Replaces `id`'s links, stamp and words. Ignored for an id that is not a note, so a load
     /// finishing after its note was trashed leaves nothing behind.
     pub fn insert(&mut self, id: EntryId, content: NoteContent) {
@@ -158,13 +195,8 @@ impl NoteIndex {
             words,
             read,
         } = content;
-        for (at, link) in source.links.iter().enumerate() {
-            if let Target::Note { path, .. } = &link.target {
-                self.by_stem
-                    .entry(Key::stem(path))
-                    .or_default()
-                    .push((id, at));
-            }
+        for (at, key) in source.note_stems() {
+            self.by_stem.entry(key).or_default().push((id, at));
         }
         self.sources.insert(id, source);
         self.corpus.write(self.notes.order(id), read);

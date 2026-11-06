@@ -11,6 +11,9 @@ mod notes;
 pub mod persist;
 mod query;
 mod search;
+mod seed;
+#[cfg(test)]
+mod seed_tests;
 mod source;
 mod target;
 #[cfg(test)]

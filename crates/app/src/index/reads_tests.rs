@@ -226,3 +226,21 @@ async fn pin_dropped_after_close(cx: &mut TestAppContext) {
         "trashed, A is evicted for B"
     );
 }
+
+#[gpui::test]
+async fn an_open_note_is_pinned_before_any_search(cx: &mut TestAppContext) {
+    let (fs, notes, links) = indexed_vault(cx, &[("a.md", "apple"), ("b.md", "berry")]);
+    cx.run_until_parked();
+    links.update(cx, |links, _| links.set_text_budget(5));
+    saved_edit(cx, &notes, "a", "acorn").await;
+    saved_edit(cx, &notes, "b", "bacon").await;
+    let a = entry_id(&notes, cx, "a");
+    let before = fs.loads(Path::new("/vault/a.md"));
+
+    assert_eq!(search(cx, &links, "acorn"), [a]);
+    assert_eq!(
+        fs.loads(Path::new("/vault/a.md")) - before,
+        0,
+        "b's save did not evict open a"
+    );
+}

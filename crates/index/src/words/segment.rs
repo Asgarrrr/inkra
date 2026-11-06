@@ -139,7 +139,7 @@ impl Segment {
     }
 
     /// The words of `ordinal`'s note, repeats counted, as of the merge; 0 when it has none here.
-    pub(super) fn length(&self, ordinal: Ordinal) -> u32 {
+    pub(crate) fn length(&self, ordinal: Ordinal) -> u32 {
         self.lengths.get(ordinal.index()).copied().unwrap_or(0)
     }
 

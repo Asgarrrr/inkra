@@ -614,3 +614,18 @@ fn mem_fs_reports_the_io_kinds_real_fs_does() {
     assert_eq!(failure_kinds(&RealFs, &dir.0), expected, "RealFs");
     assert_eq!(failure_kinds(&mem, Path::new("/vault")), expected, "MemFs");
 }
+
+#[test]
+fn read_dir_reports_a_notes_size_and_identity_from_its_metadata() {
+    let dir = TempDir::new("read-dir-size");
+    let note = dir.0.join("a.md");
+    fs::write(&note, "four").expect("write");
+
+    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
+    let metadata = fs::metadata(&note).expect("stat");
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].size, 4);
+    assert_eq!(entries[0].identity.inode, metadata.ino());
+    assert_eq!(entries[0].identity.device, metadata.dev());
+}

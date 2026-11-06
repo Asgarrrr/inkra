@@ -45,16 +45,17 @@ fn equal_stamp_hits() {
 }
 
 #[test]
-fn other_stamp_misses_and_drops() {
-    let [a, b, _] = ids();
+fn other_stamp_misses_and_keeps() {
+    let [a, ..] = ids();
     let mut cache = TextCache::new(5);
-    cache.insert(a, text(5), stamp(1));
+    cache.insert(a, "newer".into(), stamp(2));
 
-    assert_eq!(cache.get(a, stamp(2)), None);
-    assert_eq!(cache.get(a, stamp(1)), None, "the miss dropped it");
-
-    cache.insert(b, text(5), stamp(0));
-    assert!(cached(&mut cache, b), "the drop freed its bytes");
+    assert_eq!(cache.get(a, stamp(1)), None, "a search at the older stamp");
+    assert_eq!(
+        cache.get(a, stamp(2)).as_deref(),
+        Some("newer"),
+        "the saved text survives the miss"
+    );
 }
 
 #[test]

@@ -156,11 +156,12 @@ impl Fs for MemFs {
                     path: dir.clone(),
                     kind: Kind::Dir,
                     mtime: *mtime,
+                    size: 0,
                     identity: *identity,
                 });
             }
         }
-        for (file, (_, mtime, identity)) in &state.files {
+        for (file, (bytes, mtime, identity)) in &state.files {
             // As `RealFs` does: only notes are listed.
             let note = file
                 .extension()
@@ -170,6 +171,7 @@ impl Fs for MemFs {
                     path: file.clone(),
                     kind: Kind::Note,
                     mtime: *mtime,
+                    size: bytes.len() as u64,
                     identity: *identity,
                 });
             }

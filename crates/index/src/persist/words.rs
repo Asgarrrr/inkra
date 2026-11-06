@@ -102,6 +102,13 @@ pub(super) fn decode(mut section: &[u8], notes: &[CachedNote]) -> Result<CachedW
         return Err(Rejected::Corrupt("trailing"));
     }
     named(notes, &alive)?;
+    if alive.iter().any(|ordinal| {
+        lengths
+            .get(ordinal.index())
+            .is_none_or(|&length| length == 0)
+    }) {
+        return Err(Rejected::Corrupt("length"));
+    }
     let live = alive.iter().try_fold(0_u64, |sum, ordinal| {
         sum.checked_add(u64::from(
             lengths.get(ordinal.index()).copied().unwrap_or(0),
