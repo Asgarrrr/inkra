@@ -159,17 +159,25 @@ impl AppShell {
     /// The view and its header, else the note or the empty state. A view or a tab dropped near an
     /// edge splits the group there; elsewhere, one from another group lands as the last tab.
     fn render_group_body(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
-        let colors = theme::current(cx).colors;
         let view = self.group(group).shown.view();
-        // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
-        let body = div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .on_drag_move(Self::track_view_drop(group, cx))
+        let content = match view {
+            Some(view) => vec![
+                self.render_view_header(view, cx),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .children(self.render_view_body(view))
+                    .into_any_element(),
+            ],
+            None => vec![match self.editor_of(group) {
+                Some(editor) => editor.clone().into_any_element(),
+                None => self.render_empty(cx).into_any_element(),
+            }],
+        };
+        let colors = theme::current(cx).colors;
+        self.group_body(group, selector("drop-overlay", k), content, cx)
             .on_drag_move(Self::track_tab_drop(group, cx))
             .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
-            .on_drop(Self::view_body_drop(group, cx))
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
                 if dragged.group == group {
                     style
@@ -177,25 +185,46 @@ impl AppShell {
                     style.bg(colors.accent_background)
                 }
             })
-            .on_drop(Self::tab_body_drop(group, cx));
-        let overlay = self.render_drop_overlay(group, selector("drop-overlay", k), cx);
-        match view {
-            Some(view) => body
-                .flex()
-                .flex_col()
-                .child(self.render_view_header(view, cx))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .children(self.render_view_body(view)),
-                ),
-            None => body.child(match self.editor_of(group) {
-                Some(editor) => editor.clone().into_any_element(),
-                None => self.render_empty(cx).into_any_element(),
-            }),
-        }
-        .children(overlay)
+            .on_drop(Self::tab_body_drop(group, cx))
+            .when(view.is_some(), |body| body.flex().flex_col())
+    }
+
+    /// The drop target under a group's rows: `content`, then the overlay of the split a drop would make.
+    pub(super) fn group_body(
+        &self,
+        group: GroupId,
+        overlay: String,
+        content: impl IntoIterator<Item = AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .on_drag_move(Self::track_view_drop(group, cx))
+            .on_drop(Self::view_body_drop(group, cx))
+            .children(content)
+            .children(self.render_drop_overlay(group, overlay, cx))
+    }
+
+    /// `base` names the column; then its `header` if it is lower, its `rows`, its `body` and its separator.
+    pub(super) fn group_column<E: Styled + ParentElement>(
+        base: E,
+        (slot, path): (Slot, &SplitPath),
+        k: usize,
+        header: Option<Div>,
+        rows: impl IntoIterator<Item = AnyElement>,
+        body: Div,
+        cx: &mut Context<Self>,
+    ) -> E {
+        slot.size(base)
+            .flex()
+            .flex_col()
+            .children(header)
+            .children(rows)
+            .child(body)
+            .children(Self::render_separator(path, slot, k, cx))
     }
 
     /// The half of `group`'s body a drop would split off; drawn only while a drag is over it.
@@ -232,28 +261,25 @@ impl AppShell {
         lower: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        slot.size(
-            div()
-                .id(("group-column", group.raw()))
-                .debug_selector(move || selector("note-column", k)),
-        )
-        .flex()
-        .flex_col()
-        .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {
-            shell.activate_group(group, window, cx);
-        }))
-        .when(lower, |column| {
-            column.child(self.render_group_header(k, group, cx))
-        })
-        .child(self.render_nav_row(k, group, cx))
-        .children(self.render_gone_banner(k, group, cx))
-        .children(
+        let base = div()
+            .id(("group-column", group.raw()))
+            .debug_selector(move || selector("note-column", k))
+            .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {
+                shell.activate_group(group, window, cx);
+            }));
+        let header = lower.then(|| self.render_group_header(k, group, cx));
+        let rows = [
+            Some(self.render_nav_row(k, group, cx).into_any_element()),
+            self.render_gone_banner(k, group, cx)
+                .map(IntoElement::into_any_element),
             (group == self.layout.last_center())
                 .then(|| self.render_notice(cx))
-                .flatten(),
-        )
-        .child(self.render_group_body(k, group, cx))
-        .children(Self::render_separator(path, slot, k, cx))
+                .flatten()
+                .map(IntoElement::into_any_element),
+        ];
+        let rows = rows.into_iter().flatten();
+        let body = self.render_group_body(k, group, cx);
+        Self::group_column(base, (slot, path), k, header, rows, body, cx)
     }
 
     /// `k` counts `path.surface`'s groups drawn so far, depth-first; `path` names `member`.

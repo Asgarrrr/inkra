@@ -103,35 +103,21 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let view = self.group(group).shown.view();
-        let body = view.and_then(|view| self.render_view_body(view));
-        slot.size(
-            div().debug_selector(move || selector(format_args!("dock-{}-group", name(side)), k)),
-        )
-        .flex()
-        .flex_col()
-        .when(lower, |column| {
-            column.child(
-                lower_header(cx)
-                    .child(div().flex_none().w(theme::ROW_INSET))
-                    .children(self.render_dock_strip(side, group, k, cx)),
-            )
-        })
-        .children(view.map(|view| self.render_view_header(view, cx)))
-        .child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .relative()
-                .on_drag_move(Self::track_view_drop(group, cx))
-                .on_drop(Self::view_body_drop(group, cx))
-                .children(body)
-                .children(self.render_drop_overlay(
-                    group,
-                    selector(format_args!("dock-{}-drop-overlay", name(side)), k),
-                    cx,
-                )),
-        )
-        .children(Self::render_separator(path, slot, k, cx))
+        let base =
+            div().debug_selector(move || selector(format_args!("dock-{}-group", name(side)), k));
+        let header = lower.then(|| {
+            lower_header(cx)
+                .child(div().flex_none().w(theme::ROW_INSET))
+                .children(self.render_dock_strip(side, group, k, cx))
+        });
+        let rows = view.map(|view| self.render_view_header(view, cx));
+        let body = self.group_body(
+            group,
+            selector(format_args!("dock-{}-drop-overlay", name(side)), k),
+            view.and_then(|view| self.render_view_body(view)),
+            cx,
+        );
+        Self::group_column(base, (slot, path), k, header, rows, body, cx)
     }
 
     /// What `view` draws under its header; `None` with no vault.
