@@ -6,13 +6,13 @@ use gpui::{
 };
 use inkra_layout::{GroupId, SplitDirection, SplitPath};
 
+use super::AppShell;
 use super::dock_drag::DraggedView;
 use super::group::selector;
 use super::members::Slot;
-use super::tab_bar::DraggedTab;
-use super::{AppShell, GoBack, GoForward};
+use super::tab_bar::{DraggedTab, strip_slot};
 use crate::theme;
-use crate::ui::{Color, IconButton, IconName, h_flex, keep_focus};
+use crate::ui::{Color, h_flex, keep_focus};
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -62,35 +62,6 @@ impl AppShell {
                 .child("Deleted from disk. Typing restores it.")
         })
     }
-
-    /// Atop the note column, out of the editor's scroll; each arrow is lit when its walk would arrive (D4).
-    fn render_nav_row(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> impl IntoElement {
-        let group = self.group(group);
-        let showing = group.shown.note();
-        let colors = theme::current(cx).colors;
-        h_flex()
-            .debug_selector(move || selector("nav-row", k))
-            .flex_none()
-            .h(theme::NAV_ROW_HEIGHT)
-            .pl_3()
-            .bg(colors.editor_background)
-            // A press on the strip beside the arrows leaves the editor focused.
-            .on_mouse_down(MouseButton::Left, keep_focus)
-            .child(
-                IconButton::new("nav-back", IconName::ArrowLeft, "Go back")
-                    .disabled(!group.tabs.can_go_back(showing))
-                    .on_click(cx.listener(|shell, _, window, cx| {
-                        shell.go_back(&GoBack, window, cx);
-                    })),
-            )
-            .child(
-                IconButton::new("nav-forward", IconName::ArrowRight, "Go forward")
-                    .disabled(!group.tabs.can_go_forward(showing))
-                    .on_click(cx.listener(|shell, _, window, cx| {
-                        shell.go_forward(&GoForward, window, cx);
-                    })),
-            )
-    }
 }
 
 /// A lower group's header row, as the title row holds only the top groups' strips (splits spec, D4).
@@ -118,6 +89,7 @@ impl AppShell {
     fn render_group_header(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
         lower_header(cx)
             .debug_selector(move || selector("group-header", k))
+            .child(self.render_nav(k, group, strip_slot(), cx))
             .child(self.render_tab_bar(k, group, cx))
             .child(Self::render_new_tab(k, cx))
             .on_drop(Self::view_drop(group, cx))
@@ -238,8 +210,8 @@ impl AppShell {
         })
     }
 
-    /// Centre group `k`'s column: its header if it is lower, its nav row, its banner, the notice if
-    /// it is the last active, and its body.
+    /// Centre group `k`'s column: its header if it is lower, its banner, the notice if it is the
+    /// last active, and its body.
     pub(super) fn render_note_column(
         &self,
         k: usize,
@@ -256,7 +228,6 @@ impl AppShell {
             }));
         let header = lower.then(|| self.render_group_header(k, group, cx));
         let rows = [
-            Some(self.render_nav_row(k, group, cx).into_any_element()),
             self.render_gone_banner(k, group, cx)
                 .map(IntoElement::into_any_element),
             (group == self.layout.last_center())

@@ -298,6 +298,16 @@ impl Stage {
         center
     }
 
+    pub(crate) fn nav_back_center(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
+        let Some(center) = window
+            .update(&mut self.cx, |shell, _, _| shell.nav_back_center())
+            .unwrap_or_else(|error| panic!("read the back arrow: {error}"))
+        else {
+            panic!("nav is drawn");
+        };
+        center
+    }
+
     pub(crate) fn dock_icon_point(
         &mut self,
         window: WindowHandle<AppShell>,

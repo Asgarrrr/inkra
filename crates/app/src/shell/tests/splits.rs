@@ -306,16 +306,21 @@ fn each_strip_sits_over_its_column(cx: &mut TestAppContext) {
     split(&mut cx);
     assert_eq!(centre(&window, &mut cx).len(), 3);
 
-    for (strip, column) in [
-        ("tab-bar", "note-column"),
-        ("tab-bar-1", "note-column-1"),
-        ("tab-bar-2", "note-column-2"),
+    for (nav, bar, column) in [
+        ("nav", "tab-bar", "note-column"),
+        ("nav-1", "tab-bar-1", "note-column-1"),
+        ("nav-2", "tab-bar-2", "note-column-2"),
     ] {
-        let strip = cx.debug_bounds(strip).expect("drawn").left();
+        let nav = cx.debug_bounds(nav).expect("drawn");
+        let bar = cx.debug_bounds(bar).expect("drawn").left();
         let column = cx.debug_bounds(column).expect("drawn").left();
         assert!(
-            (strip - column).abs() < gpui::px(0.01),
-            "{strip:?} vs {column:?}"
+            (nav.left() - column).abs() < gpui::px(0.01),
+            "{nav:?} vs {column:?}"
+        );
+        assert!(
+            (bar - nav.right()).abs() < gpui::px(0.01),
+            "{bar:?} vs {nav:?}"
         );
     }
     close(&mut cx);

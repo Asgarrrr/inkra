@@ -12,6 +12,7 @@ pub use detached::Detached;
 #[cfg(test)]
 use history::HISTORY;
 use history::Stack;
+pub use history::{Stop, Way};
 
 /// What a tab shows, as far as history needs it.
 pub trait Place: Default {

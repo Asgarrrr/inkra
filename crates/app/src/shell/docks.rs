@@ -1,10 +1,10 @@
 //! The two docks: their toggles, revealing a view, the dock menu, and each view's title and icon (docks spec).
 
-use gpui::{Action, AppContext, Context, Pixels, Point, SharedString, Window, actions};
+use gpui::{Action, AppContext, Context, Pixels, Point, Window, actions};
 use inkra_layout::{Side, SplitDirection, Surface, View};
 
 use super::AppShell;
-use crate::ui::{ContextMenu, IconName};
+use crate::ui::{ContextMenu, IconName, MenuEntry};
 
 actions!(
     docks,
@@ -104,17 +104,17 @@ impl AppShell {
             Side::Left => Box::new(ToggleLeftDock),
             Side::Right => Box::new(ToggleRightDock),
         };
-        let mut entries = vec![(SharedString::from(move_label), move_action)];
+        let mut entries = vec![MenuEntry::new(move_label, move_action)];
         if self.group(self.tab_of(view).0).tabs.count() > 1 {
             for (label, direction) in [
                 ("Split Right", SplitDirection::Right),
                 ("Split Down", SplitDirection::Down),
             ] {
                 let split: Box<dyn Action> = Box::new(SplitView { view, direction });
-                entries.push((SharedString::from(label), split));
+                entries.push(MenuEntry::new(label, split));
             }
         }
-        entries.push((SharedString::from("Hide Dock"), hide_action));
+        entries.push(MenuEntry::new("Hide Dock", hide_action));
         let menu = cx.new(|cx| ContextMenu::new(entries, cx));
         self.open_menu(menu, at, window, cx);
     }

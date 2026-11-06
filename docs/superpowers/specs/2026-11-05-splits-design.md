@@ -134,7 +134,7 @@ notes, N editors.
   move, close and resize goes through it, normalises, checks the invariants,
   notifies and calls `save_session_later`.
 - **The active group** feeds everything that read the single `shown`: `⌘S`
-  (`NoteStore::current`), quick open's `showing`, back and forward, the nav row,
+  (`NoteStore::current`), quick open's `showing`, back and forward, the strip's arrows,
   `sidebar.follow`. `Backlinks` reads `last_center` (D3).
 - **`open(note, range, open)` takes a target group** (D7). `Open::NewTab` opens
   in a new tab of that group; the new `Open::SplitRight` splits it first.
@@ -157,7 +157,7 @@ notes, N editors.
   28 px icons (S7); a strip that overflows ends in a `⋯` button listing the hidden
   tabs *(delegated)*.
 - A group below the top draws the same strip in a 34 px header inside its rect.
-- Each centre group has its own nav row (`←` `→`) under its strip, on its own
+- Each centre group's strip starts with `←` `→`, outside its scroll, on its own
   history.
 - Empty space in any title-row strip is a window drag region, as today.
 - A dock's toggle sits at its segment's outer end. A hidden dock's toggle moves
@@ -656,8 +656,8 @@ Slice 4, the shell's modules by concern; a move, not a rewrite:
 - `split.rs` holds the `⌘K` actions, `split_in`, `split_group`, `activate_pane` and `probe`.
   `group.rs` keeps `Group` and the group's lifecycle. `panes.rs` holds `VaultPanes`, so the keys take `split.rs`
   *(delegated)*.
-- `column.rs` holds the empty state, the gone banner, the nav row, the note column and the
-  group body that takes drops. `members.rs` holds `Slot`, `render_member` and `render_split`.
+- `column.rs` holds the empty state, the gone banner, the note column and the group body
+  that takes drops. `nav.rs` holds the strip's arrows. `members.rs` holds `Slot`, `render_member` and `render_split`.
   `render.rs` keeps `Render` and `render_columns`.
 - `probe` reads the caret's place from `bounds_of`, the group's pixel rect on its own surface,
   no longer from the centre's room. Only a centre group has a caret today, so no shot changes.

@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    Action, App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement,
+    App, AppContext, ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
@@ -19,7 +19,9 @@ use super::split::{SplitDown, SplitRight};
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
-use crate::ui::{Color, ContextMenu, IconButton, IconName, Indicator, Label, Tab, UiText, h_flex};
+use crate::ui::{
+    Color, ContextMenu, IconButton, IconName, Indicator, Label, MenuEntry, Tab, UiText, h_flex,
+};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
@@ -60,7 +62,17 @@ impl Render for DraggedTab {
     }
 }
 
-fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString {
+/// A strip's slot for icon buttons, outside the bar's scroll, on the tabs' content centreline.
+pub(super) fn strip_slot() -> Div {
+    h_flex()
+        .flex_none()
+        .self_end()
+        .h(theme::TAB_HEIGHT)
+        .pt(theme::RULE_WIDTH)
+        .pb(theme::TAB_HOVER_INSET)
+}
+
+pub(super) fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString {
     note.and_then(|id| notes.title(id, cx))
         .map_or(SharedString::new_static(NEW_TAB), |title| {
             one_line(&title).into_owned().into()
@@ -264,23 +276,16 @@ impl AppShell {
 
     /// After the bar, not in it: `scroll_to_item` indexes the bar's children, which are tabs only.
     pub(super) fn render_new_tab(k: usize, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .flex_none()
-            .self_end()
-            .h(theme::TAB_HEIGHT)
-            // On the tabs' content centreline.
-            .pt(theme::RULE_WIDTH)
-            .pb(theme::TAB_HOVER_INSET)
-            .child(
-                IconButton::new(
-                    ElementId::Name(selector("tab-new", k).into()),
-                    IconName::Plus,
-                    NEW_TAB,
-                )
-                .on_click(cx.listener(|shell, _, window, cx| {
-                    shell.new_tab(&NewTab, window, cx);
-                })),
+        strip_slot().child(
+            IconButton::new(
+                ElementId::Name(selector("tab-new", k).into()),
+                IconName::Plus,
+                NEW_TAB,
             )
+            .on_click(cx.listener(|shell, _, window, cx| {
+                shell.new_tab(&NewTab, window, cx);
+            })),
+        )
     }
 
     /// The menu's entries act on the focused group, which the press has just made `group`.
@@ -299,10 +304,10 @@ impl AppShell {
         if let Some(focus) = self.land_focus(cx) {
             window.focus(&focus, cx);
         }
-        let entries: Vec<(SharedString, Box<dyn Action>)> = vec![
-            ("Split Right".into(), Box::new(SplitRight)),
-            ("Split Down".into(), Box::new(SplitDown)),
-            ("Close".into(), Box::new(CloseTab)),
+        let entries = vec![
+            MenuEntry::new("Split Right", Box::new(SplitRight)),
+            MenuEntry::new("Split Down", Box::new(SplitDown)),
+            MenuEntry::new("Close", Box::new(CloseTab)),
         ];
         let menu = cx.new(|cx| ContextMenu::new(entries, cx));
         self.open_menu(menu, at, window, cx);

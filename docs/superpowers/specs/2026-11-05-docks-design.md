@@ -23,8 +23,8 @@ own spec after this one. The note column stays one pane here.
   bottom dock can be added later without reshaping the model.
 - **D2. A view moves by menu, by palette, then by drag.** The menu and the
   palette land first: they settle the model, and the drag only calls it.
-- **D3. A dock's header sits under the title row**, level with the nav row and
-  the backlinks header. The title row does not change.
+- **D3. A dock's header sits under the title row**, level with the backlinks
+  header. The title row does not change.
 - **D4. The layout is session state.** It goes in the session file, beside the
   tabs, not in `<vault>/.inkra/settings.json`.
 - **D5. A closed set of views and a pure model.** `View` is an enum; the

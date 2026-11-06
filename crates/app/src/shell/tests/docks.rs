@@ -67,7 +67,7 @@ fn hiding_the_focused_sidebar_lands_focus_on_the_note(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_tab_bar_still_scrolls_to_the_active_tab_with_toggles(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    cx.simulate_resize(size(px(700.), px(600.)));
+    cx.simulate_resize(size(px(800.), px(600.)));
     open(&window, &mut cx, a);
     for _ in 1..30 {
         cx.simulate_keystrokes("cmd-t");

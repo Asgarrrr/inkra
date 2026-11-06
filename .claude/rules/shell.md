@@ -24,10 +24,10 @@ paths:
 - A drop in the bar (`move_tab`) calls no closure: it captures, parks and
   unparks nothing, and keeps `activation` (T4). It does not activate the tab
   dropped. A tab's left press calls `prevent_default`, so the root does not
-  take focus from the editor. An `IconButton` (a dock toggle, the ×, the `+`, the sidebar's search and new-note buttons, the nav row's arrows) prevents it on
+  take focus from the editor. An `IconButton` (a dock toggle, the ×, the `+`, the sidebar's search and new-note buttons, the strip's history arrows) prevents it on
   a left press itself, so a click on one leaves focus where it was.
 - A disabled `IconButton` drops its click and is drawn as `{id}-disabled`, which tests read; the arrows' state comes from `Tabs::can_go_back`/`can_go_forward`, never computed in the view.
-- The nav row and every title-row segment (`title-left`, `title-tabs`, `title-right`) call `ui::keep_focus` on a left press, so a press on their gaps leaves the editor focused.
+- Every title-row segment (`title-left`, `title-tabs`, `title-right`) and a lower group's header call `ui::keep_focus` on a left press, so a press on their gaps leaves the editor focused.
 - The window moves only from the four leaf drag regions of the title row
   (`title-drag-start`, `title-drag-left`, `title-drag-end`, `title-drag-right`): only a region's left press sets
   `title_drag_armed`, and calls `prevent_default` to keep the editor's focus.

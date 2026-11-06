@@ -4,15 +4,54 @@ use gpui::{
     prelude::FluentBuilder, px,
 };
 
-use super::{Label, ListItem, v_flex};
+use super::{Icon, IconName, Indicator, Label, ListItem, h_flex, v_flex};
 use crate::field::{Cancel, Confirm};
 use crate::{picker, theme};
 
 const MENU_MIN_WIDTH: Pixels = px(200.);
 
+/// A row of a menu: a label, an optional leading icon, and the action it runs.
+pub(crate) struct MenuEntry {
+    label: SharedString,
+    icon: Option<IconName>,
+    /// `None` runs nothing and closes the menu.
+    action: Option<Box<dyn Action>>,
+    /// Drawn with the current dot.
+    current: bool,
+}
+
+impl MenuEntry {
+    pub(crate) fn new(label: impl Into<SharedString>, action: Box<dyn Action>) -> Self {
+        Self {
+            label: label.into(),
+            icon: None,
+            action: Some(action),
+            current: false,
+        }
+    }
+
+    pub(crate) fn current(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+            icon: None,
+            action: None,
+            current: true,
+        }
+    }
+
+    pub(crate) fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    fn action(&self) -> Option<Box<dyn Action>> {
+        self.action.as_ref().map(|action| action.boxed_clone())
+    }
+}
+
 /// A right-click's list of actions; the shell opens it in its modal layer.
 pub(crate) struct ContextMenu {
-    entries: Vec<(SharedString, Box<dyn Action>)>,
+    entries: Vec<MenuEntry>,
     selected: Option<usize>,
     focus: FocusHandle,
 }
@@ -23,10 +62,7 @@ pub(crate) struct MenuClosed(pub(crate) Option<Box<dyn Action>>);
 impl EventEmitter<MenuClosed> for ContextMenu {}
 
 impl ContextMenu {
-    pub(crate) fn new(
-        entries: Vec<(SharedString, Box<dyn Action>)>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(entries: Vec<MenuEntry>, cx: &mut Context<Self>) -> Self {
         assert!(!entries.is_empty(), "a context menu needs an entry");
         Self {
             entries,
@@ -52,7 +88,7 @@ impl ContextMenu {
 
     fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.selected {
-            cx.emit(MenuClosed(Some(self.entries[ix].1.boxed_clone())));
+            cx.emit(MenuClosed(self.entries[ix].action()));
         }
     }
 }
@@ -81,26 +117,32 @@ impl Render for ContextMenu {
             .border_color(colors.border)
             .rounded_md()
             .shadow_lg()
-            .children(
-                self.entries
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, (label, action))| {
-                        let action = action.boxed_clone();
-                        let selected = self.selected == Some(ix);
-                        ListItem::new(("context-menu-item", ix))
-                            .selected(selected)
-                            // A test window draws no background, so the selector carries the state.
-                            .when(selected, |row| {
-                                row.debug_selector(move || {
-                                    format!("context-menu-item-{ix}-selected")
-                                })
-                            })
-                            .child(Label::new(label.clone()))
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.emit(MenuClosed(Some(action.boxed_clone())));
-                            }))
-                    }),
-            )
+            .children(self.entries.iter().enumerate().map(|(ix, entry)| {
+                let selected = self.selected == Some(ix);
+                let action = entry.action();
+                ListItem::new(("context-menu-item", ix))
+                    .selected(selected)
+                    .when_some(entry.icon, |row, icon| row.start(Icon::new(icon)))
+                    .when(entry.current, |row| {
+                        let current = Indicator::Current;
+                        row.start(
+                            h_flex()
+                                .size(theme::ICON_SIZE)
+                                .justify_center()
+                                .child(current),
+                        )
+                        .debug_selector(move || current.selector("context-menu-item", ix))
+                    })
+                    // A test window draws no background, so the selector carries the state.
+                    .when(selected, |row| {
+                        row.debug_selector(move || format!("context-menu-item-{ix}-selected"))
+                    })
+                    .child(Label::new(entry.label.clone()))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(MenuClosed(
+                            action.as_ref().map(|action| action.boxed_clone()),
+                        ));
+                    }))
+            }))
     }
 }

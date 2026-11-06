@@ -85,6 +85,7 @@ Monaco's `firstPosition` plus `firstPositionDeltaTop`, the shape of our
 | Preview tabs, pinned tabs, `max_tabs` | None | Replacement already keeps the bar short |
 | Close activates by MRU, setting for neighbour | MRU only | No setting until someone asks |
 | Back pops within an item too | History is note-granular | Deferred, with its trigger |
+| Back and forward buttons only | A right-click or a hold on either arrow lists the tab's history | A note several steps back is one gesture away, as in a browser's back menu (Obsidian chrome D4) |
 
 ## Architecture
 
@@ -116,6 +117,9 @@ Invariants, each a proptest over random operation sequences:
    drops first.
 7. A closed tab with no note and no history is not pushed on the closed stack.
 8. `⌘⇧T` reinserts a tab at its old index, clamped to the bar.
+9. A walk of n steps arrives where n walks would, captures once, and pushes
+   the places it passes as stored. A stop no longer at its steps, or no longer
+   on its note, walks nothing and calls no capture.
 
 ### A2. A place
 
@@ -519,7 +523,10 @@ section. Built as planned, with these facts and deviations:
   arrives, `show_place` drops `activation`, as every switch does.
 - **One walk for both directions.** `back` and `forward` share a private
   `walk` with a `fn` selector (`type Walk<P>`). It pops before `leaving` runs,
-  since the app's `leaving` seals an undo group.
+  since the app's `leaving` seals an undo group. Revised 2026-11-06: `Way`
+  (`Back`, `Forward`) replaces `type Walk` and picks the two stacks, and the
+  private `walk` takes a step count. `stops` lists where successive walks
+  arrive; `walk_to` reaches one of them in one walk (invariant 9).
 - **The sidebar opens through `open`.** A click on the note showing takes
   `show_note`'s same-note branch: nothing loads, nothing is pushed, forward
   stays, and the editor takes focus.

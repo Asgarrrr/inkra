@@ -179,7 +179,7 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
   `Tab`, `Icon`, `Indicator`, `IconButton`, `PanelHeader`, `Assets`), row overlays, Lucide
   icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices
-- `docs/superpowers/specs/2026-11-04-obsidian-chrome-design.md` — Obsidian chrome: surfaces, the split title row, browser tabs, the nav row, the backlinks header
+- `docs/superpowers/specs/2026-11-04-obsidian-chrome-design.md` — Obsidian chrome: surfaces, the split title row, browser tabs, the strip's history arrows and menu, the backlinks header
 - `docs/superpowers/specs/2026-11-05-docks-design.md` — docks: `inkra-layout`, `Docks`, headers and the icon bar,
   the move actions, the menu, the drag, the session's `docks` field
 - `docs/superpowers/specs/2026-11-05-splits-design.md` — splits: `Layout`'s tree of groups in the centre

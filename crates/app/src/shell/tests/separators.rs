@@ -45,6 +45,8 @@ fn near(a: Pixels, b: Pixels) -> bool {
 /// The group-strip chrome a centre group keeps with both docks drawn.
 fn centre_minimum() -> Pixels {
     theme::TAB_CURVE * 2.
+        + theme::ROW_INSET
+        + theme::ICON_BUTTON_WIDTH * 2.
         + theme::TAB_MIN_WIDTH
         + theme::ICON_BUTTON_WIDTH
         + theme::TITLE_DRAG_MIN_WIDTH
@@ -93,6 +95,8 @@ fn a_separator_stops_at_the_minimum(cx: &mut TestAppContext) {
 
     let width = bounds(&mut cx, "note-column").size.width;
     assert!(near(width, centre_minimum()), "{width:?}");
+    let tabs = bounds(&mut cx, "tab-bar").size.width;
+    assert!(tabs >= theme::TAB_MIN_WIDTH - px(1.), "{tabs:?}");
     let (strip, new_tab) = (bounds(&mut cx, "group-strip"), bounds(&mut cx, "tab-new"));
     assert!(
         strip.contains(&new_tab.origin) && new_tab.right() <= strip.right(),

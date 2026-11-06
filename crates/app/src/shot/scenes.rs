@@ -229,7 +229,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "docks-default",
-        shows: "one view icon after each dock's toggle in the title row; the Files header under the row holds new note, new folder and search, level with the Backlinks header and the nav row",
+        shows: "one view icon after each dock's toggle in the title row; the Files header under the row holds new note, new folder and search, level with the Backlinks header",
         open: docks::default,
     },
     Scene {
@@ -259,7 +259,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "view-in-center",
-        shows: "no left dock; over the note column the tabs `index` and `Files`, `Files` active in the note colour; under the title row the nav row, the Files header with new note, new folder and search, then the tree with `index` highlighted; the right dock unchanged",
+        shows: "no left dock; over the note column the tabs `index` and `Files`, `Files` active in the note colour; under the title row the Files header with new note, new folder and search, then the tree with `index` highlighted; the right dock unchanged",
         open: docks::view_in_center,
     },
     Scene {
@@ -289,7 +289,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tab-drop-split",
-        shows: "`reading`'s tab held near the note column's right edge, button down: the column's right half lit in the drop colour from the nav row's foot to the window's foot, its left half and the note's text unlit; the preview under the pointer; the tab bar unchanged, a single note column until the drop",
+        shows: "`reading`'s tab held near the note column's right edge, button down: the column's right half lit in the drop colour from the title row's foot to the window's foot, its left half and the note's text unlit; the preview under the pointer; the tab bar unchanged, a single note column until the drop",
         open: tabs::drop_split,
     },
     Scene {
@@ -323,9 +323,14 @@ const CATALOGUE: &[Scene] = &[
         open: tabs::restored,
     },
     Scene {
-        name: "nav-row",
-        shows: "the nav row atop the note column, level with the `Backlinks` header: `←` lit after tab 1 moved from `index` to `today`, `→` dimmed",
-        open: tabs::nav_row,
+        name: "nav-arrows",
+        shows: "the strip's arrows right of the dock toggle and before the first tab: `←` lit after tab 1 moved from `index` to `today`, `→` dimmed; nothing between the title row and the note's text",
+        open: tabs::nav_arrows,
+    },
+    Scene {
+        name: "history-menu",
+        shows: "the elevated menu at the pointer by ←: forward rows with → on top, the current row with an accent dot, back rows with ←; ruled, rounded and shadowed like the tab menu",
+        open: tabs::history_menu,
     },
     Scene {
         name: "quick-open-results",

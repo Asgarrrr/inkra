@@ -203,11 +203,11 @@ fn the_backlinks_column_shows_for_an_empty_tab_in_a_vault_only(cx: &mut TestAppC
     assert!(cx.debug_bounds("dock-right").is_none(), "no vault");
 }
 
-/// 30 tabs cannot fit a 700 px window; `⌘9` must bring the last one into the bar.
+/// 30 tabs cannot fit an 800 px window; `⌘9` must bring the last one into the bar.
 #[gpui::test]
 fn a_tab_activated_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    cx.simulate_resize(size(px(700.), px(600.)));
+    cx.simulate_resize(size(px(800.), px(600.)));
     open(&window, &mut cx, a);
     for _ in 1..30 {
         cx.simulate_keystrokes("cmd-t");
@@ -236,7 +236,7 @@ fn a_tab_activated_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext) 
 #[gpui::test]
 fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    cx.simulate_resize(size(px(700.), px(600.)));
+    cx.simulate_resize(size(px(800.), px(600.)));
     open(&window, &mut cx, a);
     for _ in 1..30 {
         cx.simulate_keystrokes("cmd-t");
