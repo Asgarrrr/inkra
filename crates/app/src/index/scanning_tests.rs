@@ -8,7 +8,7 @@ use std::time::{Instant, SystemTime};
 use gpui::TestAppContext;
 use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind, Mtime, Stamp};
+use inkra_vault::{FileIdentity, Fs, Kind, Mtime, Stamp};
 
 use super::tests::{backlinks, create, hold_builds, indexed_vault, notes_changed, rescan, status};
 use crate::test_support::{entry_id, index_sync, unscanned_notes};
@@ -57,6 +57,10 @@ fn a_save_during_the_initial_scan_marks_no_indexed_step(cx: &mut TestAppContext)
             stamp: Stamp {
                 mtime: Mtime(SystemTime::UNIX_EPOCH),
                 size: 5,
+            },
+            identity: FileIdentity {
+                device: 1,
+                inode: 1,
             },
         });
     });

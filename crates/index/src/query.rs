@@ -27,12 +27,12 @@ impl IndexSnapshot {
     /// The note at `order` as a read: `None` while it is not loaded, or past the end.
     #[must_use]
     pub fn candidate(&self, order: usize) -> Option<Candidate> {
-        let stamp = self.corpus().stamp(order)?;
+        let read = self.corpus().read(order)?;
         let names = self.names();
         Some(Candidate {
             id: names.id(order),
             path: names.file(order).clone(),
-            stamp,
+            stamp: read.stamp,
         })
     }
 

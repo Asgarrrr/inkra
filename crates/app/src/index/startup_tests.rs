@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use gpui::TestAppContext;
 use inkra_index::live::Status;
-use inkra_vault::{Mtime, Stamp};
+use inkra_vault::{FileIdentity, Mtime, Stamp};
 
 use super::tests::{indexed_vault, notes_changed, rescan, status};
 use crate::test_support::entry_id;
@@ -72,6 +72,10 @@ fn a_saves_turn_counts_in_the_longest_turn(cx: &mut TestAppContext) {
             stamp: Stamp {
                 mtime: Mtime(SystemTime::UNIX_EPOCH),
                 size: 5,
+            },
+            identity: FileIdentity {
+                device: 1,
+                inode: 1,
             },
         });
     });

@@ -11,8 +11,8 @@ use std::thread;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{
-    Candidate, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Read,
-    TextFound, TextSearch,
+    Candidate, FileRead, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet,
+    Read, TextFound, TextSearch,
 };
 use inkra_vault::{EntryId, Fs as _, Kind, RealFs, Vault, VaultError};
 
@@ -161,7 +161,11 @@ fn bench_read_search(c: &mut Criterion) {
         };
         count_tokens(&loaded.text, &mut df);
         let text: Arc<str> = loaded.text.into();
-        index.insert(entry.id, NoteContent::parse(&text, loaded.stamp));
+        let file = FileRead {
+            stamp: loaded.stamp,
+            identity: loaded.identity,
+        };
+        index.insert(entry.id, NoteContent::parse(&text, file));
         texts.insert(entry.id, text);
     }
     settle(&mut index);

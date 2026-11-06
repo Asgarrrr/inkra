@@ -21,7 +21,7 @@ mod text_cache_tests;
 mod window;
 mod words;
 
-pub use content::NoteContent;
+pub use content::{FileRead, NoteContent};
 pub use corpus::CorpusSnapshot;
 pub use find::{Excerpt, Group, NoteMatch, excerpt, word_starts};
 pub use index::{Backlink, IndexSnapshot, NoteIndex};

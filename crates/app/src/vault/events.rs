@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::EventEmitter;
-use inkra_vault::{EntryId, RelPath, Stamp, VaultError};
+use inkra_vault::{EntryId, FileIdentity, RelPath, Stamp, VaultError};
 
 use super::NoteStore;
 
@@ -12,6 +12,7 @@ pub(crate) struct NoteSaved {
     pub(crate) id: EntryId,
     pub(crate) text: Arc<str>,
     pub(crate) stamp: Stamp,
+    pub(crate) identity: FileIdentity,
 }
 
 impl EventEmitter<NoteSaved> for NoteStore {}

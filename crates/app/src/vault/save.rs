@@ -210,6 +210,7 @@ impl NoteStore {
                 id,
                 text,
                 stamp: saved.stamp,
+                identity: saved.identity,
             });
             if let Some(preserved) = saved.preserved.clone() {
                 cx.emit(ConflictPreserved {

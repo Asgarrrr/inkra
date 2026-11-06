@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{AsyncApp, Context, Priority, WeakEntity};
-use inkra_index::NoteContent;
 use inkra_index::live::{Load, Ticket};
+use inkra_index::{FileRead, NoteContent};
 
 use super::IndexSync;
 
@@ -43,10 +43,13 @@ impl IndexSync {
         // Low, as Zed's scanner: a query's scan goes first.
         cx.background_executor()
             .spawn_with_priority(Priority::Low, async move {
-                let loaded = fs
-                    .load(&path)
-                    .await
-                    .map(|loaded| NoteContent::parse(&loaded.text, loaded.stamp));
+                let loaded = fs.load(&path).await.map(|loaded| {
+                    let file = FileRead {
+                        stamp: loaded.stamp,
+                        identity: loaded.identity,
+                    };
+                    NoteContent::parse(&loaded.text, file)
+                });
                 // Closed only once this entity is gone, and then nobody waits for it.
                 let _ = landed.unbounded_send(Landed { ticket, loaded });
             })

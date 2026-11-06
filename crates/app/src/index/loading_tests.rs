@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use gpui::{Entity, TestAppContext};
-use inkra_index::NoteContent;
 use inkra_index::live::Status;
+use inkra_index::{FileRead, NoteContent};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Mtime, Stamp};
+use inkra_vault::{EntryId, FileIdentity, Fs, Mtime, Stamp};
 
 use super::IndexSync;
 use super::loading::Landed;
@@ -91,11 +91,17 @@ fn land_at_once(
         for id in ids {
             let mtime = Mtime(SystemTime::UNIX_EPOCH);
             let ticket = links.turn(cx, |turn| turn.saved(id, mtime));
-            let stamp = Stamp {
-                mtime,
-                size: text.len() as u64,
+            let file = FileRead {
+                stamp: Stamp {
+                    mtime,
+                    size: text.len() as u64,
+                },
+                identity: FileIdentity {
+                    device: 1,
+                    inode: 1,
+                },
             };
-            let loaded = Ok(NoteContent::parse(text, stamp));
+            let loaded = Ok(NoteContent::parse(text, file));
             links
                 .landed
                 .unbounded_send(Landed { ticket, loaded })

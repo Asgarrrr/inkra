@@ -7,13 +7,13 @@ use std::time::{Duration, SystemTime};
 use futures::executor::block_on;
 use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp, Vault};
+use inkra_vault::{EntryId, FileIdentity, Fs, Kind, Mtime, Serial, Stamp, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
 use crate::{
-    IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Read, Searched, Target,
-    TextSearch,
+    FileRead, IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Read, Searched,
+    Target, TextSearch,
 };
 
 pub(crate) const ROOT: &str = "/vault";
@@ -135,7 +135,17 @@ pub(crate) fn target(text: &str) -> Target {
 /// `text` parsed as a load at `mtime` gives it, its size the text's length.
 pub(crate) fn content(text: &str, mtime: Mtime) -> NoteContent {
     let size = text.len() as u64;
-    NoteContent::parse(text, Stamp { mtime, size })
+    let identity = FileIdentity {
+        device: 1,
+        inode: 1,
+    };
+    NoteContent::parse(
+        text,
+        FileRead {
+            stamp: Stamp { mtime, size },
+            identity,
+        },
+    )
 }
 
 /// `id`'s links, stamp and words, as a load gives them, stamped `mtime(0)`.

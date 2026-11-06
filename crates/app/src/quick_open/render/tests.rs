@@ -3,8 +3,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
 use futures::executor::block_on;
-use inkra_index::{NoteContent, NoteIndex, NoteQuery, NoteSet, excerpt};
-use inkra_vault::{EntryId, Kind, Mtime, Serial, Stamp};
+use inkra_index::{FileRead, NoteContent, NoteIndex, NoteQuery, NoteSet, excerpt};
+use inkra_vault::{EntryId, FileIdentity, Kind, Mtime, Serial, Stamp};
 
 use crate::quick_open::list::Row;
 
@@ -20,11 +20,17 @@ fn rows(path: &str, text: &str, query: &str) -> Vec<Row> {
         Kind::Note,
         mtime,
     )]));
-    let stamp = Stamp {
-        mtime,
-        size: text.len() as u64,
+    let file = FileRead {
+        stamp: Stamp {
+            mtime,
+            size: text.len() as u64,
+        },
+        identity: FileIdentity {
+            device: 1,
+            inode: 1,
+        },
     };
-    index.insert(id, NoteContent::parse(text, stamp));
+    index.insert(id, NoteContent::parse(text, file));
     let snapshot = index.snapshot();
     let query = NoteQuery::new(query, None, &[]);
     let cancel = AtomicBool::new(false);

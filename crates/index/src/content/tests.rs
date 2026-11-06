@@ -1,6 +1,6 @@
-use inkra_vault::Stamp;
+use inkra_vault::{FileIdentity, Stamp};
 
-use super::NoteContent;
+use super::{FileRead, NoteContent};
 use crate::Source;
 use crate::test_support::{content, mtime};
 
@@ -24,9 +24,15 @@ fn parse_computes_the_links_and_the_words_of_the_text() {
 
 #[test]
 fn parse_keeps_the_stamp() {
-    let stamp = Stamp {
-        mtime: mtime(7),
-        size: 3,
+    let file = FileRead {
+        stamp: Stamp {
+            mtime: mtime(7),
+            size: 3,
+        },
+        identity: FileIdentity {
+            device: 2,
+            inode: 9,
+        },
     };
-    assert_eq!(NoteContent::parse("", stamp).stamp, stamp);
+    assert_eq!(NoteContent::parse("", file).read, file);
 }

@@ -13,7 +13,7 @@ use inkra_index::live::Status;
 use inkra_index::{Candidate, NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp};
+use inkra_vault::{EntryId, FileIdentity, Fs, Kind, Mtime, Stamp};
 
 use super::{IndexSync, NotesChanged};
 use crate::test_support::{entry_id, index_sync, named, scan_notes, vault_of};
@@ -287,9 +287,7 @@ fn a_save_during_a_build_is_not_reloaded_when_the_build_applies(cx: &mut TestApp
     let before = futures::executor::block_on(fs.load(path))
         .expect("a loads")
         .stamp;
-    let saved = futures::executor::block_on(fs.save(path, "saved", before))
-        .expect("a saves")
-        .stamp;
+    let saved = futures::executor::block_on(fs.save(path, "saved", before)).expect("a saves");
     let loads = fs.loads(path);
 
     vault.update(cx, |_, cx| cx.notify());
@@ -297,7 +295,8 @@ fn a_save_during_a_build_is_not_reloaded_when_the_build_applies(cx: &mut TestApp
         cx.emit(NoteSaved {
             id: a,
             text: Arc::from("saved"),
-            stamp: saved,
+            stamp: saved.stamp,
+            identity: saved.identity,
         });
     });
     cx.run_until_parked();
@@ -420,6 +419,10 @@ fn a_load_finishing_after_a_newer_write_is_dropped(cx: &mut TestAppContext) {
                 mtime: Mtime(SystemTime::UNIX_EPOCH),
                 size: 5,
             },
+            identity: FileIdentity {
+                device: 1,
+                inode: 1,
+            },
         });
     });
     cx.run_until_parked();
@@ -485,6 +488,10 @@ fn a_failed_load_behind_a_newer_write_keeps_the_write(cx: &mut TestAppContext) {
             stamp: Stamp {
                 mtime: Mtime(SystemTime::UNIX_EPOCH),
                 size: 5,
+            },
+            identity: FileIdentity {
+                device: 1,
+                inode: 1,
             },
         });
     });

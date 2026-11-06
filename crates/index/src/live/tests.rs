@@ -8,9 +8,9 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Mtime, Vault, VaultError};
 
 use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
-use crate::NoteContent;
 use crate::test_support::{ROOT, content, id, loaded};
 use crate::words::{NoteWords, Words};
+use crate::{FileRead, NoteContent};
 
 /// Enough slots that no test below the slot tests waits for one.
 const SLOTS: usize = 64;
@@ -89,8 +89,13 @@ impl Harness {
     }
 
     pub(super) fn read(&self, load: &Load) -> inkra_vault::Result<NoteContent> {
-        block_on(self.fs.load(&load.path))
-            .map(|loaded| NoteContent::parse(&loaded.text, loaded.stamp))
+        block_on(self.fs.load(&load.path)).map(|loaded| {
+            let file = FileRead {
+                stamp: loaded.stamp,
+                identity: loaded.identity,
+            };
+            NoteContent::parse(&loaded.text, file)
+        })
     }
 
     /// Lands `loaded` in its own turn; true when an answer moved.

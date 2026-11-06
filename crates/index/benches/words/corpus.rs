@@ -5,14 +5,20 @@ use std::thread;
 use std::time::UNIX_EPOCH;
 
 use futures::executor::block_on;
-use inkra_index::NoteContent;
+use inkra_index::{FileRead, NoteContent};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
+use inkra_vault::{EntryId, FileIdentity, Kind, Mtime, Stamp, Vault};
 
 /// The stamp of every text the bench parses: nothing here compares stamps.
-pub(crate) const EPOCH: Stamp = Stamp {
-    mtime: Mtime(UNIX_EPOCH),
-    size: 0,
+pub(crate) const EPOCH: FileRead = FileRead {
+    stamp: Stamp {
+        mtime: Mtime(UNIX_EPOCH),
+        size: 0,
+    },
+    identity: FileIdentity {
+        device: 0,
+        inode: 0,
+    },
 };
 
 pub(crate) const NOTES: usize = 50_000;

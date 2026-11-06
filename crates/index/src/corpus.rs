@@ -1,7 +1,9 @@
 use std::mem;
 use std::sync::Arc;
 
-use inkra_vault::{EntryId, Mtime, Stamp};
+use inkra_vault::{EntryId, Mtime};
+
+use crate::content::FileRead;
 
 /// What one note costs: its slot and its id.
 pub(crate) const SLOT_BYTES: usize = mem::size_of::<Slot>() + mem::size_of::<EntryId>();
@@ -9,18 +11,18 @@ pub(crate) const SLOT_BYTES: usize = mem::size_of::<Slot>() + mem::size_of::<Ent
 /// Slots per chunk; a write under a held snapshot copies one chunk.
 const CHUNK: usize = 256;
 
-/// `modified` is the last text's mtime, or the scan's if it never had one. `stamp` is `Some`
-/// while the note is loaded: the stamp of the text its words came from.
+/// `modified` is the last text's mtime, or the scan's if it never had one. `read` is `Some`
+/// while the note is loaded: the file its words came from.
 #[derive(Clone)]
 struct Slot {
     modified: Mtime,
-    stamp: Option<Stamp>,
+    read: Option<FileRead>,
 }
 
 /// `CHUNK` consecutive slots, fewer in the last chunk.
 type Chunk = Arc<[Slot]>;
 
-/// Every note's mtime and loaded stamp, in vault order.
+/// Every note's mtime and loaded file, in vault order.
 #[derive(Default)]
 pub(crate) struct Corpus {
     ids: Arc<[EntryId]>,
@@ -29,26 +31,26 @@ pub(crate) struct Corpus {
 
 impl Corpus {
     /// Copies the chunk list and one chunk only while a snapshot holds them. Ignored past the end.
-    pub(crate) fn write(&mut self, at: usize, stamp: Stamp) {
+    pub(crate) fn write(&mut self, at: usize, read: FileRead) {
         if let Some(slot) = slot_mut(&mut self.slots, at) {
             *slot = Slot {
-                modified: stamp.mtime,
-                stamp: Some(stamp),
+                modified: read.stamp.mtime,
+                read: Some(read),
             };
         }
     }
 
-    /// Drops the stamp, and keeps the mtime. Ignored past the end.
+    /// Drops the read, and keeps the mtime. Ignored past the end.
     pub(crate) fn clear(&mut self, at: usize) {
         // Clearing an empty slot would copy a chunk for nothing while a snapshot is held.
-        if slot(&self.slots, at).is_some_and(|slot| slot.stamp.is_some())
+        if slot(&self.slots, at).is_some_and(|slot| slot.read.is_some())
             && let Some(slot) = slot_mut(&mut self.slots, at)
         {
-            slot.stamp = None;
+            slot.read = None;
         }
     }
 
-    /// Each note loaded at `order(id)` keeps its mtime and stamp there, else takes its `mtimes`
+    /// Each note loaded at `order(id)` keeps its mtime and read there, else takes its `mtimes`
     /// entry. Returns the previous build's ids.
     pub(crate) fn reorder(
         &mut self,
@@ -65,10 +67,10 @@ impl Corpus {
                 ids.iter()
                     .zip(mtimes)
                     .map(|(&id, &scanned)| match slot(previous, order(id)) {
-                        Some(kept) if kept.stamp.is_some() => kept.clone(),
+                        Some(kept) if kept.read.is_some() => kept.clone(),
                         _ => Slot {
                             modified: scanned,
-                            stamp: None,
+                            read: None,
                         },
                     })
                     .collect()
@@ -97,7 +99,7 @@ fn slot_mut(slots: &mut Arc<[Chunk]>, at: usize) -> Option<&mut Slot> {
     Some(&mut Arc::make_mut(&mut Arc::make_mut(slots)[at / CHUNK])[at % CHUNK])
 }
 
-/// Every note's mtime and loaded stamp at one moment, in vault order. Cloning is an `Arc` bump.
+/// Every note's mtime and loaded file at one moment, in vault order. Cloning is an `Arc` bump.
 #[derive(Clone, Default)]
 pub struct CorpusSnapshot {
     ids: Arc<[EntryId]>,
@@ -127,10 +129,9 @@ impl CorpusSnapshot {
         Some(slot(&self.slots, order)?.modified)
     }
 
-    /// The stamp of the text the words at `order` came from; `None` past the end or while it is
-    /// not loaded.
-    pub(crate) fn stamp(&self, order: usize) -> Option<Stamp> {
-        slot(&self.slots, order)?.stamp
+    /// The file the words at `order` came from; `None` past the end or while it is not loaded.
+    pub(crate) fn read(&self, order: usize) -> Option<FileRead> {
+        slot(&self.slots, order)?.read
     }
 }
 
