@@ -42,6 +42,10 @@ name = "names"
 harness = false
 
 [[bench]]
+name = "read_search"
+harness = false
+
+[[bench]]
 name = "search"
 harness = false
 
