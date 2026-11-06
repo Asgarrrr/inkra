@@ -203,6 +203,9 @@ pub(crate) const TAB_MAX_WIDTH: Pixels = px(200.);
 /// Inside the 40 px row, bottom-aligned (D3).
 pub(crate) const TAB_HEIGHT: Pixels = px(34.);
 
+/// A lower group's strip row, a tab tall.
+pub(crate) const GROUP_HEADER_HEIGHT: Pixels = TAB_HEIGHT;
+
 /// Between two tabs, and before `+`.
 pub(crate) const TAB_GAP: Pixels = px(6.);
 

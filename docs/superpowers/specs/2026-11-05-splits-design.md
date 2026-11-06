@@ -371,6 +371,34 @@ S4's choices:
   the tab under the pointer and leaves the active tab alone; activating first lets
   the entries dispatch the existing actions.
 
+S5's choices:
+
+- A lower group's header holds its strip only: the tabs and `+`, with no drag
+  region and no toggle *(delegated)*. The window moves from the title row, and
+  the toggles stay at its ends.
+- In a tree, the closed group's flex goes to its previous sibling, else its next
+  one *(delegated)*. The heir is the previous sibling's last group, depth-first,
+  else the next sibling's first: the group that touches the closed one. With
+  every sibling a group, this is S4's left-else-right rule.
+- A split replaces the group with a two-child split on its axis, flexes 1 and 1
+  *(delegated)*. Within a same-axis parent, normalising splices it in, so the two
+  halve the group's flex, as S3's row did. A removal rescales the parent's flexes
+  to sum to their count before normalising, so the validity check never resets them.
+- Normalising validates a split's incoming flexes against Zed's epsilon, resets
+  an invalid set to 1.0, splices same-axis children with their flexes scaled,
+  collapses a one-child split, then rescales the flexes to sum to their count
+  *(delegated)*.
+- A root horizontal split's children sit in the main row itself, as S3's columns
+  did; any other split draws a flex wrapper with basis 0 and `min_*_0`
+  *(delegated)*. Split Right therefore renders as before, and a keystroke in a
+  lower group still shapes its note once.
+- The rule before a member is an absolute 1 px child along its parent's axis:
+  a left rule in a row, a top rule in a column, for S3's reason *(delegated)*.
+- `k`, the debug selector's index, is the group's depth-first index *(delegated)*.
+- The old row's slice readers in `shell.rs`, `session.rs`, `tabs.rs` and
+  `docks.rs` read `center_groups()` instead *(delegated)*. This mechanical edit
+  sits outside the slice's files.
+
 ## Deferred
 
 | Item | Trigger |

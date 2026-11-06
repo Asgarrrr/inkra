@@ -195,7 +195,7 @@ impl AppShell {
     /// Nothing the restore would replace: one group, one tab, empty, no open pending, nothing to reopen.
     fn holds_nothing(&self) -> bool {
         let center = self.center();
-        self.layout.center().len() == 1
+        self.layout.center_groups().len() == 1
             && center.tabs.count() == 1
             && matches!(center.shown, Shown::Empty)
             && center.activation.is_none()

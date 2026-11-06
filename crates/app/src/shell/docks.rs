@@ -362,10 +362,10 @@ impl AppShell {
         );
         let last = self.layout.last_center();
         assert!(
-            self.layout.center().contains(&last),
+            self.layout.center_groups().contains(&last),
             "the last active group is in the centre"
         );
-        for &group in self.layout.center() {
+        for group in self.layout.center_groups() {
             assert_eq!(
                 self.group(group).views().count(),
                 0,

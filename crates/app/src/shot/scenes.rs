@@ -289,8 +289,18 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tab-menu",
-        shows: "the split-right scene with the menu at the pointer over the right group's `reading` tab: Split Right highlighted, Close under it; elevated background, border, shadow, inside the window; the right group's tab still in the note colour",
+        shows: "the split-right scene with the menu at the pointer over the right group's `reading` tab: Split Right highlighted, Split Down and Close under it; elevated background, border, shadow, inside the window; the right group's tab still in the note colour",
         open: splits::tab_menu,
+    },
+    Scene {
+        name: "split-down",
+        shows: "two note columns of equal height stacked under the title row, a 1 px hairline between them; the title row holds the upper group's strip, showing `index`, its active tab muted; the lower group starts with a 34 px header holding its own strip and `+`, showing `reading` in the note colour, the caret in it; `reading` highlighted in the sidebar",
+        open: splits::down,
+    },
+    Scene {
+        name: "split-grid",
+        shows: "the split-right scene with the right column split in two of equal height: the title row holds the left and upper-right strips, each over its column; the lower-right group's 34 px header holds its strip, showing `reading` in the note colour, the caret in it; a vertical hairline between the columns and a horizontal one between the right groups",
+        open: splits::grid,
     },
     Scene {
         name: "tabs-restored",

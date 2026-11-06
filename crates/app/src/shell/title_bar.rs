@@ -46,18 +46,22 @@ impl AppShell {
         };
         let mut leading_toggle = leading_toggle;
         let mut trailing_toggle = trailing_toggle;
-        let center = self.layout.center();
-        let segments: Vec<_> = center
-            .iter()
-            .zip(self.layout.flexes())
+        let top = self.layout.top_groups();
+        // `k` is the depth-first index, as `render`'s; `rects` is depth-first.
+        let segments: Vec<_> = self
+            .layout
+            .rects()
+            .into_iter()
             .enumerate()
-            .map(|(k, (&group, &flex))| {
-                let last = k + 1 == center.len();
+            .filter(|(_, (group, _))| top.contains(group))
+            .map(|(k, (group, rect))| {
+                let last = top.last() == Some(&group);
                 h_flex()
                     .id(("group-strip", group.raw()))
-                    // Basis 0, no padding: the strip's width is its column's, `render`'s same flex.
+                    .debug_selector(move || selector("group-strip", k))
+                    // Basis 0, no padding: the strip's width is its column's share of the centre.
                     .flex_basis(px(0.))
-                    .flex_grow(flex)
+                    .flex_grow(rect.width)
                     .min_w_0()
                     .h_full()
                     .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {

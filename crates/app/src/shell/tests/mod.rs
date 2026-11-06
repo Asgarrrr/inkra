@@ -49,6 +49,7 @@ mod session_writes;
 mod sidebar_selection;
 mod split_close;
 mod splits;
+mod splits_tree;
 mod tab_bar;
 mod tab_chrome;
 mod tab_keys;

@@ -140,7 +140,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let tabs = &self.group(group).tabs;
-        if tabs.count() == 1 && tabs.active() == id && self.layout.center().len() > 1 {
+        if tabs.count() == 1 && tabs.active() == id && self.layout.center_groups().len() > 1 {
             self.close_group(group, id, window, cx);
             return;
         }
@@ -302,9 +302,8 @@ impl AppShell {
     ) {
         let waiting: Vec<_> = self
             .layout
-            .center()
-            .iter()
-            .copied()
+            .center_groups()
+            .into_iter()
             .filter(|&group| matches!(self.group(group).shown, Shown::Trashing(note) if note == id))
             .collect();
         if waiting.is_empty() {
@@ -323,7 +322,7 @@ impl AppShell {
 
     /// Empties every centre tab on `id`, dropping its parked views; returns the groups whose active tab was one.
     pub(super) fn forget_note(&mut self, id: EntryId) -> Vec<GroupId> {
-        let center = self.layout.center().to_vec();
+        let center = self.layout.center_groups();
         center
             .into_iter()
             .filter(|&group| {

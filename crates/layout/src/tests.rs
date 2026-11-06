@@ -2,7 +2,22 @@ use std::collections::HashSet;
 
 use proptest::prelude::*;
 
-use super::{GroupId, Layout, Side, StoredDock, View, restore_views};
+use super::{Axis, GroupId, Layout, Member, Side, StoredDock, View, restore_views};
+
+mod tree;
+
+/// A centre that is one row: its groups left to right and their flexes.
+fn row(layout: &Layout) -> (Vec<GroupId>, Vec<f32>) {
+    match layout.center() {
+        &Member::Group(group) => (vec![group], vec![1.0]),
+        Member::Split {
+            axis: Axis::Horizontal,
+            flexes,
+            ..
+        } => (layout.center_groups(), flexes.clone()),
+        Member::Split { .. } => panic!("the centre is not one row"),
+    }
+}
 
 #[test]
 fn the_default_puts_files_left_and_backlinks_right_both_shown() {
@@ -17,8 +32,8 @@ fn the_default_puts_files_left_and_backlinks_right_both_shown() {
         assert!(layout.is_shown(side));
         assert!(layout.is_drawn(side));
     }
-    assert_eq!(layout.center(), [GroupId(0)]);
-    assert_eq!(layout.flexes(), [1.0]);
+    assert_eq!(layout.center(), &Member::Group(GroupId(0)));
+    assert_eq!(row(&layout), (vec![GroupId(0)], vec![1.0]));
     assert_eq!(layout.last_center(), GroupId(0));
     assert_eq!(layout.side_of(GroupId(0)), None);
     assert_eq!(
@@ -104,22 +119,22 @@ fn removing_a_dock_group_keeps_its_flag() {
 #[should_panic(expected = "the centre always has a group")]
 fn removing_the_centre_panics() {
     let mut layout = Layout::default();
-    layout.remove(layout.center()[0]);
+    layout.remove(layout.center_groups()[0]);
 }
 
 #[test]
 fn split_right_puts_the_new_group_after_and_halves_its_room() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split_right(first);
-    assert_eq!(layout.center(), [first, second]);
-    assert_eq!(layout.flexes(), [1.0, 1.0]);
+    let second = layout.split(first, Axis::Horizontal);
+    assert_eq!(row(&layout).0, [first, second]);
+    assert_eq!(row(&layout).1, [1.0, 1.0]);
     assert_eq!(layout.last_center(), first);
     assert_eq!(layout.side_of(second), None);
 
-    let third = layout.split_right(first);
-    assert_eq!(layout.center(), [first, third, second]);
-    assert_eq!(layout.flexes(), [0.75, 0.75, 1.5]);
+    let third = layout.split(first, Axis::Horizontal);
+    assert_eq!(row(&layout).0, [first, third, second]);
+    assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
     let handed: HashSet<_> = layout.groups().collect();
     assert_eq!(handed.len(), 5);
 
@@ -135,9 +150,9 @@ fn split_right_puts_the_new_group_after_and_halves_its_room() {
 fn split_right_keeps_the_other_groups_widths() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split_right(first);
-    layout.split_right(second);
-    assert_eq!(layout.flexes(), [1.5, 0.75, 0.75]);
+    let second = layout.split(first, Axis::Horizontal);
+    layout.split(second, Axis::Horizontal);
+    assert_eq!(row(&layout).1, [1.5, 0.75, 0.75]);
 }
 
 #[test]
@@ -151,14 +166,14 @@ fn removing_a_dock_group_returns_no_heir() {
 fn removing_a_centre_group_gives_its_room_to_the_left() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split_right(first);
-    let second = layout.split_right(first);
-    assert_eq!(layout.flexes(), [0.75, 0.75, 1.5]);
+    let third = layout.split(first, Axis::Horizontal);
+    let second = layout.split(first, Axis::Horizontal);
+    assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
 
     assert_eq!(layout.remove(second), Some(first));
 
-    assert_eq!(layout.center(), [first, third]);
-    assert_eq!(layout.flexes(), [1.0, 1.0]);
+    assert_eq!(row(&layout).0, [first, third]);
+    assert_eq!(row(&layout).1, [1.0, 1.0]);
     assert_eq!(layout.last_center(), first);
     assert_eq!(
         layout.groups().collect::<Vec<_>>(),
@@ -170,21 +185,21 @@ fn removing_a_centre_group_gives_its_room_to_the_left() {
 fn the_first_group_gives_its_room_to_the_right() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split_right(first);
-    let second = layout.split_right(first);
+    let third = layout.split(first, Axis::Horizontal);
+    let second = layout.split(first, Axis::Horizontal);
 
     assert_eq!(layout.remove(first), Some(second));
 
-    assert_eq!(layout.center(), [second, third]);
-    assert_eq!(layout.flexes(), [1.0, 1.0]);
+    assert_eq!(row(&layout).0, [second, third]);
+    assert_eq!(row(&layout).1, [1.0, 1.0]);
 }
 
 #[test]
 fn removing_the_last_center_moves_it_to_the_heir() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split_right(first);
-    let third = layout.split_right(second);
+    let second = layout.split(first, Axis::Horizontal);
+    let third = layout.split(second, Axis::Horizontal);
     layout.activate(second);
 
     assert_eq!(layout.remove(second), Some(first));
@@ -200,7 +215,7 @@ fn removing_the_last_center_moves_it_to_the_heir() {
 fn removing_the_centres_only_group_panics() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split_right(first);
+    let second = layout.split(first, Axis::Horizontal);
     layout.remove(first);
     layout.remove(second);
 }
@@ -216,7 +231,7 @@ fn activating_a_dock_group_panics() {
 #[should_panic(expected = "is not in the centre")]
 fn splitting_a_dock_group_panics() {
     let mut layout = Layout::default();
-    layout.split_right(GroupId(2));
+    layout.split(GroupId(2), Axis::Horizontal);
 }
 
 #[test]
@@ -373,12 +388,12 @@ fn centre_op() -> impl Strategy<Value = CentreOp> {
 }
 
 fn fractions(layout: &Layout) -> Vec<(GroupId, f32)> {
-    let sum: f32 = layout.flexes().iter().sum();
-    layout
-        .center()
-        .iter()
-        .zip(layout.flexes())
-        .map(|(&group, flex)| (group, flex / sum))
+    let (center, flexes) = row(layout);
+    let sum: f32 = flexes.iter().sum();
+    center
+        .into_iter()
+        .zip(flexes)
+        .map(|(group, flex)| (group, flex / sum))
         .collect()
 }
 
@@ -447,11 +462,11 @@ proptest! {
     #[test]
     fn layout_ops_keep_the_invariants(ops in proptest::collection::vec(op(), 0..64)) {
         let mut layout = Layout::default();
-        let center = layout.center().to_vec();
+        let center = layout.center_groups();
         let mut handed: HashSet<GroupId> = layout.groups().collect();
         for op in ops {
             apply(&mut layout, op, &mut handed)?;
-            prop_assert_eq!(layout.center(), &center[..]);
+            prop_assert_eq!(layout.center_groups(), &center[..]);
             let mut held = center.clone();
             for side in [Side::Left, Side::Right] {
                 prop_assert_eq!(layout.is_drawn(side), layout.is_shown(side) && layout.dock(side).is_some());
@@ -474,18 +489,20 @@ proptest! {
             match op {
                 CentreOp::Dock(op) => apply(&mut layout, op, &mut handed)?,
                 CentreOp::Split(pick) => {
-                    let group = layout.center()[pick % layout.center().len()];
-                    let split = layout.split_right(group);
+                    let center = layout.center_groups();
+                    let group = center[pick % center.len()];
+                    let split = layout.split(group, Axis::Horizontal);
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
                     changed = vec![group, split];
                 }
                 CentreOp::Activate(pick) => {
-                    let group = layout.center()[pick % layout.center().len()];
+                    let center = layout.center_groups();
+                    let group = center[pick % center.len()];
                     layout.activate(group);
                     prop_assert_eq!(layout.last_center(), group);
                 }
                 CentreOp::Remove(pick) => {
-                    let center = layout.center().to_vec();
+                    let center = layout.center_groups();
                     if center.len() == 1 {
                         continue;
                     }
@@ -493,7 +510,7 @@ proptest! {
                     let was_last = layout.last_center() == center[ix];
                     let heir = layout.remove(center[ix]).expect("a centre group has an heir");
                     prop_assert_eq!(heir, center[ix.checked_sub(1).unwrap_or(1)]);
-                    prop_assert!(!layout.center().contains(&center[ix]));
+                    prop_assert!(!layout.center_groups().contains(&center[ix]));
                     if was_last {
                         prop_assert_eq!(layout.last_center(), heir);
                     }
@@ -504,8 +521,8 @@ proptest! {
                     changed = vec![heir, center[ix]];
                 }
             }
-            let flexes = layout.flexes();
-            prop_assert_eq!(flexes.len(), layout.center().len());
+            let (center, flexes) = row(&layout);
+            prop_assert_eq!(flexes.len(), center.len());
             prop_assert!(flexes.iter().all(|&flex| flex > 0.0));
             #[allow(clippy::cast_precision_loss)]
             let len = flexes.len() as f32;
@@ -521,7 +538,7 @@ proptest! {
             let groups: Vec<_> = layout.groups().collect();
             let unique: HashSet<_> = groups.iter().collect();
             prop_assert_eq!(unique.len(), groups.len());
-            prop_assert!(layout.center().contains(&layout.last_center()));
+            prop_assert!(layout.center_groups().contains(&layout.last_center()));
         }
     }
 }

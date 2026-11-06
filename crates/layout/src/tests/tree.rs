@@ -1,0 +1,423 @@
+use std::collections::HashSet;
+
+use proptest::prelude::*;
+
+use crate::tree::{normalised, rects};
+use crate::{Axis, GroupId, Layout, Member, Rect};
+
+fn group(raw: u32) -> Member {
+    Member::Group(GroupId(raw))
+}
+
+fn split(axis: Axis, children: Vec<Member>, flexes: Vec<f32>) -> Member {
+    Member::Split {
+        axis,
+        children,
+        flexes,
+    }
+}
+
+fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+/// `first`, then `second` right of it, then `third` below `second`.
+fn grid() -> (Layout, [GroupId; 3]) {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split(first, Axis::Horizontal);
+    let third = layout.split(second, Axis::Vertical);
+    (layout, [first, second, third])
+}
+
+#[test]
+fn split_down_stacks_the_new_group_below() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+
+    let second = layout.split(first, Axis::Vertical);
+
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Vertical,
+            vec![Member::Group(first), Member::Group(second)],
+            vec![1.0, 1.0]
+        )
+    );
+    assert_eq!(layout.center_groups(), [first, second]);
+    assert_eq!(layout.last_center(), first);
+    assert_eq!(layout.side_of(second), None);
+    assert_eq!(
+        layout.rects(),
+        [
+            (first, rect(0.0, 0.0, 1.0, 0.5)),
+            (second, rect(0.0, 0.5, 1.0, 0.5))
+        ]
+    );
+
+    let (layout, [first, second, third]) = grid();
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Horizontal,
+            vec![
+                Member::Group(first),
+                split(
+                    Axis::Vertical,
+                    vec![Member::Group(second), Member::Group(third)],
+                    vec![1.0, 1.0]
+                )
+            ],
+            vec![1.0, 1.0]
+        )
+    );
+}
+
+#[test]
+fn a_same_axis_split_inserts_a_sibling() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split(first, Axis::Vertical);
+
+    let third = layout.split(first, Axis::Vertical);
+
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Vertical,
+            vec![
+                Member::Group(first),
+                Member::Group(third),
+                Member::Group(second)
+            ],
+            vec![0.75, 0.75, 1.5]
+        )
+    );
+    assert_eq!(layout.center_groups(), [first, third, second]);
+    assert_eq!(layout.last_center(), first);
+}
+
+#[test]
+fn a_one_child_split_collapses() {
+    assert_eq!(
+        normalised(split(Axis::Horizontal, vec![group(0)], vec![1.0])),
+        group(0)
+    );
+    assert_eq!(
+        normalised(split(
+            Axis::Vertical,
+            vec![split(Axis::Horizontal, vec![group(1)], vec![1.0]), group(2)],
+            vec![1.0, 1.0]
+        )),
+        split(Axis::Vertical, vec![group(1), group(2)], vec![1.0, 1.0])
+    );
+}
+
+#[test]
+fn a_nested_same_axis_split_merges_with_scaled_flexes() {
+    let nested = split(
+        Axis::Horizontal,
+        vec![
+            group(0),
+            split(Axis::Horizontal, vec![group(1), group(2)], vec![1.5, 0.5]),
+        ],
+        vec![1.0, 1.0],
+    );
+
+    assert_eq!(
+        normalised(nested),
+        split(
+            Axis::Horizontal,
+            vec![group(0), group(1), group(2)],
+            vec![1.5, 1.125, 0.375]
+        )
+    );
+
+    let collapsed = split(
+        Axis::Horizontal,
+        vec![
+            group(0),
+            split(
+                Axis::Vertical,
+                vec![split(
+                    Axis::Horizontal,
+                    vec![group(1), group(2)],
+                    vec![0.5, 1.5],
+                )],
+                vec![1.0],
+            ),
+        ],
+        vec![1.0, 1.0],
+    );
+    assert_eq!(
+        normalised(collapsed),
+        split(
+            Axis::Horizontal,
+            vec![group(0), group(1), group(2)],
+            vec![1.5, 0.375, 1.125]
+        )
+    );
+}
+
+#[test]
+fn invalid_flexes_reset_to_one() {
+    for flexes in [
+        vec![2.0],
+        vec![1.0, 1.0, 1.0],
+        vec![f32::NAN, 2.0],
+        vec![f32::INFINITY, 1.0],
+        vec![0.0, 2.0],
+        vec![-1.0, 3.0],
+        vec![1.0, 1.5],
+        vec![1.0, 0.998],
+    ] {
+        assert_eq!(
+            normalised(split(
+                Axis::Vertical,
+                vec![group(0), group(1)],
+                flexes.clone()
+            )),
+            split(Axis::Vertical, vec![group(0), group(1)], vec![1.0, 1.0]),
+            "{flexes:?}"
+        );
+    }
+
+    let Member::Split { flexes, .. } = normalised(split(
+        Axis::Vertical,
+        vec![group(0), group(1)],
+        vec![1.5, 0.5005],
+    )) else {
+        panic!("two children stay a split");
+    };
+    assert!((flexes[0] - 1.5 * 2.0 / 2.0005).abs() < 1e-6, "{flexes:?}");
+    assert!(
+        (flexes.iter().sum::<f32>() - 2.0).abs() < 1e-6,
+        "{flexes:?}"
+    );
+}
+
+#[test]
+fn rects_tile_the_unit_square() {
+    let (mut layout, [first, second, third]) = grid();
+    assert_eq!(
+        layout.rects(),
+        [
+            (first, rect(0.0, 0.0, 0.5, 1.0)),
+            (second, rect(0.5, 0.0, 0.5, 0.5)),
+            (third, rect(0.5, 0.5, 0.5, 0.5))
+        ]
+    );
+
+    let fourth = layout.split(first, Axis::Horizontal);
+    assert_eq!(
+        layout.rects(),
+        [
+            (first, rect(0.0, 0.0, 0.25, 1.0)),
+            (fourth, rect(0.25, 0.0, 0.25, 1.0)),
+            (second, rect(0.5, 0.0, 0.5, 0.5)),
+            (third, rect(0.5, 0.5, 0.5, 0.5))
+        ]
+    );
+}
+
+#[test]
+fn top_groups_skip_a_lower_group() {
+    let (mut layout, [first, second, third]) = grid();
+    assert_eq!(layout.top_groups(), [first, second]);
+
+    let fourth = layout.split(first, Axis::Vertical);
+    assert_eq!(layout.center_groups(), [first, fourth, second, third]);
+    assert_eq!(layout.top_groups(), [first, second]);
+
+    let fifth = layout.split(second, Axis::Horizontal);
+    assert_eq!(layout.top_groups(), [first, second, fifth]);
+
+    let layout = Layout {
+        center: split(Axis::Vertical, vec![group(0), group(3)], vec![0.002, 1.998]),
+        ..Layout::default()
+    };
+    assert_eq!(layout.rects()[1].1, rect(0.0, 0.001, 1.0, 0.999));
+    assert_eq!(
+        layout.top_groups(),
+        [GroupId(0)],
+        "an epsilon down is below the top"
+    );
+}
+
+#[test]
+fn remove_in_a_nested_split_hands_the_room_to_the_sibling() {
+    let (mut layout, [first, second, third]) = grid();
+    layout.activate(third);
+
+    assert_eq!(layout.remove(third), Some(second));
+
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Horizontal,
+            vec![Member::Group(first), Member::Group(second)],
+            vec![1.0, 1.0]
+        )
+    );
+    assert_eq!(layout.last_center(), second);
+
+    let (mut layout, [first, second, third]) = grid();
+    assert_eq!(layout.remove(first), Some(second));
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Vertical,
+            vec![Member::Group(second), Member::Group(third)],
+            vec![1.0, 1.0]
+        )
+    );
+    assert_eq!(layout.last_center(), second);
+
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split(first, Axis::Horizontal);
+    let third = layout.split(first, Axis::Vertical);
+    layout.activate(second);
+    assert_eq!(layout.remove(second), Some(third));
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Vertical,
+            vec![Member::Group(first), Member::Group(third)],
+            vec![1.0, 1.0]
+        )
+    );
+    assert_eq!(layout.last_center(), third);
+}
+
+/// Splits with one child and nested same-axis splits included; flexes valid, so rects are defined.
+fn tree() -> impl Strategy<Value = Member> {
+    let leaf = Just(group(0));
+    leaf.prop_recursive(4, 24, 4, |inner| {
+        (
+            prop_oneof![Just(Axis::Horizontal), Just(Axis::Vertical)],
+            proptest::collection::vec((inner, 0.1f32..10.0), 1..4),
+        )
+            .prop_map(|(axis, children)| {
+                let (children, mut flexes): (Vec<_>, Vec<_>) = children.into_iter().unzip();
+                #[allow(clippy::cast_precision_loss)]
+                let scale = children.len() as f32 / flexes.iter().sum::<f32>();
+                for flex in &mut flexes {
+                    *flex *= scale;
+                }
+                split(axis, children, flexes)
+            })
+    })
+    .prop_map(|mut tree| {
+        renumber(&mut tree, &mut 0);
+        tree
+    })
+}
+
+fn renumber(member: &mut Member, next: &mut u32) {
+    match member {
+        Member::Group(group) => {
+            *group = GroupId(*next);
+            *next += 1;
+        }
+        Member::Split { children, .. } => {
+            for child in children {
+                renumber(child, next);
+            }
+        }
+    }
+}
+
+fn is_normalised(member: &Member) -> bool {
+    let Member::Split {
+        axis,
+        children,
+        flexes,
+    } = member
+    else {
+        return true;
+    };
+    #[allow(clippy::cast_precision_loss)]
+    let len = children.len() as f32;
+    children.len() > 1
+        && flexes.len() == children.len()
+        && flexes.iter().all(|&flex| flex.is_finite() && flex > 0.0)
+        && (flexes.iter().sum::<f32>() - len).abs() < 0.001
+        && children.iter().all(|child| {
+            is_normalised(child)
+                && !matches!(child, Member::Split { axis: inner, .. } if inner == axis)
+        })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TreeOp {
+    Split(usize, Axis),
+    Remove(usize),
+    Activate(usize),
+}
+
+fn tree_op() -> impl Strategy<Value = TreeOp> {
+    let axis = prop_oneof![Just(Axis::Horizontal), Just(Axis::Vertical)];
+    prop_oneof![
+        (any::<usize>(), axis).prop_map(|(pick, axis)| TreeOp::Split(pick, axis)),
+        any::<usize>().prop_map(TreeOp::Remove),
+        any::<usize>().prop_map(TreeOp::Activate),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn normalising_never_moves_a_rect(tree in tree()) {
+        let before = rects(&tree);
+        let after = rects(&normalised(tree));
+        prop_assert_eq!(before.len(), after.len());
+        for ((group, was), (now_group, now)) in before.into_iter().zip(after) {
+            prop_assert_eq!(group, now_group);
+            for (was, now) in [(was.x, now.x), (was.y, now.y), (was.width, now.width), (was.height, now.height)] {
+                prop_assert!((was - now).abs() < 1e-4, "{group:?} moved from {was:?} to {now:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn tree_ops_keep_the_invariants(ops in proptest::collection::vec(tree_op(), 0..48)) {
+        let mut layout = Layout::default();
+        let mut handed: HashSet<GroupId> = layout.groups().collect();
+        for op in ops {
+            let center = layout.center_groups();
+            match op {
+                TreeOp::Split(pick, axis) => {
+                    let split = layout.split(center[pick % center.len()], axis);
+                    prop_assert!(handed.insert(split), "{split:?} handed out twice");
+                }
+                TreeOp::Remove(pick) => {
+                    if center.len() == 1 {
+                        continue;
+                    }
+                    let group = center[pick % center.len()];
+                    let heir = layout.remove(group).expect("a centre group has an heir");
+                    prop_assert!(layout.center_groups().contains(&heir));
+                    prop_assert!(!layout.center_groups().contains(&group));
+                }
+                TreeOp::Activate(pick) => {
+                    let group = center[pick % center.len()];
+                    layout.activate(group);
+                    prop_assert_eq!(layout.last_center(), group);
+                }
+            }
+            prop_assert!(is_normalised(layout.center()), "{:?}", layout.center());
+            let area: f32 = layout.rects().iter().map(|(_, rect)| rect.width * rect.height).sum();
+            prop_assert!((area - 1.0).abs() < 1e-3, "{area}");
+            let groups: Vec<_> = layout.groups().collect();
+            let unique: HashSet<_> = groups.iter().collect();
+            prop_assert_eq!(unique.len(), groups.len());
+            prop_assert!(layout.center_groups().contains(&layout.last_center()));
+        }
+    }
+}
