@@ -4,8 +4,9 @@ use std::path::Path;
 
 use gpui::TestAppContext;
 
-use super::restore_lands::{empty, id, launch, notes, save, vault};
-use super::session_writes::{SESSION, saved, tab, wait};
+use super::restore_lands::{empty, id, launch, notes, notes_group, row, save, save_tree, vault};
+use super::session_writes::{SESSION, saved_tabs, tab, wait};
+use super::splits::centre;
 use crate::open::{NoteActivated, Open};
 use crate::shell::session::THROTTLE;
 
@@ -33,9 +34,8 @@ fn a_sidebar_open_before_the_walk_wins(cx: &mut TestAppContext) {
 
     assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
     wait(&mut cx, THROTTLE);
-    let saved: Vec<_> = saved(&fs)
+    let saved: Vec<_> = saved_tabs(&fs)
         .unwrap()
-        .tabs
         .into_iter()
         .map(|tab| tab.note)
         .collect();
@@ -104,9 +104,8 @@ fn a_user_open_pending_when_the_restore_lands_wins(cx: &mut TestAppContext) {
 
     assert_eq!(notes(&window, &mut cx), (vec![Some(b)], 0));
     wait(&mut cx, THROTTLE);
-    let saved: Vec<_> = saved(&fs)
+    let saved: Vec<_> = saved_tabs(&fs)
         .unwrap()
-        .tabs
         .into_iter()
         .map(|tab| tab.note)
         .collect();
@@ -214,5 +213,42 @@ fn a_corrupt_file_restores_nothing(cx: &mut TestAppContext) {
 
     wait(&mut cx, THROTTLE);
 
-    assert_eq!(saved(&fs).unwrap().tabs, [empty()]);
+    assert_eq!(saved_tabs(&fs).unwrap(), [empty()]);
+}
+
+#[gpui::test]
+fn a_refused_restore_leaves_no_empty_group(cx: &mut TestAppContext) {
+    let fs = vault();
+    let center = row(vec![
+        notes_group(vec![tab("b.md", 0, 0)], 0),
+        notes_group(vec![tab("f/c.md", 0, 0)], 0),
+        notes_group(vec![tab("b.md", 0, 0)], 0),
+    ]);
+    save_tree(&fs, 2, center);
+    let gate = fs.block_read_dir("/vault/f");
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+    assert_eq!(
+        centre(&window, &mut cx).len(),
+        3,
+        "the tree draws before the walk"
+    );
+
+    let a = id(&window, &mut cx, "a");
+    window
+        .update(&mut cx, |shell, _, cx| shell.open_note(a, None, cx))
+        .unwrap();
+    cx.run_until_parked();
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(centre(&window, &mut cx).len(), 1);
+    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    wait(&mut cx, THROTTLE);
+    let saved: Vec<_> = saved_tabs(&fs)
+        .unwrap()
+        .into_iter()
+        .map(|tab| tab.note)
+        .collect();
+    assert_eq!(saved, [Some("a.md".to_owned())]);
 }

@@ -8,10 +8,14 @@ use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
+use super::splits::{close, split};
 use super::{keys, open, select, start_trash, text_of, trash};
 use crate::keymap::key_bindings;
-use crate::restore::{Opened, SavedDocks, SavedTab, SavedView, Session};
+use crate::restore::{
+    Opened, SavedAxis, SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session,
+};
 use crate::shell::AppShell;
+use crate::shell::group::SplitDown;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
 
@@ -60,8 +64,20 @@ pub(super) fn saved(fs: &MemFs) -> Option<Session> {
     Some(Session::decode(&text, Path::new("/vault")).expect("a session of this vault"))
 }
 
-pub(super) fn tab(note: &str, tail: usize, head: usize) -> SavedTab {
-    SavedTab {
+/// The note tabs of the saved centre's one group.
+pub(super) fn saved_tabs(fs: &MemFs) -> Option<Vec<SavedNoteTab>> {
+    let Some(SavedMember::Group(group)) = saved(fs)?.center else {
+        panic!("one centre group");
+    };
+    let tabs = group.tabs.into_iter().map(|tab| match tab {
+        SavedTab::Note(tab) => tab,
+        SavedTab::View { view } => panic!("a view tab in the centre: {view}"),
+    });
+    Some(tabs.collect())
+}
+
+pub(super) fn tab(note: &str, tail: usize, head: usize) -> SavedNoteTab {
+    SavedNoteTab {
         note: Some(note.to_owned()),
         view: Some(SavedView {
             tail,
@@ -90,17 +106,23 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
 
     wait(&mut cx, THROTTLE);
 
-    let empty = SavedTab {
+    let empty = SavedNoteTab {
         note: None,
         view: None,
     };
+    let tabs = [tab("a.md", 2, 4), tab("b.md", 1, 3), empty];
     assert_eq!(
         saved(&fs),
         Some(Session::new(
             PathBuf::from("/vault"),
-            1,
-            vec![tab("a.md", 2, 4), tab("b.md", 1, 3), empty],
-            Some(SavedDocks::default()),
+            0,
+            SavedMember::Group(SavedGroup {
+                tabs: tabs.into_iter().map(SavedTab::Note).collect(),
+                active: 1,
+            }),
+            Some(view_group("files")),
+            Some(view_group("backlinks")),
+            [true, true],
         ))
     );
 }
@@ -112,9 +134,59 @@ fn a_dock_toggle_is_saved(cx: &mut TestAppContext) {
 
     wait(&mut cx, THROTTLE);
 
-    let docks = saved(&fs).and_then(|session| session.docks);
-    let [_, (_, _, right_shown)] = docks.expect("a saved layout").views();
-    assert!(!right_shown);
+    let session = saved(&fs).expect("a saved layout");
+    assert_eq!(session.shown, [true, false]);
+    assert_eq!(session.right, Some(view_group("backlinks")));
+}
+
+fn view_group(view: &str) -> SavedGroup {
+    SavedGroup {
+        tabs: vec![SavedTab::View {
+            view: view.to_owned(),
+        }],
+        active: 0,
+    }
+}
+
+fn note_group(tab: SavedNoteTab) -> SavedMember {
+    SavedMember::Group(SavedGroup {
+        tabs: vec![SavedTab::Note(tab)],
+        active: 0,
+    })
+}
+
+#[gpui::test]
+fn a_split_writes_its_tree(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, b) = saving(cx);
+    open(&window, &mut cx, a);
+    select(&window, &mut cx, 1..3);
+    split(&mut cx);
+    open(&window, &mut cx, b);
+    select(&window, &mut cx, 0..2);
+    cx.dispatch_action(SplitDown);
+    cx.run_until_parked();
+    select(&window, &mut cx, 1..1);
+
+    wait(&mut cx, THROTTLE);
+
+    let session = saved(&fs).expect("a session");
+    assert_eq!(
+        session.center,
+        Some(SavedMember::Split {
+            split: SavedAxis::Horizontal,
+            flexes: vec![1.0, 1.0],
+            children: vec![
+                note_group(tab("a.md", 1, 3)),
+                SavedMember::Split {
+                    split: SavedAxis::Vertical,
+                    flexes: vec![1.0, 1.0],
+                    children: vec![note_group(tab("b.md", 0, 2)), note_group(tab("b.md", 1, 1))],
+                },
+            ],
+        })
+    );
+    assert_eq!(session.active, 2);
+    close(&mut cx);
 }
 
 /// A parked view is saved where its anchors are now, not where the tab left it.
@@ -130,7 +202,7 @@ fn a_parked_view_is_saved_after_an_edit_made_in_another_tab(cx: &mut TestAppCont
 
     wait(&mut cx, THROTTLE);
 
-    let tabs = saved(&fs).expect("a session").tabs;
+    let tabs = saved_tabs(&fs).expect("a session");
     assert_eq!(tabs, [tab("a.md", 5, 5), tab("a.md", 2, 2)]);
 }
 
@@ -146,14 +218,14 @@ fn the_throttle_writes_once_per_window(cx: &mut TestAppContext) {
     assert_eq!(saved(&fs), None, "nothing is written inside the window");
 
     wait(&mut cx, half);
-    let first = saved(&fs).expect("the window's write").tabs;
+    let first = saved_tabs(&fs).expect("the window's write");
     assert_eq!(first, [tab("a.md", 2, 2)]);
 
     select(&window, &mut cx, 3..3);
     wait(&mut cx, half);
-    assert_eq!(saved(&fs).expect("a session").tabs, first);
+    assert_eq!(saved_tabs(&fs).expect("a session"), first);
     wait(&mut cx, half);
-    assert_eq!(saved(&fs).expect("a session").tabs, [tab("a.md", 3, 3)]);
+    assert_eq!(saved_tabs(&fs).expect("a session"), [tab("a.md", 3, 3)]);
 }
 
 #[gpui::test]
@@ -164,7 +236,7 @@ fn quitting_writes_the_session_the_throttle_has_not(cx: &mut TestAppContext) {
 
     cx.quit();
 
-    assert_eq!(saved(&fs).expect("a session").tabs, [tab("a.md", 1, 3)]);
+    assert_eq!(saved_tabs(&fs).expect("a session"), [tab("a.md", 1, 3)]);
 }
 
 /// A save is no gesture: typing across a write still undoes in one step.
@@ -197,12 +269,12 @@ fn two_tabs_saved(
     cx.simulate_keystrokes("cmd-t");
     open(&window, &mut cx, b);
     wait(&mut cx, THROTTLE);
-    assert_eq!(saved(&fs).expect("a session").tabs.len(), 2);
+    assert_eq!(saved_tabs(&fs).expect("a session").len(), 2);
     (fs, window, cx, b)
 }
 
 fn notes_saved(fs: &MemFs) -> Vec<Option<String>> {
-    let tabs = saved(fs).expect("a session").tabs;
+    let tabs = saved_tabs(fs).expect("a session");
     tabs.into_iter().map(|tab| tab.note).collect()
 }
 
@@ -302,9 +374,8 @@ fn a_tab_whose_trash_is_pending_is_saved_empty(cx: &mut TestAppContext) {
 
     wait(&mut cx, THROTTLE);
 
-    let notes: Vec<_> = saved(&fs)
+    let notes: Vec<_> = saved_tabs(&fs)
         .expect("a session")
-        .tabs
         .into_iter()
         .map(|tab| tab.note)
         .collect();

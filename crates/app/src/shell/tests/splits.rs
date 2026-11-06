@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
@@ -256,6 +257,28 @@ fn cmd_w_closes_in_the_active_group(cx: &mut TestAppContext) {
     assert_eq!(tabs_in(&window, &mut cx, 0), [Some(a)]);
     assert_eq!(tabs_in(&window, &mut cx, 1), [Some(b)]);
     check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn cmd_s_saves_the_active_groups_note(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    split(&mut cx);
+    open(&window, &mut cx, b);
+    press(&mut cx, "note-column");
+    cx.simulate_input("X");
+    press(&mut cx, "note-column-1");
+    cx.simulate_input("Y");
+    let disk = |path| fs.read_to_string(Path::new(path));
+    // Leaving group 0 saved its note at once, so only the active group's note is still dirty.
+    assert_eq!(disk("/vault/a.md").as_deref(), Some("alphaX"));
+    assert_eq!(disk("/vault/b.md").as_deref(), Some("beta"));
+
+    keys(&mut cx, "cmd-s");
+
+    assert_eq!(disk("/vault/b.md").as_deref(), Some("betaY"));
+    assert_eq!(disk("/vault/a.md").as_deref(), Some("alphaX"));
     close(&mut cx);
 }
 

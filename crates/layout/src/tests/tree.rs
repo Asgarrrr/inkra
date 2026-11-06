@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use proptest::prelude::*;
 
 use crate::tree::{normalised, rects};
-use crate::{Axis, GroupId, Layout, Member, Rect};
+use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side};
 
 fn group(raw: u32) -> Member {
     Member::Group(GroupId(raw))
@@ -11,6 +11,30 @@ fn group(raw: u32) -> Member {
 
 fn split(axis: Axis, children: Vec<Member>, flexes: Vec<f32>) -> Member {
     Member::Split {
+        axis,
+        children,
+        flexes,
+    }
+}
+
+/// `member` as a session stores it: the tree without its ids.
+fn shape(member: &Member) -> Shape {
+    match member {
+        Member::Group(_) => Shape::Group,
+        Member::Split {
+            axis,
+            children,
+            flexes,
+        } => Shape::Split {
+            axis: *axis,
+            children: children.iter().map(shape).collect(),
+            flexes: flexes.clone(),
+        },
+    }
+}
+
+fn shape_split(axis: Axis, children: Vec<Shape>, flexes: Vec<f32>) -> Shape {
+    Shape::Split {
         axis,
         children,
         flexes,
@@ -251,6 +275,26 @@ fn top_groups_skip_a_lower_group() {
 }
 
 #[test]
+fn a_deep_vertical_split_keeps_one_top_group() {
+    let mut layout = Layout::default();
+    let top = layout.center_groups()[0];
+    for _ in 0..12 {
+        layout.split(top, Axis::Vertical);
+    }
+    assert_eq!(layout.top_groups(), [top]);
+
+    let layout = Layout {
+        center: split(
+            Axis::Vertical,
+            vec![group(0), group(1)],
+            vec![0.0005, 1.9995],
+        ),
+        ..Layout::default()
+    };
+    assert_eq!(layout.top_groups(), [GroupId(0)]);
+}
+
+#[test]
 fn remove_in_a_nested_split_hands_the_room_to_the_sibling() {
     let (mut layout, [first, second, third]) = grid();
     layout.activate(third);
@@ -294,6 +338,113 @@ fn remove_in_a_nested_split_hands_the_room_to_the_sibling() {
         )
     );
     assert_eq!(layout.last_center(), third);
+}
+
+#[test]
+fn restored_assigns_ids_depth_first_centre_then_docks() {
+    let center = shape_split(
+        Axis::Horizontal,
+        vec![
+            Shape::Group,
+            shape_split(
+                Axis::Vertical,
+                vec![Shape::Group, Shape::Group],
+                vec![1.0, 1.0],
+            ),
+        ],
+        vec![1.0, 1.0],
+    );
+
+    let mut layout = Layout::restored(&center, [true, true], [false, true]);
+
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Horizontal,
+            vec![
+                group(0),
+                split(Axis::Vertical, vec![group(1), group(2)], vec![1.0, 1.0])
+            ],
+            vec![1.0, 1.0]
+        )
+    );
+    assert_eq!(layout.dock(Side::Left), Some(GroupId(3)));
+    assert_eq!(layout.dock(Side::Right), Some(GroupId(4)));
+    assert_eq!(
+        layout.groups().map(GroupId::raw).collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+    assert_eq!(layout.last_center(), GroupId(0));
+    assert!(!layout.is_shown(Side::Left));
+    assert!(layout.is_shown(Side::Right));
+    assert_eq!(layout.split(GroupId(2), Axis::Horizontal), GroupId(5));
+
+    let mut layout = Layout::restored(&Shape::Group, [false, true], [true, false]);
+    assert_eq!(layout.dock(Side::Left), None);
+    assert_eq!(layout.dock(Side::Right), Some(GroupId(1)));
+    assert!(layout.is_shown(Side::Left));
+    assert!(!layout.is_shown(Side::Right));
+    assert_eq!(layout.add_dock(Side::Left), GroupId(2));
+
+    let layout = Layout::restored(&Shape::Group, [true, false], [true, true]);
+    assert_eq!(layout.dock(Side::Left), Some(GroupId(1)));
+    assert_eq!(layout.dock(Side::Right), None);
+    assert_eq!(
+        Layout::restored(&Shape::Group, [true, true], [true, true]),
+        Layout::default()
+    );
+}
+
+#[test]
+fn restored_resets_invalid_flexes() {
+    for flexes in [vec![5.0, 1.0], vec![1.0], vec![f32::NAN, 1.0]] {
+        let center = shape_split(Axis::Vertical, vec![Shape::Group, Shape::Group], flexes);
+        let layout = Layout::restored(&center, [false, false], [true, true]);
+        assert_eq!(
+            layout.center(),
+            &split(Axis::Vertical, vec![group(0), group(1)], vec![1.0, 1.0])
+        );
+    }
+    let center = shape_split(
+        Axis::Vertical,
+        vec![Shape::Group, Shape::Group],
+        vec![1.5, 0.5],
+    );
+    let layout = Layout::restored(&center, [false, false], [true, true]);
+    assert_eq!(
+        layout.center(),
+        &split(Axis::Vertical, vec![group(0), group(1)], vec![1.5, 0.5])
+    );
+}
+
+#[test]
+fn restored_normalises_a_one_child_split() {
+    let center = shape_split(Axis::Horizontal, vec![Shape::Group], vec![1.0]);
+    let layout = Layout::restored(&center, [false, false], [true, true]);
+    assert_eq!(layout.center(), &group(0));
+    assert_eq!(layout.last_center(), GroupId(0));
+
+    let center = shape_split(
+        Axis::Horizontal,
+        vec![
+            shape_split(Axis::Vertical, vec![Shape::Group], vec![1.0]),
+            shape_split(
+                Axis::Horizontal,
+                vec![Shape::Group, Shape::Group],
+                vec![1.0, 1.0],
+            ),
+        ],
+        vec![1.0, 1.0],
+    );
+    let layout = Layout::restored(&center, [false, false], [true, true]);
+    assert_eq!(
+        layout.center(),
+        &split(
+            Axis::Horizontal,
+            vec![group(0), group(1), group(2)],
+            vec![1.5, 0.75, 0.75]
+        )
+    );
 }
 
 /// Splits with one child and nested same-axis splits included; flexes valid, so rects are defined.
@@ -371,6 +522,25 @@ fn tree_op() -> impl Strategy<Value = TreeOp> {
     ]
 }
 
+/// `ops` run on the default layout, as `tree_ops_keep_the_invariants` runs them.
+fn built(ops: &[TreeOp]) -> Layout {
+    let mut layout = Layout::default();
+    for &op in ops {
+        let center = layout.center_groups();
+        match op {
+            TreeOp::Split(pick, axis) => {
+                layout.split(center[pick % center.len()], axis);
+            }
+            TreeOp::Remove(pick) if center.len() > 1 => {
+                layout.remove(center[pick % center.len()]);
+            }
+            TreeOp::Remove(_) => {}
+            TreeOp::Activate(pick) => layout.activate(center[pick % center.len()]),
+        }
+    }
+    layout
+}
+
 proptest! {
     #[test]
     fn normalising_never_moves_a_rect(tree in tree()) {
@@ -419,5 +589,28 @@ proptest! {
             prop_assert_eq!(unique.len(), groups.len());
             prop_assert!(layout.center_groups().contains(&layout.last_center()));
         }
+    }
+    #[test]
+    fn restored_keeps_a_built_layouts_rects(
+        ops in proptest::collection::vec(tree_op(), 0..48),
+        docks in any::<[bool; 2]>(),
+        shown in any::<[bool; 2]>(),
+    ) {
+        let built = built(&ops);
+
+        let restored = Layout::restored(&shape(built.center()), docks, shown);
+
+        let (was, now) = (built.rects(), restored.rects());
+        prop_assert_eq!(was.len(), now.len());
+        for ((_, was), (_, now)) in was.into_iter().zip(now) {
+            for (was, now) in [(was.x, now.x), (was.y, now.y), (was.width, now.width), (was.height, now.height)] {
+                prop_assert!((was - now).abs() < 1e-4, "{was:?} became {now:?}");
+            }
+        }
+        let count = built.center_groups().len() + docks.iter().filter(|&&held| held).count();
+        let ids: Vec<_> = restored.groups().map(GroupId::raw).collect();
+        prop_assert_eq!(ids, (0..count).map(|ix| u32::try_from(ix).unwrap()).collect::<Vec<_>>());
+        prop_assert_eq!(restored.center_groups().len(), built.center_groups().len());
+        prop_assert!(is_normalised(restored.center()), "{:?}", restored.center());
     }
 }

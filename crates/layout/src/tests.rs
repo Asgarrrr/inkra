@@ -244,7 +244,6 @@ fn state(views: &[View], active: usize) -> StoredDock {
     StoredDock {
         views: views.iter().map(|view| view.name().to_owned()).collect(),
         active,
-        shown: true,
     }
 }
 
@@ -309,7 +308,6 @@ fn stored(names: &[&str], active: usize) -> StoredDock {
     StoredDock {
         views: names.iter().map(|&name| name.to_owned()).collect(),
         active,
-        shown: true,
     }
 }
 
@@ -350,16 +348,8 @@ fn name() -> impl Strategy<Value = String> {
 }
 
 fn stored_dock() -> impl Strategy<Value = StoredDock> {
-    (
-        proptest::collection::vec(name(), 0..6),
-        0..8usize,
-        any::<bool>(),
-    )
-        .prop_map(|(views, active, shown)| StoredDock {
-            views,
-            active,
-            shown,
-        })
+    (proptest::collection::vec(name(), 0..6), 0..8usize)
+        .prop_map(|(views, active)| StoredDock { views, active })
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,7 +1,7 @@
 use gpui::WindowHandle;
 
 use super::LINKED;
-use crate::restore::{SavedTab, SavedView};
+use crate::restore::{SavedNoteTab, SavedView};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -54,8 +54,8 @@ pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-fn saved(note: &str, tail: usize, head: usize) -> SavedTab {
-    SavedTab {
+fn saved(note: &str, tail: usize, head: usize) -> SavedNoteTab {
+    SavedNoteTab {
         note: Some(note.to_owned()),
         view: Some(SavedView {
             tail,

@@ -2,7 +2,7 @@
 
 mod tree;
 
-pub use tree::{Axis, Member, Rect};
+pub use tree::{Axis, Member, Rect, Shape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
@@ -202,11 +202,10 @@ impl Layout {
 }
 
 /// A dock as stored: any view names, any index; `restore_views` makes it valid.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StoredDock {
     pub views: Vec<String>,
     pub active: usize,
-    pub shown: bool,
 }
 
 /// Each dock's views and active index, left then right; each `View` lands in exactly one.

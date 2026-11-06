@@ -1,19 +1,24 @@
 //! The session file behind the shell: throttled writes, the quit write, and the one-shot restore (restore-tabs spec, R5–R6).
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{App, Context, Entity, Subscription, Task, Window};
-use inkra_layout::{GroupId, Layout, Side};
+use inkra_layout::{GroupId, Layout, Member, Side};
 use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
 use inkra_text::Buffer;
+use inkra_vault::EntryId;
 
+use super::AppShell;
 use super::group::Group;
 use super::parked::Parked;
-use super::{AppShell, Shown};
 use crate::editor::ParkedView;
-use crate::restore::{Opened, Plan, Restored, SavedDock, SavedDocks, Session, SessionWriter};
+use crate::restore::{
+    Landed, Pending, Plan, Restored, SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session,
+    SessionWriter, Surfaces,
+};
 use crate::vault::NoteStore;
 
 /// A crash loses at most this much of the tab changes, never text: autosave writes that.
@@ -21,7 +26,7 @@ pub(super) const THROTTLE: Duration = Duration::from_secs(1);
 
 /// Only `Done` writes: an earlier write would replace the saved tabs with the launch's one tab.
 pub(super) enum Restore {
-    Waiting(Session),
+    Waiting(Pending),
     /// Held outside `activation`: a user open replaces that, and must not cancel the restore.
     Landing {
         _loads: Task<()>,
@@ -38,47 +43,41 @@ pub(super) struct SessionFile {
 }
 
 impl AppShell {
-    /// The centre's one empty group and the dock groups `saved` holds; docks rule 6's with none.
-    pub(super) fn dock_groups(saved: Option<&SavedDocks>) -> (Layout, HashMap<GroupId, Group>) {
-        let mut layout = Layout::default();
-        let mut groups = HashMap::from([(layout.last_center(), Group::new())]);
-        let docks = saved.map_or_else(|| SavedDocks::default().views(), SavedDocks::views);
-        for (side, (views, active, shown)) in [Side::Left, Side::Right].into_iter().zip(docks) {
-            let Some(group) = layout.dock(side) else {
-                panic!("the default layout has a group in each dock");
-            };
-            if views.is_empty() {
-                layout.remove(group);
-            } else {
-                groups.insert(group, Group::holding(&views, active));
-            }
-            if !shown {
-                layout.toggle(side);
-            }
-        }
-        (layout, groups)
+    /// The tree and the dock groups `read` holds, its notes still to load; docks rule 6's with none.
+    pub(super) fn restored_groups(
+        read: Option<Session>,
+    ) -> (Layout, HashMap<GroupId, Group>, Option<Pending>) {
+        let Surfaces {
+            layout,
+            docks,
+            pending,
+        } = Surfaces::resolve(read);
+        let groups = layout
+            .center_groups()
+            .into_iter()
+            .map(|group| (group, Group::new()))
+            .chain(
+                docks
+                    .into_iter()
+                    .map(|(group, views, active)| (group, Group::holding(&views, active))),
+            )
+            .collect();
+        (layout, groups, pending)
     }
 
     /// A vault launch with a session file keeps its writer; it waits on the walk only with a session read.
     /// Spawns nothing: the vault's notify tries the restore and arms the throttle.
     pub(super) fn open_session(
-        session: Option<Opened>,
+        file: Option<PathBuf>,
+        pending: Option<Pending>,
         notes: &Entity<NoteStore>,
         cx: &mut Context<Self>,
     ) -> (Option<SessionFile>, Restore) {
-        let (fs, has_vault) = {
-            let notes = notes.read(cx);
-            (notes.fs(), notes.vault().is_some())
-        };
-        let Some(Opened {
-            file,
-            session: read,
-        }) = session.filter(|_| has_vault)
-        else {
+        let Some(file) = file else {
             return (None, Restore::Done);
         };
         let session = SessionFile {
-            writer: SessionWriter::new(fs, file),
+            writer: SessionWriter::new(notes.read(cx).fs(), file),
             throttle: None,
             // Spawned before the future: shutdown holds the app borrowed.
             _quit: cx.on_app_quit(|shell, cx| {
@@ -90,7 +89,10 @@ impl AppShell {
                 }
             }),
         };
-        (Some(session), read.map_or(Restore::Done, Restore::Waiting))
+        (
+            Some(session),
+            pending.map_or(Restore::Done, Restore::Waiting),
+        )
     }
 
     /// Every change the session saves calls this: a switch, a tab op, a caret move. O(1).
@@ -120,39 +122,82 @@ impl AppShell {
         if !matches!(self.restore, Restore::Done) {
             return None;
         }
-        let docks = self
-            .panes
-            .as_ref()
-            .map(|_| SavedDocks::new(self.saved_dock(Side::Left), self.saved_dock(Side::Right)));
-        let session = self.session.as_mut()?;
-        let center = &self.groups[&self.layout.last_center()];
-        let shown = &center.shown;
-        let notes = self.notes.read(cx);
-        let vault = notes.vault()?.read(cx);
-        // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
-        let tabs = center.tabs.iter().map(|tab| match tab.place() {
-            None => shown.bound().map_or((None, None), |bound| {
-                (Some(bound.note), Some(bound.editor.read(cx).view_state()))
-            }),
-            Some(parked) => (parked.note(), parked.peek(cx)),
-        });
-        session.writer.write(
-            vault,
-            tabs,
-            |id| notes.vault_path(id, cx),
-            center.tabs.active_index(),
-            docks,
-            cx,
-        )
+        self.session.as_ref()?;
+        let saved = self.saved_session(cx)?;
+        self.session.as_mut()?.writer.write(&saved, cx)
     }
 
-    /// An empty dock saves no view, at index 0.
-    fn saved_dock(&self, side: Side) -> SavedDock {
-        let active = self
-            .layout
-            .dock(side)
-            .map_or(0, |group| self.group(group).tabs.active_index());
-        SavedDock::new(self.dock_views(side), active, self.layout.is_shown(side))
+    fn saved_session(&self, cx: &App) -> Option<Session> {
+        let notes = self.notes.read(cx);
+        let root = notes.vault()?.read(cx).root().to_path_buf();
+        let path_of = |id| notes.vault_path(id, cx);
+        let last = self.layout.last_center();
+        let active = self.layout.groups().position(|group| group == last)?;
+        let [left, right] = [Side::Left, Side::Right].map(|side| self.saved_dock(side));
+        let shown = [Side::Left, Side::Right].map(|side| self.layout.is_shown(side));
+        let center = self.saved_member(self.layout.center(), &path_of, cx);
+        Some(Session::new(root, active, center, left, right, shown))
+    }
+
+    fn saved_member(
+        &self,
+        member: &Member,
+        path_of: &impl Fn(EntryId) -> Option<PathBuf>,
+        cx: &App,
+    ) -> SavedMember {
+        match member {
+            Member::Group(group) => SavedMember::Group(self.saved_group(*group, path_of, cx)),
+            Member::Split {
+                axis,
+                children,
+                flexes,
+            } => SavedMember::Split {
+                split: (*axis).into(),
+                flexes: flexes.clone(),
+                children: children
+                    .iter()
+                    .map(|child| self.saved_member(child, path_of, cx))
+                    .collect(),
+            },
+        }
+    }
+
+    fn saved_group(
+        &self,
+        group: GroupId,
+        path_of: &impl Fn(EntryId) -> Option<PathBuf>,
+        cx: &App,
+    ) -> SavedGroup {
+        let group = self.group(group);
+        // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
+        let tabs = group.tabs.iter().map(|tab| {
+            let (note, view) = match tab.place() {
+                None => group.shown.bound().map_or((None, None), |bound| {
+                    (Some(bound.note), Some(bound.editor.read(cx).view_state()))
+                }),
+                Some(parked) => (parked.note(), parked.peek(cx)),
+            };
+            SavedTab::Note(SavedNoteTab::new(note.and_then(path_of), view.as_ref()))
+        });
+        SavedGroup {
+            tabs: tabs.collect(),
+            active: group.tabs.active_index(),
+        }
+    }
+
+    /// An empty dock saves none.
+    fn saved_dock(&self, side: Side) -> Option<SavedGroup> {
+        let group = self.layout.dock(side)?;
+        let tabs = self
+            .dock_views(side)
+            .into_iter()
+            .map(|view| SavedTab::View {
+                view: view.name().to_owned(),
+            });
+        Some(SavedGroup {
+            tabs: tabs.collect(),
+            active: self.group(group).tabs.active_index(),
+        })
     }
 
     /// Until `Done`, the empty state says nothing: the restore may still fill it.
@@ -165,7 +210,7 @@ impl AppShell {
         let Some(vault) = self.notes.read(cx).vault().cloned() else {
             return;
         };
-        let Restore::Waiting(session) = &self.restore else {
+        let Restore::Waiting(pending) = &self.restore else {
             return;
         };
         if !vault.read(cx).has_read_whole() {
@@ -173,7 +218,7 @@ impl AppShell {
         }
         let plan = self
             .holds_nothing()
-            .then(|| Plan::resolve(session, vault.read(cx)))
+            .then(|| Plan::resolve(pending, vault.read(cx)))
             .flatten();
         let Some(plan) = plan else {
             self.finish_restore(cx);
@@ -192,16 +237,15 @@ impl AppShell {
         self.restore = Restore::Landing { _loads: loads };
     }
 
-    /// Nothing the restore would replace: one group, one tab, empty, no open pending, nothing to reopen.
+    /// Nothing the restore would replace, in any centre group.
     fn holds_nothing(&self) -> bool {
-        let center = self.center();
-        self.layout.center_groups().len() == 1
-            && center.tabs.count() == 1
-            && matches!(center.shown, Shown::Empty)
-            && center.activation.is_none()
-            && !center.tabs.has_closed()
+        self.layout
+            .center_groups()
+            .into_iter()
+            .all(|group| self.group(group).holds_nothing())
     }
 
+    /// A planned group the user closed meanwhile is skipped.
     fn land_restore(
         &mut self,
         plan: Plan,
@@ -209,18 +253,41 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.finish_restore(cx);
         if !self.holds_nothing() {
+            self.finish_restore(cx);
             return;
         }
-        let Some(Restored {
+        let Landed { groups, active } = plan.restored(buffers);
+        for (group, restored) in groups {
+            if self.groups.contains_key(&group) {
+                self.land_group(group, restored, cx);
+            }
+        }
+        self.finish_restore(cx);
+        let target = active
+            .into_iter()
+            .find(|group| self.groups.contains_key(group))
+            .unwrap_or(self.layout.center_groups()[0]);
+        if target != self.layout.last_center() {
+            self.switch_group(target, cx);
+        }
+        if cfg!(debug_assertions) {
+            self.check_layout(cx);
+        }
+        self.focus_note_from_root(window, cx);
+        cx.notify();
+    }
+
+    fn land_group(
+        &mut self,
+        group: GroupId,
+        Restored {
             shown,
             parked,
             active,
-        }) = plan.restored(buffers)
-        else {
-            return;
-        };
+        }: Restored<Entity<Buffer>>,
+        cx: &mut Context<Self>,
+    ) {
         let mut places: Vec<_> = parked
             .into_iter()
             .map(|arrival| {
@@ -232,18 +299,40 @@ impl AppShell {
             .collect();
         // `restored` drops the active entry: `bind` shows it, and a default one holds no anchor.
         places.insert(active, Parked::default());
-        let center = self.layout.last_center();
-        self.group_mut(center).tabs = Tabs::restored(places, active);
+        self.group_mut(group).tabs = Tabs::restored(places, active);
         let since = self.tree_cursor(cx);
-        self.bind(center, shown.note, shown.buffer, shown.view, since, cx);
-        self.focus_note_from_root(window, cx);
-        self.keep_active_tab_visible(center);
-        cx.notify();
+        self.bind(group, shown.note, shown.buffer, shown.view, since, cx);
+        self.keep_active_tab_visible(group);
     }
 
-    /// Arms the throttle: a change made while the restore was pending is saved too.
+    /// Removes the centre groups left holding nothing, then arms the throttle: a change made while
+    /// the restore was pending is saved too.
     fn finish_restore(&mut self, cx: &mut Context<Self>) {
         self.restore = Restore::Done;
+        self.drop_empty_groups(cx);
+        if cfg!(debug_assertions) {
+            self.check_layout(cx);
+        }
         self.save_session_later(cx);
+    }
+
+    /// The last centre group stays, with its empty tab (L3).
+    fn drop_empty_groups(&mut self, cx: &mut Context<Self>) {
+        for group in self.layout.center_groups() {
+            if self.layout.center_groups().len() == 1 {
+                return;
+            }
+            if !self.group(group).holds_nothing() {
+                continue;
+            }
+            let was_last = group == self.layout.last_center();
+            let Some(heir) = self.layout.remove(group) else {
+                panic!("a centre group has an heir");
+            };
+            self.groups.remove(&group);
+            if was_last {
+                self.enter_group(heir, cx);
+            }
+        }
     }
 }

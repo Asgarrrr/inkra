@@ -21,6 +21,39 @@ pub enum Member {
     },
 }
 
+/// A centre tree as a session stores it: the shape without its ids.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Shape {
+    Group,
+    Split {
+        axis: Axis,
+        children: Vec<Shape>,
+        flexes: Vec<f32>,
+    },
+}
+
+impl Shape {
+    /// Ids depth-first from `next`.
+    fn member(&self, next: &mut u32) -> Member {
+        match self {
+            Self::Group => {
+                let group = GroupId(*next);
+                *next += 1;
+                Member::Group(group)
+            }
+            Self::Split {
+                axis,
+                children,
+                flexes,
+            } => Member::Split {
+                axis: *axis,
+                children: children.iter().map(|child| child.member(next)).collect(),
+                flexes: flexes.clone(),
+            },
+        }
+    }
+}
+
 /// A group's room in the unit square.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -47,6 +80,28 @@ impl Member {
             Self::Split { children, .. } => {
                 for child in children {
                     child.collect(groups);
+                }
+            }
+        }
+    }
+
+    /// Structural, so no flex can make a lower group top: a vertical split's first child alone
+    /// keeps the top edge.
+    fn collect_top(&self, groups: &mut Vec<GroupId>) {
+        match self {
+            Self::Group(group) => groups.push(*group),
+            Self::Split {
+                axis: Axis::Horizontal,
+                children,
+                ..
+            } => {
+                for child in children {
+                    child.collect_top(groups);
+                }
+            }
+            Self::Split { children, .. } => {
+                if let Some(first) = children.first() {
+                    first.collect_top(groups);
                 }
             }
         }
@@ -102,6 +157,36 @@ impl Member {
 }
 
 impl Layout {
+    /// Ids depth-first: the centre's groups, then the left dock's if `docks[0]`, then the right's
+    /// if `docks[1]`; `groups` lists them in that order. The first centre group is `last_center`.
+    ///
+    /// # Panics
+    /// If `center` holds no group.
+    #[must_use]
+    pub fn restored(center: &Shape, docks: [bool; 2], shown: [bool; 2]) -> Self {
+        let mut next = 0;
+        let center = normalised(center.member(&mut next));
+        let Some(&last_center) = center.groups().first() else {
+            panic!("a restored centre holds a group");
+        };
+        let mut dock = |held: bool| {
+            held.then(|| {
+                let group = GroupId(next);
+                next += 1;
+                group
+            })
+        };
+        let (left, right) = (dock(docks[0]), dock(docks[1]));
+        Self {
+            center,
+            last_center,
+            left,
+            right,
+            shown,
+            next,
+        }
+    }
+
     #[must_use]
     pub fn center(&self) -> &Member {
         &self.center
@@ -146,11 +231,9 @@ impl Layout {
     /// The centre groups along the window's top, left to right: depth-first order already is.
     #[must_use]
     pub fn top_groups(&self) -> Vec<GroupId> {
-        self.rects()
-            .into_iter()
-            .filter(|(_, rect)| rect.y < EPSILON)
-            .map(|(group, _)| group)
-            .collect()
+        let mut groups = Vec::new();
+        self.center.collect_top(&mut groups);
+        groups
     }
 
     fn normalise(&mut self) {
