@@ -1,12 +1,15 @@
 //! Keeps a `NoteIndex` current: fed by the vault's scans and by our own writes.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
-use gpui::{AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription};
+use gpui::{
+    AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription,
+    WeakEntity,
+};
 use inkra_index::live::{Effects, Status, Turn};
-use inkra_index::{LiveIndex, NoteContent, NoteIndex};
+use inkra_index::{LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
 use inkra_vault::{EntryId, Fs, Vault};
 
 use crate::count::thousands;
@@ -52,7 +55,11 @@ type Hold = futures::future::Shared<futures::channel::oneshot::Receiver<()>>;
 pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
     vault: Entity<Vault>,
+    /// Pins the open notes' texts at each search start.
+    notes: WeakEntity<NoteStore>,
     live: LiveIndex,
+    /// Filled by our saves and by the searches' reads.
+    texts: Arc<Mutex<TextCache>>,
     /// `simulate_load`'s loads, added to the index's revision.
     #[cfg(test)]
     simulated_loads: u64,
@@ -87,7 +94,9 @@ impl IndexSync {
         let mut sync = Self {
             fs,
             vault,
+            notes: notes.downgrade(),
             live: LiveIndex::new(cx.background_executor().num_cpus() * loading::LOADS_PER_CORE),
+            texts: Arc::new(Mutex::new(TextCache::new(TEXT_CACHE_BYTES))),
             #[cfg(test)]
             simulated_loads: 0,
             landed,
@@ -223,6 +232,7 @@ impl IndexSync {
     /// Never queued: a write needs no load and must not wait behind the startup queue.
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
         let (id, stamp) = (event.id, event.stamp);
+        reads::lock(&self.texts).insert(id, Arc::clone(&event.text), stamp);
         let ticket = self.turn(cx, |turn| turn.saved(id, stamp.mtime));
         let text = Arc::clone(&event.text);
         let parsed = cx.background_spawn(async move { NoteContent::parse(text, stamp) });

@@ -332,3 +332,6 @@ Each slice appends what it did differently from this spec, and why.
   reads": `MemFs` counts every read.
 - Slice 2a: reads go through `Fs::load`, which folds line endings as the loads
   whose words they must match did. `read_bytes` moves to 4b, its first caller.
+- Slice 2b: P12 as written. A note leaves the `Sessions` live set only
+  through our trash, which also drops it from the index, so the pin test
+  watches the unpinned text make room for another note's.

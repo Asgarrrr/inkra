@@ -14,6 +14,9 @@ mod source;
 mod target;
 #[cfg(test)]
 mod test_support;
+mod text_cache;
+#[cfg(test)]
+mod text_cache_tests;
 mod window;
 mod words;
 
@@ -30,6 +33,7 @@ pub use search::{
 };
 pub use source::{Source, SourceLink};
 pub use target::{Style, Target};
+pub use text_cache::{TEXT_CACHE_BYTES, TextCache};
 pub use words::{
     Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, TermHit, WordsMerge, WordsSnapshot,
 };
