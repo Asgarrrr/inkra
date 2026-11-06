@@ -6,6 +6,7 @@ use inkra_layout::GroupId;
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
+use super::dragging::drag;
 use super::{
     AppShell, EditorView, ab_focused, at, keys, open, select, shell_focused, start_open, trash,
 };
@@ -363,5 +364,29 @@ fn a_split_refused_by_the_minimum_leaves_the_focus_where_it_was(cx: &mut TestApp
             .update(&mut cx, |_, window, _| root.is_focused(window))
             .unwrap()
     );
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn a_note_moved_to_another_group_becomes_active_there(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+    open(&window, &mut cx, b);
+    split(&mut cx);
+    keys(&mut cx, "cmd-t");
+    open(&window, &mut cx, a);
+    let groups = centre(&window, &mut cx);
+    assert_eq!(last(&window, &mut cx), groups[1]);
+
+    drag(&mut cx, "tab-1-1", "tab-0");
+
+    assert_eq!(tabs_in(&window, &mut cx, 0), [Some(a), Some(a), Some(b)]);
+    assert_eq!(tabs_in(&window, &mut cx, 1), [Some(b)]);
+    assert_eq!(shown_in(&window, &mut cx, 0), Some(a));
+    assert_eq!(last(&window, &mut cx), groups[0]);
+    let editor = editor_in(&window, &mut cx, 0);
+    assert!(focused(&window, &mut cx, &editor));
+    check_layout(&window, &mut cx);
     close(&mut cx);
 }

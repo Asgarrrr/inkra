@@ -84,18 +84,6 @@ impl AppShell {
         self.move_to_other_dock(View::Backlinks, window, cx);
     }
 
-    pub(super) fn split_view(
-        &mut self,
-        &SplitView { view, direction }: &SplitView,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (group, tab) = self.tab_of(view);
-        if self.group(group).tabs.count() >= 2 {
-            self.split_off((group, tab), group, direction, window, cx);
-        }
-    }
-
     fn move_to_other_dock(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
         let side = self.side_of(view).other();
         self.append(view, side, window, cx);
@@ -153,67 +141,6 @@ impl AppShell {
                 Surface::Center => shell.switch_group(group, cx),
                 Surface::Dock(side) => shell.layout.show(side),
             }
-        });
-    }
-
-    /// Docks rules 1 and 2, and a view into the centre (P4). `index` counts in group `to` after
-    /// `view` left it. A centre group `to` becomes the active one and takes the focus.
-    ///
-    /// # Panics
-    /// If `index` is past the end of that group.
-    pub(super) fn move_view(
-        &mut self,
-        view: View,
-        to: GroupId,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let surface = self.layout.surface_of(to);
-        self.change_layout(window, cx, |shell, window, cx| {
-            let (source, tab) = shell.tab_of(view);
-            let len = shell.group(to).tabs.count() - usize::from(source == to);
-            assert!(
-                index <= len,
-                "index {index} is past the end of a dock group of {len}"
-            );
-            if source == to {
-                shell.group_mut(source).tabs.move_tab(tab, index);
-                shell.activate_tab(source, tab, window, cx);
-            } else {
-                let detached = shell.detach(source, tab, window, cx);
-                shell.attach(detached, to, index, window, cx);
-            }
-            match surface {
-                Surface::Center => shell.switch_group(to, cx),
-                Surface::Dock(side) => shell.layout.show(side),
-            }
-        });
-        if surface == Surface::Center
-            && let Some(focus) = self.land_focus(cx)
-        {
-            window.focus(&focus, cx);
-        }
-    }
-
-    /// Moves `view` to the end of `side`'s first group, as `move_view` does; to a fresh dock on an empty side.
-    pub(super) fn append(
-        &mut self,
-        view: View,
-        side: Side,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(&group) = self.layout.dock_groups(side).first() {
-            self.drop_view_at_end(view, group, window, cx);
-            return;
-        }
-        self.change_layout(window, cx, |shell, window, cx| {
-            let (source, tab) = shell.tab_of(view);
-            let detached = shell.detach(source, tab, window, cx);
-            let group = shell.layout.add_dock(side);
-            shell.attach_alone(detached, group, window, cx);
-            shell.layout.show(side);
         });
     }
 

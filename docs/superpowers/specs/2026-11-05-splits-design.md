@@ -611,6 +611,27 @@ Slice 1, the layout owns split refusal and removability:
   `⌘K →` splits the Files group through `split_view` and never reaches `split_group`
   *(delegated)*.
 
+Slice 2, one tab move for notes and views:
+
+- `move_tab_to` in `tab_moves.rs` is the one move of a `(group, tab)` to `(group, index)`.
+  `move_view` resolves `tab_of` and calls it; `append`, `drop_view_at_end` and `split_view`
+  sit beside it.
+- Within one group a move is a reorder, notes and views alike: the active tab, the active
+  group and the focus stay, as the tabs spec's T4 fifth no-op case *(delegated)*. A view
+  dropped on its own group's icon, strip or body no longer becomes active. Docks rule 1
+  reads as a move into another group.
+- Across groups the moved tab becomes the destination's active tab, notes and views alike.
+  A centre destination becomes the active group and takes the focus; a dock destination
+  shows *(delegated)*.
+- The dock's show step runs inside the move's one `change_layout`, keyed on the destination's
+  surface, not in `move_view` *(delegated)*: a second `change_layout` would see Files in a
+  hidden dock between the two and drop the tree's focus. L2 keeps notes out of docks, so the
+  step is a view's in practice.
+- The past-the-end assertion covers every move, notes included *(delegated)*: no note caller
+  passes such an index.
+- A dock icon compares its index with the dragged view's only when that view is in its
+  group; a view from another group shows the insertion marker a foreign tab shows.
+
 ## Deferred
 
 | Item | Trigger |

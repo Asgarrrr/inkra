@@ -8,6 +8,7 @@ use inkra_layout::{Side, View};
 use inkra_vault::mem_fs::MemFs;
 
 use super::dock_menu::docks;
+use super::dragging::drag;
 use super::tab_bar::click;
 use super::{
     ab_focused, editor_focused, focus_tree, keys, no_vault, open, selected, shell_focused,
@@ -349,4 +350,31 @@ fn the_dock_icon_point_lands_on_the_icon(cx: &mut TestAppContext) {
     move_view(&mut cx, View::Backlinks);
     lands(&mut cx, "dock-icon-files", Side::Right, 0);
     lands(&mut cx, "dock-icon-backlinks", Side::Right, 1);
+}
+
+#[gpui::test]
+fn a_reorder_inside_a_dock_keeps_the_active_view(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+    move_view(&mut cx, View::Backlinks);
+    click(&mut cx, "dock-icon-files");
+
+    drag(&mut cx, "dock-icon-backlinks", "dock-icon-files");
+
+    let [(views, active, _), _] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Backlinks, View::Files]);
+    assert_eq!(active, Some(View::Files));
+}
+
+#[gpui::test]
+fn a_view_moved_to_the_other_dock_becomes_active_there(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
+    keys(&mut cx, "cmd-|");
+
+    move_view(&mut cx, View::Files);
+
+    let [_, right] = docks(&window, &mut cx);
+    assert_eq!(
+        right,
+        (vec![View::Backlinks, View::Files], Some(View::Files), true)
+    );
 }
