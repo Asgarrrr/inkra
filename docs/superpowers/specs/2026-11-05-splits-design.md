@@ -399,6 +399,19 @@ S5's choices:
   `docks.rs` read `center_groups()` instead *(delegated)*. This mechanical edit
   sits outside the slice's files.
 
+S6's choices:
+
+- A view tab saved in the centre is dropped until P4 lets the centre hold views
+  *(delegated)*. A note tab saved in a dock is dropped, since a dock holds views only.
+- The active group maps to its own group if it survives, else to the nearest
+  earlier survivor, else to the first group *(delegated)*. This is the tab rule
+  (`rposition`) one level up.
+- Each dock saves and restores as one group until dock trees land *(delegated)*.
+- A saved centre that holds a split with no children decodes as missing: the
+  centre falls back to one empty group, and the docks still restore.
+- A planned group the user closed before the restore landed is skipped; its
+  notes do not reopen elsewhere.
+
 ## Deferred
 
 | Item | Trigger |

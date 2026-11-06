@@ -48,6 +48,14 @@ impl Group {
         Self::with(tabs, Shown::View(views[active]))
     }
 
+    /// One empty tab, no open pending, nothing to reopen.
+    pub(super) fn holds_nothing(&self) -> bool {
+        self.tabs.count() == 1
+            && matches!(self.shown, Shown::Empty)
+            && self.activation.is_none()
+            && !self.tabs.has_closed()
+    }
+
     fn with(tabs: Tabs<Place, Parked>, shown: Shown) -> Self {
         Self {
             tabs,
@@ -160,7 +168,7 @@ impl AppShell {
         }
     }
 
-    fn switch_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
+    pub(super) fn switch_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
         if let Some(editor) = self.editor() {
             editor.update(cx, EditorView::pin);
         }
@@ -168,7 +176,7 @@ impl AppShell {
     }
 
     /// `group` becomes `last_center`, unpinned, and what it shows reaches the note's followers.
-    fn enter_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
+    pub(super) fn enter_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
         if let Some(editor) = self.editor_of(group) {
             editor.update(cx, EditorView::unpin);
         }

@@ -13,7 +13,7 @@ use inkra_vault::{Fs, Vault};
 use crate::Quit;
 use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
-use crate::restore::{SavedTab, Session};
+use crate::restore::{SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::theme::{self, Appearance};
 use crate::ui::Assets;
@@ -152,7 +152,7 @@ impl Stage {
     pub(crate) fn open_restored(
         &mut self,
         files: &[(&str, &str)],
-        tabs: Vec<SavedTab>,
+        tabs: Vec<SavedNoteTab>,
         active: usize,
     ) -> WindowHandle<AppShell> {
         let fs = Arc::new(MemFs::new());
@@ -160,7 +160,11 @@ impl Stage {
             fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
         }
         let session = PathBuf::from("/support/session.json");
-        let text = Session::new(VAULT_ROOT.into(), active, tabs, None)
+        let center = SavedMember::Group(SavedGroup {
+            tabs: tabs.into_iter().map(SavedTab::Note).collect(),
+            active,
+        });
+        let text = Session::new(VAULT_ROOT.into(), 0, center, None, None, [true, true])
             .encode()
             .unwrap_or_else(|error| panic!("encode the session: {error}"));
         fs.insert_file(session.clone(), text);

@@ -132,12 +132,12 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (layout, mut groups) = Self::dock_groups(
-            session
-                .as_ref()
-                .and_then(|opened| opened.session.as_ref())
-                .and_then(|session| session.docks.as_ref()),
-        );
+        let (file, read) = session
+            .filter(|_| notes.read(cx).vault().is_some())
+            .map_or((None, None), |Opened { file, session }| {
+                (Some(file), session)
+            });
+        let (layout, mut groups, pending) = Self::restored_groups(read);
         let panes = notes
             .read(cx)
             .vault()
@@ -191,7 +191,7 @@ impl AppShell {
         Self::quit_on_close(window, cx);
         let first = notes.read(cx).current();
         let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
-        let (session, restore) = Self::open_session(session, &notes, cx);
+        let (session, restore) = Self::open_session(file, pending, &notes, cx);
         if let Some((editor, note)) = editor.zip(first) {
             // `root` adopts the note it launches with, so its editor comes with `current`.
             groups.insert(

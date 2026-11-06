@@ -3,30 +3,77 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use inkra_layout::{StoredDock, View, restore_views};
+use inkra_layout::{Axis, StoredDock, View, restore_views};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
-/// The tabs of one vault, in bar order, and the active one among them.
+/// One vault's tree of tab groups, its docks, and the active group (splits spec, Session).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Session {
     pub(crate) version: u32,
     /// The vault's absolute root: a file whose root differs is not this vault's.
     pub(crate) root: PathBuf,
+    /// The active group's depth-first index: the centre's groups, then the left dock's, then the right's.
     pub(crate) active: usize,
-    pub(crate) tabs: Vec<SavedTab>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_center"
+    )]
+    pub(crate) center: Option<SavedMember>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "lenient"
     )]
-    pub(crate) docks: Option<SavedDocks>,
+    pub(crate) left: Option<SavedGroup>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub(crate) right: Option<SavedGroup>,
+    #[serde(default = "both_shown")]
+    pub(crate) shown: [bool; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum SavedMember {
+    Split {
+        split: SavedAxis,
+        flexes: Vec<f32>,
+        children: Vec<SavedMember>,
+    },
+    Group(SavedGroup),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SavedAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedGroup {
+    pub(crate) tabs: Vec<SavedTab>,
+    pub(crate) active: usize,
+}
+
+/// A view by name: an unknown one drops alone, where a serde enum would fail the whole file (docks spec).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub(crate) enum SavedTab {
+    View { view: String },
+    Note(SavedNoteTab),
 }
 
 /// `note` is vault-relative, `None` for an empty tab.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct SavedTab {
+pub(crate) struct SavedNoteTab {
     pub(crate) note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) view: Option<SavedView>,
@@ -41,7 +88,21 @@ pub(crate) struct SavedView {
     pub(crate) below: f32,
 }
 
-/// Views by name: an unknown one drops alone, where a serde enum would fail the whole file (docks spec).
+/// Version 1: the centre's one group and the docks (restore-tabs spec).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionV1 {
+    pub(crate) version: u32,
+    pub(crate) root: PathBuf,
+    pub(crate) active: usize,
+    pub(crate) tabs: Vec<SavedNoteTab>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub(crate) docks: Option<SavedDocks>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SavedDocks {
     pub(crate) left: SavedDock,
@@ -55,55 +116,116 @@ pub(crate) struct SavedDock {
     pub(crate) shown: bool,
 }
 
-/// A malformed `docks` reads as absent, so the tabs still restore.
-fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SavedDocks>, D::Error> {
+/// A malformed surface reads as absent, so the others still restore.
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).ok())
 }
 
-/// Docks rule 6: Files left, Backlinks right, both shown.
-impl Default for SavedDocks {
-    fn default() -> Self {
-        Self::new(
-            SavedDock::new([View::Files], 0, true),
-            SavedDock::new([View::Backlinks], 0, true),
-        )
+/// A split with no child is malformed: it would leave the centre a room with no group.
+fn lenient_center<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SavedMember>, D::Error> {
+    Ok(lenient(deserializer)?.filter(SavedMember::is_whole))
+}
+
+fn both_shown() -> [bool; 2] {
+    [true, true]
+}
+
+impl SavedMember {
+    fn is_whole(&self) -> bool {
+        match self {
+            Self::Group(_) => true,
+            Self::Split { children, .. } => {
+                !children.is_empty() && children.iter().all(Self::is_whole)
+            }
+        }
     }
 }
 
-impl SavedDocks {
-    pub(crate) fn new(left: SavedDock, right: SavedDock) -> Self {
-        Self { left, right }
+impl From<Axis> for SavedAxis {
+    fn from(axis: Axis) -> Self {
+        match axis {
+            Axis::Horizontal => Self::Horizontal,
+            Axis::Vertical => Self::Vertical,
+        }
     }
+}
 
-    /// Each dock's views, its active index and its flag, left then right; each view in exactly one.
-    pub(crate) fn views(&self) -> [(Vec<View>, usize, bool); 2] {
-        let [(left, left_active), (right, right_active)] =
-            restore_views(&self.left.stored(), &self.right.stored());
-        [
-            (left, left_active, self.left.shown),
-            (right, right_active, self.right.shown),
-        ]
+impl From<SavedAxis> for Axis {
+    fn from(axis: SavedAxis) -> Self {
+        match axis {
+            SavedAxis::Horizontal => Self::Horizontal,
+            SavedAxis::Vertical => Self::Vertical,
+        }
     }
+}
+
+impl SavedGroup {
+    /// The views its tabs name, its active index following them: a note tab drops (L2).
+    fn stored(&self) -> StoredDock {
+        let (views, saved_ixs): (Vec<_>, Vec<_>) = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(saved_ix, tab)| match tab {
+                SavedTab::View { view } => Some((view.clone(), saved_ix)),
+                SavedTab::Note(_) => None,
+            })
+            .unzip();
+        // The saved active tab, else its nearest kept tab to the left, else the first.
+        let active = saved_ixs
+            .iter()
+            .rposition(|&saved_ix| saved_ix <= self.active)
+            .unwrap_or(0);
+        StoredDock { views, active }
+    }
+}
+
+/// Each dock's views and active index, left then right; each view in exactly one.
+pub(crate) fn dock_views(
+    left: Option<&SavedGroup>,
+    right: Option<&SavedGroup>,
+) -> [(Vec<View>, usize); 2] {
+    let stored = |group: Option<&SavedGroup>| group.map(SavedGroup::stored).unwrap_or_default();
+    restore_views(&stored(left), &stored(right))
 }
 
 impl SavedDock {
-    pub(crate) fn new(views: impl IntoIterator<Item = View>, active: usize, shown: bool) -> Self {
-        Self {
-            views: views
+    fn group(self) -> SavedGroup {
+        SavedGroup {
+            tabs: self
+                .views
                 .into_iter()
-                .map(|view| view.name().to_owned())
+                .map(|view| SavedTab::View { view })
                 .collect(),
-            active,
-            shown,
+            active: self.active,
         }
     }
+}
 
-    fn stored(&self) -> StoredDock {
-        StoredDock {
-            views: self.views.clone(),
-            active: self.active,
-            shown: self.shown,
+/// Its tabs become one centre group, active, and each dock one group.
+impl From<SessionV1> for Session {
+    fn from(v1: SessionV1) -> Self {
+        let center = SavedMember::Group(SavedGroup {
+            tabs: v1.tabs.into_iter().map(SavedTab::Note).collect(),
+            active: v1.active,
+        });
+        let (left, right, shown) = v1.docks.map_or((None, None, both_shown()), |docks| {
+            let shown = [docks.left.shown, docks.right.shown];
+            (Some(docks.left.group()), Some(docks.right.group()), shown)
+        });
+        Self {
+            version: VERSION,
+            root: v1.root,
+            active: 0,
+            center: Some(center),
+            left,
+            right,
+            shown,
         }
     }
 }
@@ -130,15 +252,19 @@ impl Session {
     pub(crate) fn new(
         root: PathBuf,
         active: usize,
-        tabs: Vec<SavedTab>,
-        docks: Option<SavedDocks>,
+        center: SavedMember,
+        left: Option<SavedGroup>,
+        right: Option<SavedGroup>,
+        shown: [bool; 2],
     ) -> Self {
         Self {
             version: VERSION,
             root,
             active,
-            tabs,
-            docks,
+            center: Some(center),
+            left,
+            right,
+            shown,
         }
     }
 
@@ -148,10 +274,17 @@ impl Session {
     }
 
     pub(crate) fn decode(text: &str, root: &Path) -> Result<Self, Rejected> {
-        let session: Self = serde_json::from_str(text).map_err(|_| Rejected::Corrupt)?;
-        if session.version != VERSION {
-            return Err(Rejected::Version);
+        #[derive(Deserialize)]
+        struct Versioned {
+            version: u32,
         }
+        let Versioned { version } = serde_json::from_str(text).map_err(|_| Rejected::Corrupt)?;
+        let session = match version {
+            1 => serde_json::from_str::<SessionV1>(text).map(Self::from),
+            VERSION => serde_json::from_str(text),
+            _ => return Err(Rejected::Version),
+        }
+        .map_err(|_| Rejected::Corrupt)?;
         if session.root != root {
             return Err(Rejected::Root);
         }

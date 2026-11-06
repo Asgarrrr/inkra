@@ -10,12 +10,14 @@ use std::sync::Arc;
 
 use futures::lock::Mutex;
 use gpui::{App, AppContext as _, Task};
-use inkra_vault::{EntryId, Fs, Vault};
+use inkra_vault::Fs;
 
-pub(crate) use format::{SavedDock, SavedDocks, SavedTab, SavedView, Session, session_file};
-pub(crate) use plan::{Plan, Restored};
-
-use crate::editor::ViewState;
+#[cfg(test)]
+pub(crate) use format::{SavedAxis, SavedDock, SavedDocks, SessionV1};
+pub(crate) use format::{
+    SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session, session_file,
+};
+pub(crate) use plan::{Landed, Pending, Plan, Restored, Surfaces};
 
 /// The session file of a vault launch, read before the first frame.
 pub(crate) struct Opened {
@@ -43,29 +45,9 @@ impl SessionWriter {
         }
     }
 
-    /// A tab whose note has no path (`path_of`) or no UTF-8 path saves empty; `None` only on a root that is not UTF-8.
-    pub(crate) fn write(
-        &mut self,
-        vault: &Vault,
-        tabs: impl Iterator<Item = (Option<EntryId>, Option<ViewState>)>,
-        path_of: impl Fn(EntryId) -> Option<PathBuf>,
-        active: usize,
-        docks: Option<SavedDocks>,
-        cx: &App,
-    ) -> Option<Task<()>> {
-        let tabs = tabs
-            .map(|(note, view)| {
-                let note = note
-                    .and_then(&path_of)
-                    .and_then(|path| path.to_str().map(str::to_owned));
-                let view = view
-                    .as_ref()
-                    .filter(|_| note.is_some())
-                    .map(SavedView::from);
-                SavedTab { note, view }
-            })
-            .collect();
-        let text = Session::new(vault.root().to_path_buf(), active, tabs, docks)
+    /// `None` only on a root that is not UTF-8.
+    pub(crate) fn write(&mut self, session: &Session, cx: &App) -> Option<Task<()>> {
+        let text = session
             .encode()
             .inspect_err(|error| log::warn!("session not saved: {error}"))
             .ok()?;

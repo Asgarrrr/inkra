@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 
-use super::session_writes::{saved, saving, tab, wait};
+use super::session_writes::{saved_tabs, saving, tab, wait};
 use super::{ab_focused, open};
 use crate::shell::AppShell;
 use crate::shell::quit::QUIT_WAIT;
@@ -25,7 +25,7 @@ fn closing_the_window_saves_the_notes_and_the_session_then_quits(cx: &mut TestAp
 
     assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alphax"));
     assert_eq!(
-        saved(&fs).expect("the quit's session").tabs,
+        saved_tabs(&fs).expect("the quit's session"),
         [tab("a.md", 6, 6)]
     );
 }
@@ -107,7 +107,7 @@ fn a_quit_during_a_rename_rescan_saves_the_new_name_in_the_session(cx: &mut Test
 
     assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("alphax"));
     assert_eq!(
-        saved(&fs).expect("the quit's session").tabs,
+        saved_tabs(&fs).expect("the quit's session"),
         [tab("z.md", 6, 6)]
     );
 }
@@ -144,7 +144,7 @@ fn a_hung_save_asks_only_after_the_quit_wait(cx: &mut TestAppContext) {
 
     assert!(quitting(&window, &mut visual), "the guard is set");
     assert_eq!(
-        saved(&fs).expect("the quit's session").tabs,
+        saved_tabs(&fs).expect("the quit's session"),
         [tab("a.md", 6, 6)]
     );
     assert_eq!(
