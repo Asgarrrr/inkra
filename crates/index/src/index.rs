@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use inkra_markdown::Link;
 use inkra_vault::{EntryId, Mtime};
 
-use crate::content::NoteContent;
+use crate::content::{FileRead, NoteContent};
 use crate::corpus::{Corpus, CorpusSnapshot};
 use crate::key::Key;
 use crate::names::NamesSnapshot;
@@ -149,7 +149,7 @@ impl NoteIndex {
         let NoteContent {
             source,
             words,
-            stamp,
+            read,
         } = content;
         for (at, link) in source.links.iter().enumerate() {
             if let Target::Note { path, .. } = &link.target {
@@ -160,7 +160,7 @@ impl NoteIndex {
             }
         }
         self.sources.insert(id, source);
-        self.corpus.write(self.notes.order(id), stamp);
+        self.corpus.write(self.notes.order(id), read);
         self.words.set(id, words);
     }
 
@@ -186,6 +186,23 @@ impl NoteIndex {
                 }
             }
         }
+    }
+
+    /// Each loaded note in vault order: its file as scanned, the read its words came from, and
+    /// its links.
+    ///
+    /// # Panics
+    /// If a note was loaded but holds no source.
+    pub(crate) fn loaded(&self) -> impl Iterator<Item = (&Arc<str>, FileRead, &Source)> {
+        let corpus = self.corpus.snapshot();
+        (0..self.names.len()).filter_map(move |order| {
+            let read = corpus.read(order)?;
+            let id = self.names.id(order);
+            let Some(source) = self.sources.get(&id) else {
+                panic!("note {id:?} was loaded but holds no source");
+            };
+            Some((self.names.file(order), read, source))
+        })
     }
 
     #[must_use]

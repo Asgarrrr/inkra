@@ -9,7 +9,7 @@ use gpui::{
     WeakEntity,
 };
 use inkra_index::live::{Effects, Status, Turn};
-use inkra_index::{LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
+use inkra_index::{FileRead, LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
 use inkra_vault::{EntryId, Fs, Vault};
 
 use crate::count::thousands;
@@ -235,7 +235,11 @@ impl IndexSync {
         reads::lock(&self.texts).insert(id, Arc::clone(&event.text), stamp);
         let ticket = self.turn(cx, |turn| turn.saved(id, stamp.mtime));
         let text = Arc::clone(&event.text);
-        let parsed = cx.background_spawn(async move { NoteContent::parse(&text, stamp) });
+        let file = FileRead {
+            stamp,
+            identity: event.identity,
+        };
+        let parsed = cx.background_spawn(async move { NoteContent::parse(&text, file) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
             let _ = this.update(cx, |this, cx| {

@@ -1,0 +1,244 @@
+//! Section 1: each loaded note's stamp, identity and links, keyed by its vault path (P2).
+
+use std::collections::HashSet;
+use std::ops::Range;
+use std::str;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use foldhash::fast::RandomState;
+use inkra_text::ByteOffset;
+use inkra_vault::{FileIdentity, Mtime, Stamp};
+
+use super::Rejected;
+use crate::words::varint;
+use crate::{NoteIndex, Source, SourceLink, Style, Target};
+
+/// A record's path length, flags, device, inode and link count, at their smallest.
+const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1;
+/// The flags bit of a record holding a stamp.
+const STAMPED: u8 = 1;
+
+/// A note as the cache holds it: the file its words came from, and its links.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CachedNote {
+    pub path: Arc<str>,
+    /// `None` when the stamp cannot be written: the note always reloads.
+    pub stamp: Option<Stamp>,
+    pub identity: FileIdentity,
+    pub source: Source,
+}
+
+/// Each loaded note of `index`, in vault order.
+pub(super) fn encode(index: &NoteIndex) -> Vec<u8> {
+    let notes: Vec<_> = index.loaded().collect();
+    let mut out = Vec::new();
+    let mut links = Vec::new();
+    varint::push(&mut out, super::header::narrow(notes.len()));
+    for (path, read, source) in notes {
+        let Some(()) = put_str(&mut out, path) else {
+            panic!("a note path of {} bytes", path.len());
+        };
+        links.clear();
+        let since = read.stamp.mtime.0.duration_since(SystemTime::UNIX_EPOCH);
+        match since {
+            Ok(since) if put_links(&mut links, &source.links).is_some() => {
+                out.push(STAMPED);
+                out.extend_from_slice(&since.as_secs().to_le_bytes());
+                out.extend_from_slice(&since.subsec_nanos().to_le_bytes());
+                out.extend_from_slice(&read.stamp.size.to_le_bytes());
+            }
+            _ => {
+                out.push(0);
+                links.clear();
+                varint::push(&mut links, 0);
+            }
+        }
+        out.extend_from_slice(&read.identity.device.to_le_bytes());
+        out.extend_from_slice(&read.identity.inode.to_le_bytes());
+        out.extend_from_slice(&links);
+    }
+    out
+}
+
+/// `None` when a length or an offset exceeds `u32::MAX`; `out` then holds a part.
+fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
+    varint::push(out, u32::try_from(links.len()).ok()?);
+    for link in links {
+        let Target::Note {
+            path,
+            fragment,
+            style,
+        } = &link.target
+        else {
+            panic!("a source holds note links only");
+        };
+        put_str(out, path)?;
+        match fragment {
+            Some(fragment) => {
+                out.push(1);
+                put_str(out, fragment)?;
+            }
+            None => out.push(0),
+        }
+        out.push(style_code(*style));
+        put_range(out, link.range.start.get()..link.range.end.get())?;
+        put_str(out, &link.context)?;
+        put_range(out, link.context_link.clone())?;
+    }
+    Some(())
+}
+
+fn put_str(out: &mut Vec<u8>, text: &str) -> Option<()> {
+    varint::push(out, u32::try_from(text.len()).ok()?);
+    out.extend_from_slice(text.as_bytes());
+    Some(())
+}
+
+fn put_range(out: &mut Vec<u8>, range: Range<usize>) -> Option<()> {
+    for at in [range.start, range.end] {
+        varint::push(out, u32::try_from(at).ok()?);
+    }
+    Some(())
+}
+
+pub(super) fn style_code(style: Style) -> u8 {
+    match style {
+        Style::Name => 0,
+        Style::Suffix => 1,
+        Style::Relative => 2,
+    }
+}
+
+/// Every field checked before it is used, and the count before it allocates.
+pub(super) fn decode(mut section: &[u8]) -> Result<Vec<CachedNote>, Rejected> {
+    let bytes = &mut section;
+    let count = len(bytes)?;
+    if count
+        .checked_mul(MIN_RECORD)
+        .is_none_or(|least| least > bytes.len())
+    {
+        return Err(Rejected::Corrupt("count"));
+    }
+    let mut notes = Vec::with_capacity(count);
+    let mut paths = HashSet::with_capacity_and_hasher(count, RandomState::default());
+    for _ in 0..count {
+        let note = record(bytes)?;
+        if !paths.insert(Arc::clone(&note.path)) {
+            return Err(Rejected::Corrupt("duplicate"));
+        }
+        notes.push(note);
+    }
+    if !bytes.is_empty() {
+        return Err(Rejected::Corrupt("trailing"));
+    }
+    Ok(notes)
+}
+
+fn record(bytes: &mut &[u8]) -> Result<CachedNote, Rejected> {
+    let path = Arc::from(string(bytes)?);
+    let flags = byte(bytes)?;
+    if flags & !STAMPED != 0 {
+        return Err(Rejected::Corrupt("flags"));
+    }
+    let stamp = if flags == STAMPED {
+        Some(stamp(bytes)?)
+    } else {
+        None
+    };
+    let device = u64::from_le_bytes(take(bytes)?);
+    let inode = u64::from_le_bytes(take(bytes)?);
+    let mut links = Vec::new();
+    for _ in 0..len(bytes)? {
+        links.push(link(bytes)?);
+    }
+    Ok(CachedNote {
+        path,
+        stamp,
+        identity: FileIdentity { device, inode },
+        source: Source { links },
+    })
+}
+
+fn stamp(bytes: &mut &[u8]) -> Result<Stamp, Rejected> {
+    let secs = u64::from_le_bytes(take(bytes)?);
+    let nanos = u32::from_le_bytes(take(bytes)?);
+    let size = u64::from_le_bytes(take(bytes)?);
+    if nanos >= 1_000_000_000 {
+        return Err(Rejected::Corrupt("nanos"));
+    }
+    let mtime = SystemTime::UNIX_EPOCH
+        .checked_add(Duration::new(secs, nanos))
+        .ok_or(Rejected::Corrupt("mtime"))?;
+    Ok(Stamp {
+        mtime: Mtime(mtime),
+        size,
+    })
+}
+
+fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
+    let path = string(bytes)?.to_owned();
+    let fragment = match byte(bytes)? {
+        0 => None,
+        1 => Some(string(bytes)?.to_owned()),
+        _ => return Err(Rejected::Corrupt("flags")),
+    };
+    let style = match byte(bytes)? {
+        0 => Style::Name,
+        1 => Style::Suffix,
+        2 => Style::Relative,
+        _ => return Err(Rejected::Corrupt("style")),
+    };
+    let within_note = range(bytes)?;
+    let context = string(bytes)?.to_owned();
+    let context_link = range(bytes)?;
+    if !context.is_char_boundary(context_link.start) || !context.is_char_boundary(context_link.end)
+    {
+        return Err(Rejected::Corrupt("context"));
+    }
+    Ok(SourceLink {
+        target: Target::Note {
+            path,
+            fragment,
+            style,
+        },
+        range: ByteOffset::new(within_note.start)..ByteOffset::new(within_note.end),
+        context,
+        context_link,
+    })
+}
+
+fn range(bytes: &mut &[u8]) -> Result<Range<usize>, Rejected> {
+    let (start, end) = (len(bytes)?, len(bytes)?);
+    if start > end {
+        return Err(Rejected::Corrupt("range"));
+    }
+    Ok(start..end)
+}
+
+fn string<'a>(bytes: &mut &'a [u8]) -> Result<&'a str, Rejected> {
+    let len = len(bytes)?;
+    let (text, rest) = bytes
+        .split_at_checked(len)
+        .ok_or(Rejected::Corrupt("truncated"))?;
+    *bytes = rest;
+    str::from_utf8(text).map_err(|_| Rejected::Corrupt("utf8"))
+}
+
+fn len(bytes: &mut &[u8]) -> Result<usize, Rejected> {
+    varint::read_checked(bytes)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or(Rejected::Corrupt("varint"))
+}
+
+fn byte(bytes: &mut &[u8]) -> Result<u8, Rejected> {
+    take(bytes).map(|[byte]| byte)
+}
+
+fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], Rejected> {
+    let (taken, rest) = bytes
+        .split_first_chunk::<N>()
+        .ok_or(Rejected::Corrupt("truncated"))?;
+    *bytes = rest;
+    Ok(*taken)
+}

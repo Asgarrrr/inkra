@@ -2,8 +2,12 @@
 
 mod fingerprint;
 mod header;
+mod notes;
 
-pub use header::{FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
+pub use header::{Decoded, FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
+pub use notes::CachedNote;
 
 #[cfg(test)]
 mod header_tests;
+#[cfg(test)]
+mod notes_tests;

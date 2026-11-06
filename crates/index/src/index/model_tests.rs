@@ -220,7 +220,9 @@ fn mtimes(corpus: &CorpusSnapshot) -> Vec<Option<Mtime>> {
 }
 
 fn stamps(corpus: &CorpusSnapshot) -> Vec<Option<Stamp>> {
-    (0..corpus.len()).map(|at| corpus.stamp(at)).collect()
+    (0..corpus.len())
+        .map(|at| corpus.read(at).map(|read| read.stamp))
+        .collect()
 }
 
 struct Model {

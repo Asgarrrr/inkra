@@ -8,16 +8,22 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{
-    IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Read, Searched,
+    FileRead, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Read, Searched,
     TextSearch,
 };
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
+use inkra_vault::{EntryId, FileIdentity, Kind, Mtime, Stamp, Vault};
 
 /// The stamp of every text the bench parses: nothing here compares stamps.
-const EPOCH: Stamp = Stamp {
-    mtime: Mtime(UNIX_EPOCH),
-    size: 0,
+const EPOCH: FileRead = FileRead {
+    stamp: Stamp {
+        mtime: Mtime(UNIX_EPOCH),
+        size: 0,
+    },
+    identity: FileIdentity {
+        device: 0,
+        inode: 0,
+    },
 };
 
 const NOTES: usize = 50_000;

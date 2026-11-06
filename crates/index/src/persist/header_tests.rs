@@ -1,12 +1,13 @@
 use std::path::Path;
 
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
-use super::{Rejected, decode, encode};
+use super::{Decoded, Rejected, decode, encode};
+use crate::NoteIndex;
 
 const ROOT: &str = "/v";
 
 fn bytes() -> Vec<u8> {
-    encode(Path::new(ROOT))
+    encode(&NoteIndex::default(), Path::new(ROOT))
 }
 
 /// `bytes` with its crc over the body set again, so a later check sees the change.
@@ -26,23 +27,30 @@ fn rejected(bytes: &[u8]) -> (Rejected, &'static str) {
 #[test]
 fn golden_bytes() {
     assert_eq!(fold_fingerprint(), 0xC6D3_150D);
-    assert_eq!(derivation_fingerprint(), 0xBA5E_B88C);
-    let golden: [u8; 28] = [
+    assert_eq!(derivation_fingerprint(), 0xD952_5C44);
+    let golden: [u8; 30] = [
         b'I', b'N', b'K', b'R', b'A', b'I', b'X', 0, // magic
         1, 0, 0, 0, // version
         0x0D, 0x15, 0xD3, 0xC6, // fold
-        0x8C, 0xB8, 0x5E, 0xBA, // derivation
-        0x73, 0x80, 0x06, 0x31, // crc32 of the body
-        1, 2, b'/', b'v', // one section of two bytes: the root
+        0x44, 0x5C, 0x52, 0xD9, // derivation
+        0x00, 0xEB, 0x02, 0x74, // crc32 of the body
+        2, 2, 1, // two sections: two bytes, then one
+        b'/', b'v', // the root
+        0,    // no note
     ];
     assert_eq!(bytes(), golden);
 }
 
 #[test]
 fn round_trip_ok() {
-    assert_eq!(decode(&bytes(), Path::new(ROOT)), Ok(()));
+    let empty = Decoded { notes: Vec::new() };
+    assert_eq!(decode(&bytes(), Path::new(ROOT)), Ok(empty));
     let root = Path::new("/Users/me/Notes/Été 🌱");
-    assert_eq!(decode(&encode(root), root), Ok(()));
+    let bytes = encode(&NoteIndex::default(), root);
+    assert_eq!(
+        decode(&bytes, root).map(|decoded| decoded.notes.len()),
+        Ok(0)
+    );
 }
 
 #[test]
@@ -107,8 +115,8 @@ fn magic_flip_is_corrupt() {
 }
 
 #[test]
-fn a_count_other_than_one_is_corrupt() {
-    for count in [0, 2] {
+fn a_count_other_than_two_is_corrupt() {
+    for count in [1, 3] {
         let mut bytes = bytes();
         bytes[24] = count;
         assert_eq!(
@@ -152,7 +160,7 @@ fn other_root_is_root() {
 #[test]
 fn no_truncation_panics() {
     let root = format!("/{}", "v".repeat(200));
-    let bytes = encode(Path::new(&root));
+    let bytes = encode(&NoteIndex::default(), Path::new(&root));
     for len in 0..bytes.len() {
         let prefix = &bytes[..len];
         assert!(decode(prefix, Path::new(ROOT)).is_err(), "{len}");

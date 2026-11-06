@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
+use super::notes::{self, CachedNote};
+use crate::NoteIndex;
 use crate::words::varint;
 
 pub const FORMAT_VERSION: u32 = 1;
@@ -10,7 +12,13 @@ pub const MAX_BYTES: u64 = 256 << 20;
 const MAGIC: [u8; 8] = *b"INKRAIX\0";
 /// The magic, then the version, both fingerprints and the body's crc, each a u32 LE.
 const HEADER_BYTES: usize = 24;
-const SECTIONS: usize = 1;
+const SECTIONS: usize = 2;
+
+/// What a cache file holds, once every check passed.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Decoded {
+    pub notes: Vec<CachedNote>,
+}
 
 /// Why a cache file is not used: a list of reasons, not a second error enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,14 +47,18 @@ impl Rejected {
     }
 }
 
-/// The cache file of the vault at `root`.
+/// The cache file of `index`, the vault at `root`.
 ///
 /// # Panics
 ///
 /// When the file would exceed `MAX_BYTES`, which no reader accepts.
 #[must_use]
-pub fn encode(root: &Path) -> Vec<u8> {
-    let sections: [&[u8]; SECTIONS] = [root.as_os_str().as_encoded_bytes()];
+pub fn encode(index: &NoteIndex, root: &Path) -> Vec<u8> {
+    seal([root.as_os_str().as_encoded_bytes(), &notes::encode(index)])
+}
+
+/// The header, then `sections` as given, so a test can seal a section it built by hand.
+pub(super) fn seal(sections: [&[u8]; SECTIONS]) -> Vec<u8> {
     let mut body = Vec::new();
     varint::push(&mut body, narrow(sections.len()));
     for section in sections {
@@ -74,7 +86,7 @@ pub fn encode(root: &Path) -> Vec<u8> {
 /// # Errors
 ///
 /// The first check that fails, in the header's order: a newer format is `Version`, not `Checksum`.
-pub fn decode(bytes: &[u8], root: &Path) -> Result<(), Rejected> {
+pub fn decode(bytes: &[u8], root: &Path) -> Result<Decoded, Rejected> {
     let Some((header, mut body)) = bytes.split_first_chunk::<HEADER_BYTES>() else {
         return Err(Rejected::Short);
     };
@@ -112,7 +124,7 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<(), Rejected> {
     if total != body.len() {
         return Err(Rejected::Corrupt("lengths"));
     }
-    let [stored_root] = lengths.map(|length| {
+    let [stored_root, stored_notes] = lengths.map(|length| {
         let (section, rest) = body.split_at(length);
         body = rest;
         section
@@ -120,7 +132,9 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<(), Rejected> {
     if stored_root != root.as_os_str().as_encoded_bytes() {
         return Err(Rejected::Root);
     }
-    Ok(())
+    Ok(Decoded {
+        notes: notes::decode(stored_notes)?,
+    })
 }
 
 /// The header's fields after the magic, for a file whose body is `body`.
@@ -133,9 +147,9 @@ fn fields(body: &[u8]) -> [u32; 4] {
     ]
 }
 
-fn narrow(len: usize) -> u32 {
+pub(super) fn narrow(len: usize) -> u32 {
     let Ok(len) = u32::try_from(len) else {
-        panic!("an index cache section of {len} bytes, over 4 GiB");
+        panic!("an index cache length of {len}, over u32::MAX");
     };
     len
 }

@@ -13,18 +13,24 @@ use std::time::UNIX_EPOCH;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{
-    Excerpt, Group, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteMatch, NoteQuery,
-    NoteSet, excerpt,
+    Excerpt, FileRead, Group, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteMatch,
+    NoteQuery, NoteSet, excerpt,
 };
-use inkra_vault::{EntryId, Job, Jobs, Kind, Mtime, Serial, Stamp};
+use inkra_vault::{EntryId, FileIdentity, Job, Jobs, Kind, Mtime, Serial, Stamp};
 
 use corpus::{Corpus, NOTE_IDS, NOTES, contents};
 use paths::{Lcg, folders};
 
 /// The stamp of every text the bench parses: nothing here compares stamps.
-const EPOCH: Stamp = Stamp {
-    mtime: Mtime(UNIX_EPOCH),
-    size: 0,
+const EPOCH: FileRead = FileRead {
+    stamp: Stamp {
+        mtime: Mtime(UNIX_EPOCH),
+        size: 0,
+    },
+    identity: FileIdentity {
+        device: 0,
+        inode: 0,
+    },
 };
 
 /// Quick open's `LIMIT`.

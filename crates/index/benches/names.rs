@@ -10,15 +10,21 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::{NoteContent, NoteIndex, NoteSet};
+use inkra_index::{FileRead, NoteContent, NoteIndex, NoteSet};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
+use inkra_vault::{EntryId, FileIdentity, Kind, Mtime, Stamp, Vault};
 use paths::{Lcg, folders};
 
 /// The stamp of every text the bench parses: nothing here compares stamps.
-const EPOCH: Stamp = Stamp {
-    mtime: Mtime(UNIX_EPOCH),
-    size: 0,
+const EPOCH: FileRead = FileRead {
+    stamp: Stamp {
+        mtime: Mtime(UNIX_EPOCH),
+        size: 0,
+    },
+    identity: FileIdentity {
+        device: 0,
+        inode: 0,
+    },
 };
 
 const NOTES: usize = 50_000;

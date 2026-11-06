@@ -348,3 +348,12 @@ Each slice appends what it did differently from this spec, and why.
   compared on its own, so a flip there is rejected by name, and `Version`
   comes before `Checksum`. The fold fingerprint is one crc32 over the
   widened versions and the folded probes, so the header field is a u32.
+- Slice 3b: the stamp the per-note table writes travels with the words as a
+  `FileRead` (stamp and identity), so `NoteContent` and the `Slot` hold
+  `read`, and `NoteSaved` carries `Saved.identity`. `Decoded` lives in the
+  header module: each later section adds a field to it. Beyond the brief's
+  `Corrupt` names, decode rejects `mtime` (a stamp past `SystemTime`),
+  `truncated`, `varint` and `utf8`. The record count is checked against the
+  bytes after it, so a 19-byte minimal record proves `>` against `>=`. The
+  derivation probe gained a link out of path order, so a fingerprint that
+  skips the sort changes.
