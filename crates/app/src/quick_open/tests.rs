@@ -18,14 +18,14 @@ mod excerpts;
 mod refresh;
 mod rows;
 
-struct Opened {
+pub(super) struct Opened {
     notes: Entity<NoteStore>,
-    picker: Entity<Picker<QuickOpenDelegate>>,
-    visual: VisualTestContext,
+    pub(super) picker: Entity<Picker<QuickOpenDelegate>>,
+    pub(super) visual: VisualTestContext,
 }
 
 /// `showing` and `recent` by name; the index has built before the picker opens.
-fn open(
+pub(super) fn open(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
     showing: Option<&str>,
@@ -82,7 +82,7 @@ fn last_scan(opened: &mut Opened) -> Arc<AtomicBool> {
     })
 }
 
-fn with_texts(files: &[(&str, &str)]) -> Arc<MemFs> {
+pub(super) fn with_texts(files: &[(&str, &str)]) -> Arc<MemFs> {
     let fs = Arc::new(MemFs::new());
     for (file, text) in files {
         fs.insert_file(format!("/vault/{file}"), *text);
@@ -98,7 +98,7 @@ fn footer(opened: &mut Opened) -> Option<String> {
 }
 
 /// Types `keys` and lets the debounced search answer.
-fn search(opened: &mut Opened, keys: &str) {
+pub(super) fn search(opened: &mut Opened, keys: &str) {
     opened.visual.simulate_keystrokes(keys);
     opened.visual.executor().advance_clock(SEARCH_DEBOUNCE);
     opened.visual.run_until_parked();

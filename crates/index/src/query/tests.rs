@@ -213,3 +213,45 @@ fn candidates_stop_once_cancelled() {
             .is_none()
     );
 }
+
+#[test]
+fn a_candidate_is_the_loaded_note_at_its_order() {
+    let (ids, index) = indexed(&[Some("alpha"), None, Some("beta")]);
+    let snapshot = index.snapshot();
+
+    let Some(candidate) = snapshot.candidate(2) else {
+        panic!("a loaded note");
+    };
+
+    assert_eq!(candidate.id, ids[2]);
+    assert_eq!(&*candidate.path, "n002.md");
+    assert_eq!(
+        candidate.stamp,
+        Stamp {
+            mtime: mtime(0),
+            size: 4
+        }
+    );
+    assert_eq!(snapshot.candidate(1), None, "not loaded");
+    assert_eq!(snapshot.candidate(3), None, "past the end");
+}
+
+#[test]
+fn a_match_names_the_order_of_its_candidate() {
+    let (_, index) = indexed(&[Some("plan"), Some("plan"), Some("plan")]);
+    let snapshot = index.snapshot();
+    let query = NoteQuery::new("plan", None, &[]);
+
+    let found = block_on(snapshot.find_notes(&query, 10, &Serial, &not_cancelled()));
+
+    let Some(found) = found else {
+        panic!("not cancelled");
+    };
+    assert_eq!(found.len(), 3);
+    for note in found {
+        let Some(candidate) = snapshot.candidate(note.order()) else {
+            panic!("loaded");
+        };
+        assert_eq!(candidate.id, note.id);
+    }
+}

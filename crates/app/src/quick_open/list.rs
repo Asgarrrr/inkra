@@ -3,11 +3,13 @@
 use std::collections::HashMap;
 use std::mem;
 use std::ops::Range;
+use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use futures::StreamExt as _;
 use gpui::Context;
-use inkra_index::{Excerpt, IndexSnapshot, NoteMatch, NoteQuery, excerpt};
+use inkra_index::{Excerpt, IndexSnapshot, NoteMatch, NoteQuery, Read, excerpt};
 use inkra_vault::EntryId;
 
 use super::QuickOpenDelegate;
@@ -118,35 +120,58 @@ impl List {
 }
 
 impl QuickOpenDelegate {
-    /// One background task per row of `range` not asked for yet, so the rows spread across cores.
+    /// The rows of `range` not asked for yet read through one reader stream; each excerpt is
+    /// computed in its reader task. A row not loaded shows its name alone.
     pub(super) fn ask_excerpts(&mut self, range: Range<usize>, cx: &mut Context<Picker<Self>>) {
         let list = &mut self.list;
+        let mut items = Vec::new();
         let rows = list.rows.iter_mut().enumerate();
         for (ix, row) in rows.take(range.end).skip(range.start) {
             if mem::replace(&mut row.asked, true) {
                 continue;
             }
-            let id = list.id;
-            let (found, snapshot) = (row.found.clone(), list.snapshot.clone());
-            let (query, cancel) = (Arc::clone(&list.query), Arc::clone(&list.cancel));
-            let executor = cx.background_executor().clone();
-            #[cfg(test)]
-            let hold = self.hold_excerpts.clone();
-            cx.spawn(async move |picker, cx| {
-                let excerpt = executor
-                    .spawn(async move { excerpt(&snapshot, &found, &query, &cancel) })
-                    .await;
+            match list.snapshot.candidate(row.found.order()) {
+                Some(candidate) => items.push((candidate, (ix, row.found.clone()))),
+                // The rows are drawn right after, so no notify.
+                None => row.set_excerpt(None),
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        let id = list.id;
+        let (snapshot, query) = (list.snapshot.clone(), Arc::clone(&list.query));
+        let cancel = Arc::clone(&list.cancel);
+        let reader = self.links.read(cx).reader(cx);
+        let reads = reader.stream_with(items, move |(ix, found): (usize, NoteMatch), read| {
+            let excerpt = match read {
+                Read::Text { text, .. } => excerpt(&snapshot, &found, &query, &text, &cancel),
+                Read::Gone | Read::NotUtf8 | Read::Failed => None,
+            };
+            (ix, excerpt)
+        });
+        #[cfg(test)]
+        let hold = self.hold_excerpts.clone();
+        cx.spawn(async move |picker, cx| {
+            let mut reads = pin!(reads);
+            while let Some((_, (ix, excerpt))) = reads.next().await {
                 #[cfg(test)]
-                if let Some(hold) = hold {
-                    let _ = hold.await;
+                if let Some(hold) = &hold {
+                    let _ = hold.clone().await;
                 }
-                let _ = picker.update(cx, |picker, cx| {
-                    if picker.delegate.list.land(id, ix, excerpt) {
+                let landed = picker.update(cx, |picker, cx| {
+                    let landed = picker.delegate.list.land(id, ix, excerpt);
+                    if landed {
                         cx.notify();
                     }
+                    landed
                 });
-            })
-            .detach();
-        }
+                // The list was replaced or cancelled: dropping the stream stops the reads left.
+                if !matches!(landed, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 }

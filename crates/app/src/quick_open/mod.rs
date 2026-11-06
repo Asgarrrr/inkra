@@ -18,6 +18,8 @@ use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
 use list::List;
 
+#[cfg(test)]
+mod excerpt_tests;
 mod list;
 mod render;
 #[cfg(test)]
