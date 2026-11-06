@@ -2,10 +2,11 @@
 //! a group by a drop near its edge (splits spec, P4).
 
 use gpui::{App, Context, DragMoveEvent, Window};
-use inkra_layout::{GroupId, SplitDirection, Surface, View, drop_zone};
+use inkra_layout::{GroupId, Side, SplitDirection, Surface, View, drop_zone};
 use inkra_tabs::{Detached, TabId, Tabs};
 
 use super::dock_drag::DraggedView;
+use super::docks::SplitView;
 use super::group::Group;
 use super::parked::Parked;
 use super::tab_bar::DraggedTab;
@@ -13,7 +14,13 @@ use super::tabs::Place;
 use super::{AppShell, Shown};
 
 impl AppShell {
-    /// Note tabs move centre to centre only: `to` becomes the active group and takes the focus.
+    /// Tab `id` of `from` to `to` at `at`, counted after it left (`Tabs::move_tab`'s rule). Within
+    /// one group a reorder: the active tab stays (tabs spec, T4). Across groups it becomes `to`'s
+    /// active tab and `to` comes forward: a centre group becomes the active one and takes the
+    /// focus, a dock shows.
+    ///
+    /// # Panics
+    /// If `at` is past the end of `to`.
     pub(super) fn move_tab_to(
         &mut self,
         from: GroupId,
@@ -26,17 +33,71 @@ impl AppShell {
         if !self.holds((from, id)) {
             return;
         }
+        let len = self.group(to).tabs.count() - usize::from(from == to);
+        assert!(at <= len, "index {at} is past the end of a group of {len}");
         if from == to {
             self.move_tab(from, id, at, cx);
             return;
         }
+        let surface = self.layout.surface_of(to);
         self.change_layout(window, cx, |shell, window, cx| {
             let detached = shell.detach(from, id, window, cx);
             shell.attach(detached, to, at, window, cx);
-            shell.switch_group(to, cx);
+            match surface {
+                Surface::Center => shell.switch_group(to, cx),
+                Surface::Dock(side) => shell.layout.show(side),
+            }
         });
-        if let Some(focus) = self.land_focus(cx) {
+        if surface == Surface::Center
+            && let Some(focus) = self.land_focus(cx)
+        {
             window.focus(&focus, cx);
+        }
+    }
+
+    /// `view`'s tab to `to` at `index`, as `move_tab_to` moves it (docks rules 1 and 2, P4).
+    pub(super) fn move_view(
+        &mut self,
+        view: View,
+        to: GroupId,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (from, id) = self.tab_of(view);
+        self.move_tab_to(from, id, to, index, window, cx);
+    }
+
+    /// Moves `view` to the end of `side`'s first group, as `move_view` does; to a fresh dock on an empty side.
+    pub(super) fn append(
+        &mut self,
+        view: View,
+        side: Side,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(&group) = self.layout.dock_groups(side).first() {
+            self.drop_view_at_end(view, group, window, cx);
+            return;
+        }
+        self.change_layout(window, cx, |shell, window, cx| {
+            let (source, tab) = shell.tab_of(view);
+            let detached = shell.detach(source, tab, window, cx);
+            let group = shell.layout.add_dock(side);
+            shell.attach_alone(detached, group, window, cx);
+            shell.layout.show(side);
+        });
+    }
+
+    pub(super) fn split_view(
+        &mut self,
+        &SplitView { view, direction }: &SplitView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (group, tab) = self.tab_of(view);
+        if self.group(group).tabs.count() >= 2 {
+            self.split_off((group, tab), group, direction, window, cx);
         }
     }
 
@@ -47,7 +108,7 @@ impl AppShell {
             .is_some_and(|held| held.tabs.iter().any(|tab| tab.id() == id))
     }
 
-    /// `view` to the end of `group`, counted after it left (`move_view`'s rule).
+    /// `view` to the end of `group`, counted after it left (`move_tab_to`'s rule).
     pub(super) fn drop_view_at_end(
         &mut self,
         view: View,

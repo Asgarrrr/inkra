@@ -163,11 +163,7 @@ fn a_move_inside_a_dock_reorders(cx: &mut TestAppContext) {
 
     assert_eq!(
         left(docks(&window, &mut cx)),
-        (
-            vec![View::Backlinks, View::Files],
-            Some(View::Backlinks),
-            true
-        )
+        (vec![View::Backlinks, View::Files], Some(View::Files), true)
     );
 }
 
@@ -195,7 +191,11 @@ fn append_on_the_same_side_moves_to_the_end(cx: &mut TestAppContext) {
 
     assert_eq!(
         left(docks(&window, &mut cx)),
-        (vec![View::Backlinks, View::Files], Some(View::Files), true)
+        (
+            vec![View::Backlinks, View::Files],
+            Some(View::Backlinks),
+            true
+        )
     );
 }
 
