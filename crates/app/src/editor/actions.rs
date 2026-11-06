@@ -25,6 +25,7 @@ actions!(
         Redo,
         FollowLink,
         FollowLinkInNewTab,
+        FollowLinkInSplit,
     ]
 );
 
@@ -125,6 +126,15 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         self.follow_at_cursor(Open::NewTab, cx);
+    }
+
+    pub(super) fn follow_link_in_split(
+        &mut self,
+        _: &FollowLinkInSplit,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_at_cursor(Open::SplitRight, cx);
     }
 
     /// Follows at the selection's head; the view never resolves, the shell does.

@@ -1,6 +1,7 @@
-use gpui::WindowHandle;
+use gpui::{WindowHandle, point, px};
 
 use super::LINKED;
+use crate::bootstrap::WINDOW_SIZE;
 use crate::restore::{SavedNoteTab, SavedView};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
@@ -51,6 +52,15 @@ pub(super) fn dragging(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     let (from, to) = (stage.tab_center(window, 0), stage.tab_center(window, 2));
     stage.drag_holding(window, from, to);
+    window
+}
+
+/// `reading`'s tab held 30 px inside the note column's right edge, left of the 260 px right dock.
+pub(super) fn drop_split(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    let from = stage.tab_center(window, 1);
+    let edge = point(WINDOW_SIZE.width - px(290.), WINDOW_SIZE.height / 2.);
+    stage.drag_holding(window, from, edge);
     window
 }
 

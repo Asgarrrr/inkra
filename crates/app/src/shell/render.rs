@@ -2,9 +2,9 @@
 
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Render, Styled, Window, div, prelude::FluentBuilder, px,
+    Render, Styled, Window, div, prelude::FluentBuilder, px, relative,
 };
-use inkra_layout::{Axis, GroupId, Member, Side, SplitPath, Surface};
+use inkra_layout::{Axis, GroupId, Member, Side, SplitDirection, SplitPath, Surface};
 
 use super::dock_drag::{DraggedView, SHELL_GROUP};
 use super::group::selector;
@@ -146,7 +146,7 @@ impl AppShell {
             .on_drop(Self::view_drop(group, cx))
     }
 
-    /// A view dropped on a centre group's strip or body lands as its last tab.
+    /// A view dropped on a centre group's strip lands as its last tab.
     pub(super) fn view_drop(
         group: GroupId,
         cx: &mut Context<Self>,
@@ -156,17 +156,24 @@ impl AppShell {
         })
     }
 
-    /// The view and its header, else the note or the empty state. A view or a tab from another
-    /// group dropped here lands as the last tab.
-    fn render_group_body(&self, group: GroupId, cx: &mut Context<Self>) -> Div {
+    /// The view and its header, else the note or the empty state. A view or a tab dropped near an
+    /// edge splits the group there; elsewhere, one from another group lands as the last tab.
+    fn render_group_body(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
         let colors = theme::current(cx).colors;
         let view = self.group(group).shown.view();
         // `min_h_0`: a flex child's minimum is its content, which would outgrow the pane.
         let body = div()
             .flex_1()
             .min_h_0()
+            .relative()
+            .on_drag_move(Self::track_view_drop(group, cx))
+            .on_drag_move(Self::track_tab_drop(group, cx))
             .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
-            .on_drop(Self::view_drop(group, cx))
+            .on_drop(Self::view_body_drop(
+                group,
+                move |shell, view, window, cx| shell.drop_view_at_end(view, group, window, cx),
+                cx,
+            ))
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
                 if dragged.group == group {
                     style
@@ -174,12 +181,8 @@ impl AppShell {
                     style.bg(colors.accent_background)
                 }
             })
-            .on_drop(cx.listener(move |shell, dragged: &DraggedTab, window, cx| {
-                if dragged.group != group {
-                    let at = shell.group(group).tabs.count();
-                    shell.move_tab_to(dragged.group, dragged.id, group, at, window, cx);
-                }
-            }));
+            .on_drop(Self::tab_body_drop(group, cx));
+        let overlay = self.render_drop_overlay(group, selector("drop-overlay", k), cx);
         match view {
             Some(view) => body
                 .flex()
@@ -196,6 +199,31 @@ impl AppShell {
                 None => self.render_empty(cx).into_any_element(),
             }),
         }
+        .children(overlay)
+    }
+
+    /// The half of `group`'s body a drop would split off; drawn only while a drag is over it.
+    pub(super) fn render_drop_overlay(
+        &self,
+        group: GroupId,
+        selector: String,
+        cx: &App,
+    ) -> Option<Div> {
+        let direction = self.group(group).drop_split?;
+        let colors = theme::current(cx).colors;
+        let overlay = div()
+            .debug_selector(move || selector)
+            .absolute()
+            .bg(colors.accent_background)
+            .invisible()
+            .drag_over::<DraggedTab>(|style, _, _, _| style.visible())
+            .drag_over::<DraggedView>(|style, _, _, _| style.visible());
+        Some(match direction {
+            SplitDirection::Up => overlay.top_0().left_0().right_0().h(relative(0.5)),
+            SplitDirection::Down => overlay.bottom_0().left_0().right_0().h(relative(0.5)),
+            SplitDirection::Left => overlay.top_0().left_0().bottom_0().w(relative(0.5)),
+            SplitDirection::Right => overlay.top_0().right_0().bottom_0().w(relative(0.5)),
+        })
     }
 
     /// Centre group `k`'s column: its header if it is lower, its nav row, its banner, the notice if
@@ -228,7 +256,7 @@ impl AppShell {
                 .then(|| self.render_notice(cx))
                 .flatten(),
         )
-        .child(self.render_group_body(group, cx))
+        .child(self.render_group_body(k, group, cx))
         .children(Self::render_separator(path, slot, k, cx))
     }
 

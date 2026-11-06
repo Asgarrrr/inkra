@@ -4,13 +4,13 @@ use std::ops::Range;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Window};
 use inkra_index::{Resolution, Target};
-use inkra_layout::{GroupId, View};
+use inkra_layout::{GroupId, SplitDirection, View};
 use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
 use super::group::Group;
-use super::tabs::capture;
+use super::tabs::{Place, capture};
 use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 use crate::open::Open;
@@ -85,6 +85,34 @@ impl AppShell {
             // A view's tab keeps its view: a commit would push it into the tab's history.
             Open::Here if self.center().shown.view().is_none() => self.show_note(id, at, cx),
             Open::Here | Open::NewTab => self.open_in_new_tab(id, at, cx),
+            Open::SplitRight => {
+                let shell = cx.weak_entity();
+                // A split needs the window, which `open`'s callers do not hold.
+                cx.defer(move |cx| {
+                    let _ = shell.update_in(cx, |shell, window, cx| {
+                        shell.open_in_split(id, at, window, cx);
+                    });
+                });
+            }
+        }
+    }
+
+    /// `id` in a fresh group right of the active one, else in a new tab where a half would be too narrow.
+    fn open_in_split(
+        &mut self,
+        id: EntryId,
+        at: Option<Range<ByteOffset>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let from = self.layout.last_center();
+        if self
+            .split_group(from, SplitDirection::Right, Place::Empty, window, cx)
+            .is_some()
+        {
+            self.open_note(id, at, cx);
+        } else {
+            self.open_in_new_tab(id, at, cx);
         }
     }
 

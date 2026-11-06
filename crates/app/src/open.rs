@@ -1,4 +1,4 @@
-//! Where an opener shows its note: the active tab or a new one (tabs spec, A5).
+//! Where an opener shows its note: the active tab, a new one (tabs spec, A5) or a split (splits spec, P5).
 
 use gpui::Modifiers;
 use inkra_vault::EntryId;
@@ -7,6 +7,7 @@ use inkra_vault::EntryId;
 pub(crate) enum Open {
     Here,
     NewTab,
+    SplitRight,
 }
 
 impl Open {

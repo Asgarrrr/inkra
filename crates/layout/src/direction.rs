@@ -6,6 +6,9 @@ use crate::{Axis, GroupId, Layout, Side, Surface};
 /// Past an edge, so the point falls in the rect beyond it.
 const STEP: f32 = 1e-4;
 
+/// The edge band's depth, as a share of a group's shorter side: Zed's `drop_target_size`.
+pub const DROP_FRACTION: f32 = 0.2;
+
 /// Which side of a group a split opens on, or a neighbour lies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDirection {
@@ -28,6 +31,26 @@ impl SplitDirection {
     pub(crate) fn before(self) -> bool {
         matches!(self, Self::Left | Self::Up)
     }
+}
+
+/// The edge a drop at `at` in a group of `size` splits towards: the nearest edge, if `at` lies
+/// within its band. A tie keeps the first of up, right, down, left, as Zed's `min_by_key`.
+#[must_use]
+pub fn drop_zone((width, height): (f32, f32), (x, y): (f32, f32)) -> Option<SplitDirection> {
+    if width <= 0. || height <= 0. {
+        return None;
+    }
+    let band = width.min(height) * DROP_FRACTION;
+    [
+        (SplitDirection::Up, y),
+        (SplitDirection::Right, width - x),
+        (SplitDirection::Down, height - y),
+        (SplitDirection::Left, x),
+    ]
+    .into_iter()
+    .min_by(|(_, a), (_, b)| a.total_cmp(b))
+    .filter(|&(_, distance)| distance < band)
+    .map(|(direction, _)| direction)
 }
 
 impl Layout {

@@ -91,12 +91,11 @@ fn dragging_an_inactive_tab_keeps_the_active_one_and_the_mru(cx: &mut TestAppCon
     check(&window, &mut cx);
 }
 
-/// R7.
+/// R7. The body's middle, since its edges split (splits spec, P4).
 #[gpui::test]
 fn a_drop_outside_the_tabs_moves_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, c, _]) = abc(cx);
-    let bar = cx.debug_bounds("tab-bar").expect("drawn");
-    let editor = point(bar.center().x, bar.bottom() + px(100.));
+    let editor = cx.debug_bounds("note-column").expect("drawn").center();
 
     drag_to(&mut cx, "tab-0", editor);
 

@@ -6,8 +6,8 @@ use gpui::KeyBinding;
 use crate::Quit;
 use crate::command_palette;
 use crate::editor::actions::{
-    Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, Newline, Paste, Redo,
-    SelectDown, SelectUp, Undo, Up,
+    Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, FollowLinkInSplit, Newline,
+    Paste, Redo, SelectDown, SelectUp, Undo, Up,
 };
 use crate::field::{Cancel, Confirm};
 use crate::picker;
@@ -56,6 +56,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-enter", FollowLink, editor),
         // `enter` keeps shift on macOS, unlike a character key (gpui_macos `events.rs`).
         KeyBinding::new("cmd-shift-enter", FollowLinkInNewTab, editor),
+        KeyBinding::new("cmd-alt-enter", FollowLinkInSplit, editor),
         KeyBinding::new("cmd-c", Copy, editor),
         KeyBinding::new("cmd-x", Cut, editor),
         KeyBinding::new("cmd-v", Paste, editor),

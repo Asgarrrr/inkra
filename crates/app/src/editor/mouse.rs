@@ -44,7 +44,9 @@ impl EditorView {
             && let Some(link) = self.link_under(event.position, cx)
         {
             // `⇧` adds the new tab: a mouse event keeps it, only a key's character clears it.
-            let open = if event.modifiers.shift {
+            let open = if event.modifiers.alt {
+                Open::SplitRight
+            } else if event.modifiers.shift {
                 Open::NewTab
             } else {
                 Open::Here

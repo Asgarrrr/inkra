@@ -45,6 +45,8 @@ pub(super) struct Group {
     /// Held, never detached: dropping a `Task` cancels it, so a superseded
     /// load cannot rebind the editor behind a later activation.
     pub(super) activation: Option<Task<()>>,
+    /// The edge a drop held over the body would split towards; written on each drag move.
+    pub(super) drop_split: Option<SplitDirection>,
 }
 
 impl Group {
@@ -76,6 +78,7 @@ impl Group {
             shown,
             tab_scroll: ScrollHandle::new(),
             activation: None,
+            drop_split: None,
         }
     }
 
@@ -204,7 +207,19 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         match self.layout.surface_of(group) {
-            Surface::Center => self.split(group, direction, window, cx),
+            Surface::Center => {
+                let place = self
+                    .group(group)
+                    .shown
+                    .bound()
+                    .map_or(Place::Empty, |bound| {
+                        Place::Note(OnNote {
+                            note: bound.note,
+                            view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
+                        })
+                    });
+                self.split_group(group, direction, place, window, cx);
+            }
             Surface::Dock(_) => {
                 if let Some(view) = self.group(group).shown.view() {
                     self.split_view(&SplitView { view, direction }, window, cx);
@@ -213,32 +228,31 @@ impl AppShell {
         }
     }
 
-    /// The new group shows the note with the caret it had, and takes the focus.
-    fn split(
+    /// A fresh group on `from`'s `direction` side shows `place` and takes the focus; `None` where a
+    /// half would fall below its minimum.
+    pub(super) fn split_group(
         &mut self,
         from: GroupId,
         direction: SplitDirection,
+        place: Place,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<GroupId> {
+        let mut fresh = None;
         self.change_layout(window, cx, |shell, window, cx| {
             if !shell.fits_split(from, direction.axis(), window) {
                 return;
             }
-            let on = shell.group(from).shown.bound().map(|bound| OnNote {
-                note: bound.note,
-                view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
-            });
             let split = shell.layout.split(from, direction);
             shell.groups.insert(split, Group::new());
-            if let Some(on) = on {
-                shell.display(split, Place::Note(on), window, cx);
-            }
+            shell.display(split, place, window, cx);
             shell.switch_group(split, cx);
+            fresh = Some(split);
         });
         if let Some(focus) = self.land_focus(cx) {
             window.focus(&focus, cx);
         }
+        fresh
     }
 
     /// Focus moves to the group past the active one's edge: a centre group's content, or the
