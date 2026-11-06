@@ -74,14 +74,14 @@ impl AppShell {
             .on_mouse_down(MouseButton::Left, keep_focus)
             .child(
                 IconButton::new("nav-back", IconName::ArrowLeft, "Go back")
-                    .disabled(!self.tabs.can_go_back(showing))
+                    .disabled(!self.center().tabs.can_go_back(showing))
                     .on_click(cx.listener(|shell, _, window, cx| {
                         shell.go_back(&GoBack, window, cx);
                     })),
             )
             .child(
                 IconButton::new("nav-forward", IconName::ArrowRight, "Go forward")
-                    .disabled(!self.tabs.can_go_forward(showing))
+                    .disabled(!self.center().tabs.can_go_forward(showing))
                     .on_click(cx.listener(|shell, _, window, cx| {
                         shell.go_forward(&GoForward, window, cx);
                     })),

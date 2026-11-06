@@ -1,15 +1,20 @@
 //! The two docks: the view each draws under its header, and the toggles that show and hide them (docks spec).
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use gpui::{
     Action, AnyElement, App, AppContext, Context, Div, Focusable, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString,
     StatefulInteractiveElement, Styled, Window, actions, div, prelude::FluentBuilder,
 };
-use inkra_layout::{Docks, Side, View};
+use inkra_layout::{GroupId, Side, View};
+use inkra_tabs::{Closed, TabId};
 
 use super::dock_drag::DraggedView;
+use super::group::Group;
+use super::parked::Parked;
+use super::tabs::{Place, capture};
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::Sidebar;
 use crate::theme;
@@ -24,6 +29,9 @@ actions!(
         MoveBacklinksToOtherDock
     ]
 );
+
+/// Each dock's views in tab order, active view and flag, left then right.
+pub(super) type DockState = [(Vec<View>, Option<View>, bool); 2];
 
 pub(super) fn title(view: View) -> &'static str {
     match view {
@@ -90,7 +98,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.change_docks(window, cx, |docks| docks.toggle(Side::Left));
+        self.toggle_dock(Side::Left, window, cx);
     }
 
     pub(super) fn toggle_right_dock(
@@ -99,7 +107,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.change_docks(window, cx, |docks| docks.toggle(Side::Right));
+        self.toggle_dock(Side::Right, window, cx);
     }
 
     pub(super) fn move_files_to_other_dock(
@@ -121,10 +129,8 @@ impl AppShell {
     }
 
     fn move_to_other_dock(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
-        self.change_docks(window, cx, |docks| {
-            let side = docks.side_of(view).other();
-            docks.append(view, side);
-        });
+        let side = self.side_of(view).other();
+        self.append(view, side, window, cx);
     }
 
     /// `view`'s menu: move it to the other dock, or hide its own.
@@ -135,10 +141,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(panes) = &self.panes else {
+        if self.panes.is_none() {
             return;
-        };
-        let side = panes.docks.side_of(view);
+        }
+        let side = self.side_of(view);
         let move_label = match side.other() {
             Side::Left => "Move to Left Dock",
             Side::Right => "Move to Right Dock",
@@ -159,26 +165,176 @@ impl AppShell {
         self.open_menu(menu, at, window, cx);
     }
 
-    /// The one writer of `docks`. A hidden tree keeps neither focus nor an open name field: either
+    pub(super) fn toggle_dock(&mut self, side: Side, window: &mut Window, cx: &mut Context<Self>) {
+        self.change_layout(window, cx, |shell, _, _| shell.layout.toggle(side));
+    }
+
+    /// Activates `view` in its dock and shows that dock.
+    pub(super) fn reveal(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
+        self.change_layout(window, cx, |shell, window, cx| {
+            let (side, group, tab) = shell.tab_of(view);
+            shell.activate_tab(group, tab, window, cx);
+            shell.layout.show(side);
+        });
+    }
+
+    /// Docks rules 1 and 2. `index` counts in `side`'s dock after `view` left it.
+    ///
+    /// # Panics
+    /// If `index` is past the end of that dock.
+    pub(super) fn move_view(
+        &mut self,
+        view: View,
+        side: Side,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.change_layout(window, cx, |shell, window, cx| {
+            let (from, source, tab) = shell.tab_of(view);
+            let len = shell.dock_views(side).len() - usize::from(from == side);
+            assert!(
+                index <= len,
+                "index {index} is past the end of a dock of {len}"
+            );
+            if from == side {
+                shell.group_mut(source).tabs.move_tab(tab, index);
+                shell.activate_tab(source, tab, window, cx);
+            } else {
+                shell.take_view_tab(source, tab, window, cx);
+                shell.put_view_tab(view, side, index, window, cx);
+            }
+            shell.layout.show(side);
+        });
+    }
+
+    /// Moves `view` to the end of `side`'s dock, as `move_view` does.
+    pub(super) fn append(
+        &mut self,
+        view: View,
+        side: Side,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let index = self.dock_views(side).len() - usize::from(self.side_of(view) == side);
+        self.move_view(view, side, index, window, cx);
+    }
+
+    /// A dock's last tab takes its group with it (docks rule 3).
+    fn take_view_tab(
+        &mut self,
+        group: GroupId,
+        tab: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.group(group).tabs.count() == 1 {
+            self.layout.remove(group);
+            self.groups.remove(&group);
+            return;
+        }
+        let Group { tabs, shown, .. } = self.group_mut(group);
+        let closed = tabs.close(tab, |slot| match slot {
+            None => capture(shown, cx),
+            Some(parked) => parked.unpark(cx),
+        });
+        if let Some(Closed {
+            shown: Some((_, parked)),
+            ..
+        }) = closed
+        {
+            let place = parked.unpark(cx);
+            self.display(group, place, window, cx);
+        }
+    }
+
+    fn put_view_tab(
+        &mut self,
+        view: View,
+        side: Side,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(group) = self.layout.dock(side) else {
+            let group = self.layout.add_dock(side);
+            self.groups.insert(group, Group::holding(&[view], 0));
+            return;
+        };
+        let Group { tabs, shown, .. } = self.group_mut(group);
+        tabs.insert(index, || Parked::park(shown, cx));
+        self.display(group, Place::View(view), window, cx);
+    }
+
+    /// Its dock is drawn and it is that dock's active view.
+    pub(super) fn is_visible(&self, view: View) -> bool {
+        let (side, group, _) = self.tab_of(view);
+        self.layout.is_drawn(side) && self.group(group).shown.view() == Some(view)
+    }
+
+    pub(super) fn side_of(&self, view: View) -> Side {
+        self.tab_of(view).0
+    }
+
+    /// In tab order; empty for a dock with no group.
+    pub(super) fn dock_views(&self, side: Side) -> Vec<View> {
+        self.layout.dock(side).map_or_else(Vec::new, |group| {
+            self.group(group).views().map(|(_, view)| view).collect()
+        })
+    }
+
+    pub(super) fn dock_active(&self, side: Side) -> Option<View> {
+        self.group(self.layout.dock(side)?).shown.view()
+    }
+
+    /// # Panics
+    /// Only on a broken invariant: each view sits in exactly one dock tab.
+    fn tab_of(&self, view: View) -> (Side, GroupId, TabId) {
+        for side in [Side::Left, Side::Right] {
+            let Some(group) = self.layout.dock(side) else {
+                continue;
+            };
+            if let Some((tab, _)) = self.group(group).views().find(|&(_, held)| held == view) {
+                return (side, group, tab);
+            }
+        }
+        panic!("{view:?} sits in no dock");
+    }
+
+    pub(super) fn dock_state(&self) -> DockState {
+        [Side::Left, Side::Right].map(|side| {
+            (
+                self.dock_views(side),
+                self.dock_active(side),
+                self.layout.is_shown(side),
+            )
+        })
+    }
+
+    /// The one writer of `layout` and the dock groups. A hidden tree keeps neither focus nor an open name field: either
     /// would take keys out of sight. An open menu closes: it describes the layout it opened on.
-    pub(super) fn change_docks(
+    pub(super) fn change_layout(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        change: impl FnOnce(&mut Docks),
+        change: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>),
     ) {
         if self.modal_menu().is_some() {
             self.dismiss_modal(window, cx);
         }
-        let Some(panes) = &mut self.panes else {
-            return;
-        };
-        let before = panes.docks.clone();
-        change(&mut panes.docks);
-        if panes.docks == before {
+        if self.panes.is_none() {
             return;
         }
-        if before.is_visible(View::Files) && !panes.docks.is_visible(View::Files) {
+        let (layout, docks) = (self.layout.clone(), self.dock_state());
+        let files_shown = self.is_visible(View::Files);
+        change(self, window, cx);
+        if self.layout == layout && self.dock_state() == docks {
+            return;
+        }
+        if files_shown
+            && !self.is_visible(View::Files)
+            && let Some(panes) = &self.panes
+        {
             let sidebar = panes.sidebar.clone();
             let focused = sidebar.focus_handle(cx).contains_focused(window, cx);
             sidebar.update(cx, Sidebar::cancel_edit);
@@ -186,8 +342,41 @@ impl AppShell {
                 window.focus(&focus, cx);
             }
         }
+        if cfg!(debug_assertions) {
+            self.check_layout();
+        }
         cx.notify();
         self.save_session_later(cx);
+    }
+
+    /// Debug builds check these after every layout change and the launch's.
+    ///
+    /// # Panics
+    /// On a broken one.
+    pub(super) fn check_layout(&self) {
+        let held: HashSet<GroupId> = self.layout.groups().collect();
+        assert_eq!(
+            self.groups.keys().copied().collect::<HashSet<_>>(),
+            held,
+            "a group for each of the layout's, and no other"
+        );
+        assert_eq!(self.center().views().count(), 0, "the centre holds no view");
+        let mut views = Vec::new();
+        for side in [Side::Left, Side::Right] {
+            if let Some(group) = self.layout.dock(side) {
+                let group = self.group(group);
+                assert_eq!(
+                    group.views().count(),
+                    group.tabs.count(),
+                    "a dock tab holds a view"
+                );
+                views.extend(group.views().map(|(_, view)| view));
+            }
+        }
+        for view in View::ALL {
+            let tabs = views.iter().filter(|&&held| held == view).count();
+            assert_eq!(tabs, 1, "{view:?} sits in exactly one tab");
+        }
     }
 
     /// `None` with no vault or an undrawn dock. A hidden view keeps its entity, so it comes back as it was left.
@@ -197,11 +386,12 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
         let panes = self.panes.as_ref()?;
-        let dock = panes.docks.dock(side);
-        if !dock.is_drawn() {
+        if !self.layout.is_drawn(side) {
             return None;
         }
-        let view = dock.active()?;
+        let group = self.group(self.layout.dock(side)?);
+        let view = group.shown.view()?;
+        let views: Vec<_> = group.views().map(|(_, view)| view).collect();
         let (body, count) = match view {
             View::Files => (panes.sidebar.clone().into_any_element(), None),
             View::Backlinks => (
@@ -218,8 +408,7 @@ impl AppShell {
             .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    let view = dragged.view;
-                    shell.change_docks(window, cx, |docks| docks.append(view, side));
+                    shell.append(dragged.view, side, window, cx);
                 }),
             );
         let column = match side {
@@ -227,7 +416,7 @@ impl AppShell {
             Side::Right => column.border_l(theme::RULE_WIDTH),
         };
         let header =
-            match dock.views() {
+            match views.as_slice() {
                 [_] => div()
                     .id(("dock-title-drag", usize::from(side == Side::Right)))
                     .on_drag(DraggedView { view, index: 0 }, |dragged, _, _, cx| {
@@ -254,7 +443,7 @@ impl AppShell {
         )
     }
 
-    /// Rule 4: a click on the active icon changes nothing, as `change_docks` drops an equal layout.
+    /// Rule 4: a click on the active icon changes nothing, as `change_layout` drops an equal layout.
     /// A drop on it inserts at `ix`, counted after the dragged view left (`Tabs::move_tab`'s rule).
     fn render_dock_icon(
         view: View,
@@ -269,7 +458,7 @@ impl AppShell {
             .tooltip(Tooltip::text(title(view)))
             .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
             .on_click(cx.listener(move |shell, _, window, cx| {
-                shell.change_docks(window, cx, |docks| docks.reveal(view));
+                shell.reveal(view, window, cx);
             }))
             .on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
                 cx.new(|_| dragged.clone())
@@ -286,8 +475,7 @@ impl AppShell {
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    let dragged = dragged.view;
-                    shell.change_docks(window, cx, |docks| docks.move_view(dragged, side, ix));
+                    shell.move_view(dragged.view, side, ix, window, cx);
                 }),
             )
             .into_any_element()
@@ -312,12 +500,10 @@ impl AppShell {
         Option<impl IntoElement + use<>>,
         Option<impl IntoElement + use<>>,
     ) {
-        let docks = self.panes.as_ref().map(|panes| &panes.docks);
-        let has_views = |side| docks.is_some_and(|docks| !docks.dock(side).views().is_empty());
-        let shown = |side| docks.is_some_and(|docks| docks.dock(side).is_shown());
+        let has_views = |side| self.panes.is_some() && self.layout.dock(side).is_some();
         let left = has_views(Side::Left).then(|| {
             IconButton::new("dock-toggle-left", IconName::PanelLeft, "Toggle left dock")
-                .toggled(shown(Side::Left))
+                .toggled(self.layout.is_shown(Side::Left))
                 .on_click(cx.listener(|shell, _, window, cx| {
                     shell.toggle_left_dock(&ToggleLeftDock, window, cx);
                 }))
@@ -328,7 +514,7 @@ impl AppShell {
                 IconName::PanelRight,
                 "Toggle right dock",
             )
-            .toggled(shown(Side::Right))
+            .toggled(self.layout.is_shown(Side::Right))
             .on_click(cx.listener(|shell, _, window, cx| {
                 shell.toggle_right_dock(&ToggleRightDock, window, cx);
             }))

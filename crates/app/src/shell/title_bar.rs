@@ -21,9 +21,8 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::current(cx).colors;
-        let docks = self.panes.as_ref().map(|panes| &panes.docks);
-        let left_drawn = docks.is_some_and(|docks| docks.dock(Side::Left).is_drawn());
-        let right_drawn = docks.is_some_and(|docks| docks.dock(Side::Right).is_drawn());
+        let drawn = |side| self.panes.is_some() && self.layout.is_drawn(side);
+        let (left_drawn, right_drawn) = (drawn(Side::Left), drawn(Side::Right));
         let (left_toggle, right_toggle) = self.render_dock_toggles(cx);
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {

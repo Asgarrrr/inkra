@@ -7,6 +7,7 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size}
 use inkra_layout::{Side, View};
 use inkra_vault::mem_fs::MemFs;
 
+use super::dock_menu::docks;
 use super::tab_bar::click;
 use super::{
     ab_focused, editor_focused, focus_tree, keys, no_vault, open, selected, shell_focused,
@@ -228,7 +229,7 @@ fn move_view(cx: &mut VisualTestContext, view: View) {
 
 fn active(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, side: Side) -> Option<View> {
     window
-        .update(cx, |shell, _, _| shell.panes().docks.dock(side).active())
+        .update(cx, |shell, _, _| shell.dock_active(side))
         .unwrap()
 }
 
@@ -263,15 +264,11 @@ fn a_click_on_an_inactive_icon_activates_its_view(cx: &mut TestAppContext) {
 fn a_click_on_the_active_icon_changes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
     move_view(&mut cx, View::Backlinks);
-    let before = window
-        .update(&mut cx, |shell, _, _| shell.panes().docks.clone())
-        .unwrap();
+    let before = docks(&window, &mut cx);
 
     click(&mut cx, "dock-icon-backlinks");
 
-    let after = window
-        .update(&mut cx, |shell, _, _| shell.panes().docks.clone())
-        .unwrap();
+    let after = docks(&window, &mut cx);
     assert_eq!(after, before);
 }
 

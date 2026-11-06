@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Docks, Side};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
@@ -101,7 +100,7 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
             PathBuf::from("/vault"),
             1,
             vec![tab("a.md", 2, 4), tab("b.md", 1, 3), empty],
-            Some(SavedDocks::from(&Docks::default())),
+            Some(SavedDocks::default()),
         ))
     );
 }
@@ -114,8 +113,8 @@ fn a_dock_toggle_is_saved(cx: &mut TestAppContext) {
     wait(&mut cx, THROTTLE);
 
     let docks = saved(&fs).and_then(|session| session.docks);
-    let docks = docks.expect("a saved layout").docks();
-    assert!(!docks.dock(Side::Right).is_shown());
+    let [_, (_, _, right_shown)] = docks.expect("a saved layout").views();
+    assert!(!right_shown);
 }
 
 /// A parked view is saved where its anchors are now, not where the tab left it.
@@ -212,7 +211,7 @@ fn a_tab_dropped_elsewhere_in_the_bar_is_saved(cx: &mut TestAppContext) {
     let (fs, window, mut cx, _b) = two_tabs_saved(cx);
     window
         .update(&mut cx, |shell, _, cx| {
-            let id = shell.tabs.id_at(1).unwrap();
+            let id = shell.center().tabs.id_at(1).unwrap();
             shell.move_tab(id, 0, cx);
         })
         .unwrap();
@@ -230,7 +229,7 @@ fn an_inactive_tab_closed_is_saved(cx: &mut TestAppContext) {
     let (fs, window, mut cx, _b) = two_tabs_saved(cx);
     window
         .update(&mut cx, |shell, window, cx| {
-            let id = shell.tabs.id_at(0).unwrap();
+            let id = shell.center().tabs.id_at(0).unwrap();
             shell.close_tab(id, window, cx);
         })
         .unwrap();

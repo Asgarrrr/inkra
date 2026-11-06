@@ -103,9 +103,7 @@ fn choosing_move_files_moves_the_tree_right(cx: &mut TestAppContext) {
     visual.simulate_keystrokes("cmd-shift-p m o v e space f i l e s enter");
     visual.run_until_parked();
     let side = window
-        .update(&mut visual, |shell, _, _| {
-            shell.panes().docks.side_of(View::Files)
-        })
+        .update(&mut visual, |shell, _, _| shell.side_of(View::Files))
         .unwrap();
     assert_eq!(side, Side::Right);
 }

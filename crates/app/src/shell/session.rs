@@ -1,16 +1,19 @@
 //! The session file behind the shell: throttled writes, the quit write, and the one-shot restore (restore-tabs spec, R5–R6).
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui::{App, Context, Entity, Subscription, Task, Window};
+use inkra_layout::{GroupId, Layout, Side};
 use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
 use inkra_text::Buffer;
 
+use super::group::Group;
 use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ParkedView;
-use crate::restore::{Opened, Plan, Restored, SavedDocks, Session, SessionWriter};
+use crate::restore::{Opened, Plan, Restored, SavedDock, SavedDocks, Session, SessionWriter};
 use crate::vault::NoteStore;
 
 /// A crash loses at most this much of the tab changes, never text: autosave writes that.
@@ -35,6 +38,27 @@ pub(super) struct SessionFile {
 }
 
 impl AppShell {
+    /// The centre's one empty group and the dock groups `saved` holds; docks rule 6's with none.
+    pub(super) fn dock_groups(saved: Option<&SavedDocks>) -> (Layout, HashMap<GroupId, Group>) {
+        let mut layout = Layout::default();
+        let mut groups = HashMap::from([(layout.center(), Group::new())]);
+        let docks = saved.map_or_else(|| SavedDocks::default().views(), SavedDocks::views);
+        for (side, (views, active, shown)) in [Side::Left, Side::Right].into_iter().zip(docks) {
+            let Some(group) = layout.dock(side) else {
+                panic!("the default layout has a group in each dock");
+            };
+            if views.is_empty() {
+                layout.remove(group);
+            } else {
+                groups.insert(group, Group::holding(&views, active));
+            }
+            if !shown {
+                layout.toggle(side);
+            }
+        }
+        (layout, groups)
+    }
+
     /// A vault launch with a session file keeps its writer; it waits on the walk only with a session read.
     /// Spawns nothing: the vault's notify tries the restore and arms the throttle.
     pub(super) fn open_session(
@@ -96,12 +120,17 @@ impl AppShell {
         if !matches!(self.restore, Restore::Done) {
             return None;
         }
+        let docks = self
+            .panes
+            .as_ref()
+            .map(|_| SavedDocks::new(self.saved_dock(Side::Left), self.saved_dock(Side::Right)));
         let session = self.session.as_mut()?;
-        let shown = &self.shown;
+        let center = &self.groups[&self.layout.center()];
+        let shown = &center.shown;
         let notes = self.notes.read(cx);
         let vault = notes.vault()?.read(cx);
         // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
-        let tabs = self.tabs.iter().map(|tab| match tab.place() {
+        let tabs = center.tabs.iter().map(|tab| match tab.place() {
             None => shown.bound().map_or((None, None), |bound| {
                 (Some(bound.note), Some(bound.editor.read(cx).view_state()))
             }),
@@ -111,12 +140,19 @@ impl AppShell {
             vault,
             tabs,
             |id| notes.vault_path(id, cx),
-            self.tabs.active_index(),
-            self.panes
-                .as_ref()
-                .map(|panes| SavedDocks::from(&panes.docks)),
+            center.tabs.active_index(),
+            docks,
             cx,
         )
+    }
+
+    /// An empty dock saves no view, at index 0.
+    fn saved_dock(&self, side: Side) -> SavedDock {
+        let active = self
+            .layout
+            .dock(side)
+            .map_or(0, |group| self.group(group).tabs.active_index());
+        SavedDock::new(self.dock_views(side), active, self.layout.is_shown(side))
     }
 
     /// Until `Done`, the empty state says nothing: the restore may still fill it.
@@ -158,10 +194,11 @@ impl AppShell {
 
     /// Nothing the restore would replace: one tab, empty, no open pending, nothing to reopen.
     fn holds_nothing(&self) -> bool {
-        self.tabs.count() == 1
-            && matches!(self.shown, Shown::Empty)
-            && self.activation.is_none()
-            && !self.tabs.has_closed()
+        let center = self.center();
+        center.tabs.count() == 1
+            && matches!(center.shown, Shown::Empty)
+            && center.activation.is_none()
+            && !center.tabs.has_closed()
     }
 
     fn land_restore(
@@ -194,11 +231,12 @@ impl AppShell {
             .collect();
         // `restored` drops the active entry: `bind` shows it, and a default one holds no anchor.
         places.insert(active, Parked::default());
-        self.tabs = Tabs::restored(places, active);
+        let center = self.layout.center();
+        self.group_mut(center).tabs = Tabs::restored(places, active);
         let since = self.tree_cursor(cx);
-        self.bind(shown.note, shown.buffer, shown.view, since, cx);
+        self.bind(center, shown.note, shown.buffer, shown.view, since, cx);
         self.focus_note_from_root(window, cx);
-        self.keep_active_tab_visible();
+        self.keep_active_tab_visible(center);
         cx.notify();
     }
 

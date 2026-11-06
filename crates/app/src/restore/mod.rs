@@ -12,7 +12,7 @@ use futures::lock::Mutex;
 use gpui::{App, AppContext as _, Task};
 use inkra_vault::{EntryId, Fs, Vault};
 
-pub(crate) use format::{SavedDocks, SavedTab, SavedView, Session, session_file};
+pub(crate) use format::{SavedDock, SavedDocks, SavedTab, SavedView, Session, session_file};
 pub(crate) use plan::{Plan, Restored};
 
 use crate::editor::ViewState;

@@ -4,10 +4,12 @@ use std::ops::Range;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Window};
 use inkra_index::{Resolution, Target};
+use inkra_layout::GroupId;
 use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
+use super::group::Group;
 use super::tabs::capture;
 use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
@@ -22,13 +24,15 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let (tab, since) = (self.tabs.active(), self.tree_cursor(cx));
+        let center = self.layout.center();
+        let (tab, since) = (self.group(center).tabs.active(), self.tree_cursor(cx));
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
-        self.activation = Some(cx.spawn(async move |shell, cx| {
+        self.group_mut(center).activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
+                let Group { tabs, shown, .. } = shell.group_mut(center);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
-                if !shell.tabs.commit(tab, || capture(&shell.shown, cx)) {
+                if !tabs.commit(tab, || capture(shown, cx)) {
                     return;
                 }
                 shell.land(id, buffer, at, since, window, cx);
@@ -45,7 +49,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let editor = self.bind(id, buffer, None, since, cx);
+        let editor = self.bind(self.layout.center(), id, buffer, None, since, cx);
         if let Some(range) = at {
             editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
         }
@@ -76,7 +80,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if self.showing() == Some(id) {
-            self.activation = None;
+            self.center_mut().activation = None;
             if let (Some(range), Some(editor)) = (at, self.editor()) {
                 cx.with_window(cx.entity_id(), |window, cx| {
                     editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
@@ -117,22 +121,31 @@ impl AppShell {
     }
 
     /// The one place `shown` changes; the highlight moves only if the tree's cursor is still `since`.
-    pub(super) fn set_shown(&mut self, shown: Shown, since: Cursor, cx: &mut Context<Self>) {
-        self.shown = shown;
-        let note = self.showing();
-        if let Some(id) = note {
-            remember(&mut self.recent, id);
-        }
-        if let Some(panes) = &self.panes {
-            // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
+    /// Only the centre's change reaches the note's followers.
+    pub(super) fn set_shown(
+        &mut self,
+        group: GroupId,
+        shown: Shown,
+        since: Cursor,
+        cx: &mut Context<Self>,
+    ) {
+        self.group_mut(group).shown = shown;
+        if group == self.layout.center() {
+            let note = self.showing();
             if let Some(id) = note {
-                panes
-                    .sidebar
-                    .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
+                remember(&mut self.recent, id);
             }
-            panes
-                .backlinks
-                .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+            if let Some(panes) = &self.panes {
+                // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
+                if let Some(id) = note {
+                    panes
+                        .sidebar
+                        .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
+                }
+                panes
+                    .backlinks
+                    .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+            }
         }
         self.save_session_later(cx);
     }
@@ -171,6 +184,7 @@ impl AppShell {
     /// Binds `id` into the editor, then `showing` and `current`, with no `await` between.
     pub(super) fn bind(
         &mut self,
+        group: GroupId,
         id: EntryId,
         buffer: Entity<Buffer>,
         view: Option<ViewState>,
@@ -178,7 +192,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Entity<EditorView> {
         let mut view = view;
-        let editor = match &self.shown {
+        let editor = match &self.group(group).shown {
             Shown::Bound(bound) if bound.note == id => bound.editor.clone(),
             // A rebind restores the view itself, clipped to the new buffer.
             Shown::Bound(bound) => {
@@ -186,7 +200,7 @@ impl AppShell {
                 editor.update(cx, |editor, cx| editor.open_buffer(buffer, view.take(), cx));
                 editor
             }
-            Shown::Empty | Shown::Trashing(_) => {
+            Shown::Empty | Shown::Trashing(_) | Shown::View(_) => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
                 Self::watch_editor(&editor, cx);
                 editor
@@ -196,6 +210,7 @@ impl AppShell {
             editor.update(cx, |editor, cx| editor.restore(view, cx));
         }
         self.set_shown(
+            group,
             Shown::Bound(Bound {
                 note: id,
                 editor: editor.clone(),
@@ -203,14 +218,16 @@ impl AppShell {
             since,
             cx,
         );
-        self.notes.update(cx, |notes, cx| notes.set_current(id, cx));
+        if group == self.layout.center() {
+            self.notes.update(cx, |notes, cx| notes.set_current(id, cx));
+        }
         editor
     }
 
     /// Before the editor drops: focus on a dropped handle reaches no action.
-    pub(super) fn unfocus_editor(&self, window: &mut Window, cx: &mut App) {
-        if let Some(editor) = self.editor()
-            && editor.focus_handle(cx).contains_focused(window, cx)
+    pub(super) fn unfocus_editor(&self, group: GroupId, window: &mut Window, cx: &mut App) {
+        if let Some(bound) = self.group(group).shown.bound()
+            && bound.editor.focus_handle(cx).contains_focused(window, cx)
         {
             window.focus(&self.focus_handle, cx);
         }

@@ -1,12 +1,12 @@
-use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, ScrollHandle, Task, Window, px,
-};
+use std::collections::HashMap;
+
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, px};
 use inkra_vault::{EntryId, Kind};
 
 use crate::editor::EditorView;
 use crate::open::NoteActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
-use crate::restore::{Opened, SavedDocks};
+use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
 use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
@@ -15,6 +15,7 @@ use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 mod activation;
 mod dock_drag;
 mod docks;
+mod group;
 mod modal;
 mod notice;
 mod palette;
@@ -28,14 +29,12 @@ mod tabs;
 mod themes;
 mod title_bar;
 
-use inkra_layout::View;
-use inkra_tabs::Tabs;
+use group::Group;
+use inkra_layout::{GroupId, Layout, View};
 use modal::Modal;
 use notice::{Notice, reason};
 use panes::VaultPanes;
-use parked::Parked;
 use session::{Restore, SessionFile};
-use tabs::Place;
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
 pub(crate) use tabs::{
@@ -68,39 +67,43 @@ enum Shown {
     /// The note's trash is pending: no editor until `NoteClosed` or `TrashFailed`.
     /// Entered only from a bound note, so a failed trash always finds its buffer again.
     Trashing(EntryId),
+    View(View),
 }
 
 impl Shown {
     fn bound(&self) -> Option<&Bound> {
         match self {
             Self::Bound(bound) => Some(bound),
-            Self::Empty | Self::Trashing(_) => None,
+            Self::Empty | Self::Trashing(_) | Self::View(_) => None,
         }
     }
 
     /// The note the tab is on, bound or being trashed.
     fn note(&self) -> Option<EntryId> {
         match self {
-            Self::Empty => None,
+            Self::Empty | Self::View(_) => None,
             Self::Bound(Bound { note, .. }) | Self::Trashing(note) => Some(*note),
+        }
+    }
+
+    fn view(&self) -> Option<View> {
+        match self {
+            Self::View(view) => Some(*view),
+            Self::Empty | Self::Bound(_) | Self::Trashing(_) => None,
         }
     }
 }
 
 pub(crate) struct AppShell {
-    /// Written only by `set_shown`. Not `NoteStore::current`, which `trash` clears first.
-    shown: Shown,
+    /// Where each group sits; written only by `change_layout`, and by the launch.
+    layout: Layout,
+    /// One per group of `layout`, with no other key.
+    groups: HashMap<GroupId, Group>,
     notes: Entity<NoteStore>,
     /// `None` with no vault: the launch settles the mode once.
     panes: Option<VaultPanes>,
     /// Root of the dispatch tree while no editor exists — load-bearing, see `render`.
     focus_handle: FocusHandle,
-    tabs: Tabs<Place, Parked>,
-    /// The bar's horizontal scroll, moved to the active tab on every switch.
-    tab_scroll: ScrollHandle,
-    /// Held, never detached: dropping a `Task` cancels it, so a superseded
-    /// load cannot rebind the editor behind a later activation.
-    activation: Option<Task<()>>,
     /// The picker over the window, if any.
     modal: Option<Modal>,
     /// The notes shown, newest first; see `remember`.
@@ -129,17 +132,17 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let docks = session
-            .as_ref()
-            .and_then(|opened| opened.session.as_ref())
-            .and_then(|session| session.docks.as_ref())
-            .map(SavedDocks::docks)
-            .unwrap_or_default();
+        let (layout, mut groups) = Self::dock_groups(
+            session
+                .as_ref()
+                .and_then(|opened| opened.session.as_ref())
+                .and_then(|session| session.docks.as_ref()),
+        );
         let panes = notes
             .read(cx)
             .vault()
             .cloned()
-            .map(|vault| VaultPanes::new(vault, &notes, docks, cx));
+            .map(|vault| VaultPanes::new(vault, &notes, cx));
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }
@@ -176,17 +179,22 @@ impl AppShell {
         let first = notes.read(cx).current();
         let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
         let (session, restore) = Self::open_session(session, &notes, cx);
-        Self {
+        if let Some((editor, note)) = editor.zip(first) {
             // `root` adopts the note it launches with, so its editor comes with `current`.
-            shown: editor.zip(first).map_or(Shown::Empty, |(editor, note)| {
-                Shown::Bound(Bound { note, editor })
-            }),
-            tabs: Tabs::new(),
-            tab_scroll: ScrollHandle::new(),
+            groups.insert(
+                layout.center(),
+                Group {
+                    shown: Shown::Bound(Bound { note, editor }),
+                    ..Group::new()
+                },
+            );
+        }
+        let shell = Self {
+            layout,
+            groups,
             notes,
             panes,
             focus_handle: cx.focus_handle(),
-            activation: None,
             modal: None,
             recent: Vec::new(),
             recent_commands: Vec::new(),
@@ -204,7 +212,11 @@ impl AppShell {
             }),
             backdrop: None,
             themes: ThemeStore::default(),
+        };
+        if cfg!(debug_assertions) {
+            shell.check_layout();
         }
+        shell
     }
 
     #[cfg(feature = "shot")]
@@ -212,14 +224,40 @@ impl AppShell {
         self.backdrop = Some(backdrop);
     }
 
+    /// # Panics
+    /// If `id` is not a group of the layout.
+    fn group(&self, id: GroupId) -> &Group {
+        let Some(group) = self.groups.get(&id) else {
+            panic!("{id:?} has no group");
+        };
+        group
+    }
+
+    /// # Panics
+    /// If `id` is not a group of the layout.
+    fn group_mut(&mut self, id: GroupId) -> &mut Group {
+        let Some(group) = self.groups.get_mut(&id) else {
+            panic!("{id:?} has no group");
+        };
+        group
+    }
+
+    fn center(&self) -> &Group {
+        self.group(self.layout.center())
+    }
+
+    fn center_mut(&mut self) -> &mut Group {
+        self.group_mut(self.layout.center())
+    }
+
     /// The note bound in the editor; `None` on a tab whose note is being trashed.
     pub(super) fn showing(&self) -> Option<EntryId> {
-        self.shown.bound().map(|bound| bound.note)
+        self.center().shown.bound().map(|bound| bound.note)
     }
 
     /// The note the active tab is on, bound or being trashed.
     pub(super) fn active_note(&self) -> Option<EntryId> {
-        self.shown.note()
+        self.center().shown.note()
     }
 
     /// Read when an open or a tab op begins; a synchronous op reads it in its own update.
@@ -230,7 +268,7 @@ impl AppShell {
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
-        self.shown.bound().map(|bound| &bound.editor)
+        self.center().shown.bound().map(|bound| &bound.editor)
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
@@ -276,7 +314,7 @@ impl AppShell {
 
     /// Reveals the tree first: the name field it focuses must be drawn.
     fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
-        self.change_docks(window, cx, |docks| docks.reveal(View::Files));
+        self.reveal(View::Files, window, cx);
         if let Some(panes) = &self.panes {
             panes.sidebar.update(cx, |sidebar, cx| {
                 sidebar.start_creating(kind, window, cx);
@@ -308,7 +346,8 @@ impl AppShell {
 impl AppShell {
     /// Where tab `ix` was drawn last, for a scene to press on; `None` before the bar is drawn.
     pub(crate) fn tab_center(&self, ix: usize) -> Option<gpui::Point<Pixels>> {
-        self.tab_scroll
+        self.center()
+            .tab_scroll
             .bounds_for_item(ix)
             .map(|bounds| bounds.center())
     }

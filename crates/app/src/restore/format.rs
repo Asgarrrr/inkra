@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use inkra_layout::{Docks, Side, StoredDock};
+use inkra_layout::{StoredDock, View, restore_views};
 use serde::{Deserialize, Deserializer, Serialize};
 
 const VERSION: u32 = 1;
@@ -61,35 +61,50 @@ fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SavedDoc
     Ok(serde_json::from_value(value).ok())
 }
 
-impl From<&Docks> for SavedDocks {
-    fn from(docks: &Docks) -> Self {
-        let saved = |side| {
-            let StoredDock {
-                views,
-                active,
-                shown,
-            } = docks.state(side);
-            SavedDock {
-                views,
-                active,
-                shown,
-            }
-        };
-        Self {
-            left: saved(Side::Left),
-            right: saved(Side::Right),
-        }
+/// Docks rule 6: Files left, Backlinks right, both shown.
+impl Default for SavedDocks {
+    fn default() -> Self {
+        Self::new(
+            SavedDock::new([View::Files], 0, true),
+            SavedDock::new([View::Backlinks], 0, true),
+        )
     }
 }
 
 impl SavedDocks {
-    pub(crate) fn docks(&self) -> Docks {
-        let stored = |dock: &SavedDock| StoredDock {
-            views: dock.views.clone(),
-            active: dock.active,
-            shown: dock.shown,
-        };
-        Docks::restore(stored(&self.left), stored(&self.right))
+    pub(crate) fn new(left: SavedDock, right: SavedDock) -> Self {
+        Self { left, right }
+    }
+
+    /// Each dock's views, its active index and its flag, left then right; each view in exactly one.
+    pub(crate) fn views(&self) -> [(Vec<View>, usize, bool); 2] {
+        let [(left, left_active), (right, right_active)] =
+            restore_views(&self.left.stored(), &self.right.stored());
+        [
+            (left, left_active, self.left.shown),
+            (right, right_active, self.right.shown),
+        ]
+    }
+}
+
+impl SavedDock {
+    pub(crate) fn new(views: impl IntoIterator<Item = View>, active: usize, shown: bool) -> Self {
+        Self {
+            views: views
+                .into_iter()
+                .map(|view| view.name().to_owned())
+                .collect(),
+            active,
+            shown,
+        }
+    }
+
+    fn stored(&self) -> StoredDock {
+        StoredDock {
+            views: self.views.clone(),
+            active: self.active,
+            shown: self.shown,
+        }
     }
 }
 

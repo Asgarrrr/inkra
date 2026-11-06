@@ -188,6 +188,16 @@ Zed's. A double-click equalises the split.
 | Tab drag | Over a group: within `min(w, h) × 0.33` of an edge, the nearest edge wins and the drop splits; else the drop moves the tab into the group. A half-group overlay shows the result. Over a tab strip: reorder or insert. A note tab over a dock shows nothing and drops nothing (L2). |
 | `⌘⌥`-click on a link, `⌘⌥↵` | Open the link in a split to the right of its group (`Open::SplitRight`). |
 
+Zed's keys, checked at zed@526c95d4 via DeepWiki:
+
+- `cmd-k up/down/left/right` binds `pane::SplitUp/Down/Left/Right` in the
+  `Pane` context (`assets/keymaps/default-macos.json:770-773`).
+- `cmd-k cmd-up/down/left/right` binds `workspace::ActivatePaneUp/Down/Left/Right`
+  in the `Workspace` context (`default-macos.json:876-881`).
+
+Zed's drop target size is 0.2 (`assets/settings/default.json:205`), against
+this spec's 0.33; P4 decides.
+
 A split that would leave either side under its minimum size does nothing.
 Dragging a view tab replaces the dock icon drag; the empty-dock drop strips
 stay (dock_drag.rs:30's reason holds).
@@ -252,8 +262,30 @@ stay (dock_drag.rs:30's reason holds).
 ## Slices
 
 Each slice is vertical and lands as its own PR, near 150 lines when possible.
+The P rows below are the phases; this run lands them as S1–S6.
 
 | Slice | Content | User sees |
+|---|---|---|
+| S1 | Groups: one tab group per surface (P0). | Nothing changes (shots compared) |
+| S2 | Two editors on one buffer: a pinned selection and a shared parse. | Nothing yet |
+| S3 | Split Right: a row of centre groups, the last-active group feeding note consumers. | Two notes side by side |
+| S4 | Closing a group (L6) and the tab context menu. | The menu's Split Right and Close |
+| S5 | Split Down: a normalised tree of groups in the centre. | Notes above and below |
+| S6 | Session v2: the tree, every group's tabs and the dock groups, with v1 still read. | Splits survive a relaunch |
+
+A follow-up run covers the rest:
+
+- the Files header (D5);
+- dock tab strips in the title row: view icon tabs, overflow;
+- dock trees (`Option<Member>`);
+- P2 separators: resize, equalise, minimum sizes, the split refusal;
+- P3 `⌘K` keys with `neighbour`, focus-driven activation and the `active` field;
+- P4 tab drag: `take`/`put`, a shared `TabId` counter, views into the centre, the edge zone;
+- P5 `⌘⌥`-click on a link and `Open::SplitRight`.
+
+The phases:
+
+| Phase | Content | User sees |
 |---|---|---|
 | P0 | `Layout` replaces `Docks`: one group per surface, the docks' views as icon tabs of a dock group; the app's `Group` holds what `AppShell` held once. Session v2 with v1 read. | Nothing changes (shots compared) |
 | P1 | Split Right/Down from the tab menu; axis rendering; the title row from `top_groups()`; the Files header; the active group feeding `⌘S`, quick open, history, `Backlinks`. | Two notes side by side |
@@ -262,7 +294,16 @@ Each slice is vertical and lands as its own PR, near 150 lines when possible.
 | P4 | Tab drag between groups, edge drops, views into the centre, note refused on docks. | Drag to split |
 | P5 | `⌘⌥`-click and `⌘⌥↵` open a link in a split. | Links to the side |
 
-P0 may split in two (layout crate, then app) if its diff grows past ~400 lines.
+P0 cannot split into "layout crate, then app": deleting `Docks` breaks the app
+in the same commit, so S1 lands both.
+
+S1's choices:
+
+- `TabId`s stay per group until P4's `take`/`put` *(delegated)*.
+- The dock view logic lives in the app's one writer, `change_layout`;
+  `check_layout` replaces the dock proptest *(delegated)*.
+- The session stays version 1 until S6, a deviation from the P0 row *(delegated)*.
+- Zed's flex epsilon, 0.001, is adopted *(delegated)*.
 
 ## Deferred
 
