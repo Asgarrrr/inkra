@@ -354,6 +354,23 @@ S3's choices:
   (`shot/stage.rs`) is outside the slice's files; it applies to every scene, and
   a scene with one group renders the same.
 
+S4's choices:
+
+- The heir takes the closed group's closed stack *(delegated)*, the tab just closed
+  on top, so `⌘⇧T` still brings it back. Each group keeps its own stack (Tabs), so
+  dropping the stack with its group would lose every tab closed there.
+  `ClosedTabs` moves it whole; the heir keeps the newest `HISTORY` entries.
+- The heir is the left neighbour, else the right one, and takes the closed
+  group's width; the other widths stay. Deviation: Zed's `PaneAxis::remove` resets
+  every flex to 1, which would undo widths the user dragged; this matches S3's split.
+  The heir becomes `last_center` only if the closed group was; then it is unpinned,
+  feeds the note consumers and takes the focus, where Zed focuses the last pane.
+- The tab menu lists `Split Right`, then `Close` *(delegated)*. `Split Down`
+  joins it with S5. A right press activates the tab's group and the tab first,
+  so both entries act on `last_center`. Deviation: Zed's menu binds each entry to
+  the tab under the pointer and leaves the active tab alone; activating first lets
+  the entries dispatch the existing actions.
+
 ## Deferred
 
 | Item | Trigger |

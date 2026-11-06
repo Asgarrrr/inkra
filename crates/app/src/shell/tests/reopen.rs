@@ -85,7 +85,7 @@ fn a_closed_tab_on_the_note_showing_reopens_with_the_view_its_anchors_moved_to(
     window
         .update(&mut cx, |shell, window, cx| {
             let first = shell.center().tabs.id_at(0).unwrap();
-            shell.close_tab(first, window, cx);
+            shell.close_tab(shell.layout.last_center(), first, window, cx);
         })
         .unwrap();
     cx.run_until_parked();

@@ -301,7 +301,7 @@ fn closing_an_inactive_tab_does_not_seal_the_active_notes_undo_group(cx: &mut Te
     window
         .update(&mut cx, |shell, window, cx| {
             let inactive = shell.center().tabs.id_at(1).unwrap();
-            shell.close_tab(inactive, window, cx);
+            shell.close_tab(shell.layout.last_center(), inactive, window, cx);
         })
         .unwrap();
     assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));

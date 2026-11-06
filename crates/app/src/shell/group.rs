@@ -7,7 +7,7 @@ use inkra_layout::{GroupId, View};
 use inkra_tabs::{TabId, Tabs};
 
 use super::parked::Parked;
-use super::tabs::{OnNote, Place};
+use super::tabs::{OnNote, Place, capture};
 use super::{AppShell, Shown};
 use crate::editor::EditorView;
 
@@ -114,18 +114,51 @@ impl AppShell {
         }
     }
 
+    /// Closes `group`'s one tab `id` and removes the group; the heir takes its room and its closed
+    /// stack, so `⌘⇧T` brings the tab back there (L6). Its pending open drops with it (T4).
+    pub(super) fn close_group(
+        &mut self,
+        group: GroupId,
+        id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let was_last = group == self.layout.last_center();
+        self.change_layout(window, cx, |shell, window, cx| {
+            let Group { tabs, shown, .. } = shell.group_mut(group);
+            tabs.close(id, |_| capture(shown, cx));
+            let closed = tabs.take_closed();
+            if was_last {
+                shell.unfocus_editor(group, window, cx);
+            } else if let Some(editor) = shell.editor_of(group) {
+                editor.update(cx, EditorView::unpin);
+            }
+            let Some(heir) = shell.layout.remove(group) else {
+                panic!("a centre group has an heir");
+            };
+            shell.groups.remove(&group);
+            shell.group_mut(heir).tabs.extend_closed(closed);
+            if was_last {
+                shell.enter_group(heir, cx);
+            }
+        });
+        if was_last && let Some(focus) = self.land_focus(cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
     fn switch_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
         if let Some(editor) = self.editor() {
             editor.update(cx, EditorView::pin);
         }
-        if let Some(editor) = self.editor_of(group) {
-            editor.update(cx, EditorView::unpin);
-        }
         self.enter_group(group, cx);
     }
 
-    /// `group` becomes `last_center`, and what it shows reaches the note's followers.
+    /// `group` becomes `last_center`, unpinned, and what it shows reaches the note's followers.
     fn enter_group(&mut self, group: GroupId, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor_of(group) {
+            editor.update(cx, EditorView::unpin);
+        }
         self.layout.activate(group);
         let since = self.tree_cursor(cx);
         self.follow_center(since, cx);

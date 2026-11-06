@@ -255,7 +255,7 @@ fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext)
     window
         .update(&mut cx, |shell, window, cx| {
             let first = shell.center().tabs.id_at(0).unwrap();
-            shell.close_tab(first, window, cx);
+            shell.close_tab(shell.layout.last_center(), first, window, cx);
         })
         .unwrap();
     cx.run_until_parked();
@@ -320,7 +320,7 @@ fn a_right_click_on_a_tab_closes_nothing(cx: &mut TestAppContext) {
 
     assert_eq!(
         tab_notes(&window, &mut cx),
-        (vec![Some(a), Some(b), None], 2)
+        (vec![Some(a), Some(b), None], 0)
     );
 }
 

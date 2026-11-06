@@ -132,13 +132,18 @@ impl Layout {
         let half = self.flexes[ix] / 2.0;
         self.flexes.splice(ix..=ix, [half, half]);
         self.center.insert(ix + 1, split);
+        self.rescale();
+        split
+    }
+
+    /// Rescales the centre's flexes to sum to their count, keeping each group's share.
+    fn rescale(&mut self) {
         #[allow(clippy::cast_precision_loss)]
         let len = self.center.len() as f32;
         let scale = len / self.flexes.iter().sum::<f32>();
         for flex in &mut self.flexes {
             *flex *= scale;
         }
-        split
     }
 
     #[must_use]
@@ -198,13 +203,28 @@ impl Layout {
         group
     }
 
+    /// A centre group's room goes to its left neighbour, else its right, which it returns and which
+    /// becomes `last_center` in its place (L6). A dock group returns `None`.
+    ///
     /// # Panics
-    /// On the centre, or a group not in this layout.
-    pub fn remove(&mut self, group: GroupId) {
-        let Some(side) = self.side_of(group) else {
-            panic!("the centre always has a group");
-        };
-        *self.dock_mut(side) = None;
+    /// On the centre's only group, or a group not in this layout.
+    pub fn remove(&mut self, group: GroupId) -> Option<GroupId> {
+        if let Some(side) = self.side_of(group) {
+            *self.dock_mut(side) = None;
+            return None;
+        }
+        assert!(self.center.len() > 1, "the centre always has a group");
+        let ix = self.center_ix(group);
+        let heir_ix = ix.checked_sub(1).unwrap_or(1);
+        let heir = self.center[heir_ix];
+        self.flexes[heir_ix] += self.flexes[ix];
+        self.flexes.remove(ix);
+        self.center.remove(ix);
+        self.rescale();
+        if self.last_center == group {
+            self.last_center = heir;
+        }
+        Some(heir)
     }
 
     /// The centre left to right, then the left dock's, then the right dock's.

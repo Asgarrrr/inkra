@@ -288,6 +288,11 @@ const CATALOGUE: &[Scene] = &[
         open: splits::right,
     },
     Scene {
+        name: "tab-menu",
+        shows: "the split-right scene with the menu at the pointer over the right group's `reading` tab: Split Right highlighted, Close under it; elevated background, border, shadow, inside the window; the right group's tab still in the note colour",
+        open: splits::tab_menu,
+    },
+    Scene {
         name: "tabs-restored",
         shows: "a relaunch: `index`, `reading` and `today` back in the bar, `reading` active (34 px, note colour, hairline on top and sides, no rule under it) with `Books to read,` selected; a `+` after the last tab; `reading` highlighted in the sidebar; no \"Select a note.\"",
         open: tabs::restored,

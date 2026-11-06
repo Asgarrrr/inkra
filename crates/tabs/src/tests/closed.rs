@@ -316,3 +316,74 @@ fn a_commit_to_an_inactive_tab_does_not_call_leaving() {
     harness.commit(a, Some(1));
     assert_eq!(harness.left.len(), calls);
 }
+
+/// Closes a fresh tab on each of `notes`, in order: the last is the newest closed.
+fn closed_on(notes: &[u8]) -> Harness {
+    let mut harness = Harness::new();
+    for &note in notes {
+        let id = harness.insert(1);
+        harness.commit(id, Some(note));
+        harness.close(id);
+    }
+    harness
+}
+
+fn reopened_notes(harness: &mut Harness) -> Vec<Option<u8>> {
+    std::iter::from_fn(|| harness.reopen())
+        .map(|place| place.note)
+        .collect()
+}
+
+#[test]
+fn moved_closed_tabs_reopen_first_newest_first() {
+    let mut from = closed_on(&[1, 2]);
+    let mut to = closed_on(&[3]);
+
+    to.tabs.extend_closed(from.tabs.take_closed());
+
+    assert_eq!(reopened_notes(&mut to), [Some(2), Some(1), Some(3)]);
+    to.tabs.check();
+}
+
+#[test]
+fn take_closed_leaves_nothing_to_reopen() {
+    let mut harness = closed_on(&[1, 2]);
+
+    harness.tabs.take_closed();
+
+    assert!(!harness.tabs.has_closed());
+    assert_eq!(harness.reopen(), None);
+}
+
+#[test]
+fn extend_closed_drops_the_oldest_past_the_cap() {
+    let notes: Vec<u8> = (0..HISTORY - 1)
+        .map(|n| u8::try_from(n % 4).unwrap())
+        .collect();
+    let mut from = closed_on(&notes);
+    let mut to = closed_on(&[1, 2]);
+
+    to.tabs.extend_closed(from.tabs.take_closed());
+
+    assert_eq!(to.tabs.closed.len(), HISTORY);
+    let reopened = reopened_notes(&mut to);
+    assert_eq!(reopened.len(), HISTORY);
+    assert_eq!(reopened.last(), Some(&Some(2)), "the oldest, 1, dropped");
+}
+
+#[test]
+fn a_moved_tab_reopens_clamped_to_the_bar() {
+    let (mut from, [_, _, c]) = three();
+    from.activate(c);
+    from.commit(c, Some(1));
+    assert_eq!(from.close(c).map(|closed| closed.index), Some(2));
+    let mut to = Harness::new();
+    let only = to.tabs.active();
+
+    to.tabs.extend_closed(from.tabs.take_closed());
+    let place = to.reopen();
+
+    assert_eq!(place.map(|place| place.note), Some(Some(1)));
+    assert_eq!(to.ids(), [only, to.tabs.active()]);
+    to.tabs.check();
+}

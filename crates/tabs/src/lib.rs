@@ -5,8 +5,8 @@ mod history;
 
 use std::collections::VecDeque;
 
-pub use closed::Closed;
 use closed::ClosedTab;
+pub use closed::{Closed, ClosedTabs};
 #[cfg(test)]
 use history::HISTORY;
 use history::Stack;
