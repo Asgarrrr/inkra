@@ -2,7 +2,7 @@
 
 use futures::channel::oneshot;
 
-use crate::fs::{FileIdentity, Mtime, Result, VaultError};
+use crate::fs::{FileIdentity, Result, Stamp, VaultError};
 use crate::vault::{EntryId, Vault};
 use crate::watch::Pending;
 
@@ -47,7 +47,7 @@ impl Default for Next {
 struct Rekey {
     id: EntryId,
     identity: FileIdentity,
-    mtime: Mtime,
+    stamp: Stamp,
     /// The live vault already mapped `identity` to `id`: the save kept the inode (watcher spec, F5).
     in_place: bool,
 }
@@ -105,15 +105,15 @@ impl Scans {
         live: &mut Vault,
         id: EntryId,
         identity: FileIdentity,
-        mtime: Mtime,
+        stamp: Stamp,
     ) -> bool {
         let Some(session) = &mut self.running else {
-            return live.reidentify(id, identity, mtime);
+            return live.reidentify(id, identity, stamp);
         };
         session.rekeys.push(Rekey {
             id,
             identity,
-            mtime,
+            stamp,
             in_place: live.id_for(identity) == Some(id),
         });
         false
@@ -201,7 +201,7 @@ fn replace(
 ) -> Swapped {
     let mut notify = claims.reclaim(&mut next, live) || changed;
     for rekey in rekeys {
-        notify |= next.replay_reidentify(rekey.id, rekey.identity, rekey.mtime, rekey.in_place);
+        notify |= next.replay_reidentify(rekey.id, rekey.identity, rekey.stamp, rekey.in_place);
     }
     Swapped {
         notify,
@@ -213,7 +213,7 @@ fn replace(
 fn fail(live: &mut Vault, rekeys: Vec<Rekey>, error: VaultError) -> Swapped {
     let mut notify = false;
     for rekey in rekeys {
-        notify |= live.reidentify(rekey.id, rekey.identity, rekey.mtime);
+        notify |= live.reidentify(rekey.id, rekey.identity, rekey.stamp);
     }
     Swapped {
         notify,

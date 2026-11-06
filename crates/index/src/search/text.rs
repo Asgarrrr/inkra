@@ -1,9 +1,10 @@
 //! Vault search over texts read now: the candidates' reads, in vault order, against the query.
 
+use std::io::ErrorKind;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use inkra_vault::{EntryId, Stamp};
+use inkra_vault::{EntryId, Loaded, Stamp, VaultError};
 
 use super::hit::{NoteHits, Searched};
 use super::run::{HITS_PER_NOTE, note_hits};
@@ -34,6 +35,21 @@ pub enum Read {
     NotUtf8,
     /// Any other error: the note may be fine, so it is not stale.
     Failed,
+}
+
+impl From<Result<Loaded, VaultError>> for Read {
+    /// A candidate's `Fs::load`: a missing file is gone, any error but `NotUtf8` a failure.
+    fn from(load: Result<Loaded, VaultError>) -> Self {
+        match load {
+            Ok(loaded) => Self::Text {
+                text: loaded.text.into(),
+                stamp: loaded.stamp,
+            },
+            Err(VaultError::NotUtf8 { .. }) => Self::NotUtf8,
+            Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => Self::Gone,
+            Err(_) => Self::Failed,
+        }
+    }
 }
 
 /// A search's answer, and the notes its reads found changed or gone since their load.
@@ -72,6 +88,9 @@ impl<'q> TextSearch<'q> {
 
     /// Searches `candidate`'s `read`; false once the search wants no more reads.
     pub fn read(&mut self, candidate: &Candidate, read: Read, cancel: &AtomicBool) -> bool {
+        if cancel.load(Ordering::Relaxed) {
+            return false;
+        }
         self.reads += 1;
         match read {
             Read::Text { text, stamp } => {

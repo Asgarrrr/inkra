@@ -55,7 +55,7 @@ type Hold = futures::future::Shared<futures::channel::oneshot::Receiver<()>>;
 pub(crate) struct IndexSync {
     fs: Arc<dyn Fs>,
     vault: Entity<Vault>,
-    /// Pins the open notes' texts at each search start.
+    /// Pins the open notes' texts at each store change and search start.
     notes: WeakEntity<NoteStore>,
     live: LiveIndex,
     /// Filled by our saves and by the searches' reads.
@@ -73,7 +73,7 @@ pub(crate) struct IndexSync {
     /// A build waits for it before it starts, so a test can hold one in flight.
     #[cfg(test)]
     hold: Option<Hold>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 3],
 }
 
 impl IndexSync {
@@ -86,6 +86,9 @@ impl IndexSync {
         let subscriptions = [
             cx.subscribe(notes, Self::saved),
             cx.observe(&vault, |this, _, cx| this.reconcile(cx)),
+            cx.observe(notes, |this, notes, cx| {
+                reads::lock(&this.texts).pin_only(&notes.read(cx).open_notes());
+            }),
         ];
         let (landed, arrivals) = unbounded();
         // Detached: it holds only a weak handle, so it ends when this entity does.
@@ -233,7 +236,7 @@ impl IndexSync {
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
         let (id, stamp) = (event.id, event.stamp);
         reads::lock(&self.texts).insert(id, Arc::clone(&event.text), stamp);
-        let ticket = self.turn(cx, |turn| turn.saved(id, stamp.mtime));
+        let ticket = self.turn(cx, |turn| turn.saved(id, stamp));
         let text = Arc::clone(&event.text);
         let file = FileRead {
             stamp,

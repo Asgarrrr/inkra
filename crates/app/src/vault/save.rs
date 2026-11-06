@@ -204,7 +204,7 @@ impl NoteStore {
                 note.landed(version);
             }
             // An atomic save moves the inode: without the re-key the id orphans on the next rescan.
-            this.reidentify(id, saved.identity, saved.stamp.mtime, cx);
+            this.reidentify(id, saved.identity, saved.stamp, cx);
             // The index's only signal for an ordinary write: it neither rescans nor notifies.
             cx.emit(NoteSaved {
                 id,

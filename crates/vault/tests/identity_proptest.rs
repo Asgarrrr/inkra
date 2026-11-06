@@ -102,7 +102,7 @@ proptest! {
                             let stamp = block_on(fs.load(&absolute)).expect("load").stamp;
                             let saved =
                                 block_on(fs.save(&absolute, "written", stamp)).expect("save");
-                            let _ = vault.reidentify(id, saved.identity, saved.stamp.mtime);
+                            let _ = vault.reidentify(id, saved.identity, saved.stamp);
                         }
                     }
                 }

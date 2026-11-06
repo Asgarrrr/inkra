@@ -193,8 +193,13 @@ What the persisted index (docs/superpowers/specs/2026-11-06-persisted-index-desi
 against. Release build of `08afc2a8` plus the slice-0 log line, Apple M5 Pro, 48 GB, macOS 26.5.
 
 Warm launch, 50,000-note `startup_vault` vault, 5 runs. The command was
-`scripts/launch-figure.sh --home "$TMPDIR/inkra-home" target/release/inkra-app "$V" 5`; the first run is the slowest,
-likely a cooler page cache. `phys_footprint` is the figure the spec compares.
+`scripts/launch-figure.sh --home "$TMPDIR/inkra-home" target/release/inkra-app "$V" 5`, with
+`V="$TMPDIR/inkra-startup-50k"`, the vault `cargo run -p inkra-app --release --example startup_vault`
+writes. The first run is the slowest, likely a cooler page cache.
+
+`phys_footprint` splits into two groups: 309.4 and 310.9 MB, then 399.2 to 407.5 MB. Its median is
+399.2 MB, its spread 309.4 to 407.5 MB. The memory gate compares the medians of 5 runs, rss and
+`phys_footprint` each, as slice 2d does.
 
 ```
 launch: first frame 115.9ms, session read 28.50µs, root 143.8ms, scanned 1.0s, names ready 1.1s, indexed 2.08s (50000 notes, corpus 158045432 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 340160 kB | phys_footprint 399213528 B
@@ -205,14 +210,16 @@ launch: first frame 81.9ms, session read 73.58µs, root 106.5ms, scanned 197.8ms
 ```
 
 `⌘⇧F` with the whole corpus resident, `cargo bench -p inkra-index --bench read_search`, on the
-`bench_vault -- 50000` vault read from disk with `RealFs`: term `penrara` (1,000 notes), resident
+`bench_vault -- 50000` vault read from disk with `RealFs`. The term `penrara` is picked as a whole
+token in 1,000 notes. The search matches word starts, so it finds more: it stops at the 1,000-hit
+limit after 988 notes, as the bench prints. The bench runs the search serial, on one thread. Resident
 median 8.19 ms (95% interval 8.14 to 8.79 ms, 10 samples). The slice 2d gate is this figure plus
 50 ms.
 
 Slice 2a adds `read_search/read4`: the candidates, then 4 threads that each read a contiguous
 quarter through `RealFs::load`, then `TextSearch` over the reads in order. Same vault and term,
 `--quick`: resident 7.72 ms (7.71 to 7.72 ms), `read4` 14.43 ms (14.35 to 14.73 ms). Reading the
-1,000 candidates costs about 6.7 ms over the resident search, inside the 50 ms gate.
+candidates costs about 6.7 ms over the resident search, inside the 50 ms gate.
 
 Slice 2d removes the corpus text; both gates hold. Same machine, vault and commands. Warm launch,
 5 runs, medians: rss 175,008 kB (slice 0: 344,176 kB, 169 MB less), `phys_footprint` 229.1 MB

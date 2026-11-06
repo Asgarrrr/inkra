@@ -106,6 +106,14 @@ pub(crate) fn mtime(n: u64) -> Mtime {
     Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(n))
 }
 
+/// A stamp at `mtime(n)` of an empty file.
+pub(crate) fn stamp(n: u64) -> Stamp {
+    Stamp {
+        mtime: mtime(n),
+        size: 0,
+    }
+}
+
 /// `vault`'s notes as `NoteIndex::set_notes` takes them.
 pub(crate) fn note_set(vault: &Vault) -> NoteSet {
     NoteSet::build(entries(vault))

@@ -232,11 +232,11 @@ fn a_pending_folder_past_the_depth_limit_is_not_read() {
 /// Runs `op`, then re-keys the vault after each save, as the app does.
 fn run_and_reidentify(fs: &MemFs, vault: &mut Vault, op: &Op) {
     let mut rekeys = Vec::new();
-    run(fs, vault, Path::new(""), op, &mut |id, identity, mtime| {
-        rekeys.push((id, identity, mtime));
+    run(fs, vault, Path::new(""), op, &mut |id, identity, stamp| {
+        rekeys.push((id, identity, stamp));
     });
-    for (id, identity, mtime) in rekeys {
-        let _ = vault.reidentify(id, identity, mtime);
+    for (id, identity, stamp) in rekeys {
+        let _ = vault.reidentify(id, identity, stamp);
     }
 }
 

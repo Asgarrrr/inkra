@@ -300,7 +300,7 @@ fn a_reclaim_takes_its_id_from_an_identity_a_partial_walk_kept() {
     block_on(fs.rename(path, Path::new("/vault/under/b.md"))).expect("rename");
 
     vault = vault.applied(walk(&fs, "under"));
-    assert!(vault.reidentify(ours, saved.identity, saved.stamp.mtime));
+    assert!(vault.reidentify(ours, saved.identity, saved.stamp));
 
     assert_eq!(id_of(&vault, "under/b.md"), Some(ours));
     assert_eq!(
@@ -330,7 +330,7 @@ fn reidentify_remaps_an_identity_a_partial_walk_kept_on_no_entry() {
     vault = vault.applied(walk(&fs, "under"));
     assert_eq!(vault.id_for(saved.identity), Some(minted));
 
-    assert!(!vault.reidentify(ours, saved.identity, saved.stamp.mtime));
+    assert!(!vault.reidentify(ours, saved.identity, saved.stamp));
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(id_of(&vault, "outside/a.md"), Some(ours));

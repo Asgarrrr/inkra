@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hint::black_box;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -14,7 +13,7 @@ use inkra_index::{
     Candidate, FileRead, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet,
     Read, TextFound, TextSearch,
 };
-use inkra_vault::{EntryId, Fs as _, Kind, RealFs, Vault, VaultError};
+use inkra_vault::{EntryId, Fs as _, Kind, RealFs, Vault};
 
 const LIMIT: usize = 1_000;
 const TARGET_DF: usize = 1_000;
@@ -51,15 +50,7 @@ fn count_tokens(text: &str, df: &mut BTreeMap<String, usize>) {
 
 /// `candidate` read from disk now, as the app's reader maps it.
 fn read(root: &Path, candidate: &Candidate) -> Read {
-    match block_on(RealFs.load(&root.join(&*candidate.path))) {
-        Ok(loaded) => Read::Text {
-            text: loaded.text.into(),
-            stamp: loaded.stamp,
-        },
-        Err(VaultError::NotUtf8 { .. }) => Read::NotUtf8,
-        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => Read::Gone,
-        Err(_) => Read::Failed,
-    }
+    Read::from(block_on(RealFs.load(&root.join(&*candidate.path))))
 }
 
 /// The candidates read by `READERS` threads, a contiguous share each, then searched in order.
@@ -136,8 +127,9 @@ fn bench_read_search(c: &mut Criterion) {
         );
         return;
     }
-    let Ok(vault) = block_on(Vault::scan(&RealFs, &root)) else {
-        panic!("the vault at {} scans", root.display());
+    let vault = match block_on(Vault::scan(&RealFs, &root)) {
+        Ok(vault) => vault,
+        Err(e) => panic!("the vault at {} scans: {e}", root.display()),
     };
     let entries = vault.entries().map(|entry| {
         (
@@ -156,8 +148,9 @@ fn bench_read_search(c: &mut Criterion) {
         let Some(path) = vault.absolute(entry.id) else {
             panic!("a scanned note has a path");
         };
-        let Ok(loaded) = block_on(RealFs.load(&path)) else {
-            panic!("{} loads", path.display());
+        let loaded = match block_on(RealFs.load(&path)) {
+            Ok(loaded) => loaded,
+            Err(e) => panic!("{} loads: {e}", path.display()),
         };
         count_tokens(&loaded.text, &mut df);
         let text: Arc<str> = loaded.text.into();
@@ -175,7 +168,6 @@ fn bench_read_search(c: &mut Criterion) {
     else {
         panic!("the vault holds words of {MIN_TOKEN_CHARS} characters or more");
     };
-    eprintln!("read_search: term {term}, {notes} notes");
 
     let query = NoteQuery::new(term, None, &[]);
     let cancel = AtomicBool::new(false);
@@ -183,6 +175,15 @@ fn bench_read_search(c: &mut Criterion) {
     let read = read4(&snapshot, &root, &query, &cancel).map(|found| found.searched);
     let held = resident(&snapshot, &texts, &query, &cancel).map(|found| found.searched);
     assert_eq!(read, held, "the reads find what the texts in memory do");
+    let Some(searched) = held else {
+        panic!("the search is not cancelled");
+    };
+    let hits: usize = searched.notes.iter().map(|note| note.hits.len()).sum();
+    eprintln!(
+        "read_search: term {term}, a whole token in {notes} notes; searched: {} notes, {hits} hits, limit reached {}",
+        searched.notes.len(),
+        searched.limit_reached
+    );
     let mut group = c.benchmark_group("read_search");
     group.sample_size(10);
     group.bench_function("resident", |b| {

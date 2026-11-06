@@ -30,6 +30,14 @@ pub(crate) struct Corpus {
 }
 
 impl Corpus {
+    /// Every note at its scanned mtime, none loaded.
+    pub(crate) fn new(ids: Arc<[EntryId]>, mtimes: &[Mtime]) -> Self {
+        let mut corpus = Self::default();
+        // An empty corpus keeps no slot, whatever the order says.
+        let _ = corpus.reorder(ids, mtimes, |_| 0);
+        corpus
+    }
+
     /// Copies the chunk list and one chunk only while a snapshot holds them. Ignored past the end.
     pub(crate) fn write(&mut self, at: usize, read: FileRead) {
         if let Some(slot) = slot_mut(&mut self.slots, at) {

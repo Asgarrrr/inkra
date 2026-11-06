@@ -561,3 +561,15 @@ fn a_full_last_alive_word_decodes() {
     assert_eq!(decoded.words.next, 64);
     assert_eq!(decoded.words.alive.len(), 64);
 }
+
+#[test]
+fn an_alive_note_of_length_zero_is_length() {
+    rejects(
+        &Fields {
+            total: 0,
+            lengths: vec![0, 0],
+            ..valid()
+        },
+        "length",
+    );
+}

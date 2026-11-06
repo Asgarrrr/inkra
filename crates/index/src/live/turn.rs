@@ -1,9 +1,10 @@
 //! One foreground turn: its inputs, then its end, which returns the work the turn made due.
 
-use inkra_vault::{EntryId, Mtime, Vault};
+use inkra_vault::{EntryId, Stamp, Vault};
 
 use super::{Applied, BuildJob, Built, LiveIndex, Load, Merge, Merged, Retired, Ticket, TurnEnd};
 use crate::content::NoteContent;
+use crate::persist::Outcome;
 use crate::words::RetiredWords;
 
 /// The inputs of one foreground turn; only `LiveIndex::turn` makes one.
@@ -90,6 +91,15 @@ impl Turn<'_> {
         self.changed = true;
     }
 
+    /// The cache outcome `LiveIndex::await_cache` waits for: the next build carries it.
+    ///
+    /// # Panics
+    /// If no outcome is awaited.
+    pub fn cached(&mut self, outcome: Outcome) {
+        self.live.cached(outcome);
+        self.changed = true;
+    }
+
     /// A build's result, from `BuildJob::run`.
     ///
     /// # Panics
@@ -103,10 +113,10 @@ impl Turn<'_> {
         );
     }
 
-    /// A note saved: `mtime` is the one indexed, and the parse of its text comes back through `landed`.
+    /// A note saved: `stamp` is the one indexed, and the parse of its text comes back through `landed`.
     #[must_use]
-    pub fn saved(&mut self, id: EntryId, mtime: Mtime) -> Ticket {
-        self.live.saved(id, mtime)
+    pub fn saved(&mut self, id: EntryId, stamp: Stamp) -> Ticket {
+        self.live.saved(id, stamp)
     }
 
     /// A load or a save's parse landed.

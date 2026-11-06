@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_vault::{Fs, Job, Jobs, Mtime, Reach, RealFs, RelPath, Serial, Vault, Walk};
+use inkra_vault::{Fs, Job, Jobs, Mtime, Reach, RealFs, RelPath, Serial, Stamp, Vault, Walk};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -117,19 +117,22 @@ fn apply(c: &mut Criterion) {
         .find(|e| e.path.as_path().extension().is_some())
         .expect("a note");
     let loaded = block_on(RealFs.load(&root.join(note.path.as_path()))).expect("load");
-    let (id, identity, mtime) = (note.id, loaded.identity, loaded.stamp.mtime);
+    let (id, identity, stamp) = (note.id, loaded.identity, loaded.stamp);
     let mut live = scanned.applied(walk()); // its own state, shared with nothing
     c.bench_function("reidentify 50k", |b| {
-        b.iter(|| live.reidentify(id, identity, mtime));
+        b.iter(|| live.reidentify(id, identity, stamp));
     });
     // A save while an `IndexSync` build holds the entries: a new mtime copies them.
-    let later = Mtime(mtime.0 + Duration::from_secs(1));
+    let later = Stamp {
+        mtime: Mtime(stamp.mtime.0 + Duration::from_secs(1)),
+        ..stamp
+    };
     let mut flip = false;
     c.bench_function("reidentify shared 50k", |b| {
         b.iter_with_large_drop(|| {
             let held = live.shared_entries();
             flip = !flip;
-            let moved = live.reidentify(id, identity, if flip { later } else { mtime });
+            let moved = live.reidentify(id, identity, if flip { later } else { stamp });
             (held, moved)
         });
     });

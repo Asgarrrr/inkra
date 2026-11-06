@@ -1,8 +1,9 @@
 //! `TextSearch` over texts read now: read failures, the limit, the stale rules.
 
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use inkra_vault::{EntryId, Stamp};
+use inkra_vault::{EntryId, FileIdentity, Loaded, Stamp, VaultError};
 
 use crate::test_support::{indexed, mtime};
 use crate::{Candidate, IndexSnapshot, NoteQuery, READ_FAILURES, Read, TextFound, TextSearch};
@@ -180,11 +181,52 @@ fn hits_counts_the_hits_so_far() {
 
 #[test]
 fn a_cancelled_search_stops_and_finds_nothing() {
-    let (_, query, candidates) = alphas(1);
+    let (_, query, candidates) = alphas(2);
     let cancel = AtomicBool::new(false);
     let mut search = TextSearch::new(&query, 1_000);
     cancel.store(true, Ordering::Relaxed);
 
     assert!(!search.read(&candidates[0], unchanged("alpha", &candidates[0]), &cancel));
+    assert!(
+        !search.read(&candidates[1], Read::Gone, &cancel),
+        "a gone note after the cancel is not folded"
+    );
     assert!(search.finish(&cancel).is_none());
+}
+
+#[test]
+fn a_load_maps_to_its_read() {
+    let stamp = Stamp {
+        mtime: mtime(1),
+        size: 5,
+    };
+    let loaded = Loaded {
+        text: "alpha".to_owned(),
+        stamp,
+        identity: FileIdentity {
+            device: 1,
+            inode: 1,
+        },
+    };
+    let failed = |kind| {
+        Err(VaultError::Io {
+            path: "a.md".into(),
+            source: io::Error::from(kind),
+        })
+    };
+
+    let text = Read::Text {
+        text: "alpha".into(),
+        stamp,
+    };
+    assert_eq!(Read::from(Ok(loaded)), text);
+    assert_eq!(Read::from(failed(io::ErrorKind::NotFound)), Read::Gone);
+    let not_utf8 = Err(VaultError::NotUtf8 {
+        path: "a.md".into(),
+    });
+    assert_eq!(Read::from(not_utf8), Read::NotUtf8);
+    assert_eq!(
+        Read::from(failed(io::ErrorKind::PermissionDenied)),
+        Read::Failed
+    );
 }

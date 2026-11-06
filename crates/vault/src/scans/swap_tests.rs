@@ -24,7 +24,7 @@ fn save(fs: &MemFs, name: &str) -> Saved {
 }
 
 fn rekey(scans: &mut Scans, live: &mut Vault, id: EntryId, saved: &Saved) -> bool {
-    scans.reidentify(live, id, saved.identity, saved.stamp.mtime)
+    scans.reidentify(live, id, saved.identity, saved.stamp)
 }
 
 /// A note deleted on disk, then written back at its path under a new inode, which a scan gave a new id.
@@ -85,7 +85,7 @@ fn a_re_key_with_no_scan_says_whether_an_id_moved() {
 
     let loaded = block_on(fs.load(&path("a.md"))).expect("load");
 
-    assert!(scans.reidentify(&mut live, a, loaded.identity, loaded.stamp.mtime));
+    assert!(scans.reidentify(&mut live, a, loaded.identity, loaded.stamp));
     assert_eq!(id_of(&live, "a.md"), Some(a));
 }
 
@@ -122,7 +122,7 @@ fn an_in_place_save_re_keyed_during_a_scan_keeps_the_saves_mtime() {
     // `MemFs::save` always moves the inode: the in-place write is `RealFs`'s for a hard link.
     fs.insert_file(path("a.md"), "beta");
     let saved = block_on(fs.load(&path("a.md"))).expect("load");
-    scans.reidentify(&mut live, a, saved.identity, saved.stamp.mtime);
+    scans.reidentify(&mut live, a, saved.identity, saved.stamp);
     scans.swap(&mut live, scanned, &Claims::default());
 
     let entry = live.entry(a).expect("kept");
@@ -177,7 +177,7 @@ fn a_failed_walk_whose_replay_moves_an_id_notifies() {
 
     let (_, running) = scans.request(&live);
     let written = block_on(fs.load(&path("a.md"))).expect("load");
-    scans.reidentify(&mut live, a, written.identity, written.stamp.mtime);
+    scans.reidentify(&mut live, a, written.identity, written.stamp);
     fs.make_unreadable(ROOT);
     let (swapped, _) = run(&mut scans, &mut live, running.expect("started"), &fs);
 
@@ -233,7 +233,7 @@ fn a_gone_notes_save_during_a_scan_takes_back_its_id() {
     let (_, running) = scans.request(&live);
     fs.insert_file(path("a.md"), "written back");
     let saved = block_on(fs.load(&path("a.md"))).expect("load");
-    scans.reidentify(&mut live, a, saved.identity, saved.stamp.mtime);
+    scans.reidentify(&mut live, a, saved.identity, saved.stamp);
     let scanned = walked(running.expect("started"), &fs);
     let gone = claims(&[a], &[(a, Some("a.md"))]);
     let (swapped, _) = scans.swap(&mut live, scanned, &gone);

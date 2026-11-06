@@ -29,8 +29,8 @@ fn replayed_re_keys_leave_the_entry_at_the_last_saves_mtime() {
     let second = block_on(fs.save(path, "three", first.stamp)).expect("save 2, during the walk");
 
     vault = vault.applied(mid_walk);
-    assert!(!vault.replay_reidentify(a, first.identity, first.stamp.mtime, false));
-    assert!(!vault.replay_reidentify(a, second.identity, second.stamp.mtime, false));
+    assert!(!vault.replay_reidentify(a, first.identity, first.stamp, false));
+    assert!(!vault.replay_reidentify(a, second.identity, second.stamp, false));
 
     assert_eq!(vault.id_for(second.identity), Some(a));
     let disk = block_on(fs.load(path)).expect("load").stamp.mtime;
@@ -58,7 +58,7 @@ fn a_replayed_re_key_keeps_the_mtime_the_walk_read() {
     .expect("the scan's walk");
 
     vault = vault.applied(walk);
-    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp.mtime, false));
+    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp, false));
 
     let disk = block_on(fs.load(path)).expect("load");
     assert_eq!(
@@ -88,7 +88,7 @@ fn a_replayed_re_key_after_a_walk_that_read_the_old_inode_takes_the_save() {
     let saved = block_on(fs.save(path, "two", loaded.stamp)).expect("save, after the walk read");
 
     vault = vault.applied(walk);
-    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp.mtime, false));
+    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp, false));
 
     assert_eq!(vault.id_for(saved.identity), Some(a));
     assert_eq!(vault.id_for(loaded.identity), None, "one id, one identity");
@@ -116,7 +116,7 @@ fn an_in_place_re_key_replays_the_saves_mtime() {
     assert!(in_place, "the live vault maps the kept inode to the note");
 
     vault = vault.applied(walk);
-    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp.mtime, in_place));
+    assert!(!vault.replay_reidentify(a, saved.identity, saved.stamp, in_place));
 
     assert_eq!(vault.id_for(saved.identity), Some(a));
     assert_eq!(vault.entry(a).expect("kept").mtime, saved.stamp.mtime);

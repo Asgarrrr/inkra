@@ -89,13 +89,13 @@ fn land_at_once(
     links.update(cx, |links, cx| {
         links.apply_budget = Some(budget);
         for id in ids {
-            let mtime = Mtime(SystemTime::UNIX_EPOCH);
-            let ticket = links.turn(cx, |turn| turn.saved(id, mtime));
+            let stamp = Stamp {
+                mtime: Mtime(SystemTime::UNIX_EPOCH),
+                size: text.len() as u64,
+            };
+            let ticket = links.turn(cx, |turn| turn.saved(id, stamp));
             let file = FileRead {
-                stamp: Stamp {
-                    mtime,
-                    size: text.len() as u64,
-                },
+                stamp,
                 identity: FileIdentity {
                     device: 1,
                     inode: 1,
@@ -281,7 +281,11 @@ fn a_load_missing_a_renamed_note_behind_a_save_is_not_retried(cx: &mut TestAppCo
     drop(renamed);
     // What `saved` does before its parse lands: the save, not a reload, brings the text.
     links.update(cx, |sync, cx| {
-        let _parsing = sync.turn(cx, |turn| turn.saved(a, Mtime(SystemTime::UNIX_EPOCH)));
+        let stamp = Stamp {
+            mtime: Mtime(SystemTime::UNIX_EPOCH),
+            size: 0,
+        };
+        let _parsing = sync.turn(cx, |turn| turn.saved(a, stamp));
     });
     gate.release();
     cx.run_until_parked();

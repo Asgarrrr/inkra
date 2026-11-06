@@ -74,6 +74,7 @@ fn listed(path: PathBuf, metadata: io::Result<fs::Metadata>) -> Result<Option<Di
     };
     Ok(Some(DirEntry {
         mtime: mtime_of(&path, &metadata)?,
+        size: metadata.len(),
         identity: identity_of(&metadata),
         path,
         kind,

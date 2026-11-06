@@ -371,3 +371,24 @@ Each slice appends what it did differently from this spec, and why.
   `alive`, `bounds`, `sorted`, `gap`, `overflow`, `ordinal`, `frequency`,
   `lengths`, `total`, `trailing`, and 3b's `truncated`, `varint`, `utf8`.
   `FORMAT_VERSION` stays 1.
+- Slice 4a: the fixture is `MemFs::insert_with_mtime`, not
+  `insert_with_stamp`: the size always follows the bytes. With `Entry`'s
+  size, `Scans::reidentify` takes a `Stamp` and the diff's `Change::Mtimes`
+  is `Change::Stamps`. `indexed` is pre-filled for each seeded note with no
+  `latest` entry, not by `or_insert`: a save after the first build wins, and
+  a save that landed before it named no note, so the note reloads. A racy
+  note is seeded, so its old words show until its reload, but it is not
+  pre-filled. `Turn::cached` marks the turn changed, so an outcome landing
+  during a build turns it `Dirty`. The build that carries the outcome has no
+  `last`, so its change is a layout that queues every note. While the wait
+  lasts, `queue_changed` (and with it a forgotten load's retry) and the words
+  merge are skipped. A failed load's retry calls `queue_load` directly, so the
+  wait does not gate it. `NoteIndex::seed` takes the held notes' words through
+  `Words::into_fresh`, which asserts that no merge applied. `Corpus::new`
+  is a `reorder` of an empty corpus, and `Segment::length` is `pub(crate)`.
+  `Words::restore` loses its `cfg(test)`; `with_words` stays test-only, as
+  the seed restores the words whole. One scan never lists two entries with
+  one identity (a vault collapses hard links), so `seed_tests` sets the
+  entry-side ambiguity by hand.
+- Slice 2a, accepted after review: the stop after 8 failed reads (P11) lands the hits found so
+  far with `limit_reached` false, so the footer flags no partial answer.

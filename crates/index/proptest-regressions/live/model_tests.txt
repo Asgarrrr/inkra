@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 528a2b05502b149cfde075004abe846965483f52619244a3354553b6b57018e1 # shrinks to ops = [VaultChanged, RunBuild, Trash(0), Write(0, 0), Write(0, 0), Write(0, 0), Land(0), Relaunch(2)]
+cc 0f5a8be50cf41757573ab02c6cd5ada8d1f034931351b5c729dc8a2eb3441b7b # shrinks to ops = [Relaunch(0), VaultChanged, RunBuild]
+cc 9a643125b07f59f592ec615df05766efd16e46f09d4fd40c80adfafe2802fbb0 # shrinks to ops = [Relaunch(0), Trash(0), Write(1, 1), Cached, RunBuild, Land(1), Write(0, 0), Relaunch(2)]

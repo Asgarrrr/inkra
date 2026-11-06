@@ -9,6 +9,15 @@ pub use header::{Decoded, FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
 pub use notes::CachedNote;
 pub use words::CachedWords;
 
+/// What the cache read gave the index: the turn input that ends `LiveIndex::await_cache` (P7).
+#[derive(Debug)]
+pub enum Outcome {
+    Decoded(Decoded),
+    Rejected(Rejected),
+    /// No file, an I/O error, or no `HOME`.
+    Missing,
+}
+
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]

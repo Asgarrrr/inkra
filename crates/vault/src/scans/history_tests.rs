@@ -32,16 +32,16 @@ fn when() -> impl Strategy<Value = When> {
 /// `in_place`: saved as `RealFs` saves a hard-linked note, keeping the inode; else the inode moves.
 fn write(fs: &MemFs, scans: &mut Scans, live: &mut Vault, id: EntryId, note: &str, in_place: bool) {
     let path = Path::new(ROOT).join(note);
-    let (identity, mtime) = if in_place {
+    let (identity, stamp) = if in_place {
         fs.insert_file(&path, "written");
         let loaded = block_on(fs.load(&path)).expect("load");
-        (loaded.identity, loaded.stamp.mtime)
+        (loaded.identity, loaded.stamp)
     } else {
         let stamp = block_on(fs.load(&path)).expect("load").stamp;
         let saved = block_on(fs.save(&path, "saved", stamp)).expect("save");
-        (saved.identity, saved.stamp.mtime)
+        (saved.identity, saved.stamp)
     };
-    let _ = scans.reidentify(live, id, identity, mtime);
+    let _ = scans.reidentify(live, id, identity, stamp);
 }
 
 proptest! {

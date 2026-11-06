@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::MemFs;
-use crate::fs::FileIdentity;
+use crate::fs::{FileIdentity, Mtime};
 
 impl MemFs {
     /// Creates every parent directory. Reuses the identity if the path
@@ -24,6 +24,17 @@ impl MemFs {
         identity: FileIdentity,
     ) {
         self.insert(&path.into(), text.into().into_bytes(), Some(identity));
+    }
+
+    /// As `insert_file`, at a given mtime: a real disk's carries nanoseconds, a tick's does not.
+    pub fn insert_with_mtime(&self, path: impl Into<PathBuf>, text: &str, mtime: Mtime) {
+        let path = path.into();
+        let mut state = self.state();
+        Self::put_file(&mut state, path.clone(), text.as_bytes().to_vec(), None);
+        if let Some(file) = state.files.get_mut(&path) {
+            file.1 = mtime;
+        }
+        state.changed(&path);
     }
 
     fn insert(&self, path: &Path, bytes: Vec<u8>, identity: Option<FileIdentity>) {

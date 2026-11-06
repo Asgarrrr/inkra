@@ -1,17 +1,21 @@
 //! Random interleavings of vault changes, builds held across them, saves, loads and merges
-//! landing in any order: the index ends as a fresh build of the final vault answers.
+//! landing in any order, relaunches over the cache: the index ends as a fresh build of the final
+//! vault answers.
 
 use std::collections::HashSet;
+use std::path::Path;
+use std::time::{Duration, UNIX_EPOCH};
 
 use futures::executor::block_on;
-use inkra_vault::{EntryId, Fs, Kind, Stamp};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Stamp, Vault};
 use proptest::prelude::*;
 
 use super::diff::notes;
 use super::tests::{Harness, Pending, failure, words_of};
 use super::{LiveIndex, Status, Ticket, Turn};
-use crate::NoteContent;
-use crate::test_support::{ROOT, content, loaded};
+use crate::persist::{Outcome, decode, encode};
+use crate::test_support::{ROOT, loaded};
+use crate::{FileRead, NoteContent};
 
 const SLOTS: usize = 2;
 const NAMES: &[&str] = &["a", "b", "c", "n1", "n2", "r1", "zz"];
@@ -33,6 +37,11 @@ enum Op {
     Save(usize, usize),
     LandSave(usize),
     RunMerge,
+    /// The app quits and starts again: the cache is written, a new index waits for it over a
+    /// new scan, and the outcome is held for `Cached`; 0 is a missing file, 1 a rejected one.
+    Relaunch(usize),
+    /// The held outcome lands.
+    Cached,
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -49,6 +58,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (any.clone(), 0..TEXTS.len()).prop_map(|(at, text)| Op::Save(at, text)),
         1 => any.prop_map(Op::LandSave),
         1 => Just(Op::RunMerge),
+        1 => (0..4usize).prop_map(Op::Relaunch),
+        2 => Just(Op::Cached),
     ]
 }
 
@@ -59,8 +70,12 @@ struct Model {
     /// paths would hold the other note's text, a race the scheduler does not guard (spec, As built).
     loads: Vec<(Ticket, inkra_vault::Result<NoteContent>)>,
     saves: Vec<(Ticket, NoteContent)>,
-    /// Turns that reported `indexed`.
+    /// Turns of this launch that reported `indexed`.
     indexed: usize,
+    /// The cache read of the last relaunch, not landed yet.
+    outcome: Option<Outcome>,
+    /// Writes so far: each gets its own mtime, every other one a whole second (P8).
+    writes: u64,
 }
 
 /// Every getter of `LiveIndex`: a turn that does not notify leaves it as it was (D5).
@@ -85,19 +100,71 @@ impl Seen {
 
 impl Model {
     fn new() -> Self {
-        Self {
-            h: Harness::with_slots(
-                &[
-                    ("a.md", "[[b]]"),
-                    ("b.md", "[[c]] [[a]]"),
-                    ("d/e.md", "[[a]]"),
-                ],
-                SLOTS,
-            ),
+        let files = [
+            ("a.md", "[[b]]"),
+            ("b.md", "[[c]] [[a]]"),
+            ("d/e.md", "[[a]]"),
+        ];
+        let mut model = Self {
+            h: Harness::with_slots(&files, SLOTS),
             loads: Vec::new(),
             saves: Vec::new(),
             indexed: 0,
+            outcome: None,
+            writes: 0,
+        };
+        // Rewritten at sub-second and whole-second mtimes, so a relaunch reuses some.
+        for (file, text) in files {
+            model.write(Path::new(&format!("{ROOT}/{file}")), text);
         }
+        model
+    }
+
+    fn write(&mut self, path: &Path, text: &str) {
+        self.writes += 1;
+        let half = Duration::from_millis(500 * (self.writes % 2));
+        let mtime = UNIX_EPOCH + Duration::from_secs(2_000_000 + self.writes) + half;
+        self.h.fs.insert_with_mtime(path, text, Mtime(mtime));
+        self.h.rescan();
+    }
+
+    /// The old launch's jobs die with it; the new one scans the same disk.
+    fn relaunch(&mut self, kind: usize) {
+        let root = Path::new(ROOT);
+        let bytes = encode(self.h.live.index(), root);
+        self.outcome = Some(match kind {
+            0 => Outcome::Missing,
+            1 => match decode(&bytes[..bytes.len() / 2], root) {
+                Ok(_) => panic!("half a cache decodes"),
+                Err(rejected) => Outcome::Rejected(rejected),
+            },
+            _ => match decode(&bytes, root) {
+                Ok(decoded) => Outcome::Decoded(decoded),
+                Err(rejected) => panic!("rejected: {}", rejected.reason()),
+            },
+        });
+        let Ok(vault) = block_on(Vault::scan(&self.h.fs, root)) else {
+            panic!("a MemFs scan cannot fail");
+        };
+        let mut live = LiveIndex::new(SLOTS);
+        live.await_cache();
+        self.h = Harness {
+            fs: std::mem::take(&mut self.h.fs),
+            vault,
+            live,
+            pending: Pending::default(),
+        };
+        self.loads.clear();
+        self.saves.clear();
+        self.indexed = 0;
+    }
+
+    fn cached(&mut self) -> Result<bool, TestCaseError> {
+        let Some(outcome) = self.outcome.take() else {
+            return Ok(false);
+        };
+        self.turn(|t| t.cached(outcome))?;
+        Ok(true)
     }
 
     /// Runs one turn, reading its loads and keeping its other jobs pending; a turn that does not
@@ -178,20 +245,16 @@ impl Model {
         match *op {
             Op::Write(at, text) => {
                 if let Some((_, path)) = self.note(at) {
-                    self.h.fs.insert_file(path, TEXTS[text]);
-                    self.h.rescan();
+                    self.write(&path, TEXTS[text]);
                 }
             }
             Op::Create(name) => {
-                self.h
-                    .fs
-                    .insert_file(format!("{ROOT}/{}.md", NAMES[name]), "");
-                self.h.rescan();
+                self.write(Path::new(&format!("{ROOT}/{}.md", NAMES[name])), "");
             }
             Op::Rename(at, name) => {
                 if let Some((_, path)) = self.note(at) {
                     let to = format!("{ROOT}/{}.md", NAMES[name]);
-                    let _ = block_on(self.h.fs.rename(&path, std::path::Path::new(&to)));
+                    let _ = block_on(self.h.fs.rename(&path, Path::new(&to)));
                     self.h.rescan();
                 }
             }
@@ -213,14 +276,17 @@ impl Model {
             }
             Op::Save(at, text) => {
                 if let Some((id, path)) = self.note(at) {
-                    self.h.fs.insert_file(&path, TEXTS[text]);
-                    // As `NoteStore` re-keys the entry after a save, the vault holds the saved mtime.
-                    self.h.rescan();
-                    let Some(mtime) = self.h.vault.entry(id).map(|entry| entry.mtime) else {
+                    // As `NoteStore` re-keys the entry after a save, the vault holds the saved stamp.
+                    self.write(&path, TEXTS[text]);
+                    let Some(read) = self.h.vault.entry(id).map(|entry| FileRead {
+                        stamp: entry.stamp(),
+                        identity: entry.identity,
+                    }) else {
                         panic!("a saved note stays listed");
                     };
-                    let ticket = self.turn(|t| t.saved(id, mtime))?;
-                    self.saves.push((ticket, content(TEXTS[text], mtime)));
+                    let ticket = self.turn(|t| t.saved(id, read.stamp))?;
+                    self.saves
+                        .push((ticket, NoteContent::parse(TEXTS[text], read)));
                 }
             }
             Op::LandSave(at) => {
@@ -228,6 +294,10 @@ impl Model {
             }
             Op::RunMerge => {
                 self.run_merge()?;
+            }
+            Op::Relaunch(kind) => self.relaunch(kind),
+            Op::Cached => {
+                self.cached()?;
             }
         }
         Ok(())
@@ -253,13 +323,21 @@ impl Model {
                     .map(|load| load.id),
             )
             .collect();
+        let wait = usize::from(live.cache.waits());
+        if wait == 1 {
+            prop_assert!(live.queued.is_empty(), "queued while the cache is awaited");
+            prop_assert!(
+                self.h.pending.merge.is_none(),
+                "a merge while the cache is awaited"
+            );
+        }
         let (loaded, total) = live.progress();
         prop_assert!(
-            pending.len() <= total,
+            pending.len() + wait <= total,
             "{} pending of {total}",
-            pending.len()
+            pending.len() + wait
         );
-        prop_assert_eq!(loaded, total - pending.len());
+        prop_assert_eq!(loaded, total - pending.len() - wait);
         match live.status() {
             Status::Scanning => prop_assert!(live.last.is_none(), "scanning after a build"),
             Status::Indexing {
@@ -288,8 +366,11 @@ impl Model {
     fn drain(&mut self) -> Result<bool, TestCaseError> {
         self.vault_changed()?;
         for _ in 0..1_000 {
-            let busy =
-                self.run_build()? | self.land(0, false)? | self.land_save(0)? | self.run_merge()?;
+            let busy = self.cached()?
+                | self.run_build()?
+                | self.land(0, false)?
+                | self.land_save(0)?
+                | self.run_merge()?;
             if !busy {
                 return Ok(true);
             }

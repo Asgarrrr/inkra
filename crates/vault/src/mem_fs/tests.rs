@@ -613,3 +613,16 @@ fn reading_bytes_that_are_not_utf8_as_a_string_names_the_path() {
 
     let _ = fs.read_to_string(Path::new("/vault/a.md"));
 }
+
+#[test]
+fn insert_with_mtime_sets_the_mtime_and_the_size_follows_the_bytes() {
+    let fs = MemFs::new();
+    let mtime = Mtime(SystemTime::UNIX_EPOCH + Duration::from_millis(1_500));
+    fs.insert_with_mtime("/vault/a.md", "héllo", mtime);
+
+    assert_eq!(stamp_of(&fs, "/vault/a.md"), Stamp { mtime, size: 6 });
+    let Ok(listed) = block_on(fs.read_dir(Path::new("/vault"))) else {
+        panic!("read_dir must succeed");
+    };
+    assert_eq!((listed[0].mtime, listed[0].size), (mtime, 6));
+}
