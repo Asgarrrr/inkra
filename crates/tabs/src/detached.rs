@@ -68,10 +68,7 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
         park: impl FnOnce() -> Q,
     ) -> (TabId, Q) {
         let id = self.insert(at, park);
-        let index = self.active_index();
-        let tab = &mut self.list[index];
-        tab.back = detached.back;
-        tab.forward = detached.forward;
+        self.set_active_history(detached.back, detached.forward);
         (id, detached.place)
     }
 
@@ -79,9 +76,7 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
     #[must_use]
     pub fn detached(detached: Detached<P, Q>) -> (Self, Q) {
         let mut tabs = Self::new();
-        let tab = &mut tabs.list[0];
-        tab.back = detached.back;
-        tab.forward = detached.forward;
+        tabs.set_active_history(detached.back, detached.forward);
         (tabs, detached.place)
     }
 }

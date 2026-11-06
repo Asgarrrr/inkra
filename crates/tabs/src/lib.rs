@@ -171,6 +171,14 @@ impl<P, Q> Tabs<P, Q> {
         Some((index, tab))
     }
 
+    /// Gives the active tab the stacks of the tab it stands for.
+    fn set_active_history(&mut self, back: Stack<P>, forward: Stack<P>) {
+        let index = self.active_index();
+        let tab = &mut self.list[index];
+        tab.back = back;
+        tab.forward = forward;
+    }
+
     /// After the active tab left: the MRU's first takes over, and its slot is the place to show.
     fn show_next(&mut self) -> (TabId, Q) {
         self.active = self.mru[0];
