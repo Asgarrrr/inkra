@@ -3,17 +3,19 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement, MouseButton,
+    App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
     Window, div, prelude::FluentBuilder,
 };
+use inkra_layout::GroupId;
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
+use super::group::selector;
 use super::{AppShell, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
-use crate::ui::{IconButton, IconName, Indicator, Tab, UiText, h_flex};
+use crate::ui::{Color, IconButton, IconName, Indicator, Label, Tab, UiText, h_flex};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
@@ -24,6 +26,15 @@ pub(super) struct DraggedTab {
     id: TabId,
     index: usize,
     title: SharedString,
+    group: GroupId,
+}
+
+/// The centre group a strip draws: `k` is its place in the row, for the selectors.
+#[derive(Clone, Copy)]
+struct Strip {
+    k: usize,
+    group: GroupId,
+    active: bool,
 }
 
 impl Render for DraggedTab {
@@ -45,47 +56,66 @@ fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString
 
 impl AppShell {
     /// The note each tab shows; `None` for an empty tab.
-    pub(super) fn tab_notes(&self) -> impl Iterator<Item = Option<EntryId>> + '_ {
-        let active = self.active_note();
-        self.center()
+    pub(super) fn tab_notes(&self, group: GroupId) -> impl Iterator<Item = Option<EntryId>> + '_ {
+        let group = self.group(group);
+        let active = group.shown.note();
+        group
             .tabs
             .iter()
             .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::note))
     }
 
     /// Every tab's title, reading the store once.
-    pub(super) fn tab_titles(&self, cx: &App) -> Vec<SharedString> {
+    pub(super) fn tab_titles(&self, group: GroupId, cx: &App) -> Vec<SharedString> {
         let notes = self.notes.read(cx);
-        self.tab_notes()
+        self.tab_notes(group)
             .map(|note| tab_title(note, notes, cx))
             .collect()
     }
 
     /// Its children are the tabs only, so `scroll_to_item` indexes tabs (`div.rs:4291-4322`).
-    pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.center().tabs.active();
+    pub(super) fn render_tab_bar(
+        &self,
+        k: usize,
+        group: GroupId,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let strip = Strip {
+            k,
+            group,
+            active: group == self.layout.last_center(),
+        };
+        let active = self.group(group).tabs.active();
         let notes = self.notes.read(cx);
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
         let indicators: Vec<Option<Indicator>> = self
-            .tab_notes()
+            .tab_notes(group)
             .map(|note| {
                 note.and_then(|id| Indicator::of(notes.is_dirty(id, cx), notes.save_failed(id)))
             })
             .collect();
         let tabs: Vec<_> = self
-            .center()
+            .group(group)
             .tabs
             .iter()
-            .zip(self.tab_titles(cx))
+            .zip(self.tab_titles(group, cx))
             .zip(indicators)
             .enumerate()
             .map(|(ix, ((tab, title), indicator))| {
-                Self::render_tab(ix, tab.id(), title, tab.id() == active, indicator, cx)
+                Self::render_tab(
+                    strip,
+                    ix,
+                    tab.id(),
+                    title,
+                    tab.id() == active,
+                    indicator,
+                    cx,
+                )
             })
             .collect();
         div()
             .id("tab-bar")
-            .debug_selector(|| "tab-bar".into())
+            .debug_selector(move || selector("tab-bar", k))
             .role(Role::TabList)
             .flex()
             .flex_row()
@@ -98,12 +128,13 @@ impl AppShell {
             .px(theme::TAB_CURVE)
             .gap(theme::TAB_GAP)
             .overflow_x_scroll()
-            .track_scroll(&self.center().tab_scroll)
+            .track_scroll(&self.group(group).tab_scroll)
             .ui_text()
             .children(tabs)
     }
 
     fn render_tab(
+        strip: Strip,
         ix: usize,
         id: TabId,
         title: SharedString,
@@ -116,20 +147,23 @@ impl AppShell {
             id,
             index: ix,
             title: title.clone(),
+            group: strip.group,
         };
+        let group = strip.group;
         Tab::new(("tab", ix))
+            .debug_selector(move || selector(format_args!("tab-{ix}"), strip.k))
             .active(is_active)
             .when_some(indicator, |tab, indicator| {
                 tab.start(
                     div()
-                        .debug_selector(move || indicator.selector("tab", ix))
+                        .debug_selector(move || selector(indicator.selector("tab", ix), strip.k))
                         .child(indicator),
                 )
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press_tab))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::press_tab))
             .on_click(cx.listener(move |shell, _, window, cx| {
-                shell.activate_tab(shell.layout.center(), id, window, cx);
+                shell.activate_tab(group, id, window, cx);
             }))
             // The × has no aux listener, so a middle click on it closes its tab here.
             .on_aux_click(cx.listener(move |shell, event: &ClickEvent, window, cx| {
@@ -140,6 +174,10 @@ impl AppShell {
             }))
             .on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone()))
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
+                // P4 moves tabs across groups; until then a foreign tab has no landing here.
+                if dragged.group != group {
+                    return style;
+                }
                 let style = style
                     .bg(colors.accent_background)
                     .border_color(colors.accent);
@@ -150,9 +188,17 @@ impl AppShell {
                 }
             })
             .on_drop(cx.listener(move |shell, dragged: &DraggedTab, _, cx| {
-                shell.move_tab(dragged.id, ix, cx);
+                if dragged.group == group {
+                    shell.move_tab(group, dragged.id, ix, cx);
+                }
             }))
-            .child(title)
+            .map(|tab| {
+                if is_active && !strip.active {
+                    tab.child(Label::new(title).color(Color::Muted))
+                } else {
+                    tab.child(title)
+                }
+            })
             .end(
                 IconButton::new(("tab-close", ix), IconName::X, "Close tab")
                     .square(theme::TAB_CLOSE_SIZE)
@@ -166,7 +212,7 @@ impl AppShell {
     }
 
     /// After the bar, not in it: `scroll_to_item` indexes the bar's children, which are tabs only.
-    pub(super) fn render_new_tab(cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_new_tab(k: usize, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_none()
             .self_end()
@@ -175,11 +221,14 @@ impl AppShell {
             .pt(theme::RULE_WIDTH)
             .pb(theme::TAB_HOVER_INSET)
             .child(
-                IconButton::new("tab-new", IconName::Plus, NEW_TAB).on_click(cx.listener(
-                    |shell, _, window, cx| {
-                        shell.new_tab(&NewTab, window, cx);
-                    },
-                )),
+                IconButton::new(
+                    ElementId::Name(selector("tab-new", k).into()),
+                    IconName::Plus,
+                    NEW_TAB,
+                )
+                .on_click(cx.listener(|shell, _, window, cx| {
+                    shell.new_tab(&NewTab, window, cx);
+                })),
             )
     }
 

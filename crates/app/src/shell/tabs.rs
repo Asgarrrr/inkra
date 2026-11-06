@@ -8,11 +8,11 @@ use inkra_tabs::{Closed, Direction, TabId};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 
+use super::activation::Origin;
 use super::group::Group;
 use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ViewState;
-use crate::vault::NoteStore;
 
 actions!(
     tabs,
@@ -79,7 +79,7 @@ pub(super) fn capture(shown: &Shown, cx: &mut App) -> Place {
 impl AppShell {
     pub(super) fn new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
-        let center = self.layout.center();
+        let center = self.layout.last_center();
         let Group { tabs, shown, .. } = self.group_mut(center);
         tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
         self.show_place(center, Place::Empty, window, cx);
@@ -93,20 +93,23 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let center = self.layout.center();
-        let (source, since) = (self.group(center).tabs.active(), self.tree_cursor(cx));
+        let origin = Origin {
+            group: self.layout.last_center(),
+            since: self.tree_cursor(cx),
+        };
+        let source = self.group(origin.group).tabs.active();
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
-        self.group_mut(center).activation = Some(cx.spawn(async move |shell, cx| {
+        self.group_mut(origin.group).activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                let Group { tabs, shown, .. } = shell.group_mut(center);
+                let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
                 if tabs.active() != source {
                     return;
                 }
                 tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
-                shell.land(id, buffer, at, since, window, cx);
-                shell.keep_active_tab_visible(center);
+                shell.land(origin, id, buffer, at, window, cx);
+                shell.keep_active_tab_visible(origin.group);
                 cx.notify();
             });
         }));
@@ -124,7 +127,7 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     pub(super) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        let center = self.layout.center();
+        let center = self.layout.last_center();
         let Group { tabs, shown, .. } = self.group_mut(center);
         // Plain offsets: the closed stack keeps no anchors (A2).
         let closed = tabs.close(id, |slot| match slot {
@@ -153,7 +156,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_modal(window, cx);
-        let center = self.layout.center();
+        let center = self.layout.last_center();
         let Group { tabs, shown, .. } = self.group_mut(center);
         let arriving = tabs.reopen(|| Parked::park(shown, cx));
         if let Some(place) = arriving {
@@ -163,10 +166,15 @@ impl AppShell {
     }
 
     /// A drop in the bar: nothing is left, captured or parked, so a pending open still lands (T4).
-    pub(super) fn move_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
-        let center = self.layout.center();
-        self.group_mut(center).tabs.move_tab(id, to);
-        self.keep_active_tab_visible(center);
+    pub(super) fn move_tab(
+        &mut self,
+        group: GroupId,
+        id: TabId,
+        to: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.group_mut(group).tabs.move_tab(id, to);
+        self.keep_active_tab_visible(group);
         self.save_session_later(cx);
         cx.notify();
     }
@@ -192,7 +200,7 @@ impl AppShell {
     ) {
         self.dismiss_modal(window, cx);
         if let Some(id) = self.center().tabs.id_at(action.0) {
-            self.activate_tab(self.layout.center(), id, window, cx);
+            self.activate_tab(self.layout.last_center(), id, window, cx);
         }
     }
 
@@ -203,13 +211,18 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_modal(window, cx);
-        self.activate_tab(self.layout.center(), self.center().tabs.last(), window, cx);
+        self.activate_tab(
+            self.layout.last_center(),
+            self.center().tabs.last(),
+            window,
+            cx,
+        );
     }
 
     fn step_tab(&mut self, direction: Direction, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
         let id = self.center().tabs.step(direction);
-        self.activate_tab(self.layout.center(), id, window, cx);
+        self.activate_tab(self.layout.last_center(), id, window, cx);
     }
 
     pub(super) fn activate_tab(
@@ -230,7 +243,7 @@ impl AppShell {
 
     pub(super) fn go_back(&mut self, _: &GoBack, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_modal(window, cx);
-        let (center, note) = (self.layout.center(), self.active_note());
+        let (center, note) = (self.layout.last_center(), self.active_note());
         let Group { tabs, shown, .. } = self.group_mut(center);
         // Captured, not parked: the tab stays active, and the stack keeps plain offsets (A2).
         let arriving = tabs.back(note, || capture(shown, cx));
@@ -246,7 +259,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_modal(window, cx);
-        let (center, note) = (self.layout.center(), self.active_note());
+        let (center, note) = (self.layout.last_center(), self.active_note());
         let Group { tabs, shown, .. } = self.group_mut(center);
         let arriving = tabs.forward(note, || capture(shown, cx));
         if let Some(place) = arriving {
@@ -257,38 +270,52 @@ impl AppShell {
     /// Drops the view with the note: a buffer with no file is still typable, and every keystroke would be lost.
     pub(super) fn note_closed(&mut self, id: EntryId, window: &mut Window, cx: &mut Context<Self>) {
         // No focus move: a trash from the tree keeps the focus there.
-        if self.forget_note(id) {
-            self.display(self.layout.center(), Place::Empty, window, cx);
+        for group in self.forget_note(id) {
+            self.display(group, Place::Empty, window, cx);
         }
         self.save_session_later(cx);
         cx.notify();
     }
 
-    /// Binds `id` again if the active tab waited on its trash.
+    /// Binds `id` again in each group whose active tab waited on its trash.
     pub(super) fn trash_failed(
         &mut self,
         id: EntryId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Shown::Trashing(note) = self.center().shown
-            && note == id
-        {
+        let waiting: Vec<_> = self
+            .layout
+            .center()
+            .iter()
+            .copied()
+            .filter(|&group| matches!(self.group(group).shown, Shown::Trashing(note) if note == id))
+            .collect();
+        if waiting.is_empty() {
+            return;
+        }
+        for group in waiting {
             let place = Place::Note(OnNote {
                 note: id,
                 view: None,
             });
-            self.display(self.layout.center(), place, window, cx);
-            self.focus_note_from_root(window, cx);
-            cx.notify();
+            self.display(group, place, window, cx);
         }
+        self.focus_note_from_root(window, cx);
+        cx.notify();
     }
 
-    /// Empties every tab on `id`, dropping its parked views; returns whether the active tab was one.
-    pub(super) fn forget_note(&mut self, id: EntryId) -> bool {
-        let active = self.active_note() == Some(id);
-        self.center_mut().tabs.forget(id);
-        active
+    /// Empties every centre tab on `id`, dropping its parked views; returns the groups whose active tab was one.
+    pub(super) fn forget_note(&mut self, id: EntryId) -> Vec<GroupId> {
+        let center = self.layout.center().to_vec();
+        center
+            .into_iter()
+            .filter(|&group| {
+                let group = self.group_mut(group);
+                group.tabs.forget(id);
+                group.shown.note() == Some(id)
+            })
+            .collect()
     }
 
     /// After every change to the tab set or the active tab: a close to its left shifts it too.
@@ -306,7 +333,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.show(group, place, window, cx);
-        if group == self.layout.center()
+        if group == self.layout.last_center()
             && let Some(focus) = self.land_focus(cx)
         {
             window.focus(&focus, cx);
@@ -350,11 +377,7 @@ impl AppShell {
                 Shown::Trashing(on.note)
             }
         };
-        let clears = group == self.layout.center() && shown.view().is_none();
         self.unfocus_editor(group, window, cx);
         self.set_shown(group, shown, since, cx);
-        if clears {
-            self.notes.update(cx, NoteStore::clear_current);
-        }
     }
 }

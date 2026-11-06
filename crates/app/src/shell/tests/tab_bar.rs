@@ -17,7 +17,9 @@ use crate::bootstrap::{Launch, root};
 
 fn titles(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) -> Vec<gpui::SharedString> {
     window
-        .update(cx, |shell, _, cx| shell.tab_titles(cx))
+        .update(cx, |shell, _, cx| {
+            shell.tab_titles(shell.layout.last_center(), cx)
+        })
         .unwrap()
 }
 

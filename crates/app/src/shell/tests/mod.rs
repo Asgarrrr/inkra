@@ -47,6 +47,7 @@ mod restore_lands;
 mod restore_refused;
 mod session_writes;
 mod sidebar_selection;
+mod splits;
 mod tab_bar;
 mod tab_chrome;
 mod tab_keys;
@@ -255,7 +256,7 @@ pub(super) fn tab_notes(
     window
         .update(cx, |shell, _, _| {
             (
-                shell.tab_notes().collect(),
+                shell.tab_notes(shell.layout.last_center()).collect(),
                 shell.center().tabs.active_index(),
             )
         })
