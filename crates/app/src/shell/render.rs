@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
     Render, Styled, Window, div, prelude::FluentBuilder, px,
 };
-use inkra_layout::{Axis, GroupId, Member, Side};
+use inkra_layout::{Axis, GroupId, Member, Side, Surface};
 
 use super::dock_drag::SHELL_GROUP;
 use super::group::selector;
@@ -91,24 +91,24 @@ impl AppShell {
     }
 }
 
-/// Where a centre member sits: its parent's axis, its index there, and its flex.
+/// Where a member sits: its parent's axis, its index there, and its flex.
 #[derive(Clone, Copy)]
-struct Slot {
+pub(super) struct Slot {
     axis: Axis,
     ix: usize,
     flex: f32,
 }
 
 impl Slot {
-    /// The root, as the main row's one centre member.
-    const ROOT: Self = Self {
+    /// The root, as its row's one member.
+    pub(super) const ROOT: Self = Self {
         axis: Axis::Horizontal,
         ix: 0,
         flex: 1.0,
     };
 
     /// Basis 0, so the flexes alone share the parent's room; `min_*_0`, else content would widen it.
-    fn size<E: Styled>(self, element: E) -> E {
+    pub(super) fn size<E: Styled>(self, element: E) -> E {
         let element = element.flex_basis(px(0.)).flex_grow(self.flex).relative();
         match self.axis {
             Axis::Horizontal => element.min_w_0().h_full(),
@@ -117,7 +117,7 @@ impl Slot {
     }
 
     /// Drawn over the member, not as its border: a border would widen it past its strip.
-    fn rule(self, cx: &App) -> Option<Div> {
+    pub(super) fn rule(self, cx: &App) -> Option<Div> {
         let colors = theme::current(cx).colors;
         (self.ix > 0).then(|| {
             let rule = div().absolute().left_0().top_0().bg(colors.border_variant);
@@ -129,27 +129,31 @@ impl Slot {
     }
 }
 
+/// A lower group's header row, as the title row holds only the top groups' strips (splits spec, D4).
+pub(super) fn lower_header(cx: &App) -> Div {
+    let colors = theme::current(cx).colors;
+    h_flex()
+        .flex_none()
+        .relative()
+        .h(theme::GROUP_HEADER_HEIGHT)
+        .bg(colors.background)
+        .on_mouse_down(MouseButton::Left, keep_focus)
+        // Under the tabs, as the title row's; the active tab, painted later, breaks it.
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .border_b(theme::RULE_WIDTH)
+                .border_color(colors.border_variant),
+        )
+}
+
 impl AppShell {
-    /// A lower group's strip, as the title row holds only the top groups' (splits spec, D4).
     fn render_group_header(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
-        let colors = theme::current(cx).colors;
-        h_flex()
+        lower_header(cx)
             .debug_selector(move || selector("group-header", k))
-            .flex_none()
-            .relative()
-            .h(theme::GROUP_HEADER_HEIGHT)
-            .bg(colors.background)
-            .on_mouse_down(MouseButton::Left, keep_focus)
-            // Under the tabs, as the title row's; the active tab, painted later, breaks it.
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .border_b(theme::RULE_WIDTH)
-                    .border_color(colors.border_variant),
-            )
             .child(self.render_tab_bar(k, group, cx))
             .child(Self::render_new_tab(k, cx))
     }
@@ -192,11 +196,12 @@ impl AppShell {
         .children(slot.rule(cx))
     }
 
-    /// `k` counts the groups drawn so far, depth-first.
-    fn render_member(
+    /// `k` counts `surface`'s groups drawn so far, depth-first.
+    pub(super) fn render_member(
         &self,
         member: &Member,
         slot: Slot,
+        surface: Surface,
         top: &[GroupId],
         k: &mut usize,
         cx: &mut Context<Self>,
@@ -204,16 +209,24 @@ impl AppShell {
         match member {
             Member::Group(group) => {
                 let lower = !top.contains(group);
-                let column = self.render_note_column(*k, *group, slot, lower, cx);
+                let column = match surface {
+                    Surface::Center => self
+                        .render_note_column(*k, *group, slot, lower, cx)
+                        .into_any_element(),
+                    Surface::Dock(side) => self
+                        .render_view_column(side, *k, *group, slot, lower, cx)
+                        .into_any_element(),
+                };
                 *k += 1;
-                column.into_any_element()
+                column
             }
             Member::Split {
                 axis,
                 children,
                 flexes,
             } => {
-                let children = self.render_split(*axis, children, flexes, top, k, cx);
+                let children =
+                    self.render_split(*axis, children.iter().zip(flexes), surface, top, k, cx);
                 slot.size(div().flex().when(*axis == Axis::Vertical, Styled::flex_col))
                     .children(children)
                     .children(slot.rule(cx))
@@ -222,28 +235,27 @@ impl AppShell {
         }
     }
 
-    fn render_split(
+    fn render_split<'a>(
         &self,
         axis: Axis,
-        children: &[Member],
-        flexes: &[f32],
+        children: impl Iterator<Item = (&'a Member, &'a f32)>,
+        surface: Surface,
         top: &[GroupId],
         k: &mut usize,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         children
-            .iter()
-            .zip(flexes)
             .enumerate()
             .map(|(ix, (child, &flex))| {
-                self.render_member(child, Slot { axis, ix, flex }, top, k, cx)
+                self.render_member(child, Slot { axis, ix, flex }, surface, top, k, cx)
             })
             .collect()
     }
 
     /// Under the title row: the left dock, the centre and the right dock.
     fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let top = self.layout.top_groups();
+        let surface = Surface::Center;
+        let top = self.layout.top_groups(surface);
         let mut k = 0;
         // In the row itself, not a wrapper: a nested row has taffy measure the note's content.
         let center = match self.layout.center() {
@@ -251,8 +263,15 @@ impl AppShell {
                 axis: Axis::Horizontal,
                 children,
                 flexes,
-            } => self.render_split(Axis::Horizontal, children, flexes, &top, &mut k, cx),
-            member => vec![self.render_member(member, Slot::ROOT, &top, &mut k, cx)],
+            } => self.render_split(
+                Axis::Horizontal,
+                children.iter().zip(flexes),
+                surface,
+                &top,
+                &mut k,
+                cx,
+            ),
+            member => vec![self.render_member(member, Slot::ROOT, surface, &top, &mut k, cx)],
         };
         div()
             .relative()
@@ -301,6 +320,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::toggle_right_dock))
             .on_action(cx.listener(Self::move_files_to_other_dock))
             .on_action(cx.listener(Self::move_backlinks_to_other_dock))
+            .on_action(cx.listener(Self::split_view))
             .on_action(cx.listener(Self::select_theme))
             .on_action(cx.listener(Self::quit))
             .on_mouse_move(cx.listener(Self::title_drag_move))

@@ -87,7 +87,7 @@ impl Member {
 
     /// Structural, so no flex can make a lower group top: a vertical split's first child alone
     /// keeps the top edge.
-    fn collect_top(&self, groups: &mut Vec<GroupId>) {
+    pub(crate) fn collect_top(&self, groups: &mut Vec<GroupId>) {
         match self {
             Self::Group(group) => groups.push(*group),
             Self::Split {
@@ -135,7 +135,7 @@ impl Member {
 
     /// The heir: the previous sibling's last group, else the next one's first, which takes the room.
     /// `None` when `group` is this member itself.
-    fn remove(&mut self, group: GroupId) -> Option<GroupId> {
+    pub(crate) fn remove(&mut self, group: GroupId) -> Option<GroupId> {
         let Self::Split {
             children, flexes, ..
         } = self
@@ -157,26 +157,25 @@ impl Member {
 }
 
 impl Layout {
-    /// Ids depth-first: the centre's groups, then the left dock's if `docks[0]`, then the right's
-    /// if `docks[1]`; `groups` lists them in that order. The first centre group is `last_center`.
+    /// Ids depth-first: the centre's groups, then the left dock's, then the right's; `groups`
+    /// lists them in that order. The centre group at `active` is `last_center`, else the first.
     ///
     /// # Panics
     /// If `center` holds no group.
     #[must_use]
-    pub fn restored(center: &Shape, docks: [bool; 2], shown: [bool; 2]) -> Self {
+    pub fn restored(
+        center: &Shape,
+        docks: [Option<&Shape>; 2],
+        shown: [bool; 2],
+        active: usize,
+    ) -> Self {
         let mut next = 0;
         let center = normalised(center.member(&mut next));
-        let Some(&last_center) = center.groups().first() else {
+        let groups = center.groups();
+        let Some(&last_center) = groups.get(active).or(groups.first()) else {
             panic!("a restored centre holds a group");
         };
-        let mut dock = |held: bool| {
-            held.then(|| {
-                let group = GroupId(next);
-                next += 1;
-                group
-            })
-        };
-        let (left, right) = (dock(docks[0]), dock(docks[1]));
+        let [left, right] = docks.map(|dock| dock.map(|shape| normalised(shape.member(&mut next))));
         Self {
             center,
             last_center,
@@ -198,48 +197,24 @@ impl Layout {
         self.center.groups()
     }
 
-    /// A fresh group after `group` on `axis`: a sibling sharing `group`'s room when its parent
-    /// splits on `axis`, else a new split in `group`'s place.
+    /// A fresh group after `group` on `axis`, on `group`'s surface: a sibling sharing `group`'s
+    /// room when its parent splits on `axis`, else a new split in `group`'s place.
     ///
     /// # Panics
-    /// If `group` is not in the centre.
+    /// If `group` is not in this layout.
     pub fn split(&mut self, group: GroupId, axis: Axis) -> GroupId {
         let fresh = GroupId(self.next);
-        let found = self.center.split(group, fresh, axis);
-        assert!(found, "{group:?} is not in the centre");
+        let member = self.holder_mut(group);
+        member.split(group, fresh, axis);
+        normalise(member);
         self.next += 1;
-        self.normalise();
         fresh
     }
+}
 
-    /// # Panics
-    /// If `group` is the centre's only group.
-    pub(crate) fn remove_center(&mut self, group: GroupId) -> GroupId {
-        let Some(heir) = self.center.remove(group) else {
-            panic!("the centre always has a group");
-        };
-        self.normalise();
-        heir
-    }
-
-    /// The centre laid out in the unit square, depth-first.
-    #[must_use]
-    pub fn rects(&self) -> Vec<(GroupId, Rect)> {
-        rects(&self.center)
-    }
-
-    /// The centre groups along the window's top, left to right: depth-first order already is.
-    #[must_use]
-    pub fn top_groups(&self) -> Vec<GroupId> {
-        let mut groups = Vec::new();
-        self.center.collect_top(&mut groups);
-        groups
-    }
-
-    fn normalise(&mut self) {
-        let center = std::mem::replace(&mut self.center, Member::Group(self.last_center));
-        self.center = normalised(center);
-    }
+pub(crate) fn normalise(member: &mut Member) {
+    let taken = std::mem::replace(member, Member::Group(GroupId(0)));
+    *member = normalised(taken);
 }
 
 pub(crate) fn rects(member: &Member) -> Vec<(GroupId, Rect)> {

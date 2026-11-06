@@ -1,7 +1,7 @@
 //! Split Down: the centre as a tree, a lower group's header, the title row's top strips (splits spec, D4).
 
 use gpui::{Bounds, MouseButton, Pixels, TestAppContext, VisualTestContext, WindowHandle, px};
-use inkra_layout::{Axis, Member};
+use inkra_layout::{Axis, Member, Surface};
 
 use super::dock_menu::drawn;
 use super::splits::{centre, check_layout, close, last, shown_in, split};
@@ -107,7 +107,7 @@ fn each_top_strip_sits_over_its_group(cx: &mut TestAppContext) {
     split_down(&mut cx);
     assert!(drawn(&mut cx, "group-header-3"));
     let widths: Vec<f32> = window
-        .update(&mut cx, |shell, _, _| shell.layout.rects())
+        .update(&mut cx, |shell, _, _| shell.layout.rects(Surface::Center))
         .unwrap()
         .into_iter()
         .map(|(_, rect)| rect.width)

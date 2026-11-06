@@ -133,7 +133,10 @@ impl AppShell {
         let path_of = |id| notes.vault_path(id, cx);
         let last = self.layout.last_center();
         let active = self.layout.groups().position(|group| group == last)?;
-        let [left, right] = [Side::Left, Side::Right].map(|side| self.saved_dock(side));
+        let [left, right] = [Side::Left, Side::Right].map(|side| {
+            let dock = self.layout.dock(side)?;
+            Some(self.saved_member(dock, &path_of, cx))
+        });
         let shown = [Side::Left, Side::Right].map(|side| self.layout.is_shown(side));
         let center = self.saved_member(self.layout.center(), &path_of, cx);
         Some(Session::new(root, active, center, left, right, shown))
@@ -169,8 +172,13 @@ impl AppShell {
         cx: &App,
     ) -> SavedGroup {
         let group = self.group(group);
-        // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
         let tabs = group.tabs.iter().map(|tab| {
+            if let Some(view) = tab.place().map_or_else(|| group.shown.view(), Parked::view) {
+                return SavedTab::View {
+                    view: view.name().to_owned(),
+                };
+            }
+            // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
             let (note, view) = match tab.place() {
                 None => group.shown.bound().map_or((None, None), |bound| {
                     (Some(bound.note), Some(bound.editor.read(cx).view_state()))
@@ -183,21 +191,6 @@ impl AppShell {
             tabs: tabs.collect(),
             active: group.tabs.active_index(),
         }
-    }
-
-    /// An empty dock saves none.
-    fn saved_dock(&self, side: Side) -> Option<SavedGroup> {
-        let group = self.layout.dock(side)?;
-        let tabs = self
-            .dock_views(side)
-            .into_iter()
-            .map(|view| SavedTab::View {
-                view: view.name().to_owned(),
-            });
-        Some(SavedGroup {
-            tabs: tabs.collect(),
-            active: self.group(group).tabs.active_index(),
-        })
     }
 
     /// Until `Done`, the empty state says nothing: the restore may still fill it.

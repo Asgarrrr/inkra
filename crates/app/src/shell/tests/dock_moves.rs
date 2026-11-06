@@ -4,9 +4,8 @@ use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use inkra_layout::{Side, View};
 
 use super::ab_focused;
-use super::dock_menu::docks;
+use super::dock_menu::{Docks, docks};
 use crate::shell::AppShell;
-use crate::shell::docks::DockState;
 
 fn shell(
     window: &WindowHandle<AppShell>,
@@ -25,7 +24,12 @@ fn move_view(
     index: usize,
 ) {
     shell(window, cx, |shell, window, cx| {
-        shell.move_view(view, side, index, window, cx);
+        if let Some(&group) = shell.layout.dock_groups(side).first() {
+            shell.move_view(view, group, index, window, cx);
+        } else {
+            assert_eq!(index, 0, "an empty side takes the view first");
+            shell.append(view, side, window, cx);
+        }
     });
 }
 
@@ -64,7 +68,7 @@ fn both_left(cx: &mut TestAppContext, active: View) -> (WindowHandle<AppShell>, 
     (window, cx)
 }
 
-fn left(docks: DockState) -> (Vec<View>, Option<View>, bool) {
+fn left(docks: Docks) -> (Vec<View>, Option<View>, bool) {
     let [left, _] = docks;
     left
 }

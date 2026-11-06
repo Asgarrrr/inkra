@@ -273,11 +273,11 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S5 | Split Down: a normalised tree of groups in the centre. | Notes above and below |
 | S6 | Session v2: the tree, every group's tabs and the dock groups, with v1 still read. | Splits survive a relaunch |
 | S7 | Dock view strips in the title row, and the Files header (D5). | Dock icons beside the toggle, new note, new folder and search under it |
+| S8 | Dock trees: `Option<Member>` per dock, drawn, split from the dock menu, saved and restored. | Files above Backlinks in one dock |
 
 A follow-up run covers the rest:
 
 - the `⋯` overflow of a dock's view strip, deferred to `docs/roadmap.md`;
-- dock trees (`Option<Member>`);
 - P2 separators: resize, equalise, minimum sizes, the split refusal;
 - P3 `⌘K` keys with `neighbour`, focus-driven activation and the `active` field;
 - P4 tab drag: `take`/`put`, a shared `TabId` counter, views into the centre, the edge zone;
@@ -427,6 +427,21 @@ S7's choices:
 - Each view draws its own header in the column: Files its three buttons,
   Backlinks its title and count. A header carries no drag and no menu; the icon
   does, so a one-view dock no longer draws its title.
+
+S8's choices:
+
+- `VERSION` stays 2 *(delegated)*. A dock saved by S6 or S7 is one group, which
+  is also a valid tree, so every existing file decodes as is.
+- `Layout::restored` honours the saved `active` *(delegated)*. An index out of
+  the centre's range falls back to the first centre group.
+- The dock menu offers Split Right and Split Down only when the group holds two
+  views or more *(delegated)*. A lone view has nothing to split off, and
+  splitting it would leave an empty group.
+- A lower dock group starts with a 34 px header that holds its view strip, as a
+  lower centre group's holds its tab strip. The title row holds one segment per
+  top dock group.
+- A dock emptied by a move or a restore becomes `None`; its `shown` flag stays,
+  so showing it again draws nothing until a view lands.
 
 ## Deferred
 

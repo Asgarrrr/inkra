@@ -139,13 +139,13 @@ fn a_dock_toggle_is_saved(cx: &mut TestAppContext) {
     assert_eq!(session.right, Some(view_group("backlinks")));
 }
 
-fn view_group(view: &str) -> SavedGroup {
-    SavedGroup {
+fn view_group(view: &str) -> SavedMember {
+    SavedMember::Group(SavedGroup {
         tabs: vec![SavedTab::View {
             view: view.to_owned(),
         }],
         active: 0,
-    }
+    })
 }
 
 fn note_group(tab: SavedNoteTab) -> SavedMember {

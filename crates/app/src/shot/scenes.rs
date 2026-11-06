@@ -253,6 +253,11 @@ const CATALOGUE: &[Scene] = &[
         open: docks::drag_empty_side,
     },
     Scene {
+        name: "dock-split",
+        shows: "the left dock split in two of equal height under its title segment, a 1 px hairline between them: Files above, its header and the tree, its icon in the title segment; Backlinks below, a 34 px header holding its strip with the Backlinks icon, then the Backlinks header and panel; no right dock",
+        open: docks::split,
+    },
+    Scene {
         name: "tabs",
         shows: "the title row split in two. Over the sidebar: the traffic lights' space, the sidebar toggle, the Files icon, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the Files header under the row with new note, new folder and search, and the `Backlinks` header level with it, ruled like the row",
         open: tabs::dirty,

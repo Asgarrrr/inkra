@@ -1,7 +1,9 @@
 //! Where each tab group sits and which dock shows (splits spec).
 
+mod surface;
 mod tree;
 
+pub use surface::Surface;
 pub use tree::{Axis, Member, Rect, Shape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,13 +74,13 @@ impl GroupId {
     }
 }
 
-/// The centre always holds a group; a dock holds one or none, and keeps its flag either way.
+/// The centre always holds a group; a dock holds a tree or none, and keeps its flag either way.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     center: Member,
     last_center: GroupId,
-    left: Option<GroupId>,
-    right: Option<GroupId>,
+    left: Option<Member>,
+    right: Option<Member>,
     shown: [bool; 2],
     next: u32,
 }
@@ -89,8 +91,8 @@ impl Default for Layout {
         Self {
             center: Member::Group(GroupId(0)),
             last_center: GroupId(0),
-            left: Some(GroupId(1)),
-            right: Some(GroupId(2)),
+            left: Some(Member::Group(GroupId(1))),
+            right: Some(Member::Group(GroupId(2))),
             shown: [true, true],
             next: 3,
         }
@@ -112,14 +114,6 @@ impl Layout {
     }
 
     #[must_use]
-    pub fn dock(&self, side: Side) -> Option<GroupId> {
-        match side {
-            Side::Left => self.left,
-            Side::Right => self.right,
-        }
-    }
-
-    #[must_use]
     pub fn is_shown(&self, side: Side) -> bool {
         self.shown[side.index()]
     }
@@ -138,23 +132,6 @@ impl Layout {
         self.shown[side.index()] = true;
     }
 
-    /// `None` for the centre.
-    ///
-    /// # Panics
-    /// If `group` is not in this layout.
-    #[must_use]
-    pub fn side_of(&self, group: GroupId) -> Option<Side> {
-        if self.center.holds(group) {
-            None
-        } else if self.left == Some(group) {
-            Some(Side::Left)
-        } else if self.right == Some(group) {
-            Some(Side::Right)
-        } else {
-            panic!("{group:?} is not in the layout")
-        }
-    }
-
     /// # Panics
     /// If that dock already holds a group.
     pub fn add_dock(&mut self, side: Side) -> GroupId {
@@ -164,40 +141,49 @@ impl Layout {
         );
         let group = GroupId(self.next);
         self.next += 1;
-        *self.dock_mut(side) = Some(group);
+        *self.dock_mut(side) = Some(Member::Group(group));
         group
     }
 
-    /// A centre group's room goes to its previous sibling, else its next, whose nearest group it
-    /// returns and which becomes `last_center` in its place (L6). A dock group returns `None`.
+    /// A group's room goes to its previous sibling, else its next, whose nearest group it returns
+    /// (L6). That heir becomes `last_center` in a removed `last_center`'s place; a dock's only
+    /// group leaves the dock empty and returns `None`.
     ///
     /// # Panics
     /// On the centre's only group, or a group not in this layout.
     pub fn remove(&mut self, group: GroupId) -> Option<GroupId> {
-        if let Some(side) = self.side_of(group) {
-            *self.dock_mut(side) = None;
-            return None;
+        match self.surface_of(group) {
+            Surface::Center => {
+                let Some(heir) = self.center.remove(group) else {
+                    panic!("the centre always has a group");
+                };
+                tree::normalise(&mut self.center);
+                if self.last_center == group {
+                    self.last_center = heir;
+                }
+                Some(heir)
+            }
+            Surface::Dock(side) => {
+                let dock = self.dock_mut(side);
+                let heir = dock.as_mut().and_then(|member| member.remove(group));
+                match dock {
+                    Some(member) if heir.is_some() => tree::normalise(member),
+                    _ => *dock = None,
+                }
+                heir
+            }
         }
-        let heir = self.remove_center(group);
-        if self.last_center == group {
-            self.last_center = heir;
-        }
-        Some(heir)
     }
 
     /// The centre depth-first, then the left dock's, then the right dock's.
     pub fn groups(&self) -> impl Iterator<Item = GroupId> {
-        self.center_groups()
-            .into_iter()
-            .chain(self.left)
-            .chain(self.right)
-    }
-
-    fn dock_mut(&mut self, side: Side) -> &mut Option<GroupId> {
-        match side {
-            Side::Left => &mut self.left,
-            Side::Right => &mut self.right,
-        }
+        [
+            self.center_groups(),
+            self.dock_groups(Side::Left),
+            self.dock_groups(Side::Right),
+        ]
+        .into_iter()
+        .flatten()
     }
 }
 
@@ -208,36 +194,50 @@ pub struct StoredDock {
     pub active: usize,
 }
 
-/// Each dock's views and active index, left then right; each `View` lands in exactly one.
+/// Each dock group's views and active index, left groups then right, each side's depth-first;
+/// each `View` lands in exactly one, and a group emptied of views stays for the caller to remove.
 ///
-/// Keeps each known view's first place, left before right; a missing view goes to its default side.
+/// Keeps each known view's first place; a missing view goes to its default side's first group,
+/// or a fresh one when that side has none.
 #[must_use]
-pub fn restore_views(left: &StoredDock, right: &StoredDock) -> [(Vec<View>, usize); 2] {
+pub fn restore_views(docks: [&[StoredDock]; 2]) -> [Vec<(Vec<View>, usize)>; 2] {
     let mut held = Vec::with_capacity(View::ALL.len());
-    let mut docks = [left, right].map(|stored| {
-        let (views, stored_ixs): (Vec<_>, Vec<_>) = stored
-            .views
+    let mut docks = docks.map(|groups| {
+        groups
             .iter()
-            .enumerate()
-            .filter_map(|(stored_ix, name)| {
-                let view = View::named(name).filter(|view| !held.contains(view))?;
-                held.push(view);
-                Some((view, stored_ix))
-            })
-            .unzip();
-        // The stored active view, else its nearest kept entry to the left, else the first.
-        let active = stored_ixs
-            .iter()
-            .rposition(|&stored_ix| stored_ix <= stored.active)
-            .unwrap_or(0);
-        (views, active)
+            .map(|stored| restore_group(stored, &mut held))
+            .collect::<Vec<_>>()
     });
     for view in View::ALL {
         if !held.contains(&view) {
-            docks[view.default_side().index()].0.push(view);
+            let side = &mut docks[view.default_side().index()];
+            match side.first_mut() {
+                Some((views, _)) => views.push(view),
+                None => side.push((vec![view], 0)),
+            }
         }
     }
     docks
+}
+
+/// `stored`'s known views not in `held`, which takes them.
+fn restore_group(stored: &StoredDock, held: &mut Vec<View>) -> (Vec<View>, usize) {
+    let (views, stored_ixs): (Vec<_>, Vec<_>) = stored
+        .views
+        .iter()
+        .enumerate()
+        .filter_map(|(stored_ix, name)| {
+            let view = View::named(name).filter(|view| !held.contains(view))?;
+            held.push(view);
+            Some((view, stored_ix))
+        })
+        .unzip();
+    // The stored active view, else its nearest kept entry to the left, else the first.
+    let active = stored_ixs
+        .iter()
+        .rposition(|&stored_ix| stored_ix <= stored.active)
+        .unwrap_or(0);
+    (views, active)
 }
 
 #[cfg(test)]

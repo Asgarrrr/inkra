@@ -7,10 +7,12 @@ use gpui::{
     MouseDownEvent, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder,
 };
-use inkra_layout::{Side, View};
+use inkra_layout::{GroupId, Side, Surface, View};
 
 use super::dock_drag::DraggedView;
 use super::docks::{ToggleLeftDock, ToggleRightDock, icon, title};
+use super::group::selector;
+use super::render::{Slot, lower_header};
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::{NewFolder, NewNote};
 use crate::theme;
@@ -24,10 +26,10 @@ fn icon_id(view: View) -> &'static str {
     }
 }
 
-fn bar_selector(side: Side) -> &'static str {
+fn name(side: Side) -> &'static str {
     match side {
-        Side::Left => "dock-bar-left",
-        Side::Right => "dock-bar-right",
+        Side::Left => "left",
+        Side::Right => "right",
     }
 }
 
@@ -61,21 +63,18 @@ impl AppShell {
         side: Side,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
-        let panes = self.panes.as_ref()?;
+        self.panes.as_ref()?;
         if !self.layout.is_drawn(side) {
             return None;
         }
-        let view = self.group(self.layout.dock(side)?).shown.view()?;
-        let body = match view {
-            View::Files => panes.sidebar.clone().into_any_element(),
-            View::Backlinks => panes.backlinks.clone().into_any_element(),
-        };
+        let root = self.layout.dock(side)?;
+        let surface = Surface::Dock(side);
+        let top = self.layout.top_groups(surface);
         let colors = theme::current(cx).colors;
         let column = side_column(column_selector(side), width(side))
             .bg(colors.background)
             .border_color(colors.border_variant)
             .flex()
-            .flex_col()
             .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
@@ -86,11 +85,43 @@ impl AppShell {
             Side::Left => column.border_r(theme::RULE_WIDTH),
             Side::Right => column.border_l(theme::RULE_WIDTH),
         };
-        Some(
-            column
-                .child(self.render_view_header(view, cx))
-                .child(div().flex_1().min_h_0().child(body)),
+        Some(column.child(self.render_member(root, Slot::ROOT, surface, &top, &mut 0, cx)))
+    }
+
+    /// Dock group `k`'s column: its header if it is lower, its view's header, and the view.
+    pub(super) fn render_view_column(
+        &self,
+        side: Side,
+        k: usize,
+        group: GroupId,
+        slot: Slot,
+        lower: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let view = self.group(group).shown.view();
+        let body = self
+            .panes
+            .as_ref()
+            .zip(view)
+            .map(|(panes, view)| match view {
+                View::Files => panes.sidebar.clone().into_any_element(),
+                View::Backlinks => panes.backlinks.clone().into_any_element(),
+            });
+        slot.size(
+            div().debug_selector(move || selector(format_args!("dock-{}-group", name(side)), k)),
         )
+        .flex()
+        .flex_col()
+        .when(lower, |column| {
+            column.child(
+                lower_header(cx)
+                    .child(div().flex_none().w(theme::ROW_INSET))
+                    .children(self.render_dock_strip(side, group, k, cx)),
+            )
+        })
+        .children(view.map(|view| self.render_view_header(view, cx)))
+        .child(div().flex_1().min_h_0().children(body))
+        .children(slot.rule(cx))
     }
 
     /// The view's own first row. A press keeps the focus, as every header's does.
@@ -131,25 +162,31 @@ impl AppShell {
         }
     }
 
-    /// `None` when the dock is not drawn.
+    /// Dock group `k`'s view icons; `None` when the dock is not drawn.
     pub(super) fn render_dock_strip(
         &self,
         side: Side,
+        group: GroupId,
+        k: usize,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
         if self.panes.is_none() || !self.layout.is_drawn(side) {
             return None;
         }
-        let group = self.group(self.layout.dock(side)?);
-        let active = group.shown.view();
+        let active = self.group(group).shown.view();
         Some(
             h_flex()
-                .debug_selector(move || bar_selector(side).into())
+                .debug_selector(move || selector(format_args!("dock-bar-{}", name(side)), k))
                 .flex_none()
                 .items_center()
-                .children(group.views().enumerate().map(|(ix, (_, held))| {
-                    Self::render_dock_icon(held, Some(held) == active, side, ix, cx)
-                })),
+                .children(
+                    self.group(group)
+                        .views()
+                        .enumerate()
+                        .map(|(ix, (_, held))| {
+                            Self::render_dock_icon(held, Some(held) == active, group, ix, cx)
+                        }),
+                ),
         )
     }
 
@@ -158,7 +195,7 @@ impl AppShell {
     fn render_dock_icon(
         view: View,
         active: bool,
-        side: Side,
+        group: GroupId,
         ix: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -185,7 +222,7 @@ impl AppShell {
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.move_view(dragged.view, side, ix, window, cx);
+                    shell.move_view(dragged.view, group, ix, window, cx);
                 }),
             )
             .into_any_element()

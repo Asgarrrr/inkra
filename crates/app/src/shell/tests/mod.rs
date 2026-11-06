@@ -26,6 +26,7 @@ mod creating;
 mod dock_drag;
 mod dock_menu;
 mod dock_moves;
+mod dock_splits;
 mod docks;
 mod dragging;
 mod failed_trash;
