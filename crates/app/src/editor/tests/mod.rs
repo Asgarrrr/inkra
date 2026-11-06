@@ -23,6 +23,7 @@ mod protocol;
 mod restore;
 mod scroll;
 mod shapes;
+mod split;
 mod swap;
 mod wrap;
 

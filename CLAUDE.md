@@ -92,8 +92,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   one-step gesture (paste, cut, `apply_diff`) uses `Buffer::transact` instead:
   it merges with neither neighbour and is a no-op when it edits nothing.
   `finalize_transaction` is only for sealing without an edit.
-  Exception: a tab switch's, an open's, or a back's capture calls it on the
-  note left even with no edit, so typing on both sides of `⌃Tab` is two undo steps (tabs spec, A3).
+  Exception: a tab switch's, an open's, a back's capture, or a group switch's pin, calls it
+  on the note left even with no edit, so typing on both sides of `⌃Tab` is two undo steps (tabs spec, A3).
 - `Buffer` assumes LF: text entering from outside (load, paste) goes through
   `inkra_vault::normalize_line_endings`.
 - Only `app` reads a clock; `text` and `editor` take the `Instant` as an argument.

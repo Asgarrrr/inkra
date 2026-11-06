@@ -17,7 +17,10 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         let diff = &event.0;
-        self.input.map_through(diff);
+        // A pin's anchors already moved with the text.
+        if self.pinned.is_none() {
+            self.input.map_through(diff);
+        }
         // The layout before any reshape: the top line is read in the old text.
         let layout = self.input.last_layout().map(Rc::as_ref);
         self.viewport.reloaded(diff, layout);

@@ -4,6 +4,7 @@ pub(crate) mod layout;
 mod motion;
 mod mouse;
 mod parked;
+mod parses;
 mod reload;
 #[cfg(test)]
 mod tests;
@@ -19,7 +20,7 @@ use gpui::{
     MouseButton, ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription,
     TextStyle, Window, div,
 };
-use inkra_editor::Selection;
+use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset, Version};
 
@@ -63,9 +64,11 @@ impl ViewState {
 
 pub(crate) struct EditorView {
     input: TextInput,
-    markdown: Markdown,
+    markdown: Rc<Markdown>,
     /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
     parsed_at: Option<Version>,
+    /// An inactive editor's selection, kept as anchors and re-read on every buffer version.
+    pinned: Option<ParkedSelection>,
     is_selecting: bool,
     viewport: Viewport,
     /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
@@ -80,13 +83,14 @@ impl EditorView {
 
         let mut view = Self {
             input: TextInput::new(buffer, Selection::at(end), Mode::Multiline, cx),
-            markdown: Markdown::default(),
+            markdown: Rc::default(),
             parsed_at: None,
+            pinned: None,
             is_selecting: false,
             viewport: Viewport::default(),
             _buffer: subscriptions,
         };
-        view.refresh_markdown(cx);
+        view.refresh(cx);
         view
     }
 
@@ -108,11 +112,16 @@ impl EditorView {
         let (selection, top) = view.map_or((Selection::at(ByteOffset::new(0)), None), |view| {
             (view.selection, Some(view.top))
         });
+        // Before the rebind: the anchors resolve only in the buffer they were set in.
+        let pinned = self.drop_pin(cx);
         // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
         self.input.rebind(buffer, selection);
+        if pinned {
+            self.pinned = Some(self.park_selection(cx));
+        }
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
-        self.refresh_markdown(cx);
+        self.refresh(cx);
 
         self.is_selecting = false;
         self.viewport = Viewport::default();
@@ -135,26 +144,83 @@ impl EditorView {
         &self.markdown
     }
 
-    /// Parses only when the buffer moved since the last parse; a caret move costs nothing.
-    fn refresh_markdown(&mut self, cx: &App) {
-        let buffer = self.input.buffer().read(cx);
-        let version = buffer.version();
+    /// Syncs only when the buffer moved since the last parse; a caret move costs nothing.
+    fn refresh(&mut self, cx: &mut App) {
+        let version = self.input.buffer().read(cx).version();
         if self.parsed_at == Some(version) {
             return;
         }
-        self.markdown = inkra_markdown::parse(buffer.text());
+        self.markdown = parses::parsed(self.input.buffer(), cx);
         self.parsed_at = Some(version);
+        if let Some(pinned) = &self.pinned {
+            let peeked = pinned.peek(self.input.buffer().read(cx));
+            // Unfocused, so no composition to lose.
+            if &peeked != self.input.state().selection() {
+                self.input.reset_state(peeked);
+            }
+        }
+    }
+
+    /// Seals the undo group even with no edit, as `capture` does, and parks the selection.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "S3's groups pin the editor left")
+    )]
+    pub(crate) fn pin(&mut self, cx: &mut Context<Self>) {
+        if self.pinned.is_some() {
+            return;
+        }
+        let selection = self.input.state().selection();
+        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
+        let pinned = self.input.buffer().update(cx, |buffer, _| {
+            buffer.finalize_transaction();
+            ParkedSelection::park(selection, buffer)
+        });
+        self.pinned = Some(pinned);
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "S3's groups unpin the editor entered")
+    )]
+    pub(crate) fn unpin(&mut self, cx: &mut Context<Self>) {
+        self.drop_pin(cx);
+    }
+
+    #[cfg_attr(not(test), expect(dead_code, reason = "S3's groups read it"))]
+    pub(crate) fn is_pinned(&self) -> bool {
+        self.pinned.is_some()
+    }
+
+    /// Forgets the anchors unread: every buffer version already reset the selection to them.
+    fn drop_pin(&mut self, cx: &mut App) -> bool {
+        let Some(pinned) = self.pinned.take() else {
+            return false;
+        };
+        let _ = self
+            .input
+            .buffer()
+            .update(cx, |buffer, _| pinned.unpark(buffer));
+        true
+    }
+
+    /// The selection as anchors in the bound buffer, unsealed: the pin it replaces already sealed.
+    fn park_selection(&self, cx: &mut App) -> ParkedSelection {
+        let selection = self.input.state().selection();
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| ParkedSelection::park(selection, buffer))
     }
 
     /// Covers writes that bypass `edit_buffer`; tests make them today.
     fn on_buffer_changed(&mut self, _: Entity<Buffer>, cx: &mut Context<Self>) {
-        self.refresh_markdown(cx);
+        self.refresh(cx);
         cx.notify();
     }
 
     fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // First: the observer only runs when effects flush, after this reshape.
-        self.refresh_markdown(cx);
+        self.refresh(cx);
         let Some(last) = self.input.last_layout().cloned() else {
             return;
         };
@@ -210,7 +276,11 @@ impl EditorView {
     /// A view back onto the bound buffer: no resubscribe and no reparse, unlike `open_buffer`.
     pub(crate) fn restore(&mut self, view: ViewState, cx: &mut Context<Self>) {
         let view = view.clipped(self.input.buffer().read(cx));
+        let pinned = self.drop_pin(cx);
         self.input.reset_state(view.selection);
+        if pinned {
+            self.pinned = Some(self.park_selection(cx));
+        }
         self.is_selecting = false;
         self.viewport = Viewport::default();
         self.viewport.request(ScrollTo::Top(view.top));
@@ -284,6 +354,15 @@ impl EditorView {
     }
 }
 
+impl Drop for EditorView {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.pinned.is_none() || std::thread::panicking(),
+            "an EditorView dropped while pinned leaks its anchors"
+        );
+    }
+}
+
 impl InputHost for EditorView {
     fn input(&self) -> &TextInput {
         &self.input
@@ -319,7 +398,7 @@ impl Focusable for EditorView {
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         // A reload applied without a buffer notify would otherwise shape stale spans.
-        self.refresh_markdown(cx);
+        self.refresh(cx);
         let colors = theme::current(cx).colors;
         text_input::on_actions(div(), cx)
             .id("editor")

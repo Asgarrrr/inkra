@@ -305,6 +305,17 @@ S1's choices:
 - The session stays version 1 until S6, a deviation from the P0 row *(delegated)*.
 - Zed's flex epsilon, 0.001, is adopted *(delegated)*.
 
+S2's choices:
+
+- A pin holds the selection only *(delegated)*. An inactive editor keeps its
+  selection as a `ParkedSelection` in its buffer, re-read on every buffer
+  version; `Reloaded` leaves it to the anchors. The top line keeps its pixel
+  offset: a wheel scroll on an inactive group would leave a pinned top anchor
+  stale. Revisit when a user notices the jump.
+- One parse per buffer version, shared by every view of the buffer through the
+  `Parses` global *(delegated)*. N views of one note parse once per edit.
+- Shaping stays per view, since each view has its own width *(delegated)*.
+
 ## Deferred
 
 | Item | Trigger |
