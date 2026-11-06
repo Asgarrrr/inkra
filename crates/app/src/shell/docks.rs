@@ -90,17 +90,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.change_layout(window, cx, |shell, window, cx| {
-            let (group, tab) = shell.tab_of(view);
-            if shell.group(group).tabs.count() < 2
-                || !shell.fits_split(group, direction.axis(), window)
-            {
-                return;
-            }
-            let detached = shell.detach(group, tab, window, cx);
-            let fresh = shell.layout.split(group, direction);
-            shell.attach_alone(detached, fresh, window, cx);
-        });
+        let (group, tab) = self.tab_of(view);
+        if self.group(group).tabs.count() >= 2 && self.fits_split(group, direction.axis(), window) {
+            self.split_off((group, tab), group, direction, window, cx);
+        }
     }
 
     fn move_to_other_dock(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {

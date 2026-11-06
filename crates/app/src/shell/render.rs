@@ -169,11 +169,7 @@ impl AppShell {
             .on_drag_move(Self::track_view_drop(group, cx))
             .on_drag_move(Self::track_tab_drop(group, cx))
             .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
-            .on_drop(Self::view_body_drop(
-                group,
-                move |shell, view, window, cx| shell.drop_view_at_end(view, group, window, cx),
-                cx,
-            ))
+            .on_drop(Self::view_body_drop(group, cx))
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
                 if dragged.group == group {
                     style

@@ -7,9 +7,10 @@ use gpui::{
 use inkra_layout::{Member, Side, SplitPath, Surface};
 
 use super::dragging::drag_to;
+use super::edge_drops::hold;
 use super::splits::{centre, close, last, split};
 use super::tab_bar::{click, press};
-use super::{ab_focused, open};
+use super::{ab_focused, keys, open};
 use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
 use crate::shell::group::SplitDown;
@@ -202,5 +203,33 @@ fn a_dock_separator_resizes_the_dock_groups(cx: &mut TestAppContext) {
         (flexes.iter().sum::<f32>() - 2.0).abs() < 1e-3,
         "{flexes:?}"
     );
+    close(&mut cx);
+}
+
+/// Closing two of four groups mid-drag leaves the held separator past the split's end.
+#[gpui::test]
+fn a_drag_whose_separator_is_gone_ends(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.simulate_resize(size(px(2400.), px(1200.)));
+    cx.run_until_parked();
+    for _ in 0..3 {
+        split(&mut cx);
+    }
+    assert_eq!(centre(&window, &mut cx).len(), 4);
+    let from = bounds(&mut cx, "separator-3").center();
+    hold(&mut cx, "separator-3", from);
+    keys(&mut cx, "cmd-w");
+    keys(&mut cx, "cmd-w");
+
+    cx.simulate_mouse_move(
+        from - point(px(40.), px(0.)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+
+    assert!(!cx.update(|_, cx| cx.has_active_drag()), "the drag ended");
+    assert_eq!(flexes(&window, &mut cx, Surface::Center).len(), 2);
+    cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
     close(&mut cx);
 }

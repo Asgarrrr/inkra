@@ -112,7 +112,16 @@ impl AppShell {
                     return;
                 }
                 let (ix, axis) = (dragged.ix, dragged.axis);
-                let Some(Member::Split { flexes, .. }) = shell.layout.member_at(&path) else {
+                // A tree change mid-drag can take the separator away.
+                let Some(flexes) = shell
+                    .layout
+                    .member_at(&path)
+                    .and_then(|member| match member {
+                        Member::Split { flexes, .. } if ix < flexes.len() => Some(flexes),
+                        _ => None,
+                    })
+                else {
+                    cx.stop_active_drag(window);
                     return;
                 };
                 let (origin, extent, cursor) = along(axis, event.bounds, event.event.position);

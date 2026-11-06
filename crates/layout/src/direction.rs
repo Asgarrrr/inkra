@@ -7,7 +7,7 @@ use crate::{Axis, GroupId, Layout, Side, Surface};
 const STEP: f32 = 1e-4;
 
 /// The edge band's depth, as a share of a group's shorter side: Zed's `drop_target_size`.
-pub const DROP_FRACTION: f32 = 0.2;
+pub(crate) const DROP_FRACTION: f32 = 0.2;
 
 /// Which side of a group a split opens on, or a neighbour lies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

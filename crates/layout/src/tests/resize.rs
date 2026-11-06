@@ -118,12 +118,12 @@ fn a_split_child_takes_its_minimum_from_its_groups() {
         panic!("the right child is a split");
     };
 
-    // Widths: the row sums g1 and g2, 20 + 30; g3's 40 is less.
-    assert!((minimum(&rows[0], Axis::Horizontal, &by_id) - 50.0).abs() < 1e-4);
-    assert!((minimum(column, Axis::Horizontal, &by_id) - 50.0).abs() < 1e-4);
-    // Heights: the row is its taller group, g2's 1002; the column adds g3's 1003.
+    // Widths: the row gives g2 half its width, so twice its 30; g3's 40 is less.
+    assert!((minimum(&rows[0], Axis::Horizontal, &by_id) - 60.0).abs() < 1e-4);
+    assert!((minimum(column, Axis::Horizontal, &by_id) - 60.0).abs() < 1e-4);
+    // Heights: the row is its taller group, g2's 1002; the column gives g3 half, so twice its 1003.
     assert!((minimum(&rows[0], Axis::Vertical, &by_id) - 1002.0).abs() < 1e-4);
-    assert!((minimum(column, Axis::Vertical, &by_id) - 2005.0).abs() < 1e-4);
+    assert!((minimum(column, Axis::Vertical, &by_id) - 2006.0).abs() < 1e-4);
     let min = |group: GroupId, axis| {
         if group == GroupId(3) {
             70.0
@@ -140,10 +140,66 @@ fn a_drag_against_a_nested_split_stops_at_its_minimum() {
 
     assert!(layout.resize(&root(), 1, 1000.0, 600.0, by_id));
 
-    assert!(near(&flexes(&layout, &root()), &[1.8333, 0.1667]));
+    assert!(near(&flexes(&layout, &root()), &[1.8, 0.2]));
     let column = path(Surface::Center, &[1]);
     assert!(layout.resize(&column, 1, -1000.0, 2500.0, by_id));
     assert!(near(&flexes(&layout, &column), &[0.8016, 1.1984]));
+}
+
+/// `A | (B over (C D))`, C and D at flexes 0.2 and 1.8: C needs 10 times its minimum.
+fn uneven() -> Layout {
+    let row = shape_split(
+        Axis::Horizontal,
+        vec![Shape::Group, Shape::Group],
+        vec![0.2, 1.8],
+    );
+    let column = shape_split(Axis::Vertical, vec![Shape::Group, row], vec![1.0, 1.0]);
+    let center = shape_split(Axis::Horizontal, vec![Shape::Group, column], vec![1.0, 1.0]);
+    Layout::restored(&center, [None, None], [true, true], 0)
+}
+
+/// Each group under `member` and its length along `axis`, the member being `length` long.
+fn group_lengths(member: &Member, axis: Axis, length: f32, out: &mut Vec<(GroupId, f32)>) {
+    match member {
+        Member::Group(group) => out.push((*group, length)),
+        Member::Split {
+            axis: inner,
+            children,
+            flexes,
+        } => {
+            let sum: f32 = flexes.iter().sum();
+            for (child, flex) in children.iter().zip(flexes) {
+                let share = if *inner == axis { flex / sum } else { 1.0 };
+                group_lengths(child, axis, length * share, out);
+            }
+        }
+    }
+}
+
+fn widths(layout: &Layout, size: f32) -> Vec<(GroupId, f32)> {
+    let mut out = Vec::new();
+    group_lengths(layout.center(), Axis::Horizontal, size, &mut out);
+    out
+}
+
+#[test]
+fn a_drag_keeps_each_group_of_an_uneven_split_at_its_minimum() {
+    let mut layout = uneven();
+
+    layout.resize(&root(), 1, 10_000.0, 10_000.0, flat(80.0));
+
+    for (group, width) in widths(&layout, 10_000.0) {
+        assert!(width >= 80.0 - 1e-2, "{group:?} is {width} wide");
+    }
+    let mut layout = uneven();
+    let before = widths(&layout, 1000.0);
+    layout.resize(&root(), 1, 10_000.0, 1000.0, flat(80.0));
+    for ((group, was), (_, now)) in before.into_iter().zip(widths(&layout, 1000.0)) {
+        assert!(
+            now >= was.min(80.0) - 1e-2,
+            "{group:?} went from {was} to {now}"
+        );
+    }
 }
 
 #[test]
@@ -301,6 +357,13 @@ proptest! {
             let (was, now) = (was * size / count, now * size / count);
             let floor = minimum(child, *axis, &min).min(was);
             prop_assert!(now >= floor - 1e-2, "{now} under {floor}, was {was}");
+        }
+        let (mut was_groups, mut now_groups) = (Vec::new(), Vec::new());
+        group_lengths(before.member_at(path).unwrap(), *axis, size, &mut was_groups);
+        group_lengths(layout.member_at(path).unwrap(), *axis, size, &mut now_groups);
+        for ((group, was), (_, now)) in was_groups.into_iter().zip(now_groups) {
+            let floor = min(group, *axis).min(was);
+            prop_assert!(now >= floor - 1e-2, "{group:?}: {now} under {floor}, was {was}");
         }
         prop_assert!(layout.groups().eq(before.groups()));
         if changed {

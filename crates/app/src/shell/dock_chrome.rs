@@ -123,11 +123,7 @@ impl AppShell {
                 .min_h_0()
                 .relative()
                 .on_drag_move(Self::track_view_drop(group, cx))
-                .on_drop(Self::view_body_drop(
-                    group,
-                    move |shell, view, window, cx| shell.append(view, side, window, cx),
-                    cx,
-                ))
+                .on_drop(Self::view_body_drop(group, cx))
                 .children(body)
                 .children(self.render_drop_overlay(
                     group,

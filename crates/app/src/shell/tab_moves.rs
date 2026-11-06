@@ -23,6 +23,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.holds((from, id)) {
+            return;
+        }
         if from == to {
             self.move_tab(from, id, at, cx);
             return;
@@ -35,6 +38,13 @@ impl AppShell {
         if let Some(focus) = self.land_focus(cx) {
             window.focus(&focus, cx);
         }
+    }
+
+    /// Whether tab `id` is still in `group`: a tab closed while dragged is not.
+    fn holds(&self, (group, id): (GroupId, TabId)) -> bool {
+        self.groups
+            .get(&group)
+            .is_some_and(|held| held.tabs.iter().any(|tab| tab.id() == id))
     }
 
     /// `view` to the end of `group`, counted after it left (`move_view`'s rule).
@@ -110,16 +120,17 @@ impl AppShell {
         self.display(group, place, window, cx);
     }
 
-    /// `group`'s `drop_split` for the pointer: none outside its body, where a half would fall below
-    /// its minimum, or unless `splits`.
+    /// `group`'s `drop_split` for a tab of `from`: none outside its body, where a half would fall
+    /// below its minimum, or for `group`'s only tab, which would leave nothing behind.
     fn track_drop<T: 'static>(
         &mut self,
         group: GroupId,
-        splits: bool,
+        from: GroupId,
         event: &DragMoveEvent<T>,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
+        let splits = from != group || self.group(group).tabs.count() >= 2;
         let (bounds, at) = (event.bounds, event.event.position);
         let zone = (splits && bounds.contains(&at))
             .then(|| {
@@ -138,15 +149,13 @@ impl AppShell {
         }
     }
 
-    /// A group's only tab splits nothing of its own group: it would leave nothing behind.
     pub(super) fn track_tab_drop(
         group: GroupId,
         cx: &mut Context<Self>,
     ) -> impl Fn(&DragMoveEvent<DraggedTab>, &mut Window, &mut App) + 'static {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedTab>, window, cx| {
-                let splits = event.drag(cx).group != group || shell.group(group).tabs.count() >= 2;
-                shell.track_drop(group, splits, event, window, cx);
+                shell.track_drop(group, event.drag(cx).group, event, window, cx);
             },
         )
     }
@@ -157,7 +166,8 @@ impl AppShell {
     ) -> impl Fn(&DragMoveEvent<DraggedView>, &mut Window, &mut App) + 'static {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedView>, window, cx| {
-                shell.track_drop(group, true, event, window, cx);
+                let (from, _) = shell.tab_of(event.drag(cx).view);
+                shell.track_drop(group, from, event, window, cx);
             },
         )
     }
@@ -173,6 +183,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.holds((from, id)) {
+            return;
+        }
         let centre = self.layout.surface_of(target) == Surface::Center;
         self.change_layout(window, cx, |shell, window, cx| {
             let fresh = shell.layout.split(target, direction);
@@ -207,10 +220,9 @@ impl AppShell {
         })
     }
 
-    /// A view dropped on `group`'s body: a split where `drop_split` holds an edge, else `land`.
+    /// A view dropped on `group`'s body: a split where `drop_split` holds an edge, else the last tab.
     pub(super) fn view_body_drop(
         group: GroupId,
-        land: impl Fn(&mut Self, View, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
@@ -219,7 +231,7 @@ impl AppShell {
                     let tab = shell.tab_of(dragged.view);
                     shell.split_off(tab, group, direction, window, cx);
                 }
-                None => land(shell, dragged.view, window, cx),
+                None => shell.drop_view_at_end(dragged.view, group, window, cx),
             }
         })
     }

@@ -1,13 +1,15 @@
 //! A tab or a view dropped near a group's edge splits the group there (splits spec, P4).
 
 use gpui::{
-    Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px, size,
+    Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, WindowHandle, point,
+    px, size,
 };
 use inkra_layout::{Side, View};
 
 use super::dragging::drag_to;
 use super::splits::{centre, check_layout, close, editor_in, focused, last, split, tabs_in};
 use super::{ab_focused, keys, open};
+use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
 
 /// A point at `x` of `selector`'s width, half-way down.
@@ -17,7 +19,7 @@ fn across(cx: &mut VisualTestContext, selector: &'static str, x: f32) -> Point<P
 }
 
 /// `drag_to` short of the release: the drag stays held over `to`.
-fn hold(cx: &mut VisualTestContext, from: &'static str, to: Point<Pixels>) {
+pub(super) fn hold(cx: &mut VisualTestContext, from: &'static str, to: Point<Pixels>) {
     let from = cx.debug_bounds(from).expect("drawn").center();
     cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_move(
@@ -168,6 +170,66 @@ fn a_view_dropped_near_a_dock_groups_bottom_edge_splits_the_dock(cx: &mut TestAp
         })
         .unwrap();
     assert_eq!(held, [vec![View::Files], vec![View::Backlinks]]);
+    check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
+fn left_views(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<Vec<View>> {
+    window
+        .update(cx, |shell, _, _| {
+            let groups = shell.layout.dock_groups(Side::Left);
+            groups
+                .iter()
+                .map(|&group| shell.group(group).views().map(|(_, view)| view).collect())
+                .collect()
+        })
+        .unwrap()
+}
+
+#[gpui::test]
+fn a_view_dropped_mid_a_lower_dock_group_joins_it(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.dispatch_action(MoveBacklinksToOtherDock);
+    cx.run_until_parked();
+    let group = cx.debug_bounds("dock-left-group").expect("drawn");
+    drag_to(
+        &mut cx,
+        "dock-icon-backlinks",
+        point(group.center().x, group.bottom() - px(10.)),
+    );
+    let lower = cx.debug_bounds("dock-left-group-1").expect("drawn");
+
+    drag_to(&mut cx, "dock-icon-files", lower.center());
+
+    assert_eq!(
+        left_views(&window, &mut cx),
+        [vec![View::Backlinks, View::Files]]
+    );
+    check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn a_lone_view_held_on_its_own_groups_edge_splits_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let before = window
+        .update(&mut cx, |shell, _, _| shell.layout.dock_groups(Side::Left))
+        .unwrap();
+    let group = cx.debug_bounds("dock-left-group").expect("drawn");
+    let edge = point(group.center().x, group.bottom() - px(10.));
+
+    hold(&mut cx, "dock-icon-files", edge);
+
+    assert!(cx.debug_bounds("dock-left-drop-overlay").is_none());
+    cx.simulate_mouse_up(edge, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+    let after = window
+        .update(&mut cx, |shell, _, _| shell.layout.dock_groups(Side::Left))
+        .unwrap();
+    assert_eq!(after, before);
+    assert_eq!(left_views(&window, &mut cx), [vec![View::Files]]);
     check_layout(&window, &mut cx);
     close(&mut cx);
 }
