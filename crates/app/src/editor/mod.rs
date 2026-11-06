@@ -416,6 +416,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::follow_link))
             .on_action(cx.listener(Self::follow_link_in_new_tab))
+            .on_action(cx.listener(Self::follow_link_in_split))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))

@@ -29,6 +29,7 @@ mod dock_moves;
 mod dock_splits;
 mod docks;
 mod dragging;
+mod edge_drops;
 mod failed_trash;
 mod files_header;
 mod following;

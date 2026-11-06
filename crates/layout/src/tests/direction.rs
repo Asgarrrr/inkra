@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 
 use super::tree::{built, tree_op};
-use crate::{Axis, GroupId, Layout, Member, Rect, Side, SplitDirection, Surface};
+use crate::{Axis, GroupId, Layout, Member, Rect, Side, SplitDirection, Surface, drop_zone};
 
 const DIRECTIONS: [SplitDirection; 4] = [
     SplitDirection::Up,
@@ -272,6 +272,74 @@ fn a_dock_leads_back_to_last_center() {
         layout.neighbour(lower_files, SplitDirection::Right, 0.5),
         Some(right)
     );
+}
+
+#[test]
+fn drop_zone_centre_is_none() {
+    assert_eq!(drop_zone((100., 100.), (50., 50.)), None);
+    assert_eq!(drop_zone((400., 100.), (200., 50.)), None);
+}
+
+#[test]
+fn drop_zone_picks_each_edge() {
+    for (at, zone) in [
+        ((50., 5.), SplitDirection::Up),
+        ((95., 50.), SplitDirection::Right),
+        ((50., 95.), SplitDirection::Down),
+        ((5., 50.), SplitDirection::Left),
+    ] {
+        assert_eq!(drop_zone((100., 100.), at), Some(zone), "{at:?}");
+    }
+}
+
+#[test]
+fn drop_zone_band_is_a_fifth_of_the_short_side() {
+    let size = (400., 100.);
+    assert_eq!(drop_zone(size, (19., 50.)), Some(SplitDirection::Left));
+    assert_eq!(drop_zone(size, (21., 50.)), None);
+    assert_eq!(
+        drop_zone(size, (20., 50.)),
+        None,
+        "the band is open at its end"
+    );
+    assert_eq!(drop_zone(size, (381., 50.)), Some(SplitDirection::Right));
+    assert_eq!(drop_zone(size, (379., 50.)), None);
+    assert_eq!(drop_zone(size, (200., 19.)), Some(SplitDirection::Up));
+    assert_eq!(drop_zone(size, (200., 21.)), None);
+    assert_eq!(drop_zone(size, (200., 81.)), Some(SplitDirection::Down));
+    assert_eq!(drop_zone(size, (200., 79.)), None);
+}
+
+#[test]
+fn drop_zone_corner_tie_prefers_up() {
+    assert_eq!(drop_zone((100., 100.), (5., 5.)), Some(SplitDirection::Up));
+    assert_eq!(drop_zone((100., 100.), (95., 5.)), Some(SplitDirection::Up));
+    assert_eq!(
+        drop_zone((100., 100.), (95., 95.)),
+        Some(SplitDirection::Right)
+    );
+    assert_eq!(
+        drop_zone((100., 100.), (5., 95.)),
+        Some(SplitDirection::Down)
+    );
+    assert_eq!(
+        drop_zone((100., 100.), (4., 5.)),
+        Some(SplitDirection::Left)
+    );
+}
+
+#[test]
+fn drop_zone_zero_size_is_none() {
+    for (size, at) in [
+        ((0., 100.), (0., 50.)),
+        ((0., 100.), (1., 50.)),
+        ((100., 0.), (50., 1.)),
+        ((0., 0.), (-1., -1.)),
+        ((-10., 100.), (0., 0.)),
+        ((100., -10.), (0., 0.)),
+    ] {
+        assert_eq!(drop_zone(size, at), None, "{size:?} {at:?}");
+    }
 }
 
 proptest! {

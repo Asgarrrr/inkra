@@ -5,7 +5,7 @@ mod resize;
 mod surface;
 mod tree;
 
-pub use direction::SplitDirection;
+pub use direction::{DROP_FRACTION, SplitDirection, drop_zone};
 pub use resize::SplitPath;
 pub use surface::Surface;
 pub use tree::{Axis, Member, Rect, Shape};

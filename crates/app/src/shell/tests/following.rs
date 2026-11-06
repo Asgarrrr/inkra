@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
+    Bounds, Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds,
+    WindowHandle, WindowOptions, point, px, size,
 };
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
@@ -14,6 +15,7 @@ use crate::open::Open;
 use crate::shell::AppShell;
 use crate::test_support::entry_id;
 
+use super::splits::{centre, check_layout, close, last, shown_in};
 use super::{activate, check, editor, open_vault, showing, tab_notes, vault_names};
 
 /// A vault whose `a` is showing, its caret at 0 (`open_buffer` leaves it at the end), with the
@@ -176,6 +178,72 @@ fn a_relative_link_in_a_new_tab_resolves_from_the_note_left(cx: &mut TestAppCont
     let (tabs, active) = tab_notes(&window, cx);
     assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
     assert_eq!(shown_text(&window, cx), "gamma");
+    check(&window, cx);
+}
+
+/// Two groups, the right one active and showing `b`, the left one still `a`.
+fn assert_split_to_b(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+    a: Option<EntryId>,
+) {
+    let groups = centre(window, cx);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(last(window, cx), groups[1]);
+    assert_eq!(shown_text(window, cx), "beta");
+    assert_eq!(shown_in(window, cx, 0), a);
+    check_layout(window, cx);
+}
+
+#[gpui::test]
+fn cmd_alt_click_on_a_link_opens_it_in_a_split(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[[b]] next"), ("b.md", "beta")]);
+    let a = showing(&window, cx);
+    visual.simulate_keystrokes("right right");
+    let on_link = editor(&window, cx)
+        .read_with(cx, |editor, _| editor.caret_point())
+        .expect("drawn")
+        + point(px(3.), px(0.));
+
+    let modifiers = Modifiers {
+        platform: true,
+        alt: true,
+        ..Modifiers::none()
+    };
+    visual.simulate_mouse_down(on_link, MouseButton::Left, modifiers);
+    visual.simulate_mouse_up(on_link, MouseButton::Left, modifiers);
+    visual.run_until_parked();
+
+    assert_split_to_b(&window, &mut visual, a);
+    close(&mut visual);
+}
+
+#[gpui::test]
+fn cmd_alt_enter_follows_the_link_in_a_split(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[[b]] next"), ("b.md", "beta")]);
+    let a = showing(&window, cx);
+
+    visual.simulate_keystrokes("cmd-alt-enter");
+    visual.run_until_parked();
+
+    assert_split_to_b(&window, &mut visual, a);
+    close(&mut visual);
+}
+
+#[gpui::test]
+fn a_link_split_refused_by_the_minimum_opens_a_new_tab(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[[b]] next"), ("b.md", "beta")]);
+    let a = showing(&window, cx);
+    visual.simulate_resize(size(px(600.), px(600.)));
+    visual.run_until_parked();
+
+    visual.simulate_keystrokes("cmd-alt-enter");
+    visual.run_until_parked();
+
+    assert_eq!(centre(&window, &mut visual).len(), 1);
+    let (tabs, active) = tab_notes(&window, cx);
+    assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
+    assert_eq!(shown_text(&window, cx), "beta");
     check(&window, cx);
 }
 

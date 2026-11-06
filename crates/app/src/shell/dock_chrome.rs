@@ -91,7 +91,8 @@ impl AppShell {
         Some(column.child(self.render_member(root, Slot::ROOT, &path, &top, &mut 0, cx)))
     }
 
-    /// Dock group `k`'s column: its header if it is lower, its view's header, and the view.
+    /// Dock group `k`'s column: its header if it is lower, its view's header, and the view, which a
+    /// view dropped near its edge splits.
     pub(super) fn render_view_column(
         &self,
         side: Side,
@@ -116,7 +117,24 @@ impl AppShell {
             )
         })
         .children(view.map(|view| self.render_view_header(view, cx)))
-        .child(div().flex_1().min_h_0().children(body))
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .on_drag_move(Self::track_view_drop(group, cx))
+                .on_drop(Self::view_body_drop(
+                    group,
+                    move |shell, view, window, cx| shell.append(view, side, window, cx),
+                    cx,
+                ))
+                .children(body)
+                .children(self.render_drop_overlay(
+                    group,
+                    selector(format_args!("dock-{}-drop-overlay", name(side)), k),
+                    cx,
+                )),
+        )
         .children(Self::render_separator(path, slot, k, cx))
     }
 

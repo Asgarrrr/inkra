@@ -184,7 +184,7 @@ Zed's. A double-click equalises the split.
 | Separator drag | Resize, clamped to the minimum sizes; double-click equalises. |
 | `⌘K` then an arrow | Split the active group in that direction *(delegated; Zed's convention, check its keymap via DeepWiki before binding)*. |
 | `⌘K` then `⌘` + an arrow | Focus the neighbour in that direction *(delegated, same check)*. |
-| Tab drag | Over a group: within `min(w, h) × 0.33` of an edge, the nearest edge wins and the drop splits; else the drop moves the tab into the group. A half-group overlay shows the result. Over a tab strip: reorder or insert. A note tab over a dock shows nothing and drops nothing (L2). |
+| Tab drag | Over a group: within `min(w, h) × 0.2` of an edge, the nearest edge wins and the drop splits; else the drop moves the tab into the group. A half-group overlay shows the result. Over a tab strip: reorder or insert. A note tab over a dock shows nothing and drops nothing (L2). |
 | `⌘⌥`-click on a link, `⌘⌥↵` | Open the link in a split to the right of its group (`Open::SplitRight`). |
 
 Zed's keys, checked at zed@526c95d4 via DeepWiki:
@@ -195,7 +195,7 @@ Zed's keys, checked at zed@526c95d4 via DeepWiki:
   in the `Workspace` context (`default-macos.json:876-881`).
 
 Zed's drop target size is 0.2 (`assets/settings/default.json:205`), against
-this spec's 0.33; P4 decides.
+the 0.33 first written here; S12 takes 0.2.
 
 A split that would leave either side under its minimum size does nothing.
 Dragging a view tab replaces the dock icon drag; the empty-dock drop strips
@@ -276,14 +276,15 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S9 | P2 separators: drag to resize, double-click to equalise, minimum sizes, the split refused for room. | Resizable splits |
 | S10 | P3 `⌘K` keys: split in four directions, focus the neighbour. | Keyboard splits |
 | S11 | P4 tab moves: `take`/`put` between groups, views into the centre, notes refused on docks. | Drag a tab to another group, Files into the centre |
+| S12 | P4 edge drops that split, P5 `⌘⌥`-click and `⌘⌥↵` into a split. | Drag to split, links to the side |
 
-A follow-up run covers the rest:
+The follow-up run covered the rest, all landed:
 
 - the `⋯` overflow of a dock's view strip, deferred to `docs/roadmap.md`;
-- P2 separators: resize, equalise, minimum sizes, the split refusal;
-- P3 `⌘K` keys with `neighbour` and focus-driven activation;
-- P4 tab drag: `take`/`put`, a shared `TabId` counter, views into the centre, the edge zone;
-- P5 `⌘⌥`-click on a link and `Open::SplitRight`.
+- P2 separators: resize, equalise, minimum sizes, the split refusal (S9);
+- P3 `⌘K` keys with `neighbour` and focus-driven activation (S10);
+- P4 tab drag: `take`/`put`, per-group `TabId`s, views into the centre (S11), the edge zone (S12);
+- P5 `⌘⌥`-click on a link and `Open::SplitRight` (S12).
 
 The phases:
 
@@ -538,6 +539,33 @@ S11's choices:
   `scenes/docks.rs` with a `drag_drop` helper in `stage.rs`. S3's refusal test in
   `splits.rs` is removed, and `dock_drag.rs`'s miss now drops on the title row's
   drag space, since a centre body takes a view.
+
+S12's choices:
+
+- The edge zone is Zed's 0.2 of `min(w, h)` (`DROP_FRACTION`), not this spec's
+  0.33 *(delegated)*. Zed's value is tried; 0.33 left little room to move a tab
+  into a group.
+- `Open::from_click` is unchanged: only an editor link reads `⌥` and splits
+  *(delegated)*. A sidebar, picker or backlinks row keeps `⌘`-click and `⇧`-click.
+- A link opened in a split goes to a fresh empty group to the right of the
+  last-active centre group, then opens there *(delegated)*. Where the split is
+  refused for room, the link opens in a new tab instead.
+- `open` takes no window, so `Open::SplitRight` defers to the next effect cycle
+  and runs with the shell's window there *(delegated)*. The deferral lands
+  before the next frame, so nothing shows late. Threading a `Window` through
+  `open`'s callers (`follow`, the pickers, the sidebar and backlinks rows)
+  would touch five modules for this one variant.
+- A drop that splits splits first, then detaches the tab, as the contract
+  orders. The fresh group is held empty before the detach: `Layout::remove`
+  names it the heir of a source group the detach empties, and it keeps that
+  group's closed tabs.
+- With the left dock empty, a view held over the left drop strip also lies in
+  the centre body's left band, so the body's left half lights beside the strip
+  *(delegated)*. The strip sits on top and takes the drop; the stale
+  `drop_split` is recomputed on the next drag's first move. The
+  `docks-drag-empty-side` shots show both tints.
+- `dragging.rs`'s R7 test drops in the body's middle, outside the slice's
+  files: its old drop point lies in the top band, which now splits.
 
 ## Deferred
 

@@ -288,6 +288,11 @@ const CATALOGUE: &[Scene] = &[
         open: tabs::dragging,
     },
     Scene {
+        name: "tab-drop-split",
+        shows: "`reading`'s tab held near the note column's right edge, button down: the column's right half lit in the drop colour from the nav row's foot to the window's foot, its left half and the note's text unlit; the preview under the pointer; the tab bar unchanged, a single note column until the drop",
+        open: tabs::drop_split,
+    },
+    Scene {
         name: "tabs-overflow",
         shows: "30 tabs over the note, the last one active (`cmd-9`) and scrolled into view, 34 px on the row's floor with no rule under it; the `+` after the scroll area, still visible before the empty drag space; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle; the sidebar segment unchanged: the lights, the toggle, the Files icon, its hairline",
         open: tabs::overflow,
