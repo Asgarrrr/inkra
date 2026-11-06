@@ -24,6 +24,7 @@ mod panes;
 mod parked;
 mod quit;
 mod render;
+mod separator;
 mod session;
 mod tab_bar;
 mod tabs;

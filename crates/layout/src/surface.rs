@@ -68,7 +68,7 @@ impl Layout {
             .unwrap_or_else(|| panic!("{group:?} is not in the layout"))
     }
 
-    fn member(&self, surface: Surface) -> Option<&Member> {
+    pub(crate) fn member(&self, surface: Surface) -> Option<&Member> {
         match surface {
             Surface::Center => Some(&self.center),
             Surface::Dock(side) => self.dock(side),

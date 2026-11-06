@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
     Render, Styled, Window, div, prelude::FluentBuilder, px,
 };
-use inkra_layout::{Axis, GroupId, Member, Side, Surface};
+use inkra_layout::{Axis, GroupId, Member, Side, SplitPath, Surface};
 
 use super::dock_drag::SHELL_GROUP;
 use super::group::selector;
@@ -91,11 +91,10 @@ impl AppShell {
     }
 }
 
-/// Where a member sits: its parent's axis, its index there, and its flex.
+/// Where a member sits: its parent's axis and its flex.
 #[derive(Clone, Copy)]
 pub(super) struct Slot {
-    axis: Axis,
-    ix: usize,
+    pub(super) axis: Axis,
     flex: f32,
 }
 
@@ -103,7 +102,6 @@ impl Slot {
     /// The root, as its row's one member.
     pub(super) const ROOT: Self = Self {
         axis: Axis::Horizontal,
-        ix: 0,
         flex: 1.0,
     };
 
@@ -114,18 +112,6 @@ impl Slot {
             Axis::Horizontal => element.min_w_0().h_full(),
             Axis::Vertical => element.min_h_0().w_full(),
         }
-    }
-
-    /// Drawn over the member, not as its border: a border would widen it past its strip.
-    pub(super) fn rule(self, cx: &App) -> Option<Div> {
-        let colors = theme::current(cx).colors;
-        (self.ix > 0).then(|| {
-            let rule = div().absolute().left_0().top_0().bg(colors.border_variant);
-            match self.axis {
-                Axis::Horizontal => rule.bottom_0().w(theme::RULE_WIDTH),
-                Axis::Vertical => rule.right_0().h(theme::RULE_WIDTH),
-            }
-        })
     }
 }
 
@@ -164,7 +150,7 @@ impl AppShell {
         &self,
         k: usize,
         group: GroupId,
-        slot: Slot,
+        (slot, path): (Slot, &SplitPath),
         lower: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -193,15 +179,15 @@ impl AppShell {
             Some(editor) => editor.clone().into_any_element(),
             None => self.render_empty(cx).into_any_element(),
         }))
-        .children(slot.rule(cx))
+        .children(Self::render_separator(path, slot, k, cx))
     }
 
-    /// `k` counts `surface`'s groups drawn so far, depth-first.
+    /// `k` counts `path.surface`'s groups drawn so far, depth-first; `path` names `member`.
     pub(super) fn render_member(
         &self,
         member: &Member,
         slot: Slot,
-        surface: Surface,
+        path: &SplitPath,
         top: &[GroupId],
         k: &mut usize,
         cx: &mut Context<Self>,
@@ -209,12 +195,12 @@ impl AppShell {
         match member {
             Member::Group(group) => {
                 let lower = !top.contains(group);
-                let column = match surface {
+                let column = match path.surface {
                     Surface::Center => self
-                        .render_note_column(*k, *group, slot, lower, cx)
+                        .render_note_column(*k, *group, (slot, path), lower, cx)
                         .into_any_element(),
                     Surface::Dock(side) => self
-                        .render_view_column(side, *k, *group, slot, lower, cx)
+                        .render_view_column(side, *k, *group, (slot, path), lower, cx)
                         .into_any_element(),
                 };
                 *k += 1;
@@ -225,21 +211,24 @@ impl AppShell {
                 children,
                 flexes,
             } => {
+                let separator = Self::render_separator(path, slot, *k, cx);
                 let children =
-                    self.render_split(*axis, children.iter().zip(flexes), surface, top, k, cx);
+                    self.render_split(*axis, children.iter().zip(flexes), path, top, k, cx);
                 slot.size(div().flex().when(*axis == Axis::Vertical, Styled::flex_col))
+                    .on_drag_move(Self::on_separator_drag(path.clone(), (px(0.), px(0.)), cx))
                     .children(children)
-                    .children(slot.rule(cx))
+                    .children(separator)
                     .into_any_element()
             }
         }
     }
 
+    /// `path` names the split.
     fn render_split<'a>(
         &self,
         axis: Axis,
         children: impl Iterator<Item = (&'a Member, &'a f32)>,
-        surface: Surface,
+        path: &SplitPath,
         top: &[GroupId],
         k: &mut usize,
         cx: &mut Context<Self>,
@@ -247,16 +236,28 @@ impl AppShell {
         children
             .enumerate()
             .map(|(ix, (child, &flex))| {
-                self.render_member(child, Slot { axis, ix, flex }, surface, top, k, cx)
+                let mut child_path = path.clone();
+                child_path.steps.push(ix);
+                self.render_member(child, Slot { axis, flex }, &child_path, top, k, cx)
             })
             .collect()
     }
 
     /// Under the title row: the left dock, the centre and the right dock.
     fn render_columns(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let surface = Surface::Center;
-        let top = self.layout.top_groups(surface);
+        let root = SplitPath {
+            surface: Surface::Center,
+            steps: Vec::new(),
+        };
+        let top = self.layout.top_groups(root.surface);
         let mut k = 0;
+        let split_row = matches!(
+            self.layout.center(),
+            Member::Split {
+                axis: Axis::Horizontal,
+                ..
+            }
+        );
         // In the row itself, not a wrapper: a nested row has taffy measure the note's content.
         let center = match self.layout.center() {
             Member::Split {
@@ -266,12 +267,12 @@ impl AppShell {
             } => self.render_split(
                 Axis::Horizontal,
                 children.iter().zip(flexes),
-                surface,
+                &root,
                 &top,
                 &mut k,
                 cx,
             ),
-            member => vec![self.render_member(member, Slot::ROOT, surface, &top, &mut k, cx)],
+            member => vec![self.render_member(member, Slot::ROOT, &root, &top, &mut k, cx)],
         };
         div()
             .relative()
@@ -282,6 +283,9 @@ impl AppShell {
             .w_full()
             // `min_h_0`: a flex child's minimum is its content, which would outgrow the window.
             .min_h_0()
+            .when(split_row, |row| {
+                row.on_drag_move(Self::on_separator_drag(root, self.dock_ends(), cx))
+            })
             .children(self.render_dock(Side::Left, cx))
             .children(center)
             // Shown for an empty tab too, so a switch does not move the note column by the dock's width.

@@ -95,7 +95,7 @@ impl AppShell {
     ) {
         self.change_layout(window, cx, |shell, window, cx| {
             let (group, tab) = shell.tab_of(view);
-            if shell.group(group).tabs.count() < 2 {
+            if shell.group(group).tabs.count() < 2 || !shell.fits_split(group, axis, window) {
                 return;
             }
             shell.take_view_tab(group, tab, window, cx);

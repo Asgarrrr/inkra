@@ -274,6 +274,7 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S6 | Session v2: the tree, every group's tabs and the dock groups, with v1 still read. | Splits survive a relaunch |
 | S7 | Dock view strips in the title row, and the Files header (D5). | Dock icons beside the toggle, new note, new folder and search under it |
 | S8 | Dock trees: `Option<Member>` per dock, drawn, split from the dock menu, saved and restored. | Files above Backlinks in one dock |
+| S9 | P2 separators: drag to resize, double-click to equalise, minimum sizes, the split refused for room. | Resizable splits |
 
 A follow-up run covers the rest:
 
@@ -442,6 +443,30 @@ S8's choices:
   top dock group.
 - A dock emptied by a move or a restore becomes `None`; its `shown` flag stays,
   so showing it again draws nothing until a view lands.
+
+S9's choices:
+
+- `Layout::resize` converts pixels to flex as `px × len / size` *(delegated)*.
+  Zed divides by the container alone because its flexes sum to 1; ours sum to
+  the child count.
+- A drag moves only the separator's two neighbours *(delegated)*. Zed cascades
+  past a neighbour at its minimum into the next one; here the drag stops there.
+- A side already under its minimum may grow and is never forced bigger. The
+  clamp's floor is the lesser of the minimum and the side's current size.
+- A split member's minimum along its parent's axis is the sum of its children's
+  when it runs along that axis, and its largest child's when it runs across.
+- A group's minimum width includes the title-row chrome it draws *(delegated)*:
+  a centre group's curves, one tab, the new-tab button and the drag space; a
+  dock group's view icons and drag space; the lights and the left toggle on the
+  window's left-most top group, the right toggle and the inset on its right-most.
+  80 px stays the floor.
+- Split Right and Split Down are refused when half of the group would fall
+  under that group's own minimum *(delegated)*. The check reads the unit
+  rectangle and the window size, not the last frame's bounds.
+- A press on a separator keeps the editor's focus and activates no group: the
+  hitbox occludes the columns under it.
+- The separator replaces the hairline each member after the first drew, at the
+  same pixels; its hitbox overhangs the member before by 1.5 px.
 
 ## Deferred
 

@@ -1,8 +1,10 @@
 //! Where each tab group sits and which dock shows (splits spec).
 
+mod resize;
 mod surface;
 mod tree;
 
+pub use resize::SplitPath;
 pub use surface::Surface;
 pub use tree::{Axis, Member, Rect, Shape};
 

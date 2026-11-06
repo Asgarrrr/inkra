@@ -99,6 +99,9 @@ impl AppShell {
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         self.change_layout(window, cx, |shell, window, cx| {
             let from = shell.layout.last_center();
+            if !shell.fits_split(from, axis, window) {
+                return;
+            }
             let on = shell.group(from).shown.bound().map(|bound| OnNote {
                 note: bound.note,
                 view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
