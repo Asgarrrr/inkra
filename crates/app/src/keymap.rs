@@ -13,8 +13,9 @@ use crate::field::{Cancel, Confirm};
 use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::shell::{
-    ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
-    ReopenClosedTab, ToggleLeftDock, ToggleRightDock,
+    ActivateLastTab, ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp,
+    ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab, ReopenClosedTab,
+    SplitDown, SplitLeft, SplitRight, SplitUp, ToggleLeftDock, ToggleRightDock,
 };
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
@@ -108,6 +109,14 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-\\", ToggleLeftDock, Some("AppShell")),
         // ⌘⇧\ as macOS reports it, as `cmd-}` above.
         KeyBinding::new("cmd-|", ToggleRightDock, Some("AppShell")),
+        KeyBinding::new("cmd-k left", SplitLeft, Some("AppShell")),
+        KeyBinding::new("cmd-k right", SplitRight, Some("AppShell")),
+        KeyBinding::new("cmd-k up", SplitUp, Some("AppShell")),
+        KeyBinding::new("cmd-k down", SplitDown, Some("AppShell")),
+        KeyBinding::new("cmd-k cmd-left", ActivatePaneLeft, Some("AppShell")),
+        KeyBinding::new("cmd-k cmd-right", ActivatePaneRight, Some("AppShell")),
+        KeyBinding::new("cmd-k cmd-up", ActivatePaneUp, Some("AppShell")),
+        KeyBinding::new("cmd-k cmd-down", ActivatePaneDown, Some("AppShell")),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-s", Save, Some("AppShell")),
     ]

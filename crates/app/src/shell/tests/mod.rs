@@ -39,6 +39,7 @@ mod nav_row;
 mod notices;
 mod open;
 mod open_first;
+mod pane_keys;
 mod parked;
 mod quick_open;
 mod quitting;

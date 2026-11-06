@@ -67,7 +67,6 @@ pub struct Layout {
     left: Option<Member>,
     right: Option<Member>,
     shown: [bool; 2],
-    active: GroupId,
     last_center: GroupId,
 }
 ```
@@ -275,12 +274,13 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S7 | Dock view strips in the title row, and the Files header (D5). | Dock icons beside the toggle, new note, new folder and search under it |
 | S8 | Dock trees: `Option<Member>` per dock, drawn, split from the dock menu, saved and restored. | Files above Backlinks in one dock |
 | S9 | P2 separators: drag to resize, double-click to equalise, minimum sizes, the split refused for room. | Resizable splits |
+| S10 | P3 `⌘K` keys: split in four directions, focus the neighbour. | Keyboard splits |
 
 A follow-up run covers the rest:
 
 - the `⋯` overflow of a dock's view strip, deferred to `docs/roadmap.md`;
 - P2 separators: resize, equalise, minimum sizes, the split refusal;
-- P3 `⌘K` keys with `neighbour`, focus-driven activation and the `active` field;
+- P3 `⌘K` keys with `neighbour` and focus-driven activation;
 - P4 tab drag: `take`/`put`, a shared `TabId` counter, views into the centre, the edge zone;
 - P5 `⌘⌥`-click on a link and `Open::SplitRight`.
 
@@ -467,6 +467,40 @@ S9's choices:
   hitbox occludes the columns under it.
 - The separator replaces the hairline each member after the first drew, at the
   same pixels; its hitbox overhangs the member before by 1.5 px.
+
+S10's choices:
+
+- No `active` field: the active group is read from focus *(delegated)*. It is the
+  Files dock group while the tree holds focus, else `last_center`. Focus already
+  says which group takes keys; a stored field would follow every focus change.
+- `⌘K` and an arrow on the Files dock group splits Files off as the dock menu
+  does: two views or more, and room for both. On a centre group it is S9's split,
+  refused for room.
+- `⌘K ⌘` and an arrow towards Backlinks does nothing *(delegated)*. The panel has
+  no focus handle and takes no keys.
+- The probe is the caret's centre as a fraction of the group's rectangle
+  *(delegated)*. `TextInput::caret_point` reads the last frame's bounds and
+  layout. The rectangle is the unit rectangle times the surface's room, offset by
+  the title row and the drawn left dock, as S9's refusal reads it. With no caret
+  drawn, the probe is 0.5.
+- A rectangle is half-open, so the point is clamped 1e-4 short of the edge's end.
+  A caret scrolled below its group gives a probe of 1 and still finds the group
+  past the edge.
+- From the centre, Left and Right continue into a drawn dock at the same height:
+  the docks and the centre share the unit square's height under the title row.
+- A right press on a tab focuses the tab's content before its menu opens, as a
+  left press does *(delegated)*. The menu returns focus before
+  its entry runs, and focus now picks the group a Split entry splits: with the
+  tree focused, Split Right would split the Files dock. The contract does not
+  settle this and `tab_bar.rs` is outside the slice's files, so it sits in its
+  own commit.
+- The eight bindings sit in the `AppShell` context. Deviation: Zed binds the
+  splits in `Pane` and the focus moves in `Workspace`; here one context holds
+  every shell key.
+- `Layout::split` takes a `SplitDirection`, so the layout tests in `resize.rs`
+  and `surface.rs` and the palette test in `splits.rs` change with it. The
+  palette label of Split right now carries its key. These edits sit outside the
+  slice's files.
 
 ## Deferred
 

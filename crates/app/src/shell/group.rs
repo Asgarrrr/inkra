@@ -1,17 +1,31 @@
-//! One tab group: its tabs, what its active tab shows and its pending open; the centre's split and activation (splits spec, App).
+//! One tab group: its tabs, what its active tab shows and its pending open; the splits and activation (splits spec, App and P3).
 
 use std::fmt::Display;
 
-use gpui::{Context, ScrollHandle, Task, Window, actions};
-use inkra_layout::{Axis, GroupId, Surface, View};
+use gpui::{App, Context, FocusHandle, Focusable, ScrollHandle, Task, Window, actions};
+use inkra_layout::{Axis, GroupId, SplitDirection, Surface, View};
 use inkra_tabs::{TabId, Tabs};
 
+use super::docks::SplitView;
 use super::parked::Parked;
 use super::tabs::{OnNote, Place, capture};
 use super::{AppShell, Shown};
 use crate::editor::EditorView;
+use crate::theme;
 
-actions!(pane, [SplitRight, SplitDown]);
+actions!(
+    pane,
+    [
+        SplitRight,
+        SplitDown,
+        SplitLeft,
+        SplitUp,
+        ActivatePaneLeft,
+        ActivatePaneRight,
+        ActivatePaneUp,
+        ActivatePaneDown
+    ]
+);
 
 /// The debug selector `name` takes in the centre's group `k`: bare in the first, so one group keeps every name.
 pub(super) fn selector(name: impl Display, k: usize) -> String {
@@ -83,7 +97,12 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.split(Axis::Horizontal, window, cx);
+        self.split_in(
+            self.active_group(window, cx),
+            SplitDirection::Right,
+            window,
+            cx,
+        );
     }
 
     pub(super) fn split_down(
@@ -92,21 +111,125 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.split(Axis::Vertical, window, cx);
+        self.split_in(
+            self.active_group(window, cx),
+            SplitDirection::Down,
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn split_left(
+        &mut self,
+        _: &SplitLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.split_in(
+            self.active_group(window, cx),
+            SplitDirection::Left,
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn split_up(&mut self, _: &SplitUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.split_in(
+            self.active_group(window, cx),
+            SplitDirection::Up,
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn activate_pane_left(
+        &mut self,
+        _: &ActivatePaneLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_pane(SplitDirection::Left, window, cx);
+    }
+
+    pub(super) fn activate_pane_right(
+        &mut self,
+        _: &ActivatePaneRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_pane(SplitDirection::Right, window, cx);
+    }
+
+    pub(super) fn activate_pane_up(
+        &mut self,
+        _: &ActivatePaneUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_pane(SplitDirection::Up, window, cx);
+    }
+
+    pub(super) fn activate_pane_down(
+        &mut self,
+        _: &ActivatePaneDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_pane(SplitDirection::Down, window, cx);
+    }
+
+    /// The Files dock group while the tree holds focus, else `last_center`: no field stores it.
+    fn active_group(&self, window: &Window, cx: &App) -> GroupId {
+        if self
+            .tree_focus(cx)
+            .is_some_and(|tree| tree.contains_focused(window, cx))
+        {
+            self.tab_of(View::Files).0
+        } else {
+            self.layout.last_center()
+        }
+    }
+
+    fn tree_focus(&self, cx: &App) -> Option<FocusHandle> {
+        let panes = self.panes.as_ref()?;
+        Some(panes.sidebar.read(cx).focus_handle(cx))
+    }
+
+    /// A dock group splits as its view's menu does: off a group it shares, with room for both.
+    fn split_in(
+        &mut self,
+        group: GroupId,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.layout.surface_of(group) {
+            Surface::Center => self.split(group, direction, window, cx),
+            Surface::Dock(_) => {
+                if let Some(view) = self.group(group).shown.view() {
+                    self.split_view(&SplitView { view, direction }, window, cx);
+                }
+            }
+        }
     }
 
     /// The new group shows the note with the caret it had, and takes the focus.
-    fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
+    fn split(
+        &mut self,
+        from: GroupId,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.change_layout(window, cx, |shell, window, cx| {
-            let from = shell.layout.last_center();
-            if !shell.fits_split(from, axis, window) {
+            if !shell.fits_split(from, direction.axis(), window) {
                 return;
             }
             let on = shell.group(from).shown.bound().map(|bound| OnNote {
                 note: bound.note,
                 view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
             });
-            let split = shell.layout.split(from, axis);
+            let split = shell.layout.split(from, direction);
             shell.groups.insert(split, Group::new());
             if let Some(on) = on {
                 shell.display(split, Place::Note(on), window, cx);
@@ -116,6 +239,57 @@ impl AppShell {
         if let Some(focus) = self.land_focus(cx) {
             window.focus(&focus, cx);
         }
+    }
+
+    /// Focus moves to the group past the active one's edge: a centre group's content, or the
+    /// tree; Backlinks takes none.
+    fn activate_pane(
+        &mut self,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let from = self.active_group(window, cx);
+        let probe = self.probe(from, direction, window, cx);
+        let Some(to) = self.layout.neighbour(from, direction, probe) else {
+            return;
+        };
+        let focus = match self.layout.surface_of(to) {
+            Surface::Center => {
+                self.activate_group(to, window, cx);
+                self.land_focus(cx)
+            }
+            Surface::Dock(_) => (self.group(to).shown.view() == Some(View::Files))
+                .then(|| self.tree_focus(cx))
+                .flatten(),
+        };
+        if let Some(focus) = focus {
+            window.focus(&focus, cx);
+        }
+    }
+
+    /// The caret's place along `from`'s edge in `direction`, as a fraction; half-way with no caret drawn.
+    fn probe(&self, from: GroupId, direction: SplitDirection, window: &Window, cx: &App) -> f32 {
+        let caret = self
+            .editor_of(from)
+            .and_then(|editor| editor.read(cx).caret_point());
+        let (Some(caret), Some(rect)) = (caret, self.rect_of(from)) else {
+            return 0.5;
+        };
+        let room = self.surface_size(Surface::Center, window);
+        let (at, start, length) = match direction.axis() {
+            Axis::Horizontal => (
+                caret.y,
+                theme::TITLE_BAR_HEIGHT + room.height * rect.y,
+                room.height * rect.height,
+            ),
+            Axis::Vertical => (
+                caret.x,
+                self.dock_ends().0 + room.width * rect.x,
+                room.width * rect.width,
+            ),
+        };
+        ((at - start) / length).clamp(0., 1.)
     }
 
     /// Focus in the group left moves to the one entered: a pinned editor takes no keys.

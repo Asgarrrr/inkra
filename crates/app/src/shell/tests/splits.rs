@@ -350,7 +350,7 @@ fn the_palette_lists_split_right(cx: &mut TestAppContext) {
         .unwrap()
         .expect("the palette is open");
     assert!(
-        names.iter().any(|label| label == "Split right"),
+        names.iter().any(|label| label == "Split right, ⌘K →"),
         "{names:?}"
     );
 

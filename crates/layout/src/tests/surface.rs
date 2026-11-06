@@ -1,5 +1,6 @@
 use crate::{
-    Axis, GroupId, Layout, Member, Rect, Shape, Side, StoredDock, Surface, View, restore_views,
+    Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, StoredDock, Surface, View,
+    restore_views,
 };
 
 fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
@@ -25,7 +26,7 @@ fn surface_of_names_each_surface() {
     assert_eq!(layout.surface_of(GroupId(1)), Surface::Dock(Side::Left));
     assert_eq!(layout.surface_of(GroupId(2)), Surface::Dock(Side::Right));
 
-    let lower = layout.split(GroupId(1), Axis::Vertical);
+    let lower = layout.split(GroupId(1), SplitDirection::Down);
 
     assert_eq!(layout.surface_of(lower), Surface::Dock(Side::Left));
     assert_eq!(layout.dock_groups(Side::Left), [GroupId(1), lower]);
@@ -57,8 +58,8 @@ fn surface_of_an_absent_group_panics() {
 fn remove_a_dock_group_hands_its_room_to_its_sibling() {
     let mut layout = Layout::default();
     let top = GroupId(2);
-    let middle = layout.split(top, Axis::Vertical);
-    let bottom = layout.split(middle, Axis::Vertical);
+    let middle = layout.split(top, SplitDirection::Down);
+    let bottom = layout.split(middle, SplitDirection::Down);
 
     assert_eq!(layout.remove(middle), Some(top));
 
@@ -80,7 +81,7 @@ fn remove_a_dock_group_hands_its_room_to_its_sibling() {
 fn removing_a_docks_last_group_empties_it_and_keeps_shown() {
     let mut layout = Layout::default();
     layout.toggle(Side::Left);
-    let lower = layout.split(GroupId(1), Axis::Horizontal);
+    let lower = layout.split(GroupId(1), SplitDirection::Right);
     assert_eq!(layout.remove(GroupId(1)), Some(lower));
 
     assert_eq!(layout.remove(lower), None);
