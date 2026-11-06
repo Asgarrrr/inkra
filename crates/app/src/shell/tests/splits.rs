@@ -340,3 +340,28 @@ fn the_palette_lists_split_right(cx: &mut TestAppContext) {
     assert_eq!(shown_in(&window, &mut cx, 1), Some(a));
     close(&mut cx);
 }
+
+/// The root holds focus, so landing it on the note would move it.
+#[gpui::test]
+fn a_split_refused_by_the_minimum_leaves_the_focus_where_it_was(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    cx.simulate_resize(gpui::size(gpui::px(650.), gpui::px(600.)));
+    open(&window, &mut cx, a);
+    let root = window
+        .update(&mut cx, |shell, window, cx| {
+            window.focus(&shell.focus_handle, cx);
+            shell.focus_handle.clone()
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    keys(&mut cx, "cmd-k right");
+
+    assert_eq!(centre(&window, &mut cx).len(), 1);
+    assert!(
+        window
+            .update(&mut cx, |_, window, _| root.is_focused(window))
+            .unwrap()
+    );
+    close(&mut cx);
+}

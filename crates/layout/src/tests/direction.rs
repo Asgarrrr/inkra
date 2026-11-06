@@ -1,5 +1,6 @@
 use proptest::prelude::*;
 
+use super::no_min;
 use super::tree::{built, tree_op};
 use crate::{Axis, GroupId, Layout, Member, Rect, Side, SplitDirection, Surface, drop_zone};
 
@@ -60,9 +61,15 @@ fn edge(rect: Rect, direction: SplitDirection) -> f32 {
 fn two_by_two() -> (Layout, [GroupId; 4]) {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let right = layout.split(first, SplitDirection::Right);
-    let lower_left = layout.split(first, SplitDirection::Down);
-    let lower_right = layout.split(right, SplitDirection::Down);
+    let right = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let lower_left = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
+    let lower_right = layout
+        .split(right, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     (layout, [first, right, lower_left, lower_right])
 }
 
@@ -70,8 +77,12 @@ fn two_by_two() -> (Layout, [GroupId; 4]) {
 fn tall_left() -> (Layout, [GroupId; 3]) {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let right = layout.split(first, SplitDirection::Right);
-    let lower = layout.split(right, SplitDirection::Down);
+    let right = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let lower = layout
+        .split(right, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     (layout, [first, right, lower])
 }
 
@@ -91,7 +102,9 @@ fn left_and_right_run_horizontally_up_and_down_vertically() {
 fn split_left_puts_the_fresh_group_first() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let fresh = layout.split(first, SplitDirection::Left);
+    let fresh = layout
+        .split(first, SplitDirection::Left, 1.0, no_min)
+        .unwrap();
     assert_eq!(
         layout.center(),
         &Member::Split {
@@ -102,7 +115,9 @@ fn split_left_puts_the_fresh_group_first() {
     );
     assert_eq!(layout.last_center(), first);
 
-    let between = layout.split(first, SplitDirection::Left);
+    let between = layout
+        .split(first, SplitDirection::Left, 1.0, no_min)
+        .unwrap();
     assert_eq!(layout.center_groups(), [fresh, between, first]);
     let Member::Split { flexes, .. } = layout.center() else {
         panic!("the centre is a row");
@@ -114,7 +129,9 @@ fn split_left_puts_the_fresh_group_first() {
 fn split_up_puts_the_fresh_group_above() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let fresh = layout.split(first, SplitDirection::Up);
+    let fresh = layout
+        .split(first, SplitDirection::Up, 1.0, no_min)
+        .unwrap();
     assert_eq!(
         layout.center(),
         &Member::Split {
@@ -180,8 +197,12 @@ fn the_probe_picks_along_the_edge_half_open_and_clamped() {
 
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let lower = layout.split(first, SplitDirection::Down);
-    let right = layout.split(first, SplitDirection::Right);
+    let lower = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
+    let right = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     for (probe, to) in [(0.49, first), (0.5, right), (1.0, right)] {
         assert_eq!(
             layout.neighbour(lower, SplitDirection::Up, probe),
@@ -204,8 +225,12 @@ fn neighbour_crosses_into_a_drawn_dock() {
         Some(backlinks)
     );
 
-    let lower_files = layout.split(files, SplitDirection::Down);
-    let side_files = layout.split(files, SplitDirection::Right);
+    let lower_files = layout
+        .split(files, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
+    let side_files = layout
+        .split(files, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(
         layout.neighbour(first, SplitDirection::Left, 0.5),
         Some(side_files)
@@ -263,7 +288,9 @@ fn a_dock_leads_back_to_last_center() {
         );
     }
 
-    let lower_files = layout.split(files, SplitDirection::Down);
+    let lower_files = layout
+        .split(files, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     assert_eq!(
         layout.neighbour(files, SplitDirection::Down, 0.5),
         Some(lower_files)

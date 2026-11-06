@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use proptest::prelude::*;
 
+use super::no_min;
 use crate::tree::{normalised, rects};
 use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, Surface};
 
@@ -54,8 +55,12 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 fn grid() -> (Layout, [GroupId; 3]) {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
-    let third = layout.split(second, SplitDirection::Down);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let third = layout
+        .split(second, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     (layout, [first, second, third])
 }
 
@@ -64,7 +69,9 @@ fn split_down_stacks_the_new_group_below() {
     let mut layout = Layout::default();
     let first = layout.last_center();
 
-    let second = layout.split(first, SplitDirection::Down);
+    let second = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
 
     assert_eq!(
         layout.center(),
@@ -107,9 +114,13 @@ fn split_down_stacks_the_new_group_below() {
 fn a_same_axis_split_inserts_a_sibling() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Down);
+    let second = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
 
-    let third = layout.split(first, SplitDirection::Down);
+    let third = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
 
     assert_eq!(
         layout.center(),
@@ -238,7 +249,9 @@ fn rects_tile_the_unit_square() {
         ]
     );
 
-    let fourth = layout.split(first, SplitDirection::Right);
+    let fourth = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(
         layout.rects(Surface::Center),
         [
@@ -255,11 +268,15 @@ fn top_groups_skip_a_lower_group() {
     let (mut layout, [first, second, third]) = grid();
     assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
-    let fourth = layout.split(first, SplitDirection::Down);
+    let fourth = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     assert_eq!(layout.center_groups(), [first, fourth, second, third]);
     assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
-    let fifth = layout.split(second, SplitDirection::Right);
+    let fifth = layout
+        .split(second, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(layout.top_groups(Surface::Center), [first, second, fifth]);
 
     let layout = Layout {
@@ -282,7 +299,9 @@ fn a_deep_vertical_split_keeps_one_top_group() {
     let mut layout = Layout::default();
     let top = layout.center_groups()[0];
     for _ in 0..12 {
-        layout.split(top, SplitDirection::Down);
+        layout
+            .split(top, SplitDirection::Down, 1.0, no_min)
+            .unwrap();
     }
     assert_eq!(layout.top_groups(Surface::Center), [top]);
 
@@ -328,8 +347,12 @@ fn remove_in_a_nested_split_hands_the_room_to_the_sibling() {
 
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
-    let third = layout.split(first, SplitDirection::Down);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let third = layout
+        .split(first, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     layout.activate(second);
     assert_eq!(layout.remove(second), Some(third));
     assert_eq!(
@@ -380,7 +403,12 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
     assert_eq!(layout.last_center(), GroupId(0));
     assert!(!layout.is_shown(Side::Left));
     assert!(layout.is_shown(Side::Right));
-    assert_eq!(layout.split(GroupId(2), SplitDirection::Right), GroupId(5));
+    assert_eq!(
+        layout
+            .split(GroupId(2), SplitDirection::Right, 1.0, no_min)
+            .unwrap(),
+        GroupId(5)
+    );
 
     let mut layout = Layout::restored(&Shape::Group, [None, Some(&Shape::Group)], [true, false], 0);
     assert_eq!(layout.dock(Side::Left), None);
@@ -448,6 +476,62 @@ fn restored_normalises_a_one_child_split() {
             vec![1.5, 0.75, 0.75]
         )
     );
+}
+
+/// Only `group` has a minimum, `min` along `axis`; any other query refuses.
+fn only(group: GroupId, axis: Axis, min: f32) -> impl Fn(GroupId, Axis) -> f32 {
+    move |held, along| {
+        if (held, along) == (group, axis) {
+            min
+        } else {
+            f32::INFINITY
+        }
+    }
+}
+
+#[test]
+fn a_split_fits_while_each_half_keeps_the_minimum() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let hair = 100.0_f32.next_up();
+    let fits =
+        |group, axis, room, min| layout.fits_split(group, axis, room, only(group, axis, min));
+
+    // Half the centre's width, all its height.
+    assert!(fits(first, Axis::Horizontal, 400.0, 100.0));
+    assert!(!fits(first, Axis::Horizontal, 400.0, hair));
+    assert!(fits(second, Axis::Vertical, 200.0, 100.0));
+    assert!(!fits(second, Axis::Vertical, 200.0, hair));
+    assert!(fits(GroupId(1), Axis::Horizontal, 200.0, 100.0));
+    assert!(!fits(GroupId(1), Axis::Horizontal, 200.0, hair));
+    assert!(!layout.fits_split(GroupId(7), Axis::Horizontal, 1.0, no_min));
+}
+
+#[test]
+fn a_refused_split_hands_out_no_id() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let hair = 100.0_f32.next_up();
+
+    let refused = layout.split(
+        first,
+        SplitDirection::Down,
+        200.0,
+        only(first, Axis::Vertical, hair),
+    );
+
+    assert_eq!(refused, None);
+    assert_eq!(layout, Layout::default());
+    let split = layout.split(
+        first,
+        SplitDirection::Down,
+        200.0,
+        only(first, Axis::Vertical, 100.0),
+    );
+    assert_eq!(split, Some(GroupId(3)));
 }
 
 /// Splits with one child and nested same-axis splits included; flexes valid, so rects are defined.
@@ -518,15 +602,18 @@ pub(super) enum TreeOp {
     Add(Side),
 }
 
-pub(super) fn tree_op() -> impl Strategy<Value = TreeOp> {
-    let direction = prop_oneof![
+fn direction() -> impl Strategy<Value = SplitDirection> {
+    prop_oneof![
         Just(SplitDirection::Up),
         Just(SplitDirection::Down),
         Just(SplitDirection::Left),
         Just(SplitDirection::Right),
-    ];
+    ]
+}
+
+pub(super) fn tree_op() -> impl Strategy<Value = TreeOp> {
     prop_oneof![
-        (any::<usize>(), direction).prop_map(|(pick, direction)| TreeOp::Split(pick, direction)),
+        (any::<usize>(), direction()).prop_map(|(pick, direction)| TreeOp::Split(pick, direction)),
         any::<usize>().prop_map(TreeOp::Remove),
         any::<usize>().prop_map(TreeOp::Activate),
         prop_oneof![Just(Side::Left), Just(Side::Right)].prop_map(TreeOp::Add),
@@ -549,7 +636,9 @@ pub(super) fn built(ops: &[TreeOp]) -> Layout {
         let center = layout.center_groups();
         match op {
             TreeOp::Split(pick, direction) => {
-                layout.split(groups[pick % groups.len()], direction);
+                layout
+                    .split(groups[pick % groups.len()], direction, 1.0, no_min)
+                    .unwrap();
             }
             TreeOp::Remove(pick) => {
                 if let Some(group) = removable(&layout, pick) {
@@ -605,7 +694,7 @@ proptest! {
                 TreeOp::Split(pick, direction) => {
                     let group = groups[pick % groups.len()];
                     let surface = layout.surface_of(group);
-                    let split = layout.split(group, direction);
+                    let split = layout.split(group, direction, 1.0, no_min).unwrap();
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
                     prop_assert_eq!(layout.surface_of(split), surface);
                 }
@@ -653,6 +742,30 @@ proptest! {
             prop_assert!(layout.center_groups().contains(&layout.last_center()));
         }
     }
+    #[test]
+    fn a_split_is_refused_exactly_where_it_does_not_fit(
+        ops in proptest::collection::vec(tree_op(), 0..24),
+        pick in any::<usize>(),
+        direction in direction(),
+        room in 0.0f32..2000.0,
+        min in 0.0f32..500.0,
+    ) {
+        let mut layout = built(&ops);
+        let groups: Vec<_> = layout.groups().collect();
+        let group = groups[pick % groups.len()];
+        let before = layout.clone();
+        let fits = layout.fits_split(group, direction.axis(), room, |_, _| min);
+
+        let split = layout.split(group, direction, room, |_, _| min);
+
+        prop_assert_eq!(split.is_some(), fits);
+        if let Some(fresh) = split {
+            prop_assert_eq!(layout.surface_of(fresh), before.surface_of(group));
+        } else {
+            prop_assert_eq!(layout, before);
+        }
+    }
+
     #[test]
     fn restored_keeps_a_built_layouts_rects(
         ops in proptest::collection::vec(tree_op(), 0..48),

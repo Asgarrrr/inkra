@@ -1,5 +1,6 @@
 use proptest::prelude::*;
 
+use super::no_min;
 use super::tree::{built, tree_op};
 use crate::resize::minimum;
 use crate::{Axis, GroupId, Layout, Member, Shape, Side, SplitDirection, SplitPath, Surface};
@@ -206,7 +207,9 @@ fn a_drag_keeps_each_group_of_an_uneven_split_at_its_minimum() {
 fn a_drag_in_a_dock_resizes_its_groups() {
     let mut layout = Layout::default();
     let files = layout.dock_groups(Side::Left)[0];
-    layout.split(files, SplitDirection::Down);
+    layout
+        .split(files, SplitDirection::Down, 1.0, no_min)
+        .unwrap();
     let dock = path(Surface::Dock(Side::Left), &[]);
 
     assert!(layout.resize(&dock, 1, 100.0, 1000.0, flat(100.0)));

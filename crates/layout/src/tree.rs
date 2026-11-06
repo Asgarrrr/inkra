@@ -201,18 +201,50 @@ impl Layout {
         self.center.groups()
     }
 
+    /// Whether each half of `group` split along `axis` keeps `min(group, axis)`, with `room` the
+    /// px length of `group`'s surface along `axis`. False for a group not in this layout.
+    #[must_use]
+    pub fn fits_split(
+        &self,
+        group: GroupId,
+        axis: Axis,
+        room: f32,
+        min: impl Fn(GroupId, Axis) -> f32,
+    ) -> bool {
+        let Some(rect) = [Some(&self.center), self.left.as_ref(), self.right.as_ref()]
+            .into_iter()
+            .flatten()
+            .flat_map(rects)
+            .find_map(|(held, rect)| (held == group).then_some(rect))
+        else {
+            return false;
+        };
+        let share = match axis {
+            Axis::Horizontal => rect.width,
+            Axis::Vertical => rect.height,
+        };
+        share * room / 2.0 >= min(group, axis)
+    }
+
     /// A fresh group on `group`'s `direction` side, on `group`'s surface: a sibling sharing
     /// `group`'s room when its parent splits on that axis, else a new split in `group`'s place.
-    ///
-    /// # Panics
-    /// If `group` is not in this layout.
-    pub fn split(&mut self, group: GroupId, direction: SplitDirection) -> GroupId {
+    /// `None`, the layout untouched, where `fits_split` refuses.
+    pub fn split(
+        &mut self,
+        group: GroupId,
+        direction: SplitDirection,
+        room: f32,
+        min: impl Fn(GroupId, Axis) -> f32,
+    ) -> Option<GroupId> {
+        if !self.fits_split(group, direction.axis(), room, min) {
+            return None;
+        }
         let fresh = GroupId(self.next);
         let member = self.holder_mut(group);
         member.split(group, fresh, direction.axis(), direction.before());
         normalise(member);
         self.next += 1;
-        fresh
+        Some(fresh)
     }
 }
 

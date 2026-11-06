@@ -157,7 +157,7 @@ impl AppShell {
     }
 
     /// Each group's least room along each axis: the floor, or the title-row chrome it draws if wider.
-    fn min_sizes(&self, window: &Window) -> HashMap<(GroupId, Axis), f32> {
+    pub(super) fn min_sizes(&self, window: &Window) -> HashMap<(GroupId, Axis), f32> {
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
         } else {
@@ -219,17 +219,13 @@ impl AppShell {
             .collect()
     }
 
-    /// Whether both halves of `group` split along `axis` would keep its minimum.
-    pub(super) fn fits_split(&self, group: GroupId, axis: Axis, window: &Window) -> bool {
-        let Some(rect) = self.rect_of(group) else {
-            return false;
-        };
+    /// The px length of `group`'s surface along `axis`: the room `Layout::split` takes.
+    pub(super) fn room_along(&self, group: GroupId, axis: Axis, window: &Window) -> f32 {
         let room = self.surface_size(self.layout.surface_of(group), window);
-        let (share, room) = match axis {
-            Axis::Horizontal => (rect.width, room.width),
-            Axis::Vertical => (rect.height, room.height),
-        };
-        f32::from(room) * share / 2. >= self.min_sizes(window)[&(group, axis)]
+        f32::from(match axis {
+            Axis::Horizontal => room.width,
+            Axis::Vertical => room.height,
+        })
     }
 
     /// `group`'s share of its surface.

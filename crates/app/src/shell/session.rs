@@ -312,7 +312,7 @@ impl AppShell {
     /// The last centre group stays, with its empty tab (L3).
     fn drop_empty_groups(&mut self, cx: &mut Context<Self>) {
         for group in self.layout.center_groups() {
-            if self.layout.center_groups().len() == 1 {
+            if !self.layout.removable(group) {
                 return;
             }
             if !self.group(group).holds_nothing() {

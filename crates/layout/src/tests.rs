@@ -11,6 +11,11 @@ mod resize;
 mod surface;
 mod tree;
 
+/// No group has a minimum, so every split fits.
+fn no_min(_: GroupId, _: Axis) -> f32 {
+    0.0
+}
+
 /// A centre that is one row: its groups left to right and their flexes.
 fn row(layout: &Layout) -> (Vec<GroupId>, Vec<f32>) {
     match layout.center() {
@@ -133,13 +138,17 @@ fn removing_the_centre_panics() {
 fn split_right_puts_the_new_group_after_and_halves_its_room() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(row(&layout).0, [first, second]);
     assert_eq!(row(&layout).1, [1.0, 1.0]);
     assert_eq!(layout.last_center(), first);
     assert_eq!(layout.surface_of(second), Surface::Center);
 
-    let third = layout.split(first, SplitDirection::Right);
+    let third = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(row(&layout).0, [first, third, second]);
     assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
     let handed: HashSet<_> = layout.groups().collect();
@@ -157,8 +166,12 @@ fn split_right_puts_the_new_group_after_and_halves_its_room() {
 fn split_right_keeps_the_other_groups_widths() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
-    layout.split(second, SplitDirection::Right);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    layout
+        .split(second, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(row(&layout).1, [1.5, 0.75, 0.75]);
 }
 
@@ -173,8 +186,12 @@ fn removing_a_dock_group_returns_no_heir() {
 fn removing_a_centre_group_gives_its_room_to_the_left() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split(first, SplitDirection::Right);
-    let second = layout.split(first, SplitDirection::Right);
+    let third = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
 
     assert_eq!(layout.remove(second), Some(first));
@@ -192,8 +209,12 @@ fn removing_a_centre_group_gives_its_room_to_the_left() {
 fn the_first_group_gives_its_room_to_the_right() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split(first, SplitDirection::Right);
-    let second = layout.split(first, SplitDirection::Right);
+    let third = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
 
     assert_eq!(layout.remove(first), Some(second));
 
@@ -205,8 +226,12 @@ fn the_first_group_gives_its_room_to_the_right() {
 fn removing_the_last_center_moves_it_to_the_heir() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
-    let third = layout.split(second, SplitDirection::Right);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let third = layout
+        .split(second, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     layout.activate(second);
 
     assert_eq!(layout.remove(second), Some(first));
@@ -222,9 +247,30 @@ fn removing_the_last_center_moves_it_to_the_heir() {
 fn removing_the_centres_only_group_panics() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, SplitDirection::Right);
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
     layout.remove(first);
     layout.remove(second);
+}
+
+#[test]
+fn only_the_centres_only_group_is_not_removable() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    assert!(!layout.removable(first));
+    assert!(layout.removable(GroupId(1)));
+    assert!(layout.removable(GroupId(2)));
+    assert!(!layout.removable(GroupId(7)));
+
+    let second = layout
+        .split(first, SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    assert!(layout.removable(first));
+    assert!(layout.removable(second));
+
+    layout.remove(first);
+    assert!(!layout.removable(second));
 }
 
 #[test]
@@ -235,10 +281,13 @@ fn activating_a_dock_group_panics() {
 }
 
 #[test]
-#[should_panic(expected = "is not in the layout")]
-fn splitting_an_absent_group_panics() {
+fn splitting_an_absent_group_refuses() {
     let mut layout = Layout::default();
-    layout.split(GroupId(7), SplitDirection::Right);
+    assert_eq!(
+        layout.split(GroupId(7), SplitDirection::Right, 1.0, no_min),
+        None
+    );
+    assert_eq!(layout, Layout::default());
 }
 
 #[test]
@@ -496,7 +545,7 @@ proptest! {
                 CentreOp::Split(pick) => {
                     let center = layout.center_groups();
                     let group = center[pick % center.len()];
-                    let split = layout.split(group, SplitDirection::Right);
+                    let split = layout.split(group, SplitDirection::Right, 1.0, no_min).unwrap();
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
                     changed = vec![group, split];
                 }
