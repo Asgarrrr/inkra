@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use gpui::{Context, ScrollHandle, Task, Window, actions};
-use inkra_layout::{Axis, GroupId, View};
+use inkra_layout::{Axis, GroupId, Surface, View};
 use inkra_tabs::{TabId, Tabs};
 
 use super::parked::Parked;
@@ -144,6 +144,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        debug_assert_eq!(self.layout.surface_of(group), Surface::Center);
         let was_last = group == self.layout.last_center();
         self.change_layout(window, cx, |shell, window, cx| {
             let Group { tabs, shown, .. } = shell.group_mut(group);

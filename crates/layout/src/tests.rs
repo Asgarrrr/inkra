@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use proptest::prelude::*;
 
-use super::{Axis, GroupId, Layout, Member, Side, StoredDock, View, restore_views};
+use super::{Axis, GroupId, Layout, Member, Side, StoredDock, Surface, View, restore_views};
 
+mod surface;
 mod tree;
 
 /// A centre that is one row: its groups left to right and their flexes.
@@ -27,15 +28,17 @@ fn the_default_puts_files_left_and_backlinks_right_both_shown() {
     assert_eq!(Side::Left.other(), Side::Right);
     assert_eq!(Side::Right.other(), Side::Left);
     for side in [Side::Left, Side::Right] {
-        let group = layout.dock(side).expect("a group in each dock");
-        assert_eq!(layout.side_of(group), Some(side));
+        let [group] = layout.dock_groups(side)[..] else {
+            panic!("one group in each dock");
+        };
+        assert_eq!(layout.surface_of(group), Surface::Dock(side));
         assert!(layout.is_shown(side));
         assert!(layout.is_drawn(side));
     }
     assert_eq!(layout.center(), &Member::Group(GroupId(0)));
     assert_eq!(row(&layout), (vec![GroupId(0)], vec![1.0]));
     assert_eq!(layout.last_center(), GroupId(0));
-    assert_eq!(layout.side_of(GroupId(0)), None);
+    assert_eq!(layout.surface_of(GroupId(0)), Surface::Center);
     assert_eq!(
         layout.groups().map(GroupId::raw).collect::<Vec<_>>(),
         [0, 1, 2]
@@ -76,7 +79,7 @@ fn a_hidden_dock_shows_no_visible_view() {
 #[test]
 fn an_empty_dock_is_not_drawn_and_keeps_its_flag() {
     let mut layout = Layout::default();
-    let left = layout.dock(Side::Left).expect("a left group");
+    let left = layout.dock_groups(Side::Left)[0];
     layout.remove(left);
     assert_eq!(layout.dock(Side::Left), None);
     assert!(layout.is_shown(Side::Left));
@@ -91,12 +94,12 @@ fn an_empty_dock_is_not_drawn_and_keeps_its_flag() {
 #[test]
 fn add_dock_gives_a_fresh_id_and_draws_the_dock() {
     let mut layout = Layout::default();
-    let right = layout.dock(Side::Right).expect("a right group");
+    let right = layout.dock_groups(Side::Right)[0];
     layout.remove(right);
     let added = layout.add_dock(Side::Right);
     assert!(![GroupId(0), GroupId(1), right].contains(&added));
-    assert_eq!(layout.dock(Side::Right), Some(added));
-    assert_eq!(layout.side_of(added), Some(Side::Right));
+    assert_eq!(layout.dock(Side::Right), Some(&Member::Group(added)));
+    assert_eq!(layout.surface_of(added), Surface::Dock(Side::Right));
     assert!(layout.is_drawn(Side::Right));
 }
 
@@ -104,7 +107,7 @@ fn add_dock_gives_a_fresh_id_and_draws_the_dock() {
 fn removing_a_dock_group_keeps_its_flag() {
     let mut layout = Layout::default();
     layout.toggle(Side::Right);
-    let right = layout.dock(Side::Right).expect("a right group");
+    let right = layout.dock_groups(Side::Right)[0];
     layout.remove(right);
     assert!(!layout.is_shown(Side::Right));
     assert_eq!(
@@ -130,7 +133,7 @@ fn split_right_puts_the_new_group_after_and_halves_its_room() {
     assert_eq!(row(&layout).0, [first, second]);
     assert_eq!(row(&layout).1, [1.0, 1.0]);
     assert_eq!(layout.last_center(), first);
-    assert_eq!(layout.side_of(second), None);
+    assert_eq!(layout.surface_of(second), Surface::Center);
 
     let third = layout.split(first, Axis::Horizontal);
     assert_eq!(row(&layout).0, [first, third, second]);
@@ -158,7 +161,7 @@ fn split_right_keeps_the_other_groups_widths() {
 #[test]
 fn removing_a_dock_group_returns_no_heir() {
     let mut layout = Layout::default();
-    let left = layout.dock(Side::Left).expect("a left group");
+    let left = layout.dock_groups(Side::Left)[0];
     assert_eq!(layout.remove(left), None);
 }
 
@@ -228,10 +231,10 @@ fn activating_a_dock_group_panics() {
 }
 
 #[test]
-#[should_panic(expected = "is not in the centre")]
-fn splitting_a_dock_group_panics() {
+#[should_panic(expected = "is not in the layout")]
+fn splitting_an_absent_group_panics() {
     let mut layout = Layout::default();
-    layout.split(GroupId(2), Axis::Horizontal);
+    layout.split(GroupId(7), Axis::Horizontal);
 }
 
 #[test]
@@ -259,9 +262,17 @@ fn defaults() -> [(Vec<View>, usize); 2] {
     [(vec![View::Files], 0), (vec![View::Backlinks], 0)]
 }
 
+/// `restore_views` on one group a side.
+fn restore_pair(left: &StoredDock, right: &StoredDock) -> [(Vec<View>, usize); 2] {
+    restore_views([std::slice::from_ref(left), std::slice::from_ref(right)]).map(|groups| {
+        let [group] = <[_; 1]>::try_from(groups).expect("one group a side");
+        group
+    })
+}
+
 #[test]
 fn a_view_in_both_docks_is_kept_left() {
-    let views = restore_views(
+    let views = restore_pair(
         &state(&[View::Files, View::Backlinks], 1),
         &state(&[View::Backlinks], 0),
     );
@@ -270,7 +281,7 @@ fn a_view_in_both_docks_is_kept_left() {
 
 #[test]
 fn a_view_twice_in_one_dock_is_kept_first() {
-    let views = restore_views(
+    let views = restore_pair(
         &state(&[View::Files, View::Files], 0),
         &state(&[View::Backlinks], 0),
     );
@@ -279,13 +290,13 @@ fn a_view_twice_in_one_dock_is_kept_first() {
 
 #[test]
 fn a_missing_view_is_appended_to_its_default_side() {
-    let views = restore_views(&state(&[], 0), &state(&[View::Backlinks], 0));
+    let views = restore_pair(&state(&[], 0), &state(&[View::Backlinks], 0));
     assert_eq!(views, defaults());
 
-    let views = restore_views(&state(&[View::Files], 0), &state(&[], 0));
+    let views = restore_pair(&state(&[View::Files], 0), &state(&[], 0));
     assert_eq!(views, defaults());
 
-    let views = restore_views(&state(&[], 0), &state(&[View::Files], 0));
+    let views = restore_pair(&state(&[], 0), &state(&[View::Files], 0));
     assert_eq!(
         views,
         [(Vec::new(), 0), (vec![View::Files, View::Backlinks], 0)]
@@ -294,13 +305,13 @@ fn a_missing_view_is_appended_to_its_default_side() {
 
 #[test]
 fn an_active_index_out_of_range_is_clamped() {
-    let views = restore_views(&state(&[View::Files, View::Backlinks], 7), &state(&[], 3));
+    let views = restore_pair(&state(&[View::Files, View::Backlinks], 7), &state(&[], 3));
     assert_eq!(views, both_left(1));
 }
 
 #[test]
 fn both_docks_empty_restore_the_default_views_with_their_flags() {
-    let views = restore_views(&state(&[], 0), &state(&[], 0));
+    let views = restore_pair(&state(&[], 0), &state(&[], 0));
     assert_eq!(views, defaults());
 }
 
@@ -313,7 +324,7 @@ fn stored(names: &[&str], active: usize) -> StoredDock {
 
 #[test]
 fn an_unknown_name_before_the_active_keeps_the_active_view() {
-    let [(views, active), _] = restore_views(
+    let [(views, active), _] = restore_pair(
         &stored(&["graph", "files", "backlinks"], 1),
         &stored(&[], 0),
     );
@@ -322,7 +333,7 @@ fn an_unknown_name_before_the_active_keeps_the_active_view() {
 
 #[test]
 fn an_active_duplicate_maps_to_its_kept_view() {
-    let [(views, active), _] = restore_views(
+    let [(views, active), _] = restore_pair(
         &stored(&["files", "files", "backlinks"], 1),
         &stored(&[], 0),
     );
@@ -395,7 +406,7 @@ fn apply(layout: &mut Layout, op: Op, handed: &mut HashSet<GroupId>) -> Result<(
             prop_assert!(layout.is_shown(side));
         }
         Op::Remove(side) => {
-            if let Some(group) = layout.dock(side) {
+            if let Some(&group) = layout.dock_groups(side).first() {
                 layout.remove(group);
             }
         }
@@ -425,7 +436,7 @@ fn op() -> impl Strategy<Value = Op> {
 proptest! {
     #[test]
     fn restore_repairs_any_stored_names(left in stored_dock(), right in stored_dock()) {
-        let docks = restore_views(&left, &right);
+        let docks = restore_pair(&left, &right);
         let mut views = [docks[0].0.clone(), docks[1].0.clone()].concat();
         views.sort_by_key(|&view| view == View::Backlinks);
         prop_assert_eq!(views, [View::Files, View::Backlinks]);
@@ -460,8 +471,8 @@ proptest! {
             let mut held = center.clone();
             for side in [Side::Left, Side::Right] {
                 prop_assert_eq!(layout.is_drawn(side), layout.is_shown(side) && layout.dock(side).is_some());
-                if let Some(group) = layout.dock(side) {
-                    prop_assert_eq!(layout.side_of(group), Some(side));
+                for group in layout.dock_groups(side) {
+                    prop_assert_eq!(layout.surface_of(group), Surface::Dock(side));
                     held.push(group);
                 }
             }

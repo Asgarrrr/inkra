@@ -539,6 +539,34 @@ fn the_active_group_maps_to_a_survivor(cx: &mut TestAppContext) {
     close(&mut cx);
 }
 
+/// The layout restores before the walk, its active group with it: a load held back leaves the saved one active.
+#[gpui::test]
+fn the_saved_active_group_is_active_before_the_notes_land(cx: &mut TestAppContext) {
+    let fs = vault();
+    save_tree(
+        &fs,
+        1,
+        row(vec![
+            notes_group(vec![tab("a.md", 0, 0)], 0),
+            notes_group(vec![tab("b.md", 0, 0)], 0),
+        ]),
+    );
+    let gate = fs.block_load("/vault/b.md");
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    let groups = centre(&window, &mut cx);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(last(&window, &mut cx), groups[1]);
+    gate.release();
+    cx.run_until_parked();
+
+    let b = id(&window, &mut cx, "b");
+    assert_eq!(last(&window, &mut cx), groups[1]);
+    assert_eq!(shown_in(&window, &mut cx, 1), Some(b));
+    close(&mut cx);
+}
+
 #[gpui::test]
 fn a_note_saved_in_a_dock_is_dropped(cx: &mut TestAppContext) {
     let fs = vault();
@@ -552,7 +580,14 @@ fn a_note_saved_in_a_dock_is_dropped(cx: &mut TestAppContext) {
         active: 0,
     };
     let center = notes_group(vec![tab("b.md", 0, 0)], 0);
-    let session = Session::new("/vault".into(), 0, center, Some(left), None, [true, true]);
+    let session = Session::new(
+        "/vault".into(),
+        0,
+        center,
+        Some(SavedMember::Group(left)),
+        None,
+        [true, true],
+    );
     save_text(&fs, session.encode().unwrap());
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();

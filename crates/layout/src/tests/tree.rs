@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use proptest::prelude::*;
 
 use crate::tree::{normalised, rects};
-use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side};
+use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side, Surface};
 
 fn group(raw: u32) -> Member {
     Member::Group(GroupId(raw))
@@ -76,9 +76,9 @@ fn split_down_stacks_the_new_group_below() {
     );
     assert_eq!(layout.center_groups(), [first, second]);
     assert_eq!(layout.last_center(), first);
-    assert_eq!(layout.side_of(second), None);
+    assert_eq!(layout.surface_of(second), Surface::Center);
     assert_eq!(
-        layout.rects(),
+        layout.rects(Surface::Center),
         [
             (first, rect(0.0, 0.0, 1.0, 0.5)),
             (second, rect(0.0, 0.5, 1.0, 0.5))
@@ -230,7 +230,7 @@ fn invalid_flexes_reset_to_one() {
 fn rects_tile_the_unit_square() {
     let (mut layout, [first, second, third]) = grid();
     assert_eq!(
-        layout.rects(),
+        layout.rects(Surface::Center),
         [
             (first, rect(0.0, 0.0, 0.5, 1.0)),
             (second, rect(0.5, 0.0, 0.5, 0.5)),
@@ -240,7 +240,7 @@ fn rects_tile_the_unit_square() {
 
     let fourth = layout.split(first, Axis::Horizontal);
     assert_eq!(
-        layout.rects(),
+        layout.rects(Surface::Center),
         [
             (first, rect(0.0, 0.0, 0.25, 1.0)),
             (fourth, rect(0.25, 0.0, 0.25, 1.0)),
@@ -253,22 +253,25 @@ fn rects_tile_the_unit_square() {
 #[test]
 fn top_groups_skip_a_lower_group() {
     let (mut layout, [first, second, third]) = grid();
-    assert_eq!(layout.top_groups(), [first, second]);
+    assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
     let fourth = layout.split(first, Axis::Vertical);
     assert_eq!(layout.center_groups(), [first, fourth, second, third]);
-    assert_eq!(layout.top_groups(), [first, second]);
+    assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
     let fifth = layout.split(second, Axis::Horizontal);
-    assert_eq!(layout.top_groups(), [first, second, fifth]);
+    assert_eq!(layout.top_groups(Surface::Center), [first, second, fifth]);
 
     let layout = Layout {
         center: split(Axis::Vertical, vec![group(0), group(3)], vec![0.002, 1.998]),
         ..Layout::default()
     };
-    assert_eq!(layout.rects()[1].1, rect(0.0, 0.001, 1.0, 0.999));
     assert_eq!(
-        layout.top_groups(),
+        layout.rects(Surface::Center)[1].1,
+        rect(0.0, 0.001, 1.0, 0.999)
+    );
+    assert_eq!(
+        layout.top_groups(Surface::Center),
         [GroupId(0)],
         "an epsilon down is below the top"
     );
@@ -281,7 +284,7 @@ fn a_deep_vertical_split_keeps_one_top_group() {
     for _ in 0..12 {
         layout.split(top, Axis::Vertical);
     }
-    assert_eq!(layout.top_groups(), [top]);
+    assert_eq!(layout.top_groups(Surface::Center), [top]);
 
     let layout = Layout {
         center: split(
@@ -291,7 +294,7 @@ fn a_deep_vertical_split_keeps_one_top_group() {
         ),
         ..Layout::default()
     };
-    assert_eq!(layout.top_groups(), [GroupId(0)]);
+    assert_eq!(layout.top_groups(Surface::Center), [GroupId(0)]);
 }
 
 #[test]
@@ -355,7 +358,7 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
         vec![1.0, 1.0],
     );
 
-    let mut layout = Layout::restored(&center, [true, true], [false, true]);
+    let mut layout = Layout::restored(&center, [Some(&Shape::Group); 2], [false, true], 0);
 
     assert_eq!(
         layout.center(),
@@ -368,8 +371,8 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
             vec![1.0, 1.0]
         )
     );
-    assert_eq!(layout.dock(Side::Left), Some(GroupId(3)));
-    assert_eq!(layout.dock(Side::Right), Some(GroupId(4)));
+    assert_eq!(layout.dock_groups(Side::Left), [GroupId(3)]);
+    assert_eq!(layout.dock_groups(Side::Right), [GroupId(4)]);
     assert_eq!(
         layout.groups().map(GroupId::raw).collect::<Vec<_>>(),
         [0, 1, 2, 3, 4]
@@ -379,18 +382,18 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
     assert!(layout.is_shown(Side::Right));
     assert_eq!(layout.split(GroupId(2), Axis::Horizontal), GroupId(5));
 
-    let mut layout = Layout::restored(&Shape::Group, [false, true], [true, false]);
+    let mut layout = Layout::restored(&Shape::Group, [None, Some(&Shape::Group)], [true, false], 0);
     assert_eq!(layout.dock(Side::Left), None);
-    assert_eq!(layout.dock(Side::Right), Some(GroupId(1)));
+    assert_eq!(layout.dock_groups(Side::Right), [GroupId(1)]);
     assert!(layout.is_shown(Side::Left));
     assert!(!layout.is_shown(Side::Right));
     assert_eq!(layout.add_dock(Side::Left), GroupId(2));
 
-    let layout = Layout::restored(&Shape::Group, [true, false], [true, true]);
-    assert_eq!(layout.dock(Side::Left), Some(GroupId(1)));
+    let layout = Layout::restored(&Shape::Group, [Some(&Shape::Group), None], [true, true], 0);
+    assert_eq!(layout.dock_groups(Side::Left), [GroupId(1)]);
     assert_eq!(layout.dock(Side::Right), None);
     assert_eq!(
-        Layout::restored(&Shape::Group, [true, true], [true, true]),
+        Layout::restored(&Shape::Group, [Some(&Shape::Group); 2], [true, true], 0),
         Layout::default()
     );
 }
@@ -399,7 +402,7 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
 fn restored_resets_invalid_flexes() {
     for flexes in [vec![5.0, 1.0], vec![1.0], vec![f32::NAN, 1.0]] {
         let center = shape_split(Axis::Vertical, vec![Shape::Group, Shape::Group], flexes);
-        let layout = Layout::restored(&center, [false, false], [true, true]);
+        let layout = Layout::restored(&center, [None, None], [true, true], 0);
         assert_eq!(
             layout.center(),
             &split(Axis::Vertical, vec![group(0), group(1)], vec![1.0, 1.0])
@@ -410,7 +413,7 @@ fn restored_resets_invalid_flexes() {
         vec![Shape::Group, Shape::Group],
         vec![1.5, 0.5],
     );
-    let layout = Layout::restored(&center, [false, false], [true, true]);
+    let layout = Layout::restored(&center, [None, None], [true, true], 0);
     assert_eq!(
         layout.center(),
         &split(Axis::Vertical, vec![group(0), group(1)], vec![1.5, 0.5])
@@ -420,7 +423,7 @@ fn restored_resets_invalid_flexes() {
 #[test]
 fn restored_normalises_a_one_child_split() {
     let center = shape_split(Axis::Horizontal, vec![Shape::Group], vec![1.0]);
-    let layout = Layout::restored(&center, [false, false], [true, true]);
+    let layout = Layout::restored(&center, [None, None], [true, true], 0);
     assert_eq!(layout.center(), &group(0));
     assert_eq!(layout.last_center(), GroupId(0));
 
@@ -436,7 +439,7 @@ fn restored_normalises_a_one_child_split() {
         ],
         vec![1.0, 1.0],
     );
-    let layout = Layout::restored(&center, [false, false], [true, true]);
+    let layout = Layout::restored(&center, [None, None], [true, true], 0);
     assert_eq!(
         layout.center(),
         &split(
@@ -506,11 +509,13 @@ fn is_normalised(member: &Member) -> bool {
         })
 }
 
+/// `Split` and `Remove` pick from every surface's groups, `Activate` from the centre's.
 #[derive(Debug, Clone, Copy)]
 enum TreeOp {
     Split(usize, Axis),
     Remove(usize),
     Activate(usize),
+    Add(Side),
 }
 
 fn tree_op() -> impl Strategy<Value = TreeOp> {
@@ -519,26 +524,55 @@ fn tree_op() -> impl Strategy<Value = TreeOp> {
         (any::<usize>(), axis).prop_map(|(pick, axis)| TreeOp::Split(pick, axis)),
         any::<usize>().prop_map(TreeOp::Remove),
         any::<usize>().prop_map(TreeOp::Activate),
+        prop_oneof![Just(Side::Left), Just(Side::Right)].prop_map(TreeOp::Add),
     ]
+}
+
+/// The group `pick` names, unless it is the centre's only group, which no remove takes.
+fn removable(layout: &Layout, pick: usize) -> Option<GroupId> {
+    let groups: Vec<_> = layout.groups().collect();
+    let group = groups[pick % groups.len()];
+    (layout.surface_of(group) != Surface::Center || layout.center_groups().len() > 1)
+        .then_some(group)
 }
 
 /// `ops` run on the default layout, as `tree_ops_keep_the_invariants` runs them.
 fn built(ops: &[TreeOp]) -> Layout {
     let mut layout = Layout::default();
     for &op in ops {
+        let groups: Vec<_> = layout.groups().collect();
         let center = layout.center_groups();
         match op {
             TreeOp::Split(pick, axis) => {
-                layout.split(center[pick % center.len()], axis);
+                layout.split(groups[pick % groups.len()], axis);
             }
-            TreeOp::Remove(pick) if center.len() > 1 => {
-                layout.remove(center[pick % center.len()]);
+            TreeOp::Remove(pick) => {
+                if let Some(group) = removable(&layout, pick) {
+                    layout.remove(group);
+                }
             }
-            TreeOp::Remove(_) => {}
             TreeOp::Activate(pick) => layout.activate(center[pick % center.len()]),
+            TreeOp::Add(side) => {
+                if layout.dock(side).is_none() {
+                    layout.add_dock(side);
+                }
+            }
         }
     }
     layout
+}
+
+const SURFACES: [Surface; 3] = [
+    Surface::Center,
+    Surface::Dock(Side::Left),
+    Surface::Dock(Side::Right),
+];
+
+fn tree_of(layout: &Layout, surface: Surface) -> Option<&Member> {
+    match surface {
+        Surface::Center => Some(layout.center()),
+        Surface::Dock(side) => layout.dock(side),
+    }
 }
 
 proptest! {
@@ -560,31 +594,55 @@ proptest! {
         let mut layout = Layout::default();
         let mut handed: HashSet<GroupId> = layout.groups().collect();
         for op in ops {
+            let groups: Vec<_> = layout.groups().collect();
             let center = layout.center_groups();
             match op {
                 TreeOp::Split(pick, axis) => {
-                    let split = layout.split(center[pick % center.len()], axis);
+                    let group = groups[pick % groups.len()];
+                    let surface = layout.surface_of(group);
+                    let split = layout.split(group, axis);
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
+                    prop_assert_eq!(layout.surface_of(split), surface);
                 }
                 TreeOp::Remove(pick) => {
-                    if center.len() == 1 {
-                        continue;
+                    let Some(group) = removable(&layout, pick) else { continue };
+                    let surface = layout.surface_of(group);
+                    let heir = layout.remove(group);
+                    prop_assert!(!layout.groups().any(|held| held == group));
+                    let held: Vec<_> = layout.rects(surface).into_iter().map(|(held, _)| held).collect();
+                    if let Some(heir) = heir {
+                        prop_assert!(held.contains(&heir));
+                    } else {
+                        prop_assert_ne!(surface, Surface::Center);
+                        prop_assert!(held.is_empty());
                     }
-                    let group = center[pick % center.len()];
-                    let heir = layout.remove(group).expect("a centre group has an heir");
-                    prop_assert!(layout.center_groups().contains(&heir));
-                    prop_assert!(!layout.center_groups().contains(&group));
                 }
                 TreeOp::Activate(pick) => {
                     let group = center[pick % center.len()];
                     layout.activate(group);
                     prop_assert_eq!(layout.last_center(), group);
                 }
+                TreeOp::Add(side) => {
+                    if layout.dock(side).is_none() {
+                        let added = layout.add_dock(side);
+                        prop_assert!(handed.insert(added), "{added:?} handed out twice");
+                    }
+                }
             }
-            prop_assert!(is_normalised(layout.center()), "{:?}", layout.center());
-            let area: f32 = layout.rects().iter().map(|(_, rect)| rect.width * rect.height).sum();
-            prop_assert!((area - 1.0).abs() < 1e-3, "{area}");
+            let mut tiled = Vec::new();
+            for surface in SURFACES {
+                let rects = layout.rects(surface);
+                if let Some(member) = tree_of(&layout, surface) {
+                    prop_assert!(is_normalised(member), "{surface:?}: {member:?}");
+                    let area: f32 = rects.iter().map(|(_, rect)| rect.width * rect.height).sum();
+                    prop_assert!((area - 1.0).abs() < 1e-3, "{surface:?}: {area}");
+                } else {
+                    prop_assert!(rects.is_empty());
+                }
+                tiled.extend(rects.into_iter().map(|(group, _)| group));
+            }
             let groups: Vec<_> = layout.groups().collect();
+            prop_assert_eq!(&groups, &tiled);
             let unique: HashSet<_> = groups.iter().collect();
             prop_assert_eq!(unique.len(), groups.len());
             prop_assert!(layout.center_groups().contains(&layout.last_center()));
@@ -593,24 +651,31 @@ proptest! {
     #[test]
     fn restored_keeps_a_built_layouts_rects(
         ops in proptest::collection::vec(tree_op(), 0..48),
-        docks in any::<[bool; 2]>(),
         shown in any::<[bool; 2]>(),
+        active in 0..8usize,
     ) {
         let built = built(&ops);
+        let docks = [Side::Left, Side::Right].map(|side| built.dock(side).map(shape));
 
-        let restored = Layout::restored(&shape(built.center()), docks, shown);
+        let restored = Layout::restored(&shape(built.center()), docks.each_ref().map(Option::as_ref), shown, active);
 
-        let (was, now) = (built.rects(), restored.rects());
-        prop_assert_eq!(was.len(), now.len());
-        for ((_, was), (_, now)) in was.into_iter().zip(now) {
-            for (was, now) in [(was.x, now.x), (was.y, now.y), (was.width, now.width), (was.height, now.height)] {
-                prop_assert!((was - now).abs() < 1e-4, "{was:?} became {now:?}");
+        for surface in SURFACES {
+            let (was, now) = (built.rects(surface), restored.rects(surface));
+            prop_assert_eq!(was.len(), now.len());
+            for ((_, was), (_, now)) in was.into_iter().zip(now) {
+                for (was, now) in [(was.x, now.x), (was.y, now.y), (was.width, now.width), (was.height, now.height)] {
+                    prop_assert!((was - now).abs() < 1e-4, "{surface:?}: {was:?} became {now:?}");
+                }
+            }
+            if let Some(member) = tree_of(&restored, surface) {
+                prop_assert!(is_normalised(member), "{surface:?}: {member:?}");
             }
         }
-        let count = built.center_groups().len() + docks.iter().filter(|&&held| held).count();
+        let count = built.groups().count();
         let ids: Vec<_> = restored.groups().map(GroupId::raw).collect();
         prop_assert_eq!(ids, (0..count).map(|ix| u32::try_from(ix).unwrap()).collect::<Vec<_>>());
-        prop_assert_eq!(restored.center_groups().len(), built.center_groups().len());
-        prop_assert!(is_normalised(restored.center()), "{:?}", restored.center());
+        let center = restored.center_groups();
+        prop_assert_eq!(restored.last_center(), *center.get(active).unwrap_or(&center[0]));
+        prop_assert_eq!([restored.is_shown(Side::Left), restored.is_shown(Side::Right)], shown);
     }
 }

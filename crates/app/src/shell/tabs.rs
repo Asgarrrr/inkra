@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{App, Context, Window, actions};
-use inkra_layout::{GroupId, View};
+use inkra_layout::{GroupId, Surface, View};
 use inkra_tabs::{Closed, Direction, TabId};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
@@ -140,7 +140,11 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let tabs = &self.group(group).tabs;
-        if tabs.count() == 1 && tabs.active() == id && self.layout.center_groups().len() > 1 {
+        if tabs.count() == 1
+            && tabs.active() == id
+            && self.layout.surface_of(group) == Surface::Center
+            && self.layout.center_groups().len() > 1
+        {
             self.close_group(group, id, window, cx);
             return;
         }

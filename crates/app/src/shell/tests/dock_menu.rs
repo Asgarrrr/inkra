@@ -6,7 +6,7 @@ use inkra_layout::{Side, View};
 use super::tab_bar::{click, press};
 use super::{ab_focused, editor_focused, focus_tree, keys, open};
 use crate::shell::AppShell;
-use crate::shell::docks::{DockState, MoveBacklinksToOtherDock};
+use crate::shell::docks::MoveBacklinksToOtherDock;
 
 pub(super) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
@@ -46,12 +46,30 @@ fn highlighted(cx: &mut VisualTestContext) -> Option<usize> {
     .position(|selector| drawn(cx, selector))
 }
 
-pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> DockState {
-    window.update(cx, |shell, _, _| shell.dock_state()).unwrap()
+/// Each side's views over its groups, depth-first, its first group's active view and its flag; left then right.
+pub(super) type Docks = [(Vec<View>, Option<View>, bool); 2];
+
+pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
+    window
+        .update(cx, |shell, _, _| {
+            let shell = &*shell;
+            [Side::Left, Side::Right].map(|side| {
+                let groups = shell.layout.dock_groups(side);
+                let views = groups
+                    .iter()
+                    .flat_map(|&group| shell.group(group).views().map(|(_, view)| view))
+                    .collect();
+                let active = groups
+                    .first()
+                    .and_then(|&group| shell.group(group).shown.view());
+                (views, active, shell.layout.is_shown(side))
+            })
+        })
+        .unwrap()
 }
 
 /// Docks rule 6: Files left, Backlinks right, both shown.
-pub(super) fn default_docks() -> DockState {
+pub(super) fn default_docks() -> Docks {
     [
         (vec![View::Files], Some(View::Files), true),
         (vec![View::Backlinks], Some(View::Backlinks), true),

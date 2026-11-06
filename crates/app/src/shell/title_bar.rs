@@ -1,11 +1,11 @@
 //! The tab row is the window's title bar: the traffic lights' space, the toggles, the tabs and the drag regions (shell chrome spec, S3).
 
 use gpui::{
-    ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement, MouseButton,
+    AnyElement, ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement, MouseButton,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement,
     Styled, Window, div, prelude::FluentBuilder, px,
 };
-use inkra_layout::Side;
+use inkra_layout::{GroupId, Side, Surface};
 
 use super::AppShell;
 use super::group::selector;
@@ -44,22 +44,17 @@ impl AppShell {
         };
         let mut leading_toggle = leading_toggle;
         let mut trailing_toggle = trailing_toggle;
-        let top = self.layout.top_groups();
-        // `k` is the depth-first index, as `render`'s; `rects` is depth-first.
-        let segments: Vec<_> = self
-            .layout
-            .rects()
-            .into_iter()
-            .enumerate()
-            .filter(|(_, (group, _))| top.contains(group))
-            .map(|(k, (group, rect))| {
-                let last = top.last() == Some(&group);
+        let top = self.top_rects(Surface::Center);
+        let segments: Vec<_> = top
+            .iter()
+            .map(|&(k, group, width)| {
+                let last = top.last().is_some_and(|&(_, end, _)| end == group);
                 h_flex()
                     .id(("group-strip", group.raw()))
                     .debug_selector(move || selector("group-strip", k))
                     // Basis 0, no padding: the strip's width is its column's share of the centre.
                     .flex_basis(px(0.))
-                    .flex_grow(rect.width)
+                    .flex_grow(width)
                     .min_w_0()
                     .h_full()
                     .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {
@@ -122,13 +117,62 @@ impl AppShell {
             .children(right_title)
     }
 
-    /// Over the right dock: its view icons, a drag region, then its toggle at the window's right edge.
+    /// `surface`'s top groups, left to right, each with its depth-first index, as `render`'s, and its width.
+    fn top_rects(&self, surface: Surface) -> Vec<(usize, GroupId, f32)> {
+        let top = self.layout.top_groups(surface);
+        self.layout
+            .rects(surface)
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (group, _))| top.contains(group))
+            .map(|(k, (group, rect))| (k, group, rect.width))
+            .collect()
+    }
+
+    /// A dock's top group `k`'s share of the row over it: `lead`, its view icons, then a drag region.
+    fn render_dock_segment(
+        &self,
+        side: Side,
+        (k, group, width): (usize, GroupId, f32),
+        lead: Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let drag = match side {
+            Side::Left => "title-drag-left",
+            Side::Right => "title-drag-right",
+        };
+        h_flex()
+            .flex_basis(px(0.))
+            .flex_grow(width)
+            .min_w_0()
+            .h_full()
+            .children(lead)
+            .children(self.render_dock_strip(side, group, k, cx))
+            .child(Self::render_drag_region(ElementId::Name(selector(drag, k).into()), cx).flex_1())
+    }
+
+    /// Over the right dock: each top group's icons, then its toggle at the window's right edge.
     fn render_title_backlinks<Toggle: IntoElement>(
         &self,
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
-        let strip = self.render_dock_strip(Side::Right, cx);
+        let top = self.top_rects(Surface::Dock(Side::Right));
+        let end = top.len().saturating_sub(1);
+        let mut toggle = toggle;
+        // Spacers, not padding: each segment's width is its group's share.
+        let inset = || div().flex_none().w(theme::ROW_INSET).into_any_element();
+        let segments: Vec<_> = top
+            .into_iter()
+            .enumerate()
+            .map(|(ix, rect)| {
+                let lead = if ix == 0 { vec![inset()] } else { Vec::new() };
+                self.render_dock_segment(Side::Right, rect, lead, cx)
+                    .when(ix == end, |segment| {
+                        segment.children(toggle.take()).child(inset())
+                    })
+            })
+            .collect();
         let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-right".into())
@@ -136,22 +180,38 @@ impl AppShell {
             .flex_none()
             .w(super::RIGHT_DOCK_WIDTH)
             .h_full()
-            .px(theme::ROW_INSET)
             .border_l(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
-            .children(strip)
-            .child(Self::render_drag_region("title-drag-right", cx).flex_1())
-            .children(toggle)
+            .children(segments)
     }
 
-    /// Over the left dock: the lights, its toggle, then its view icons (D2).
+    /// Over the left dock: the lights and its toggle, then each top group's icons (D2).
     fn render_title_sidebar<Toggle: IntoElement>(
         &self,
         lights: Pixels,
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
-        let strip = self.render_dock_strip(Side::Left, cx);
+        let top = self.top_rects(Surface::Dock(Side::Left));
+        let mut toggle = toggle;
+        let segments: Vec<_> = top
+            .into_iter()
+            .enumerate()
+            .map(|(ix, rect)| {
+                let lead = if ix == 0 {
+                    let start = Self::render_drag_region("title-drag-start", cx)
+                        .flex_none()
+                        .w(lights);
+                    let toggle = toggle.take().map(IntoElement::into_any_element);
+                    std::iter::once(start.into_any_element())
+                        .chain(toggle)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                self.render_dock_segment(Side::Left, rect, lead, cx)
+            })
+            .collect();
         let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-left".into())
@@ -161,14 +221,7 @@ impl AppShell {
             .h_full()
             .border_r(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
-            .child(
-                Self::render_drag_region("title-drag-start", cx)
-                    .flex_none()
-                    .w(lights),
-            )
-            .children(toggle)
-            .children(strip)
-            .child(Self::render_drag_region("title-drag-left", cx).flex_1())
+            .children(segments)
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.

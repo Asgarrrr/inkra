@@ -68,26 +68,44 @@ pub(crate) struct Landed<B> {
 impl Surfaces {
     pub(crate) fn resolve(session: Option<Session>) -> Self {
         let mut saved = Vec::new();
-        let (shape, left, right, shown, active) = match session {
-            None => (Shape::Group, None, None, [true, true], None),
+        let (center, [left, right], shown, active) = match session {
+            None => (Shape::Group, [None, None], [true, true], None),
             Some(session) => (
                 session
                     .center
                     .map_or(Shape::Group, |center| shape(center, &mut saved)),
-                session.left,
-                session.right,
+                [session.left, session.right],
                 session.shown,
                 Some(session.active),
             ),
         };
-        let views = dock_views(left.as_ref(), right.as_ref());
-        let held = views.each_ref().map(|(views, _)| !views.is_empty());
-        let layout = Layout::restored(&shape, held, shown);
-        let docks = [Side::Left, Side::Right]
-            .into_iter()
-            .zip(views)
-            .filter_map(|(side, (views, active))| Some((layout.dock(side)?, views, active)))
-            .collect();
+        let views = dock_views([left.as_ref(), right.as_ref()]);
+        // A side saved empty is drawn only if it took a view no other dock kept.
+        let dock_shape = |dock: Option<SavedMember>, views: &[(Vec<View>, usize)]| match dock {
+            Some(dock) => Some(shape(dock, &mut Vec::new())),
+            None => (!views.is_empty()).then_some(Shape::Group),
+        };
+        let shapes = [dock_shape(left, &views[0]), dock_shape(right, &views[1])];
+        let mut layout = Layout::restored(
+            &center,
+            shapes.each_ref().map(Option::as_ref),
+            shown,
+            active.unwrap_or(0),
+        );
+        let mut docks = Vec::new();
+        let mut emptied = Vec::new();
+        for (side, views) in [Side::Left, Side::Right].into_iter().zip(views) {
+            for (group, (views, active)) in layout.dock_groups(side).into_iter().zip(views) {
+                if views.is_empty() {
+                    emptied.push(group);
+                } else {
+                    docks.push((group, views, active));
+                }
+            }
+        }
+        for group in emptied {
+            layout.remove(group);
+        }
         let pending = active.map(|active| Pending {
             groups: layout.center_groups().into_iter().zip(saved).collect(),
             active,

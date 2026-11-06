@@ -56,3 +56,13 @@ pub(super) fn drag_empty_side(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.drag_holding(window, icon, point(px(20.), WINDOW_SIZE.height / 2.));
     window
 }
+
+/// `both_left`'s move, then Backlinks split down off Files through its icon's menu.
+pub(super) fn split(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = default(stage);
+    stage.keys(window, "cmd-shift-p m o v e space b a c k l i n k s enter");
+    let icon = stage.dock_icon_point(window, Side::Left, 1);
+    stage.right_click(window, icon);
+    stage.keys(window, "down down down enter");
+    window
+}

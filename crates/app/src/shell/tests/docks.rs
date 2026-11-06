@@ -228,9 +228,11 @@ fn move_view(cx: &mut VisualTestContext, view: View) {
 }
 
 fn active(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, side: Side) -> Option<View> {
-    window
-        .update(cx, |shell, _, _| shell.dock_active(side))
-        .unwrap()
+    let [left, right] = docks(window, cx);
+    match side {
+        Side::Left => left.1,
+        Side::Right => right.1,
+    }
 }
 
 #[gpui::test]

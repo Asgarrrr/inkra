@@ -216,10 +216,13 @@ fn a_v1_file_reads_as_one_centre_group_and_its_docks() {
             1
         )))
     );
-    assert_eq!(session.left, Some(group(Vec::new(), 0)));
+    assert_eq!(session.left, Some(SavedMember::Group(group(Vec::new(), 0))));
     assert_eq!(
         session.right,
-        Some(group(vec![view("backlinks"), view("files")], 1))
+        Some(SavedMember::Group(group(
+            vec![view("backlinks"), view("files")],
+            1
+        )))
     );
     assert_eq!(session.shown, [false, true]);
 }
@@ -243,7 +246,7 @@ fn v2_round_trips_a_nested_tree() {
             },
         ],
     });
-    session.left = Some(group(vec![view("files")], 0));
+    session.left = Some(SavedMember::Group(group(vec![view("files")], 0)));
     session.shown = [true, false];
     let text = session.encode().unwrap();
 
@@ -275,7 +278,7 @@ fn a_malformed_center_keeps_the_docks() {
         assert_eq!(session.center, None, "{center}");
         assert_eq!(
             session.left,
-            Some(group(vec![view("files")], 0)),
+            Some(SavedMember::Group(group(vec![view("files")], 0))),
             "{center}"
         );
     }
@@ -335,41 +338,47 @@ fn an_unknown_view_name_is_dropped() {
         }"#,
     );
     let session = decoded(&text);
-    let docks = dock_views(session.left.as_ref(), session.right.as_ref());
-    assert_eq!(docks, dock_views(None, None));
-    assert_eq!(docks[0].0, [View::Files]);
+    let docks = dock_views([session.left.as_ref(), session.right.as_ref()]);
+    assert_eq!(docks, dock_views([None, None]));
+    assert_eq!(docks[0][0].0, [View::Files]);
 }
 
 #[test]
 fn docks_round_trip_through_the_file() {
     let mut session = session();
-    session.right = Some(group(vec![view("backlinks"), view("files")], 0));
+    session.right = Some(SavedMember::Group(group(
+        vec![view("backlinks"), view("files")],
+        0,
+    )));
     session.shown = [false, true];
 
     let decoded = decoded(&session.encode().unwrap());
 
     assert_eq!(decoded, session);
     assert_eq!(
-        dock_views(decoded.left.as_ref(), decoded.right.as_ref()),
-        [(Vec::new(), 0), (vec![View::Backlinks, View::Files], 0)]
+        dock_views([decoded.left.as_ref(), decoded.right.as_ref()]),
+        [Vec::new(), vec![(vec![View::Backlinks, View::Files], 0)]]
     );
 }
 
 /// A note tab in a dock drops; the active index follows the views kept.
 #[test]
 fn a_note_tab_in_a_dock_is_dropped() {
-    let left = group(vec![view("backlinks"), note("a.md"), view("files")], 1);
+    let left = SavedMember::Group(group(
+        vec![view("backlinks"), note("a.md"), view("files")],
+        1,
+    ));
     assert_eq!(
-        dock_views(Some(&left), None),
-        [(vec![View::Backlinks, View::Files], 0), (Vec::new(), 0)]
+        dock_views([Some(&left), None]),
+        [vec![(vec![View::Backlinks, View::Files], 0)], Vec::new()]
     );
 }
 
 #[test]
 fn the_docks_field_is_written_as_names() {
     let mut session = session();
-    session.left = Some(group(vec![view("files")], 0));
-    session.right = Some(group(vec![view("backlinks")], 0));
+    session.left = Some(SavedMember::Group(group(vec![view("files")], 0)));
+    session.right = Some(SavedMember::Group(group(vec![view("backlinks")], 0)));
     let value: serde_json::Value = serde_json::from_str(&session.encode().unwrap()).unwrap();
     assert_eq!(value["left"]["tabs"], json!([{ "view": "files" }]));
     assert_eq!(value["right"]["tabs"], json!([{ "view": "backlinks" }]));
@@ -380,6 +389,35 @@ fn no_docks_writes_no_docks_key() {
     let text = session().encode().unwrap();
     assert!(!text.contains("\"left\""), "{text}");
     assert!(!text.contains("\"right\""), "{text}");
+}
+
+/// A field a later build adds to a view tab must not turn it into a note tab or fail the file.
+#[test]
+fn a_view_tab_with_an_unknown_field_decodes() {
+    let tab: SavedTab = serde_json::from_str(r#"{"view":"files","pinned":true}"#).unwrap();
+    assert_eq!(tab, view("files"));
+}
+
+/// A dock written as one group, before docks held trees, reads as a one-group tree.
+#[test]
+fn a_v2_single_group_dock_decodes() {
+    let text = r#"{ "version": 2, "root": "/Users/me/Notes", "active": 0,
+      "center": { "tabs": [{ "note": "a.md" }], "active": 0 },
+      "left": { "tabs": [{ "view": "files" }, { "view": "backlinks" }], "active": 1 } }"#;
+
+    let session = decoded(text);
+
+    assert_eq!(
+        session.left,
+        Some(SavedMember::Group(group(
+            vec![view("files"), view("backlinks")],
+            1
+        )))
+    );
+    assert_eq!(
+        dock_views([session.left.as_ref(), session.right.as_ref()]),
+        [vec![(vec![View::Files, View::Backlinks], 1)], Vec::new()]
+    );
 }
 
 /// Published FNV-1a 64 vectors: the key must not change between builds.

@@ -26,15 +26,15 @@ pub(crate) struct Session {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "lenient"
+        deserialize_with = "lenient_center"
     )]
-    pub(crate) left: Option<SavedGroup>,
+    pub(crate) left: Option<SavedMember>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "lenient"
+        deserialize_with = "lenient_center"
     )]
-    pub(crate) right: Option<SavedGroup>,
+    pub(crate) right: Option<SavedMember>,
     #[serde(default = "both_shown")]
     pub(crate) shown: [bool; 2],
 }
@@ -65,7 +65,7 @@ pub(crate) struct SavedGroup {
 
 /// A view by name: an unknown one drops alone, where a serde enum would fail the whole file (docks spec).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
+#[serde(untagged)]
 pub(crate) enum SavedTab {
     View { view: String },
     Note(SavedNoteTab),
@@ -124,7 +124,7 @@ fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(
     Ok(serde_json::from_value(value).ok())
 }
 
-/// A split with no child is malformed: it would leave the centre a room with no group.
+/// A split with no child is malformed: it would leave a surface a room with no group.
 fn lenient_center<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<SavedMember>, D::Error> {
@@ -136,6 +136,13 @@ fn both_shown() -> [bool; 2] {
 }
 
 impl SavedMember {
+    fn groups(&self) -> Vec<&SavedGroup> {
+        match self {
+            Self::Group(group) => vec![group],
+            Self::Split { children, .. } => children.iter().flat_map(Self::groups).collect(),
+        }
+    }
+
     fn is_whole(&self) -> bool {
         match self {
             Self::Group(_) => true,
@@ -185,13 +192,14 @@ impl SavedGroup {
     }
 }
 
-/// Each dock's views and active index, left then right; each view in exactly one.
-pub(crate) fn dock_views(
-    left: Option<&SavedGroup>,
-    right: Option<&SavedGroup>,
-) -> [(Vec<View>, usize); 2] {
-    let stored = |group: Option<&SavedGroup>| group.map(SavedGroup::stored).unwrap_or_default();
-    restore_views(&stored(left), &stored(right))
+/// Each dock group's views and active index, depth-first, left then right; each view in exactly one.
+pub(crate) fn dock_views(docks: [Option<&SavedMember>; 2]) -> [Vec<(Vec<View>, usize)>; 2] {
+    let stored = docks.map(|dock| {
+        dock.map_or_else(Vec::new, |dock| {
+            dock.groups().into_iter().map(SavedGroup::stored).collect()
+        })
+    });
+    restore_views(stored.each_ref().map(Vec::as_slice))
 }
 
 impl SavedDock {
@@ -216,7 +224,9 @@ impl From<SessionV1> for Session {
         });
         let (left, right, shown) = v1.docks.map_or((None, None, both_shown()), |docks| {
             let shown = [docks.left.shown, docks.right.shown];
-            (Some(docks.left.group()), Some(docks.right.group()), shown)
+            let [left, right] =
+                [docks.left, docks.right].map(|dock| Some(SavedMember::Group(dock.group())));
+            (left, right, shown)
         });
         Self {
             version: VERSION,
@@ -253,8 +263,8 @@ impl Session {
         root: PathBuf,
         active: usize,
         center: SavedMember,
-        left: Option<SavedGroup>,
-        right: Option<SavedGroup>,
+        left: Option<SavedMember>,
+        right: Option<SavedMember>,
         shown: [bool; 2],
     ) -> Self {
         Self {
