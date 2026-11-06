@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -123,6 +123,11 @@ impl NoteStore {
     /// `None` for a note being trashed, as `open_note`: no view binds it.
     pub(crate) fn buffer_for(&self, id: EntryId) -> Option<&Entity<Buffer>> {
         openable(&self.sessions.get(id)?.life)
+    }
+
+    /// The notes bound to a buffer, once each however many panes show them.
+    pub(crate) fn open_notes(&self) -> HashSet<EntryId> {
+        self.sessions.live_ids()
     }
 
     pub(crate) fn current(&self) -> Option<EntryId> {

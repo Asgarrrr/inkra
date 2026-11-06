@@ -192,7 +192,6 @@ impl Sessions {
         self.all.keys().copied().collect()
     }
 
-    #[cfg(test)]
     pub(super) fn live_ids(&self) -> HashSet<EntryId> {
         self.live.clone()
     }
