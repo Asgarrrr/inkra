@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ed6527bc4e0af90f85255d06518ba21e56fb0eee3c1f306b699e23f49a227ff2 # shrinks to ops = [Split(108079929243228225, Horizontal), Remove(2517924712090229660), Split(528124170954833481, Vertical), Split(10329832960685199374, Horizontal), Split(13319813758622951482, Horizontal), Split(3714832231914761018, Horizontal), Remove(0), Split(3723634846783564164, Horizontal), Remove(2940260169148321425), Remove(0), Split(920779604525230056, Horizontal), Split(9851731838616096564, Vertical), Split(16925826551263332832, Horizontal), Remove(2833618833900887), Remove(11698920579407233590)], pick = 10247381446875757801, ix = 13329859977969846991, delta = -2034.4846, size = 82.686165, mins = [134.52501, 14.405008, 102.396065, 96.95503]

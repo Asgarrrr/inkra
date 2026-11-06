@@ -2,7 +2,7 @@
 
 use crate::{GroupId, Layout};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
     /// Side by side, left to right.
     Horizontal,
@@ -64,7 +64,7 @@ pub struct Rect {
 }
 
 /// Zed's flex epsilon (S1).
-const EPSILON: f32 = 0.001;
+pub(crate) const EPSILON: f32 = 0.001;
 
 impl Member {
     /// Depth-first.
@@ -327,6 +327,6 @@ fn rescale(flexes: &mut [f32]) {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn count(len: usize) -> f32 {
+pub(crate) fn count(len: usize) -> f32 {
     len as f32
 }

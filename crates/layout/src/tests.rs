@@ -4,6 +4,7 @@ use proptest::prelude::*;
 
 use super::{Axis, GroupId, Layout, Member, Side, StoredDock, Surface, View, restore_views};
 
+mod resize;
 mod surface;
 mod tree;
 

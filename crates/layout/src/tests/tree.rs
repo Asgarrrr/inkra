@@ -511,14 +511,14 @@ fn is_normalised(member: &Member) -> bool {
 
 /// `Split` and `Remove` pick from every surface's groups, `Activate` from the centre's.
 #[derive(Debug, Clone, Copy)]
-enum TreeOp {
+pub(super) enum TreeOp {
     Split(usize, Axis),
     Remove(usize),
     Activate(usize),
     Add(Side),
 }
 
-fn tree_op() -> impl Strategy<Value = TreeOp> {
+pub(super) fn tree_op() -> impl Strategy<Value = TreeOp> {
     let axis = prop_oneof![Just(Axis::Horizontal), Just(Axis::Vertical)];
     prop_oneof![
         (any::<usize>(), axis).prop_map(|(pick, axis)| TreeOp::Split(pick, axis)),
@@ -537,7 +537,7 @@ fn removable(layout: &Layout, pick: usize) -> Option<GroupId> {
 }
 
 /// `ops` run on the default layout, as `tree_ops_keep_the_invariants` runs them.
-fn built(ops: &[TreeOp]) -> Layout {
+pub(super) fn built(ops: &[TreeOp]) -> Layout {
     let mut layout = Layout::default();
     for &op in ops {
         let groups: Vec<_> = layout.groups().collect();

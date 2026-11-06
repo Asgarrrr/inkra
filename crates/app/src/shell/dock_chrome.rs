@@ -7,7 +7,7 @@ use gpui::{
     MouseDownEvent, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder,
 };
-use inkra_layout::{GroupId, Side, Surface, View};
+use inkra_layout::{GroupId, Side, SplitPath, Surface, View};
 
 use super::dock_drag::DraggedView;
 use super::docks::{ToggleLeftDock, ToggleRightDock, icon, title};
@@ -26,7 +26,7 @@ fn icon_id(view: View) -> &'static str {
     }
 }
 
-fn name(side: Side) -> &'static str {
+pub(super) fn name(side: Side) -> &'static str {
     match side {
         Side::Left => "left",
         Side::Right => "right",
@@ -40,7 +40,7 @@ fn column_selector(side: Side) -> &'static str {
     }
 }
 
-fn width(side: Side) -> Pixels {
+pub(super) fn width(side: Side) -> Pixels {
     match side {
         Side::Left => LEFT_DOCK_WIDTH,
         Side::Right => RIGHT_DOCK_WIDTH,
@@ -68,8 +68,11 @@ impl AppShell {
             return None;
         }
         let root = self.layout.dock(side)?;
-        let surface = Surface::Dock(side);
-        let top = self.layout.top_groups(surface);
+        let path = SplitPath {
+            surface: Surface::Dock(side),
+            steps: Vec::new(),
+        };
+        let top = self.layout.top_groups(path.surface);
         let colors = theme::current(cx).colors;
         let column = side_column(column_selector(side), width(side))
             .bg(colors.background)
@@ -85,7 +88,7 @@ impl AppShell {
             Side::Left => column.border_r(theme::RULE_WIDTH),
             Side::Right => column.border_l(theme::RULE_WIDTH),
         };
-        Some(column.child(self.render_member(root, Slot::ROOT, surface, &top, &mut 0, cx)))
+        Some(column.child(self.render_member(root, Slot::ROOT, &path, &top, &mut 0, cx)))
     }
 
     /// Dock group `k`'s column: its header if it is lower, its view's header, and the view.
@@ -94,7 +97,7 @@ impl AppShell {
         side: Side,
         k: usize,
         group: GroupId,
-        slot: Slot,
+        (slot, path): (Slot, &SplitPath),
         lower: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -121,7 +124,7 @@ impl AppShell {
         })
         .children(view.map(|view| self.render_view_header(view, cx)))
         .child(div().flex_1().min_h_0().children(body))
-        .children(slot.rule(cx))
+        .children(Self::render_separator(path, slot, k, cx))
     }
 
     /// The view's own first row. A press keeps the focus, as every header's does.

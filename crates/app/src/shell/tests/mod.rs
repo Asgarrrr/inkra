@@ -47,6 +47,7 @@ mod renaming;
 mod reopen;
 mod restore_lands;
 mod restore_refused;
+mod separators;
 mod session_writes;
 mod sidebar_selection;
 mod split_close;
