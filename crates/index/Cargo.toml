@@ -10,6 +10,7 @@ publish.workspace = true
 bench = false
 
 [dependencies]
+crc32fast = "1.5"
 foldhash = "0.2.0"
 inkra-markdown = { workspace = true }
 inkra-text = { workspace = true }

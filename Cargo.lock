@@ -2727,6 +2727,7 @@ dependencies = [
 name = "inkra-index"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "criterion",
  "foldhash 0.2.0",
  "futures",

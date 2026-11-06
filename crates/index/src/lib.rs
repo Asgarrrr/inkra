@@ -8,6 +8,7 @@ pub mod live;
 mod names;
 mod note_set;
 mod notes;
+pub mod persist;
 mod query;
 mod search;
 mod source;

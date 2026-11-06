@@ -342,3 +342,9 @@ Each slice appends what it did differently from this spec, and why.
   it checks each slot's stamp and the words against its own model, each step,
   not against a cold build; `LiveIndex`'s model test compares against a cold
   build of the final `MemFs`.
+- Slice 3a: `FORMAT_VERSION` stays 1 across 3a to 3c: no file is written
+  before 5a, so no reader meets an older layout. The crc covers the body
+  after the 24-byte header, not the header (P2): each header field is
+  compared on its own, so a flip there is rejected by name, and `Version`
+  comes before `Checksum`. The fold fingerprint is one crc32 over the
+  widened versions and the folded probes, so the header field is a u32.
