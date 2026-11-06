@@ -198,6 +198,10 @@ here, so the two cannot drift.
   macOS path `$HOME/Library/Application Support` that `bootstrap::launch`
   joins today (`superpowers/specs/2026-09-30-restore-tabs-design.md`, R1).
   **Trigger:** a non-macOS build.
+- A dock's view strip has no `⋯` overflow button listing the hidden views
+  (`superpowers/specs/2026-11-05-splits-design.md`, D4). Two views and fixed
+  dock widths never overflow a strip. **Trigger:** a third view, or resizing a
+  dock.
 
 ## Startup performance
 

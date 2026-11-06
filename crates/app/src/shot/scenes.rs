@@ -229,17 +229,17 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "docks-default",
-        shows: "Files header over the tree, level with the Backlinks header and the nav row",
+        shows: "one view icon after each dock's toggle in the title row; the Files header under the row holds new note, new folder and search, level with the Backlinks header and the nav row",
         open: docks::default,
     },
     Scene {
         name: "docks-both-left",
-        shows: "icon bar on the left, Backlinks active, its tooltip; no right dock",
+        shows: "two view icons after the left toggle in the title row, Backlinks lit, its tooltip; the Backlinks header over its panel; no right dock",
         open: docks::both_left,
     },
     Scene {
         name: "docks-menu",
-        shows: "the menu at the pointer over the Files header: Move to Right Dock highlighted, Hide Dock under it; elevated background, border, shadow, inside the window",
+        shows: "the menu at the pointer over the Files icon: Move to Right Dock highlighted, Hide Dock under it; elevated background, border, shadow, inside the window",
         open: docks::menu,
     },
     Scene {
@@ -249,22 +249,22 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "docks-drag-empty-side",
-        shows: "Files dragged from the right bar, its preview at the left edge; a 40 px accent strip down the left edge under the title row, ruled on its right",
+        shows: "Files dragged from the right strip, its preview at the left edge; a 40 px accent strip down the left edge under the title row, ruled on its right",
         open: docks::drag_empty_side,
     },
     Scene {
         name: "tabs",
-        shows: "the title row split in two. Over the sidebar: the traffic lights' space, search and new note, the sidebar toggle at the segment's right edge, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the `Files` header over the tree and the `Backlinks` header level under the row, ruled like it",
+        shows: "the title row split in two. Over the sidebar: the traffic lights' space, the sidebar toggle, the Files icon, a hairline down the segment's edge meeting the sidebar column's. Over the note: four 34 px tabs on the row's floor, a `+` after the last, the empty drag space, the backlinks toggle; `index` active in the note's colour with a hairline on its top and sides and 10 px top corners, joining the note with no rule under it, typed into, the dirty dot before its title and its × after; `reading`, `New tab` twice, muted text, no background, no × on them; `index` highlighted in the sidebar with its dot at the row's right edge; both toggles lit; the Files header under the row with new note, new folder and search, and the `Backlinks` header level with it, ruled like the row",
         open: tabs::dirty,
     },
     Scene {
         name: "panels-hidden",
-        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width under the title row; no sidebar segment, no search or new-note button; both toggles muted, the sidebar's after the traffic lights' space leading the tabs and the backlinks' at the row's right end",
+        shows: "`cmd-\\` and `cmd-|`: no sidebar, no backlinks, the note column the window's width under the title row; no sidebar segment; both toggles muted, the sidebar's after the traffic lights' space leading the tabs and the backlinks' at the row's right end",
         open: tabs::panels_hidden,
     },
     Scene {
         name: "toggle-hover",
-        shows: "the pointer on the sidebar toggle at the sidebar segment's right edge: the 28 x 26 button hover behind its lit icon, mid-row; search and new note unhovered to its left",
+        shows: "the pointer on the sidebar toggle after the traffic lights' space: the 28 x 26 button hover behind its lit icon, mid-row; the Files icon unhovered to its right",
         open: tabs::toggle_hover,
     },
     Scene {
@@ -279,7 +279,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "tabs-overflow",
-        shows: "30 tabs over the note, the last one active (`cmd-9`) and scrolled into view, 34 px on the row's floor with no rule under it; the `+` after the scroll area, still visible before the empty drag space; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle; the sidebar segment unchanged: the lights, search and new note, the toggle at its right edge, its hairline",
+        shows: "30 tabs over the note, the last one active (`cmd-9`) and scrolled into view, 34 px on the row's floor with no rule under it; the `+` after the scroll area, still visible before the empty drag space; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle; the sidebar segment unchanged: the lights, the toggle, the Files icon, its hairline",
         open: tabs::overflow,
     },
     Scene {

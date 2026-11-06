@@ -23,14 +23,14 @@ fn dropping_an_icon_on_another_reorders_the_bar(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn dropping_on_a_one_view_header_appends(cx: &mut TestAppContext) {
+fn dropping_on_a_lone_icon_takes_its_place(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
 
-    drag(&mut cx, "panel-header-files", "panel-header-backlinks");
+    drag(&mut cx, "dock-icon-files", "dock-icon-backlinks");
 
     let [_, (views, active, _)] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Backlinks, View::Files]);
+    assert_eq!(views, [View::Files, View::Backlinks]);
     assert_eq!(active, Some(View::Files));
     assert!(cx.debug_bounds("dock-left").is_none());
 }
@@ -40,7 +40,7 @@ fn dropping_on_a_dock_body_appends(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
 
-    drag(&mut cx, "panel-header-backlinks", "dock-left");
+    drag(&mut cx, "dock-icon-backlinks", "dock-left");
 
     let [(views, active, _), _] = docks(&window, &mut cx);
     assert_eq!(views, [View::Files, View::Backlinks]);
@@ -52,7 +52,7 @@ fn a_drop_outside_any_target_changes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
 
-    drag(&mut cx, "panel-header-files", "note-column");
+    drag(&mut cx, "dock-icon-files", "note-column");
 
     assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));

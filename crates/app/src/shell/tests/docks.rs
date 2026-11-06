@@ -183,7 +183,7 @@ fn creating_with_the_sidebar_hidden_shows_it(cx: &mut TestAppContext) {
 }
 
 /// Edges included: `Bounds::is_contained_within` excludes the right and bottom ones.
-fn inside(cx: &mut VisualTestContext, inner: &'static str, outer: &'static str) -> bool {
+pub(super) fn inside(cx: &mut VisualTestContext, inner: &'static str, outer: &'static str) -> bool {
     let inner = cx.debug_bounds(inner).expect("drawn");
     let outer = cx.debug_bounds(outer).expect("drawn");
     outer.left() <= inner.left()
@@ -293,7 +293,7 @@ fn a_focused_tree_keeps_focus_when_it_moves(cx: &mut TestAppContext) {
 
     move_view(&mut cx, View::Files);
 
-    assert!(inside(&mut cx, "dock-icon-files", "dock-right"));
+    assert!(inside(&mut cx, "dock-icon-files", "title-right"));
     assert_eq!(active(&window, &mut cx, Side::Right), Some(View::Files));
     let focused = window
         .update(&mut cx, |shell, window, cx| {
@@ -337,7 +337,7 @@ fn the_dock_icon_point_lands_on_the_icon(cx: &mut TestAppContext) {
             "{selector}: {at:?} outside {bounds:?}"
         );
     };
-    lands(&mut cx, "panel-header-files", Side::Left, 0);
+    lands(&mut cx, "dock-icon-files", Side::Left, 0);
 
     move_view(&mut cx, View::Backlinks);
     lands(&mut cx, "dock-icon-files", Side::Left, 0);

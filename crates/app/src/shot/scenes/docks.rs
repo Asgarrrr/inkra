@@ -27,28 +27,28 @@ pub(super) fn both_left(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-/// The Files header's menu at the pointer, the first entry highlighted.
+/// The Files icon's menu at the pointer, the first entry highlighted.
 pub(super) fn menu(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = default(stage);
-    let header = stage.dock_icon_point(window, Side::Left, 0);
-    stage.right_click(window, header);
+    let icon = stage.dock_icon_point(window, Side::Left, 0);
+    stage.right_click(window, icon);
     stage.keys(window, "down");
     window
 }
 
-/// Backlinks' header held mid-height over the left dock's body, the button down.
+/// Backlinks' icon held mid-height over the left dock's body, the button down.
 pub(super) fn drag(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = default(stage);
-    let header = stage.dock_icon_point(window, Side::Right, 0);
+    let icon = stage.dock_icon_point(window, Side::Right, 0);
     let body = point(
         stage.dock_icon_point(window, Side::Left, 0).x,
         WINDOW_SIZE.height / 2.,
     );
-    stage.drag_holding(window, header, body);
+    stage.drag_holding(window, icon, body);
     window
 }
 
-/// Files dragged from the right bar, held at the left edge over its drop strip.
+/// Files dragged from the right strip, held at the left edge over its drop strip.
 pub(super) fn drag_empty_side(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = default(stage);
     stage.keys(window, "cmd-shift-p m o v e space f i l e s enter");

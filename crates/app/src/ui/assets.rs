@@ -37,6 +37,7 @@ icons! {
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
     Files => "files",
+    FolderPlus => "folder-plus",
     Link => "link",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",

@@ -1,24 +1,19 @@
 //! The two docks: the view each draws under its header, and the toggles that show and hide them (docks spec).
 
-use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use gpui::{
-    Action, AnyElement, App, AppContext, Context, Div, Focusable, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString,
-    StatefulInteractiveElement, Styled, Window, actions, div, prelude::FluentBuilder,
+    Action, App, AppContext, Context, Focusable, Pixels, Point, SharedString, Window, actions,
 };
 use inkra_layout::{GroupId, Side, View};
 use inkra_tabs::{Closed, TabId};
 
-use super::dock_drag::DraggedView;
+use super::AppShell;
 use super::group::Group;
 use super::parked::Parked;
 use super::tabs::{Place, capture};
-use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::Sidebar;
-use crate::theme;
-use crate::ui::{ContextMenu, IconButton, IconName, PanelHeader, Tooltip, keep_focus};
+use crate::ui::{ContextMenu, IconName};
 
 actions!(
     docks,
@@ -45,50 +40,6 @@ pub(super) fn icon(view: View) -> IconName {
         View::Files => IconName::Files,
         View::Backlinks => IconName::Link,
     }
-}
-
-fn icon_id(view: View) -> &'static str {
-    match view {
-        View::Files => "dock-icon-files",
-        View::Backlinks => "dock-icon-backlinks",
-    }
-}
-
-fn bar_selector(side: Side) -> &'static str {
-    match side {
-        Side::Left => "dock-bar-left",
-        Side::Right => "dock-bar-right",
-    }
-}
-
-fn header_selector(view: View) -> &'static str {
-    match view {
-        View::Files => "panel-header-files",
-        View::Backlinks => "panel-header-backlinks",
-    }
-}
-
-fn column_selector(side: Side) -> &'static str {
-    match side {
-        Side::Left => "dock-left",
-        Side::Right => "dock-right",
-    }
-}
-
-fn width(side: Side) -> Pixels {
-    match side {
-        Side::Left => LEFT_DOCK_WIDTH,
-        Side::Right => RIGHT_DOCK_WIDTH,
-    }
-}
-
-/// A dock's column: fixed width, the body's full height.
-fn side_column(selector: &'static str, width: Pixels) -> Div {
-    div()
-        .debug_selector(move || selector.into())
-        .flex_none()
-        .w(width)
-        .h_full()
 }
 
 impl AppShell {
@@ -134,7 +85,7 @@ impl AppShell {
     }
 
     /// `view`'s menu: move it to the other dock, or hide its own.
-    fn open_dock_menu(
+    pub(super) fn open_dock_menu(
         &mut self,
         view: View,
         at: Point<Pixels>,
@@ -393,148 +344,5 @@ impl AppShell {
             let tabs = views.iter().filter(|&&held| held == view).count();
             assert_eq!(tabs, 1, "{view:?} sits in exactly one tab");
         }
-    }
-
-    /// `None` with no vault or an undrawn dock. A hidden view keeps its entity, so it comes back as it was left.
-    pub(super) fn render_dock(
-        &self,
-        side: Side,
-        cx: &mut Context<Self>,
-    ) -> Option<impl IntoElement + use<>> {
-        let panes = self.panes.as_ref()?;
-        if !self.layout.is_drawn(side) {
-            return None;
-        }
-        let group = self.group(self.layout.dock(side)?);
-        let view = group.shown.view()?;
-        let views: Vec<_> = group.views().map(|(_, view)| view).collect();
-        let (body, count) = match view {
-            View::Files => (panes.sidebar.clone().into_any_element(), None),
-            View::Backlinks => (
-                panes.backlinks.clone().into_any_element(),
-                panes.backlinks.read(cx).count(),
-            ),
-        };
-        let colors = theme::current(cx).colors;
-        let column = side_column(column_selector(side), width(side))
-            .bg(colors.background)
-            .border_color(colors.border_variant)
-            .flex()
-            .flex_col()
-            .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
-            .on_drop(
-                cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.append(dragged.view, side, window, cx);
-                }),
-            );
-        let column = match side {
-            Side::Left => column.border_r(theme::RULE_WIDTH),
-            Side::Right => column.border_l(theme::RULE_WIDTH),
-        };
-        let header =
-            match views.as_slice() {
-                [_] => div()
-                    .id(("dock-title-drag", usize::from(side == Side::Right)))
-                    .on_drag(DraggedView { view, index: 0 }, |dragged, _, _, cx| {
-                        cx.new(|_| dragged.clone())
-                    })
-                    .child(
-                        PanelHeader::new(header_selector(view), title(view))
-                            .when_some(count, PanelHeader::count)
-                            .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
-                            .on_mouse_down(MouseButton::Left, keep_focus),
-                    )
-                    .into_any_element(),
-                views => PanelHeader::bar(bar_selector(side))
-                    .children(views.iter().enumerate().map(|(ix, &held)| {
-                        Self::render_dock_icon(held, held == view, side, ix, cx)
-                    }))
-                    .on_mouse_down(MouseButton::Left, keep_focus)
-                    .into_any_element(),
-            };
-        Some(
-            column
-                .child(header)
-                .child(div().flex_1().min_h_0().child(body)),
-        )
-    }
-
-    /// Rule 4: a click on the active icon changes nothing, as `change_layout` drops an equal layout.
-    /// A drop on it inserts at `ix`, counted after the dragged view left (`Tabs::move_tab`'s rule).
-    fn render_dock_icon(
-        view: View,
-        active: bool,
-        side: Side,
-        ix: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = theme::current(cx).colors;
-        IconButton::new(icon_id(view), icon(view), title(view))
-            .toggled(active)
-            .tooltip(Tooltip::text(title(view)))
-            .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
-            .on_click(cx.listener(move |shell, _, window, cx| {
-                shell.reveal(view, window, cx);
-            }))
-            .on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
-                cx.new(|_| dragged.clone())
-            })
-            .drag_over::<DraggedView>(move |style, dragged, _, _| {
-                let style = style
-                    .bg(colors.accent_background)
-                    .border_color(colors.accent);
-                match ix.cmp(&dragged.index) {
-                    Ordering::Less => style.border_l(theme::DROP_EDGE),
-                    Ordering::Greater => style.border_r(theme::DROP_EDGE),
-                    Ordering::Equal => style,
-                }
-            })
-            .on_drop(
-                cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.move_view(dragged.view, side, ix, window, cx);
-                }),
-            )
-            .into_any_element()
-    }
-
-    /// `prevent_default`: the root would take focus from the menu on the press (`div.rs:2765-2780`).
-    fn open_menu_on_press(
-        view: View,
-        cx: &mut Context<Self>,
-    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
-        cx.listener(move |shell, event: &MouseDownEvent, window, cx| {
-            window.prevent_default();
-            shell.open_dock_menu(view, event.position, window, cx);
-        })
-    }
-
-    /// `None` with no vault or an empty dock: there is no dock to toggle (rule 3).
-    pub(super) fn render_dock_toggles(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> (
-        Option<impl IntoElement + use<>>,
-        Option<impl IntoElement + use<>>,
-    ) {
-        let has_views = |side| self.panes.is_some() && self.layout.dock(side).is_some();
-        let left = has_views(Side::Left).then(|| {
-            IconButton::new("dock-toggle-left", IconName::PanelLeft, "Toggle left dock")
-                .toggled(self.layout.is_shown(Side::Left))
-                .on_click(cx.listener(|shell, _, window, cx| {
-                    shell.toggle_left_dock(&ToggleLeftDock, window, cx);
-                }))
-        });
-        let right = has_views(Side::Right).then(|| {
-            IconButton::new(
-                "dock-toggle-right",
-                IconName::PanelRight,
-                "Toggle right dock",
-            )
-            .toggled(self.layout.is_shown(Side::Right))
-            .on_click(cx.listener(|shell, _, window, cx| {
-                shell.toggle_right_dock(&ToggleRightDock, window, cx);
-            }))
-        });
-        (left, right)
     }
 }
