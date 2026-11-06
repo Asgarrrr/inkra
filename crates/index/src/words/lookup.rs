@@ -40,7 +40,7 @@ impl Lookup {
 
     /// The note's ordinal, resolved once for all its terms; `None` when it has no words.
     pub(crate) fn ordinal(&self, id: EntryId) -> Option<Ordinal> {
-        self.words.ordinals.get(id).copied()
+        self.words.ordinal(id)
     }
 
     pub(crate) fn hit(&self, term: usize, ordinal: Ordinal) -> Option<TermHit> {

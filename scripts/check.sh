@@ -40,6 +40,10 @@ cargo deny check
 echo "==> cargo test"
 cargo test --workspace
 
+echo "==> cargo test, inkra-index in release"
+# Release has no overflow checks: the decode must reject without them.
+cargo test -p inkra-index --release
+
 echo "==> cargo build --release"
 cargo build --workspace --release
 

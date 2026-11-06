@@ -11,7 +11,7 @@ use super::ordinal::Ordinal;
 pub(super) const SHARDS: usize = 64;
 
 /// The shard holding a key, the same in every snapshot.
-pub(super) trait ShardKey: Copy + Eq + Hash {
+pub(crate) trait ShardKey: Copy + Eq + Hash {
     fn shard(self) -> usize;
 }
 
@@ -31,7 +31,7 @@ impl ShardKey for Ordinal {
 
 /// A map split into `SHARDS` maps behind `Arc`s, so a write under a held snapshot copies one.
 #[derive(Debug, Clone)]
-pub(super) struct Shards<K, V> {
+pub(crate) struct Shards<K, V> {
     maps: Arc<[Arc<HashMap<K, V>>]>,
     len: usize,
 }

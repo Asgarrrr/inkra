@@ -15,7 +15,7 @@ const FRESH_SLOT_BYTES: usize =
     size_of::<(Ordinal, Arc<NoteWords>)>() + 2 * size_of::<usize>() + size_of::<NoteWords>();
 
 type Fresh = Shards<Ordinal, Arc<NoteWords>>;
-pub(super) type Ordinals = Shards<EntryId, Ordinal>;
+pub(crate) type Ordinals = Shards<EntryId, Ordinal>;
 
 /// Every note's folded words: one merged segment, the bits of its live notes, the notes set since.
 #[derive(Default)]
@@ -185,6 +185,47 @@ impl Words {
             .take_if(|running| running.token.strong_count() == 0);
     }
 
+    /// A store holding `segment` merged, its `alive` ordinals each named by one of `ordinals`.
+    ///
+    /// # Panics
+    ///
+    /// If the parts break an invariant the store keeps.
+    #[cfg(test)]
+    pub(crate) fn restore(
+        segment: Segment,
+        alive: Alive,
+        ordinals: Ordinals,
+        next: u32,
+        total: u64,
+    ) -> Self {
+        let named: HashSet<Ordinal> = ordinals.iter().map(|(_, &ordinal)| ordinal).collect();
+        assert!(
+            named.len() == ordinals.len() && named.len() == alive.len(),
+            "each alive ordinal names one note"
+        );
+        assert!(
+            alive
+                .iter()
+                .all(|ordinal| named.contains(&ordinal) && ordinal.get() < next),
+            "an alive ordinal names no note or is not minted"
+        );
+        assert!(alive.len() <= segment.notes(), "more alive than held");
+        let live: u64 = alive
+            .iter()
+            .map(|ordinal| u64::from(segment.length(ordinal)))
+            .sum();
+        assert_eq!(total, live, "total is the sum of the live lengths");
+        Self {
+            ordinals,
+            segment: Arc::new(segment),
+            alive: Arc::new(alive),
+            fresh: Fresh::default(),
+            next,
+            total,
+            running: None,
+        }
+    }
+
     /// Starts a merge, due or not, unless one runs or there is nothing to do.
     #[cfg(test)]
     pub(crate) fn start_merge(&mut self) -> Option<WordsMerge> {
@@ -213,24 +254,28 @@ impl WordsMerge {
     /// Decodes the segment, merges the fresh words in, and encodes the result.
     #[must_use]
     pub fn run(self) -> MergedWords {
-        let mut fresh: Vec<(Ordinal, &NoteWords)> = self
-            .fresh
-            .iter()
-            .map(|(&ordinal, words)| (ordinal, &**words))
-            .collect();
-        fresh.sort_unstable_by_key(|&(ordinal, _)| ordinal);
-        let segment = self.segment.merge(&self.alive, &fresh);
-        let live = self
-            .alive
-            .iter()
-            .chain(fresh.iter().map(|&(ordinal, _)| ordinal))
-            .collect();
+        let (segment, live) = merge(&self.segment, &self.alive, &self.fresh);
         MergedWords {
             token: self.token,
             segment,
             live,
         }
     }
+}
+
+/// `segment`'s `alive` postings plus `fresh`'s, and the ordinals the result holds.
+fn merge(segment: &Segment, alive: &Alive, fresh: &Fresh) -> (Segment, Alive) {
+    let mut fresh: Vec<(Ordinal, &NoteWords)> = fresh
+        .iter()
+        .map(|(&ordinal, words)| (ordinal, &**words))
+        .collect();
+    fresh.sort_unstable_by_key(|&(ordinal, _)| ordinal);
+    let segment = segment.merge(alive, &fresh);
+    let live = alive
+        .iter()
+        .chain(fresh.iter().map(|&(ordinal, _)| ordinal))
+        .collect();
+    (segment, live)
 }
 
 /// A merge's result, to swap in on the foreground.
@@ -276,8 +321,8 @@ pub struct WordsSnapshot {
     pub(super) segment: Arc<Segment>,
     pub(super) alive: Arc<Alive>,
     pub(super) fresh: Fresh,
-    next: u32,
-    pub(super) total: u64,
+    pub(crate) next: u32,
+    pub(crate) total: u64,
 }
 
 impl WordsSnapshot {
@@ -297,6 +342,16 @@ impl WordsSnapshot {
 
     pub(super) fn length(&self, ordinal: Ordinal) -> u32 {
         length(&self.segment, &self.alive, &self.fresh, ordinal)
+    }
+
+    /// The note's ordinal; `None` when it never had words.
+    pub(crate) fn ordinal(&self, id: EntryId) -> Option<Ordinal> {
+        self.ordinals.get(id).copied()
+    }
+
+    /// The segment with the fresh notes merged in, and the ordinals it holds.
+    pub(crate) fn merged(&self) -> (Segment, Alive) {
+        merge(&self.segment, &self.alive, &self.fresh)
     }
 
     /// One past the last ordinal minted, a removed note's included; for tests and the bench.

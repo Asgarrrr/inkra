@@ -2,6 +2,7 @@ use std::path::Path;
 
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
 use super::notes::{self, CachedNote};
+use super::words::{self, CachedWords};
 use crate::NoteIndex;
 use crate::words::varint;
 
@@ -12,12 +13,13 @@ pub const MAX_BYTES: u64 = 256 << 20;
 const MAGIC: [u8; 8] = *b"INKRAIX\0";
 /// The magic, then the version, both fingerprints and the body's crc, each a u32 LE.
 const HEADER_BYTES: usize = 24;
-const SECTIONS: usize = 2;
+const SECTIONS: usize = 3;
 
 /// What a cache file holds, once every check passed.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Decoded {
     pub notes: Vec<CachedNote>,
+    pub words: CachedWords,
 }
 
 /// Why a cache file is not used: a list of reasons, not a second error enum.
@@ -54,7 +56,14 @@ impl Rejected {
 /// When the file would exceed `MAX_BYTES`, which no reader accepts.
 #[must_use]
 pub fn encode(index: &NoteIndex, root: &Path) -> Vec<u8> {
-    seal([root.as_os_str().as_encoded_bytes(), &notes::encode(index)])
+    let snapshot = index.words();
+    let (cached, to) = words::cached(&snapshot);
+    let ordinal = |id| *to.get(snapshot.ordinal(id)?.index())?;
+    seal([
+        root.as_os_str().as_encoded_bytes(),
+        &notes::encode(index, ordinal),
+        &words::encode(&cached),
+    ])
 }
 
 /// The header, then `sections` as given, so a test can seal a section it built by hand.
@@ -124,7 +133,7 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<Decoded, Rejected> {
     if total != body.len() {
         return Err(Rejected::Corrupt("lengths"));
     }
-    let [stored_root, stored_notes] = lengths.map(|length| {
+    let [stored_root, stored_notes, stored_words] = lengths.map(|length| {
         let (section, rest) = body.split_at(length);
         body = rest;
         section
@@ -132,9 +141,9 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<Decoded, Rejected> {
     if stored_root != root.as_os_str().as_encoded_bytes() {
         return Err(Rejected::Root);
     }
-    Ok(Decoded {
-        notes: notes::decode(stored_notes)?,
-    })
+    let notes = notes::decode(stored_notes)?;
+    let words = words::decode(stored_words, &notes)?;
+    Ok(Decoded { notes, words })
 }
 
 /// The header's fields after the magic, for a file whose body is `body`.

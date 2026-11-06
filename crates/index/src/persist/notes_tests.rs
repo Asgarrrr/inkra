@@ -8,9 +8,9 @@ use inkra_vault::{EntryId, FileIdentity, Mtime, Stamp};
 use proptest::prelude::*;
 
 use super::header::seal;
-use super::{CachedNote, Rejected, decode, encode, notes};
+use super::{CachedNote, Rejected, decode, encode, notes, words};
 use crate::test_support::{ROOT, id, note_set, vault};
-use crate::words::{NoteWords, varint};
+use crate::words::{NoteWords, Ordinal, varint};
 use crate::{FileRead, NoteContent, NoteIndex, Source, SourceLink, Style, Target};
 
 fn read(secs: u64, nanos: u32, size: u64, inode: u64) -> FileRead {
@@ -41,11 +41,12 @@ fn decoded(bytes: &[u8]) -> Vec<CachedNote> {
     }
 }
 
-fn cached(path: &str, text: &str, read: FileRead) -> CachedNote {
+fn cached(path: &str, text: &str, read: FileRead, ordinal: Option<u32>) -> CachedNote {
     CachedNote {
         path: path.into(),
         stamp: Some(read.stamp),
         identity: read.identity,
+        ordinal: ordinal.map(Ordinal::new),
         source: Source::parse(text),
     }
 }
@@ -60,8 +61,8 @@ fn sources_by_path_across_shifted_ids() {
     let (after, second) = index(&["0.md", "a.md", "b.md"], &loads);
     assert_eq!(after[..2], before, "0.md takes a's id, a takes b's");
     let expected = [
-        cached("a.md", loads[0].1, loads[0].2),
-        cached("b.md", loads[1].1, loads[1].2),
+        cached("a.md", loads[0].1, loads[0].2, Some(0)),
+        cached("b.md", loads[1].1, loads[1].2, Some(1)),
     ];
     assert_eq!(decoded(&encode(&first, Path::new(ROOT))), expected);
     assert_eq!(decoded(&encode(&second, Path::new(ROOT))), expected);
@@ -118,9 +119,13 @@ proptest! {
             .collect();
         let (_, index) = index(&files, &loads);
         let decoded = decoded(&encode(&index, Path::new(ROOT)));
+        let mut minted = 0..;
         let expected: BTreeMap<Arc<str>, CachedNote> = loads
             .iter()
-            .map(|(file, text, read)| (Arc::from(*file), cached(file, text, *read)))
+            .map(|(file, text, read)| {
+                let ordinal = (!NoteWords::parse(text).is_empty()).then(|| minted.next()).flatten();
+                (Arc::from(*file), cached(file, text, *read, ordinal))
+            })
             .collect();
         prop_assert_eq!(decoded.len(), expected.len());
         let decoded: BTreeMap<Arc<str>, CachedNote> = decoded
@@ -144,11 +149,12 @@ fn pre_epoch_writes_no_stamp() {
         path: "a.md".into(),
         stamp: None,
         identity: before.identity,
+        ordinal: Some(Ordinal::new(0)),
         source: Source::default(),
     };
     assert_eq!(
         decoded(&encode(&index, Path::new(ROOT))),
-        [unstamped, cached("b.md", "[[a]]", at_epoch)]
+        [unstamped, cached("b.md", "[[a]]", at_epoch, Some(1))]
     );
 }
 
@@ -176,6 +182,7 @@ fn an_offset_past_u32_writes_no_stamp() {
         path: "a.md".into(),
         stamp: None,
         identity: file.identity,
+        ordinal: None,
         source: Source::default(),
     };
     assert_eq!(decoded(&encode(&index, Path::new(ROOT))), [unstamped]);
@@ -183,30 +190,30 @@ fn an_offset_past_u32_writes_no_stamp() {
 
 /// A section's bytes, written field by field with no check, so each rule can be broken alone.
 #[derive(Default)]
-struct Raw(Vec<u8>);
+pub(super) struct Raw(pub(super) Vec<u8>);
 
 impl Raw {
-    fn var(mut self, value: u32) -> Self {
+    pub(super) fn var(mut self, value: u32) -> Self {
         varint::push(&mut self.0, value);
         self
     }
 
-    fn byte(mut self, byte: u8) -> Self {
+    pub(super) fn byte(mut self, byte: u8) -> Self {
         self.0.push(byte);
         self
     }
 
-    fn u32(mut self, value: u32) -> Self {
+    pub(super) fn u32(mut self, value: u32) -> Self {
         self.0.extend_from_slice(&value.to_le_bytes());
         self
     }
 
-    fn u64(mut self, value: u64) -> Self {
+    pub(super) fn u64(mut self, value: u64) -> Self {
         self.0.extend_from_slice(&value.to_le_bytes());
         self
     }
 
-    fn str(self, bytes: &[u8]) -> Self {
+    pub(super) fn str(self, bytes: &[u8]) -> Self {
         let Ok(len) = u32::try_from(bytes.len()) else {
             panic!("a short test string");
         };
@@ -215,7 +222,7 @@ impl Raw {
         raw
     }
 
-    /// A record's path, its flags, then the stamp `flags` asks for, then device 7 and inode 3.
+    /// A record's path, its flags, the stamp `flags` asks for, device 7, inode 3 and no ordinal.
     fn head(self, path: &[u8], flags: u8, nanos: u32) -> Self {
         let raw = self.str(path).byte(flags);
         let raw = if flags & 1 == 1 {
@@ -223,7 +230,7 @@ impl Raw {
         } else {
             raw
         };
-        raw.u64(7).u64(3)
+        raw.u64(7).u64(3).var(0)
     }
 
     /// One link to `b` with no fragment.
@@ -244,8 +251,13 @@ impl Raw {
     }
 }
 
+/// Section 2 of an index with no words.
+fn no_words() -> Vec<u8> {
+    words::encode(&words::cached(&NoteIndex::default().words()).0)
+}
+
 fn sealed(section: &Raw) -> Vec<u8> {
-    seal([ROOT.as_bytes(), &section.0])
+    seal([ROOT.as_bytes(), &section.0, &no_words()])
 }
 
 #[test]
@@ -273,6 +285,7 @@ fn hand_built_records_decode() {
                 path: "a.md".into(),
                 stamp: None,
                 identity,
+                ordinal: None,
                 source: Source { links: vec![link] },
             },
         ),
@@ -285,6 +298,7 @@ fn hand_built_records_decode() {
                     size: 4,
                 }),
                 identity,
+                ordinal: None,
                 source: Source::default(),
             },
         ),
@@ -294,6 +308,7 @@ fn hand_built_records_decode() {
                 path: "".into(),
                 stamp: None,
                 identity,
+                ordinal: None,
                 source: Source::default(),
             },
         ),
@@ -365,9 +380,9 @@ fn no_truncation_panics() {
         ("b.md", "[[a]]", read(6, 8, 5, 2)),
     ];
     let (_, index) = index(&["a.md", "b.md"], &loads);
-    let section = notes::encode(&index);
+    let section = notes::encode(&index, |_| None);
     for len in 0..section.len() {
-        let bytes = seal([ROOT.as_bytes(), &section[..len]]);
+        let bytes = seal([ROOT.as_bytes(), &section[..len], &no_words()]);
         assert!(decode(&bytes, Path::new(ROOT)).is_err(), "{len}");
     }
     let bytes = encode(&index, Path::new(ROOT));

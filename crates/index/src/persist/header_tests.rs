@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
-use super::{Decoded, Rejected, decode, encode};
+use super::{Rejected, decode, encode};
 use crate::NoteIndex;
 
 const ROOT: &str = "/v";
@@ -28,23 +28,34 @@ fn rejected(bytes: &[u8]) -> (Rejected, &'static str) {
 fn golden_bytes() {
     assert_eq!(fold_fingerprint(), 0xC6D3_150D);
     assert_eq!(derivation_fingerprint(), 0xD952_5C44);
-    let golden: [u8; 30] = [
+    let golden: [u8; 55] = [
         b'I', b'N', b'K', b'R', b'A', b'I', b'X', 0, // magic
         1, 0, 0, 0, // version
         0x0D, 0x15, 0xD3, 0xC6, // fold
         0x44, 0x5C, 0x52, 0xD9, // derivation
-        0x00, 0xEB, 0x02, 0x74, // crc32 of the body
-        2, 2, 1, // two sections: two bytes, then one
+        0xE9, 0x63, 0xF8, 0x38, // crc32 of the body
+        3, 2, 1, 24, // three sections: two bytes, one, then 24
         b'/', b'v', // the root
         0,    // no note
+        0,    // next
+        0, 0, 0, 0, 0, 0, 0, 0, // total
+        0, // no alive bit
+        0, // no held note
+        0, // no word byte
+        1, 0, 0, 0, 0, // one bound, 0
+        1, 0, 0, 0, 0, // one start, 0
+        0, // no posting
+        0, // no length
     ];
     assert_eq!(bytes(), golden);
 }
 
 #[test]
 fn round_trip_ok() {
-    let empty = Decoded { notes: Vec::new() };
-    assert_eq!(decode(&bytes(), Path::new(ROOT)), Ok(empty));
+    assert_eq!(
+        decode(&bytes(), Path::new(ROOT)).map(|decoded| decoded.notes),
+        Ok(Vec::new())
+    );
     let root = Path::new("/Users/me/Notes/Été 🌱");
     let bytes = encode(&NoteIndex::default(), root);
     assert_eq!(
@@ -115,8 +126,8 @@ fn magic_flip_is_corrupt() {
 }
 
 #[test]
-fn a_count_other_than_two_is_corrupt() {
-    for count in [1, 3] {
+fn a_count_other_than_three_is_corrupt() {
+    for count in [2, 4] {
         let mut bytes = bytes();
         bytes[24] = count;
         assert_eq!(
@@ -150,7 +161,9 @@ fn other_root_is_root() {
     let bytes = bytes();
     for other in ["/w", "/v/", "/", "/vv"] {
         assert_eq!(
-            decode(&bytes, Path::new(other)).map_err(|rejected| (rejected, rejected.reason())),
+            decode(&bytes, Path::new(other))
+                .map(|decoded| decoded.notes)
+                .map_err(|rejected| (rejected, rejected.reason())),
             Err((Rejected::Root, "root")),
             "{other}"
         );

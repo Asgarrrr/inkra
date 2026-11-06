@@ -7,15 +7,15 @@ use super::wide;
 pub(crate) struct Ordinal(u32);
 
 impl Ordinal {
-    pub(super) const fn new(n: u32) -> Self {
+    pub(crate) const fn new(n: u32) -> Self {
         Self(n)
     }
 
-    pub(super) const fn get(self) -> u32 {
+    pub(crate) const fn get(self) -> u32 {
         self.0
     }
 
-    pub(super) fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         wide(self.0)
     }
 
@@ -30,19 +30,29 @@ impl Ordinal {
 
 /// The ordinals whose segment postings are live, one bit each.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(super) struct Alive {
+pub(crate) struct Alive {
     bits: Vec<u64>,
     len: usize,
 }
 
 impl Alive {
-    pub(super) fn contains(&self, ordinal: Ordinal) -> bool {
+    /// The ordinals whose bit is set in `bits`, ordinal `n` at bit `n % 64` of word `n / 64`.
+    pub(crate) fn from_bits(bits: Vec<u64>) -> Self {
+        let len = bits.iter().map(|word| wide(word.count_ones())).sum();
+        Self { bits, len }
+    }
+
+    pub(crate) fn bits(&self) -> &[u64] {
+        &self.bits
+    }
+
+    pub(crate) fn contains(&self, ordinal: Ordinal) -> bool {
         self.bits
             .get(ordinal.word())
             .is_some_and(|word| word & ordinal.bit() != 0)
     }
 
-    pub(super) fn insert(&mut self, ordinal: Ordinal) {
+    pub(crate) fn insert(&mut self, ordinal: Ordinal) {
         let at = ordinal.word();
         if at >= self.bits.len() {
             self.bits.resize(at + 1, 0);
@@ -62,12 +72,12 @@ impl Alive {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
     /// The set ordinals, ascending.
-    pub(super) fn iter(&self) -> impl Iterator<Item = Ordinal> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Ordinal> + '_ {
         self.bits.iter().zip(0_u32..).flat_map(|(&word, at)| {
             let mut rest = word;
             iter::from_fn(move || {

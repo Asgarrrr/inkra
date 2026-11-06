@@ -10,7 +10,7 @@ use super::{narrow, varint, wide};
 
 /// The notes as of the last merge, in sorted arrays; every snapshot shares it.
 #[derive(Debug)]
-pub(super) struct Segment {
+pub(crate) struct Segment {
     /// The distinct words, sorted and concatenated; word `w` is `bytes[bounds[w]..bounds[w + 1]]`.
     bytes: Box<str>,
     bounds: Box<[u32]>,
@@ -36,7 +36,77 @@ impl Default for Segment {
     }
 }
 
+/// A segment's arrays, as the index cache writes them.
+pub(crate) struct Parts<'a> {
+    pub(crate) bytes: &'a str,
+    pub(crate) bounds: &'a [u32],
+    pub(crate) starts: &'a [u32],
+    pub(crate) postings: &'a [u8],
+    pub(crate) notes: usize,
+    pub(crate) lengths: &'a [u32],
+}
+
 impl Segment {
+    /// A segment of parts the index cache's decode checked against every rule `Builder` keeps.
+    pub(crate) fn from_parts(
+        bytes: String,
+        bounds: Vec<u32>,
+        starts: Vec<u32>,
+        postings: Vec<u8>,
+        notes: usize,
+        lengths: Vec<u32>,
+    ) -> Self {
+        Self {
+            bytes: bytes.into(),
+            bounds: bounds.into(),
+            starts: starts.into(),
+            postings: postings.into(),
+            notes,
+            lengths: lengths.into(),
+        }
+    }
+
+    pub(crate) fn parts(&self) -> Parts<'_> {
+        Parts {
+            bytes: &self.bytes,
+            bounds: &self.bounds,
+            starts: &self.starts,
+            postings: &self.postings,
+            notes: self.notes,
+            lengths: &self.lengths,
+        }
+    }
+
+    /// `self` with each ordinal `o` it holds renamed `to[o]`; `to` keeps their order, so each
+    /// posting list stays sorted.
+    ///
+    /// # Panics
+    ///
+    /// If `to` misses an ordinal `self` holds.
+    pub(crate) fn renumbered(&self, to: &[Option<Ordinal>]) -> Self {
+        let rename = |ordinal: Ordinal| {
+            let Some(&Some(renamed)) = to.get(ordinal.index()) else {
+                panic!("{ordinal:?} has postings but no new ordinal");
+            };
+            renamed
+        };
+        let mut out = Builder::with_capacity(self.bytes.len(), self.postings.len());
+        for (word, postings) in self.words() {
+            out.push(
+                word,
+                postings.map(|(ordinal, count)| (rename(ordinal), count)),
+            );
+        }
+        let last = to.iter().flatten().max();
+        let mut lengths = vec![0; last.map_or(0, |ordinal| ordinal.index() + 1)];
+        for (old, renamed) in (0..).zip(to) {
+            if let Some(renamed) = renamed {
+                lengths[renamed.index()] = self.length(Ordinal::new(old));
+            }
+        }
+        out.finish(self.notes, lengths.into())
+    }
+
     /// `self`'s `alive` postings plus `fresh`'s, sorted by ordinal and none alive, in one pass.
     pub(super) fn merge(&self, alive: &Alive, fresh: &[(Ordinal, &NoteWords)]) -> Self {
         let added = invert(fresh);
