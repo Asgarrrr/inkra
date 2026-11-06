@@ -7,7 +7,13 @@ use std::time::UNIX_EPOCH;
 use futures::executor::block_on;
 use inkra_index::NoteContent;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
+
+/// The stamp of every text the bench parses: nothing here compares stamps.
+pub(crate) const EPOCH: Stamp = Stamp {
+    mtime: Mtime(UNIX_EPOCH),
+    size: 0,
+};
 
 pub(crate) const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -203,7 +209,7 @@ fn parse(texts: &[Arc<str>]) -> Vec<NoteContent> {
                 scope.spawn(move || {
                     texts
                         .iter()
-                        .map(|text| NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)))
+                        .map(|text| NoteContent::parse(Arc::clone(text), EPOCH))
                         .collect::<Vec<_>>()
                 })
             })

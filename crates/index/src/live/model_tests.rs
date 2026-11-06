@@ -11,7 +11,7 @@ use super::diff::notes;
 use super::tests::{Harness, Pending, failure};
 use super::{LiveIndex, Status, Ticket, Turn};
 use crate::NoteContent;
-use crate::test_support::{ROOT, texts};
+use crate::test_support::{ROOT, content, texts};
 
 const SLOTS: usize = 2;
 const NAMES: &[&str] = &["a", "b", "c", "n1", "n2", "r1", "zz"];
@@ -220,8 +220,7 @@ impl Model {
                         panic!("a saved note stays listed");
                     };
                     let ticket = self.turn(|t| t.saved(id, mtime))?;
-                    self.saves
-                        .push((ticket, NoteContent::parse(TEXTS[text].into(), mtime)));
+                    self.saves.push((ticket, content(TEXTS[text], mtime)));
                 }
             }
             Op::LandSave(at) => {

@@ -46,7 +46,7 @@ impl IndexSync {
                 let loaded = fs
                     .load(&path)
                     .await
-                    .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp.mtime));
+                    .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp));
                 // Closed only once this entity is gone, and then nobody waits for it.
                 let _ = landed.unbounded_send(Landed { ticket, loaded });
             })

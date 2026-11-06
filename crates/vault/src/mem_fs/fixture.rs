@@ -8,7 +8,12 @@ impl MemFs {
     /// Creates every parent directory. Reuses the identity if the path
     /// already exists, so writing to a file does not change what it is.
     pub fn insert_file(&self, path: impl Into<PathBuf>, text: impl Into<String>) {
-        self.insert(&path.into(), text.into(), None);
+        self.insert(&path.into(), text.into().into_bytes(), None);
+    }
+
+    /// As `insert_file`, with bytes that need not be UTF-8.
+    pub fn insert_bytes(&self, path: impl Into<PathBuf>, bytes: impl Into<Vec<u8>>) {
+        self.insert(&path.into(), bytes.into(), None);
     }
 
     /// As `insert_file`, under a given identity: a real filesystem reuses a freed inode.
@@ -18,12 +23,12 @@ impl MemFs {
         text: impl Into<String>,
         identity: FileIdentity,
     ) {
-        self.insert(&path.into(), text.into(), Some(identity));
+        self.insert(&path.into(), text.into().into_bytes(), Some(identity));
     }
 
-    fn insert(&self, path: &Path, text: String, identity: Option<FileIdentity>) {
+    fn insert(&self, path: &Path, bytes: Vec<u8>, identity: Option<FileIdentity>) {
         let mut state = self.state();
-        Self::put_file(&mut state, path.to_path_buf(), text, identity);
+        Self::put_file(&mut state, path.to_path_buf(), bytes, identity);
         state.changed(path);
     }
 
@@ -60,12 +65,14 @@ impl MemFs {
         }
     }
 
+    /// # Panics
+    /// If the trashed bytes are not UTF-8.
     #[must_use]
     pub fn trashed(&self, path: &Path) -> Option<String> {
         self.state()
             .trashed
             .get(path)
-            .map(|(text, _, _)| text.clone())
+            .map(|(bytes, _, _)| utf8(path, bytes))
     }
 
     /// How many loads of `path` have started.
@@ -84,11 +91,20 @@ impl MemFs {
             .unwrap_or_default()
     }
 
+    /// # Panics
+    /// If the bytes at `path` are not UTF-8.
     #[must_use]
     pub fn read_to_string(&self, path: &Path) -> Option<String> {
         self.state()
             .files
             .get(path)
-            .map(|(text, _, _)| text.clone())
+            .map(|(bytes, _, _)| utf8(path, bytes))
     }
+}
+
+fn utf8(path: &Path, bytes: &[u8]) -> String {
+    let Ok(text) = String::from_utf8(bytes.to_vec()) else {
+        panic!("{} is not valid UTF-8", path.display());
+    };
+    text
 }

@@ -25,7 +25,9 @@ pub use live::LiveIndex;
 pub use names::NamesSnapshot;
 pub use note_set::NoteSet;
 pub use notes::Resolution;
-pub use search::{HITS_PER_NOTE, Hit, NoteHits, Searched};
+pub use search::{
+    Candidate, HITS_PER_NOTE, Hit, NoteHits, READ_FAILURES, Read, Searched, TextFound, TextSearch,
+};
 pub use source::{Source, SourceLink};
 pub use target::{Style, Target};
 pub use words::{

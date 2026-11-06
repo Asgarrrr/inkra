@@ -101,6 +101,15 @@ impl LiveIndex {
         }
     }
 
+    /// Notes a read found changed or gone: each one indexed and not queued loads again.
+    pub(super) fn stale(&mut self, ids: &[EntryId]) {
+        for &id in ids {
+            if self.indexed.contains_key(&id) && !self.queued.contains_key(&id) {
+                self.queue_load(id);
+            }
+        }
+    }
+
     pub(super) fn queue_load(&mut self, id: EntryId) {
         let seq = self.next_seq(id);
         self.queue.push_back((id, seq));

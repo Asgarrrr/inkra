@@ -12,8 +12,14 @@ use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion
 use futures::executor::block_on;
 use inkra_index::{NoteContent, NoteIndex, NoteSet};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
 use paths::{Lcg, folders};
+
+/// The stamp of every text the bench parses: nothing here compares stamps.
+const EPOCH: Stamp = Stamp {
+    mtime: Mtime(UNIX_EPOCH),
+    size: 0,
+};
 
 const NOTES: usize = 50_000;
 /// Built once: a `MemFs` scan of this vault takes minutes.
@@ -53,7 +59,7 @@ fn bench_set_notes(c: &mut Criterion) {
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, _, kind, _) in ENTRIES.iter() {
         if *kind == Kind::Note {
-            index.insert(*id, NoteContent::parse("".into(), Mtime(UNIX_EPOCH)));
+            index.insert(*id, NoteContent::parse("".into(), EPOCH));
         }
     }
     let mut group = c.benchmark_group("set_notes");
@@ -84,7 +90,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(ENTRIES.clone()));
     for (id, text) in notes.iter().zip(&texts) {
-        index.insert(*id, NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
+        index.insert(*id, NoteContent::parse(Arc::clone(text), EPOCH));
     }
 
     let mut other = Some(NoteSet::build(ENTRIES.clone()));
@@ -127,7 +133,7 @@ fn bench_prune(group: &mut BenchmarkGroup<'_, WallTime>) {
                     total += start.elapsed();
                     partial = Some(index.set_notes(full));
                     for (id, text) in notes[..count].iter().zip(&texts) {
-                        index.insert(*id, NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
+                        index.insert(*id, NoteContent::parse(Arc::clone(text), EPOCH));
                     }
                 }
                 total
@@ -144,7 +150,7 @@ fn bench_set_notes_with_text(group: &mut BenchmarkGroup<'_, WallTime>) {
     for (n, (id, _, kind, _)) in ENTRIES.iter().enumerate() {
         if *kind == Kind::Note {
             let text = format!("note {n}\n");
-            index.insert(*id, NoteContent::parse(text.into(), Mtime(UNIX_EPOCH)));
+            index.insert(*id, NoteContent::parse(text.into(), EPOCH));
         }
     }
     let mut other = Some(NoteSet::build(ENTRIES.clone()));

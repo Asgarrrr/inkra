@@ -330,3 +330,5 @@ Each slice appends what it did differently from this spec, and why.
   `restore/`, which the open splits stack rewrites: they start after the
   splits merge. 2a's "loads delta is 0" reads "the delta is the search's
   reads": `MemFs` counts every read.
+- Slice 2a: reads go through `Fs::load`, which folds line endings as the loads
+  whose words they must match did. `read_bytes` moves to 4b, its first caller.

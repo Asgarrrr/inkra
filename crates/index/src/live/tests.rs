@@ -8,7 +8,7 @@ use inkra_vault::{Fs, Mtime, Vault, VaultError};
 
 use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
 use crate::NoteContent;
-use crate::test_support::{ROOT, id, texts};
+use crate::test_support::{ROOT, content, id, texts};
 
 /// Enough slots that no test below the slot tests waits for one.
 const SLOTS: usize = 64;
@@ -88,7 +88,7 @@ impl Harness {
 
     pub(super) fn read(&self, load: &Load) -> inkra_vault::Result<NoteContent> {
         block_on(self.fs.load(&load.path))
-            .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp.mtime))
+            .map(|loaded| NoteContent::parse(loaded.text.into(), loaded.stamp))
     }
 
     /// Lands `loaded` in its own turn; true when an answer moved.
@@ -121,7 +121,7 @@ impl Harness {
         let mtime = self.mtime_on_disk(file);
         let id = self.id(file);
         let (ticket, _) = self.turn(|t| t.saved(id, mtime));
-        (ticket, NoteContent::parse(text.into(), mtime))
+        (ticket, content(text, mtime))
     }
 
     fn save(&mut self, file: &str, text: &str) {
@@ -635,7 +635,7 @@ fn a_save_landing_before_its_note_joins_is_reloaded_by_the_next_build() {
     let mtime = h.mtime_on_disk("a.md");
     let (ticket, _) = h.turn(|t| t.saved(a, mtime));
 
-    h.landed(ticket, Ok(NoteContent::parse("[[b]]".into(), mtime)));
+    h.landed(ticket, Ok(content("[[b]]", mtime)));
     let _ = h.built();
     h.load_all();
 

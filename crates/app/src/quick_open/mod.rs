@@ -102,6 +102,7 @@ impl QuickOpenDelegate {
 impl IndexDelegate for QuickOpenDelegate {
     type Found = Vec<NoteMatch>;
     type Key = EntryId;
+    type Reads = ();
 
     fn runs(&mut self) -> &mut Runs {
         &mut self.runs
@@ -118,7 +119,10 @@ impl IndexDelegate for QuickOpenDelegate {
         Some(NoteQuery::new(text, self.showing, &self.recent))
     }
 
+    fn reads(&self, _: &App) {}
+
     async fn search(
+        (): (),
         snapshot: &IndexSnapshot,
         query: &NoteQuery,
         jobs: &dyn Jobs,

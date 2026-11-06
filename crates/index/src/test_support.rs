@@ -1,11 +1,12 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
 use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Vault};
+use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp, Vault};
 
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
@@ -109,7 +110,7 @@ pub(crate) fn note_set(vault: &Vault) -> NoteSet {
 }
 
 pub(crate) fn table(vault: &Vault) -> NoteTable {
-    NoteTable::new(&prepare(entries(vault)).0)
+    NoteTable::new(&prepare(entries(vault)).notes)
 }
 
 pub(crate) fn id(vault: &Vault, path: &str) -> EntryId {
@@ -129,9 +130,16 @@ pub(crate) fn target(text: &str) -> Target {
     Target::parse(&found[0])
 }
 
+/// `text` parsed as a load at `mtime` gives it, its size the text's length.
+pub(crate) fn content(text: impl Into<Arc<str>>, mtime: Mtime) -> NoteContent {
+    let text = text.into();
+    let size = text.len() as u64;
+    NoteContent::parse(text, Stamp { mtime, size })
+}
+
 /// `id`'s links, text and words, as a load gives them, stamped `mtime(0)`.
 pub(crate) fn load(index: &mut NoteIndex, id: EntryId, text: &str) {
-    index.insert(id, NoteContent::parse(text.into(), mtime(0)));
+    index.insert(id, content(text, mtime(0)));
 }
 
 /// Each loaded note of `corpus` with its text, in vault order.

@@ -574,3 +574,42 @@ fn replace_honours_unwritable() {
         Some("before")
     );
 }
+
+#[test]
+fn bytes_that_are_not_utf8_load_as_not_utf8() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/a.md", [b'a', 0xff]);
+
+    let loaded = block_on(fs.load(Path::new("/vault/a.md")));
+
+    let Err(VaultError::NotUtf8 { path }) = loaded else {
+        panic!("not valid UTF-8");
+    };
+    assert_eq!(path, Path::new("/vault/a.md"));
+    assert_eq!(fs.loads(Path::new("/vault/a.md")), 1);
+}
+
+#[test]
+fn utf8_bytes_load_as_text_stamped_with_their_length() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/a.md", "été\r\n");
+
+    let Ok(loaded) = block_on(fs.load(Path::new("/vault/a.md"))) else {
+        panic!("valid UTF-8");
+    };
+
+    assert_eq!(loaded.text, "été\n");
+    assert_eq!(
+        loaded.stamp.size, 7,
+        "the bytes on disk, before the line endings fold"
+    );
+}
+
+#[test]
+#[should_panic(expected = "/vault/a.md")]
+fn reading_bytes_that_are_not_utf8_as_a_string_names_the_path() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/a.md", [0xff]);
+
+    let _ = fs.read_to_string(Path::new("/vault/a.md"));
+}

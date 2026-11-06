@@ -47,3 +47,11 @@ fn a_name_position_is_its_note_order() {
         assert_eq!(set.notes.order(set.names.id(at)), at, "name {at}");
     }
 }
+
+#[test]
+fn a_note_s_file_is_its_path_as_scanned() {
+    let (_fs, vault) = vault(&["Notes/Cafe\u{301}.MD"]);
+    let names = NoteSet::build(entries(&vault)).names;
+    assert_eq!(&**names.file(0), "Notes/Cafe\u{301}.MD");
+    assert_eq!(&**names.path(0), "Notes/Café");
+}

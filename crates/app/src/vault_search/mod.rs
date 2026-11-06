@@ -1,26 +1,30 @@
 //! `⌘⇧F`: the word starts of every term across the vault's text, a header per note.
 
 use std::ops::Range;
+use std::pin::pin;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, IntoElement, Pixels, SharedString,
     Subscription, actions, div,
 };
 use inkra_index::live::Status;
-use inkra_index::{IndexSnapshot, NoteQuery, Searched};
+use inkra_index::{IndexSnapshot, NoteQuery, Searched, TextFound, TextSearch};
 use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
-use crate::index::{IndexSync, SCANNING, indexing_footer};
+use crate::index::{IndexSync, Reader, SCANNING, indexing_footer};
 use crate::open::Open;
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
 use rows::{HitKey, Results, Row};
 
+#[cfg(test)]
+mod reads_tests;
 mod render;
 mod rows;
 #[cfg(test)]
@@ -31,11 +35,14 @@ actions!(vault_search, [SearchVault]);
 /// Search spec D9: past it the footer asks for a narrower query.
 const LIMIT: usize = 1_000;
 
-/// A run's answer and when it was ready, for the release log line.
+/// A run's answer, the notes its reads found stale, and when it was ready, for the release log line.
 pub(crate) struct Found {
     searched: Searched,
-    started: Instant,
+    stale: Vec<EntryId>,
+    /// The notes read from disk.
+    read: usize,
     first_hits: Duration,
+    started: Instant,
 }
 
 /// The release log line of one answer; `read` counts the notes read from disk.
@@ -111,6 +118,7 @@ impl VaultSearchDelegate {
 impl IndexDelegate for VaultSearchDelegate {
     type Found = Found;
     type Key = HitKey;
+    type Reads = Reader;
 
     fn runs(&mut self) -> &mut Runs {
         &mut self.runs
@@ -133,18 +141,42 @@ impl IndexDelegate for VaultSearchDelegate {
         Some(query)
     }
 
+    fn reads(&self, cx: &App) -> Reader {
+        self.links.read(cx).reader(cx)
+    }
+
     async fn search(
+        reader: Reader,
         snapshot: &IndexSnapshot,
         query: &NoteQuery,
-        jobs: &dyn Jobs,
+        _: &dyn Jobs,
         cancel: &AtomicBool,
     ) -> Option<Found> {
         let started = Instant::now();
-        let searched = snapshot.search(query, LIMIT, jobs, cancel).await?;
+        let candidates = snapshot.candidates(query, cancel)?;
+        let mut search = TextSearch::new(query, LIMIT);
+        let mut first_hits = None;
+        let mut reads = pin!(reader.stream(candidates));
+        while let Some((candidate, read)) = reads.next().await {
+            let more = search.read(&candidate, read, cancel);
+            if first_hits.is_none() && search.hits() > 0 {
+                first_hits = Some(started.elapsed());
+            }
+            if !more {
+                break;
+            }
+        }
+        let TextFound {
+            searched,
+            stale,
+            reads,
+        } = search.finish(cancel)?;
         Some(Found {
             searched,
+            stale,
+            read: reads,
+            first_hits: first_hits.unwrap_or_else(|| started.elapsed()),
             started,
-            first_hits: started.elapsed(),
         })
     }
 
@@ -152,7 +184,11 @@ impl IndexDelegate for VaultSearchDelegate {
         let found = landed.found;
         let elapsed = found.started.elapsed();
         if cfg!(not(debug_assertions)) {
-            eprintln!("{}", search_line(found.first_hits, elapsed, 0));
+            eprintln!("{}", search_line(found.first_hits, elapsed, found.read));
+        }
+        if !found.stale.is_empty() {
+            self.links
+                .update(cx, |links, cx| links.stale(&found.stale, cx));
         }
         let vault = self.vault.read(cx);
         self.results = Results::new(found.searched, |note| {

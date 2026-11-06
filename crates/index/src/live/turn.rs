@@ -114,6 +114,11 @@ impl Turn<'_> {
         self.live.landed(ticket, loaded, self.vault);
     }
 
+    /// Notes a search read changed or gone since their load: each indexed one loads again.
+    pub fn stale(&mut self, ids: &[EntryId]) {
+        self.live.stale(ids);
+    }
+
     /// A word merge's result, from `Merge::run`.
     ///
     /// # Panics

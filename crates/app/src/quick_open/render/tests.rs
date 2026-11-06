@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use futures::executor::block_on;
 use inkra_index::{NoteContent, NoteIndex, NoteQuery, NoteSet, excerpt};
-use inkra_vault::{EntryId, Kind, Mtime, Serial};
+use inkra_vault::{EntryId, Kind, Mtime, Serial, Stamp};
 
 use crate::quick_open::list::Row;
 
@@ -20,7 +20,11 @@ fn rows(path: &str, text: &str, query: &str) -> Vec<Row> {
         Kind::Note,
         mtime,
     )]));
-    index.insert(id, NoteContent::parse(text.into(), mtime));
+    let stamp = Stamp {
+        mtime,
+        size: text.len() as u64,
+    };
+    index.insert(id, NoteContent::parse(text.into(), stamp));
     let snapshot = index.snapshot();
     let query = NoteQuery::new(query, None, &[]);
     let cancel = AtomicBool::new(false);

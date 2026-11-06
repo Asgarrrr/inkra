@@ -2,6 +2,7 @@
 
 use super::Merge;
 use super::tests::Harness;
+use crate::test_support::content;
 
 /// Lands every pending load, one turn each; the merges the turns started, not run, and whether one reported `indexed`.
 fn load_all_in_turns(h: &mut Harness) -> (Vec<Merge>, bool) {
@@ -57,7 +58,7 @@ fn a_save_during_the_settle_stays_fresh_and_indexed_is_reported() {
     let _ = h.built();
     let merge = settle(&mut h);
     let a = h.id("a.md");
-    let during = crate::NoteContent::parse("during".into(), crate::test_support::mtime(9));
+    let during = content("during", crate::test_support::mtime(9));
     let ((), end) = h.turn(|t| {
         let ticket = t.saved(a, crate::test_support::mtime(9));
         t.landed(ticket, Ok(during));

@@ -2,7 +2,7 @@ use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 
-use inkra_vault::{EntryId, Mtime};
+use inkra_vault::{EntryId, Mtime, Stamp};
 
 /// What a slot costs beyond its text.
 pub(crate) const SLOT_BYTES: usize = mem::size_of::<Slot>() + mem::size_of::<EntryId>();
@@ -12,11 +12,13 @@ pub(crate) const TEXT_HEADER_BYTES: usize = 2 * mem::size_of::<usize>();
 /// Slots per chunk; a write under a held snapshot copies one chunk.
 const CHUNK: usize = 256;
 
-/// `modified` is the last text's mtime, or the scan's if it never had one.
+/// `modified` is the last text's mtime, or the scan's if it never had one. `stamp` is `Some`
+/// while the note is loaded: the stamp of the text its words came from.
 #[derive(Clone)]
 struct Slot {
     text: Option<Arc<str>>,
     modified: Mtime,
+    stamp: Option<Stamp>,
 }
 
 /// `CHUNK` consecutive slots, fewer in the last chunk.
@@ -32,7 +34,7 @@ pub(crate) struct Corpus {
 
 impl Corpus {
     /// Copies the chunk list and one chunk only while a snapshot holds them. Ignored past the end.
-    pub(crate) fn write(&mut self, at: usize, text: Arc<str>, modified: Mtime) {
+    pub(crate) fn write(&mut self, at: usize, text: Arc<str>, stamp: Stamp) {
         let Some(slot) = slot_mut(&mut self.slots, at) else {
             return;
         };
@@ -40,21 +42,23 @@ impl Corpus {
         self.text_bytes += cost(Some(&text));
         *slot = Slot {
             text: Some(text),
-            modified,
+            modified: stamp.mtime,
+            stamp: Some(stamp),
         };
     }
 
-    /// Drops the text and keeps its mtime. Ignored past the end.
+    /// Drops the text and its stamp, and keeps its mtime. Ignored past the end.
     pub(crate) fn clear(&mut self, at: usize) {
         // Clearing an empty slot would copy a chunk for nothing while a snapshot is held.
         if slot(&self.slots, at).is_some_and(|slot| slot.text.is_some())
             && let Some(slot) = slot_mut(&mut self.slots, at)
         {
             self.text_bytes -= cost(slot.text.take().as_deref());
+            slot.stamp = None;
         }
     }
 
-    /// Each note keeps its text and mtime from `order(id)`, else takes its `mtimes` entry.
+    /// Each note keeps its text, mtime and stamp from `order(id)`, else takes its `mtimes` entry.
     /// Returns the previous build's ids and the texts of the notes gone.
     pub(crate) fn reorder(
         &mut self,
@@ -79,12 +83,19 @@ impl Corpus {
                         let kept = previous
                             .get_mut(at / CHUNK)
                             .and_then(|chunk| chunk.get_mut(at % CHUNK))
-                            .and_then(|slot| Some((slot.text.take()?, slot.modified)));
-                        let (text, modified) = kept.unzip();
-                        text_bytes += cost(text.as_deref());
+                            .and_then(|slot| Some((slot.text.take()?, slot.modified, slot.stamp)));
+                        let Some((text, modified, stamp)) = kept else {
+                            return Slot {
+                                text: None,
+                                modified: scanned,
+                                stamp: None,
+                            };
+                        };
+                        text_bytes += cost(Some(&text));
                         Slot {
-                            text,
-                            modified: modified.unwrap_or(scanned),
+                            text: Some(text),
+                            modified,
+                            stamp,
                         }
                     })
                     .collect()
@@ -172,6 +183,12 @@ impl CorpusSnapshot {
     /// The mtime of the last text at `order`, or the scan's if it never had one; `None` past the end.
     pub(crate) fn modified(&self, order: usize) -> Option<Mtime> {
         Some(slot(&self.slots, order)?.modified)
+    }
+
+    /// The stamp of the text the words at `order` came from; `None` past the end or while it is
+    /// not loaded.
+    pub(crate) fn stamp(&self, order: usize) -> Option<Stamp> {
+        slot(&self.slots, order)?.stamp
     }
 }
 

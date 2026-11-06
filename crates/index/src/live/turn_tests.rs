@@ -202,3 +202,39 @@ fn a_second_merge_in_one_turn_is_refused() {
         t.merged(second);
     });
 }
+
+#[test]
+fn a_stale_note_loads_again_and_moves_no_revision() {
+    let mut h = indexed(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let (a, revision) = (h.id("a.md"), h.live.revision());
+
+    let ((), effects) = h.turn(|t| t.stale(&[a]));
+
+    assert_eq!(paths(&effects.loads), [path("a.md")]);
+    assert_eq!(h.live.revision(), revision);
+}
+
+#[test]
+fn a_stale_note_the_index_does_not_hold_queues_nothing() {
+    let mut h = indexed(&[("a.md", "alpha")]);
+    h.write("c.md", "gamma");
+    let c = h.id("c.md");
+
+    let ((), effects) = h.turn(|t| t.stale(&[c]));
+
+    assert!(effects.loads.is_empty());
+}
+
+#[test]
+fn a_stale_note_already_queued_keeps_its_place() {
+    let mut h = Harness::with_slots(&[("a.md", ""), ("b.md", ""), ("c.md", "")], 1);
+    assert_eq!(paths(&h.built().loads), [path("a.md")]);
+    let b = h.id("b.md");
+    let _ = h.turn(|t| t.stale(&[b]));
+
+    assert_eq!(
+        paths(&h.land_pending(0).loads),
+        [path("b.md")],
+        "b before c"
+    );
+}

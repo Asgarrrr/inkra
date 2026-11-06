@@ -6,7 +6,7 @@ use std::hint::black_box;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, SamplingMode, criterion_group, criterion_main};
@@ -16,7 +16,9 @@ use inkra_index::{
 use inkra_vault::{EntryId, Kind, Mtime};
 
 use build::{FRESH_MIN, FRESH_RATIO, build, loaded_notes, max_fresh, settle};
-use corpus::{Corpus, ENTRIES, Lcg, NOTE_IDS, NOTES, Pick, contents, forty_word, prose, zipf_word};
+use corpus::{
+    Corpus, ENTRIES, EPOCH, Lcg, NOTE_IDS, NOTES, Pick, contents, forty_word, prose, zipf_word,
+};
 
 /// A trash of this many notes while loaded.
 const GONE: usize = 5_500;
@@ -74,7 +76,7 @@ fn bench_memory(_: &mut Criterion) {
         let before = rss_kb();
         let parsed = texts
             .iter()
-            .map(|text| NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH)));
+            .map(|text| NoteContent::parse(Arc::clone(text), EPOCH));
         let _ = build(&mut index, parsed);
         let after = rss_kb();
         let (notes, heap_bytes) = (index.corpus().len(), index.words().heap_bytes());
@@ -98,7 +100,7 @@ fn bench_parse(c: &mut Criterion) {
     for (script, pick) in scripts {
         let text: Arc<str> = prose(&mut Lcg(29), 3_072, pick).into();
         group.bench_function(script, |b| {
-            b.iter_with_large_drop(|| NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)));
+            b.iter_with_large_drop(|| NoteContent::parse(Arc::clone(&text), EPOCH));
         });
     }
     group.finish();
@@ -197,7 +199,7 @@ fn inserts(
         if new {
             index.remove(id);
         }
-        let content = NoteContent::parse(Arc::clone(text), Mtime(UNIX_EPOCH));
+        let content = NoteContent::parse(Arc::clone(text), EPOCH);
         let snapshots = hold.take(index);
         let started = Instant::now();
         index.insert(id, content);
