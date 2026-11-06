@@ -8,6 +8,7 @@ use gpui::{
 use inkra_layout::{GroupId, Side, Surface};
 
 use super::AppShell;
+use super::dock_chrome::{name, width};
 use super::group::selector;
 use crate::theme;
 use crate::ui::{h_flex, identified, keep_focus};
@@ -31,14 +32,17 @@ impl AppShell {
         };
         let (left_title, leading_toggle) = if left_drawn {
             (
-                Some(self.render_title_sidebar(lights, left_toggle, cx)),
+                Some(self.render_title_dock(Side::Left, lights, left_toggle, cx)),
                 None,
             )
         } else {
             (None, Some(left_toggle))
         };
         let (right_title, trailing_toggle) = if right_drawn {
-            (Some(self.render_title_backlinks(right_toggle, cx)), None)
+            (
+                Some(self.render_title_dock(Side::Right, lights, right_toggle, cx)),
+                None,
+            )
         } else {
             (None, right_toggle)
         };
@@ -152,77 +156,56 @@ impl AppShell {
             .child(Self::render_drag_region(ElementId::Name(selector(drag, k).into()), cx).flex_1())
     }
 
-    /// Over the right dock: each top group's icons, then its toggle at the window's right edge.
-    fn render_title_backlinks<Toggle: IntoElement>(
+    /// Over `side`'s dock: each top group's icons. The left lead is the lights and the toggle (D2);
+    /// the right end is the toggle at the window's right edge.
+    fn render_title_dock<Toggle: IntoElement>(
         &self,
+        side: Side,
+        lights: Pixels,
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
-        let top = self.top_rects(Surface::Dock(Side::Right));
+        let top = self.top_rects(Surface::Dock(side));
         let end = top.len().saturating_sub(1);
-        let mut toggle = toggle;
+        let mut toggle = toggle.map(IntoElement::into_any_element);
         // Spacers, not padding: each segment's width is its group's share.
         let inset = || div().flex_none().w(theme::ROW_INSET).into_any_element();
         let segments: Vec<_> = top
             .into_iter()
             .enumerate()
             .map(|(ix, rect)| {
-                let lead = if ix == 0 { vec![inset()] } else { Vec::new() };
-                self.render_dock_segment(Side::Right, rect, lead, cx)
-                    .when(ix == end, |segment| {
+                let lead = match (side, ix) {
+                    (Side::Left, 0) => {
+                        let start = Self::render_drag_region("title-drag-start", cx)
+                            .flex_none()
+                            .w(lights);
+                        std::iter::once(start.into_any_element())
+                            .chain(toggle.take())
+                            .collect()
+                    }
+                    (Side::Right, 0) => vec![inset()],
+                    _ => Vec::new(),
+                };
+                self.render_dock_segment(side, rect, lead, cx)
+                    .when(side == Side::Right && ix == end, |segment| {
                         segment.children(toggle.take()).child(inset())
                     })
             })
             .collect();
         let colors = theme::current(cx).colors;
-        h_flex()
-            .debug_selector(|| "title-right".into())
+        let selector = format!("title-{}", name(side));
+        let ruled = h_flex()
+            .debug_selector(move || selector)
             .on_mouse_down(MouseButton::Left, keep_focus)
             .flex_none()
-            .w(super::RIGHT_DOCK_WIDTH)
-            .h_full()
-            .border_l(theme::RULE_WIDTH)
-            .border_color(colors.border_variant)
-            .children(segments)
-    }
-
-    /// Over the left dock: the lights and its toggle, then each top group's icons (D2).
-    fn render_title_sidebar<Toggle: IntoElement>(
-        &self,
-        lights: Pixels,
-        toggle: Option<Toggle>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<Toggle> {
-        let top = self.top_rects(Surface::Dock(Side::Left));
-        let mut toggle = toggle;
-        let segments: Vec<_> = top
-            .into_iter()
-            .enumerate()
-            .map(|(ix, rect)| {
-                let lead = if ix == 0 {
-                    let start = Self::render_drag_region("title-drag-start", cx)
-                        .flex_none()
-                        .w(lights);
-                    let toggle = toggle.take().map(IntoElement::into_any_element);
-                    std::iter::once(start.into_any_element())
-                        .chain(toggle)
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                self.render_dock_segment(Side::Left, rect, lead, cx)
-            })
-            .collect();
-        let colors = theme::current(cx).colors;
-        h_flex()
-            .debug_selector(|| "title-left".into())
-            .on_mouse_down(MouseButton::Left, keep_focus)
-            .flex_none()
-            .w(super::LEFT_DOCK_WIDTH)
-            .h_full()
-            .border_r(theme::RULE_WIDTH)
-            .border_color(colors.border_variant)
-            .children(segments)
+            .w(width(side))
+            .h_full();
+        match side {
+            Side::Left => ruled.border_r(theme::RULE_WIDTH),
+            Side::Right => ruled.border_l(theme::RULE_WIDTH),
+        }
+        .border_color(colors.border_variant)
+        .children(segments)
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.

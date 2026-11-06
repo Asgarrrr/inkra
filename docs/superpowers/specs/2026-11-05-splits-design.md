@@ -632,6 +632,20 @@ Slice 2, one tab move for notes and views:
 - A dock icon compares its index with the dragged view's only when that view is in its
   group; a view from another group shows the insertion marker a foreign tab shows.
 
+Slice 3, one group column for the centre and the docks:
+
+- `group_column` in `render.rs` builds a group's column on both surfaces: the caller's base
+  element, the lower header, its rows, its body and the separator. `group_body` builds the
+  body's view drop target and the drop overlay. A pure refactor: ids, selectors and every
+  shot are unchanged.
+- The tab drops are the centre's to add after `group_body` returns, not a parameter of it
+  *(delegated)*: the dock body takes a view only, the centre also a tab, and an enum of the
+  two would cost more than the one place that differs.
+- `render_title_dock` builds a dock's title segments for a `Side`: the left leads with the
+  lights and the toggle, the right ends with the toggle and an inset. The rule on the
+  centre-facing edge stays a `match` in the title builder and in `render_dock`; a shared
+  helper would not shorten either.
+
 ## Deferred
 
 | Item | Trigger |
