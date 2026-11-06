@@ -182,6 +182,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-11-04-obsidian-chrome-design.md` — Obsidian chrome: surfaces, the split title row, browser tabs, the nav row, the backlinks header
 - `docs/superpowers/specs/2026-11-05-docks-design.md` — docks: `inkra-layout`, `Docks`, headers and the icon bar,
   the move actions, the menu, the drag, the session's `docks` field
+- `docs/superpowers/specs/2026-11-05-splits-design.md` — splits: `Layout`'s tree of groups in the centre
+  and docks, L1–L7, the title row from the top groups, the gestures, session v2
 - `docs/superpowers/specs/2026-11-04-themes-components-design.md` — semantic tokens, `GlobalTheme`, `ui::Color` and `Label`,
   vault themes in `.inkra/`, `settings.json`, hot reload, the theme picker
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
