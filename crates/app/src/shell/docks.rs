@@ -91,7 +91,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let (group, tab) = self.tab_of(view);
-        if self.group(group).tabs.count() >= 2 && self.fits_split(group, direction.axis(), window) {
+        if self.group(group).tabs.count() >= 2 {
             self.split_off((group, tab), group, direction, window, cx);
         }
     }

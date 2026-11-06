@@ -74,7 +74,8 @@ pub struct Layout {
 `Layout` knows where each group sits and how much room it takes. It does not
 know what a group's tabs hold; the app does.
 
-Operations: `split(group, direction) -> GroupId`, `remove(group)`,
+Operations: `split(group, direction, room, min) -> Option<GroupId>`,
+`fits_split(group, axis, room, min)`, `removable(group)`, `remove(group)`,
 `resize(path, index, delta)`, `equalize(path)`, `activate(group)`,
 `neighbour(group, direction, probe) -> Option<GroupId>`, `rects(surface)`,
 `surface_of(group)`, `top_groups()`.
@@ -589,6 +590,26 @@ S13's choices:
 - A drag whose tab or separator a tree change removed does nothing. A
   separator drag ends at its next move; a tab drop finds no tab and is ignored.
 - `DROP_FRACTION` is crate-private: only `drop_zone` reads it.
+
+## Architecture review's choices
+
+Slice 1, the layout owns split refusal and removability:
+
+- `Layout::fits_split` holds the rule `AppShell::fits_split` held: the group's unit share
+  along the axis, times `room`, halved, is at least its minimum. The app passes `room`, its
+  surface's px length along the axis, and the minimum as a closure, as `resize` takes it.
+- `Layout::split` refuses where `fits_split` does: it returns `None` and leaves the layout,
+  `next` included, as it was. A group not in the layout is refused, no longer a panic.
+- `removable` is false for a group not in the layout, as `fits_split` is *(delegated)*:
+  `remove` panics on one.
+- `split_off` asks `fits_split` before `change_layout`, as `split_view`'s pre-check did, so a
+  refused split leaves an open menu and the focus alone *(delegated)*. The split inside it
+  then cannot refuse, and panics if it does.
+- The drop overlay keeps its filter through `Layout::fits_split` *(delegated)*: without it,
+  a zone would show where the drop then splits nothing.
+- A refused `split_group` moves no focus. Its test holds the root's focus: from the tree,
+  `⌘K →` splits the Files group through `split_view` and never reaches `split_group`
+  *(delegated)*.
 
 ## Deferred
 

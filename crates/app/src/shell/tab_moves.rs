@@ -68,7 +68,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Detached<Place, Parked> {
         if self.group(from).tabs.count() == 1 {
-            if self.layout.center_groups() != [from] {
+            if self.layout.removable(from) {
                 let place = Parked::park(&self.group(from).shown, cx);
                 return self
                     .remove_group(from, window, cx)
@@ -131,6 +131,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let splits = from != group || self.group(group).tabs.count() >= 2;
+        let mins = self.min_sizes(window);
         let (bounds, at) = (event.bounds, event.event.position);
         let zone = (splits && bounds.contains(&at))
             .then(|| {
@@ -141,7 +142,13 @@ impl AppShell {
                 )
             })
             .flatten()
-            .filter(|direction| self.fits_split(group, direction.axis(), window));
+            .filter(|direction| {
+                let room = self.room_along(group, direction.axis(), window);
+                self.layout
+                    .fits_split(group, direction.axis(), room, |group, axis| {
+                        mins[&(group, axis)]
+                    })
+            });
         let held = &mut self.group_mut(group).drop_split;
         if *held != zone {
             *held = zone;
@@ -172,9 +179,10 @@ impl AppShell {
         )
     }
 
-    /// Tab `id` of `from` alone in a fresh group on `target`'s `direction` side. The split comes
-    /// first, so `target` still exists when `from` is its sibling and the detach removes it. A
-    /// fresh centre group becomes the active one and takes the focus.
+    /// Tab `id` of `from` alone in a fresh group on `target`'s `direction` side, or nothing where
+    /// that split does not fit. The split comes first, so `target` still exists when `from` is its
+    /// sibling and the detach removes it. A fresh centre group becomes the active one and takes
+    /// the focus.
     pub(super) fn split_off(
         &mut self,
         (from, id): (GroupId, TabId),
@@ -186,9 +194,19 @@ impl AppShell {
         if !self.holds((from, id)) {
             return;
         }
+        let (room, mins) = (
+            self.room_along(target, direction.axis(), window),
+            self.min_sizes(window),
+        );
+        let min = |group, axis| mins[&(group, axis)];
+        if !self.layout.fits_split(target, direction.axis(), room, min) {
+            return;
+        }
         let centre = self.layout.surface_of(target) == Surface::Center;
         self.change_layout(window, cx, |shell, window, cx| {
-            let fresh = shell.layout.split(target, direction);
+            let Some(fresh) = shell.layout.split(target, direction, room, min) else {
+                panic!("{target:?} fits the split");
+            };
             // The heir of a group the detach removes may be `fresh`, which takes its closed tabs.
             shell.groups.insert(fresh, Group::new());
             let detached = shell.detach(from, id, window, cx);

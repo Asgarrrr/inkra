@@ -236,16 +236,24 @@ impl AppShell {
     ) -> Option<GroupId> {
         let mut fresh = None;
         self.change_layout(window, cx, |shell, window, cx| {
-            if !shell.fits_split(from, direction.axis(), window) {
+            let (room, mins) = (
+                shell.room_along(from, direction.axis(), window),
+                shell.min_sizes(window),
+            );
+            let Some(split) = shell
+                .layout
+                .split(from, direction, room, |group, axis| mins[&(group, axis)])
+            else {
                 return;
-            }
-            let split = shell.layout.split(from, direction);
+            };
             shell.groups.insert(split, Group::new());
             shell.display(split, place, window, cx);
             shell.switch_group(split, cx);
             fresh = Some(split);
         });
-        if let Some(focus) = self.land_focus(cx) {
+        if fresh.is_some()
+            && let Some(focus) = self.land_focus(cx)
+        {
             window.focus(&focus, cx);
         }
         fresh

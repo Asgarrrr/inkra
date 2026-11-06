@@ -149,7 +149,7 @@ impl AppShell {
         if tabs.count() == 1
             && tabs.active() == id
             && self.layout.surface_of(group) == Surface::Center
-            && self.layout.center_groups().len() > 1
+            && self.layout.removable(group)
         {
             self.close_group(group, id, window, cx);
             return;

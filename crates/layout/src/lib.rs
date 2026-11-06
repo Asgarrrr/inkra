@@ -179,6 +179,12 @@ impl Layout {
         }
     }
 
+    /// L3: every group in this layout but the centre's only one.
+    #[must_use]
+    pub fn removable(&self, group: GroupId) -> bool {
+        self.center != Member::Group(group) && self.groups().any(|held| held == group)
+    }
+
     /// The centre depth-first, then the left dock's, then the right dock's.
     pub fn groups(&self) -> impl Iterator<Item = GroupId> {
         [
