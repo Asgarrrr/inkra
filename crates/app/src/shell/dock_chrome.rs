@@ -180,27 +180,29 @@ impl AppShell {
             return None;
         }
         let active = self.group(group).shown.view();
-        let held: Vec<View> = self.group(group).views().map(|(_, view)| view).collect();
         Some(
             h_flex()
                 .debug_selector(move || selector(format_args!("dock-bar-{}", name(side)), k))
                 .flex_none()
                 .items_center()
-                .children(held.iter().enumerate().map(|(ix, &view)| {
-                    Self::render_dock_icon(view, Some(view) == active, group, ix, held.clone(), cx)
-                })),
+                .children(
+                    self.group(group)
+                        .views()
+                        .enumerate()
+                        .map(|(ix, (_, view))| {
+                            Self::render_dock_icon(view, Some(view) == active, group, ix, cx)
+                        }),
+                ),
         )
     }
 
     /// Rule 4: a click on the active icon changes nothing, as `change_layout` drops an equal layout.
     /// A drop on it inserts at `ix`, counted after the dragged view left (`Tabs::move_tab`'s rule).
-    /// `held` is the group's views: a view dragged from among them reorders, as in a tab strip.
     fn render_dock_icon(
         view: View,
         active: bool,
         group: GroupId,
         ix: usize,
-        held: Vec<View>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::current(cx).colors;
@@ -211,15 +213,19 @@ impl AppShell {
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.reveal(view, window, cx);
             }))
-            .on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
-                cx.new(|_| dragged.clone())
-            })
+            .on_drag(
+                DraggedView {
+                    view,
+                    index: ix,
+                    group,
+                },
+                |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+            )
             .drag_over::<DraggedView>(move |style, dragged, _, _| {
                 let style = style
                     .bg(colors.accent_background)
                     .border_color(colors.accent);
-                let own = held.contains(&dragged.view).then_some(dragged.index);
-                match own.map_or(Ordering::Less, |index| ix.cmp(&index)) {
+                match dragged.landing(group, ix) {
                     Ordering::Less => style.border_l(theme::DROP_EDGE),
                     Ordering::Greater => style.border_r(theme::DROP_EDGE),
                     Ordering::Equal => style,

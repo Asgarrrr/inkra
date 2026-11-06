@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use gpui::{Bounds, Pixels, Size, Window, point, px, size};
-use inkra_layout::{Axis, GroupId, Rect, Side, Surface};
+use inkra_layout::{Axis, GroupId, Side, Surface};
 
 use super::dock_chrome::width;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
@@ -100,18 +100,10 @@ impl AppShell {
         })
     }
 
-    /// `group`'s share of its surface.
-    fn rect_of(&self, group: GroupId) -> Option<Rect> {
-        self.layout
-            .rects(self.layout.surface_of(group))
-            .into_iter()
-            .find_map(|(held, rect)| (held == group).then_some(rect))
-    }
-
     /// `group`'s room in window coordinates: its share of its own surface, which sits where the
     /// surface does.
     pub(super) fn bounds_of(&self, group: GroupId, window: &Window) -> Option<Bounds<Pixels>> {
-        let rect = self.rect_of(group)?;
+        let rect = self.layout.rect_of(group)?;
         let surface = self.layout.surface_of(group);
         let room = self.surface_size(surface, window);
         let left = match surface {

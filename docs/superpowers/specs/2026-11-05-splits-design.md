@@ -668,6 +668,20 @@ Slice 5, one history-insert helper in `Tabs`:
   stands for; `reopen`, `put` and `detached` call it *(delegated)*. `detached` builds its group
   with `new`, so the helper sets the active tab's stacks and does not insert.
 
+Slice 6, review fixes:
+
+- `track_drop` builds `min_sizes` inside the zone's filter, so it runs only once a zone exists:
+  every group's `on_drag_move` sees every move of a drag.
+- `DraggedView` carries the `group` it left, as `DraggedTab` does. `DraggedView::landing` is
+  the marker rule a dragged view gets over slot `ix` of a group: beside its own slot in its
+  group, before the slot from another group. The dock icon calls it; the tab strip compares the
+  group, as its tab drag does *(delegated)*. No `held` list is built.
+- A view dropped mid its own group's body changes nothing, as a tab dropped mid its own group's
+  body does. A strip drop keeps moving it to the end.
+- `Layout::rect_of` is the one lookup of a group's unit rect, on any surface; `fits_split` and
+  `bounds_of` call it. A group not in the layout gets `None`, no longer a panic in `bounds_of`
+  *(delegated)*.
+
 ## Deferred
 
 | Item | Trigger |

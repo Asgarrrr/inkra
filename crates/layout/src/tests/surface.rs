@@ -52,6 +52,23 @@ fn surface_of_names_each_surface() {
 }
 
 #[test]
+fn rect_of_finds_a_group_on_any_surface() {
+    let mut layout = Layout::default();
+    let right = layout
+        .split(GroupId(0), SplitDirection::Right, 1.0, no_min)
+        .unwrap();
+    let lower = layout
+        .split(GroupId(2), SplitDirection::Down, 1.0, no_min)
+        .unwrap();
+
+    assert_eq!(layout.rect_of(GroupId(0)), Some(rect(0.0, 0.0, 0.5, 1.0)));
+    assert_eq!(layout.rect_of(right), Some(rect(0.5, 0.0, 0.5, 1.0)));
+    assert_eq!(layout.rect_of(GroupId(1)), Some(rect(0.0, 0.0, 1.0, 1.0)));
+    assert_eq!(layout.rect_of(lower), Some(rect(0.0, 0.5, 1.0, 0.5)));
+    assert_eq!(layout.rect_of(GroupId(7)), None);
+}
+
+#[test]
 #[should_panic(expected = "is not in the layout")]
 fn surface_of_an_absent_group_panics() {
     let _ = Layout::default().surface_of(GroupId(7));

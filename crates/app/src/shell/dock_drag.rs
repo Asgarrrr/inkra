@@ -1,7 +1,9 @@
 //! A dock view on the move: what a drag carries and the preview under the pointer (docks spec, Drag).
 
+use std::cmp::Ordering;
+
 use gpui::{Context, InteractiveElement, IntoElement, Pixels, Render, Styled, Window, div, px};
-use inkra_layout::{Side, View};
+use inkra_layout::{GroupId, Side, View};
 
 use super::AppShell;
 use super::docks::{icon, title};
@@ -13,11 +15,25 @@ pub(super) const SHELL_GROUP: &str = "app-shell";
 
 const DROP_STRIP_WIDTH: Pixels = px(40.);
 
-/// The view under the pointer; also its preview. `index` is where it stood when the drag began.
+/// The view under the pointer; also its preview. `index` and `group` are where it stood when the
+/// drag began.
 #[derive(Clone)]
 pub(super) struct DraggedView {
     pub(super) view: View,
     pub(super) index: usize,
+    pub(super) group: GroupId,
+}
+
+impl DraggedView {
+    /// Where slot `ix` of `group` sits from this view: `Less` marks its left edge, `Greater` its
+    /// right. A view from another group lands before the slot, as a foreign tab does.
+    pub(super) fn landing(&self, group: GroupId, ix: usize) -> Ordering {
+        if self.group == group {
+            ix.cmp(&self.index)
+        } else {
+            Ordering::Less
+        }
+    }
 }
 
 impl Render for DraggedView {

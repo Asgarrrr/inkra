@@ -192,7 +192,6 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let splits = from != group || self.group(group).tabs.count() >= 2;
-        let mins = self.min_sizes(window);
         let (bounds, at) = (event.bounds, event.event.position);
         let zone = (splits && bounds.contains(&at))
             .then(|| {
@@ -204,6 +203,8 @@ impl AppShell {
             })
             .flatten()
             .filter(|direction| {
+                // Built here, not up front: every group's listener sees every move of a drag.
+                let mins = self.min_sizes(window);
                 let room = self.room_along(group, direction.axis(), window);
                 self.layout
                     .fits_split(group, direction.axis(), room, |group, axis| {
@@ -299,18 +300,18 @@ impl AppShell {
         })
     }
 
-    /// A view dropped on `group`'s body: a split where `drop_split` holds an edge, else the last tab.
+    /// A view dropped on `group`'s body: a split where `drop_split` holds an edge, else the last
+    /// tab, if it comes from another group.
     pub(super) fn view_body_drop(
         group: GroupId,
         cx: &mut Context<Self>,
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-            match shell.group_mut(group).drop_split.take() {
-                Some(direction) => {
-                    let tab = shell.tab_of(dragged.view);
-                    shell.split_off(tab, group, direction, window, cx);
-                }
-                None => shell.drop_view_at_end(dragged.view, group, window, cx),
+            if let Some(direction) = shell.group_mut(group).drop_split.take() {
+                let tab = shell.tab_of(dragged.view);
+                shell.split_off(tab, group, direction, window, cx);
+            } else if dragged.group != group {
+                shell.drop_view_at_end(dragged.view, group, window, cx);
             }
         })
     }
