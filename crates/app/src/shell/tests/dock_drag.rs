@@ -1,12 +1,33 @@
 //! Dragging a dock view: onto an icon, onto a dock column, onto nothing (docks spec, Drag).
 
+use std::cmp::Ordering;
+
 use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
-use inkra_layout::View;
+use inkra_layout::{Layout, Side, View};
 
 use super::dock_menu::{default_docks, docks};
 use super::dragging::drag;
 use super::{ab_focused, editor_focused, open};
+use crate::shell::dock_drag::DraggedView;
 use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
+
+#[test]
+fn a_view_lands_beside_its_own_slot_and_before_a_foreign_one() {
+    let layout = Layout::default();
+    let (own, other) = (layout.dock_groups(Side::Left)[0], layout.last_center());
+    let dragged = DraggedView {
+        view: View::Files,
+        index: 1,
+        group: own,
+    };
+
+    assert_eq!(dragged.landing(own, 0), Ordering::Less);
+    assert_eq!(dragged.landing(own, 1), Ordering::Equal);
+    assert_eq!(dragged.landing(own, 2), Ordering::Greater);
+    for ix in 0..3 {
+        assert_eq!(dragged.landing(other, ix), Ordering::Less);
+    }
+}
 
 #[gpui::test]
 fn dropping_an_icon_on_another_reorders_the_bar(cx: &mut TestAppContext) {

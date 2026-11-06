@@ -121,7 +121,6 @@ impl AppShell {
             })
             .collect();
         let views: Vec<_> = self.tab_views(group).collect();
-        let held: Vec<View> = views.iter().copied().flatten().collect();
         let tabs: Vec<_> = self
             .group(group)
             .tabs
@@ -138,7 +137,7 @@ impl AppShell {
                     indicator,
                     view,
                 };
-                Self::render_tab(strip, ix, entry, held.clone(), cx)
+                Self::render_tab(strip, ix, entry, cx)
             })
             .collect();
         div()
@@ -161,7 +160,6 @@ impl AppShell {
             .children(tabs)
     }
 
-    /// `held` is the group's views: a view dragged from among them reorders, as a tab dragged in its own bar does.
     fn render_tab(
         strip: Strip,
         ix: usize,
@@ -172,7 +170,6 @@ impl AppShell {
             indicator,
             view,
         }: TabEntry,
-        held: Vec<View>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let colors = theme::current(cx).colors;
@@ -222,9 +219,14 @@ impl AppShell {
                 }
             }))
             .map(|tab| match view {
-                Some(view) => tab.on_drag(DraggedView { view, index: ix }, |dragged, _, _, cx| {
-                    cx.new(|_| dragged.clone())
-                }),
+                Some(view) => tab.on_drag(
+                    DraggedView {
+                        view,
+                        index: ix,
+                        group,
+                    },
+                    |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+                ),
                 None => tab.on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone())),
             })
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
@@ -234,7 +236,7 @@ impl AppShell {
                 shell.move_tab_to(dragged.group, dragged.id, group, ix, window, cx);
             }))
             .drag_over::<DraggedView>(move |style, dragged, _, _| {
-                landing(style, held.contains(&dragged.view).then_some(dragged.index))
+                landing(style, (dragged.group == group).then_some(dragged.index))
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {

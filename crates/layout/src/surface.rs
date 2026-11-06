@@ -47,6 +47,16 @@ impl Layout {
         self.member(surface).map_or_else(Vec::new, rects)
     }
 
+    /// `group`'s room in its surface's unit square; `None` for a group not in this layout.
+    #[must_use]
+    pub fn rect_of(&self, group: GroupId) -> Option<Rect> {
+        [Some(&self.center), self.left.as_ref(), self.right.as_ref()]
+            .into_iter()
+            .flatten()
+            .flat_map(rects)
+            .find_map(|(held, rect)| (held == group).then_some(rect))
+    }
+
     /// The groups along `surface`'s top, left to right: depth-first order already is.
     #[must_use]
     pub fn top_groups(&self, surface: Surface) -> Vec<GroupId> {

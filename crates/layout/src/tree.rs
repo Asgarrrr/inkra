@@ -211,12 +211,7 @@ impl Layout {
         room: f32,
         min: impl Fn(GroupId, Axis) -> f32,
     ) -> bool {
-        let Some(rect) = [Some(&self.center), self.left.as_ref(), self.right.as_ref()]
-            .into_iter()
-            .flatten()
-            .flat_map(rects)
-            .find_map(|(held, rect)| (held == group).then_some(rect))
-        else {
+        let Some(rect) = self.rect_of(group) else {
             return false;
         };
         let share = match axis {

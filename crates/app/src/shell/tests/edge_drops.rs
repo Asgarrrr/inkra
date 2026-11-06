@@ -211,6 +211,24 @@ fn a_view_dropped_mid_a_lower_dock_group_joins_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_view_dropped_mid_its_own_group_stays_in_place(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    cx.dispatch_action(MoveBacklinksToOtherDock);
+    cx.run_until_parked();
+    let group = cx.debug_bounds("dock-left-group").expect("drawn");
+
+    drag_to(&mut cx, "dock-icon-files", group.center());
+
+    assert_eq!(
+        left_views(&window, &mut cx),
+        [vec![View::Files, View::Backlinks]]
+    );
+    check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
+#[gpui::test]
 fn a_lone_view_held_on_its_own_groups_edge_splits_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
