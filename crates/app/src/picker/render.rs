@@ -75,6 +75,7 @@ impl<D: PickerDelegate> Render for Picker<D> {
                 .role(Role::List)
                 .debug_selector(|| "picker-list".into())
                 .w_full()
+                .px(theme::MENU_INSET)
                 .child(
                     uniform_list("picker-rows", count, cx.processor(Self::render_rows))
                         .w_full()

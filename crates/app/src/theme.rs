@@ -144,6 +144,7 @@ pub(crate) fn ui_digit_width() -> Pixels {
     UI_TEXT_SIZE * 0.6
 }
 
+/// The icons' `stroke-width="2.571"` paints 1.5 px at this size, regular text's weight: change both together.
 pub(crate) const ICON_SIZE: Pixels = px(14.);
 
 pub(crate) const DOT_SIZE: Pixels = px(6.);
@@ -155,6 +156,15 @@ pub(crate) const ROW_INSET: Pixels = px(8.);
 pub(crate) const TREE_ROW_HEIGHT: Pixels = px(27.);
 
 pub(crate) const ROW_RADIUS: Pixels = px(8.);
+
+/// The corners of an elevated surface: the menu, the modal, the tooltip.
+pub(crate) const ELEVATED_RADIUS: Pixels = px(8.);
+
+/// A menu row's gap to its list's sides; its padding gives the gap back, so its text stays at `ROW_INSET`.
+pub(crate) const MENU_INSET: Pixels = px(4.);
+
+/// `ELEVATED_RADIUS - MENU_INSET`, so a row's corners are concentric with its surface's.
+pub(crate) const MENU_ROW_RADIUS: Pixels = px(4.);
 
 /// The reference's gap above the tree's first row.
 pub(crate) const TREE_TOP_GAP: Pixels = px(4.);

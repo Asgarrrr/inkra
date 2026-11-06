@@ -59,12 +59,14 @@ impl Render for BacklinksPanel {
                     .px(theme::ROW_INSET)
                     .child(Label::new(message).color(Color::Placeholder))
             }))
-            .children(
-                self.rows
-                    .iter()
-                    .enumerate()
-                    .map(|(index, row)| Self::render_row(index, row, cx).into_any_element())
-                    .collect::<Vec<_>>(),
+            .child(
+                v_flex().px(theme::MENU_INSET).children(
+                    self.rows
+                        .iter()
+                        .enumerate()
+                        .map(|(index, row)| Self::render_row(index, row, cx).into_any_element())
+                        .collect::<Vec<_>>(),
+                ),
             )
     }
 }
