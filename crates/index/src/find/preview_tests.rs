@@ -7,8 +7,8 @@ use crate::{Excerpt, Group, NoteQuery, excerpt};
 
 #[test]
 fn a_name_row_shows_its_first_prose_line_unlit() {
-    let (vault, index) =
-        with_texts(&[("plan.md", Some("\n  \n\t# The plan, its plan  \nbody plan"))]);
+    let text = "\n  \n\t# The plan, its plan  \nbody plan";
+    let (vault, index) = with_texts(&[("plan.md", Some(text))]);
     let snapshot = index.snapshot();
     let cancel = AtomicBool::new(false);
     let named = NoteQuery::new("plan", None, &[]);
@@ -18,12 +18,12 @@ fn a_name_row_shows_its_first_prose_line_unlit() {
         text: "The plan, its plan".into(),
         highlights: Vec::new(),
     });
-    assert_eq!(excerpt(&snapshot, &found, &named, &cancel), preview);
+    assert_eq!(excerpt(&snapshot, &found, &named, text, &cancel), preview);
 
     let recent = NoteQuery::new("", None, &[id(&vault, "plan.md")]);
     let found = self::found(&index, &recent);
     assert_eq!(
-        excerpt(&snapshot, &found, &recent, &cancel),
+        excerpt(&snapshot, &found, &recent, text, &cancel),
         preview,
         "an empty query"
     );
@@ -38,6 +38,7 @@ fn a_huge_first_line_gives_a_160_byte_preview() {
         &index.snapshot(),
         &found(&index, &query),
         &query,
+        &text,
         &AtomicBool::new(false),
     ) else {
         panic!("a preview");
@@ -58,6 +59,7 @@ fn a_preview_past_the_scan_limit_is_none() {
             &index.snapshot(),
             &found(&index, &query),
             &query,
+            text,
             &AtomicBool::new(false),
         )
         .map(|preview| preview.text)
@@ -75,7 +77,8 @@ fn preview_of(file: &str, text: &str, query: &str) -> Option<String> {
     let query = NoteQuery::new(query, None, &[]);
     let found = found(&index, &query);
     assert_eq!(found.group, Group::Name);
-    let excerpt = excerpt(&index.snapshot(), &found, &query, &AtomicBool::new(false))?;
+    let cancel = AtomicBool::new(false);
+    let excerpt = excerpt(&index.snapshot(), &found, &query, text, &cancel)?;
     assert!(excerpt.highlights.is_empty(), "a preview is unlit");
     Some(excerpt.text)
 }
@@ -280,10 +283,12 @@ fn a_skipped_line_past_the_scan_limit_is_none() {
 
 #[test]
 fn an_empty_query_shows_the_first_prose_line() {
-    let (vault, index) = with_texts(&[("plan.md", Some("---\na: b\n---\n# Plan\n- **Body**"))]);
+    let text = "---\na: b\n---\n# Plan\n- **Body**";
+    let (vault, index) = with_texts(&[("plan.md", Some(text))]);
     let recent = NoteQuery::new("", None, &[id(&vault, "plan.md")]);
     let found = found(&index, &recent);
-    let preview = excerpt(&index.snapshot(), &found, &recent, &AtomicBool::new(false));
+    let cancel = AtomicBool::new(false);
+    let preview = excerpt(&index.snapshot(), &found, &recent, text, &cancel);
     assert_eq!(preview.map(|preview| preview.text), Some("Body".into()));
 }
 

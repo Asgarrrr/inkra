@@ -30,15 +30,31 @@ impl Reader {
         &self,
         candidates: Vec<Candidate>,
     ) -> impl Stream<Item = (Candidate, Read)> + Send + 'static {
+        let items = candidates.into_iter().map(|candidate| (candidate, ()));
+        self.stream_with(items.collect(), |(), read| read)
+    }
+
+    /// As `stream`, each item's `then` run in its reader task, after the read and the cache step.
+    pub(crate) fn stream_with<I, T, F>(
+        &self,
+        items: Vec<(Candidate, I)>,
+        then: F,
+    ) -> impl Stream<Item = (Candidate, T)> + Send + 'static
+    where
+        I: Send + 'static,
+        T: Send + 'static,
+        F: Fn(I, Read) -> T + Clone + Send + 'static,
+    {
         let reader = self.clone();
-        futures::stream::iter(candidates)
-            .map(move |candidate| {
+        futures::stream::iter(items)
+            .map(move |(candidate, item)| {
                 let fs = Arc::clone(&reader.fs);
                 let texts = Arc::clone(&reader.texts);
                 let path = reader.root.join(&*candidate.path);
+                let then = then.clone();
                 reader.executor.spawn(async move {
                     let read = read(&*fs, &texts, &candidate, &path).await;
-                    (candidate, read)
+                    (candidate, then(item, read))
                 })
             })
             .buffered(READERS)

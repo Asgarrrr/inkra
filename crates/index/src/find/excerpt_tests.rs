@@ -5,7 +5,7 @@ use proptest::prelude::*;
 
 use super::excerpt::{EXCERPT_SCAN_BYTES, around_match};
 use super::terms::{Terms, each_word};
-use crate::test_support::{PARTS, find_all, id, load, note_set, rename, vault};
+use crate::test_support::{PARTS, find_all, id, load, note_set, vault};
 use crate::{Excerpt, NoteIndex, NoteMatch, NoteQuery, excerpt};
 
 pub(super) fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
@@ -34,6 +34,7 @@ fn of(text: &str, query: &str) -> Option<Excerpt> {
         &index.snapshot(),
         &found(&index, &query),
         &query,
+        text,
         &AtomicBool::new(false),
     )
 }
@@ -206,6 +207,7 @@ fn a_one_megabyte_word_gives_a_short_excerpt() {
 #[test]
 fn a_set_cancel_gives_none() {
     let (vault, index) = with_texts(&[("plan.md", Some("plan")), ("n.md", Some("a plan"))]);
+    let texts = [("plan.md", "plan"), ("n.md", "a plan")];
     let query = NoteQuery::new("plan", None, &[]);
     let row = |name| {
         let all = find_all(&index.snapshot(), &query, 9);
@@ -214,52 +216,15 @@ fn a_set_cancel_gives_none() {
         };
         found
     };
-    for name in ["plan.md", "n.md"] {
+    for (name, text) in texts {
         let found = row(name);
         let cancel = AtomicBool::new(true);
         assert_eq!(
-            excerpt(&index.snapshot(), &found, &query, &cancel),
+            excerpt(&index.snapshot(), &found, &query, text, &cancel),
             None,
             "{name}"
         );
     }
-}
-
-#[test]
-fn an_unloaded_note_has_no_excerpt() {
-    let (_vault, index) = with_texts(&[("plan.md", None)]);
-    let query = NoteQuery::new("plan", None, &[]);
-    let found = found(&index, &query);
-    assert_eq!(
-        excerpt(&index.snapshot(), &found, &query, &AtomicBool::new(false)),
-        None
-    );
-}
-
-#[test]
-fn a_slot_of_another_note_gives_none() {
-    let (fs, mut vault) = vault(&["a.md", "b.md"]);
-    let mut index = NoteIndex::default();
-    let _ = index.set_notes(note_set(&vault));
-    load(&mut index, id(&vault, "a.md"), "plan");
-    load(&mut index, id(&vault, "b.md"), "plan");
-    let query = NoteQuery::new("b", None, &[]);
-    let found_b = found(&index, &query);
-
-    rename(&fs, &mut vault, "a.md", "c.md");
-    let _ = index.set_notes(note_set(&vault));
-    let snapshot = index.snapshot();
-    assert!(
-        snapshot
-            .corpus()
-            .text(1)
-            .is_some_and(|(at, _)| at == id(&vault, "c.md")),
-        "b's old slot holds c, loaded"
-    );
-    assert_eq!(
-        excerpt(&snapshot, &found_b, &query, &AtomicBool::new(false)),
-        None
-    );
 }
 
 #[test]
@@ -289,7 +254,13 @@ fn a_text_without_a_matching_word_gives_none() {
     let found = found(&index, &NoteQuery::new("plan", None, &[]));
     let other = NoteQuery::new("zzz", None, &[]);
     assert_eq!(
-        excerpt(&index.snapshot(), &found, &other, &AtomicBool::new(false)),
+        excerpt(
+            &index.snapshot(),
+            &found,
+            &other,
+            "a plan",
+            &AtomicBool::new(false)
+        ),
         None
     );
 }

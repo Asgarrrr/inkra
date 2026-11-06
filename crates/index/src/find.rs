@@ -46,6 +46,14 @@ pub struct NoteMatch {
     rank: Rank,
 }
 
+impl NoteMatch {
+    /// The note's place in the snapshot that found it: `IndexSnapshot::candidate` takes it.
+    #[must_use]
+    pub fn order(&self) -> usize {
+        self.rank.order
+    }
+}
+
 /// A note `find_in` kept; `merge_found` builds the `NoteMatch` of the ones it lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ranked(Rank);

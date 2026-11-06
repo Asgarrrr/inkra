@@ -21,17 +21,18 @@ pub struct Excerpt {
     pub highlights: Vec<Range<usize>>,
 }
 
-/// A text row's line around its first match, else the first prose line, markup dropped.
-/// `None` if unloaded, stale, cancelled, unmatched, prose-less, or past `EXCERPT_SCAN_BYTES`.
+/// A text row's line around its first match in `text`, else its first prose line, markup dropped.
+/// `text` is the note's, read through the candidate of the same snapshot.
+/// `None` if cancelled, unmatched, prose-less, or past `EXCERPT_SCAN_BYTES`.
 #[must_use]
 pub fn excerpt(
     snapshot: &IndexSnapshot,
     found: &NoteMatch,
     query: &NoteQuery,
+    text: &str,
     cancel: &AtomicBool,
 ) -> Option<Excerpt> {
-    let (id, text) = snapshot.corpus().text(found.rank.order)?;
-    if id != found.id || cancel.load(Ordering::Relaxed) {
+    if cancel.load(Ordering::Relaxed) {
         return None;
     }
     if found.group == Group::Name || query.is_empty() {

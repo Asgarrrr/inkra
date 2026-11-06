@@ -3,9 +3,10 @@ mod corpus;
 #[path = "names/paths.rs"]
 mod paths;
 
+use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::UNIX_EPOCH;
 
@@ -62,7 +63,10 @@ fn long_stem(lcg: &mut Lcg, note: usize) -> String {
     format!("{folders}/{kind} with {person} about {topic} {note}.md")
 }
 
-fn indexed(corpus: Corpus) -> IndexSnapshot {
+/// Each note's text, as the readers give it to `excerpt`.
+type Texts = HashMap<EntryId, Arc<str>>;
+
+fn indexed(corpus: Corpus) -> (IndexSnapshot, Texts) {
     let mut lcg = Lcg(11);
     let entries = NOTE_IDS
         .iter()
@@ -71,10 +75,12 @@ fn indexed(corpus: Corpus) -> IndexSnapshot {
         .collect();
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(entries));
-    for (&id, content) in NOTE_IDS.iter().zip(contents(&corpus.texts())) {
+    let texts = corpus.texts();
+    for (&id, content) in NOTE_IDS.iter().zip(contents(&texts)) {
         index.insert(id, content);
     }
-    settle(&mut index)
+    let texts = NOTE_IDS.iter().copied().zip(texts).collect();
+    (settle(&mut index), texts)
 }
 
 fn settle(index: &mut NoteIndex) -> IndexSnapshot {
@@ -145,18 +151,20 @@ fn split(snapshot: &IndexSnapshot, query: &NoteQuery, ranges: usize) -> Vec<Note
 
 fn excerpts(
     snapshot: &IndexSnapshot,
+    texts: &Texts,
     rows: &[NoteMatch],
     query: &NoteQuery,
 ) -> Vec<Option<Excerpt>> {
     let cancel = AtomicBool::new(false);
     rows.iter()
-        .map(|found| excerpt(snapshot, found, query, &cancel))
+        .map(|found| excerpt(snapshot, found, query, &texts[&found.id], &cancel))
         .collect()
 }
 
 /// The first `ON_SCREEN` rows' excerpts, one thread each, as quick open spreads them.
 fn on_screen(
     snapshot: &IndexSnapshot,
+    texts: &Texts,
     rows: &[NoteMatch],
     query: &NoteQuery,
 ) -> Vec<Option<Excerpt>> {
@@ -165,7 +173,10 @@ fn on_screen(
         let workers: Vec<_> = rows
             .iter()
             .take(ON_SCREEN)
-            .map(|found| scope.spawn(move || excerpt(snapshot, found, query, cancel)))
+            .map(|found| {
+                let text = &texts[&found.id];
+                scope.spawn(move || excerpt(snapshot, found, query, text, cancel))
+            })
             .collect();
         workers
             .into_iter()
@@ -180,14 +191,17 @@ fn to_names(snapshot: &IndexSnapshot, query: &NoteQuery) -> Vec<NoteMatch> {
 }
 
 /// Then `quick_open/list.rs`'s: the excerpts of the rows on screen.
-fn to_excerpts(snapshot: &IndexSnapshot, query: &NoteQuery) -> Vec<Option<Excerpt>> {
-    on_screen(snapshot, &to_names(snapshot, query), query)
+fn to_excerpts(snapshot: &IndexSnapshot, texts: &Texts, query: &NoteQuery) -> Vec<Option<Excerpt>> {
+    on_screen(snapshot, texts, &to_names(snapshot, query), query)
 }
 
-fn report(corpus: Corpus, case: &str, snapshot: &IndexSnapshot, query: &NoteQuery) {
+fn report(corpus: Corpus, case: &str, snapshot: &IndexSnapshot, texts: &Texts, query: &NoteQuery) {
     let rows = split(snapshot, query, PIPELINE_RANGES);
     let count = |group| rows.iter().filter(|found| found.group == group).count();
-    let lines = excerpts(snapshot, &rows, query).iter().flatten().count();
+    let lines = excerpts(snapshot, texts, &rows, query)
+        .iter()
+        .flatten()
+        .count();
     eprintln!(
         "find, {}, {case}: {} rows ({} name, {} name and text, {} text), {lines} second lines",
         corpus.name(),
@@ -199,10 +213,10 @@ fn report(corpus: Corpus, case: &str, snapshot: &IndexSnapshot, query: &NoteQuer
 }
 
 fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
-    let snapshot = indexed(corpus);
+    let (snapshot, texts) = indexed(corpus);
     let cases = cases(corpus);
     for (case, query) in &cases {
-        report(corpus, case, &snapshot, query);
+        report(corpus, case, &snapshot, &texts, query);
     }
 
     let mut group = c.benchmark_group(format!("find_notes, {}, one core", corpus.name()));
@@ -230,7 +244,7 @@ fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
     for (case, query) in &cases {
         let rows = split(&snapshot, query, PIPELINE_RANGES);
         group.bench_function(case, |b| {
-            b.iter(|| black_box(excerpts(&snapshot, &rows, query)));
+            b.iter(|| black_box(excerpts(&snapshot, &texts, &rows, query)));
         });
     }
     group.finish();
@@ -249,7 +263,7 @@ fn bench_corpus(c: &mut Criterion, corpus: Corpus) {
     ));
     for (case, query) in &cases {
         group.bench_function(case, |b| {
-            b.iter(|| black_box(to_excerpts(&snapshot, query)));
+            b.iter(|| black_box(to_excerpts(&snapshot, &texts, query)));
         });
     }
     group.finish();
@@ -290,20 +304,20 @@ fn bench_adversarial(c: &mut Criterion) {
     let snapshot = settle(&mut index);
     let cancel = AtomicBool::new(false);
     let mut group = c.benchmark_group("excerpt, adversarial");
-    for (case, text, _) in &notes {
-        let query = NoteQuery::new(text, None, &[]);
+    for (case, query, text) in &notes {
+        let query = NoteQuery::new(query, None, &[]);
         let rows = find(&snapshot, &query, &Serial);
         let [found] = rows.as_slice() else {
             panic!("{case}: one row, found {}", rows.len());
         };
-        let shown = excerpt(&snapshot, found, &query, &cancel);
+        let shown = excerpt(&snapshot, found, &query, text, &cancel);
         eprintln!(
             "excerpt, adversarial, {case}: {:?} group, {:?} bytes shown",
             found.group,
             shown.map(|shown| shown.text.len())
         );
         group.bench_function(*case, |b| {
-            b.iter(|| black_box(excerpt(&snapshot, found, &query, &cancel)));
+            b.iter(|| black_box(excerpt(&snapshot, found, &query, text, &cancel)));
         });
     }
     group.finish();

@@ -39,6 +39,18 @@ impl IndexSnapshot {
         fan_out(self, query, jobs, cancel, scan, merge).await
     }
 
+    /// The note at `order` as a read: `None` while it is not loaded, or past the end.
+    #[must_use]
+    pub fn candidate(&self, order: usize) -> Option<Candidate> {
+        let stamp = self.corpus().stamp(order)?;
+        let names = self.names();
+        Some(Candidate {
+            id: names.id(order),
+            path: names.file(order).clone(),
+            stamp,
+        })
+    }
+
     /// Vault search's reads: each note whose words hold every term, in vault order, with the
     /// stamp of the text the words came from. `None` once `cancel` is set.
     ///
@@ -61,14 +73,10 @@ impl IndexSnapshot {
                 if !holds {
                     continue;
                 }
-                let Some(stamp) = self.corpus().stamp(order) else {
+                let Some(candidate) = self.candidate(order) else {
                     panic!("note {id:?} holds words but was never loaded");
                 };
-                candidates.push(Candidate {
-                    id,
-                    path: names.file(order).clone(),
-                    stamp,
-                });
+                candidates.push(candidate);
             }
         }
         Some(candidates)

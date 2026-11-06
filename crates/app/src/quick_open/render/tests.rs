@@ -32,7 +32,7 @@ fn rows(path: &str, text: &str, query: &str) -> Vec<Row> {
         .unwrap_or_default()
         .into_iter()
         .map(|found| {
-            let excerpt = excerpt(&snapshot, &found, &query, &cancel);
+            let excerpt = excerpt(&snapshot, &found, &query, text, &cancel);
             Row::new(found, excerpt)
         })
         .collect()
