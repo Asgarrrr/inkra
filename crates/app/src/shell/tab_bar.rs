@@ -238,7 +238,7 @@ impl AppShell {
             )
     }
 
-    /// The menu's entries act on `last_center`, which the press has just made `group`.
+    /// The menu's entries act on the focused group, which the press has just made `group`.
     /// `prevent_default`: the root would take focus from the menu on the press (`div.rs:2765-2780`).
     fn open_tab_menu(
         &mut self,
@@ -251,6 +251,9 @@ impl AppShell {
         window.prevent_default();
         self.activate_group(group, window, cx);
         self.activate_tab(group, id, window, cx);
+        if let Some(focus) = self.land_focus(cx) {
+            window.focus(&focus, cx);
+        }
         let entries: Vec<(SharedString, Box<dyn Action>)> = vec![
             ("Split Right".into(), Box::new(SplitRight)),
             ("Split Down".into(), Box::new(SplitDown)),

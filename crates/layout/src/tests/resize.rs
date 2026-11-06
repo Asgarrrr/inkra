@@ -2,7 +2,7 @@ use proptest::prelude::*;
 
 use super::tree::{built, tree_op};
 use crate::resize::minimum;
-use crate::{Axis, GroupId, Layout, Member, Shape, Side, SplitPath, Surface};
+use crate::{Axis, GroupId, Layout, Member, Shape, Side, SplitDirection, SplitPath, Surface};
 
 fn path(surface: Surface, steps: &[usize]) -> SplitPath {
     SplitPath {
@@ -150,7 +150,7 @@ fn a_drag_against_a_nested_split_stops_at_its_minimum() {
 fn a_drag_in_a_dock_resizes_its_groups() {
     let mut layout = Layout::default();
     let files = layout.dock_groups(Side::Left)[0];
-    layout.split(files, Axis::Vertical);
+    layout.split(files, SplitDirection::Down);
     let dock = path(Surface::Dock(Side::Left), &[]);
 
     assert!(layout.resize(&dock, 1, 100.0, 1000.0, flat(100.0)));

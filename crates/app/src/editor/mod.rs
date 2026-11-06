@@ -17,8 +17,8 @@ use std::rc::Rc;
 use gpui::Bounds;
 use gpui::{
     App, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    MouseButton, ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription,
-    TextStyle, Window, div,
+    MouseButton, ParentElement, Pixels, Point, Render, StatefulInteractiveElement, Styled,
+    Subscription, TextStyle, Window, div,
 };
 use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
@@ -253,6 +253,10 @@ impl EditorView {
 
     pub(crate) fn cursor(&self) -> ByteOffset {
         self.input.cursor()
+    }
+
+    pub(crate) fn caret_point(&self) -> Option<Point<Pixels>> {
+        self.input.caret_point()
     }
 
     /// Seals the undo group even with no edit, so typing on both sides of a tab switch undoes in two steps.

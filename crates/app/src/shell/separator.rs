@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use gpui::{
     App, AppContext, Bounds, Context, Div, DragMoveEvent, ElementId, Empty, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Render, Stateful,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Render, Size, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, px, size,
 };
-use inkra_layout::{Axis, GroupId, Member, Side, SplitPath, Surface};
+use inkra_layout::{Axis, GroupId, Member, Rect, Side, SplitPath, Surface};
 
 use super::dock_chrome::{name, width};
 use super::group::selector;
@@ -212,30 +212,36 @@ impl AppShell {
 
     /// Whether both halves of `group` split along `axis` would keep its minimum.
     pub(super) fn fits_split(&self, group: GroupId, axis: Axis, window: &Window) -> bool {
-        let surface = self.layout.surface_of(group);
-        let Some((_, rect)) = self
-            .layout
-            .rects(surface)
-            .into_iter()
-            .find(|&(held, _)| held == group)
-        else {
+        let Some(rect) = self.rect_of(group) else {
             return false;
         };
-        let viewport = window.viewport_size();
+        let room = self.surface_size(self.layout.surface_of(group), window);
         let (share, room) = match axis {
-            Axis::Horizontal => (
-                rect.width,
-                match surface {
-                    Surface::Center => {
-                        let (lead, trail) = self.dock_ends();
-                        viewport.width - lead - trail
-                    }
-                    Surface::Dock(side) => width(side),
-                },
-            ),
-            Axis::Vertical => (rect.height, viewport.height - theme::TITLE_BAR_HEIGHT),
+            Axis::Horizontal => (rect.width, room.width),
+            Axis::Vertical => (rect.height, room.height),
         };
         f32::from(room) * share / 2. >= self.min_sizes(window)[&(group, axis)]
+    }
+
+    /// `group`'s share of its surface.
+    pub(super) fn rect_of(&self, group: GroupId) -> Option<Rect> {
+        self.layout
+            .rects(self.layout.surface_of(group))
+            .into_iter()
+            .find_map(|(held, rect)| (held == group).then_some(rect))
+    }
+
+    /// The room `surface`'s unit square stands for, under the title row.
+    pub(super) fn surface_size(&self, surface: Surface, window: &Window) -> Size<Pixels> {
+        let viewport = window.viewport_size();
+        let width = match surface {
+            Surface::Center => {
+                let (lead, trail) = self.dock_ends();
+                viewport.width - lead - trail
+            }
+            Surface::Dock(side) => width(side),
+        };
+        size(width, viewport.height - theme::TITLE_BAR_HEIGHT)
     }
 }
 

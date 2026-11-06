@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use proptest::prelude::*;
 
 use crate::tree::{normalised, rects};
-use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side, Surface};
+use crate::{Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, Surface};
 
 fn group(raw: u32) -> Member {
     Member::Group(GroupId(raw))
@@ -54,8 +54,8 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 fn grid() -> (Layout, [GroupId; 3]) {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
-    let third = layout.split(second, Axis::Vertical);
+    let second = layout.split(first, SplitDirection::Right);
+    let third = layout.split(second, SplitDirection::Down);
     (layout, [first, second, third])
 }
 
@@ -64,7 +64,7 @@ fn split_down_stacks_the_new_group_below() {
     let mut layout = Layout::default();
     let first = layout.last_center();
 
-    let second = layout.split(first, Axis::Vertical);
+    let second = layout.split(first, SplitDirection::Down);
 
     assert_eq!(
         layout.center(),
@@ -107,9 +107,9 @@ fn split_down_stacks_the_new_group_below() {
 fn a_same_axis_split_inserts_a_sibling() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Vertical);
+    let second = layout.split(first, SplitDirection::Down);
 
-    let third = layout.split(first, Axis::Vertical);
+    let third = layout.split(first, SplitDirection::Down);
 
     assert_eq!(
         layout.center(),
@@ -238,7 +238,7 @@ fn rects_tile_the_unit_square() {
         ]
     );
 
-    let fourth = layout.split(first, Axis::Horizontal);
+    let fourth = layout.split(first, SplitDirection::Right);
     assert_eq!(
         layout.rects(Surface::Center),
         [
@@ -255,11 +255,11 @@ fn top_groups_skip_a_lower_group() {
     let (mut layout, [first, second, third]) = grid();
     assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
-    let fourth = layout.split(first, Axis::Vertical);
+    let fourth = layout.split(first, SplitDirection::Down);
     assert_eq!(layout.center_groups(), [first, fourth, second, third]);
     assert_eq!(layout.top_groups(Surface::Center), [first, second]);
 
-    let fifth = layout.split(second, Axis::Horizontal);
+    let fifth = layout.split(second, SplitDirection::Right);
     assert_eq!(layout.top_groups(Surface::Center), [first, second, fifth]);
 
     let layout = Layout {
@@ -282,7 +282,7 @@ fn a_deep_vertical_split_keeps_one_top_group() {
     let mut layout = Layout::default();
     let top = layout.center_groups()[0];
     for _ in 0..12 {
-        layout.split(top, Axis::Vertical);
+        layout.split(top, SplitDirection::Down);
     }
     assert_eq!(layout.top_groups(Surface::Center), [top]);
 
@@ -328,8 +328,8 @@ fn remove_in_a_nested_split_hands_the_room_to_the_sibling() {
 
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
-    let third = layout.split(first, Axis::Vertical);
+    let second = layout.split(first, SplitDirection::Right);
+    let third = layout.split(first, SplitDirection::Down);
     layout.activate(second);
     assert_eq!(layout.remove(second), Some(third));
     assert_eq!(
@@ -380,7 +380,7 @@ fn restored_assigns_ids_depth_first_centre_then_docks() {
     assert_eq!(layout.last_center(), GroupId(0));
     assert!(!layout.is_shown(Side::Left));
     assert!(layout.is_shown(Side::Right));
-    assert_eq!(layout.split(GroupId(2), Axis::Horizontal), GroupId(5));
+    assert_eq!(layout.split(GroupId(2), SplitDirection::Right), GroupId(5));
 
     let mut layout = Layout::restored(&Shape::Group, [None, Some(&Shape::Group)], [true, false], 0);
     assert_eq!(layout.dock(Side::Left), None);
@@ -512,16 +512,21 @@ fn is_normalised(member: &Member) -> bool {
 /// `Split` and `Remove` pick from every surface's groups, `Activate` from the centre's.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum TreeOp {
-    Split(usize, Axis),
+    Split(usize, SplitDirection),
     Remove(usize),
     Activate(usize),
     Add(Side),
 }
 
 pub(super) fn tree_op() -> impl Strategy<Value = TreeOp> {
-    let axis = prop_oneof![Just(Axis::Horizontal), Just(Axis::Vertical)];
+    let direction = prop_oneof![
+        Just(SplitDirection::Up),
+        Just(SplitDirection::Down),
+        Just(SplitDirection::Left),
+        Just(SplitDirection::Right),
+    ];
     prop_oneof![
-        (any::<usize>(), axis).prop_map(|(pick, axis)| TreeOp::Split(pick, axis)),
+        (any::<usize>(), direction).prop_map(|(pick, direction)| TreeOp::Split(pick, direction)),
         any::<usize>().prop_map(TreeOp::Remove),
         any::<usize>().prop_map(TreeOp::Activate),
         prop_oneof![Just(Side::Left), Just(Side::Right)].prop_map(TreeOp::Add),
@@ -543,8 +548,8 @@ pub(super) fn built(ops: &[TreeOp]) -> Layout {
         let groups: Vec<_> = layout.groups().collect();
         let center = layout.center_groups();
         match op {
-            TreeOp::Split(pick, axis) => {
-                layout.split(groups[pick % groups.len()], axis);
+            TreeOp::Split(pick, direction) => {
+                layout.split(groups[pick % groups.len()], direction);
             }
             TreeOp::Remove(pick) => {
                 if let Some(group) = removable(&layout, pick) {
@@ -597,10 +602,10 @@ proptest! {
             let groups: Vec<_> = layout.groups().collect();
             let center = layout.center_groups();
             match op {
-                TreeOp::Split(pick, axis) => {
+                TreeOp::Split(pick, direction) => {
                     let group = groups[pick % groups.len()];
                     let surface = layout.surface_of(group);
-                    let split = layout.split(group, axis);
+                    let split = layout.split(group, direction);
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
                     prop_assert_eq!(layout.surface_of(split), surface);
                 }

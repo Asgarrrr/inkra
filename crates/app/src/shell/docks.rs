@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use gpui::{
     Action, App, AppContext, Context, Focusable, Pixels, Point, SharedString, Window, actions,
 };
-use inkra_layout::{Axis, GroupId, Side, Surface, View};
+use inkra_layout::{GroupId, Side, SplitDirection, Surface, View};
 use inkra_tabs::{Closed, TabId};
 
 use super::AppShell;
@@ -25,12 +25,12 @@ actions!(
     ]
 );
 
-/// `view` out of its dock group into a fresh one after it along `axis` (splits spec, S8).
+/// `view` out of its dock group into a fresh one on its `direction` side (splits spec, S8).
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = docks, no_json)]
 pub(crate) struct SplitView {
     pub(crate) view: View,
-    pub(crate) axis: Axis,
+    pub(crate) direction: SplitDirection,
 }
 
 /// Each dock group, depth-first, left then right: its views in tab order and its active view.
@@ -89,17 +89,19 @@ impl AppShell {
 
     pub(super) fn split_view(
         &mut self,
-        &SplitView { view, axis }: &SplitView,
+        &SplitView { view, direction }: &SplitView,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.change_layout(window, cx, |shell, window, cx| {
             let (group, tab) = shell.tab_of(view);
-            if shell.group(group).tabs.count() < 2 || !shell.fits_split(group, axis, window) {
+            if shell.group(group).tabs.count() < 2
+                || !shell.fits_split(group, direction.axis(), window)
+            {
                 return;
             }
             shell.take_view_tab(group, tab, window, cx);
-            let fresh = shell.layout.split(group, axis);
+            let fresh = shell.layout.split(group, direction);
             shell.groups.insert(fresh, Group::holding(&[view], 0));
         });
     }
@@ -135,11 +137,11 @@ impl AppShell {
         };
         let mut entries = vec![(SharedString::from(move_label), move_action)];
         if self.group(self.tab_of(view).0).tabs.count() > 1 {
-            for (label, axis) in [
-                ("Split Right", Axis::Horizontal),
-                ("Split Down", Axis::Vertical),
+            for (label, direction) in [
+                ("Split Right", SplitDirection::Right),
+                ("Split Down", SplitDirection::Down),
             ] {
-                let split: Box<dyn Action> = Box::new(SplitView { view, axis });
+                let split: Box<dyn Action> = Box::new(SplitView { view, direction });
                 entries.push((SharedString::from(label), split));
             }
         }
@@ -273,7 +275,7 @@ impl AppShell {
 
     /// # Panics
     /// Only on a broken invariant: each view sits in exactly one dock tab.
-    fn tab_of(&self, view: View) -> (GroupId, TabId) {
+    pub(super) fn tab_of(&self, view: View) -> (GroupId, TabId) {
         [Side::Left, Side::Right]
             .into_iter()
             .flat_map(|side| self.layout.dock_groups(side))

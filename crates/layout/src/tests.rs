@@ -2,8 +2,11 @@ use std::collections::HashSet;
 
 use proptest::prelude::*;
 
-use super::{Axis, GroupId, Layout, Member, Side, StoredDock, Surface, View, restore_views};
+use super::{
+    Axis, GroupId, Layout, Member, Side, SplitDirection, StoredDock, Surface, View, restore_views,
+};
 
+mod direction;
 mod resize;
 mod surface;
 mod tree;
@@ -130,13 +133,13 @@ fn removing_the_centre_panics() {
 fn split_right_puts_the_new_group_after_and_halves_its_room() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
+    let second = layout.split(first, SplitDirection::Right);
     assert_eq!(row(&layout).0, [first, second]);
     assert_eq!(row(&layout).1, [1.0, 1.0]);
     assert_eq!(layout.last_center(), first);
     assert_eq!(layout.surface_of(second), Surface::Center);
 
-    let third = layout.split(first, Axis::Horizontal);
+    let third = layout.split(first, SplitDirection::Right);
     assert_eq!(row(&layout).0, [first, third, second]);
     assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
     let handed: HashSet<_> = layout.groups().collect();
@@ -154,8 +157,8 @@ fn split_right_puts_the_new_group_after_and_halves_its_room() {
 fn split_right_keeps_the_other_groups_widths() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
-    layout.split(second, Axis::Horizontal);
+    let second = layout.split(first, SplitDirection::Right);
+    layout.split(second, SplitDirection::Right);
     assert_eq!(row(&layout).1, [1.5, 0.75, 0.75]);
 }
 
@@ -170,8 +173,8 @@ fn removing_a_dock_group_returns_no_heir() {
 fn removing_a_centre_group_gives_its_room_to_the_left() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split(first, Axis::Horizontal);
-    let second = layout.split(first, Axis::Horizontal);
+    let third = layout.split(first, SplitDirection::Right);
+    let second = layout.split(first, SplitDirection::Right);
     assert_eq!(row(&layout).1, [0.75, 0.75, 1.5]);
 
     assert_eq!(layout.remove(second), Some(first));
@@ -189,8 +192,8 @@ fn removing_a_centre_group_gives_its_room_to_the_left() {
 fn the_first_group_gives_its_room_to_the_right() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let third = layout.split(first, Axis::Horizontal);
-    let second = layout.split(first, Axis::Horizontal);
+    let third = layout.split(first, SplitDirection::Right);
+    let second = layout.split(first, SplitDirection::Right);
 
     assert_eq!(layout.remove(first), Some(second));
 
@@ -202,8 +205,8 @@ fn the_first_group_gives_its_room_to_the_right() {
 fn removing_the_last_center_moves_it_to_the_heir() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
-    let third = layout.split(second, Axis::Horizontal);
+    let second = layout.split(first, SplitDirection::Right);
+    let third = layout.split(second, SplitDirection::Right);
     layout.activate(second);
 
     assert_eq!(layout.remove(second), Some(first));
@@ -219,7 +222,7 @@ fn removing_the_last_center_moves_it_to_the_heir() {
 fn removing_the_centres_only_group_panics() {
     let mut layout = Layout::default();
     let first = layout.last_center();
-    let second = layout.split(first, Axis::Horizontal);
+    let second = layout.split(first, SplitDirection::Right);
     layout.remove(first);
     layout.remove(second);
 }
@@ -235,7 +238,7 @@ fn activating_a_dock_group_panics() {
 #[should_panic(expected = "is not in the layout")]
 fn splitting_an_absent_group_panics() {
     let mut layout = Layout::default();
-    layout.split(GroupId(7), Axis::Horizontal);
+    layout.split(GroupId(7), SplitDirection::Right);
 }
 
 #[test]
@@ -493,7 +496,7 @@ proptest! {
                 CentreOp::Split(pick) => {
                     let center = layout.center_groups();
                     let group = center[pick % center.len()];
-                    let split = layout.split(group, Axis::Horizontal);
+                    let split = layout.split(group, SplitDirection::Right);
                     prop_assert!(handed.insert(split), "{split:?} handed out twice");
                     changed = vec![group, split];
                 }

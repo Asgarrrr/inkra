@@ -1,6 +1,6 @@
 //! The centre's tree of groups, normalised after every mutation (splits spec, Layout and L7).
 
-use crate::{GroupId, Layout};
+use crate::{GroupId, Layout, SplitDirection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
@@ -114,14 +114,18 @@ impl Member {
         }
     }
 
-    /// Whether `group` was found; it becomes a split on `axis` with `fresh`, which normalising
-    /// splices into a parent on `axis`, the two halving the group's flex.
-    fn split(&mut self, group: GroupId, fresh: GroupId, axis: Axis) -> bool {
+    /// Whether `group` was found; it becomes a split on `axis` with `fresh`, `before` it or after,
+    /// which normalising splices into a parent on `axis`, the two halving the group's flex.
+    fn split(&mut self, group: GroupId, fresh: GroupId, axis: Axis, before: bool) -> bool {
         match self {
             Self::Group(held) if *held == group => {
+                let mut children = vec![Self::Group(group), Self::Group(fresh)];
+                if before {
+                    children.reverse();
+                }
                 *self = Self::Split {
                     axis,
-                    children: vec![Self::Group(group), Self::Group(fresh)],
+                    children,
                     flexes: vec![1.0, 1.0],
                 };
                 true
@@ -129,7 +133,7 @@ impl Member {
             Self::Group(_) => false,
             Self::Split { children, .. } => children
                 .iter_mut()
-                .any(|child| child.split(group, fresh, axis)),
+                .any(|child| child.split(group, fresh, axis, before)),
         }
     }
 
@@ -197,15 +201,15 @@ impl Layout {
         self.center.groups()
     }
 
-    /// A fresh group after `group` on `axis`, on `group`'s surface: a sibling sharing `group`'s
-    /// room when its parent splits on `axis`, else a new split in `group`'s place.
+    /// A fresh group on `group`'s `direction` side, on `group`'s surface: a sibling sharing
+    /// `group`'s room when its parent splits on that axis, else a new split in `group`'s place.
     ///
     /// # Panics
     /// If `group` is not in this layout.
-    pub fn split(&mut self, group: GroupId, axis: Axis) -> GroupId {
+    pub fn split(&mut self, group: GroupId, direction: SplitDirection) -> GroupId {
         let fresh = GroupId(self.next);
         let member = self.holder_mut(group);
-        member.split(group, fresh, axis);
+        member.split(group, fresh, direction.axis(), direction.before());
         normalise(member);
         self.next += 1;
         fresh

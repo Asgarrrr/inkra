@@ -39,6 +39,10 @@ use panes::VaultPanes;
 use session::{Restore, SessionFile};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use group::{
+    ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,
+    SplitRight, SplitUp,
+};
 pub(crate) use tabs::{
     ActivateLastTab, ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab,
     ReopenClosedTab,

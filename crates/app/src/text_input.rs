@@ -130,6 +130,12 @@ impl TextInput {
         self.last_bounds
     }
 
+    /// The caret's centre in window coordinates; `None` before the first draw.
+    pub(crate) fn caret_point(&self) -> Option<Point<Pixels>> {
+        let (bounds, layout) = (self.last_bounds?, self.last_layout.as_ref()?);
+        Some(bounds.origin + layout.caret_bounds(self.cursor()).center())
+    }
+
     /// The layout and a window point in its coordinates. `last_bounds` is already
     /// scrolled, so no caller subtracts the offset.
     pub(crate) fn hit_test(
