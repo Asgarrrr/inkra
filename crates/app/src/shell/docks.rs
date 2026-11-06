@@ -6,12 +6,9 @@ use gpui::{
     Action, App, AppContext, Context, Focusable, Pixels, Point, SharedString, Window, actions,
 };
 use inkra_layout::{GroupId, Side, SplitDirection, Surface, View};
-use inkra_tabs::{Closed, TabId};
+use inkra_tabs::TabId;
 
 use super::AppShell;
-use super::group::Group;
-use super::parked::Parked;
-use super::tabs::{Place, capture};
 use crate::sidebar::Sidebar;
 use crate::ui::{ContextMenu, IconName};
 
@@ -33,8 +30,8 @@ pub(crate) struct SplitView {
     pub(crate) direction: SplitDirection,
 }
 
-/// Each dock group, depth-first, left then right: its views in tab order and its active view.
-type DockState = Vec<(GroupId, Vec<View>, Option<View>)>;
+/// Each group in `Layout::groups` order: its views in tab order, its active view and its tab count.
+type TabState = Vec<(Vec<View>, Option<View>, usize)>;
 
 pub(super) fn title(view: View) -> &'static str {
     match view {
@@ -100,9 +97,9 @@ impl AppShell {
             {
                 return;
             }
-            shell.take_view_tab(group, tab, window, cx);
+            let detached = shell.detach(group, tab, window, cx);
             let fresh = shell.layout.split(group, direction);
-            shell.groups.insert(fresh, Group::holding(&[view], 0));
+            shell.attach_alone(detached, fresh, window, cx);
         });
     }
 
@@ -154,20 +151,23 @@ impl AppShell {
         self.change_layout(window, cx, |shell, _, _| shell.layout.toggle(side));
     }
 
-    /// Activates `view` in its dock and shows that dock.
+    /// Activates `view` in its group, and shows its dock or makes its centre group the active one.
     pub(super) fn reveal(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
         self.change_layout(window, cx, |shell, window, cx| {
-            let side = shell.side_of(view);
             let (group, tab) = shell.tab_of(view);
             shell.activate_tab(group, tab, window, cx);
-            shell.layout.show(side);
+            match shell.layout.surface_of(group) {
+                Surface::Center => shell.switch_group(group, cx),
+                Surface::Dock(side) => shell.layout.show(side),
+            }
         });
     }
 
-    /// Docks rules 1 and 2. `index` counts in dock group `to` after `view` left it.
+    /// Docks rules 1 and 2, and a view into the centre (P4). `index` counts in group `to` after
+    /// `view` left it. A centre group `to` becomes the active one and takes the focus.
     ///
     /// # Panics
-    /// If `index` is past the end of that group, or `to` is not a dock group.
+    /// If `index` is past the end of that group.
     pub(super) fn move_view(
         &mut self,
         view: View,
@@ -176,9 +176,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Surface::Dock(side) = self.layout.surface_of(to) else {
-            panic!("{to:?} is not a dock group");
-        };
+        let surface = self.layout.surface_of(to);
         self.change_layout(window, cx, |shell, window, cx| {
             let (source, tab) = shell.tab_of(view);
             let len = shell.group(to).tabs.count() - usize::from(source == to);
@@ -190,11 +188,19 @@ impl AppShell {
                 shell.group_mut(source).tabs.move_tab(tab, index);
                 shell.activate_tab(source, tab, window, cx);
             } else {
-                shell.take_view_tab(source, tab, window, cx);
-                shell.put_view_tab(view, to, index, window, cx);
+                let detached = shell.detach(source, tab, window, cx);
+                shell.attach(detached, to, index, window, cx);
             }
-            shell.layout.show(side);
+            match surface {
+                Surface::Center => shell.switch_group(to, cx),
+                Surface::Dock(side) => shell.layout.show(side),
+            }
         });
+        if surface == Surface::Center
+            && let Some(focus) = self.land_focus(cx)
+        {
+            window.focus(&focus, cx);
+        }
     }
 
     /// Moves `view` to the end of `side`'s first group, as `move_view` does; to a fresh dock on an empty side.
@@ -206,93 +212,55 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if let Some(&group) = self.layout.dock_groups(side).first() {
-            let index = self.group(group).tabs.count() - usize::from(self.tab_of(view).0 == group);
-            self.move_view(view, group, index, window, cx);
+            self.drop_view_at_end(view, group, window, cx);
             return;
         }
         self.change_layout(window, cx, |shell, window, cx| {
             let (source, tab) = shell.tab_of(view);
-            shell.take_view_tab(source, tab, window, cx);
+            let detached = shell.detach(source, tab, window, cx);
             let group = shell.layout.add_dock(side);
-            shell.groups.insert(group, Group::holding(&[view], 0));
+            shell.attach_alone(detached, group, window, cx);
             shell.layout.show(side);
         });
     }
 
-    /// A dock's last tab takes its group with it (docks rule 3).
-    fn take_view_tab(
-        &mut self,
-        group: GroupId,
-        tab: TabId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.group(group).tabs.count() == 1 {
-            self.layout.remove(group);
-            self.groups.remove(&group);
-            return;
-        }
-        let Group { tabs, shown, .. } = self.group_mut(group);
-        let closed = tabs.close(tab, |slot| match slot {
-            None => capture(shown, cx),
-            Some(parked) => parked.unpark(cx),
-        });
-        if let Some(Closed {
-            shown: Some((_, parked)),
-            ..
-        }) = closed
-        {
-            let place = parked.unpark(cx);
-            self.display(group, place, window, cx);
-        }
-    }
-
-    fn put_view_tab(
-        &mut self,
-        view: View,
-        group: GroupId,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Group { tabs, shown, .. } = self.group_mut(group);
-        tabs.insert(index, || Parked::park(shown, cx));
-        self.display(group, Place::View(view), window, cx);
-    }
-
-    /// Its dock is drawn and it is its group's active view.
+    /// It is its group's active view, and that group is in the centre or a drawn dock.
     pub(super) fn is_visible(&self, view: View) -> bool {
         let (group, _) = self.tab_of(view);
-        self.layout.is_drawn(self.side_of(view)) && self.group(group).shown.view() == Some(view)
+        let drawn = match self.layout.surface_of(group) {
+            Surface::Center => true,
+            Surface::Dock(side) => self.layout.is_drawn(side),
+        };
+        drawn && self.group(group).shown.view() == Some(view)
     }
 
+    /// Its dock's side; a view in the centre counts as on its default side.
     pub(super) fn side_of(&self, view: View) -> Side {
-        let Surface::Dock(side) = self.layout.surface_of(self.tab_of(view).0) else {
-            unreachable!("a view sits in a dock group");
-        };
-        side
+        match self.layout.surface_of(self.tab_of(view).0) {
+            Surface::Center => view.default_side(),
+            Surface::Dock(side) => side,
+        }
     }
 
     /// # Panics
-    /// Only on a broken invariant: each view sits in exactly one dock tab.
+    /// Only on a broken invariant: each view sits in exactly one tab.
     pub(super) fn tab_of(&self, view: View) -> (GroupId, TabId) {
-        [Side::Left, Side::Right]
-            .into_iter()
-            .flat_map(|side| self.layout.dock_groups(side))
+        self.layout
+            .groups()
             .find_map(|group| {
                 let (tab, _) = self.group(group).views().find(|&(_, held)| held == view)?;
                 Some((group, tab))
             })
-            .unwrap_or_else(|| panic!("{view:?} sits in no dock"))
+            .unwrap_or_else(|| panic!("{view:?} sits in no tab"))
     }
 
-    fn dock_state(&self) -> DockState {
-        [Side::Left, Side::Right]
-            .into_iter()
-            .flat_map(|side| self.layout.dock_groups(side))
+    fn tab_state(&self) -> TabState {
+        self.layout
+            .groups()
             .map(|group| {
-                let group_views = self.group(group).views().map(|(_, view)| view).collect();
-                (group, group_views, self.group(group).shown.view())
+                let group = self.group(group);
+                let group_views = group.views().map(|(_, view)| view).collect();
+                (group_views, group.shown.view(), group.tabs.count())
             })
             .collect()
     }
@@ -311,10 +279,10 @@ impl AppShell {
         if self.panes.is_none() {
             return;
         }
-        let (layout, docks) = (self.layout.clone(), self.dock_state());
+        let (layout, tabs) = (self.layout.clone(), self.tab_state());
         let files_shown = self.is_visible(View::Files);
         change(self, window, cx);
-        if self.layout == layout && self.dock_state() == docks {
+        if self.layout == layout && self.tab_state() == tabs {
             return;
         }
         if files_shown
@@ -352,18 +320,12 @@ impl AppShell {
             "the last active group is in the centre"
         );
         for group in self.layout.center_groups() {
-            assert_eq!(
-                self.group(group).views().count(),
-                0,
-                "the centre holds no view"
-            );
             assert!(
                 self.editor_of(group)
                     .is_none_or(|editor| editor.read(cx).is_pinned() == (group != last)),
                 "an editor is pinned exactly when its group is not the last active"
             );
         }
-        let mut views = Vec::new();
         for side in [Side::Left, Side::Right] {
             for group in self.layout.dock_groups(side) {
                 let group = self.group(group);
@@ -372,9 +334,12 @@ impl AppShell {
                     group.tabs.count(),
                     "a dock tab holds a view"
                 );
-                views.extend(group.views().map(|(_, view)| view));
             }
         }
+        let views: Vec<View> = held
+            .iter()
+            .flat_map(|&group| self.group(group).views().map(|(_, view)| view))
+            .collect();
         for view in View::ALL {
             let tabs = views.iter().filter(|&&held| held == view).count();
             assert_eq!(tabs, 1, "{view:?} sits in exactly one tab");

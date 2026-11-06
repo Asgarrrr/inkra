@@ -69,22 +69,15 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
         id: TabId,
         closing: impl FnOnce(Option<Q>) -> P,
     ) -> Option<Closed<P, Q>> {
-        let index = self.index_of(id)?;
-        let was_active = id == self.active;
-        let tab = self.list.remove(index);
-        let slot = match (was_active, tab.place) {
-            (true, None) => None,
-            (false, Some(parked)) => Some(parked),
-            _ => panic!("H8: a tab's slot is empty exactly when it is active"),
-        };
-        let place = closing(slot);
+        let (index, tab) = self.remove(id)?;
+        let was_active = tab.place.is_none();
+        let place = closing(tab.place);
         self.remember(ClosedTab {
             place: place.clone(),
             index,
             back: tab.back,
             forward: tab.forward,
         });
-        self.mru.retain(|&other| other != id);
         if self.list.is_empty() {
             let fresh = self.fresh_id();
             self.list.push(Tab {
@@ -93,14 +86,7 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
             });
             self.mru.push(fresh);
         }
-        let shown = was_active.then(|| {
-            self.active = self.mru[0];
-            let index = self.active_index();
-            let Some(place) = self.list[index].place.take() else {
-                panic!("H8: the tab taking over held no place");
-            };
-            (self.active, place)
-        });
+        let shown = was_active.then(|| self.show_next());
         Some(Closed {
             place,
             index,

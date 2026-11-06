@@ -113,8 +113,8 @@ L1, L2 and L6 span the layout and the groups' tabs: the app's one writer
 
 A `Tabs` stays one group. Two changes:
 
-- `TabId`s come from one counter shared by every group, so an id is unique in
-  the window;
+- a tab moved into a group takes a fresh id from that group's counter, so an
+  id is unique in its group *(delegated, S11)*;
 - `take(id) -> Detached` and `put(detached, at)` move a tab between groups with
   its back and forward stacks. `take` on the active tab runs the leave's `park`
   as `activate` does; the tabs spec's H8 holds on both sides.
@@ -275,6 +275,7 @@ The P rows below are the phases; this run lands them as S1–S6, and the follow-
 | S8 | Dock trees: `Option<Member>` per dock, drawn, split from the dock menu, saved and restored. | Files above Backlinks in one dock |
 | S9 | P2 separators: drag to resize, double-click to equalise, minimum sizes, the split refused for room. | Resizable splits |
 | S10 | P3 `⌘K` keys: split in four directions, focus the neighbour. | Keyboard splits |
+| S11 | P4 tab moves: `take`/`put` between groups, views into the centre, notes refused on docks. | Drag a tab to another group, Files into the centre |
 
 A follow-up run covers the rest:
 
@@ -501,6 +502,42 @@ S10's choices:
   and `surface.rs` and the palette test in `splits.rs` change with it. The
   palette label of Split right now carries its key. These edits sit outside the
   slice's files.
+
+S11's choices:
+
+- `TabId`s stay per group: `put` gives the moved tab a fresh id from the
+  receiving group's counter *(delegated)*. This replaces the spec's shared
+  counter. Every app use is keyed by `(group, id)`, and T4 lets an open pending
+  on the moved tab land nowhere.
+- Two payloads: a note tab drags a `DraggedTab`, a view tab a `DraggedView`
+  *(delegated)*. gpui exposes no reader for the active drag, so a dock refuses a
+  note (L2) by listening to `DraggedView` only. Centre strips, tabs, headers and
+  bodies accept both; a body takes the drop at the end of its group.
+- A same-group `DraggedTab` over a body is ignored; over a tab it reorders, as before.
+- A group of one tab leaves with its tab (L6). The centre's only group keeps an
+  empty tab instead (L3), so a lone view moved out of it leaves `Place::Empty`.
+- The × of a view tab in the centre returns the view to its default dock, not
+  out of the window *(delegated)*. A view closes from its dock.
+- `Open::Here` whose target tab shows a view opens a new tab in that group, and
+  the view stays *(delegated)*. A commit would push the view into the tab's
+  back stack.
+- A centre view tab is still dropped at restore, and the view returns to its
+  default dock *(delegated)*. The centre lands after the vault walk, and Files
+  must show during it. The session format does not change.
+- A centre view's side is its default side, so the dock menu's move to the
+  other dock sends it to the default side's other dock *(delegated)*. Revealing a
+  centre view activates its tab and its group.
+- `land_focus` on a centre group showing Files is the tree's focus; showing
+  Backlinks, it is the root.
+- `docks.rs`'s `dock_tabs` became `tab_state` over every group, tab counts
+  included, so `change_layout` notices a note tab moved between groups.
+- These edits sit outside the slice's files: `group.rs` gains `remove_group`,
+  which `close_group` and the move share, and exposes `Group::with` and
+  `tree_focus`; `title_bar.rs` and `render.rs` take view drops on the strips;
+  `dock_chrome.rs` shares the view body; the shot scene sits in
+  `scenes/docks.rs` with a `drag_drop` helper in `stage.rs`. S3's refusal test in
+  `splits.rs` is removed, and `dock_drag.rs`'s miss now drops on the title row's
+  drag space, since a centre body takes a view.
 
 ## Deferred
 

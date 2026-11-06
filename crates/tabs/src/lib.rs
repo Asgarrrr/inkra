@@ -1,12 +1,14 @@
 //! Tabs with stable ids, an MRU and the index rule, generic over the place a tab shows (tabs spec, A1).
 
 mod closed;
+mod detached;
 mod history;
 
 use std::collections::VecDeque;
 
 use closed::ClosedTab;
 pub use closed::{Closed, ClosedTabs};
+pub use detached::Detached;
 #[cfg(test)]
 use history::HISTORY;
 use history::Stack;
@@ -151,6 +153,32 @@ impl<P, Q> Tabs<P, Q> {
 
     fn index_of(&self, id: TabId) -> Option<usize> {
         self.list.iter().position(|tab| tab.id == id)
+    }
+
+    /// Tab `id` out of the bar and the MRU, with where it stood; its slot is `None` for the active tab.
+    ///
+    /// # Panics
+    /// On a broken H8: an inactive tab with no slot, or the active tab with one.
+    fn remove(&mut self, id: TabId) -> Option<(usize, Tab<P, Q>)> {
+        let index = self.index_of(id)?;
+        let tab = self.list.remove(index);
+        assert_eq!(
+            tab.place.is_none(),
+            id == self.active,
+            "H8: a tab's slot is empty exactly when it is active"
+        );
+        self.mru.retain(|&other| other != id);
+        Some((index, tab))
+    }
+
+    /// After the active tab left: the MRU's first takes over, and its slot is the place to show.
+    fn show_next(&mut self) -> (TabId, Q) {
+        self.active = self.mru[0];
+        let index = self.active_index();
+        let Some(place) = self.list[index].place.take() else {
+            panic!("H8: the tab taking over held no place");
+        };
+        (self.active, place)
     }
 }
 

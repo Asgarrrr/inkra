@@ -132,6 +132,7 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     /// A split's only tab takes its group with it (L6); the centre's last refills with an empty tab (L3).
+    /// A view is never closed: its tab moves to its default side's dock.
     pub(super) fn close_tab(
         &mut self,
         group: GroupId,
@@ -139,6 +140,11 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let view = self.group(group).views().find(|&(tab, _)| tab == id);
+        if let Some((_, view)) = view {
+            self.append(view, view.default_side(), window, cx);
+            return;
+        }
         let tabs = &self.group(group).tabs;
         if tabs.count() == 1
             && tabs.active() == id

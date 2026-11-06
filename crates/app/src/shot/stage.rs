@@ -262,6 +262,19 @@ impl Stage {
         self.settle();
     }
 
+    /// As `drag_holding`, then releases on `to`.
+    pub(crate) fn drag_drop(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+    ) {
+        self.drag_holding(window, from, to);
+        self.cx
+            .simulate_mouse_up(window.into(), to, MouseButton::Left, Modifiers::default());
+        self.settle();
+    }
+
     pub(crate) fn right_click(&mut self, window: WindowHandle<AppShell>, at: Point<Pixels>) {
         let (window, none) = (window.into(), Modifiers::default());
         self.cx

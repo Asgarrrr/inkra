@@ -58,6 +58,7 @@ mod tab_bar;
 mod tab_chrome;
 mod tab_keys;
 mod tab_menu;
+mod tab_moves;
 mod tabs;
 mod themes;
 mod title_bar;
