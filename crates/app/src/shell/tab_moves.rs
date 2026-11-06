@@ -181,17 +181,21 @@ impl AppShell {
         self.display(group, place, window, cx);
     }
 
-    /// `group`'s `drop_split` for a tab of `from`: none outside its body, where a half would fall
-    /// below its minimum, or for `group`'s only tab, which would leave nothing behind.
+    /// Whether a tab of `from` may split `group`: not `group`'s only tab, which would leave nothing behind.
+    fn may_split(&self, group: GroupId, from: GroupId) -> bool {
+        from != group || self.group(group).tabs.count() >= 2
+    }
+
+    /// `group`'s `drop_split` for a drag: none where `splits` is false, outside its body, or where
+    /// a half would fall below its minimum.
     fn track_drop<T: 'static>(
         &mut self,
         group: GroupId,
-        from: GroupId,
+        splits: bool,
         event: &DragMoveEvent<T>,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let splits = from != group || self.group(group).tabs.count() >= 2;
         let (bounds, at) = (event.bounds, event.event.position);
         let zone = (splits && bounds.contains(&at))
             .then(|| {
@@ -224,11 +228,13 @@ impl AppShell {
     ) -> impl Fn(&DragMoveEvent<DraggedTab>, &mut Window, &mut App) + 'static {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedTab>, window, cx| {
-                shell.track_drop(group, event.drag(cx).group, event, window, cx);
+                let splits = shell.may_split(group, event.drag(cx).group);
+                shell.track_drop(group, splits, event, window, cx);
             },
         )
     }
 
+    /// As `track_tab_drop`, but a drop strip under the pointer takes the drop, so no edge splits.
     pub(super) fn track_view_drop(
         group: GroupId,
         cx: &mut Context<Self>,
@@ -236,7 +242,9 @@ impl AppShell {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedView>, window, cx| {
                 let (from, _) = shell.tab_of(event.drag(cx).view);
-                shell.track_drop(group, from, event, window, cx);
+                let splits = shell.may_split(group, from)
+                    && !shell.drop_strip_hit()(event.event.position, window);
+                shell.track_drop(group, splits, event, window, cx);
             },
         )
     }

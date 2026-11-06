@@ -682,6 +682,26 @@ Slice 6, review fixes:
   `bounds_of` call it. A group not in the layout gets `None`, no longer a panic in `bounds_of`
   *(delegated)*.
 
+Slice 7, a centre view's background and the drop strip over a group's edge *(delegated)*:
+
+- A centre group's body paints `editor_background`, so a view shown there is opaque over the
+  window's blur, as a note is. Its drag tint is `accent_background` blended over that colour,
+  not in its place: a bare tint would show the blur again. A dock column's tint blends over
+  `background` for the same reason. A dock group, lower or not, sits on its dock column's
+  background.
+- Inside a drawn drop strip, the strip takes a view's drop. `track_view_drop` holds no edge
+  zone there, so no overlay shows and the drop never splits. The centre body shows no view
+  tint there either. Outside the strip nothing changes, and a tab drag keeps its edge zone
+  under the strip, which takes no tab.
+- The strip does not block the hitboxes under it. The strip is drawn for any drag, and a
+  blocking hitbox is blind to the drag's type, so a tab's edge drop would die under it.
+  `on_drag_move` also reports the bounds, not the hover, so blocking would not clear
+  `drop_split`. `drop_strip_hit` tests the point against the strips instead. The drop
+  reaches the strip alone: painted after the groups, it handles the drop first, and gpui's
+  drop takes the drag and stops the propagation (`div.rs:2906-2917`).
+- During a view's drag, a strip shows only its 2 px edge in `border`. The `accent_background`
+  fill and the `accent` edge show only while the pointer is over the strip.
+
 ## Deferred
 
 | Item | Trigger |

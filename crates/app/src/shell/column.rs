@@ -152,14 +152,24 @@ impl AppShell {
             }],
         };
         let colors = theme::current(cx).colors;
+        // Over the opaque centre, not in its place: a bare tint would show the window's blur.
+        let tint = colors.editor_background.blend(colors.accent_background);
+        let in_strip = self.drop_strip_hit();
         self.group_body(group, selector("drop-overlay", k), content, cx)
+            .bg(colors.editor_background)
             .on_drag_move(Self::track_tab_drop(group, cx))
-            .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
+            .drag_over::<DraggedView>(move |style, _, window, _| {
+                if in_strip(window.mouse_position(), window) {
+                    style
+                } else {
+                    style.bg(tint)
+                }
+            })
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
                 if dragged.group == group {
                     style
                 } else {
-                    style.bg(colors.accent_background)
+                    style.bg(tint)
                 }
             })
             .on_drop(Self::tab_body_drop(group, cx))
