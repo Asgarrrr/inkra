@@ -1,14 +1,15 @@
-//! The corpus `IndexSync` keeps: each note's saved text, under its id, across vault changes.
+//! The corpus `IndexSync` keeps: each note's stamp, under its id, across vault changes.
 
 use std::path::Path;
 
+use futures::executor::block_on;
 use gpui::{Entity, TestAppContext};
 use inkra_index::NoteQuery;
 use inkra_index::live::Status;
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Fs as _, Stamp};
 
 use super::IndexSync;
-use super::tests::{create, found, indexed_vault, saved_edit, status};
+use super::tests::{candidates, create, found, indexed_vault, saved_edit, status};
 use crate::test_support::{entry_id, quick_open};
 
 fn ranked(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec<EntryId> {
@@ -21,18 +22,36 @@ fn ranked(cx: &mut TestAppContext, links: &Entity<IndexSync>, text: &str) -> Vec
     })
 }
 
+/// Each candidate for `word` as its id, its path and its stamp.
+fn stamped(
+    cx: &mut TestAppContext,
+    links: &Entity<IndexSync>,
+    word: &str,
+) -> Vec<(EntryId, String, Stamp)> {
+    candidates(cx, links, word)
+        .into_iter()
+        .map(|candidate| (candidate.id, candidate.path.to_string(), candidate.stamp))
+        .collect()
+}
+
 #[gpui::test]
-fn a_rename_keeps_the_text(cx: &mut TestAppContext) {
+fn a_rename_keeps_the_stamp(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha words"), ("b.md", "")]);
     cx.run_until_parked();
     let a = entry_id(&notes, cx, "a");
+    let [(_, _, stamp)] = stamped(cx, &links, "alpha")[..] else {
+        panic!("a holds alpha");
+    };
 
-    // `c` sorts after `b`, so the text changes slot.
+    // `c` sorts after `b`, so the stamp changes slot.
     let renamed = notes.update(cx, |notes, cx| notes.rename(a, "c", cx));
     cx.run_until_parked();
     drop(renamed);
 
-    assert_eq!(found(cx, &links, "alpha"), [(a, "alpha words".to_owned())]);
+    assert_eq!(
+        stamped(cx, &links, "alpha"),
+        [(a, "c.md".to_owned(), stamp)]
+    );
     assert_eq!(
         fs.loads(Path::new("/vault/c.md")),
         0,
@@ -41,41 +60,49 @@ fn a_rename_keeps_the_text(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_trash_drops_the_text(cx: &mut TestAppContext) {
+fn a_trash_drops_the_stamp(cx: &mut TestAppContext) {
     let (_fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "beta")]);
     cx.run_until_parked();
-    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    let a = entry_id(&notes, cx, "a");
+    let beta = stamped(cx, &links, "beta");
 
     let trashed = notes.update(cx, |notes, cx| notes.trash(a, cx));
     cx.run_until_parked();
     drop(trashed);
 
     assert_eq!(found(cx, &links, "alpha"), []);
-    assert_eq!(found(cx, &links, "beta"), [(b, "beta".to_owned())]);
+    assert_eq!(stamped(cx, &links, "beta"), beta);
+    assert_eq!(
+        links.read_with(cx, |links, _| links.index().corpus().len()),
+        1
+    );
 }
 
 #[gpui::test]
-fn an_outside_edit_replaces_the_text_at_the_next_rescan(cx: &mut TestAppContext) {
+fn an_outside_edit_replaces_the_stamp_at_the_next_rescan(cx: &mut TestAppContext) {
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "before"), ("b.md", "beta")]);
     cx.run_until_parked();
-    let (a, b) = (entry_id(&notes, cx, "a"), entry_id(&notes, cx, "b"));
+    let a = entry_id(&notes, cx, "a");
+    let (before, beta) = (stamped(cx, &links, "before"), stamped(cx, &links, "beta"));
 
     fs.insert_file("/vault/a.md", "after");
-    assert_eq!(
-        found(cx, &links, "before"),
-        [(a, "before".to_owned())],
-        "not before a rescan"
-    );
-    // `0` sorts first, so every older text changes slot in the same rescan.
+    assert_eq!(stamped(cx, &links, "before"), before, "not before a rescan");
+    // `0` sorts first, so every older stamp changes slot in the same rescan.
     create(cx, &notes, "0");
 
-    assert_eq!(found(cx, &links, "after"), [(a, "after".to_owned())]);
+    let on_disk = block_on(fs.load(Path::new("/vault/a.md")))
+        .expect("a loads")
+        .stamp;
+    assert_eq!(
+        stamped(cx, &links, "after"),
+        [(a, "a.md".to_owned(), on_disk)]
+    );
     assert_eq!(found(cx, &links, "before"), []);
     assert_eq!(fs.loads(Path::new("/vault/b.md")), 1, "b is not reloaded");
     assert_eq!(
-        found(cx, &links, "beta"),
-        [(b, "beta".to_owned())],
-        "b keeps its text through the reorder"
+        stamped(cx, &links, "beta"),
+        beta,
+        "b keeps its stamp through the reorder"
     );
 }
 

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use inkra_vault::{EntryId, Mtime, Stamp};
 
-use super::{CHUNK, Corpus, CorpusSnapshot, SLOT_BYTES, Slot, TEXT_HEADER_BYTES};
-use crate::test_support::{entries, mtime, texts, vault};
+use super::{CHUNK, Corpus, CorpusSnapshot, SLOT_BYTES, Slot};
+use crate::test_support::{entries, mtime, vault};
 
 fn ids(files: &[&str]) -> Vec<EntryId> {
     let (_fs, vault) = vault(files);
@@ -45,57 +45,52 @@ fn order_in(old: &[EntryId]) -> impl Fn(EntryId) -> usize {
     move |id| old.iter().position(|&x| x == id).unwrap_or(usize::MAX)
 }
 
-/// `len` notes, each slot holding its own position as text.
+/// `len` notes, each slot stamped with its own position.
 fn numbered(len: usize) -> (Vec<EntryId>, Corpus) {
     let files: Vec<String> = (0..len).map(|n| format!("n{n}.md")).collect();
     let files: Vec<&str> = files.iter().map(String::as_str).collect();
     let ids = ids(&files);
     let mut corpus = corpus(&ids);
     for at in 0..len {
-        corpus.write(at, at.to_string().into(), stamp(0));
+        corpus.write(at, stamp(at as u64));
     }
     (ids, corpus)
 }
 
-fn listed(snapshot: &CorpusSnapshot, range: Range<usize>) -> Vec<(EntryId, String)> {
-    snapshot
-        .notes(range)
-        .map(|(id, text)| (id, text.to_owned()))
+/// Each loaded note of `range` and its stamp, in vault order.
+fn listed(snapshot: &CorpusSnapshot, range: Range<usize>) -> Vec<(EntryId, Stamp)> {
+    range
+        .filter_map(|at| Some((snapshot.ids[at], snapshot.stamp(at)?)))
         .collect()
 }
 
-fn expected(ids: &[EntryId], range: Range<usize>) -> Vec<(EntryId, String)> {
-    range.map(|at| (ids[at], at.to_string())).collect()
+fn loaded(snapshot: &CorpusSnapshot) -> Vec<(EntryId, Stamp)> {
+    listed(snapshot, 0..snapshot.len())
+}
+
+fn expected(ids: &[EntryId], range: Range<usize>) -> Vec<(EntryId, Stamp)> {
+    range.map(|at| (ids[at], stamp(at as u64))).collect()
 }
 
 #[test]
-fn heap_bytes_counts_every_slot_and_each_text() {
+fn heap_bytes_counts_every_slot() {
     let ids = ids(&["a.md", "b.md", "c.md"]);
     let mut corpus = corpus(&ids);
     assert_eq!(corpus.snapshot().heap_bytes(), 3 * SLOT_BYTES);
 
-    corpus.write(0, "hello".into(), stamp(0));
-    corpus.write(2, "été".into(), stamp(0));
-    assert_eq!(
-        corpus.snapshot().heap_bytes(),
-        3 * SLOT_BYTES + 2 * TEXT_HEADER_BYTES + 5 + 5
-    );
-
-    corpus.write(0, "hi".into(), stamp(0));
+    corpus.write(0, stamp(5));
+    corpus.write(2, stamp(5));
     corpus.clear(2);
-    assert_eq!(
-        corpus.snapshot().heap_bytes(),
-        3 * SLOT_BYTES + TEXT_HEADER_BYTES + 2
-    );
+    assert_eq!(corpus.snapshot().heap_bytes(), 3 * SLOT_BYTES);
 }
 
 #[test]
 fn a_write_past_the_end_is_ignored() {
     let ids = ids(&["a.md"]);
     let mut corpus = corpus(&ids);
-    corpus.write(1, "x".into(), stamp(0));
-    corpus.write(usize::MAX, "x".into(), stamp(0));
-    assert_eq!(texts(&corpus.snapshot()), []);
+    corpus.write(1, stamp(0));
+    corpus.write(usize::MAX, stamp(0));
+    assert_eq!(loaded(&corpus.snapshot()), []);
     assert_eq!(corpus.snapshot().heap_bytes(), SLOT_BYTES);
 }
 
@@ -103,17 +98,16 @@ fn a_write_past_the_end_is_ignored() {
 fn a_held_snapshot_never_sees_a_later_write() {
     let ids = ids(&["a.md", "b.md"]);
     let mut corpus = corpus(&ids);
-    corpus.write(0, "old".into(), stamp(10));
+    corpus.write(0, stamp(10));
     let held = corpus.snapshot();
 
-    corpus.write(0, "new".into(), stamp(11));
-    corpus.write(1, "b".into(), stamp(12));
+    corpus.write(0, stamp(11));
+    corpus.write(1, stamp(12));
 
-    assert_eq!(texts(&held), [(ids[0], "old".to_owned())]);
-    assert_eq!(held.heap_bytes(), 2 * SLOT_BYTES + TEXT_HEADER_BYTES + 3);
+    assert_eq!(loaded(&held), [(ids[0], stamp(10))]);
     assert_eq!(
-        texts(&corpus.snapshot()),
-        [(ids[0], "new".to_owned()), (ids[1], "b".to_owned())]
+        loaded(&corpus.snapshot()),
+        [(ids[0], stamp(11)), (ids[1], stamp(12))]
     );
 
     corpus.clear(0);
@@ -122,28 +116,28 @@ fn a_held_snapshot_never_sees_a_later_write() {
 }
 
 #[test]
-fn a_write_sets_the_mtime_with_the_text() {
+fn a_write_sets_the_mtime_with_the_stamp() {
     let ids = ids(&["a.md", "b.md"]);
     let mut corpus = corpus(&ids);
-    corpus.write(1, "b".into(), stamp(5));
+    corpus.write(1, stamp(5));
     assert_eq!(
         modified(&corpus.snapshot()),
         [Some(mtime(0)), Some(mtime(5)), None]
     );
 
-    corpus.write(1, "bb".into(), stamp(6));
-    corpus.write(2, "past".into(), stamp(7));
+    corpus.write(1, stamp(6));
+    corpus.write(2, stamp(7));
     assert_eq!(
         modified(&corpus.snapshot()),
         [Some(mtime(0)), Some(mtime(6)), None]
     );
-    assert_eq!(texts(&corpus.snapshot()), [(ids[1], "bb".to_owned())]);
+    assert_eq!(loaded(&corpus.snapshot()), [(ids[1], stamp(6))]);
 }
 
 #[test]
 fn a_remove_keeps_the_mtime() {
     let (ids, mut corpus) = numbered(CHUNK + 1);
-    corpus.write(1, "b".into(), stamp(5));
+    corpus.write(1, stamp(5));
     let held = corpus.snapshot();
 
     corpus.clear(1);
@@ -152,11 +146,8 @@ fn a_remove_keeps_the_mtime() {
 
     let now = corpus.snapshot();
     assert_eq!(now.modified(1), Some(mtime(5)));
-    assert_eq!(
-        listed(&now, 0..3),
-        [(ids[0], "0".to_owned()), (ids[2], "2".to_owned())]
-    );
-    assert_eq!(now.heap_bytes(), held.heap_bytes() - TEXT_HEADER_BYTES - 1);
+    assert_eq!(listed(&now, 0..3), [(ids[0], stamp(0)), (ids[2], stamp(2))]);
+    assert_eq!(now.heap_bytes(), held.heap_bytes());
     assert!(
         Arc::ptr_eq(&held.slots[1], &now.slots[1]),
         "a clear copies one chunk"
@@ -166,12 +157,12 @@ fn a_remove_keeps_the_mtime() {
     corpus.clear(1);
     assert!(
         Arc::ptr_eq(&held.slots, &corpus.snapshot().slots),
-        "clearing a slot with no text copies nothing"
+        "clearing a slot with no stamp copies nothing"
     );
 }
 
 #[test]
-fn a_note_without_text_takes_the_build_s_mtime() {
+fn a_note_not_loaded_takes_the_build_s_mtime() {
     let all = ids(&["a.md", "b.md", "c.md"]);
     let (a, b, c) = (all[0], all[1], all[2]);
     let mut corpus = corpus(&[a, b]);
@@ -180,7 +171,7 @@ fn a_note_without_text_takes_the_build_s_mtime() {
         [Some(mtime(0)), Some(mtime(1)), None]
     );
 
-    corpus.write(0, "A".into(), stamp(5));
+    corpus.write(0, stamp(5));
     corpus.clear(0);
     let _ = corpus.reorder(vec![c, b, a].into(), &stamps(20, 3), order_in(&[a, b]));
 
@@ -191,9 +182,9 @@ fn a_note_without_text_takes_the_build_s_mtime() {
 }
 
 #[test]
-fn a_slot_keeps_its_text_s_mtime_across_a_reorder() {
+fn a_slot_keeps_its_stamp_s_mtime_across_a_reorder() {
     let (ids, mut corpus) = numbered(CHUNK + 2);
-    corpus.write(CHUNK + 1, "last".into(), stamp(5));
+    corpus.write(CHUNK + 1, stamp(5));
     let kept: Vec<EntryId> = ids.iter().rev().copied().collect();
 
     let _ = corpus.reorder(
@@ -203,39 +194,34 @@ fn a_slot_keeps_its_text_s_mtime_across_a_reorder() {
     );
 
     let now = corpus.snapshot();
-    assert_eq!(now.modified(0), Some(mtime(5)), "the text written last");
+    assert_eq!(now.modified(0), Some(mtime(5)), "the stamp written last");
     assert_eq!(
         now.modified(CHUNK + 1),
         Some(mtime(0)),
-        "the text `numbered` wrote"
+        "the stamp `numbered` wrote"
     );
-    assert_eq!(listed(&now, 0..1), [(ids[CHUNK + 1], "last".to_owned())]);
+    assert_eq!(listed(&now, 0..1), [(ids[CHUNK + 1], stamp(5))]);
 }
 
 #[test]
-fn reorder_keeps_each_kept_note_s_text_and_drops_the_rest() {
+fn reorder_keeps_each_kept_note_s_stamp_and_drops_the_rest() {
     let all = ids(&["a.md", "b.md", "c.md", "d.md"]);
     let (a, b, c, d) = (all[0], all[1], all[2], all[3]);
     let mut corpus = corpus(&[a, b, c]);
-    corpus.write(0, "A".into(), stamp(0));
-    corpus.write(1, "BB".into(), stamp(0));
-    corpus.write(2, "CCC".into(), stamp(0));
+    corpus.write(0, stamp(1));
+    corpus.write(1, stamp(2));
+    corpus.write(2, stamp(3));
     let held = corpus.snapshot();
 
     let old = [a, b, c];
-    let (previous, retired) = corpus.reorder(vec![d, c, a].into(), &stamps(10, 3), order_in(&old));
+    let previous = corpus.reorder(vec![d, c, a].into(), &stamps(10, 3), order_in(&old));
 
     assert_eq!(&*previous, &[a, b, c]);
-    assert_eq!(
-        retired,
-        [Arc::<str>::from("BB")],
-        "the text of the note gone"
-    );
     let now = corpus.snapshot();
     assert_eq!(now.len(), 3);
-    assert_eq!(texts(&now), [(c, "CCC".to_owned()), (a, "A".to_owned())]);
-    assert_eq!(now.heap_bytes(), 3 * SLOT_BYTES + 2 * TEXT_HEADER_BYTES + 4);
-    assert_eq!(texts(&held).len(), 3, "a held snapshot keeps its order");
+    assert_eq!(loaded(&now), [(c, stamp(3)), (a, stamp(1))]);
+    assert_eq!(now.heap_bytes(), 3 * SLOT_BYTES);
+    assert_eq!(loaded(&held).len(), 3, "a held snapshot keeps its order");
 }
 
 #[test]
@@ -250,25 +236,9 @@ fn a_snapshot_counts_its_slots() {
 }
 
 #[test]
-fn notes_lists_the_loaded_notes_of_a_range() {
-    let ids = ids(&["a.md", "b.md", "c.md"]);
-    let mut corpus = corpus(&ids);
-    corpus.write(0, "a".into(), stamp(0));
-    corpus.write(2, "c".into(), stamp(0));
-    let snapshot = corpus.snapshot();
-    let found: Vec<(EntryId, &str)> = snapshot.notes(1..3).collect();
-    assert_eq!(found, [(ids[2], "c")]);
-}
-
-#[test]
-fn a_slot_costs_its_text_pointer_its_mtime_and_its_id() {
+fn a_slot_costs_its_mtime_its_stamp_and_its_id() {
     assert_eq!(SLOT_BYTES, size_of::<Slot>() + size_of::<EntryId>());
-    assert!(size_of::<Slot>() >= size_of::<Option<Arc<str>>>() + size_of::<Mtime>());
-}
-
-#[test]
-fn a_loaded_text_costs_its_arc_s_two_counts() {
-    assert_eq!(TEXT_HEADER_BYTES, 2 * size_of::<usize>());
+    assert!(size_of::<Slot>() >= size_of::<Mtime>() + size_of::<Option<Stamp>>());
 }
 
 #[test]
@@ -276,9 +246,9 @@ fn a_write_under_a_held_snapshot_copies_one_chunk() {
     let (ids, mut corpus) = numbered(3 * CHUNK);
     let held = corpus.snapshot();
 
-    corpus.write(CHUNK + 5, "new".into(), stamp(0));
+    corpus.write(CHUNK + 5, stamp(0));
 
-    assert_eq!(texts(&held), expected(&ids, 0..3 * CHUNK));
+    assert_eq!(loaded(&held), expected(&ids, 0..3 * CHUNK));
     let now = corpus.snapshot();
     let shared: Vec<bool> = held
         .slots
@@ -290,71 +260,49 @@ fn a_write_under_a_held_snapshot_copies_one_chunk() {
     assert_eq!(
         listed(&now, CHUNK + 4..CHUNK + 6),
         [
-            (ids[CHUNK + 4], (CHUNK + 4).to_string()),
-            (ids[CHUNK + 5], "new".to_owned())
+            (ids[CHUNK + 4], stamp((CHUNK + 4) as u64)),
+            (ids[CHUNK + 5], stamp(0))
         ]
     );
 }
 
 #[test]
-fn notes_crosses_chunk_boundaries() {
-    let (ids, corpus) = numbered(2 * CHUNK + 3);
-    let snapshot = corpus.snapshot();
-    for range in [
-        CHUNK / 2..2 * CHUNK + 1,
-        CHUNK..2 * CHUNK,
-        0..2 * CHUNK + 3,
-        2 * CHUNK..2 * CHUNK + 3,
-        CHUNK + 1..CHUNK + 1,
-    ] {
-        assert_eq!(listed(&snapshot, range.clone()), expected(&ids, range));
+fn every_slot_is_read_across_chunks() {
+    for len in [2 * CHUNK, 2 * CHUNK + 3] {
+        let (ids, corpus) = numbered(len);
+        let snapshot = corpus.snapshot();
+        assert_eq!(snapshot.slots.len(), len.div_ceil(CHUNK));
+        assert_eq!(loaded(&snapshot), expected(&ids, 0..len));
+        assert_eq!(snapshot.stamp(len), None, "past the end");
     }
+    assert_eq!(written(&Corpus::default().snapshot()), [None]);
 }
 
 #[test]
-fn notes_reaches_the_end_of_whole_chunks() {
-    let (ids, corpus) = numbered(2 * CHUNK);
-    let snapshot = corpus.snapshot();
-    assert_eq!(snapshot.slots.len(), 2);
-    for range in [0..2 * CHUNK, CHUNK + 1..2 * CHUNK, 2 * CHUNK..2 * CHUNK] {
-        assert_eq!(listed(&snapshot, range.clone()), expected(&ids, range));
-    }
-}
-
-#[test]
-fn notes_of_an_empty_corpus_is_empty() {
-    assert_eq!(Corpus::default().snapshot().notes(0..0).count(), 0);
-    assert_eq!(corpus(&[]).snapshot().notes(0..0).count(), 0);
-}
-
-#[test]
-fn reorder_moves_texts_across_chunks() {
+fn reorder_moves_stamps_across_chunks() {
     let (ids, mut corpus) = numbered(2 * CHUNK + 3);
     let held = corpus.snapshot();
     let order: HashMap<EntryId, usize> = ids.iter().enumerate().map(|(at, &id)| (id, at)).collect();
     let kept: Vec<EntryId> = ids[1..].iter().rev().copied().collect();
 
-    let (_, retired) = corpus.reorder(kept.clone().into(), &stamps(0, kept.len()), |id| order[&id]);
+    let _ = corpus.reorder(kept.clone().into(), &stamps(0, kept.len()), |id| order[&id]);
 
-    assert_eq!(retired, [Arc::<str>::from("0")]);
     let now = corpus.snapshot();
-    let moved: Vec<(EntryId, String)> =
-        kept.iter().map(|id| (*id, order[id].to_string())).collect();
-    assert_eq!(texts(&now), moved);
-    let bytes: usize = (1..ids.len()).map(|at| at.to_string().len()).sum();
-    assert_eq!(
-        now.heap_bytes(),
-        kept.len() * (SLOT_BYTES + TEXT_HEADER_BYTES) + bytes
-    );
-    assert_eq!(texts(&held), expected(&ids, 0..ids.len()));
+    let moved: Vec<(EntryId, Stamp)> = kept
+        .iter()
+        .map(|id| (*id, stamp(order[id] as u64)))
+        .collect();
+    assert_eq!(loaded(&now), moved);
+    assert_eq!(now.heap_bytes(), kept.len() * SLOT_BYTES);
+    assert_eq!(loaded(&held), expected(&ids, 0..ids.len()));
 }
 
 #[test]
-fn a_stamp_goes_with_its_text_through_clear_and_reorder() {
+fn a_stamp_goes_through_a_reorder_and_not_a_clear() {
     let ids = ids(&["a.md", "b.md", "c.md"]);
     let mut corpus = corpus(&ids);
-    corpus.write(0, "a".into(), stamp(5));
-    corpus.write(1, "b".into(), stamp(6));
+    corpus.write(0, stamp(5));
+    corpus.write(1, stamp(6));
     corpus.clear(1);
 
     let now = corpus.snapshot();

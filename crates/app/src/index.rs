@@ -235,7 +235,7 @@ impl IndexSync {
         reads::lock(&self.texts).insert(id, Arc::clone(&event.text), stamp);
         let ticket = self.turn(cx, |turn| turn.saved(id, stamp.mtime));
         let text = Arc::clone(&event.text);
-        let parsed = cx.background_spawn(async move { NoteContent::parse(text, stamp) });
+        let parsed = cx.background_spawn(async move { NoteContent::parse(&text, stamp) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
             let _ = this.update(cx, |this, cx| {

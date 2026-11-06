@@ -13,20 +13,8 @@ use inkra_vault::mem_fs::MemFs;
 
 use super::IndexSync;
 use super::reads::READERS;
-use super::tests::{hold_builds, indexed_vault, saved_edit};
+use super::tests::{candidates, hold_builds, indexed_vault, saved_edit};
 use crate::test_support::entry_id;
-
-/// The notes holding `word`, as `⌘⇧F` would read them now.
-fn candidates(cx: &mut TestAppContext, links: &Entity<IndexSync>, word: &str) -> Vec<Candidate> {
-    links.read_with(cx, |links, _| {
-        let query = NoteQuery::new(word, None, &[]);
-        let candidates = links
-            .index()
-            .snapshot()
-            .candidates(&query, &AtomicBool::new(false));
-        candidates.expect("not cancelled")
-    })
-}
 
 /// Each candidate's read, in the order the stream yields them, collected off the foreground.
 fn read_all(

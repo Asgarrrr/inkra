@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -11,7 +12,8 @@ use inkra_vault::{EntryId, Fs, Kind, Mtime, Serial, Stamp, Vault};
 use crate::note_set::prepare;
 use crate::notes::NoteTable;
 use crate::{
-    CorpusSnapshot, IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Target,
+    IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Read, Searched, Target,
+    TextSearch,
 };
 
 pub(crate) const ROOT: &str = "/vault";
@@ -131,22 +133,21 @@ pub(crate) fn target(text: &str) -> Target {
 }
 
 /// `text` parsed as a load at `mtime` gives it, its size the text's length.
-pub(crate) fn content(text: impl Into<Arc<str>>, mtime: Mtime) -> NoteContent {
-    let text = text.into();
+pub(crate) fn content(text: &str, mtime: Mtime) -> NoteContent {
     let size = text.len() as u64;
     NoteContent::parse(text, Stamp { mtime, size })
 }
 
-/// `id`'s links, text and words, as a load gives them, stamped `mtime(0)`.
+/// `id`'s links, stamp and words, as a load gives them, stamped `mtime(0)`.
 pub(crate) fn load(index: &mut NoteIndex, id: EntryId, text: &str) {
     index.insert(id, content(text, mtime(0)));
 }
 
-/// Each loaded note of `corpus` with its text, in vault order.
-pub(crate) fn texts(corpus: &CorpusSnapshot) -> Vec<(EntryId, String)> {
-    corpus
-        .notes(0..corpus.len())
-        .map(|(id, text)| (id, text.to_owned()))
+/// Each loaded note of `snapshot` with its stamp, in vault order.
+pub(crate) fn loaded(snapshot: &IndexSnapshot) -> Vec<(EntryId, Stamp)> {
+    (0..snapshot.names().len())
+        .filter_map(|order| snapshot.candidate(order))
+        .map(|candidate| (candidate.id, candidate.stamp))
         .collect()
 }
 
@@ -177,4 +178,42 @@ pub(crate) fn find_all(
         panic!("not cancelled");
     };
     found
+}
+
+/// Each loaded note of `texts` by its id in `ids`, as `search_texts` reads them.
+pub(crate) fn text_map(ids: &[EntryId], texts: &[Option<&str>]) -> HashMap<EntryId, Arc<str>> {
+    ids.iter()
+        .zip(texts)
+        .filter_map(|(id, text)| text.map(|text| (*id, Arc::from(text))))
+        .collect()
+}
+
+/// Vault search over `texts`, each candidate read unchanged since its load, in candidate order.
+pub(crate) fn search_texts(
+    snapshot: &IndexSnapshot,
+    texts: &HashMap<EntryId, Arc<str>>,
+    query: &NoteQuery,
+    limit: usize,
+) -> Searched {
+    let cancel = AtomicBool::new(false);
+    let Some(candidates) = snapshot.candidates(query, &cancel) else {
+        panic!("not cancelled");
+    };
+    let mut search = TextSearch::new(query, limit);
+    for candidate in &candidates {
+        let Some(text) = texts.get(&candidate.id) else {
+            panic!("candidate {:?} has no text", candidate.id);
+        };
+        let read = Read::Text {
+            text: Arc::clone(text),
+            stamp: candidate.stamp,
+        };
+        if !search.read(candidate, read, &cancel) {
+            break;
+        }
+    }
+    let Some(found) = search.finish(&cancel) else {
+        panic!("not cancelled");
+    };
+    found.searched
 }

@@ -24,7 +24,7 @@ fn rows(path: &str, text: &str, query: &str) -> Vec<Row> {
         mtime,
         size: text.len() as u64,
     };
-    index.insert(id, NoteContent::parse(text.into(), stamp));
+    index.insert(id, NoteContent::parse(text, stamp));
     let snapshot = index.snapshot();
     let query = NoteQuery::new(query, None, &[]);
     let cancel = AtomicBool::new(false);

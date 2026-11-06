@@ -44,11 +44,11 @@ pub struct Backlink<'a> {
 
 impl NoteIndex {
     /// Replaces the notes links resolve against and quick open lists, reorders the corpus, and
-    /// drops the source, text and words of every note gone. The caller frees the previous set,
-    /// which holds those texts, so a 50k table need not be freed on the foreground.
+    /// drops the source, stamp and words of every note gone. The caller frees the previous set,
+    /// so a 50k table need not be freed on the foreground.
     #[must_use]
     pub fn set_notes(&mut self, notes: NoteSet) -> NoteSet {
-        let (ids, retired) = self
+        let ids = self
             .corpus
             .reorder(Arc::clone(&notes.ids), &notes.mtimes, |id| {
                 self.notes.order(id)
@@ -58,7 +58,6 @@ impl NoteIndex {
             names: mem::replace(&mut self.names, notes.names),
             ids,
             mtimes: mem::replace(&mut self.mtimes, notes.mtimes),
-            _retired: retired,
         };
         let notes = &self.notes;
         let mut gone = HashSet::new();
@@ -94,7 +93,7 @@ impl NoteIndex {
         self.names.clone()
     }
 
-    /// The saved text of every note. Cloning is an `Arc` bump; a later write never reaches it.
+    /// Every note's mtime and loaded stamp. Cloning is an `Arc` bump; a later write never reaches it.
     #[must_use]
     pub fn corpus(&self) -> CorpusSnapshot {
         self.corpus.snapshot()
@@ -140,7 +139,7 @@ impl NoteIndex {
         self.words.merge_all();
     }
 
-    /// Replaces `id`'s links, text and words. Ignored for an id that is not a note, so a load
+    /// Replaces `id`'s links, stamp and words. Ignored for an id that is not a note, so a load
     /// finishing after its note was trashed leaves nothing behind.
     pub fn insert(&mut self, id: EntryId, content: NoteContent) {
         if !self.notes.contains(id) {
@@ -150,7 +149,6 @@ impl NoteIndex {
         let NoteContent {
             source,
             words,
-            text,
             stamp,
         } = content;
         for (at, link) in source.links.iter().enumerate() {
@@ -162,7 +160,7 @@ impl NoteIndex {
             }
         }
         self.sources.insert(id, source);
-        self.corpus.write(self.notes.order(id), text, stamp);
+        self.corpus.write(self.notes.order(id), stamp);
         self.words.set(id, words);
     }
 

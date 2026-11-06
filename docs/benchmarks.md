@@ -214,5 +214,20 @@ quarter through `RealFs::load`, then `TextSearch` over the reads in order. Same 
 `--quick`: resident 7.72 ms (7.71 to 7.72 ms), `read4` 14.43 ms (14.35 to 14.73 ms). Reading the
 1,000 candidates costs about 6.7 ms over the resident search, inside the 50 ms gate.
 
+Slice 2d removes the corpus text; both gates hold. Same machine, vault and commands. Warm launch,
+5 runs, medians: rss 175,008 kB (slice 0: 344,176 kB, 169 MB less), `phys_footprint` 229.1 MB
+(slice 0: 399.2 MB, 170 MB less). The corpus line drops from 158,045,432 to 2,200,000 bytes.
+
+```
+launch: first frame 126.9ms, session read 603.33µs, root 174.3ms, scanned 636.3ms, names ready 651.9ms, indexed 1.57s (50000 notes, corpus 2200000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 175008 kB | phys_footprint 229147464 B
+launch: first frame 109.6ms, session read 59.75µs, root 138.1ms, scanned 226.4ms, names ready 241.5ms, indexed 987.54ms (50000 notes, corpus 2200000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 176816 kB | phys_footprint 232129352 B
+launch: first frame 92.0ms, session read 82.67µs, root 122.7ms, scanned 215.9ms, names ready 232.3ms, indexed 977.25ms (50000 notes, corpus 2200000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 173824 kB | phys_footprint 228950832 B
+launch: first frame 87.3ms, session read 71.71µs, root 116.7ms, scanned 206.6ms, names ready 223.0ms, indexed 1.02s (50000 notes, corpus 2200000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 172496 kB | phys_footprint 135430960 B
+launch: first frame 97.1ms, session read 91.17µs, root 127.9ms, scanned 217.5ms, names ready 233.3ms, indexed 983.90ms (50000 notes, corpus 2200000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 175536 kB | phys_footprint 230769456 B
+```
+
+`read_search --quick`, where `resident` now searches texts held by the bench, not by the index:
+resident 7.44 ms (7.44 to 7.47 ms), `read4` 14.31 ms (14.29 to 14.31 ms), under the 57.72 ms gate.
+
 Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent has no passwordless
 `sudo`, so the user runs them and adds the lines to this section.

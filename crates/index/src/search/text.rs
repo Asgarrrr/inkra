@@ -45,8 +45,7 @@ pub struct TextFound {
     pub reads: usize,
 }
 
-/// One vault search fed by reads in candidate order; it equals `IndexSnapshot::search` over the
-/// texts read.
+/// One vault search fed by reads in candidate order.
 pub struct TextSearch<'q> {
     terms: Terms<'q>,
     limit: usize,

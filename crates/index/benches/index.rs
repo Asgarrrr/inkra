@@ -78,7 +78,7 @@ fn built_index(vault: &Vault) -> NoteIndex {
         .collect();
     for (at, id) in notes.into_iter().enumerate() {
         let text = note_text(at);
-        index.insert(id, NoteContent::parse(text.into(), EPOCH));
+        index.insert(id, NoteContent::parse(&text, EPOCH));
     }
     index
 }

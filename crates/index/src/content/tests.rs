@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use inkra_vault::Stamp;
 
 use super::NoteContent;
@@ -22,7 +20,6 @@ fn parse_computes_the_links_and_the_words_of_the_text() {
             ("see".to_owned(), 1)
         ]
     );
-    assert_eq!(&*content.text, "See [[plan]], Été");
 }
 
 #[test]
@@ -31,5 +28,5 @@ fn parse_keeps_the_stamp() {
         mtime: mtime(7),
         size: 3,
     };
-    assert_eq!(NoteContent::parse(Arc::from(""), stamp).stamp, stamp);
+    assert_eq!(NoteContent::parse("", stamp).stamp, stamp);
 }
