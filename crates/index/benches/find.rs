@@ -15,10 +15,16 @@ use inkra_index::{
     Excerpt, Group, IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteMatch, NoteQuery,
     NoteSet, excerpt,
 };
-use inkra_vault::{EntryId, Job, Jobs, Kind, Mtime, Serial};
+use inkra_vault::{EntryId, Job, Jobs, Kind, Mtime, Serial, Stamp};
 
 use corpus::{Corpus, NOTE_IDS, NOTES, contents};
 use paths::{Lcg, folders};
+
+/// The stamp of every text the bench parses: nothing here compares stamps.
+const EPOCH: Stamp = Stamp {
+    mtime: Mtime(UNIX_EPOCH),
+    size: 0,
+};
 
 /// Quick open's `LIMIT`.
 const LIMIT: usize = 100;
@@ -279,10 +285,7 @@ fn bench_adversarial(c: &mut Criterion) {
     let mut index = NoteIndex::default();
     let _ = index.set_notes(NoteSet::build(entries));
     for (&id, (_, _, text)) in NOTE_IDS.iter().zip(&notes) {
-        index.insert(
-            id,
-            NoteContent::parse(text.as_str().into(), Mtime(UNIX_EPOCH)),
-        );
+        index.insert(id, NoteContent::parse(text.as_str().into(), EPOCH));
     }
     let snapshot = settle(&mut index);
     let cancel = AtomicBool::new(false);

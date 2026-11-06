@@ -26,7 +26,7 @@ pub use faults::Gate;
 
 #[derive(Default)]
 struct State {
-    files: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
+    files: BTreeMap<PathBuf, (Vec<u8>, Mtime, FileIdentity)>,
     dirs: BTreeMap<PathBuf, (Mtime, FileIdentity)>,
     next_inode: u64,
     unreadable: Option<PathBuf>,
@@ -41,7 +41,7 @@ struct State {
     /// removable (no trash on the volume, say).
     untrashable: BTreeSet<PathBuf>,
     /// A move, not a drop, so a trashed note stays recoverable in tests.
-    trashed: BTreeMap<PathBuf, (String, Mtime, FileIdentity)>,
+    trashed: BTreeMap<PathBuf, (Vec<u8>, Mtime, FileIdentity)>,
     /// Loads started per path, found or not.
     loads: BTreeMap<PathBuf, usize>,
     blocked_read_dirs: BTreeMap<PathBuf, oneshot::Receiver<()>>,
@@ -110,13 +110,13 @@ impl MemFs {
     }
 
     /// `None` keeps the path's identity, or mints one for a new path.
-    fn put_file(state: &mut State, path: PathBuf, text: String, identity: Option<FileIdentity>) {
+    fn put_file(state: &mut State, path: PathBuf, bytes: Vec<u8>, identity: Option<FileIdentity>) {
         Self::insert_parents(state, &path);
         let identity = identity
             .or_else(|| state.files.get(&path).map(|(_, _, id)| *id))
             .unwrap_or_else(|| Self::fresh_identity(state));
         let mtime = Self::tick(state);
-        state.files.insert(path, (text, mtime, identity));
+        state.files.insert(path, (bytes, mtime, identity));
     }
 
     fn insert_parents(state: &mut State, path: &Path) {
@@ -211,12 +211,17 @@ impl Fs for MemFs {
 
         let state = self.state();
         state.refused_load(path)?;
-        let Some((text, mtime, identity)) = state.files.get(path) else {
+        let Some((bytes, mtime, identity)) = state.files.get(path) else {
             return Err(io(path, ErrorKind::NotFound));
+        };
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Err(VaultError::NotUtf8 {
+                path: path.to_path_buf(),
+            });
         };
         Ok(Loaded {
             text: crate::fs::normalize_line_endings(text),
-            stamp: stamp_of(text, *mtime),
+            stamp: stamp_of(bytes, *mtime),
             identity: *identity,
         })
     }
@@ -257,7 +262,7 @@ impl Fs for MemFs {
             }
         };
         if let Some((destination, bytes, stamp)) = preserved.clone() {
-            self.insert_file(destination.clone(), bytes);
+            self.insert_bytes(destination.clone(), bytes);
             if let Err(source) = self.state().injected_failure_after_preserve(path) {
                 return Err(VaultError::Unwritten {
                     preserved: destination,
@@ -267,7 +272,12 @@ impl Fs for MemFs {
             }
         }
 
-        Self::put_file(&mut self.state(), path.to_path_buf(), text.to_owned(), None);
+        Self::put_file(
+            &mut self.state(),
+            path.to_path_buf(),
+            text.as_bytes().to_vec(),
+            None,
+        );
 
         let (stamp, identity, blocked) = {
             let mut state = self.state();
@@ -323,7 +333,7 @@ impl Fs for MemFs {
             Kind::Note => {
                 state
                     .files
-                    .insert(path.to_path_buf(), (String::new(), mtime, identity));
+                    .insert(path.to_path_buf(), (Vec::new(), mtime, identity));
             }
             Kind::Dir => {
                 state.dirs.insert(path.to_path_buf(), (mtime, identity));

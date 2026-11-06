@@ -154,7 +154,7 @@ fn agrees(case: &Case, cuts: &[Index], limit: usize) -> Result<Drawn, TestCaseEr
 
 /// Cases whose query is often cut from loaded texts: from a word start it matches, from inside
 /// a word it tests the word-start rule; two cuts from two notes often split the notes.
-fn case() -> impl Strategy<Value = Case> {
+pub(super) fn case() -> impl Strategy<Value = Case> {
     let cut = || (any::<Index>(), any::<Index>(), 1..8_usize);
     let cuts = prop::collection::vec(cut(), 1..3);
     (model_cases::case(), prop::option::weighted(0.8, cuts)).prop_map(|(mut case, cuts)| {

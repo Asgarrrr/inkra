@@ -5,8 +5,8 @@ use inkra_vault::{EntryId, Serial, Vault};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::find::find_in;
-use crate::test_support::{id, mtime, note_set, vault};
-use crate::{Group, NoteContent, NoteIndex, NoteMatch, NoteQuery};
+use crate::test_support::{content, id, mtime, note_set, vault};
+use crate::{Group, NoteIndex, NoteMatch, NoteQuery};
 
 /// Texts load at `mtime(0)`, so mtimes tie unless a test sets them.
 fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
@@ -16,10 +16,7 @@ fn with_texts(files: &[(&str, Option<&str>)]) -> (Vault, NoteIndex) {
     let _ = index.set_notes(note_set(&vault));
     for (name, text) in files {
         if let Some(text) = text {
-            index.insert(
-                id(&vault, name),
-                NoteContent::parse((*text).into(), mtime(0)),
-            );
+            index.insert(id(&vault, name), content(*text, mtime(0)));
         }
     }
     (vault, index)
@@ -153,7 +150,7 @@ fn recent_notes_rank_first_newest_first() {
 fn ranked(files: &[&str], text: &str, recent: &[&str]) -> Vec<String> {
     let (vault, mut index) = with_names(files);
     for file in recent {
-        index.insert(id(&vault, file), NoteContent::parse("".into(), mtime(9)));
+        index.insert(id(&vault, file), content("", mtime(9)));
     }
     let query = NoteQuery::new(text, None, &ids(&vault, recent));
     let found = run(&index, &query, false, usize::MAX);
@@ -229,10 +226,7 @@ fn the_newest_mtime_ranks_first() {
     let files = ["a.md", "b.md", "c.md"];
     let (vault, mut index) = with_names(&files);
     for (file, n) in files.iter().zip([5, 9, 7]) {
-        index.insert(
-            id(&vault, file),
-            NoteContent::parse("plan".into(), mtime(n)),
-        );
+        index.insert(id(&vault, file), content("plan", mtime(n)));
     }
     assert_eq!(paths(&find(&index, "plan")), ["b", "c", "a"]);
 }

@@ -10,9 +10,9 @@ pub(super) fn io(path: &Path, kind: io::ErrorKind) -> VaultError {
     }
 }
 
-pub(super) fn stamp_of(text: &str, mtime: Mtime) -> Stamp {
+pub(super) fn stamp_of(bytes: &[u8], mtime: Mtime) -> Stamp {
     Stamp {
         mtime,
-        size: text.len() as u64,
+        size: bytes.len() as u64,
     }
 }

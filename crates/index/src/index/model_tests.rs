@@ -7,8 +7,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::NoteIndex;
 use crate::key::{Key, strip_md};
-use crate::test_support::{id, mtime, note_set, try_rename, vault};
-use crate::{CorpusSnapshot, NoteContent, Resolution, Source, Style, Target};
+use crate::test_support::{content, id, mtime, note_set, try_rename, vault};
+use crate::{CorpusSnapshot, Resolution, Source, Style, Target};
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -82,7 +82,7 @@ proptest! {
                 }
                 Op::Load(path, text, at) => {
                     if let Some(id) = find(&vault, &path) {
-                        index.insert(id, NoteContent::parse(text.as_str().into(), mtime(at)));
+                        index.insert(id, content(text.as_str(), mtime(at)));
                         if table.contains(&id) {
                             model.insert(id, text);
                             modified.insert(id, mtime(at));
@@ -162,7 +162,7 @@ fn external_edits_keep_each_old_mtime_until_the_reload() {
     let _ = index.set_notes(note_set(&vault));
     let (a, b, c) = (id(&vault, "a.md"), id(&vault, "b.md"), id(&vault, "c.md"));
     for (note, at) in [(a, 0), (b, 1), (c, 2)] {
-        index.insert(note, NoteContent::parse("old".into(), mtime(at)));
+        index.insert(note, content("old", mtime(at)));
     }
 
     for file in ["a.md", "b.md", "c.md", "d.md"] {
@@ -185,8 +185,8 @@ fn external_edits_keep_each_old_mtime_until_the_reload() {
         "each text keeps its mtime; d has no text yet"
     );
 
-    index.insert(c, NoteContent::parse("edited".into(), scan[&c]));
-    index.insert(a, NoteContent::parse("edited".into(), scan[&a]));
+    index.insert(c, content("edited", scan[&c]));
+    index.insert(a, content("edited", scan[&a]));
     let _ = index.set_notes(note_set(&vault));
     assert_eq!(
         mtimes(&index.corpus()),
@@ -199,7 +199,7 @@ fn external_edits_keep_each_old_mtime_until_the_reload() {
         "b's reload has not landed"
     );
 
-    index.insert(b, NoteContent::parse("edited".into(), scan[&b]));
+    index.insert(b, content("edited", scan[&b]));
     assert_eq!(
         mtimes(&index.corpus()),
         [
@@ -423,7 +423,7 @@ proptest! {
             })
             .collect();
         for (source, _, text) in &loaded {
-            index.insert(*source, NoteContent::parse(text.as_str().into(), mtime(0)));
+            index.insert(*source, content(text.as_str(), mtime(0)));
         }
         let sources: Vec<(EntryId, Source)> = loaded
             .into_iter()

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use inkra_vault::Mtime;
+use inkra_vault::Stamp;
 
 use crate::source::Source;
 use crate::words::NoteWords;
@@ -10,18 +10,18 @@ pub struct NoteContent {
     pub(crate) source: Source,
     pub(crate) words: NoteWords,
     pub(crate) text: Arc<str>,
-    /// The mtime of `text`: the loaded file's, or the save's.
-    pub(crate) modified: Mtime,
+    /// The stamp of `text`: the loaded file's, or the save's.
+    pub(crate) stamp: Stamp,
 }
 
 impl NoteContent {
     #[must_use]
-    pub fn parse(text: Arc<str>, modified: Mtime) -> Self {
+    pub fn parse(text: Arc<str>, stamp: Stamp) -> Self {
         Self {
             source: Source::parse(&text),
             words: NoteWords::parse(&text),
             text,
-            modified,
+            stamp,
         }
     }
 }

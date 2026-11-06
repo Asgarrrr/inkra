@@ -7,7 +7,13 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{NoteContent, NoteIndex, NoteSet, Source};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Stamp, Vault};
+
+/// The stamp of every text the bench parses: nothing here compares stamps.
+const EPOCH: Stamp = Stamp {
+    mtime: Mtime(UNIX_EPOCH),
+    size: 0,
+};
 
 const NOTES: usize = 10_000;
 const FOLDERS: usize = 100;
@@ -72,7 +78,7 @@ fn built_index(vault: &Vault) -> NoteIndex {
         .collect();
     for (at, id) in notes.into_iter().enumerate() {
         let text = note_text(at);
-        index.insert(id, NoteContent::parse(text.into(), Mtime(UNIX_EPOCH)));
+        index.insert(id, NoteContent::parse(text.into(), EPOCH));
     }
     index
 }

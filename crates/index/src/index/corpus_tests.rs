@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use super::NoteIndex;
-use crate::NoteContent;
 use crate::corpus::TEXT_HEADER_BYTES;
-use crate::test_support::{ROOT, id, load, mtime, note_set, rename, texts, vault};
+use crate::test_support::{ROOT, content, id, load, mtime, note_set, rename, texts, vault};
 
 #[test]
 fn insert_stores_the_text_and_remove_clears_it() {
@@ -94,7 +93,7 @@ fn a_gone_note_s_text_is_freed_with_the_previous_set() {
     let _ = index.set_notes(note_set(&vault));
     let text: Arc<str> = "gone".into();
     let weak = Arc::downgrade(&text);
-    index.insert(id(&vault, "gone.md"), NoteContent::parse(text, mtime(0)));
+    index.insert(id(&vault, "gone.md"), content(text, mtime(0)));
 
     fs.remove(std::path::Path::new(&format!("{ROOT}/gone.md")));
     let Ok(()) = futures::executor::block_on(vault.rescan(&fs)) else {
@@ -115,8 +114,8 @@ fn a_save_moves_the_note_s_mtime_without_a_rescan() {
     let scanned = |id| vault.entry(id).map(|entry| entry.mtime);
     assert_eq!(index.corpus().modified(1), scanned(b));
 
-    index.insert(a, NoteContent::parse("loaded".into(), mtime(1)));
-    index.insert(a, NoteContent::parse("saved".into(), mtime(2)));
+    index.insert(a, content("loaded", mtime(1)));
+    index.insert(a, content("saved", mtime(2)));
 
     let corpus = index.corpus();
     assert_eq!(corpus.modified(0), Some(mtime(2)));

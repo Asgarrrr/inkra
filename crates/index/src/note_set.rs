@@ -23,12 +23,16 @@ impl NoteSet {
     /// `entries` in `Vault::entries()` order, paths relative to the root; folders are dropped.
     #[must_use]
     pub fn build(entries: Vec<(EntryId, String, Kind, Mtime)>) -> Self {
-        let (notes, mtimes) = prepare(entries);
+        let Prepared {
+            notes,
+            files,
+            mtimes,
+        } = prepare(entries);
         let table = NoteTable::new(&notes);
         let ids = notes.iter().map(|(id, _)| *id).collect();
         Self {
             notes: table,
-            names: NamesSnapshot::build(notes),
+            names: NamesSnapshot::build(notes, files),
             ids,
             mtimes: mtimes.into(),
             _retired: Vec::new(),
@@ -36,23 +40,35 @@ impl NoteSet {
     }
 }
 
-/// One pass both halves share: the notes in order, `.md` stripped, NFC, with their mtimes apart.
-pub(crate) fn prepare(
-    entries: Vec<(EntryId, String, Kind, Mtime)>,
-) -> (Vec<(EntryId, Arc<str>)>, Vec<Mtime>) {
-    entries
+/// The notes of a vault, each column in vault order.
+pub(crate) struct Prepared {
+    /// `.md` stripped, NFC.
+    pub(crate) notes: Vec<(EntryId, Arc<str>)>,
+    /// Relative to the root as scanned.
+    pub(crate) files: Vec<Arc<str>>,
+    pub(crate) mtimes: Vec<Mtime>,
+}
+
+/// One pass both halves share.
+pub(crate) fn prepare(entries: Vec<(EntryId, String, Kind, Mtime)>) -> Prepared {
+    let (notes, (files, mtimes)) = entries
         .into_iter()
         .filter(|(_, _, kind, _)| *kind == Kind::Note)
-        .map(|(id, path, _, mtime)| {
-            let path = strip_md(&path);
+        .map(|(id, file, _, mtime)| {
+            let path = strip_md(&file);
             let path: Arc<str> = if path.is_ascii() {
                 path.into()
             } else {
                 path.nfc().collect::<String>().into()
             };
-            ((id, path), mtime)
+            ((id, path), (Arc::from(file), mtime))
         })
-        .unzip()
+        .unzip();
+    Prepared {
+        notes,
+        files,
+        mtimes,
+    }
 }
 
 #[cfg(test)]

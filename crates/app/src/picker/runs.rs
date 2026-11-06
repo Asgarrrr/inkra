@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use gpui::{Context, Entity, Priority, Subscription};
+use gpui::{App, Context, Entity, Priority, Subscription};
 use inkra_index::live::Status;
 use inkra_index::{IndexSnapshot, NoteQuery};
 use inkra_vault::Jobs;
@@ -26,13 +26,17 @@ pub(crate) trait IndexDelegate: PickerDelegate {
     type Found: Send + 'static;
     /// A row's identity across refreshes: what a refresh keeps selected.
     type Key: PartialEq;
+    /// What `search` reads notes through, taken on the foreground.
+    type Reads: Send + 'static;
 
     fn runs(&mut self) -> &mut Runs;
     fn sync(&self) -> &Entity<IndexSync>;
     /// The query `text` runs; `None` once the delegate set rows that need no scan.
     fn query(&mut self, text: &str, run: Run) -> Option<NoteQuery>;
-    /// Off the foreground: `find_notes` or `search`, with the delegate's limit.
+    fn reads(&self, cx: &App) -> Self::Reads;
+    /// Off the foreground: `find_notes` or reads of `candidates`, with the delegate's limit.
     fn search(
+        reads: Self::Reads,
         snapshot: &IndexSnapshot,
         query: &NoteQuery,
         jobs: &dyn Jobs,
@@ -130,6 +134,7 @@ impl Runs {
             cancel,
         } = started;
         let (snapshot, query) = (sync.read(cx).index().snapshot(), Arc::new(query));
+        let reads = delegate.reads(cx);
         let jobs = Background {
             executor: cx.background_executor().clone(),
             priority: Priority::default(),
@@ -141,7 +146,7 @@ impl Runs {
                 jobs.executor.timer(wait).await;
             }
             released.await;
-            let found = D::search(&snapshot, &query, &jobs, &cancel).await?;
+            let found = D::search(reads, &snapshot, &query, &jobs, &cancel).await?;
             Some(Ran::Found(Landed {
                 id,
                 run,

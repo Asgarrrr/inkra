@@ -151,7 +151,7 @@ impl NoteIndex {
             source,
             words,
             text,
-            modified,
+            stamp,
         } = content;
         for (at, link) in source.links.iter().enumerate() {
             if let Target::Note { path, .. } = &link.target {
@@ -162,7 +162,7 @@ impl NoteIndex {
             }
         }
         self.sources.insert(id, source);
-        self.corpus.write(self.notes.order(id), text, modified);
+        self.corpus.write(self.notes.order(id), text, stamp);
         self.words.set(id, words);
     }
 

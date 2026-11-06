@@ -209,5 +209,10 @@ launch: first frame 81.9ms, session read 73.58µs, root 106.5ms, scanned 197.8ms
 median 8.19 ms (95% interval 8.14 to 8.79 ms, 10 samples). The slice 2d gate is this figure plus
 50 ms.
 
+Slice 2a adds `read_search/read4`: the candidates, then 4 threads that each read a contiguous
+quarter through `RealFs::load`, then `TextSearch` over the reads in order. Same vault and term,
+`--quick`: resident 7.72 ms (7.71 to 7.72 ms), `read4` 14.43 ms (14.35 to 14.73 ms). Reading the
+1,000 candidates costs about 6.7 ms over the resident search, inside the 50 ms gate.
+
 Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent has no passwordless
 `sudo`, so the user runs them and adds the lines to this section.

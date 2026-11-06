@@ -7,16 +7,18 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription};
 use inkra_index::live::{Effects, Status, Turn};
 use inkra_index::{LiveIndex, NoteContent, NoteIndex};
-use inkra_vault::{Fs, Vault};
+use inkra_vault::{EntryId, Fs, Vault};
 
 use crate::count::thousands;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
 mod loading;
+mod reads;
 mod watch;
 
 use loading::Landed;
+pub(crate) use reads::Reader;
 #[cfg(test)]
 pub(crate) use watch::BUILDING_REFRESH;
 pub(crate) use watch::IndexWatch;
@@ -213,12 +215,17 @@ impl IndexSync {
         self.turn(cx, |turn: &mut Turn<'_>| turn.vault_changed());
     }
 
+    /// Notes a search read changed or gone since their load: each loads again.
+    pub(crate) fn stale(&mut self, ids: &[EntryId], cx: &mut Context<Self>) {
+        self.turn(cx, |turn| turn.stale(ids));
+    }
+
     /// Never queued: a write needs no load and must not wait behind the startup queue.
     fn saved(&mut self, _: Entity<NoteStore>, event: &NoteSaved, cx: &mut Context<Self>) {
-        let (id, modified) = (event.id, event.stamp.mtime);
-        let ticket = self.turn(cx, |turn| turn.saved(id, modified));
+        let (id, stamp) = (event.id, event.stamp);
+        let ticket = self.turn(cx, |turn| turn.saved(id, stamp.mtime));
         let text = Arc::clone(&event.text);
-        let parsed = cx.background_spawn(async move { NoteContent::parse(text, modified) });
+        let parsed = cx.background_spawn(async move { NoteContent::parse(text, stamp) });
         cx.spawn(async move |this, cx| {
             let content = parsed.await;
             let _ = this.update(cx, |this, cx| {
@@ -240,6 +247,9 @@ mod startup_tests;
 
 #[cfg(test)]
 mod loading_tests;
+
+#[cfg(test)]
+mod reads_tests;
 
 #[cfg(test)]
 mod scanning_tests;

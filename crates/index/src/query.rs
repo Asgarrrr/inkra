@@ -9,7 +9,7 @@ use crate::find::{find_in, merge_found};
 use crate::index::IndexSnapshot;
 use crate::search::search_in;
 use crate::words::{Lookup, NoteQuery};
-use crate::{NoteMatch, Searched};
+use crate::{Candidate, NoteMatch, Searched};
 
 impl IndexSnapshot {
     /// Quick open's rows: the best `limit` notes, best first. `None` once `cancel` is set.
@@ -38,7 +38,45 @@ impl IndexSnapshot {
         let merge = |found| Searched::merge(found, limit);
         fan_out(self, query, jobs, cancel, scan, merge).await
     }
+
+    /// Vault search's reads: each note whose words hold every term, in vault order, with the
+    /// stamp of the text the words came from. `None` once `cancel` is set.
+    ///
+    /// # Panics
+    /// If a note holds words but was never loaded.
+    #[must_use]
+    pub fn candidates(&self, query: &NoteQuery, cancel: &AtomicBool) -> Option<Vec<Candidate>> {
+        let lookup = self.lookup(query, cancel)?;
+        let names = self.names();
+        let mut candidates = Vec::new();
+        for block in (0..names.len()).step_by(CANCEL_EVERY) {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            for order in block..(block + CANCEL_EVERY).min(names.len()) {
+                let id = names.id(order);
+                let holds = lookup.ordinal(id).is_some_and(|ordinal| {
+                    (0..lookup.term_count()).all(|term| lookup.hit(term, ordinal).is_some())
+                });
+                if !holds {
+                    continue;
+                }
+                let Some(stamp) = self.corpus().stamp(order) else {
+                    panic!("note {id:?} holds words but was never loaded");
+                };
+                candidates.push(Candidate {
+                    id,
+                    path: names.file(order).clone(),
+                    stamp,
+                });
+            }
+        }
+        Some(candidates)
+    }
 }
+
+/// `candidates` checks its flag once per this many notes.
+const CANCEL_EVERY: usize = 256;
 
 /// `scan` over each of `jobs.parallelism()` ranges, merged in range order; `None` once `cancel` is set.
 async fn fan_out<T: Send, M>(

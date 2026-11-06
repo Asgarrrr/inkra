@@ -266,10 +266,10 @@ fn picking_a_hit_then_another_drops_the_first(cx: &mut TestAppContext) {
     fs.insert_file("/vault/a.md", "alpha plan");
     fs.insert_file("/vault/b.md", "beta\nplan");
     let (window, mut visual, [a, _b]) = shown_in(cx, &fs);
-    let gate = fs.block_load("/vault/b.md");
 
     visual.simulate_keystrokes("cmd-shift-f p l a n");
     settle(&mut visual);
+    let gate = fs.block_load("/vault/b.md");
     visual.simulate_keystrokes("down enter");
     visual.simulate_keystrokes("cmd-shift-f p l a n");
     settle(&mut visual);

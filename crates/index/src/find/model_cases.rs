@@ -10,9 +10,9 @@ use regex_syntax::is_word_character;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::key::strip_md;
-use crate::test_support::{PARTS, entries, mtime, vault};
+use crate::test_support::{PARTS, content, entries, mtime, vault};
 use crate::words::{TERM_MAX_CHARS, cap, fold};
-use crate::{NoteContent, NoteIndex, NoteQuery, NoteSet};
+use crate::{NoteIndex, NoteQuery, NoteSet};
 
 /// No `\n` or `.` (file-name rules); a skin tone modifier and U+0600 add grapheme edges.
 fn component() -> impl Strategy<Value = String> {
@@ -150,7 +150,7 @@ pub(crate) fn build(case: &Case) -> Built {
     let _ = index.set_notes(NoteSet::build(all));
     for (k, note) in notes.iter().enumerate() {
         if let Some((text, n)) = &case.loaded[k % 8] {
-            index.insert(note.id, NoteContent::parse(text.as_str().into(), mtime(*n)));
+            index.insert(note.id, content(text.as_str(), mtime(*n)));
         }
     }
     if case.merged {

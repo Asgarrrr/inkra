@@ -3,6 +3,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use inkra_text::ByteOffset;
+use inkra_vault::EntryId;
 
 use super::hit::{Hit, NoteHits, Searched};
 use crate::find::{Terms, each_word, light, word_prefix};
@@ -51,30 +52,39 @@ pub(crate) fn search_in(
             continue;
         }
         let room = HITS_PER_NOTE.min(limit - count);
-        let Some(mut lit) = locate(text, &terms, room, cancel) else {
+        let Some(group) = note_hits(note, text, &terms, room, cancel) else {
             return Searched::default();
         };
-        let capped = lit.len() > room;
-        lit.truncate(room);
-        count += lit.len();
-        notes.push(NoteHits {
-            note,
-            hits: lines(text, lit)
-                .map(|(range, line)| {
-                    Hit::new(
-                        text,
-                        ByteOffset::new(range.start)..ByteOffset::new(range.end),
-                        line,
-                    )
-                })
-                .collect(),
-            capped,
-        });
+        count += group.hits.len();
+        notes.push(group);
     }
     Searched {
         notes,
         limit_reached: count >= limit,
     }
+}
+
+/// The first `room` hits of `note`'s `text`, capped when it has more; `None` once `cancel` is set.
+pub(super) fn note_hits(
+    note: EntryId,
+    text: &str,
+    terms: &Terms<'_>,
+    room: usize,
+    cancel: &AtomicBool,
+) -> Option<NoteHits> {
+    let mut lit = locate(text, terms, room, cancel)?;
+    let capped = lit.len() > room;
+    lit.truncate(room);
+    let hits = lines(text, lit)
+        .map(|(range, line)| {
+            Hit::new(
+                text,
+                ByteOffset::new(range.start)..ByteOffset::new(range.end),
+                line,
+            )
+        })
+        .collect();
+    Some(NoteHits { note, hits, capped })
 }
 
 /// The first `room` hits in `text`, plus one if more exist; `None` once `cancel` is set.

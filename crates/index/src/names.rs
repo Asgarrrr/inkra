@@ -11,6 +11,8 @@ struct Name {
     id: EntryId,
     /// NFC, `/`-separated, `.md` stripped.
     path: Arc<str>,
+    /// Relative to the root as scanned: extension kept, never normalized.
+    file: Arc<str>,
     /// `path.chars().count()`: the path-length tie-break of `find`'s rank.
     chars: usize,
 }
@@ -23,15 +25,19 @@ pub struct NamesSnapshot {
 }
 
 impl NamesSnapshot {
-    pub(crate) fn build(notes: Vec<(EntryId, Arc<str>)>) -> Self {
+    /// `files` holds each note's file, in the order of `notes`.
+    pub(crate) fn build(notes: Vec<(EntryId, Arc<str>)>, files: Vec<Arc<str>>) -> Self {
+        assert_eq!(notes.len(), files.len(), "one file per note");
         let words = NameWords::build(notes.iter().map(|(_, path)| &**path));
         Self {
             names: notes
                 .into_iter()
-                .map(|(id, path)| Name {
+                .zip(files)
+                .map(|((id, path), file)| Name {
                     id,
                     chars: path.chars().count(),
                     path,
+                    file,
                 })
                 .collect(),
             words: Arc::new(words),
@@ -65,6 +71,12 @@ impl NamesSnapshot {
 
     pub(crate) fn path(&self, order: usize) -> &Arc<str> {
         &self.names[order].path
+    }
+
+    /// The note's path relative to the root, as scanned; join it to the root to read the note.
+    #[must_use]
+    pub fn file(&self, order: usize) -> &Arc<str> {
+        &self.names[order].file
     }
 
     pub(crate) fn chars(&self, order: usize) -> usize {

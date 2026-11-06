@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::executor::block_on;
-use inkra_vault::{Job, Jobs, Serial};
+use inkra_vault::{EntryId, Job, Jobs, Serial, Stamp};
 use proptest::prelude::*;
 
 use crate::find::model_cases::{self, Built, Case, build};
 use crate::find::{find_in, merge_found};
 use crate::search::search_in;
-use crate::test_support::{id, indexed, load, note_set, vault};
+use crate::test_support::{id, indexed, load, mtime, note_set, vault};
 use crate::{IndexSnapshot, NoteIndex, NoteMatch, NoteQuery, Searched};
 
 /// `n` ranges, their jobs run inline in order.
@@ -170,4 +170,46 @@ fn an_empty_vault_answers_empty_not_nothing() {
     assert_eq!(found, Some(Vec::new()));
     let searched = block_on(snapshot.search(&query, 10, &Ranges(4), &not_cancelled()));
     assert_eq!(searched, Some(Searched::default()));
+}
+
+#[test]
+fn candidates_are_the_notes_holding_every_term_in_vault_order() {
+    let texts: Vec<Option<&str>> = (0..300)
+        .map(|n| Some(if n % 2 == 0 { "alpha beta" } else { "alpha" }))
+        .collect();
+    let (ids, index) = indexed(&texts);
+    let query = NoteQuery::new("alpha beta", None, &[]);
+
+    let Some(candidates) = index.snapshot().candidates(&query, &AtomicBool::new(false)) else {
+        panic!("not cancelled");
+    };
+
+    let want: Vec<(EntryId, String, Stamp)> = (0..300)
+        .step_by(2)
+        .map(|n| {
+            let stamp = Stamp {
+                mtime: mtime(0),
+                size: 10,
+            };
+            (ids[n], format!("n{n:03}.md"), stamp)
+        })
+        .collect();
+    let got: Vec<(EntryId, String, Stamp)> = candidates
+        .into_iter()
+        .map(|candidate| (candidate.id, candidate.path.to_string(), candidate.stamp))
+        .collect();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn candidates_stop_once_cancelled() {
+    let (_, index) = indexed(&[Some("alpha")]);
+    let query = NoteQuery::new("alpha", None, &[]);
+
+    assert!(
+        index
+            .snapshot()
+            .candidates(&query, &AtomicBool::new(true))
+            .is_none()
+    );
 }

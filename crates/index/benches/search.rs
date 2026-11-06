@@ -8,7 +8,13 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::executor::block_on;
 use inkra_index::{IndexSnapshot, MergeWhen, NoteContent, NoteIndex, NoteQuery, NoteSet, Searched};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Kind, Mtime, Serial, Vault};
+use inkra_vault::{EntryId, Kind, Mtime, Serial, Stamp, Vault};
+
+/// The stamp of every text the bench parses: nothing here compares stamps.
+const EPOCH: Stamp = Stamp {
+    mtime: Mtime(UNIX_EPOCH),
+    size: 0,
+};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -90,10 +96,7 @@ fn index() -> (NoteIndex, u64, (EntryId, Arc<str>)) {
     for (note, (id, ..)) in notes.enumerate() {
         let text: Arc<str> = note_text(&mut lcg, note).into();
         total += text.len();
-        index.insert(
-            *id,
-            NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)),
-        );
+        index.insert(*id, NoteContent::parse(Arc::clone(&text), EPOCH));
         last = Some((*id, text));
     }
     let Some(last) = last else {
@@ -165,7 +168,7 @@ fn bench_search(c: &mut Criterion) {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let held = index.corpus();
-                let content = NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH));
+                let content = NoteContent::parse(Arc::clone(&text), EPOCH);
                 let start = Instant::now();
                 index.insert(id, content);
                 total += start.elapsed();
@@ -225,7 +228,7 @@ fn long_notes(
     let total = u64::try_from(text.len() * copies).unwrap_or(u64::MAX);
     let text: Arc<str> = text.into();
     for id in ids {
-        index.insert(id, NoteContent::parse(Arc::clone(&text), Mtime(UNIX_EPOCH)));
+        index.insert(id, NoteContent::parse(Arc::clone(&text), EPOCH));
     }
     settle(&mut index);
     (index, total)
