@@ -9,10 +9,11 @@ use gpui::{
 };
 use inkra_layout::{GroupId, Side, SplitPath, Surface, View};
 
+use super::column::lower_header;
 use super::dock_drag::DraggedView;
 use super::docks::{ToggleLeftDock, ToggleRightDock, icon, title};
 use super::group::selector;
-use super::render::{Slot, lower_header};
+use super::members::Slot;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::{NewFolder, NewNote};
 use crate::theme;

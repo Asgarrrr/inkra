@@ -11,8 +11,8 @@ use super::tab_bar::{click, press};
 use super::{ab_focused, open};
 use crate::shell::AppShell;
 use crate::shell::docks::MoveBacklinksToOtherDock;
-use crate::shell::group::SplitRight;
 use crate::shell::session::THROTTLE;
+use crate::shell::split::SplitRight;
 use crate::theme::TITLE_BAR_HEIGHT;
 
 fn left_groups(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<GroupId> {

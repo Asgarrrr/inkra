@@ -7,7 +7,7 @@ use super::dock_menu::drawn;
 use super::splits::{centre, check_layout, close, last, shown_in, split};
 use super::tab_bar::{click, press};
 use super::{AppShell, ab_focused, keys, open};
-use crate::shell::group::SplitDown;
+use crate::shell::split::SplitDown;
 use crate::theme;
 
 fn split_down(cx: &mut VisualTestContext) {

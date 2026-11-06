@@ -33,6 +33,7 @@ mod edge_drops;
 mod failed_trash;
 mod files_header;
 mod following;
+mod geometry;
 mod gone;
 mod history;
 mod modal;

@@ -13,10 +13,13 @@ use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, Tras
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
+mod column;
 mod dock_chrome;
 mod dock_drag;
 mod docks;
+mod geometry;
 mod group;
+mod members;
 mod modal;
 mod notice;
 mod palette;
@@ -26,11 +29,13 @@ mod quit;
 mod render;
 mod separator;
 mod session;
+mod split;
 mod tab_bar;
 mod tab_moves;
 mod tabs;
 mod themes;
 mod title_bar;
+mod workspace;
 
 use group::Group;
 use inkra_layout::{GroupId, Layout, View};
@@ -40,7 +45,7 @@ use panes::VaultPanes;
 use session::{Restore, SessionFile};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
-pub(crate) use group::{
+pub(crate) use split::{
     ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,
     SplitRight, SplitUp,
 };
