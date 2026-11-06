@@ -13,6 +13,7 @@ mod history;
 mod moving;
 mod parked;
 mod restored;
+mod stops;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Fake {

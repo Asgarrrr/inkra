@@ -94,8 +94,10 @@ impl RenderOnce for ListItem {
             .ui_text()
             .pl(theme::ROW_INSET + theme::INDENT_STEP * depth)
             .pr(theme::ROW_INSET)
-            .when(self.style == ListItemStyle::Tree, |row| {
-                row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS)
+            .map(|row| match self.style {
+                ListItemStyle::Tree => row.h(theme::TREE_ROW_HEIGHT).rounded(theme::ROW_RADIUS),
+                // A menu row's icon is not a tree's chevron slot: it keeps off the label.
+                ListItemStyle::Menu => row.gap_1p5(),
             });
         let (selected, hover) = match self.style {
             ListItemStyle::Tree => (colors.chrome_element_hover, colors.chrome_element_hover),

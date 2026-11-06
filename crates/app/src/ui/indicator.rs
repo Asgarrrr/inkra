@@ -3,11 +3,12 @@ use gpui::{App, IntoElement, RenderOnce, Styled, Window, div};
 use super::Color;
 use crate::theme;
 
-/// A note's unwritten state: edited, or its write failed.
+/// A dot: a note's unwritten state (edited, or its write failed), or the current entry of a list.
 #[derive(IntoElement, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Indicator {
     Dirty,
     Failed,
+    Current,
 }
 
 impl Indicator {
@@ -24,6 +25,7 @@ impl Indicator {
         match self {
             Self::Dirty => format!("{area}-dot-{ix}"),
             Self::Failed => format!("{area}-failed-{ix}"),
+            Self::Current => format!("{area}-current-{ix}"),
         }
     }
 }
@@ -33,6 +35,7 @@ impl RenderOnce for Indicator {
         let color = match self {
             Self::Dirty => Color::Muted,
             Self::Failed => Color::Error,
+            Self::Current => Color::Accent,
         };
         div()
             .size(theme::DOT_SIZE)

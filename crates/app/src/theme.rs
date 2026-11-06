@@ -165,11 +165,8 @@ pub(crate) const INDENT_STEP: Pixels = px(12.);
 /// The line between two groups of a picker's rows.
 pub(crate) const RULE_WIDTH: Pixels = px(1.);
 
-/// The mock's backlinks header; the nav row is level with it (D4).
+/// The mock's backlinks header (D4).
 pub(crate) const PANEL_HEADER_HEIGHT: Pixels = px(34.);
-
-/// Level with the backlinks header (D4).
-pub(crate) const NAV_ROW_HEIGHT: Pixels = PANEL_HEADER_HEIGHT;
 
 pub(crate) const HEADER_COUNT_TEXT_SIZE: Pixels = px(11.5);
 

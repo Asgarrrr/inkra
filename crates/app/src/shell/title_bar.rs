@@ -74,6 +74,8 @@ impl AppShell {
                             )
                             .children(toggle)
                     })
+                    // Centred on the row, level with the dock toggles, not on the tabs' centreline.
+                    .child(self.render_nav(k, group, h_flex().flex_none().h_full(), cx))
                     .child(self.render_tab_bar(k, group, cx))
                     .child(Self::render_new_tab(k, cx))
                     .child(

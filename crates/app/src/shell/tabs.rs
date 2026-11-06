@@ -4,12 +4,13 @@ use std::ops::Range;
 
 use gpui::{App, Context, Window, actions};
 use inkra_layout::{GroupId, Surface, View};
-use inkra_tabs::{Closed, Direction, TabId};
+use inkra_tabs::{Closed, Direction, TabId, Way};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 
 use super::activation::Origin;
 use super::group::Group;
+use super::nav::Walk;
 use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ViewState;
@@ -268,14 +269,7 @@ impl AppShell {
     }
 
     pub(super) fn go_back(&mut self, _: &GoBack, window: &mut Window, cx: &mut Context<Self>) {
-        self.dismiss_modal(window, cx);
-        let (center, note) = (self.layout.last_center(), self.active_note());
-        let Group { tabs, shown, .. } = self.group_mut(center);
-        // Captured, not parked: the tab stays active, and the stack keeps plain offsets (A2).
-        let arriving = tabs.back(note, || capture(shown, cx));
-        if let Some(place) = arriving {
-            self.show_place(center, place, window, cx);
-        }
+        self.walk_history(self.layout.last_center(), Walk::Step(Way::Back), window, cx);
     }
 
     pub(super) fn go_forward(
@@ -284,13 +278,12 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.dismiss_modal(window, cx);
-        let (center, note) = (self.layout.last_center(), self.active_note());
-        let Group { tabs, shown, .. } = self.group_mut(center);
-        let arriving = tabs.forward(note, || capture(shown, cx));
-        if let Some(place) = arriving {
-            self.show_place(center, place, window, cx);
-        }
+        self.walk_history(
+            self.layout.last_center(),
+            Walk::Step(Way::Forward),
+            window,
+            cx,
+        );
     }
 
     /// Drops the view with the note: a buffer with no file is still typable, and every keystroke would be lost.
@@ -350,7 +343,7 @@ impl AppShell {
     }
 
     /// As `show`, then focus lands on the note; a dock's switch leaves it where it is.
-    fn show_place(
+    pub(super) fn show_place(
         &mut self,
         group: GroupId,
         place: Place,

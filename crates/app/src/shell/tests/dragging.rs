@@ -148,7 +148,7 @@ fn a_drag_under_a_picker_moves_nothing(cx: &mut TestAppContext) {
 #[gpui::test]
 fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    cx.simulate_resize(size(px(700.), px(600.)));
+    cx.simulate_resize(size(px(800.), px(600.)));
     open(&window, &mut cx, a);
     for _ in 1..30 {
         cx.simulate_keystrokes("cmd-t");

@@ -20,7 +20,7 @@ use gpui::{
 
 pub(crate) use assets::{Assets, IconName};
 pub(crate) use color::Color;
-pub(crate) use context_menu::{ContextMenu, MenuClosed};
+pub(crate) use context_menu::{ContextMenu, MenuClosed, MenuEntry};
 pub(crate) use icon::Icon;
 pub(crate) use icon_button::IconButton;
 pub(crate) use indicator::Indicator;

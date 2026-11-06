@@ -6,6 +6,7 @@ use gpui::{Bounds, Pixels, Size, Window, point, px, size};
 use inkra_layout::{Axis, GroupId, Side, Surface};
 
 use super::dock_chrome::width;
+use super::nav::nav_width;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::theme;
 
@@ -39,6 +40,7 @@ impl AppShell {
         let trailing = theme::ICON_BUTTON_WIDTH + theme::ROW_INSET;
         let mut chrome: HashMap<GroupId, Pixels> = HashMap::new();
         let center = theme::TAB_CURVE * 2.
+            + nav_width()
             + theme::TAB_MIN_WIDTH
             + theme::ICON_BUTTON_WIDTH
             + theme::TITLE_DRAG_MIN_WIDTH;

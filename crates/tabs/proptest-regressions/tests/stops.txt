@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2f67db4081ff7a7eebf5d8d4541de05d5af9eafdeca05686cd339fb4240d9a4c # shrinks to ops = [Commit(Index(0), Some(2)), Activate(Index(0)), Commit(Index(0), None), Commit(Index(0), None), Activate(Index(0)), Activate(Index(0)), Commit(Index(0), Some(1)), Commit(Index(0), None), Commit(Index(0), None)], at = Index(4099276460824344804), pick = Index(0), back = true
+cc 9ba013dec018a500ca1d60c3b80e72a678ea03f649fda697c26aa3501ee98d3c # shrinks to ops = [Commit(Index(0), Some(0)), Close(Index(0)), Insert(0), Close(Index(0)), Insert(1), Commit(Index(9223372036854775808), Some(0)), Commit(Index(9223372036854775808), Some(1)), Commit(Index(9223372036854775808), None)], back = true
+cc 05ea5d0a6ed11313329bcc52d5866d1ad78c079238bbba111f6f101700c85349 # shrinks to ops = [Commit(Index(0), Some(0)), Commit(Index(0), Some(2)), Commit(Index(0), Some(0)), Back], back = false, pick = Index(9223372036854775808)
+cc 79ae496844f60c1e00dc523efce54e9ddceee97e0a2981d9e90e4878e1fc17df # shrinks to ops = [Activate(Index(0)), Commit(Index(0), Some(0)), Commit(Index(0), None), Commit(Index(0), None), Activate(Index(0)), Commit(Index(0), Some(1)), Commit(Index(0), None), Activate(Index(0)), Commit(Index(0), None), Forward, Commit(Index(0), None), Forward, Commit(Index(0), None), Activate(Index(0)), Commit(Index(0), Some(0)), Forward, Forward, Commit(Index(0), None)], at = Index(2049638280676781536), pick = Index(11594936384196312016), back = true

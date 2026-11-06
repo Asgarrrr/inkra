@@ -87,8 +87,19 @@ pub(super) fn restored(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-pub(super) fn nav_row(stage: &mut Stage) -> WindowHandle<AppShell> {
+pub(super) fn nav_arrows(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = bar(stage);
     stage.click_tree_row(window, 2.);
+    window
+}
+
+/// `nav_arrows`, then another note and a back: the back arrow's menu holds a forward row, the current row and a back row.
+pub(super) fn history_menu(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = bar(stage);
+    stage.click_tree_row(window, 2.);
+    stage.click_tree_row(window, 1.);
+    stage.keys(window, "cmd-[");
+    let arrow = stage.nav_back_center(window);
+    stage.right_click(window, arrow);
     window
 }

@@ -14,7 +14,7 @@ fn fake(note: u8, seq: usize) -> Fake {
 
 impl Harness {
     /// The active tab's stacks, the one walked from first.
-    fn walked(&self, back: bool) -> [Vec<Fake>; 2] {
+    pub(super) fn walked(&self, back: bool) -> [Vec<Fake>; 2] {
         let tab = self
             .tabs
             .iter()

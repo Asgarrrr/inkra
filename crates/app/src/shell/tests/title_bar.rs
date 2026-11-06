@@ -16,10 +16,10 @@ fn armed(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
         .unwrap()
 }
 
-/// Thirty tabs in a 700 px window, the last one active: they overflow the bar.
+/// Thirty tabs in an 800 px window, the last one active: they overflow the bar.
 fn thirty_tabs(cx: &mut TestAppContext) -> VisualTestContext {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
-    cx.simulate_resize(size(px(700.), px(600.)));
+    cx.simulate_resize(size(px(800.), px(600.)));
     open(&window, &mut cx, a);
     for _ in 1..30 {
         cx.simulate_keystrokes("cmd-t");
@@ -199,7 +199,7 @@ fn overflowing_tabs_keep_a_drag_region(cx: &mut TestAppContext) {
     );
     let toggle = cx.debug_bounds("dock-toggle-right").unwrap();
     assert!(
-        toggle.right() <= px(700.),
+        toggle.right() <= px(800.),
         "the toggle is pushed out: {toggle:?}"
     );
     let bar = cx.debug_bounds("tab-bar").unwrap();

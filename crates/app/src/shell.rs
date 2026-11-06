@@ -21,6 +21,7 @@ mod geometry;
 mod group;
 mod members;
 mod modal;
+mod nav;
 mod notice;
 mod palette;
 mod panes;
@@ -127,6 +128,8 @@ pub(crate) struct AppShell {
     restore: Restore,
     /// A left press on a title drag region, not yet moved or released (S3-D3).
     title_drag_armed: bool,
+    /// A left press on a history arrow, held or having opened the menu.
+    press: Option<nav::Press>,
     /// A quit is under way: a second one does nothing.
     quitting: bool,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
@@ -226,6 +229,7 @@ impl AppShell {
             session,
             restore,
             title_drag_armed: false,
+            press: None,
             quitting: false,
             notice: unwatched.map(|error| Notice {
                 text: format!(
@@ -279,11 +283,6 @@ impl AppShell {
     /// The note bound in the editor; `None` on a tab whose note is being trashed.
     pub(super) fn showing(&self) -> Option<EntryId> {
         self.center().shown.bound().map(|bound| bound.note)
-    }
-
-    /// The note the active tab is on, bound or being trashed.
-    pub(super) fn active_note(&self) -> Option<EntryId> {
-        self.center().shown.note()
     }
 
     /// Read when an open or a tab op begins; a synchronous op reads it in its own update.

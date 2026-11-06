@@ -28,9 +28,11 @@ References, both gitignored:
 - **D3. Tabs look like browser tabs.** The active tab has the note's colour, a
   hairline on top and sides, 10 px top corners, and joins the note with no rule
   under it. An inactive tab has muted text and no background.
-- **D4. A navigation row under the tabs.** 34 px, fixed at the top of the note
-  column, holding `←` `→` bound to `GoBack` and `GoForward`. An arrow with no
-  place to reach is dimmed and inert.
+- **D4. The history arrows start each tab strip.** `←` `→`, bound to `GoBack`
+  and `GoForward`, sit before a centre group's first tab, outside the strip's
+  scroll. An arrow with no place to reach is dimmed. A right-click or a hold on
+  either arrow opens the tab's history menu. Revised 2026-11-06: the 34 px nav
+  row under the tabs is gone, and the note gains its height.
 - **D5. The sidebar loses its `vault` header.** Rows grow to 27 px, rounded.
 - **D6. Backlinks keeps a plain title header**: `Backlinks` and a count, not an
   icon bar. A later dock spec shows a title for a dock with one view and an icon
@@ -101,12 +103,36 @@ values unless the comparison shows a clash; record any change here.
   failed dots are unchanged.
 - `+` after the last tab dispatches `NewTab`.
 
-## D4. Navigation row
+## D4. History arrows and the history menu
 
-- Belongs to the note column, above the editor; the editor's scroll does not
-  move it. Its background is the note's.
+- `←` `→` start every centre group's strip, before the first tab and outside
+  the tab bar's scroll. This holds in the title row's segments and in a lower
+  group's header. Each pair acts on its own group's active tab's history.
+- An arrow with no stop is dimmed at `DISABLED_OPACITY`.
 - Enabled state comes from the active tab's history in `inkra-tabs`; the view
   reads it, it does not compute it.
+- A right-click or a 500 ms hold on either arrow, lit or dimmed, opens the
+  history menu at the pointer. The hold time is
+  `GestureTuning::default().long_press_duration`.
+- Row order: forward stops far to near, each with `→`. Then the current row,
+  with an accent dot. Then back stops near to far, each with `←`. The menu
+  shows at most 7 each way.
+- Picking a row walks there in one step. A row whose stop moved walks nothing.
+  The release that ends a hold walks nothing.
+- `inkra-tabs` lists the stops (`Tabs::stops`) and walks to one
+  (`Tabs::walk_to`); `app` names each row and draws the menu.
+- Dock headers get no arrows: a dock's tabs hold views, and history skips views
+  (tabs spec, H2).
+
+Deviations:
+
+- Zed's arrows have no menu
+  (`vendor/zed-reference/crates/workspace/src/pane.rs:3474-3518`, `3570-3585`).
+  Inkra reaches a note several steps back in one gesture, as a browser's back
+  menu does.
+- From the mock (`/tmp/inkra-nav-poc/index.html`): no "ago" times, no footer
+  hint, 500 ms rather than 450 (gpui's default), and the menu anchors at the
+  pointer like every `ContextMenu`.
 
 ## D5. Sidebar
 
@@ -143,11 +169,15 @@ on its left edge against the note.
 ## Tests
 
 - Update the shot scenes `tabs`, `panels-hidden`, `toggle-hover`, `tabs-hover`,
-  `tabs-dragging`, `tabs-overflow`, `backlinks`; add `nav-row` with one arrow
-  dimmed. Render each and look at it beside the reference.
+  `tabs-dragging`, `tabs-overflow`, `backlinks`; the arrows show in the strip,
+  one dimmed. Add a scene with the history menu open. Render each and look at
+  it beside the reference.
 - `#[gpui::test]`: clicking `←` and `→` reaches the previous and next place; a
   click on a dimmed arrow changes nothing; `+` opens a new tab; the sidebar's
   search and new-note buttons dispatch their actions.
+- `#[gpui::test]`: a right-click or a hold on an arrow opens the history menu;
+  a row walks there in one step; with no history, nothing opens; the release
+  that ends a hold walks nothing.
 - Existing title-bar, drag-region and backlinks tests stay green; adapt their
   expected metrics to the new heights, never delete one.
 
@@ -159,7 +189,8 @@ Suggested, for the plan to refine; each one touches data, view and test.
    rows. Shot comparison against the reference freezes the values.
 2. **Split title row and browser tabs** (D2, D3, D6): the row, the tabs, `+`,
    the backlinks header.
-3. **Navigation row** (D4).
+3. **Navigation row** (D4), later replaced by the strip's arrows and the
+   history menu.
 
 ## Deviations
 
@@ -196,7 +227,7 @@ S4, the backlinks header:
 - No count with no backlinks: "No backlinks" under the header already says it.
 - The panel's left hairline was drawn in S1.
 
-S5, the navigation row:
+S5, the navigation row (replaced 2026-11-06 by D4's strip arrows):
 
 - Enabled arrows use `icon_muted`, one colour for every button. The mock's #616161 is dropped.
 - Dimmed means 45% opacity.
