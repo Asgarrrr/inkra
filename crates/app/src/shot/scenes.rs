@@ -8,6 +8,7 @@ mod hover;
 mod markdown_blocks;
 mod quick_open;
 mod reload;
+mod splits;
 mod tabs;
 mod vault_search;
 
@@ -280,6 +281,11 @@ const CATALOGUE: &[Scene] = &[
         name: "tabs-overflow",
         shows: "30 tabs over the note, the last one active (`cmd-9`) and scrolled into view, 34 px on the row's floor with no rule under it; the `+` after the scroll area, still visible before the empty drag space; the empty drag space after the bar kept at its 32 px floor before the backlinks toggle; the sidebar segment unchanged: the lights, search and new note, the toggle at its right edge, its hairline",
         open: tabs::overflow,
+    },
+    Scene {
+        name: "split-right",
+        shows: "two note columns of equal width under the title row, a 1 px hairline between them; over each column its own tab strip, `+` and drag space, the left strip starting at the left column's edge and the right one at the hairline; the left group shows `index`, its active tab muted; the right group shows `reading`, its tab in the note colour, the caret in it; `reading` highlighted in the sidebar",
+        open: splits::right,
     },
     Scene {
         name: "tabs-restored",

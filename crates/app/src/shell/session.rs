@@ -41,7 +41,7 @@ impl AppShell {
     /// The centre's one empty group and the dock groups `saved` holds; docks rule 6's with none.
     pub(super) fn dock_groups(saved: Option<&SavedDocks>) -> (Layout, HashMap<GroupId, Group>) {
         let mut layout = Layout::default();
-        let mut groups = HashMap::from([(layout.center(), Group::new())]);
+        let mut groups = HashMap::from([(layout.last_center(), Group::new())]);
         let docks = saved.map_or_else(|| SavedDocks::default().views(), SavedDocks::views);
         for (side, (views, active, shown)) in [Side::Left, Side::Right].into_iter().zip(docks) {
             let Some(group) = layout.dock(side) else {
@@ -125,7 +125,7 @@ impl AppShell {
             .as_ref()
             .map(|_| SavedDocks::new(self.saved_dock(Side::Left), self.saved_dock(Side::Right)));
         let session = self.session.as_mut()?;
-        let center = &self.groups[&self.layout.center()];
+        let center = &self.groups[&self.layout.last_center()];
         let shown = &center.shown;
         let notes = self.notes.read(cx);
         let vault = notes.vault()?.read(cx);
@@ -192,10 +192,11 @@ impl AppShell {
         self.restore = Restore::Landing { _loads: loads };
     }
 
-    /// Nothing the restore would replace: one tab, empty, no open pending, nothing to reopen.
+    /// Nothing the restore would replace: one group, one tab, empty, no open pending, nothing to reopen.
     fn holds_nothing(&self) -> bool {
         let center = self.center();
-        center.tabs.count() == 1
+        self.layout.center().len() == 1
+            && center.tabs.count() == 1
             && matches!(center.shown, Shown::Empty)
             && center.activation.is_none()
             && !center.tabs.has_closed()
@@ -231,7 +232,7 @@ impl AppShell {
             .collect();
         // `restored` drops the active entry: `bind` shows it, and a default one holds no anchor.
         places.insert(active, Parked::default());
-        let center = self.layout.center();
+        let center = self.layout.last_center();
         self.group_mut(center).tabs = Tabs::restored(places, active);
         let since = self.tree_cursor(cx);
         self.bind(center, shown.note, shown.buffer, shown.view, since, cx);

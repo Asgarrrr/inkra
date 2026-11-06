@@ -17,10 +17,13 @@ fn the_default_puts_files_left_and_backlinks_right_both_shown() {
         assert!(layout.is_shown(side));
         assert!(layout.is_drawn(side));
     }
-    assert_eq!(layout.side_of(layout.center()), None);
+    assert_eq!(layout.center(), [GroupId(0)]);
+    assert_eq!(layout.flexes(), [1.0]);
+    assert_eq!(layout.last_center(), GroupId(0));
+    assert_eq!(layout.side_of(GroupId(0)), None);
     assert_eq!(
-        layout.groups().collect::<Vec<_>>(),
-        [layout.center(), GroupId(1), GroupId(2)]
+        layout.groups().map(GroupId::raw).collect::<Vec<_>>(),
+        [0, 1, 2]
     );
 }
 
@@ -76,7 +79,7 @@ fn add_dock_gives_a_fresh_id_and_draws_the_dock() {
     let right = layout.dock(Side::Right).expect("a right group");
     layout.remove(right);
     let added = layout.add_dock(Side::Right);
-    assert!(![layout.center(), GroupId(1), right].contains(&added));
+    assert!(![GroupId(0), GroupId(1), right].contains(&added));
     assert_eq!(layout.dock(Side::Right), Some(added));
     assert_eq!(layout.side_of(added), Some(Side::Right));
     assert!(layout.is_drawn(Side::Right));
@@ -91,7 +94,7 @@ fn removing_a_dock_group_keeps_its_flag() {
     assert!(!layout.is_shown(Side::Right));
     assert_eq!(
         layout.groups().collect::<Vec<_>>(),
-        [layout.center(), GroupId(1)]
+        [GroupId(0), GroupId(1)]
     );
     layout.add_dock(Side::Right);
     assert!(!layout.is_drawn(Side::Right));
@@ -101,7 +104,54 @@ fn removing_a_dock_group_keeps_its_flag() {
 #[should_panic(expected = "the centre always has a group")]
 fn removing_the_centre_panics() {
     let mut layout = Layout::default();
-    layout.remove(layout.center());
+    layout.remove(layout.center()[0]);
+}
+
+#[test]
+fn split_right_puts_the_new_group_after_and_halves_its_room() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split_right(first);
+    assert_eq!(layout.center(), [first, second]);
+    assert_eq!(layout.flexes(), [1.0, 1.0]);
+    assert_eq!(layout.last_center(), first);
+    assert_eq!(layout.side_of(second), None);
+
+    let third = layout.split_right(first);
+    assert_eq!(layout.center(), [first, third, second]);
+    assert_eq!(layout.flexes(), [0.75, 0.75, 1.5]);
+    let handed: HashSet<_> = layout.groups().collect();
+    assert_eq!(handed.len(), 5);
+
+    layout.activate(third);
+    assert_eq!(layout.last_center(), third);
+    assert_eq!(
+        layout.groups().collect::<Vec<_>>(),
+        [first, third, second, GroupId(1), GroupId(2)]
+    );
+}
+
+#[test]
+fn split_right_keeps_the_other_groups_widths() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split_right(first);
+    layout.split_right(second);
+    assert_eq!(layout.flexes(), [1.5, 0.75, 0.75]);
+}
+
+#[test]
+#[should_panic(expected = "is not in the centre")]
+fn activating_a_dock_group_panics() {
+    let mut layout = Layout::default();
+    layout.activate(GroupId(1));
+}
+
+#[test]
+#[should_panic(expected = "is not in the centre")]
+fn splitting_a_dock_group_panics() {
+    let mut layout = Layout::default();
+    layout.split_right(GroupId(2));
 }
 
 #[test]
@@ -240,6 +290,53 @@ enum Op {
     Add(Side),
 }
 
+#[derive(Debug, Clone, Copy)]
+enum CentreOp {
+    Dock(Op),
+    Split(usize),
+    Activate(usize),
+}
+
+fn centre_op() -> impl Strategy<Value = CentreOp> {
+    prop_oneof![
+        op().prop_map(CentreOp::Dock),
+        any::<usize>().prop_map(CentreOp::Split),
+        any::<usize>().prop_map(CentreOp::Activate),
+    ]
+}
+
+fn fractions(layout: &Layout) -> Vec<(GroupId, f32)> {
+    let sum: f32 = layout.flexes().iter().sum();
+    layout
+        .center()
+        .iter()
+        .zip(layout.flexes())
+        .map(|(&group, flex)| (group, flex / sum))
+        .collect()
+}
+
+fn apply(layout: &mut Layout, op: Op, handed: &mut HashSet<GroupId>) -> Result<(), TestCaseError> {
+    match op {
+        Op::Toggle(side) => layout.toggle(side),
+        Op::Show(side) => {
+            layout.show(side);
+            prop_assert!(layout.is_shown(side));
+        }
+        Op::Remove(side) => {
+            if let Some(group) = layout.dock(side) {
+                layout.remove(group);
+            }
+        }
+        Op::Add(side) => {
+            if layout.dock(side).is_none() {
+                let added = layout.add_dock(side);
+                prop_assert!(handed.insert(added), "{added:?} handed out twice");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn side() -> impl Strategy<Value = Side> {
     prop_oneof![Just(Side::Left), Just(Side::Right)]
 }
@@ -283,29 +380,12 @@ proptest! {
     #[test]
     fn layout_ops_keep_the_invariants(ops in proptest::collection::vec(op(), 0..64)) {
         let mut layout = Layout::default();
-        let center = layout.center();
+        let center = layout.center().to_vec();
         let mut handed: HashSet<GroupId> = layout.groups().collect();
         for op in ops {
-            match op {
-                Op::Toggle(side) => layout.toggle(side),
-                Op::Show(side) => {
-                    layout.show(side);
-                    prop_assert!(layout.is_shown(side));
-                }
-                Op::Remove(side) => {
-                    if let Some(group) = layout.dock(side) {
-                        layout.remove(group);
-                    }
-                }
-                Op::Add(side) => {
-                    if layout.dock(side).is_none() {
-                        let added = layout.add_dock(side);
-                        prop_assert!(handed.insert(added), "{added:?} handed out twice");
-                    }
-                }
-            }
-            prop_assert_eq!(layout.center(), center);
-            let mut held = vec![center];
+            apply(&mut layout, op, &mut handed)?;
+            prop_assert_eq!(layout.center(), &center[..]);
+            let mut held = center.clone();
             for side in [Side::Left, Side::Right] {
                 prop_assert_eq!(layout.is_drawn(side), layout.is_shown(side) && layout.dock(side).is_some());
                 if let Some(group) = layout.dock(side) {
@@ -314,6 +394,48 @@ proptest! {
                 }
             }
             prop_assert_eq!(layout.groups().collect::<Vec<_>>(), held);
+        }
+    }
+
+    #[test]
+    fn centre_ops_keep_the_row_valid(ops in proptest::collection::vec(centre_op(), 0..48)) {
+        let mut layout = Layout::default();
+        let mut handed: HashSet<GroupId> = layout.groups().collect();
+        for op in ops {
+            let before = fractions(&layout);
+            let mut changed = Vec::new();
+            match op {
+                CentreOp::Dock(op) => apply(&mut layout, op, &mut handed)?,
+                CentreOp::Split(pick) => {
+                    let group = layout.center()[pick % layout.center().len()];
+                    let split = layout.split_right(group);
+                    prop_assert!(handed.insert(split), "{split:?} handed out twice");
+                    changed = vec![group, split];
+                }
+                CentreOp::Activate(pick) => {
+                    let group = layout.center()[pick % layout.center().len()];
+                    layout.activate(group);
+                    prop_assert_eq!(layout.last_center(), group);
+                }
+            }
+            let flexes = layout.flexes();
+            prop_assert_eq!(flexes.len(), layout.center().len());
+            prop_assert!(flexes.iter().all(|&flex| flex > 0.0));
+            #[allow(clippy::cast_precision_loss)]
+            let len = flexes.len() as f32;
+            prop_assert!((flexes.iter().sum::<f32>() - len).abs() < 0.001);
+            let after = fractions(&layout);
+            for (group, fraction) in before {
+                if changed.contains(&group) {
+                    continue;
+                }
+                let now = after.iter().find(|(held, _)| *held == group).map(|&(_, now)| now);
+                prop_assert!(now.is_some_and(|now| (now - fraction).abs() < 1e-4), "{group:?} went from {fraction} to {now:?}");
+            }
+            let groups: Vec<_> = layout.groups().collect();
+            let unique: HashSet<_> = groups.iter().collect();
+            prop_assert_eq!(unique.len(), groups.len());
+            prop_assert!(layout.center().contains(&layout.last_center()));
         }
     }
 }

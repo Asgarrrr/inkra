@@ -460,7 +460,9 @@ fn a_gone_note_keeps_its_tab(cx: &mut TestAppContext) {
     assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     // Gone from the vault's entries, the title comes from the note's last path.
     let titles = window
-        .update(&mut cx, |shell, _, cx| shell.tab_titles(cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.tab_titles(shell.layout.last_center(), cx)
+        })
         .unwrap();
     assert_eq!(titles, ["a", "b"]);
 

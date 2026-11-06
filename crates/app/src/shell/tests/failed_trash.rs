@@ -420,7 +420,9 @@ fn a_trashing_tabs_title_is_its_notes_name(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("ctrl-tab");
 
     let titles = window
-        .update(&mut cx, |shell, _, cx| shell.tab_titles(cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.tab_titles(shell.layout.last_center(), cx)
+        })
         .unwrap();
     assert_eq!(titles, ["b", "a"]);
     check(&window, &mut cx);

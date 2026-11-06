@@ -345,8 +345,14 @@ impl Stage {
 
 impl Drop for Stage {
     /// A walk still held owns a vault handle, which gpui reports as leaked when the app drops.
+    /// A window's views release only when it closes: dropped with the app instead, a pinned editor asserts.
     fn drop(&mut self) {
         self.gates.clear();
+        for window in self.cx.update(|cx| cx.windows()) {
+            let _ = self
+                .cx
+                .update_window(window, |_, window, _| window.remove_window());
+        }
         self.settle();
     }
 }

@@ -15,6 +15,14 @@ use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 use crate::open::Open;
 use crate::sidebar::Cursor;
+use crate::vault::NoteStore;
+
+/// Where an open began: the group it lands in, and the tree's cursor the highlight follows from.
+#[derive(Clone, Copy)]
+pub(super) struct Origin {
+    pub(super) group: GroupId,
+    pub(super) since: Cursor,
+}
 
 impl AppShell {
     /// Commits into the tab active when it started, or nowhere; no `await` from bind to `set_current`.
@@ -24,36 +32,43 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let center = self.layout.center();
-        let (tab, since) = (self.group(center).tabs.active(), self.tree_cursor(cx));
+        let origin = Origin {
+            group: self.layout.last_center(),
+            since: self.tree_cursor(cx),
+        };
+        let tab = self.group(origin.group).tabs.active();
         let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
-        self.group_mut(center).activation = Some(cx.spawn(async move |shell, cx| {
+        // Dropped with its group, so the group it began in still exists when it lands.
+        self.group_mut(origin.group).activation = Some(cx.spawn(async move |shell, cx| {
             let Some(buffer) = opened.await else { return };
             let _ = shell.update_in(cx, |shell, window, cx| {
-                let Group { tabs, shown, .. } = shell.group_mut(center);
+                let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
                 if !tabs.commit(tab, || capture(shown, cx)) {
                     return;
                 }
-                shell.land(id, buffer, at, since, window, cx);
+                shell.land(origin, id, buffer, at, window, cx);
             });
         }));
     }
 
+    /// Focus moves only if the group is still `last_center`: a switch since the open keeps it where the user put it.
     pub(super) fn land(
         &mut self,
+        origin: Origin,
         id: EntryId,
         buffer: Entity<Buffer>,
         at: Option<Range<ByteOffset>>,
-        since: Cursor,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let editor = self.bind(self.layout.center(), id, buffer, None, since, cx);
+        let editor = self.bind(origin.group, id, buffer, None, origin.since, cx);
         if let Some(range) = at {
             editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
         }
-        if let Some(focus) = self.land_focus(cx) {
+        if origin.group == self.layout.last_center()
+            && let Some(focus) = self.land_focus(cx)
+        {
             window.focus(&focus, cx);
         }
     }
@@ -120,8 +135,7 @@ impl AppShell {
         }
     }
 
-    /// The one place `shown` changes; the highlight moves only if the tree's cursor is still `since`.
-    /// Only the centre's change reaches the note's followers.
+    /// The one place `shown` changes; only `last_center`'s change reaches the note's followers.
     pub(super) fn set_shown(
         &mut self,
         group: GroupId,
@@ -129,25 +143,42 @@ impl AppShell {
         since: Cursor,
         cx: &mut Context<Self>,
     ) {
-        self.group_mut(group).shown = shown;
-        if group == self.layout.center() {
-            let note = self.showing();
-            if let Some(id) = note {
-                remember(&mut self.recent, id);
-            }
-            if let Some(panes) = &self.panes {
-                // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
-                if let Some(id) = note {
-                    panes
-                        .sidebar
-                        .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
-                }
-                panes
-                    .backlinks
-                    .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
-            }
+        let left = std::mem::replace(&mut self.group_mut(group).shown, shown);
+        // A bound editor is only ever rebound, so an editor left here drops: it must not drop pinned.
+        if let Shown::Bound(left) = left
+            && self.editor_of(group).is_none()
+        {
+            left.editor.update(cx, EditorView::unpin);
+        }
+        if group == self.layout.last_center() {
+            self.follow_center(since, cx);
         }
         self.save_session_later(cx);
+    }
+
+    /// `last_center`'s shown reaches the note's followers and `current`; the highlight moves only if the
+    /// tree's cursor is still `since`. A view leaves `current` alone.
+    pub(super) fn follow_center(&mut self, since: Cursor, cx: &mut Context<Self>) {
+        let note = self.showing();
+        if let Some(id) = note {
+            remember(&mut self.recent, id);
+        }
+        if let Some(panes) = &self.panes {
+            // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
+            if let Some(id) = note {
+                panes
+                    .sidebar
+                    .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
+            }
+            panes
+                .backlinks
+                .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+        }
+        match (&self.center().shown, note) {
+            (Shown::View(_), _) => {}
+            (_, Some(id)) => self.notes.update(cx, |notes, cx| notes.set_current(id, cx)),
+            (_, None) => self.notes.update(cx, NoteStore::clear_current),
+        }
     }
 
     /// Detached: the editor is created once and rebound, so it lives as long as the shell.
@@ -181,7 +212,7 @@ impl AppShell {
         }
     }
 
-    /// Binds `id` into the editor, then `showing` and `current`, with no `await` between.
+    /// Binds `id` into the group's editor, then `showing` and `current` if it is `last_center`, with no `await` between.
     pub(super) fn bind(
         &mut self,
         group: GroupId,
@@ -203,6 +234,9 @@ impl AppShell {
             Shown::Empty | Shown::Trashing(_) | Shown::View(_) => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
                 Self::watch_editor(&editor, cx);
+                if group != self.layout.last_center() {
+                    editor.update(cx, EditorView::pin);
+                }
                 editor
             }
         };
@@ -218,9 +252,6 @@ impl AppShell {
             since,
             cx,
         );
-        if group == self.layout.center() {
-            self.notes.update(cx, |notes, cx| notes.set_current(id, cx));
-        }
         editor
     }
 

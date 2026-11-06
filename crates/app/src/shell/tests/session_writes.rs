@@ -212,7 +212,7 @@ fn a_tab_dropped_elsewhere_in_the_bar_is_saved(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |shell, _, cx| {
             let id = shell.center().tabs.id_at(1).unwrap();
-            shell.move_tab(id, 0, cx);
+            shell.move_tab(shell.layout.last_center(), id, 0, cx);
         })
         .unwrap();
 

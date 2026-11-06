@@ -343,7 +343,7 @@ impl AppShell {
             }
         }
         if cfg!(debug_assertions) {
-            self.check_layout();
+            self.check_layout(cx);
         }
         cx.notify();
         self.save_session_later(cx);
@@ -353,14 +353,30 @@ impl AppShell {
     ///
     /// # Panics
     /// On a broken one.
-    pub(super) fn check_layout(&self) {
+    pub(super) fn check_layout(&self, cx: &App) {
         let held: HashSet<GroupId> = self.layout.groups().collect();
         assert_eq!(
             self.groups.keys().copied().collect::<HashSet<_>>(),
             held,
             "a group for each of the layout's, and no other"
         );
-        assert_eq!(self.center().views().count(), 0, "the centre holds no view");
+        let last = self.layout.last_center();
+        assert!(
+            self.layout.center().contains(&last),
+            "the last active group is in the centre"
+        );
+        for &group in self.layout.center() {
+            assert_eq!(
+                self.group(group).views().count(),
+                0,
+                "the centre holds no view"
+            );
+            assert!(
+                self.editor_of(group)
+                    .is_none_or(|editor| editor.read(cx).is_pinned() == (group != last)),
+                "an editor is pinned exactly when its group is not the last active"
+            );
+        }
         let mut views = Vec::new();
         for side in [Side::Left, Side::Right] {
             if let Some(group) = self.layout.dock(side) {

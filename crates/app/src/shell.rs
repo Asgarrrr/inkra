@@ -147,8 +147,21 @@ impl AppShell {
             Self::watch_editor(editor, cx);
         }
         cx.subscribe(&notes, |shell, _notes, event: &GoneChanged, cx| {
-            if shell.showing() == Some(event.0) {
+            let shows = |&group: &GroupId| {
+                let bound = shell.group(group).shown.bound();
+                bound.is_some_and(|bound| bound.note == event.0)
+            };
+            if shell.layout.center().iter().any(shows) {
                 cx.notify();
+            }
+        })
+        .detach();
+        // A pinned editor must not drop pinned (`EditorView`'s drop), and the shell's editors drop with it.
+        cx.on_release(|shell, cx| {
+            for &group in shell.layout.center() {
+                if let Some(editor) = shell.editor_of(group) {
+                    editor.update(cx, EditorView::unpin);
+                }
             }
         })
         .detach();
@@ -182,7 +195,7 @@ impl AppShell {
         if let Some((editor, note)) = editor.zip(first) {
             // `root` adopts the note it launches with, so its editor comes with `current`.
             groups.insert(
-                layout.center(),
+                layout.last_center(),
                 Group {
                     shown: Shown::Bound(Bound { note, editor }),
                     ..Group::new()
@@ -214,7 +227,7 @@ impl AppShell {
             themes: ThemeStore::default(),
         };
         if cfg!(debug_assertions) {
-            shell.check_layout();
+            shell.check_layout(cx);
         }
         shell
     }
@@ -242,12 +255,13 @@ impl AppShell {
         group
     }
 
+    /// `last_center`'s group, the one the note consumers read.
     fn center(&self) -> &Group {
-        self.group(self.layout.center())
+        self.group(self.layout.last_center())
     }
 
     fn center_mut(&mut self) -> &mut Group {
-        self.group_mut(self.layout.center())
+        self.group_mut(self.layout.last_center())
     }
 
     /// The note bound in the editor; `None` on a tab whose note is being trashed.
@@ -268,7 +282,11 @@ impl AppShell {
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<EditorView>> {
-        self.center().shown.bound().map(|bound| &bound.editor)
+        self.editor_of(self.layout.last_center())
+    }
+
+    pub(super) fn editor_of(&self, group: GroupId) -> Option<&Entity<EditorView>> {
+        self.group(group).shown.bound().map(|bound| &bound.editor)
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {

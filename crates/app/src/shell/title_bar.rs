@@ -1,13 +1,14 @@
 //! The tab row is the window's title bar: the traffic lights' space, the toggles, the tabs and the drag regions (shell chrome spec, S3).
 
 use gpui::{
-    ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder,
+    ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement, MouseButton,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder, px,
 };
 use inkra_layout::Side;
 
 use super::AppShell;
+use super::group::selector;
 use crate::sidebar::NewNote;
 use crate::theme;
 use crate::ui::{IconButton, IconName, h_flex, identified, keep_focus};
@@ -43,6 +44,53 @@ impl AppShell {
         } else {
             (None, right_toggle)
         };
+        let mut leading_toggle = leading_toggle;
+        let mut trailing_toggle = trailing_toggle;
+        let center = self.layout.center();
+        let segments: Vec<_> = center
+            .iter()
+            .zip(self.layout.flexes())
+            .enumerate()
+            .map(|(k, (&group, &flex))| {
+                let last = k + 1 == center.len();
+                h_flex()
+                    .id(("group-strip", group.raw()))
+                    // Basis 0, no padding: the strip's width is its column's, `render`'s same flex.
+                    .flex_basis(px(0.))
+                    .flex_grow(flex)
+                    .min_w_0()
+                    .h_full()
+                    .capture_any_mouse_down(cx.listener(move |shell, _, window, cx| {
+                        shell.activate_group(group, window, cx);
+                    }))
+                    .when_some(leading_toggle.take(), |segment, toggle| {
+                        segment
+                            .child(
+                                Self::render_drag_region("title-drag-start", cx)
+                                    .flex_none()
+                                    .w(lights),
+                            )
+                            .children(toggle)
+                    })
+                    .child(self.render_tab_bar(k, group, cx))
+                    .child(Self::render_new_tab(k, cx))
+                    .child(
+                        Self::render_drag_region(
+                            ElementId::Name(selector("title-drag-end", k).into()),
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w(theme::TITLE_DRAG_MIN_WIDTH),
+                    )
+                    .when(last, |segment| {
+                        segment
+                            .children(trailing_toggle.take())
+                            .when(!right_drawn, |segment| {
+                                segment.child(div().flex_none().w(theme::ROW_INSET))
+                            })
+                    })
+            })
+            .collect();
         let title_tabs = h_flex()
             .debug_selector(|| "title-tabs".into())
             .on_mouse_down(MouseButton::Left, keep_focus)
@@ -50,7 +98,6 @@ impl AppShell {
             .flex_1()
             .min_w_0()
             .h_full()
-            .when(!right_drawn, |segment| segment.pr(theme::ROW_INSET))
             // Under the tabs only, so the side panels run to the window's top; the active tab, painted later, breaks it (D3).
             .child(
                 div()
@@ -61,23 +108,7 @@ impl AppShell {
                     .border_b(theme::RULE_WIDTH)
                     .border_color(colors.border_variant),
             )
-            .when_some(leading_toggle, |segment, toggle| {
-                segment
-                    .child(
-                        Self::render_drag_region("title-drag-start", cx)
-                            .flex_none()
-                            .w(lights),
-                    )
-                    .children(toggle)
-            })
-            .child(self.render_tab_bar(cx))
-            .child(Self::render_new_tab(cx))
-            .child(
-                Self::render_drag_region("title-drag-end", cx)
-                    .flex_1()
-                    .min_w(theme::TITLE_DRAG_MIN_WIDTH),
-            )
-            .children(trailing_toggle);
+            .children(segments);
         h_flex()
             .debug_selector(|| "tab-row".into())
             .relative()
@@ -151,8 +182,8 @@ impl AppShell {
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.
-    fn render_drag_region(selector: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
-        identified(div(), selector)
+    fn render_drag_region(id: impl Into<ElementId>, cx: &mut Context<Self>) -> Stateful<Div> {
+        identified(div(), id)
             .h_full()
             .on_mouse_down(
                 MouseButton::Left,

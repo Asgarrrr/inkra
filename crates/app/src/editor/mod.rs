@@ -162,10 +162,6 @@ impl EditorView {
     }
 
     /// Seals the undo group even with no edit, as `capture` does, and parks the selection.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "S3's groups pin the editor left")
-    )]
     pub(crate) fn pin(&mut self, cx: &mut Context<Self>) {
         if self.pinned.is_some() {
             return;
@@ -179,15 +175,10 @@ impl EditorView {
         self.pinned = Some(pinned);
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "S3's groups unpin the editor entered")
-    )]
     pub(crate) fn unpin(&mut self, cx: &mut Context<Self>) {
         self.drop_pin(cx);
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "S3's groups read it"))]
     pub(crate) fn is_pinned(&self) -> bool {
         self.pinned.is_some()
     }

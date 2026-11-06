@@ -316,6 +316,44 @@ S2's choices:
   `Parses` global *(delegated)*. N views of one note parse once per edit.
 - Shaping stays per view, since each view has its own width *(delegated)*.
 
+S3's choices:
+
+- One focus field, `last_center`, until P3 adds `active` *(delegated)*. Every
+  reader of the old single centre reads it: the tree's follow, backlinks, quick
+  open, `cmd-w`, the session.
+- A mouse press activates a group: `capture_any_mouse_down` on its column and
+  on its title strip *(delegated)*. A press that leaves focus in the editor of
+  the group left moves it to the group entered, since that editor is now pinned.
+  A press on the sidebar toggle in the first strip (left dock hidden) also
+  activates the first group.
+- A split halves the split group's flex, then rescales the row to sum to its
+  length *(delegated)*. Zed resets every flex to 1; halving keeps the other
+  groups' widths.
+- A tab dropped on another group's strip is refused until P4 *(delegated)*. Each
+  group numbers its own tabs, so the drop checks `DraggedTab.group`, not the id.
+- An inactive group's active tab draws its label muted *(delegated)*. The tab
+  keeps the note colour and hairline, so the strip still shows what the group holds.
+- The notice draws in `last_center`'s column only *(delegated)*.
+- No minimum group size until P2 *(delegated)*.
+- A debug selector in centre group `k > 0` takes a `-{k}` suffix; group 0 keeps
+  the bare name, so every single-group test and shot reads as before *(delegated)*.
+- An open lands in the group it began in (T4 per group): `Origin` carries the
+  group and the tree cursor. Closing a group drops its pending open with its `Group`.
+- An open's focus moves only if its group is still `last_center` when it lands
+  *(delegated)*. A background open in a group the user left never takes the focus.
+- The columns sit in the main row itself, not in a wrapper row *(delegated)*: a
+  nested row has taffy measure the note's content and shape it twice per
+  keystroke. A strip has basis 0 and no padding, so its width is its column's;
+  the trailing inset is a spacer in the last strip.
+- The hairline between columns is an absolute 1 px child of the right column, not
+  its border *(delegated)*. With basis 0, a border gives the column a 1 px base
+  size its strip lacks, and the strip drifts off the column by up to 1 px.
+- gpui drops a test's or a shot's entities with the app, unreleased. The shell's
+  `on_release` unpins its editors only when its window closes, so the split
+  tests and `Stage`'s drop close every window first *(delegated)*. `Stage`'s drop
+  (`shot/stage.rs`) is outside the slice's files; it applies to every scene, and
+  a scene with one group renders the same.
+
 ## Deferred
 
 | Item | Trigger |
