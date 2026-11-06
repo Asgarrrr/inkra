@@ -2,7 +2,9 @@
 
 use std::cmp::Ordering;
 
-use gpui::{Context, InteractiveElement, IntoElement, Pixels, Render, Styled, Window, div, px};
+use gpui::{
+    Context, InteractiveElement, IntoElement, Pixels, Point, Render, Styled, Window, div, px,
+};
 use inkra_layout::{GroupId, Side, View};
 
 use super::AppShell;
@@ -10,7 +12,7 @@ use super::docks::{icon, title};
 use crate::theme;
 use crate::ui::IconButton;
 
-/// The root's group, so a strip can tint on a drag over it without a tab drag lighting it.
+/// The root's group, so a strip can show its edge on a drag over it without a tab drag lighting it.
 pub(super) const SHELL_GROUP: &str = "app-shell";
 
 const DROP_STRIP_WIDTH: Pixels = px(40.);
@@ -43,13 +45,31 @@ impl Render for DraggedView {
 }
 
 impl AppShell {
-    /// A drag-only target at the window edge of a side with no views: without it an emptied dock could not be refilled.
+    /// Whether a drag draws `side`'s drop strip: a vault is open and the side has no views.
+    fn has_drop_strip(&self, side: Side) -> bool {
+        self.panes.is_some() && self.layout.dock(side).is_none()
+    }
+
+    /// Whether a point falls in a drawn drop strip, which takes a view's drop from any group under it.
+    pub(super) fn drop_strip_hit(&self) -> impl Fn(Point<Pixels>, &Window) -> bool + 'static {
+        let (left, right) = (
+            self.has_drop_strip(Side::Left),
+            self.has_drop_strip(Side::Right),
+        );
+        move |at, window| {
+            (left && at.x < DROP_STRIP_WIDTH)
+                || (right && at.x >= window.viewport_size().width - DROP_STRIP_WIDTH)
+        }
+    }
+
+    /// A drag-only target at the window edge of a side with no views: without it an emptied dock
+    /// could not be refilled. A view's drag shows its edge; the pointer over it lights it.
     pub(super) fn render_drop_strip(
         &self,
         side: Side,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
-        if self.panes.is_none() || !cx.has_active_drag() || self.layout.dock(side).is_some() {
+        if !cx.has_active_drag() || !self.has_drop_strip(side) {
             return None;
         }
         let colors = theme::current(cx).colors;
@@ -63,7 +83,7 @@ impl AppShell {
                 .w(DROP_STRIP_WIDTH)
                 .debug_selector(move || format!("dock-drop-{name}"))
                 .group_drag_over::<DraggedView>(SHELL_GROUP, move |style| {
-                    style.bg(colors.accent_background)
+                    style.border_color(colors.border)
                 })
                 .drag_over::<DraggedView>(move |style, _, _, _| {
                     style

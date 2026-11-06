@@ -79,7 +79,10 @@ impl AppShell {
             .bg(colors.background)
             .border_color(colors.border_variant)
             .flex()
-            .drag_over::<DraggedView>(move |style, _, _, _| style.bg(colors.accent_background))
+            // Over the chrome, not in its place: a bare tint would show the window's blur.
+            .drag_over::<DraggedView>(move |style, _, _, _| {
+                style.bg(colors.background.blend(colors.accent_background))
+            })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
                     shell.append(dragged.view, side, window, cx);

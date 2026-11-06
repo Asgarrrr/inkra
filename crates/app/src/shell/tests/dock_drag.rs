@@ -2,11 +2,13 @@
 
 use std::cmp::Ordering;
 
-use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
+use gpui::{Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px};
 use inkra_layout::{Layout, Side, View};
 
 use super::dock_menu::{default_docks, docks};
 use super::dragging::drag;
+use super::edge_drops::hold;
+use super::splits::{centre, check_layout, close};
 use super::{ab_focused, editor_focused, open};
 use crate::shell::dock_drag::DraggedView;
 use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
@@ -106,4 +108,51 @@ fn an_emptied_dock_is_refilled_by_a_drop_on_its_strip(cx: &mut TestAppContext) {
     assert_eq!(active, Some(View::Files));
     assert!(shown);
     assert!(cx.debug_bounds("dock-drop-left").is_none());
+}
+
+/// Backlinks moved left, so the right strip lies over the note column's right edge zone.
+fn right_strip_over_the_note(cx: &mut VisualTestContext) -> Point<Pixels> {
+    cx.dispatch_action(MoveBacklinksToOtherDock);
+    cx.run_until_parked();
+    let column = cx.debug_bounds("note-column").expect("drawn");
+    point(column.right() - px(10.), column.center().y)
+}
+
+#[gpui::test]
+fn a_view_held_in_the_strip_shows_no_split(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let at = right_strip_over_the_note(&mut cx);
+
+    hold(&mut cx, "dock-icon-backlinks", at);
+
+    let strip = cx.debug_bounds("dock-drop-right").expect("drawn");
+    assert!(strip.contains(&at), "{at:?} outside {strip:?}");
+    let group = centre(&window, &mut cx)[0];
+    let zone = window
+        .update(&mut cx, |shell, _, _| shell.group(group).drop_split)
+        .unwrap();
+    assert_eq!(zone, None);
+    assert!(cx.debug_bounds("drop-overlay").is_none());
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn a_view_dropped_in_the_strip_fills_the_dock_and_splits_nothing(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+    let at = right_strip_over_the_note(&mut cx);
+
+    hold(&mut cx, "dock-icon-backlinks", at);
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    let [_, (views, _, shown)] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Backlinks]);
+    assert!(shown);
+    assert_eq!(centre(&window, &mut cx).len(), 1);
+    check_layout(&window, &mut cx);
+    close(&mut cx);
 }
