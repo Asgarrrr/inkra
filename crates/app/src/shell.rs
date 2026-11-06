@@ -151,14 +151,14 @@ impl AppShell {
                 let bound = shell.group(group).shown.bound();
                 bound.is_some_and(|bound| bound.note == event.0)
             };
-            if shell.layout.center().iter().any(shows) {
+            if shell.layout.center_groups().iter().any(shows) {
                 cx.notify();
             }
         })
         .detach();
         // A pinned editor must not drop pinned (`EditorView`'s drop), and the shell's editors drop with it.
         cx.on_release(|shell, cx| {
-            for &group in shell.layout.center() {
+            for group in shell.layout.center_groups() {
                 if let Some(editor) = shell.editor_of(group) {
                     editor.update(cx, EditorView::unpin);
                 }

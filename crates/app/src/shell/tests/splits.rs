@@ -14,7 +14,7 @@ use crate::test_support;
 
 pub(super) fn centre(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<GroupId> {
     window
-        .update(cx, |shell, _, _| shell.layout.center().to_vec())
+        .update(cx, |shell, _, _| shell.layout.center_groups())
         .unwrap()
 }
 

@@ -1,5 +1,9 @@
 //! Where each tab group sits and which dock shows (splits spec).
 
+mod tree;
+
+pub use tree::{Axis, Member, Rect};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
     Files,
@@ -71,8 +75,7 @@ impl GroupId {
 /// The centre always holds a group; a dock holds one or none, and keeps its flag either way.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
-    center: Vec<GroupId>,
-    flexes: Vec<f32>,
+    center: Member,
     last_center: GroupId,
     left: Option<GroupId>,
     right: Option<GroupId>,
@@ -84,8 +87,7 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            center: vec![GroupId(0)],
-            flexes: vec![1.0],
+            center: Member::Group(GroupId(0)),
             last_center: GroupId(0),
             left: Some(GroupId(1)),
             right: Some(GroupId(2)),
@@ -96,18 +98,6 @@ impl Default for Layout {
 }
 
 impl Layout {
-    /// The centre's groups, left to right.
-    #[must_use]
-    pub fn center(&self) -> &[GroupId] {
-        &self.center
-    }
-
-    /// One per centre group, each above 0, summing to their count.
-    #[must_use]
-    pub fn flexes(&self) -> &[f32] {
-        &self.flexes
-    }
-
     /// The centre group that feeds the note consumers.
     #[must_use]
     pub fn last_center(&self) -> GroupId {
@@ -117,33 +107,8 @@ impl Layout {
     /// # Panics
     /// If `group` is not in the centre.
     pub fn activate(&mut self, group: GroupId) {
-        self.center_ix(group);
+        assert!(self.center.holds(group), "{group:?} is not in the centre");
         self.last_center = group;
-    }
-
-    /// A fresh group right of `group`; the two share `group`'s room, the others keep theirs.
-    ///
-    /// # Panics
-    /// If `group` is not in the centre.
-    pub fn split_right(&mut self, group: GroupId) -> GroupId {
-        let ix = self.center_ix(group);
-        let split = GroupId(self.next);
-        self.next += 1;
-        let half = self.flexes[ix] / 2.0;
-        self.flexes.splice(ix..=ix, [half, half]);
-        self.center.insert(ix + 1, split);
-        self.rescale();
-        split
-    }
-
-    /// Rescales the centre's flexes to sum to their count, keeping each group's share.
-    fn rescale(&mut self) {
-        #[allow(clippy::cast_precision_loss)]
-        let len = self.center.len() as f32;
-        let scale = len / self.flexes.iter().sum::<f32>();
-        for flex in &mut self.flexes {
-            *flex *= scale;
-        }
     }
 
     #[must_use]
@@ -179,7 +144,7 @@ impl Layout {
     /// If `group` is not in this layout.
     #[must_use]
     pub fn side_of(&self, group: GroupId) -> Option<Side> {
-        if self.center.contains(&group) {
+        if self.center.holds(group) {
             None
         } else if self.left == Some(group) {
             Some(Side::Left)
@@ -203,8 +168,8 @@ impl Layout {
         group
     }
 
-    /// A centre group's room goes to its left neighbour, else its right, which it returns and which
-    /// becomes `last_center` in its place (L6). A dock group returns `None`.
+    /// A centre group's room goes to its previous sibling, else its next, whose nearest group it
+    /// returns and which becomes `last_center` in its place (L6). A dock group returns `None`.
     ///
     /// # Panics
     /// On the centre's only group, or a group not in this layout.
@@ -213,34 +178,19 @@ impl Layout {
             *self.dock_mut(side) = None;
             return None;
         }
-        assert!(self.center.len() > 1, "the centre always has a group");
-        let ix = self.center_ix(group);
-        let heir_ix = ix.checked_sub(1).unwrap_or(1);
-        let heir = self.center[heir_ix];
-        self.flexes[heir_ix] += self.flexes[ix];
-        self.flexes.remove(ix);
-        self.center.remove(ix);
-        self.rescale();
+        let heir = self.remove_center(group);
         if self.last_center == group {
             self.last_center = heir;
         }
         Some(heir)
     }
 
-    /// The centre left to right, then the left dock's, then the right dock's.
-    pub fn groups(&self) -> impl Iterator<Item = GroupId> + '_ {
-        self.center
-            .iter()
-            .copied()
+    /// The centre depth-first, then the left dock's, then the right dock's.
+    pub fn groups(&self) -> impl Iterator<Item = GroupId> {
+        self.center_groups()
+            .into_iter()
             .chain(self.left)
             .chain(self.right)
-    }
-
-    fn center_ix(&self, group: GroupId) -> usize {
-        self.center
-            .iter()
-            .position(|&held| held == group)
-            .unwrap_or_else(|| panic!("{group:?} is not in the centre"))
     }
 
     fn dock_mut(&mut self, side: Side) -> &mut Option<GroupId> {

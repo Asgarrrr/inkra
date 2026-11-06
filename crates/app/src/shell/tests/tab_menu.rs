@@ -1,4 +1,4 @@
-//! The tab menu: a right-click on a tab activates its group and the tab, then lists Split Right and Close.
+//! The tab menu: a right-click on a tab activates its group and the tab, then lists Split Right, Split Down and Close.
 
 use gpui::{MouseButton, TestAppContext};
 
@@ -14,10 +14,15 @@ fn a_right_click_on_a_tab_opens_its_menu(cx: &mut TestAppContext) {
 
     press(&mut cx, "tab-0", MouseButton::Right);
 
-    for shown in ["context-menu", "context-menu-item-0", "context-menu-item-1"] {
+    for shown in [
+        "context-menu",
+        "context-menu-item-0",
+        "context-menu-item-1",
+        "context-menu-item-2",
+    ] {
         assert!(drawn(&mut cx, shown), "{shown}");
     }
-    assert!(!drawn(&mut cx, "context-menu-item-2"));
+    assert!(!drawn(&mut cx, "context-menu-item-3"));
     assert!(menu_focused(&window, &mut cx));
 }
 
@@ -69,7 +74,7 @@ fn down_then_enter_chooses_close(cx: &mut TestAppContext) {
     open(&window, &mut cx, b);
 
     press(&mut cx, "tab-0", MouseButton::Right);
-    keys(&mut cx, "down down enter");
+    keys(&mut cx, "down down down enter");
 
     assert_eq!(tabs_in(&window, &mut cx, 0), [Some(b)]);
     assert!(!drawn(&mut cx, "context-menu"));

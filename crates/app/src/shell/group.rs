@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use gpui::{Context, ScrollHandle, Task, Window, actions};
-use inkra_layout::{GroupId, View};
+use inkra_layout::{Axis, GroupId, View};
 use inkra_tabs::{TabId, Tabs};
 
 use super::parked::Parked;
@@ -11,7 +11,7 @@ use super::tabs::{OnNote, Place, capture};
 use super::{AppShell, Shown};
 use crate::editor::EditorView;
 
-actions!(pane, [SplitRight]);
+actions!(pane, [SplitRight, SplitDown]);
 
 /// The debug selector `name` takes in the centre's group `k`: bare in the first, so one group keeps every name.
 pub(super) fn selector(name: impl Display, k: usize) -> String {
@@ -69,20 +69,33 @@ impl Group {
 }
 
 impl AppShell {
-    /// The new group shows the note with the caret it had, and takes the focus.
     pub(super) fn split_right(
         &mut self,
         _: &SplitRight,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.split(Axis::Horizontal, window, cx);
+    }
+
+    pub(super) fn split_down(
+        &mut self,
+        _: &SplitDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.split(Axis::Vertical, window, cx);
+    }
+
+    /// The new group shows the note with the caret it had, and takes the focus.
+    fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         self.change_layout(window, cx, |shell, window, cx| {
             let from = shell.layout.last_center();
             let on = shell.group(from).shown.bound().map(|bound| OnNote {
                 note: bound.note,
                 view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
             });
-            let split = shell.layout.split_right(from);
+            let split = shell.layout.split(from, axis);
             shell.groups.insert(split, Group::new());
             if let Some(on) = on {
                 shell.display(split, Place::Note(on), window, cx);

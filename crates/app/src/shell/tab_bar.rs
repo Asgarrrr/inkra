@@ -11,7 +11,7 @@ use inkra_layout::GroupId;
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
-use super::group::{SplitRight, selector};
+use super::group::{SplitDown, SplitRight, selector};
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
@@ -253,6 +253,7 @@ impl AppShell {
         self.activate_tab(group, id, window, cx);
         let entries: Vec<(SharedString, Box<dyn Action>)> = vec![
             ("Split Right".into(), Box::new(SplitRight)),
+            ("Split Down".into(), Box::new(SplitDown)),
             ("Close".into(), Box::new(CloseTab)),
         ];
         let menu = cx.new(|cx| ContextMenu::new(entries, cx));
