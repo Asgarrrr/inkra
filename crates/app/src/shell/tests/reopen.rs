@@ -84,7 +84,7 @@ fn a_closed_tab_on_the_note_showing_reopens_with_the_view_its_anchors_moved_to(
     assert_eq!(view_of(&window, &mut cx).0, at(4)..at(4));
     window
         .update(&mut cx, |shell, window, cx| {
-            let first = shell.tabs.id_at(0).unwrap();
+            let first = shell.center().tabs.id_at(0).unwrap();
             shell.close_tab(first, window, cx);
         })
         .unwrap();
@@ -212,7 +212,7 @@ fn reopen_cancels_a_pending_open(cx: &mut TestAppContext) {
     keys(&mut cx, "cmd-shift-t");
     assert_eq!(showing(&window, &mut cx), Some(b));
     let pending = window
-        .update(&mut cx, |shell, _, _| shell.activation.is_some())
+        .update(&mut cx, |shell, _, _| shell.center().activation.is_some())
         .unwrap();
     assert!(!pending, "the reopen dropped the pending open");
     gate.release();

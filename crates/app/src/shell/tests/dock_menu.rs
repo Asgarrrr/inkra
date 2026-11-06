@@ -1,12 +1,12 @@
 //! The dock menu: a right-click on a header or an icon, a choice by mouse (docks spec, Context menu).
 
 use gpui::{Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Docks, Side, View};
+use inkra_layout::{Side, View};
 
 use super::tab_bar::{click, press};
 use super::{ab_focused, editor_focused, focus_tree, keys, open};
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
+use crate::shell::docks::{DockState, MoveBacklinksToOtherDock};
 
 fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
@@ -46,9 +46,35 @@ fn highlighted(cx: &mut VisualTestContext) -> Option<usize> {
     .position(|selector| drawn(cx, selector))
 }
 
-pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
+pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> DockState {
+    window.update(cx, |shell, _, _| shell.dock_state()).unwrap()
+}
+
+/// Docks rule 6: Files left, Backlinks right, both shown.
+pub(super) fn default_docks() -> DockState {
+    [
+        (vec![View::Files], Some(View::Files), true),
+        (vec![View::Backlinks], Some(View::Backlinks), true),
+    ]
+}
+
+pub(super) fn side_of(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+    view: View,
+) -> Side {
     window
-        .update(cx, |shell, _, _| shell.panes().docks.clone())
+        .update(cx, |shell, _, _| shell.side_of(view))
+        .unwrap()
+}
+
+pub(super) fn is_visible(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+    view: View,
+) -> bool {
+    window
+        .update(cx, |shell, _, _| shell.is_visible(view))
         .unwrap()
 }
 
@@ -67,7 +93,7 @@ fn choosing_move_moves_the_view_and_gives_focus_back(cx: &mut TestAppContext) {
 
     click(&mut cx, "context-menu-item-0");
 
-    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
     assert!(!drawn(&mut cx, "context-menu"));
     assert!(editor_focused(&window, &mut cx));
 }
@@ -78,7 +104,7 @@ fn choosing_hide_hides_the_dock(cx: &mut TestAppContext) {
 
     click(&mut cx, "context-menu-item-1");
 
-    assert!(!docks(&window, &mut cx).is_visible(View::Files));
+    assert!(!is_visible(&window, &mut cx, View::Files));
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -96,7 +122,7 @@ fn a_click_outside_closes_the_menu(cx: &mut TestAppContext) {
     press_outside(&mut cx, MouseButton::Left);
 
     assert!(!drawn(&mut cx, "context-menu"));
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -107,7 +133,7 @@ fn a_right_click_outside_closes_the_menu(cx: &mut TestAppContext) {
     press_outside(&mut cx, MouseButton::Right);
 
     assert!(!drawn(&mut cx, "context-menu"));
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -121,7 +147,7 @@ fn a_right_click_on_an_icon_opens_that_views_menu(cx: &mut TestAppContext) {
     press(&mut cx, "dock-icon-files", MouseButton::Right);
     click(&mut cx, "context-menu-item-0");
 
-    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
 }
 
 #[gpui::test]
@@ -140,7 +166,7 @@ fn down_then_enter_moves_the_view(cx: &mut TestAppContext) {
 
     keys(&mut cx, "down enter");
 
-    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
     assert!(!drawn(&mut cx, "context-menu"));
     assert!(editor_focused(&window, &mut cx));
 }
@@ -151,7 +177,7 @@ fn up_then_enter_hides_the_dock(cx: &mut TestAppContext) {
 
     keys(&mut cx, "up enter");
 
-    assert!(!docks(&window, &mut cx).is_visible(View::Files));
+    assert!(!is_visible(&window, &mut cx, View::Files));
 }
 
 #[gpui::test]
@@ -165,7 +191,7 @@ fn down_wraps_to_the_first_entry(cx: &mut TestAppContext) {
     }
     keys(&mut cx, "enter");
 
-    assert_eq!(docks(&window, &mut cx).side_of(View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
 }
 
 #[gpui::test]
@@ -178,7 +204,7 @@ fn up_wraps_to_the_last_entry(cx: &mut TestAppContext) {
     }
     keys(&mut cx, "enter");
 
-    assert!(!docks(&window, &mut cx).is_visible(View::Files));
+    assert!(!is_visible(&window, &mut cx, View::Files));
 }
 
 #[gpui::test]
@@ -189,7 +215,7 @@ fn enter_with_nothing_selected_does_nothing(cx: &mut TestAppContext) {
 
     assert!(drawn(&mut cx, "context-menu"));
     assert!(menu_focused(&window, &mut cx));
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
 }
 
 #[gpui::test]
@@ -199,7 +225,7 @@ fn escape_closes_the_menu_and_gives_focus_back(cx: &mut TestAppContext) {
     keys(&mut cx, "escape");
 
     assert!(!drawn(&mut cx, "context-menu"));
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));
 }
 

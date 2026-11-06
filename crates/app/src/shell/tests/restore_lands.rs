@@ -7,16 +7,17 @@ use std::sync::Arc;
 use gpui::{
     Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
 };
-use inkra_layout::{Docks, Side, View};
+use inkra_layout::{Side, View};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
 
+use super::dock_menu::{default_docks, docks, side_of};
 use super::session_writes::{SESSION, saved, tab, wait};
 use super::{check, tab_notes};
 use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
-use crate::restore::{SavedDocks, SavedTab, Session};
+use crate::restore::{SavedDock, SavedDocks, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -35,9 +36,9 @@ pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedTab>) -> String {
 }
 
 /// One tab on `a.md`, laid out as `docks`.
-fn save_docks(fs: &MemFs, docks: &Docks) {
+fn save_docks(fs: &MemFs, docks: SavedDocks) {
     let tabs = vec![tab("a.md", 0, 0)];
-    let docks = Some(SavedDocks::from(docks));
+    let docks = Some(docks);
     save_session(fs, &Session::new("/vault".into(), 0, tabs, docks));
 }
 
@@ -348,26 +349,21 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     assert!(editor_focused(&window, &mut cx));
 }
 
-fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
-    window
-        .update(cx, |shell, _, _| shell.panes().docks.clone())
-        .unwrap()
-}
-
-fn backlinks_left() -> Docks {
-    let mut docks = Docks::default();
-    docks.move_view(View::Backlinks, Side::Left, 1);
-    docks
+fn backlinks_left() -> SavedDocks {
+    SavedDocks::new(
+        SavedDock::new([View::Files, View::Backlinks], 1, true),
+        SavedDock::new([], 0, true),
+    )
 }
 
 #[gpui::test]
 fn a_saved_layout_is_restored(cx: &mut TestAppContext) {
     let fs = vault();
-    save_docks(&fs, &backlinks_left());
+    save_docks(&fs, backlinks_left());
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 
-    assert_eq!(docks(&window, &mut cx).side_of(View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
     assert!(cx.debug_bounds("dock-bar-left").is_some());
 }
 
@@ -375,11 +371,11 @@ fn a_saved_layout_is_restored(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_saved_layout_is_drawn_by_the_first_frame(cx: &mut TestAppContext) {
     let fs = vault();
-    save_docks(&fs, &backlinks_left());
+    save_docks(&fs, backlinks_left());
     let (window, mut cx) = launch(cx, &fs);
 
     assert!(cx.debug_bounds("dock-bar-left").is_some());
-    assert_eq!(docks(&window, &mut cx).side_of(View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
 }
 
 /// The restore reuses the session `bootstrap::root` read before the first frame.
@@ -402,5 +398,5 @@ fn a_file_without_docks_keeps_the_default_layout(cx: &mut TestAppContext) {
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
 }

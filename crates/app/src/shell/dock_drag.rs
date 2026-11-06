@@ -33,7 +33,7 @@ impl AppShell {
         side: Side,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
-        if !cx.has_active_drag() || !self.panes.as_ref()?.docks.dock(side).views().is_empty() {
+        if self.panes.is_none() || !cx.has_active_drag() || self.layout.dock(side).is_some() {
             return None;
         }
         let colors = theme::current(cx).colors;
@@ -56,8 +56,7 @@ impl AppShell {
                 })
                 .on_drop(
                     cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                        let view = dragged.view;
-                        shell.change_docks(window, cx, |docks| docks.append(view, side));
+                        shell.append(dragged.view, side, window, cx);
                     }),
                 ),
         )

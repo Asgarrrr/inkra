@@ -47,7 +47,8 @@ impl AppShell {
     /// The note each tab shows; `None` for an empty tab.
     pub(super) fn tab_notes(&self) -> impl Iterator<Item = Option<EntryId>> + '_ {
         let active = self.active_note();
-        self.tabs
+        self.center()
+            .tabs
             .iter()
             .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::note))
     }
@@ -62,7 +63,7 @@ impl AppShell {
 
     /// Its children are the tabs only, so `scroll_to_item` indexes tabs (`div.rs:4291-4322`).
     pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.tabs.active();
+        let active = self.center().tabs.active();
         let notes = self.notes.read(cx);
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
         let indicators: Vec<Option<Indicator>> = self
@@ -72,6 +73,7 @@ impl AppShell {
             })
             .collect();
         let tabs: Vec<_> = self
+            .center()
             .tabs
             .iter()
             .zip(self.tab_titles(cx))
@@ -96,7 +98,7 @@ impl AppShell {
             .px(theme::TAB_CURVE)
             .gap(theme::TAB_GAP)
             .overflow_x_scroll()
-            .track_scroll(&self.tab_scroll)
+            .track_scroll(&self.center().tab_scroll)
             .ui_text()
             .children(tabs)
     }
@@ -127,7 +129,7 @@ impl AppShell {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press_tab))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::press_tab))
             .on_click(cx.listener(move |shell, _, window, cx| {
-                shell.activate_tab(id, window, cx);
+                shell.activate_tab(shell.layout.center(), id, window, cx);
             }))
             // The × has no aux listener, so a middle click on it closes its tab here.
             .on_aux_click(cx.listener(move |shell, event: &ClickEvent, window, cx| {

@@ -164,7 +164,7 @@ fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppCont
 
     window
         .update(&mut cx, |shell, _, cx| {
-            let first = shell.tabs.id_at(0).unwrap();
+            let first = shell.center().tabs.id_at(0).unwrap();
             shell.move_tab(first, 29, cx);
         })
         .unwrap();

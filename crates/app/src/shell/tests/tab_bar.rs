@@ -252,7 +252,7 @@ fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext)
 
     window
         .update(&mut cx, |shell, window, cx| {
-            let first = shell.tabs.id_at(0).unwrap();
+            let first = shell.center().tabs.id_at(0).unwrap();
             shell.close_tab(first, window, cx);
         })
         .unwrap();

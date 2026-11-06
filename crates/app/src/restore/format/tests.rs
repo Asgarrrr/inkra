@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use inkra_layout::{Docks, Side, View};
+use inkra_layout::View;
 use serde_json::json;
 
-use super::{Rejected, SavedDocks, SavedTab, SavedView, Session, fnv1a, session_file};
+use super::{Rejected, SavedDock, SavedDocks, SavedTab, SavedView, Session, fnv1a, session_file};
 
 fn session() -> Session {
     Session::new(
@@ -146,29 +146,36 @@ fn an_unknown_view_name_is_dropped() {
           "right": { "views": ["backlinks"], "active": 0, "shown": true }
         }"#,
     );
-    let docks = decoded(&text).docks.expect("a docks field").docks();
-    assert_eq!(docks, Docks::default());
-    assert_eq!(docks.side_of(View::Files), Side::Left);
+    let docks = decoded(&text).docks.expect("a docks field").views();
+    assert_eq!(docks, SavedDocks::default().views());
+    assert_eq!(docks[0].0, [View::Files]);
 }
 
 #[test]
 fn docks_round_trip_through_the_file() {
-    let mut docks = Docks::default();
-    docks.move_view(View::Backlinks, Side::Left, 0);
-    docks.toggle(Side::Right);
+    let docks = SavedDocks::new(
+        SavedDock::new([View::Backlinks, View::Files], 0, true),
+        SavedDock::new([], 0, false),
+    );
     let mut session = session();
-    session.docks = Some(SavedDocks::from(&docks));
+    session.docks = Some(docks.clone());
 
     let decoded = decoded(&session.encode().unwrap());
 
     assert_eq!(decoded, session);
-    assert_eq!(decoded.docks.expect("a docks field").docks(), docks);
+    assert_eq!(
+        decoded.docks.expect("a docks field").views(),
+        [
+            (vec![View::Backlinks, View::Files], 0, true),
+            (Vec::new(), 0, false)
+        ]
+    );
 }
 
 #[test]
 fn the_docks_field_is_written_as_names() {
     let mut session = session();
-    session.docks = Some(SavedDocks::from(&Docks::default()));
+    session.docks = Some(SavedDocks::default());
     let value: serde_json::Value = serde_json::from_str(&session.encode().unwrap()).unwrap();
     assert_eq!(value["docks"]["left"]["views"], json!(["files"]));
     assert_eq!(value["docks"]["right"]["views"], json!(["backlinks"]));

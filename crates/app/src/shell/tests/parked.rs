@@ -132,7 +132,7 @@ fn closing_an_inactive_tab_unparks_it(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |shell, window, cx| {
-            let inactive = shell.tabs.id_at(0).unwrap();
+            let inactive = shell.center().tabs.id_at(0).unwrap();
             shell.close_tab(inactive, window, cx);
         })
         .unwrap();

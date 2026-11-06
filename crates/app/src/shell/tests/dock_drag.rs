@@ -1,9 +1,9 @@
 //! Dragging a dock view: onto an icon, onto a dock column, onto nothing (docks spec, Drag).
 
 use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
-use inkra_layout::{Docks, Side, View};
+use inkra_layout::View;
 
-use super::dock_menu::docks;
+use super::dock_menu::{default_docks, docks};
 use super::dragging::drag;
 use super::{ab_focused, editor_focused, open};
 use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
@@ -17,9 +17,9 @@ fn dropping_an_icon_on_another_reorders_the_bar(cx: &mut TestAppContext) {
 
     drag(&mut cx, "dock-icon-backlinks", "dock-icon-files");
 
-    let left = docks(&window, &mut cx).dock(Side::Left).clone();
-    assert_eq!(left.views(), [View::Backlinks, View::Files]);
-    assert_eq!(left.active(), Some(View::Backlinks));
+    let [(views, active, _), _] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Backlinks, View::Files]);
+    assert_eq!(active, Some(View::Backlinks));
 }
 
 #[gpui::test]
@@ -29,9 +29,9 @@ fn dropping_on_a_one_view_header_appends(cx: &mut TestAppContext) {
 
     drag(&mut cx, "panel-header-files", "panel-header-backlinks");
 
-    let right = docks(&window, &mut cx).dock(Side::Right).clone();
-    assert_eq!(right.views(), [View::Backlinks, View::Files]);
-    assert_eq!(right.active(), Some(View::Files));
+    let [_, (views, active, _)] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Backlinks, View::Files]);
+    assert_eq!(active, Some(View::Files));
     assert!(cx.debug_bounds("dock-left").is_none());
 }
 
@@ -42,9 +42,9 @@ fn dropping_on_a_dock_body_appends(cx: &mut TestAppContext) {
 
     drag(&mut cx, "panel-header-backlinks", "dock-left");
 
-    let left = docks(&window, &mut cx).dock(Side::Left).clone();
-    assert_eq!(left.views(), [View::Files, View::Backlinks]);
-    assert_eq!(left.active(), Some(View::Backlinks));
+    let [(views, active, _), _] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Files, View::Backlinks]);
+    assert_eq!(active, Some(View::Backlinks));
 }
 
 #[gpui::test]
@@ -54,7 +54,7 @@ fn a_drop_outside_any_target_changes_nothing(cx: &mut TestAppContext) {
 
     drag(&mut cx, "panel-header-files", "note-column");
 
-    assert_eq!(docks(&window, &mut cx), Docks::default());
+    assert_eq!(docks(&window, &mut cx), default_docks());
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -80,9 +80,9 @@ fn an_emptied_dock_is_refilled_by_a_drop_on_its_strip(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(strip, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
 
-    let left = docks(&window, &mut cx).dock(Side::Left).clone();
-    assert_eq!(left.views(), [View::Files]);
-    assert_eq!(left.active(), Some(View::Files));
-    assert!(left.is_drawn());
+    let [(views, active, shown), _] = docks(&window, &mut cx);
+    assert_eq!(views, [View::Files]);
+    assert_eq!(active, Some(View::Files));
+    assert!(shown);
     assert!(cx.debug_bounds("dock-drop-left").is_none());
 }

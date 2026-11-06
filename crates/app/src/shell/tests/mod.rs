@@ -25,6 +25,7 @@ mod command_palette;
 mod creating;
 mod dock_drag;
 mod dock_menu;
+mod dock_moves;
 mod docks;
 mod dragging;
 mod failed_trash;
@@ -253,7 +254,10 @@ pub(super) fn tab_notes(
 ) -> (Vec<Option<EntryId>>, usize) {
     window
         .update(cx, |shell, _, _| {
-            (shell.tab_notes().collect(), shell.tabs.active_index())
+            (
+                shell.tab_notes().collect(),
+                shell.center().tabs.active_index(),
+            )
         })
         .expect("the shell is open")
 }
@@ -304,16 +308,17 @@ pub(super) fn text_of(
 pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
         .update(cx, |shell, _, cx| {
-            let active = shell.tabs.active();
+            let active = shell.center().tabs.active();
             assert!(
                 shell
+                    .center()
                     .tabs
                     .iter()
                     .all(|tab| tab.place().is_none() == (tab.id() == active)),
                 "H8"
             );
             assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
-            if let Shown::Trashing(id) = shell.shown {
+            if let Shown::Trashing(id) = shell.center().shown {
                 assert!(shell.notes.read(cx).buffer_for(id).is_none(), "Trashing");
             }
         })
