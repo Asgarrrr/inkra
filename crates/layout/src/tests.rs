@@ -141,6 +141,71 @@ fn split_right_keeps_the_other_groups_widths() {
 }
 
 #[test]
+fn removing_a_dock_group_returns_no_heir() {
+    let mut layout = Layout::default();
+    let left = layout.dock(Side::Left).expect("a left group");
+    assert_eq!(layout.remove(left), None);
+}
+
+#[test]
+fn removing_a_centre_group_gives_its_room_to_the_left() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let third = layout.split_right(first);
+    let second = layout.split_right(first);
+    assert_eq!(layout.flexes(), [0.75, 0.75, 1.5]);
+
+    assert_eq!(layout.remove(second), Some(first));
+
+    assert_eq!(layout.center(), [first, third]);
+    assert_eq!(layout.flexes(), [1.0, 1.0]);
+    assert_eq!(layout.last_center(), first);
+    assert_eq!(
+        layout.groups().collect::<Vec<_>>(),
+        [first, third, GroupId(1), GroupId(2)]
+    );
+}
+
+#[test]
+fn the_first_group_gives_its_room_to_the_right() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let third = layout.split_right(first);
+    let second = layout.split_right(first);
+
+    assert_eq!(layout.remove(first), Some(second));
+
+    assert_eq!(layout.center(), [second, third]);
+    assert_eq!(layout.flexes(), [1.0, 1.0]);
+}
+
+#[test]
+fn removing_the_last_center_moves_it_to_the_heir() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split_right(first);
+    let third = layout.split_right(second);
+    layout.activate(second);
+
+    assert_eq!(layout.remove(second), Some(first));
+
+    assert_eq!(layout.last_center(), first);
+    layout.activate(third);
+    assert_eq!(layout.remove(first), Some(third));
+    assert_eq!(layout.last_center(), third);
+}
+
+#[test]
+#[should_panic(expected = "the centre always has a group")]
+fn removing_the_centres_only_group_panics() {
+    let mut layout = Layout::default();
+    let first = layout.last_center();
+    let second = layout.split_right(first);
+    layout.remove(first);
+    layout.remove(second);
+}
+
+#[test]
 #[should_panic(expected = "is not in the centre")]
 fn activating_a_dock_group_panics() {
     let mut layout = Layout::default();
@@ -295,6 +360,7 @@ enum CentreOp {
     Dock(Op),
     Split(usize),
     Activate(usize),
+    Remove(usize),
 }
 
 fn centre_op() -> impl Strategy<Value = CentreOp> {
@@ -302,6 +368,7 @@ fn centre_op() -> impl Strategy<Value = CentreOp> {
         op().prop_map(CentreOp::Dock),
         any::<usize>().prop_map(CentreOp::Split),
         any::<usize>().prop_map(CentreOp::Activate),
+        any::<usize>().prop_map(CentreOp::Remove),
     ]
 }
 
@@ -416,6 +483,25 @@ proptest! {
                     let group = layout.center()[pick % layout.center().len()];
                     layout.activate(group);
                     prop_assert_eq!(layout.last_center(), group);
+                }
+                CentreOp::Remove(pick) => {
+                    let center = layout.center().to_vec();
+                    if center.len() == 1 {
+                        continue;
+                    }
+                    let ix = pick % center.len();
+                    let was_last = layout.last_center() == center[ix];
+                    let heir = layout.remove(center[ix]).expect("a centre group has an heir");
+                    prop_assert_eq!(heir, center[ix.checked_sub(1).unwrap_or(1)]);
+                    prop_assert!(!layout.center().contains(&center[ix]));
+                    if was_last {
+                        prop_assert_eq!(layout.last_center(), heir);
+                    }
+                    let fraction = |group| before.iter().find(|(held, _)| *held == group).map_or(0.0, |&(_, fraction)| fraction);
+                    let now = fractions(&layout).into_iter().find(|(held, _)| *held == heir).map(|(_, now)| now);
+                    let joined = fraction(heir) + fraction(center[ix]);
+                    prop_assert!(now.is_some_and(|now| (now - joined).abs() < 1e-4), "{heir:?} has {now:?}, not {joined}");
+                    changed = vec![heir, center[ix]];
                 }
             }
             let flexes = layout.flexes();

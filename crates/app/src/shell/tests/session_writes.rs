@@ -230,7 +230,7 @@ fn an_inactive_tab_closed_is_saved(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |shell, window, cx| {
             let id = shell.center().tabs.id_at(0).unwrap();
-            shell.close_tab(id, window, cx);
+            shell.close_tab(shell.layout.last_center(), id, window, cx);
         })
         .unwrap();
 

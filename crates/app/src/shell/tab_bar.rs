@@ -3,19 +3,19 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
-    Window, div, prelude::FluentBuilder,
+    Action, App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement,
+    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use inkra_layout::GroupId;
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
-use super::group::selector;
-use super::{AppShell, NewTab};
+use super::group::{SplitRight, selector};
+use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
-use crate::ui::{Color, IconButton, IconName, Indicator, Label, Tab, UiText, h_flex};
+use crate::ui::{Color, ContextMenu, IconButton, IconName, Indicator, Label, Tab, UiText, h_flex};
 use crate::vault::NoteStore;
 
 const NEW_TAB: &str = "New tab";
@@ -162,6 +162,12 @@ impl AppShell {
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press_tab))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::press_tab))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |shell, event: &MouseDownEvent, window, cx| {
+                    shell.open_tab_menu(group, id, event.position, window, cx);
+                }),
+            )
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.activate_tab(group, id, window, cx);
             }))
@@ -169,7 +175,7 @@ impl AppShell {
             .on_aux_click(cx.listener(move |shell, event: &ClickEvent, window, cx| {
                 if event.is_middle_click() {
                     cx.stop_propagation();
-                    shell.close_tab(id, window, cx);
+                    shell.close_tab(group, id, window, cx);
                 }
             }))
             .on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone()))
@@ -206,7 +212,7 @@ impl AppShell {
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         // One click, one action: the tab under the × must not also see it.
                         cx.stop_propagation();
-                        shell.close_tab(id, window, cx);
+                        shell.close_tab(group, id, window, cx);
                     })),
             )
     }
@@ -230,6 +236,27 @@ impl AppShell {
                     shell.new_tab(&NewTab, window, cx);
                 })),
             )
+    }
+
+    /// The menu's entries act on `last_center`, which the press has just made `group`.
+    /// `prevent_default`: the root would take focus from the menu on the press (`div.rs:2765-2780`).
+    fn open_tab_menu(
+        &mut self,
+        group: GroupId,
+        id: TabId,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.prevent_default();
+        self.activate_group(group, window, cx);
+        self.activate_tab(group, id, window, cx);
+        let entries: Vec<(SharedString, Box<dyn Action>)> = vec![
+            ("Split Right".into(), Box::new(SplitRight)),
+            ("Close".into(), Box::new(CloseTab)),
+        ];
+        let menu = cx.new(|cx| ContextMenu::new(entries, cx));
+        self.open_menu(menu, at, window, cx);
     }
 
     /// Focuses the active tab's content: gpui's root focus-on-press (div.rs:2765-2780) is prevented.

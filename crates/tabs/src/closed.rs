@@ -1,5 +1,7 @@
 //! Closing a tab, committing an open, and the closed stack `reopen` pops (tabs spec, A1 invariants 7, 8).
 
+use std::collections::VecDeque;
+
 use crate::history::{HISTORY, Stack};
 use crate::{Place, Tab, TabId, Tabs};
 
@@ -29,11 +31,27 @@ impl<P: Place> ClosedTab<P> {
     }
 }
 
+/// A group's closed stack, oldest first, moved whole to the group taking its room (splits spec, L6).
+#[derive(Debug)]
+pub struct ClosedTabs<P>(VecDeque<ClosedTab<P>>);
+
 impl<P, Q> Tabs<P, Q> {
     /// Whether `reopen` has a tab to bring back.
     #[must_use]
     pub fn has_closed(&self) -> bool {
         !self.closed.is_empty()
+    }
+
+    pub fn take_closed(&mut self) -> ClosedTabs<P> {
+        ClosedTabs(std::mem::take(&mut self.closed))
+    }
+
+    /// `closed` goes on top, its newest reopening first; the oldest past the cap drop (invariant 6).
+    pub fn extend_closed(&mut self, closed: ClosedTabs<P>) {
+        self.closed.extend(closed.0);
+        while self.closed.len() > HISTORY {
+            self.closed.pop_front();
+        }
     }
 }
 

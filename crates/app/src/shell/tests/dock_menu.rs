@@ -8,11 +8,11 @@ use super::{ab_focused, editor_focused, focus_tree, keys, open};
 use crate::shell::AppShell;
 use crate::shell::docks::{DockState, MoveBacklinksToOtherDock};
 
-fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
+pub(super) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
 }
 
-fn menu_focused(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+pub(super) fn menu_focused(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
     window
         .update(cx, |shell, window, cx| {
             shell

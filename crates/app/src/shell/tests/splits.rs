@@ -12,20 +12,20 @@ use super::{
 use crate::shell::group::SplitRight;
 use crate::test_support;
 
-fn centre(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<GroupId> {
+pub(super) fn centre(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<GroupId> {
     window
         .update(cx, |shell, _, _| shell.layout.center().to_vec())
         .unwrap()
 }
 
-fn last(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> GroupId {
+pub(super) fn last(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> GroupId {
     window
         .update(cx, |shell, _, _| shell.layout.last_center())
         .unwrap()
 }
 
 /// The note bound in centre group `k`.
-fn shown_in(
+pub(super) fn shown_in(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
     k: usize,
@@ -38,7 +38,7 @@ fn shown_in(
         .unwrap()
 }
 
-fn editor_in(
+pub(super) fn editor_in(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
     k: usize,
@@ -57,7 +57,7 @@ fn tab_count(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, k: usi
         .unwrap()
 }
 
-fn tabs_in(
+pub(super) fn tabs_in(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
     k: usize,
@@ -68,19 +68,22 @@ fn tabs_in(
         .unwrap()
 }
 
-fn current(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Option<EntryId> {
+pub(super) fn current(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+) -> Option<EntryId> {
     window
         .update(cx, |shell, _, cx| shell.notes.read(cx).current())
         .unwrap()
 }
 
-fn check_layout(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+pub(super) fn check_layout(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) {
     window
         .update(cx, |shell, _, cx| shell.check_layout(cx))
         .unwrap();
 }
 
-fn split(cx: &mut VisualTestContext) {
+pub(super) fn split(cx: &mut VisualTestContext) {
     cx.dispatch_action(SplitRight);
     cx.run_until_parked();
 }
@@ -91,7 +94,7 @@ fn press(cx: &mut VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
 }
 
-fn focused(
+pub(super) fn focused(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
     editor: &Entity<EditorView>,
@@ -104,7 +107,7 @@ fn focused(
 }
 
 /// Releases the shell, which unpins its editors: the test harness drops entities without releasing them.
-fn close(cx: &mut VisualTestContext) {
+pub(super) fn close(cx: &mut VisualTestContext) {
     cx.update(|window, _| window.remove_window());
     cx.run_until_parked();
 }

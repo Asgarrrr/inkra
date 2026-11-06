@@ -122,13 +122,29 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_modal(window, cx);
-        self.close_tab(self.center().tabs.active(), window, cx);
+        self.close_tab(
+            self.layout.last_center(),
+            self.center().tabs.active(),
+            window,
+            cx,
+        );
     }
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
-    pub(super) fn close_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        let center = self.layout.last_center();
-        let Group { tabs, shown, .. } = self.group_mut(center);
+    /// A split's only tab takes its group with it (L6); the centre's last refills with an empty tab (L3).
+    pub(super) fn close_tab(
+        &mut self,
+        group: GroupId,
+        id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tabs = &self.group(group).tabs;
+        if tabs.count() == 1 && tabs.active() == id && self.layout.center().len() > 1 {
+            self.close_group(group, id, window, cx);
+            return;
+        }
+        let Group { tabs, shown, .. } = self.group_mut(group);
         // Plain offsets: the closed stack keeps no anchors (A2).
         let closed = tabs.close(id, |slot| match slot {
             None => capture(shown, cx),
@@ -140,11 +156,11 @@ impl AppShell {
         }) = closed
         {
             let place = parked.unpark(cx);
-            self.show_place(center, place, window, cx);
+            self.show_place(group, place, window, cx);
         } else {
             cx.notify();
         }
-        self.keep_active_tab_visible(center);
+        self.keep_active_tab_visible(group);
         self.save_session_later(cx);
     }
 
