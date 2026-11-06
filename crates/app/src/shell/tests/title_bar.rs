@@ -4,7 +4,6 @@ use gpui::{
     Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle, point, px, size,
 };
 
-use super::tab_bar::click;
 use super::{
     AppShell, ab_focused, click_row, editor_focused, four_notes, keys, no_vault, open, selected,
     tab_notes,
@@ -47,9 +46,9 @@ fn the_tab_row_spans_the_window_above_every_column(cx: &mut TestAppContext) {
 fn the_traffic_lights_have_their_space(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
     let lights = cx.debug_bounds("title-drag-start").unwrap();
-    let search = cx.debug_bounds("sidebar-search").unwrap();
+    let toggle = cx.debug_bounds("dock-toggle-left").unwrap();
     assert_eq!(lights.size.width, theme::TRAFFIC_LIGHT_PADDING);
-    assert_eq!(search.left(), lights.right());
+    assert_eq!(toggle.left(), lights.right());
 
     window
         .update(&mut cx, |_, window, _| {
@@ -97,8 +96,8 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
 
     for button in [
-        "sidebar-search",
-        "sidebar-new-note",
+        "dock-icon-files",
+        "dock-icon-backlinks",
         "dock-toggle-left",
         "dock-toggle-right",
     ] {
@@ -109,34 +108,6 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
             "{button}"
         );
     }
-}
-
-#[gpui::test]
-fn the_search_button_opens_vault_search(cx: &mut TestAppContext) {
-    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
-
-    click(&mut cx, "sidebar-search");
-
-    let open = window
-        .update(&mut cx, |shell, _, _| {
-            shell.modal_is::<crate::vault_search::VaultSearchDelegate>()
-        })
-        .unwrap();
-    assert!(open);
-}
-
-#[gpui::test]
-fn the_new_note_button_opens_a_name_field(cx: &mut TestAppContext) {
-    let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
-
-    click(&mut cx, "sidebar-new-note");
-
-    let editing = window
-        .update(&mut cx, |shell, _, cx| {
-            shell.panes().sidebar.read(cx).is_editing()
-        })
-        .unwrap();
-    assert!(editing);
 }
 
 #[gpui::test]
@@ -256,7 +227,7 @@ fn a_press_on_a_drag_region_keeps_the_editors_focus(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_press_between_the_sidebar_buttons_keeps_the_editors_focus(cx: &mut TestAppContext) {
+fn a_press_beside_the_files_header_buttons_keeps_the_editors_focus(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
     let search = cx.debug_bounds("sidebar-search").unwrap();
@@ -301,10 +272,10 @@ fn a_press_on_the_sidebars_drag_region_arms_the_move(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_press_on_a_sidebar_button_arms_no_move(cx: &mut TestAppContext) {
+fn a_press_on_a_dock_icon_arms_no_move(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
-    let at = cx.debug_bounds("sidebar-search").unwrap().center();
+    let at = cx.debug_bounds("dock-icon-files").unwrap().center();
 
     cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
@@ -395,7 +366,7 @@ fn no_vault_draws_no_sidebar_column(cx: &mut TestAppContext) {
     assert_eq!(note.origin, point(px(0.), row.bottom()));
 }
 
-/// The backlinks header sits under the title row; the sidebar has none (D5).
+/// Both docks' headers sit under the title row.
 #[gpui::test]
 fn the_panel_headers_line_up_under_the_title_row(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);

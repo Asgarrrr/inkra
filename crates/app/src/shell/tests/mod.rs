@@ -29,6 +29,7 @@ mod dock_moves;
 mod docks;
 mod dragging;
 mod failed_trash;
+mod files_header;
 mod following;
 mod gone;
 mod history;

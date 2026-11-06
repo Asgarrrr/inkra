@@ -154,7 +154,7 @@ notes, N editors.
 - The left-most segment reserves 88 px for the traffic lights, whichever surface
   it belongs to.
 - **Note tabs** keep the browser look (Obsidian chrome D3). **View tabs** are
-  24 px icons; a strip that overflows ends in a `⋯` button listing the hidden
+  28 px icons (S7); a strip that overflows ends in a `⋯` button listing the hidden
   tabs *(delegated)*.
 - A group below the top draws the same strip in a 34 px header inside its rect.
 - Each centre group has its own nav row (`←` `→`) under its strip, on its own
@@ -168,7 +168,7 @@ notes, N editors.
 
 ### Files header (D5)
 
-A 30 px row at the top of the Files view: `NewNote`, `NewFolder`, `SearchVault`,
+A 34 px row at the top of the Files view (S7): `NewNote`, `NewFolder`, `SearchVault`,
 as Obsidian's explorer row. It belongs to the view, so it moves with Files.
 
 ### Separators
@@ -262,7 +262,7 @@ stay (dock_drag.rs:30's reason holds).
 ## Slices
 
 Each slice is vertical and lands as its own PR, near 150 lines when possible.
-The P rows below are the phases; this run lands them as S1–S6.
+The P rows below are the phases; this run lands them as S1–S6, and the follow-up run continues from S7.
 
 | Slice | Content | User sees |
 |---|---|---|
@@ -272,11 +272,11 @@ The P rows below are the phases; this run lands them as S1–S6.
 | S4 | Closing a group (L6) and the tab context menu. | The menu's Split Right and Close |
 | S5 | Split Down: a normalised tree of groups in the centre. | Notes above and below |
 | S6 | Session v2: the tree, every group's tabs and the dock groups, with v1 still read. | Splits survive a relaunch |
+| S7 | Dock view strips in the title row, and the Files header (D5). | Dock icons beside the toggle, new note, new folder and search under it |
 
 A follow-up run covers the rest:
 
-- the Files header (D5);
-- dock tab strips in the title row: view icon tabs, overflow;
+- the `⋯` overflow of a dock's view strip, deferred to `docs/roadmap.md`;
 - dock trees (`Option<Member>`);
 - P2 separators: resize, equalise, minimum sizes, the split refusal;
 - P3 `⌘K` keys with `neighbour`, focus-driven activation and the `active` field;
@@ -411,6 +411,22 @@ S6's choices:
   centre falls back to one empty group, and the docks still restore.
 - A planned group the user closed before the restore landed is skipped; its
   notes do not reopen elsewhere.
+
+S7's choices:
+
+- The Files header is 34 px (`PanelHeader`), not 30, so every panel has one
+  header height *(delegated)*.
+- View tabs are 28 px `IconButton`s, not 24 *(delegated)*.
+- The `⋯` overflow is deferred to `docs/roadmap.md` *(delegated)*. Two views and
+  fixed dock widths never overflow a strip. The trigger is a third view or
+  dock resizing.
+- A dock's title-row segment holds, left to right for the left dock: the
+  lights' space, the toggle, the view icons, drag space. The right dock's holds
+  the icons, drag space, the toggle. The left toggle's bounds are the same
+  whether its dock shows or hides.
+- Each view draws its own header in the column: Files its three buttons,
+  Backlinks its title and count. A header carries no drag and no menu; the icon
+  does, so a one-view dock no longer draws its title.
 
 ## Deferred
 

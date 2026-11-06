@@ -9,10 +9,8 @@ use inkra_layout::Side;
 
 use super::AppShell;
 use super::group::selector;
-use crate::sidebar::NewNote;
 use crate::theme;
-use crate::ui::{IconButton, IconName, h_flex, identified, keep_focus};
-use crate::vault_search::SearchVault;
+use crate::ui::{h_flex, identified, keep_focus};
 
 impl AppShell {
     /// Toggles and tabs keep their own presses: only a leaf region moves the window (S3-D3).
@@ -33,14 +31,14 @@ impl AppShell {
         };
         let (left_title, leading_toggle) = if left_drawn {
             (
-                Some(Self::render_title_sidebar(lights, left_toggle, cx)),
+                Some(self.render_title_sidebar(lights, left_toggle, cx)),
                 None,
             )
         } else {
             (None, Some(left_toggle))
         };
         let (right_title, trailing_toggle) = if right_drawn {
-            (Some(Self::render_title_backlinks(right_toggle, cx)), None)
+            (Some(self.render_title_backlinks(right_toggle, cx)), None)
         } else {
             (None, right_toggle)
         };
@@ -124,11 +122,13 @@ impl AppShell {
             .children(right_title)
     }
 
-    /// Over the right dock: a drag region, then its toggle at the window's right edge.
+    /// Over the right dock: its view icons, a drag region, then its toggle at the window's right edge.
     fn render_title_backlinks<Toggle: IntoElement>(
+        &self,
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
+        let strip = self.render_dock_strip(Side::Right, cx);
         let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-right".into())
@@ -136,19 +136,22 @@ impl AppShell {
             .flex_none()
             .w(super::RIGHT_DOCK_WIDTH)
             .h_full()
-            .pr(theme::ROW_INSET)
+            .px(theme::ROW_INSET)
             .border_l(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
+            .children(strip)
             .child(Self::render_drag_region("title-drag-right", cx).flex_1())
             .children(toggle)
     }
 
-    /// Over the left dock: the lights, the vault's buttons, then its toggle at its right edge (D2).
+    /// Over the left dock: the lights, its toggle, then its view icons (D2).
     fn render_title_sidebar<Toggle: IntoElement>(
+        &self,
         lights: Pixels,
         toggle: Option<Toggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<Toggle> {
+        let strip = self.render_dock_strip(Side::Left, cx);
         let colors = theme::current(cx).colors;
         h_flex()
             .debug_selector(|| "title-left".into())
@@ -156,7 +159,6 @@ impl AppShell {
             .flex_none()
             .w(super::LEFT_DOCK_WIDTH)
             .h_full()
-            .pr(theme::ROW_INSET)
             .border_r(theme::RULE_WIDTH)
             .border_color(colors.border_variant)
             .child(
@@ -164,25 +166,9 @@ impl AppShell {
                     .flex_none()
                     .w(lights),
             )
-            .child(
-                h_flex()
-                    .flex_none()
-                    .gap_0p5()
-                    .child(
-                        IconButton::new("sidebar-search", IconName::Search, "Search vault")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.search_vault(&SearchVault, window, cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("sidebar-new-note", IconName::PenLine, "New note")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.new_note(&NewNote, window, cx);
-                            })),
-                    ),
-            )
-            .child(Self::render_drag_region("title-drag-left", cx).flex_1())
             .children(toggle)
+            .children(strip)
+            .child(Self::render_drag_region("title-drag-left", cx).flex_1())
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.
@@ -229,34 +215,33 @@ impl AppShell {
 
 #[cfg(any(test, feature = "shot"))]
 impl AppShell {
-    /// The left dock toggle's centre. Valid while the left dock shows.
+    /// The left dock toggle's centre, whether the dock shows or hides.
     pub(crate) fn left_toggle_point() -> gpui::Point<Pixels> {
         gpui::point(
-            super::LEFT_DOCK_WIDTH
-                - theme::RULE_WIDTH
-                - theme::ROW_INSET
-                - theme::ICON_BUTTON_WIDTH / 2.,
+            theme::TRAFFIC_LIGHT_PADDING + theme::ICON_BUTTON_WIDTH / 2.,
             theme::TITLE_BAR_HEIGHT / 2.,
         )
     }
 
-    /// The centre of icon `index` in a dock's bar; for a one-view dock, a point on its title (index 0).
+    /// The centre of icon `index` in a dock's strip, in the title row.
     pub(crate) fn dock_icon_point(
         side: Side,
         index: usize,
         window: &Window,
     ) -> gpui::Point<Pixels> {
-        let start = match side {
-            Side::Left => Pixels::ZERO,
-            Side::Right => {
-                window.viewport_size().width - super::RIGHT_DOCK_WIDTH + theme::RULE_WIDTH
-            }
-        };
         #[allow(clippy::cast_precision_loss)]
         let index = index as f32;
+        let x = match side {
+            Side::Left => theme::TRAFFIC_LIGHT_PADDING + theme::ICON_BUTTON_WIDTH,
+            Side::Right => {
+                window.viewport_size().width - super::RIGHT_DOCK_WIDTH
+                    + theme::RULE_WIDTH
+                    + theme::ROW_INSET
+            }
+        };
         gpui::point(
-            start + theme::ROW_INSET + theme::ICON_BUTTON_WIDTH * (index + 0.5),
-            theme::TITLE_BAR_HEIGHT + (theme::PANEL_HEADER_HEIGHT - theme::RULE_WIDTH) / 2.,
+            x + theme::ICON_BUTTON_WIDTH * (index + 0.5),
+            theme::TITLE_BAR_HEIGHT / 2.,
         )
     }
 }
