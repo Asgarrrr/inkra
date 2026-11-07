@@ -89,6 +89,11 @@ impl Writes {
         self.backoff = Some((delay, now + delay));
     }
 
+    /// The file was removed: it holds no revision.
+    pub fn removed(&mut self) {
+        self.written = None;
+    }
+
     /// A write landed.
     pub fn wrote(&mut self) {
         self.backoff = None;

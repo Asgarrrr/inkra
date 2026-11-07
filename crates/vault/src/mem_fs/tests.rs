@@ -709,3 +709,30 @@ fn a_blocked_read_bytes_waits_for_its_gate_and_counts_no_load() {
     assert_eq!(block_on(read).ok().as_deref(), Some(&b"cache"[..]));
     assert_eq!(fs.loads(file), 0, "`loads` counts the notes' loads only");
 }
+
+#[test]
+fn remove_file_removes_the_file_and_a_missing_file_is_ok() {
+    let fs = MemFs::new();
+    let file = Path::new("/cache/index.idx");
+    fs.insert_bytes(file, b"cache".to_vec());
+
+    assert!(block_on(fs.remove_file(file)).is_ok());
+    assert_eq!(fs.read_to_string(file), None);
+    assert!(block_on(fs.remove_file(file)).is_ok(), "already gone");
+}
+
+#[test]
+fn a_blocked_replace_stores_nothing_until_its_gate_opens() {
+    let fs = MemFs::new();
+    let file = Path::new("/cache/index.idx");
+    fs.insert_bytes(file, b"old".to_vec());
+
+    let gate = fs.block_replace(file);
+    let mut replace = Box::pin(fs.replace_bytes(file, b"new"));
+    assert!(replace.as_mut().now_or_never().is_none());
+    assert_eq!(fs.read_to_string(file).as_deref(), Some("old"));
+
+    gate.release();
+    assert!(block_on(replace).is_ok());
+    assert_eq!(fs.read_to_string(file).as_deref(), Some("new"));
+}

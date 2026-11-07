@@ -33,6 +33,13 @@ impl MemFs {
             .insert(path.into(), (count, kind));
     }
 
+    /// The next `count` removes of `path` fail with `kind` and keep the file.
+    pub fn fail_next_removes(&self, path: impl Into<PathBuf>, count: u32, kind: ErrorKind) {
+        self.state()
+            .failing_removes
+            .insert(path.into(), (count, kind));
+    }
+
     /// The next `count` saves of `path` that preserve fail right after preserving, with `kind`.
     pub fn fail_next_saves_after_preserve(
         &self,
@@ -80,6 +87,13 @@ impl MemFs {
         Gate(release)
     }
 
+    /// Parks the next `replace_bytes` of `path`, before it stores anything.
+    pub fn block_replace(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_replaces.insert(path.into(), wait);
+        Gate(release)
+    }
+
     /// Parks the next `read_dir` of `path`, before it reads anything.
     pub fn block_read_dir(&self, path: impl Into<PathBuf>) -> Gate {
         let (release, wait) = oneshot::channel();
@@ -123,6 +137,10 @@ impl State {
 
     pub(super) fn injected_replace_failure(&mut self, path: &Path) -> Result<()> {
         injected(&mut self.failing_replaces, path)
+    }
+
+    pub(super) fn injected_remove_failure(&mut self, path: &Path) -> Result<()> {
+        injected(&mut self.failing_removes, path)
     }
 
     pub(super) fn injected_failure_after_preserve(&mut self, path: &Path) -> Result<()> {
