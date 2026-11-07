@@ -36,6 +36,7 @@ struct State {
     /// exists, but a create/rename has no file at the destination yet.
     uncreatable: BTreeSet<PathBuf>,
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_read_bytes: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Separate from `unwritable`: a note can be writable and still not
     /// removable (no trash on the volume, say).
@@ -226,6 +227,24 @@ impl Fs for MemFs {
             stamp: stamp_of(bytes, *mtime),
             identity: *identity,
         })
+    }
+
+    /// Counts no load: `loads` counts the notes' loads.
+    async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>> {
+        let blocked = self.state().blocked_read_bytes.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
+
+        let state = self.state();
+        state.refused_load(path)?;
+        let Some((bytes, _, _)) = state.files.get(path) else {
+            return Err(io(path, ErrorKind::NotFound));
+        };
+        if bytes.len() as u64 > max_len {
+            return Err(io(path, ErrorKind::FileTooLarge));
+        }
+        Ok(bytes.clone())
     }
 
     /// Mints a fresh identity, unlike `insert_file`: `RealFs::save` renames a

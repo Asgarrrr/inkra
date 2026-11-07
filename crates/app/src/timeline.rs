@@ -22,6 +22,8 @@ pub(crate) enum Step {
     Scanned,
     /// The first build applied: quick open lists every note.
     NamesReady,
+    /// The index cache's outcome landed, by `Outcome::name`.
+    Cached(&'static str),
     /// Nothing left to load: search sees every note.
     Indexed {
         notes: usize,
@@ -47,6 +49,9 @@ pub(crate) struct Timeline {
     root: Option<Duration>,
     scanned: Option<Duration>,
     names_ready: Option<Duration>,
+    cache: Option<(&'static str, Duration)>,
+    /// A span: the foreground turn that applied the cache's seed.
+    seed_turn: Option<Duration>,
     indexed: Option<Indexed>,
     longest_turn: Duration,
 }
@@ -62,6 +67,8 @@ impl Timeline {
             root: None,
             scanned: None,
             names_ready: None,
+            cache: None,
+            seed_turn: None,
             indexed: None,
             longest_turn: Duration::ZERO,
         }
@@ -92,8 +99,19 @@ impl Timeline {
         }
     }
 
+    /// How long the turn that applied the cache's seed took; does nothing without a timeline.
+    pub(crate) fn seed_turn(took: Duration, cx: &mut App) {
+        if cx.has_global::<Self>() {
+            cx.global_mut::<Self>().record_seed_turn(took);
+        }
+    }
+
     fn record_session_read(&mut self, took: Duration) {
         _ = self.session_read.get_or_insert(took);
+    }
+
+    fn record_seed_turn(&mut self, took: Duration) {
+        _ = self.seed_turn.get_or_insert(took);
     }
 
     fn record_turn(&mut self, turn: Duration) {
@@ -116,6 +134,7 @@ impl Timeline {
             Step::Root => _ = self.root.get_or_insert(at),
             Step::Scanned => _ = self.scanned.get_or_insert(at),
             Step::NamesReady => _ = self.names_ready.get_or_insert(at),
+            Step::Cached(name) => _ = self.cache.get_or_insert((name, at)),
             Step::Indexed {
                 notes,
                 corpus_bytes,
@@ -157,15 +176,21 @@ impl Timeline {
                 )
             },
         );
-        let session_read = self
-            .session_read
-            .map_or_else(|| "-".to_owned(), |took| format!("{took:.2?}"));
+        let span = |took: Option<Duration>| {
+            took.map_or_else(|| "-".to_owned(), |took| format!("{took:.2?}"))
+        };
+        let cache = self
+            .cache
+            .map_or_else(|| "-".to_owned(), |(name, at)| format!("{name} {at:.1?}"));
         format!(
-            "launch: first frame {}, session read {session_read}, root {}, scanned {}, names ready {}, indexed {indexed}",
+            "launch: first frame {}, session read {}, root {}, scanned {}, names ready {}, \
+             cache {cache}, seed turn {}, indexed {indexed}",
             at(self.first_frame),
+            span(self.session_read),
             at(self.root),
             at(self.scanned),
-            at(self.names_ready)
+            at(self.names_ready),
+            span(self.seed_turn)
         )
     }
 }

@@ -7,7 +7,7 @@ mod watch;
 
 use std::fs;
 use std::io;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -144,6 +144,28 @@ impl Fs for RealFs {
             stamp: stamp_of(path, &metadata)?,
             identity: identity_of(&metadata),
         })
+    }
+
+    async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>> {
+        let too_large = || io_error(path, io::Error::from(io::ErrorKind::FileTooLarge));
+        let file = fs::File::open(path).map_err(|source| io_error(path, source))?;
+        // The handle's stat, so the size checked is the opened file's.
+        let len = file
+            .metadata()
+            .map_err(|source| io_error(path, source))?
+            .len();
+        if len > max_len {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::with_capacity(usize::try_from(len).map_err(|_| too_large())?);
+        // One byte past the cap: a file that grew since the stat is refused, not cut.
+        file.take(max_len + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| io_error(path, source))?;
+        if bytes.len() as u64 > max_len {
+            return Err(too_large());
+        }
+        Ok(bytes)
     }
 
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {

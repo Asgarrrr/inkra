@@ -18,6 +18,18 @@ pub enum Outcome {
     Missing,
 }
 
+impl Outcome {
+    /// As the launch line names it.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Decoded(_) => "decoded",
+            Self::Rejected(_) => "rejected",
+            Self::Missing => "missing",
+        }
+    }
+}
+
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]

@@ -20,6 +20,10 @@ pub struct Turn<'a> {
 /// Everything the turn made due. Run each job off the foreground and hand its result
 /// back in a later turn; free `retired` off the foreground.
 #[must_use = "run its jobs; free `retired` off the foreground"]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent one-turn flags, any of them true together"
+)]
 pub struct Effects {
     /// Read, parse, hand to `Turn::landed`. At most the free slots, in queue order.
     pub loads: Vec<Load>,
@@ -35,6 +39,8 @@ pub struct Effects {
     pub notify: bool,
     /// True once: the startup load ended and its settle applied.
     pub indexed: bool,
+    /// True once: this turn applied the build carrying the cache's seed.
+    pub seeded: bool,
 }
 
 impl LiveIndex {
@@ -59,9 +65,10 @@ impl LiveIndex {
             changed,
             ..
         } = turn;
-        let (layout, retired) = applied.map_or((false, Retired::default()), |applied| {
-            (applied.layout, applied.retired)
-        });
+        let (layout, seeded, retired) = applied
+            .map_or((false, false, Retired::default()), |applied| {
+                (applied.layout, applied.seeded, applied.retired)
+            });
         let slots = self.slots;
         let loads = std::iter::from_fn(|| self.next_load(vault, slots)).collect();
         let TurnEnd { merge, indexed } = self.end_turn();
@@ -80,6 +87,7 @@ impl LiveIndex {
             layout,
             notify,
             indexed,
+            seeded,
         };
         (result, effects)
     }

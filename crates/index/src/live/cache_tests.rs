@@ -11,7 +11,7 @@ use inkra_vault::{Fs, Kind, Mtime, Stamp, Vault};
 
 use super::tests::{Harness, Pending, SLOTS, path, paths};
 use super::{Effects, LiveIndex, Status};
-use crate::persist::{Outcome, decode, encode};
+use crate::persist::{Outcome, Rejected, decode, encode};
 use crate::test_support::{ROOT, find_all, loaded as stamps};
 use crate::words::FRESH_MIN;
 use crate::{FileRead, NoteContent, NoteIndex, NoteQuery};
@@ -439,4 +439,38 @@ fn no_merge_starts_while_waiting() {
 fn an_outcome_nobody_awaits_panics() {
     let mut h = Harness::new(&[("a.md", "")]);
     let _ = h.turn(|t| t.cached(Outcome::Missing));
+}
+
+#[test]
+fn only_the_build_carrying_a_decoded_cache_is_seeded() {
+    let (mut h, outcome) = relaunch(loaded(&[("a.md", "alpha"), ("b.md", "")]));
+    assert!(!h.built().seeded, "this build read before the outcome");
+
+    let ((), landing) = h.turn(|t| t.cached(outcome));
+    let effects = h.run_build();
+
+    assert!(
+        !landing.seeded,
+        "the outcome's own turn only starts the build"
+    );
+    assert!(effects.seeded);
+    h.fs.insert_with_mtime(path("c.md"), "", fine(10));
+    h.rescan();
+    assert!(!h.built().seeded, "a later rescan's build carries no cache");
+}
+
+#[test]
+fn a_missing_cache_seeds_nothing() {
+    let (mut h, _) = relaunch(loaded(&[("a.md", "alpha")]));
+
+    let effects = seeded(&mut h, Outcome::Missing);
+
+    assert!(!effects.seeded);
+}
+
+#[test]
+fn each_outcome_has_its_name() {
+    assert_eq!(cache_of(&NoteIndex::default()).name(), "decoded");
+    assert_eq!(Outcome::Rejected(Rejected::Short).name(), "rejected");
+    assert_eq!(Outcome::Missing.name(), "missing");
 }

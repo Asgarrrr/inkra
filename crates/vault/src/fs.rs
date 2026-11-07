@@ -131,6 +131,9 @@ pub trait Fs: Send + Sync {
     /// Normalizes line endings: `Buffer` assumes no `\r` anywhere.
     async fn load(&self, path: &Path) -> Result<Loaded>;
 
+    /// The bytes as stored. A file over `max_len` is refused from its size before any read.
+    async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>>;
+
     /// Replaces the file rather than truncating it. If `expected` disagrees
     /// with what's on disk, preserves the current bytes before overwriting.
     /// Fails when `path`'s folder is missing.

@@ -13,7 +13,7 @@ use inkra_vault::{Fs, RealFs, Stamp, Vault};
 use crate::Quit;
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
-use crate::restore::{self, Opened, session_file};
+use crate::restore::{self, Opened, cache_file, session_file};
 use crate::shell::AppShell;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
@@ -28,8 +28,9 @@ pub(crate) enum Launch {
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
     Note(PathBuf, String, Stamp),
-    /// Scanned behind the first frame; the session file, if the app keeps one, read before it.
-    Vault(Vault, Option<PathBuf>),
+    /// Scanned behind the first frame; the session file, if the app keeps one, read before it;
+    /// the index cache file, if the app keeps one, read beside the scan.
+    Vault(Vault, Option<PathBuf>, Option<PathBuf>),
 }
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
@@ -40,15 +41,15 @@ pub(crate) fn root(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    let (editor, notes, session) = match launched {
-        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
+    let (editor, notes, session, cache) = match launched {
+        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None, None),
         Launch::Note(path, text, stamp) => {
             let buffer = cx.new(|_| Buffer::new(text));
             let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
             let notes = cx.new(|cx| NoteStore::detached(fs, buffer, path, stamp, cx));
-            (Some(editor), notes, None)
+            (Some(editor), notes, None, None)
         }
-        Launch::Vault(vault, session) => {
+        Launch::Vault(vault, session, cache) => {
             // Read once, here: the first frame draws the saved layout, and the tabs' restore reuses it.
             let opened = session.map(|file| {
                 let started = Instant::now();
@@ -65,10 +66,11 @@ pub(crate) fn root(
                 None,
                 cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
                 opened,
+                cache,
             )
         }
     };
-    cx.new(|cx| AppShell::new(editor, notes, session, window, cx))
+    cx.new(|cx| AppShell::new(editor, notes, session, cache, window, cx))
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
@@ -88,8 +90,12 @@ fn launch() -> Result<Launch, String> {
         let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
         futures::executor::block_on(RealFs.check_dir(&root)).map_err(|error| format!("{error}"))?;
-        let session = std::env::var_os("HOME").map(|home| session_file(Path::new(&home), &root));
-        return Ok(Launch::Vault(Vault::new(&root), session));
+        let home = std::env::var_os("HOME");
+        let session = home
+            .as_ref()
+            .map(|home| session_file(Path::new(home), &root));
+        let cache = home.and_then(|home| cache_file(Path::new(&home), &root));
+        return Ok(Launch::Vault(Vault::new(&root), session, cache));
     }
     futures::executor::block_on(RealFs.load(&path))
         .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
@@ -114,7 +120,7 @@ pub fn run() {
         };
 
         let resolved = match &launched {
-            Launch::Vault(vault, _) => {
+            Launch::Vault(vault, ..) => {
                 futures::executor::block_on(theme::store::load(&RealFs, vault.root()))
             }
             Launch::Nothing | Launch::Note(..) => Resolved::default(),

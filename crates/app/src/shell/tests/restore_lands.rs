@@ -101,7 +101,7 @@ pub(super) fn launch(
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let fs = Arc::clone(fs) as Arc<dyn Fs>;
-    let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()));
+    let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()), None);
     let window = cx
         .update(|cx| {
             let bounds = Bounds::maximized(None, cx);

@@ -110,7 +110,7 @@ pub(super) fn open_vault(
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, None, window, cx)
+        move |window, cx| AppShell::new(None, notes, None, None, window, cx)
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.panes().sidebar.clone())
@@ -187,7 +187,8 @@ pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, Visu
     let notes = cx.update(|cx| {
         gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
     });
-    let window = cx.add_window(move |window, cx| AppShell::new(None, notes, None, window, cx));
+    let window =
+        cx.add_window(move |window, cx| AppShell::new(None, notes, None, None, window, cx));
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window

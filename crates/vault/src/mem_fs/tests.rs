@@ -626,3 +626,53 @@ fn insert_with_mtime_sets_the_mtime_and_the_size_follows_the_bytes() {
     };
     assert_eq!((listed[0].mtime, listed[0].size), (mtime, 6));
 }
+
+#[test]
+fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/cache/index.idx", b"\x00\xffcache".to_vec());
+    let file = Path::new("/cache/index.idx");
+
+    let bytes = block_on(fs.read_bytes(file, 7)).ok();
+    let over = block_on(fs.read_bytes(file, 6)).err();
+
+    assert_eq!(bytes.as_deref(), Some(&b"\x00\xffcache"[..]));
+    assert_eq!(
+        over.and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::FileTooLarge)
+    );
+}
+
+#[test]
+fn read_bytes_of_a_missing_or_unreadable_file_fails() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/cache/locked.idx", b"x".to_vec());
+    fs.make_unreadable("/cache/locked.idx");
+
+    let missing = block_on(fs.read_bytes(Path::new("/cache/gone.idx"), 64)).err();
+    let locked = block_on(fs.read_bytes(Path::new("/cache/locked.idx"), 64)).err();
+
+    assert_eq!(
+        missing.and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::NotFound)
+    );
+    assert_eq!(
+        locked.and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::PermissionDenied)
+    );
+}
+
+#[test]
+fn a_blocked_read_bytes_waits_for_its_gate_and_counts_no_load() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/cache/index.idx", b"cache".to_vec());
+    let file = Path::new("/cache/index.idx");
+
+    let gate = fs.block_read_bytes(file);
+    let mut read = Box::pin(fs.read_bytes(file, 64));
+    assert!(read.as_mut().now_or_never().is_none());
+
+    gate.release();
+    assert_eq!(block_on(read).ok().as_deref(), Some(&b"cache"[..]));
+    assert_eq!(fs.loads(file), 0, "`loads` counts the notes' loads only");
+}

@@ -66,6 +66,8 @@ pub(super) struct Applied {
     pub(super) dirty: bool,
     /// The note set changed: names and link resolution may differ.
     pub(super) layout: bool,
+    /// The build carried the cache's seed.
+    pub(super) seeded: bool,
     pub(super) retired: Retired,
 }
 
@@ -198,6 +200,7 @@ impl LiveIndex {
             seed,
         } = built;
         let dirty = mem::take(&mut self.build) == Build::Dirty;
+        let seeded = seed.is_some();
         let last = self.last.replace(entries);
         if matches!(self.cache, Cache::Carried) {
             self.cache = Cache::Off;
@@ -213,6 +216,7 @@ impl LiveIndex {
         Applied {
             dirty,
             layout: retired_notes.is_some(),
+            seeded,
             retired: Retired {
                 last,
                 notes: retired_notes,

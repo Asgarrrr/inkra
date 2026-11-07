@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::{
     Rejected, SavedAxis, SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session,
-    dock_views, fnv1a, session_file,
+    cache_file, dock_views, fnv1a, session_file,
 };
 
 fn note(note: &str) -> SavedTab {
@@ -434,5 +434,24 @@ fn the_session_file_is_named_by_the_root_key_in_application_support() {
     assert_eq!(
         session_file(Path::new("/Users/me"), Path::new("/Users/me/Notes1800")),
         Path::new("/Users/me/Library/Application Support/Inkra/sessions/088abcfd907476e2.json")
+    );
+}
+
+/// Caches, not the vault: sync clients would copy the file and the watcher would see it (P4).
+#[test]
+fn the_cache_file_is_named_by_the_root_key_under_caches() {
+    assert_eq!(
+        cache_file(Path::new("/Users/me"), Path::new("/Users/me/Notes1800")).as_deref(),
+        Some(Path::new(
+            "/Users/me/Library/Caches/Inkra/index/088abcfd907476e2.idx"
+        ))
+    );
+}
+
+#[test]
+fn a_vault_holding_the_caches_folder_gets_no_cache_file() {
+    assert_eq!(
+        cache_file(Path::new("/Users/me"), Path::new("/Users/me")),
+        None
     );
 }

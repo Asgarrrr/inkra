@@ -24,7 +24,7 @@ fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
     let (buffer, notes) = detached_store(cx, fs, "/notes/a.md");
     let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
     let window =
-        cx.add_window(move |window, cx| AppShell::new(Some(editor), notes, None, window, cx));
+        cx.add_window(move |window, cx| AppShell::new(Some(editor), notes, None, None, window, cx));
     window
         .update(cx, |shell, window, cx| {
             window.focus(&shell.focus_handle(cx), cx);
@@ -238,7 +238,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
 
     for (launched, expected) in [
         (Launch::Nothing, false),
-        (Launch::Vault(scanned, None), false),
+        (Launch::Vault(scanned, None, None), false),
         (
             Launch::Note(
                 PathBuf::from("/vault/a.md"),

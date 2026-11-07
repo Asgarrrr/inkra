@@ -124,6 +124,10 @@ impl Fs for PanickingFs {
         self.inner.load(path).await
     }
 
+    async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>> {
+        self.inner.read_bytes(path, max_len).await
+    }
+
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
         self.inner.save(path, text, expected).await
     }
