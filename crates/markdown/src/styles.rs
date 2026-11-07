@@ -29,6 +29,7 @@ impl Styles {
     pub const MARKER: Self = Self(1 << 8);
     pub const QUOTE: Self = Self(1 << 9);
     pub const FRONTMATTER: Self = Self(1 << 10);
+    pub const CODE_BLOCK: Self = Self(1 << 11);
 
     #[must_use]
     pub fn heading(level: HeadingLevel) -> Self {

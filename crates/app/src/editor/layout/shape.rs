@@ -3,9 +3,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
-use inkra_markdown::{Conceal, DisplayLine, Gutter, Heading, Span, is_active};
+use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Span, is_active};
 use inkra_text::ByteOffset;
 
+use super::blocks::{Blocks, Labels};
 use super::prefix::{GutterCarry, Hanging, Prefix, indent};
 use super::runs::{RunStyles, line_runs};
 use super::{DocumentLayout, LayoutInputs, LineLayout, rows::rows};
@@ -106,20 +107,24 @@ pub(crate) fn shape_document(
     let mut row_count = 0;
     let mut top = px(0.);
     let mut bars = Vec::new();
+    let mut blocks = Blocks::new(wrap_width);
+    let mut labels = Labels::new(style, theme);
     // Spans, markers and gutters never cross a `\n`, so each line's are the next ones in order.
     let mut rest = markdown.spans.as_slice();
     let mut conceals = markdown.conceals.as_slice();
     let mut gutters = markdown.gutters.as_slice();
     let mut headings = markdown.headings.as_slice();
+    let mut code_blocks = markdown.code_blocks.as_slice();
     let mut carry = GutterCarry::new(body_size);
     let lines = buffer
         .lines()
         .enumerate()
         .map(|(index, (start, text))| {
             let range = start..start + text.len();
-            let heading = line_heading(&mut headings, &range);
+            let heading = line_holder(&mut headings, &range, |heading| &heading.range);
+            let block = line_holder(&mut code_blocks, &range, |block| &block.range);
             let opening = heading_opening(heading, &range);
-            let (font_size, row_height) = line_metrics(heading, (body_size, body_height));
+            let (font_size, row_height) = line_metrics(heading, block, (body_size, body_height));
             let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
             let line_conceals =
                 line_items(&mut conceals, |conceal| conceal.marker.start <= range.end);
@@ -127,6 +132,8 @@ pub(crate) fn shape_document(
             let gutter = line_gutters
                 .first()
                 .map(|gutter| (gutter, &text[..gutter.range.end - start]));
+            let label = label_text(block, &range, text, line_conceals, selection)
+                .map(|label| labels.shape(label, window));
             let (prefix, text_conceals) = line_prefix(
                 gutter,
                 &mut carry,
@@ -155,7 +162,7 @@ pub(crate) fn shape_document(
             let line_top = top;
             top += rows_height(rows.len(), row_height);
             bars.extend(line_bars(prefix.as_ref(), line_top, top));
-            LineLayout {
+            let line = LineLayout {
                 shape,
                 range,
                 display,
@@ -164,7 +171,9 @@ pub(crate) fn shape_document(
                 top: line_top,
                 row_height,
                 prefix,
-            }
+            };
+            blocks.line(block, label, &line, top);
+            line
         })
         .collect();
 
@@ -173,6 +182,7 @@ pub(crate) fn shape_document(
         row_count,
         height: top,
         bars,
+        code_blocks: blocks.finish(),
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
@@ -211,11 +221,38 @@ fn heading_opening(
         .filter(|marker| marker.start == range.start)
 }
 
-/// A heading line takes its level's size and row height; any other line takes the body's.
-fn line_metrics(heading: Option<&Heading>, body: (Pixels, Pixels)) -> (Pixels, Pixels) {
-    heading
-        .map(|heading| theme::heading_metrics(heading.level))
-        .map_or(body, |metrics| (metrics.size, metrics.line_height))
+/// A heading line takes its level's size and row height; a block line the code size in the body's
+/// row; any other line the body's. A line never holds both.
+fn line_metrics(
+    heading: Option<&Heading>,
+    block: Option<&CodeBlock>,
+    body: (Pixels, Pixels),
+) -> (Pixels, Pixels) {
+    if let Some(heading) = heading {
+        let metrics = theme::heading_metrics(heading.level);
+        (metrics.size, metrics.line_height)
+    } else if block.is_some() {
+        (theme::CODE_BLOCK_TEXT_SIZE, body.1)
+    } else {
+        body
+    }
+}
+
+/// The language a block's label shows: it has one, the block opens on this line, and its opening
+/// fence is concealed. `text` is the line's own text.
+fn label_text<'t>(
+    block: Option<&CodeBlock>,
+    line: &Range<ByteOffset>,
+    text: &'t str,
+    conceals: &[Conceal],
+    selection: &Range<ByteOffset>,
+) -> Option<&'t str> {
+    let block = block.filter(|block| block.range.start >= line.start)?;
+    let language = block.language.as_ref()?;
+    conceals
+        .iter()
+        .any(|conceal| conceal.element == block.range && is_active(conceal, selection))
+        .then(|| &text[language.start - line.start..language.end - line.start])
 }
 
 /// The previous layout's line at `index`, then the one the edit moved to `start`, as reuse candidates.
@@ -248,17 +285,18 @@ fn rows_height(rows: usize, row_height: Pixels) -> Pixels {
     row_height * rows
 }
 
-/// The heading that holds the line at `range`; `rest` moves past the headings before it. A setext
-/// heading spans lines: it stays first until a line starts past its end.
-fn line_heading<'a>(rest: &mut &'a [Heading], range: &Range<ByteOffset>) -> Option<&'a Heading> {
-    while rest
-        .first()
-        .is_some_and(|heading| heading.range.end < range.start)
-    {
+/// The item of a sorted cursor that holds the line at `range`; `rest` moves past the items before
+/// it. A setext heading spans lines, and so does a block: it stays first until a line starts past
+/// its end.
+fn line_holder<'a, T>(
+    rest: &mut &'a [T],
+    range: &Range<ByteOffset>,
+    of: impl Fn(&T) -> &Range<ByteOffset>,
+) -> Option<&'a T> {
+    while rest.first().is_some_and(|item| of(item).end < range.start) {
         *rest = &rest[1..];
     }
-    rest.first()
-        .filter(|heading| heading.range.start <= range.end)
+    rest.first().filter(|item| of(item).start <= range.end)
 }
 
 /// One bar per quote level, from the line's top to the next line's, so a quote's bars meet.

@@ -35,6 +35,9 @@ pub(crate) fn markdown_style(base: &TextStyle, styles: Styles, theme: &Theme) ->
     if styles.contains(Styles::QUOTE) {
         style.color = colors.md_quote.into();
     }
+    if styles.contains(Styles::CODE_BLOCK) {
+        style.color = colors.md_code_block.into();
+    }
     if styles.contains(Styles::FRONTMATTER) || styles.contains(Styles::MARKER) {
         style.color = colors.md_marker.into();
     }

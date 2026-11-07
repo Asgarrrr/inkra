@@ -10,6 +10,7 @@ use super::EditorView;
 use crate::keymap::key_bindings;
 
 mod clipboard;
+mod code_blocks;
 mod conceal;
 mod dispatch;
 mod follow;

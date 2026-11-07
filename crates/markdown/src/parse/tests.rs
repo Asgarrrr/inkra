@@ -1,11 +1,12 @@
 use super::{Markdown, parse};
 use crate::HeadingLevel::{H1, H2};
-use crate::{HeadingLevel, Styles};
+use crate::{CodeBlock, HeadingLevel, Styles};
 
 const S: Styles = Styles::STRONG;
 const E: Styles = Styles::EMPHASIS;
 const X: Styles = Styles::STRIKETHROUGH;
 const C: Styles = Styles::CODE;
+const B: Styles = Styles::CODE_BLOCK;
 const M: Styles = Styles::MARKER;
 
 /// Each span as the text it covers, so expectations read like the source.
@@ -190,11 +191,11 @@ fn a_fence_inside_a_quote_keeps_both_styles() {
         styled("> ```\n> code\n> ```"),
         vec![
             ("> ", Q | M),
-            ("```", C | Q | M),
+            ("```", C | B | Q | M),
             ("> ", Q | M),
-            ("code", C | Q),
+            ("code", C | B | Q),
             ("> ", Q | M),
-            ("```", C | Q | M),
+            ("```", C | B | Q | M),
         ]
     );
 }
@@ -213,9 +214,9 @@ fn list_markers_are_dimmed() {
 fn code_blocks_mark_their_fences() {
     assert_eq!(
         styled("```rs\nlet x;\n```"),
-        vec![("```rs", C | M), ("let x;", C), ("```", C | M)]
+        vec![("```rs", C | B | M), ("let x;", C | B), ("```", C | B | M)]
     );
-    assert_eq!(styled("    code"), vec![("code", C)]);
+    assert_eq!(styled("    code"), vec![("code", C | B)]);
 }
 
 #[test]
@@ -528,9 +529,34 @@ fn conceal_offsets_are_bytes_across_multibyte_text() {
 
 use proptest::prelude::*;
 
+/// A language is one word on the block's first line.
+fn check_language(text: &str, block: &CodeBlock) {
+    let Some(language) = &block.language else {
+        return;
+    };
+    let (start, end) = (block.range.start.get(), block.range.end.get());
+    let (from, to) = (language.start.get(), language.end.get());
+    assert!(from < to, "empty language in {block:?}");
+    assert!(start <= from && to <= end, "language outside {block:?}");
+    assert!(text.is_char_boundary(from) && text.is_char_boundary(to));
+    assert!(
+        !text[start..to].contains('\n'),
+        "language off the first line of {block:?} in {text:?}"
+    );
+    assert!(
+        !text[from..to]
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace()),
+        "language holds whitespace in {block:?} in {text:?}"
+    );
+}
+
 fn check_invariants(text: &str) {
     let Markdown {
-        spans, conceals, ..
+        spans,
+        conceals,
+        code_blocks,
+        ..
     } = parse(text);
     for span in &spans {
         let (start, end) = (span.range.start.get(), span.range.end.get());
@@ -572,8 +598,11 @@ fn check_invariants(text: &str) {
             !text[start..end].contains('\n'),
             "marker {conceal:?} crosses a line in {text:?}"
         );
+        let element_end = conceal.element.end.get();
         assert!(
-            !text[conceal.element.start.get()..conceal.element.end.get()].ends_with('\n'),
+            !text[conceal.element.start.get()..element_end].ends_with('\n')
+                || text[element_end..].is_empty()
+                || text[element_end..].starts_with('\n'),
             "element {conceal:?} keeps its line ending in {text:?}"
         );
         if conceal.replacement == "•" {
@@ -587,6 +616,35 @@ fn check_invariants(text: &str) {
         assert!(
             pair[0].marker.end <= pair[1].marker.start,
             "unsorted or overlapping markers: {pair:?} in {text:?}"
+        );
+    }
+    for block in &code_blocks {
+        let (start, end) = (block.range.start.get(), block.range.end.get());
+        assert!(start < end, "empty block {block:?} in {text:?}");
+        assert!(
+            end <= text.len(),
+            "block {block:?} past the end of {text:?}"
+        );
+        assert!(text.is_char_boundary(start) && text.is_char_boundary(end));
+        assert!(
+            text[end..].is_empty() || text[end..].starts_with('\n'),
+            "block {block:?} keeps its line ending in {text:?}"
+        );
+        check_language(text, block);
+    }
+    for pair in code_blocks.windows(2) {
+        assert!(
+            pair[0].range.end < pair[1].range.start,
+            "unsorted or touching blocks: {pair:?} in {text:?}"
+        );
+    }
+    for span in spans.iter().filter(|span| span.styles.contains(B)) {
+        assert!(
+            code_blocks
+                .iter()
+                .any(|block| block.range.start <= span.range.start
+                    && span.range.end <= block.range.end),
+            "block span {span:?} outside every block in {text:?}"
         );
     }
 }
@@ -646,6 +704,8 @@ fn an_empty_wikilink_alias_leaves_its_containers_open() {
 fn syntax_fragment() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("```\n".to_string()),
+        Just("```rs\n".to_string()),
+        Just("~~~\n".to_string()),
         Just("# ".to_string()),
         Just("> ".to_string()),
         Just(">".to_string()),
@@ -687,5 +747,6 @@ proptest! {
 
 }
 
+mod code_blocks;
 mod gutters;
 mod headings;

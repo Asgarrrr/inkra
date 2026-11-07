@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
 
 use crate::gutters::{cut, gutters, quote_conceals};
 use crate::{Conceal, Gutter, Styles};
@@ -16,6 +16,8 @@ pub struct Markdown {
     pub headings: Vec<Heading>,
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included.
     pub gutters: Vec<Gutter>,
+    /// Sorted by `range.start`; blocks never nest or overlap.
+    pub code_blocks: Vec<CodeBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +34,14 @@ pub struct Heading {
     pub marker: Option<Range<ByteOffset>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeBlock {
+    /// The whole block, fences included, up to its last line's end (no `\n`).
+    pub range: Range<ByteOffset>,
+    /// The info string's first word; `None` without one, and for an indented block.
+    pub language: Option<Range<ByteOffset>>,
+}
+
 /// One pass over pulldown-cmark's events. A byte inside an element that no
 /// leaf covers is a marker (live-preview spec, D3). `text` is LF-only, as
 /// `Buffer` holds it: a `\r` would be styled as a marker.
@@ -46,6 +56,7 @@ pub fn parse(text: &str) -> Markdown {
     let mut open: Vec<Open> = Vec::new();
     let mut headings = Vec::new();
     let mut quotes = Vec::new();
+    let mut code_blocks = Vec::new();
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let current = open.last().cloned();
@@ -64,6 +75,12 @@ pub fn parse(text: &str) -> Markdown {
                         level,
                     });
                 }
+                if let Tag::CodeBlock(kind) = &tag {
+                    code_blocks.push(CodeBlock {
+                        range: to_offsets(without_line_ending(text, &range)),
+                        language: language(text, &range, kind).map(to_offsets),
+                    });
+                }
                 // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
                 let leading = matches!(tag, Tag::BlockQuote(_))
                     && current.as_ref().is_none_or(|open| open.leading);
@@ -72,8 +89,13 @@ pub fn parse(text: &str) -> Markdown {
                 }
                 open.push(Open {
                     styles: styles | tag_styles(&tag),
+                    indent: if matches!(tag, Tag::CodeBlock(_)) {
+                        styles
+                    } else {
+                        styles | tag_styles(&tag)
+                    },
                     end: range.end,
-                    element: concealable(&tag, &range),
+                    element: concealable(text, &tag, &range),
                     leading,
                 });
             }
@@ -89,6 +111,7 @@ pub fn parse(text: &str) -> Markdown {
                 let (content_start, content_end) = backtick_runs(text, &range);
                 let code = Open {
                     styles: styles | Styles::CODE,
+                    indent: styles | Styles::CODE,
                     end: range.end,
                     element: Some(range.clone()),
                     leading: false,
@@ -118,6 +141,7 @@ pub fn parse(text: &str) -> Markdown {
         conceals,
         headings,
         gutters,
+        code_blocks,
     }
 }
 
@@ -135,7 +159,7 @@ fn tag_styles(tag: &Tag<'_>) -> Styles {
         Tag::Strong => Styles::STRONG,
         Tag::Emphasis => Styles::EMPHASIS,
         Tag::Strikethrough => Styles::STRIKETHROUGH,
-        Tag::CodeBlock(_) => Styles::CODE,
+        Tag::CodeBlock(_) => Styles::CODE | Styles::CODE_BLOCK,
         Tag::Link { .. } | Tag::Image { .. } => Styles::LINK,
         Tag::BlockQuote(_) => Styles::QUOTE,
         Tag::MetadataBlock(_) => Styles::FRONTMATTER,
@@ -144,12 +168,54 @@ fn tag_styles(tag: &Tag<'_>) -> Styles {
 }
 
 /// The range whose touch reveals this element's markers, or `None` when they never hide (spec D2).
-fn concealable(tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
+/// A fenced block's fences hide too (code-blocks spec, D2).
+fn concealable(text: &str, tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
     matches!(
         tag,
-        Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link { .. }
+        Tag::Strong
+            | Tag::Emphasis
+            | Tag::Strikethrough
+            | Tag::Link { .. }
+            | Tag::CodeBlock(CodeBlockKind::Fenced(_))
     )
-    .then(|| range.clone())
+    .then(|| without_line_ending(text, range))
+}
+
+/// The first word of a fenced block's info string, as source text: the opening line from the
+/// fence, past its run and the blanks after it. It splits at ASCII bytes only, so both ends stay on
+/// char boundaries.
+fn language(text: &str, block: &Range<usize>, kind: &CodeBlockKind<'_>) -> Option<Range<usize>> {
+    if matches!(kind, CodeBlockKind::Indented) {
+        return None;
+    }
+    let line = text[block.clone()]
+        .split('\n')
+        .next()
+        .unwrap_or_default()
+        .as_bytes();
+    let fence = line.iter().take_while(|&&byte| byte == line[0]).count();
+    let blanks = line[fence..]
+        .iter()
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let start = fence + blanks;
+    let len = line[start..]
+        .iter()
+        .take_while(|byte| !byte.is_ascii_whitespace())
+        .count();
+    (len > 0).then(|| block.start + start..block.start + start + len)
+}
+
+/// A container prefix or indent leads a line, not an element's syntax: the length of the leading
+/// `[ \t>]*` run when `piece` starts a line, else 0.
+fn line_start_prefix(text: &str, piece: &Range<usize>) -> usize {
+    if piece.start != 0 && text.as_bytes()[piece.start - 1] != b'\n' {
+        return 0;
+    }
+    text.as_bytes()[piece.clone()]
+        .iter()
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'>'))
+        .count()
 }
 
 /// The heading's text lines: an ATX heading is one line, and a setext heading's last line is its underline.
@@ -194,6 +260,9 @@ pub(crate) fn backtick_runs(text: &str, range: &Range<usize>) -> (usize, usize) 
 #[derive(Clone)]
 struct Open {
     styles: Styles,
+    /// What a line-start prefix in this element's gaps carries: the parent's styles in a code
+    /// block, so its indents match the opening line's.
+    indent: Styles,
     end: usize,
     element: Option<Range<usize>>,
     /// A quote whose ancestors are all quotes.
@@ -217,35 +286,22 @@ impl Out<'_> {
             return;
         }
         if let Some(open) = current {
-            let gap = self.cursor..end;
-            self.emit(gap.clone(), open.styles | Styles::MARKER);
-            if let Some(element) = &open.element {
-                self.conceal(gap, element);
+            for piece in lines(self.text, self.cursor..end) {
+                let split = piece.start + line_start_prefix(self.text, &piece);
+                self.push(piece.start..split, open.indent | Styles::MARKER);
+                self.push(split..piece.end, open.styles | Styles::MARKER);
+                if let Some(element) = &open.element
+                    && split < piece.end
+                {
+                    self.conceals.push(Conceal {
+                        element: to_offsets(element.clone()),
+                        marker: to_offsets(split..piece.end),
+                        replacement: "",
+                    });
+                }
             }
         }
         self.cursor = end;
-    }
-
-    fn conceal(&mut self, gap: Range<usize>, element: &Range<usize>) {
-        for (index, line) in lines(self.text, gap).enumerate() {
-            let bytes = &self.text.as_bytes()[line.clone()];
-            // After a `\n` in the gap, a container prefix or indent leads the line, not this element's syntax.
-            let prefix = if index == 0 {
-                0
-            } else {
-                bytes
-                    .iter()
-                    .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'>'))
-                    .count()
-            };
-            if prefix < bytes.len() {
-                self.conceals.push(Conceal {
-                    element: to_offsets(element.clone()),
-                    marker: to_offsets(line.start + prefix..line.end),
-                    replacement: "",
-                });
-            }
-        }
     }
 
     /// Conceals an ATX heading's opening sequence, and only it; `heading` excludes its line ending.

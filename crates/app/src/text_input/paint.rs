@@ -62,6 +62,7 @@ pub(crate) fn paint<V: InputHost>(
     let focus_handle = view.read(cx).input().focus_handle().clone();
     window.handle_input(&focus_handle, InputAdapter::new(bounds, view.clone()), cx);
 
+    layout.paint_backgrounds(bounds.origin, window);
     for quad in quads.selection {
         window.paint_quad(quad);
     }
