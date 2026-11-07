@@ -33,7 +33,7 @@ fn a_cached_note_that_differs_from_its_file_rejects_the_cache(cx: &mut TestAppCo
 
 #[gpui::test]
 fn an_untouched_vault_keeps_the_cache(cx: &mut TestAppContext) {
-    let fs = vault(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let fs = vault(&[("a.md", "alpha [[b]]"), ("b.md", "beta")]);
     drop(launch(cx, &fs));
     cx.run_until_parked();
 

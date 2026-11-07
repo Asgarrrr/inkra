@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use gpui::{Context, Priority};
 use inkra_index::persist::ScrubJob;
-use inkra_index::{FileRead, NoteContent};
 
 use super::IndexSync;
+use super::loading::load_note;
 
 impl IndexSync {
     pub(super) fn scrub(&self, job: ScrubJob, cx: &mut Context<Self>) {
@@ -20,13 +20,7 @@ impl IndexSync {
             .spawn_with_priority(Priority::Low, async move {
                 let mut loaded = Vec::with_capacity(paths.len());
                 for path in &paths {
-                    loaded.push(fs.load(path).await.map(|loaded| {
-                        let file = FileRead {
-                            stamp: loaded.stamp,
-                            identity: loaded.identity,
-                        };
-                        NoteContent::parse(&loaded.text, file)
-                    }));
+                    loaded.push(load_note(&*fs, path).await);
                 }
                 job.mismatch(loaded)
             });
