@@ -318,16 +318,8 @@ impl AppShell {
             if !self.layout.removable(group) {
                 return;
             }
-            if !self.group(group).holds_nothing() {
-                continue;
-            }
-            let was_last = group == self.layout.last_center();
-            let Some(heir) = self.layout.remove(group) else {
-                panic!("a centre group has an heir");
-            };
-            self.groups.remove(&group);
-            if was_last {
-                self.enter_group(heir, cx);
+            if self.group(group).holds_nothing() {
+                self.detach_group(group, cx);
             }
         }
     }

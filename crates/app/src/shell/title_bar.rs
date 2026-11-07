@@ -11,7 +11,7 @@ use super::AppShell;
 use super::dock_chrome::{name, width};
 use super::group::selector;
 use crate::theme;
-use crate::ui::{h_flex, identified, keep_focus};
+use crate::ui::{h_flex, identified, keep_focus, strip_rule};
 
 impl AppShell {
     /// Toggles and tabs keep their own presses: only a leaf region moves the window (S3-D3).
@@ -102,16 +102,8 @@ impl AppShell {
             .flex_1()
             .min_w_0()
             .h_full()
-            // Under the tabs only, so the side panels run to the window's top; the active tab, painted later, breaks it (D3).
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .border_b(theme::RULE_WIDTH)
-                    .border_color(colors.border_variant),
-            )
+            // Under the tabs only, so the side panels run to the window's top (D3).
+            .child(strip_rule(cx))
             .children(segments);
         h_flex()
             .debug_selector(|| "tab-row".into())

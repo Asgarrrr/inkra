@@ -1,7 +1,5 @@
 //! The docks' chrome: each column, the view icons that switch and move its views, and the toggles that show and hide it (docks spec).
 
-use std::cmp::Ordering;
-
 use gpui::{
     AnyElement, App, AppContext, Context, Div, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window, div,
@@ -9,15 +7,15 @@ use gpui::{
 };
 use inkra_layout::{GroupId, Side, SplitPath, Surface, View};
 
-use super::column::lower_header;
 use super::dock_drag::DraggedView;
 use super::docks::{ToggleLeftDock, ToggleRightDock, icon, title};
+use super::drop_marker;
 use super::group::selector;
 use super::members::Slot;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
 use crate::sidebar::{NewFolder, NewNote};
 use crate::theme;
-use crate::ui::{IconButton, IconName, PanelHeader, Tooltip, h_flex, keep_focus};
+use crate::ui::{IconButton, IconName, PanelHeader, Tooltip, h_flex, keep_focus, lower_header};
 use crate::vault_search::SearchVault;
 
 fn icon_id(view: View) -> &'static str {
@@ -225,14 +223,7 @@ impl AppShell {
                 |dragged, _, _, cx| cx.new(|_| dragged.clone()),
             )
             .drag_over::<DraggedView>(move |style, dragged, _, _| {
-                let style = style
-                    .bg(colors.accent_background)
-                    .border_color(colors.accent);
-                match dragged.landing(group, ix) {
-                    Ordering::Less => style.border_l(theme::DROP_EDGE),
-                    Ordering::Greater => style.border_r(theme::DROP_EDGE),
-                    Ordering::Equal => style,
-                }
+                drop_marker::mark(style, dragged.landing(group, ix), &colors)
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {

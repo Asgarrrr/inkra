@@ -1,18 +1,18 @@
 //! A group's column: the empty state, the note column's rows, and the body that takes drops (splits spec, P3).
 
 use gpui::{
-    AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Styled, Window, div, prelude::FluentBuilder, relative,
+    AnyElement, App, Context, Div, InteractiveElement, IntoElement, ParentElement, Styled, Window,
+    div, prelude::FluentBuilder, relative,
 };
 use inkra_layout::{GroupId, SplitDirection, SplitPath};
 
 use super::dock_drag::DraggedView;
 use super::group::selector;
 use super::members::Slot;
-use super::tab_bar::{DraggedTab, strip_slot};
+use super::tab_bar::DraggedTab;
 use super::{AppShell, Shown};
 use crate::theme;
-use crate::ui::{Color, h_flex, keep_focus};
+use crate::ui::{Color, lower_header, strip_slot};
 
 impl AppShell {
     /// None while the restore is pending, so the launch does not flash the empty state before the note.
@@ -62,30 +62,7 @@ impl AppShell {
                 .child("Deleted from disk. Typing restores it.")
         })
     }
-}
 
-/// A lower group's header row, as the title row holds only the top groups' strips (splits spec, D4).
-pub(super) fn lower_header(cx: &App) -> Div {
-    let colors = theme::current(cx).colors;
-    h_flex()
-        .flex_none()
-        .relative()
-        .h(theme::GROUP_HEADER_HEIGHT)
-        .bg(colors.background)
-        .on_mouse_down(MouseButton::Left, keep_focus)
-        // Under the tabs, as the title row's; the active tab, painted later, breaks it.
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .border_b(theme::RULE_WIDTH)
-                .border_color(colors.border_variant),
-        )
-}
-
-impl AppShell {
     fn render_group_header(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
         lower_header(cx)
             .debug_selector(move || selector("group-header", k))

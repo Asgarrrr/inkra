@@ -3,9 +3,9 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    App, AppContext, ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
+    App, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use inkra_layout::{GroupId, View};
 use inkra_tabs::TabId;
@@ -13,6 +13,7 @@ use inkra_vault::EntryId;
 
 use super::dock_drag::DraggedView;
 use super::docks::title;
+use super::drop_marker;
 use super::group::selector;
 use super::parked::Parked;
 use super::split::{SplitDown, SplitRight};
@@ -20,7 +21,7 @@ use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
 use crate::theme;
 use crate::ui::{
-    Color, ContextMenu, IconButton, IconName, Indicator, Label, MenuEntry, Tab, UiText, h_flex,
+    Color, ContextMenu, IconButton, IconName, Indicator, Label, MenuEntry, Tab, UiText, strip_slot,
 };
 use crate::vault::NoteStore;
 
@@ -30,9 +31,16 @@ const NEW_TAB: &str = "New tab";
 #[derive(Clone)]
 pub(super) struct DraggedTab {
     pub(super) id: TabId,
-    index: usize,
-    title: SharedString,
+    pub(super) index: usize,
+    pub(super) title: SharedString,
     pub(super) group: GroupId,
+}
+
+impl DraggedTab {
+    /// Where slot `ix` of `group` sits from this tab, as `DraggedView::landing`.
+    pub(super) fn landing(&self, group: GroupId, ix: usize) -> Ordering {
+        drop_marker::landing((self.group == group).then_some(self.index), ix)
+    }
 }
 
 /// One tab as its bar draws it; `view` is the view it holds, if any.
@@ -60,16 +68,6 @@ impl Render for DraggedTab {
             .active(true)
             .child(self.title.clone())
     }
-}
-
-/// A strip's slot for icon buttons, outside the bar's scroll, on the tabs' content centreline.
-pub(super) fn strip_slot() -> Div {
-    h_flex()
-        .flex_none()
-        .self_end()
-        .h(theme::TAB_HEIGHT)
-        .pt(theme::RULE_WIDTH)
-        .pb(theme::TAB_HOVER_INSET)
 }
 
 pub(super) fn tab_title(file: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString {
@@ -192,16 +190,6 @@ impl AppShell {
             group: strip.group,
         };
         let group = strip.group;
-        let landing = move |style: StyleRefinement, own: Option<usize>| {
-            let style = style
-                .bg(colors.accent_background)
-                .border_color(colors.accent);
-            match own.map_or(Ordering::Less, |index| ix.cmp(&index)) {
-                Ordering::Less => style.border_l(theme::DROP_EDGE),
-                Ordering::Greater => style.border_r(theme::DROP_EDGE),
-                Ordering::Equal => style,
-            }
-        };
         Tab::new(("tab", ix))
             .debug_selector(move || selector(format_args!("tab-{ix}"), strip.k))
             .active(is_active)
@@ -242,13 +230,13 @@ impl AppShell {
                 None => tab.on_drag(dragged, |tab, _, _, cx| cx.new(|_| tab.clone())),
             })
             .drag_over::<DraggedTab>(move |style, dragged, _, _| {
-                landing(style, (dragged.group == group).then_some(dragged.index))
+                drop_marker::mark(style, dragged.landing(group, ix), &colors)
             })
             .on_drop(cx.listener(move |shell, dragged: &DraggedTab, window, cx| {
                 shell.move_tab_to(dragged.group, dragged.id, group, ix, window, cx);
             }))
             .drag_over::<DraggedView>(move |style, dragged, _, _| {
-                landing(style, (dragged.group == group).then_some(dragged.index))
+                drop_marker::mark(style, dragged.landing(group, ix), &colors)
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {

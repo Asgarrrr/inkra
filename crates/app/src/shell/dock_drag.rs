@@ -9,6 +9,7 @@ use inkra_layout::{GroupId, Side, View};
 
 use super::AppShell;
 use super::docks::{icon, title};
+use super::drop_marker;
 use crate::theme;
 use crate::ui::IconButton;
 
@@ -30,11 +31,7 @@ impl DraggedView {
     /// Where slot `ix` of `group` sits from this view: `Less` marks its left edge, `Greater` its
     /// right. A view from another group lands before the slot, as a foreign tab does.
     pub(super) fn landing(&self, group: GroupId, ix: usize) -> Ordering {
-        if self.group == group {
-            ix.cmp(&self.index)
-        } else {
-            Ordering::Less
-        }
+        drop_marker::landing((self.group == group).then_some(self.index), ix)
     }
 }
 

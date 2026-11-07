@@ -19,6 +19,7 @@ mod column;
 mod dock_chrome;
 mod dock_drag;
 mod docks;
+mod drop_marker;
 mod geometry;
 mod group;
 mod members;
@@ -44,7 +45,7 @@ mod workspace;
 use group::Group;
 use inkra_layout::{GroupId, Layout, View};
 use modal::Modal;
-use notice::{Notice, reason};
+use notice::Notice;
 use panes::VaultPanes;
 use session::{Restore, SessionFile};
 
@@ -238,14 +239,7 @@ impl AppShell {
             title_drag_armed: false,
             press: None,
             quitting: false,
-            notice: unwatched.map(|error| Notice {
-                text: format!(
-                    "Inkra can't follow changes made outside the app: {}",
-                    reason(&error)
-                )
-                .into(),
-                cleared_by_save: None,
-            }),
+            notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),
         };
