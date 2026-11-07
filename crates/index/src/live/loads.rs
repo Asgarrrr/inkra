@@ -117,6 +117,10 @@ impl LiveIndex {
             self.rebuild_due = true;
             return;
         }
+        // The removal (P15) leaves the file holding nothing.
+        if let Some(launch) = &mut self.launch {
+            launch.held = None;
+        }
         let Some(last) = &self.last else {
             return;
         };

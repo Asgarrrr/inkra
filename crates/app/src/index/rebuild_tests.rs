@@ -14,7 +14,8 @@ use inkra_vault::mem_fs::MemFs;
 use super::IndexSync;
 use super::cache_writer::{remove_in_order, write_in_order};
 use super::cache_writer_tests::{CACHE, launch, vault};
-use super::tests::saved_edit;
+use super::tests::{hold_builds, saved_edit};
+use crate::test_support::{cached_index_sync, scan_notes};
 
 pub(super) fn kind(fs: &MemFs) -> Option<ErrorKind> {
     block_on(fs.read_bytes(Path::new(CACHE), MAX_BYTES))
@@ -37,6 +38,31 @@ async fn a_rebuild_removes_the_file_after_a_write_in_flight(cx: &mut TestAppCont
     cx.run_until_parked();
 
     assert_eq!(kind(&fs), Some(ErrorKind::NotFound));
+}
+
+#[gpui::test]
+fn a_rebuild_before_indexed_writes_the_file_again(cx: &mut TestAppContext) {
+    let fs = vault(&[]);
+    fs.insert_dir("/vault");
+    drop(launch(cx, &fs));
+    cx.run_until_parked();
+    assert_eq!(kind(&fs), None, "the first launch wrote the file");
+    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let links = cached_index_sync(&notes, Path::new(CACHE), cx);
+    let release = hold_builds(cx, &links);
+    cx.run_until_parked();
+
+    links.update(cx, IndexSync::rebuild);
+    cx.run_until_parked();
+    assert_eq!(
+        kind(&fs),
+        Some(ErrorKind::NotFound),
+        "the rebuild removed the file"
+    );
+    let _ = release.send(());
+    cx.run_until_parked();
+
+    assert_eq!(kind(&fs), None, "written again at indexed");
 }
 
 /// A removal that fails still moves the mark, so an older write cannot bring the old file back.

@@ -20,10 +20,6 @@ pub struct Turn<'a> {
 /// Everything the turn made due. Run each job off the foreground and hand its result
 /// back in a later turn; free `retired` off the foreground.
 #[must_use = "run its jobs; free `retired` off the foreground"]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent one-turn flags, any of them true together"
-)]
 pub struct Effects {
     /// Read, parse, hand to `Turn::landed`. At most the free slots, in queue order.
     pub loads: Vec<Load>,
@@ -37,11 +33,17 @@ pub struct Effects {
     pub layout: bool,
     /// `revision` or `progress` moved: a reader's answer may differ.
     pub notify: bool,
-    /// True once: the startup load ended and its settle applied.
-    pub indexed: bool,
+    /// Once: the startup load ended and its settle applied, with what the launch's seed left.
+    pub indexed: Option<Indexed>,
     /// True once: this turn applied the build carrying the cache's seed.
     pub seeded: bool,
-    /// On the turn that emits `indexed` after a seed: load and check its notes off the foreground.
+}
+
+/// What the launch's seed left, handed out once on the turn that indexes the vault.
+pub struct Indexed {
+    /// The revision the cache file holds; `None` when it holds none, the seed pruned a note, or a rebuild ran.
+    pub held: Option<u64>,
+    /// The seeded notes to load and check off the foreground (P16); `None` without a seed.
     pub scrub: Option<ScrubJob>,
 }
 
@@ -74,10 +76,14 @@ impl LiveIndex {
         let slots = self.slots;
         let loads = std::iter::from_fn(|| self.next_load(vault, slots)).collect();
         let TurnEnd { merge, indexed } = self.end_turn();
-        let scrub = indexed
-            .then(|| self.scrub.take())
-            .flatten()
-            .map(|ids| ScrubJob::new(ids, vault, self.index.snapshot()));
+        let indexed = indexed.then(|| {
+            let launch = self.launch.take();
+            Indexed {
+                held: launch.as_ref().and_then(|launch| launch.held),
+                scrub: launch
+                    .map(|launch| ScrubJob::new(launch.scrub, vault, self.index.snapshot())),
+            }
+        });
         // One build, after the full scan: the root pass alone would cost a build the next swap discards.
         let build = if changed && vault.is_scanned() {
             self.start_build(vault.shared_entries())
@@ -94,7 +100,6 @@ impl LiveIndex {
             notify,
             indexed,
             seeded,
-            scrub,
         };
         (result, effects)
     }

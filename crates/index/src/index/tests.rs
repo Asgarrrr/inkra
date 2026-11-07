@@ -383,7 +383,7 @@ fn a_snapshot_keeps_the_sources_it_was_taken_with() {
     let mut seeded = NoteIndex::default();
     let _ = seeded.set_notes(note_set(&vault));
     let notes = vault.entries().filter(|entry| entry.kind == Kind::Note);
-    let _ = seeded.seed(Seed::build(decoded, notes, &note_set(&vault)));
+    let _ = seeded.seed(Seed::build(decoded, notes, &note_set(&vault)).0);
     let words: Vec<String> = seeded
         .words()
         .entries()

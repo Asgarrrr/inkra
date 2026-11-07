@@ -25,6 +25,10 @@ pub(crate) struct Seed {
     pub(crate) by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
     /// Each seeded note's cached stamp, the racy ones left out so they reload (P8).
     pub(crate) stamps: Vec<(EntryId, Stamp)>,
+}
+
+/// What the seed found beyond the maps; `LiveIndex` keeps it until `indexed`.
+pub(crate) struct LaunchFacts {
     /// Some cached note matched no entry or had no stamp: the file holds a note the index does not.
     pub(crate) pruned: bool,
     /// The notes of `stamps` the scrub re-parses, drawn from the file's crc (P16).
@@ -41,7 +45,7 @@ impl Seed {
         decoded: Decoded,
         entries: impl Iterator<Item = &'a Entry>,
         notes: &NoteSet,
-    ) -> Self {
+    ) -> (Self, LaunchFacts) {
         let Decoded {
             notes: cached,
             words,
@@ -97,15 +101,16 @@ impl Seed {
             words.next,
             words.total - ghost_words,
         );
-        Self {
-            words,
-            corpus,
-            sources,
-            by_stem,
-            stamps,
-            pruned,
-            scrub,
-        }
+        (
+            Self {
+                words,
+                corpus,
+                sources,
+                by_stem,
+                stamps,
+            },
+            LaunchFacts { pruned, scrub },
+        )
     }
 }
 

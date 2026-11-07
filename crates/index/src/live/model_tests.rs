@@ -82,7 +82,6 @@ struct Model {
 #[derive(Debug, PartialEq)]
 struct Seen {
     revision: u64,
-    cache_revision: Option<u64>,
     progress: (usize, usize),
     status: Status,
     answers: Vec<Answer>,
@@ -92,7 +91,6 @@ impl Seen {
     fn of(h: &Harness) -> Self {
         Self {
             revision: h.live.revision(),
-            cache_revision: h.live.cache_revision(),
             progress: h.live.progress(),
             status: h.live.status(),
             answers: answers(h),
@@ -179,7 +177,7 @@ impl Model {
             let read = self.h.read(&load);
             self.loads.push((load.ticket, read));
         }
-        self.indexed += usize::from(effects.indexed);
+        self.indexed += usize::from(effects.indexed.is_some());
         if !effects.notify {
             prop_assert_eq!(before, Seen::of(&self.h), "a turn that did not notify");
         }

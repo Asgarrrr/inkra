@@ -207,7 +207,10 @@ fn unchanged_notes_load_nothing() {
     assert_eq!(loading(&h), Vec::<PathBuf>::new());
     assert_eq!(h.fs.loads(&path("a.md")), 1, "the first launch's load only");
     assert_eq!(h.live.status(), Status::Ready);
-    assert!(effects.indexed, "the seed's turn is the startup's last");
+    assert!(
+        effects.indexed.is_some(),
+        "the seed's turn is the startup's last"
+    );
     let cold = cold(&mut h);
     assert_eq!(view(&h), view(&cold));
 }
@@ -343,7 +346,7 @@ fn wait_blocks_queue_and_done() {
         Vec::<PathBuf>::new(),
         "no load before the outcome"
     );
-    assert!(!effects.indexed);
+    assert!(effects.indexed.is_none());
     assert_eq!(
         h.live.status(),
         Status::Indexing {
@@ -352,7 +355,7 @@ fn wait_blocks_queue_and_done() {
         }
     );
     let effects = h.idle_turn();
-    assert!(!effects.indexed);
+    assert!(effects.indexed.is_none());
     assert!(h.pending.build.is_none());
 
     let _ = h.turn(|t| t.cached(Outcome::Missing));
@@ -365,7 +368,7 @@ fn wait_blocks_queue_and_done() {
     assert_eq!(loading(&h), [path("a.md"), path("b.md")]);
     h.load_all();
     let effects = h.run_merge();
-    assert!(effects.indexed, "the settle ends the startup");
+    assert!(effects.indexed.is_some(), "the settle ends the startup");
 }
 
 #[test]
@@ -383,11 +386,11 @@ fn an_empty_vault_waits_as_one_note() {
             total: 1
         }
     );
-    assert!(!effects.indexed);
+    assert!(effects.indexed.is_none());
     let _ = h.turn(|t| t.cached(Outcome::Missing));
     let effects = h.run_build();
     assert_eq!(h.live.status(), Status::Ready);
-    assert!(effects.indexed);
+    assert!(effects.indexed.is_some());
 }
 
 #[test]
@@ -529,13 +532,20 @@ fn a_fresh_reload_survives_a_relaunch() {
     assert_eq!(zulu.len(), 1);
 }
 
+fn held(effects: &Effects) -> Option<u64> {
+    let Some(indexed) = &effects.indexed else {
+        panic!("the indexed turn");
+    };
+    indexed.held
+}
+
 #[test]
 fn a_full_match_seed_is_the_revision_the_file_holds() {
     let (mut h, outcome) = relaunch(loaded(&[("a.md", "alpha"), ("b.md", "beta")]));
 
-    let _ = seeded(&mut h, outcome);
+    let seed = seeded(&mut h, outcome);
 
-    assert_eq!(h.live.cache_revision(), Some(h.live.revision()));
+    assert_eq!(held(&seed), Some(h.live.revision()));
 }
 
 #[test]
@@ -547,7 +557,8 @@ fn a_seed_that_pruned_a_note_holds_no_revision() {
     let _ = seeded(&mut h, outcome);
 
     assert_eq!(loading(&h), Vec::<PathBuf>::new());
-    assert_eq!(h.live.cache_revision(), None, "the file still holds a");
+    let settle = h.run_merge();
+    assert_eq!(held(&settle), None, "the file still holds a");
 }
 
 #[test]
@@ -555,8 +566,10 @@ fn no_cache_holds_no_revision() {
     let (mut h, _) = relaunch(loaded(&[("a.md", "alpha")]));
 
     let _ = seeded(&mut h, Outcome::Missing);
+    h.load_all();
+    let settle = h.run_merge();
 
-    assert_eq!(h.live.cache_revision(), None);
+    assert_eq!(held(&settle), None);
 }
 
 #[test]
@@ -597,8 +610,30 @@ fn a_rebuild_while_the_cache_waits_runs_once_it_lands() {
     assert_eq!(loading(&h), [path("a.md"), path("b.md"), path("c.md")]);
 }
 
+#[test]
+fn a_rebuild_while_the_cache_waits_hands_out_no_revision() {
+    let (mut h, outcome) = relaunch(loaded(&[
+        ("a.md", "alpha"),
+        ("b.md", "beta"),
+        ("c.md", "gamma"),
+    ]));
+    let _ = h.built();
+    let _ = h.turn(|t: &mut Turn<'_>| t.rebuild());
+    let _ = seeded(&mut h, outcome);
+
+    h.load_all();
+    let _ = h.run_merge();
+    let settle = h.run_merge();
+
+    assert_eq!(
+        held(&settle),
+        None,
+        "the rebuild removed what the seed held"
+    );
+}
+
 fn scrubbed(effects: &Effects) -> Option<Vec<PathBuf>> {
-    let job = effects.scrub.as_ref()?;
+    let job = effects.indexed.as_ref()?.scrub.as_ref()?;
     Some(job.paths().map(Path::to_path_buf).collect())
 }
 
@@ -617,7 +652,7 @@ fn the_indexed_turn_hands_the_seeded_notes_to_the_scrub() {
 
     assert_eq!(scrubbed(&seed), None, "a's reload is pending");
     assert_eq!(scrubbed(&reload), None, "the settle is pending");
-    assert!(settle.indexed);
+    assert!(settle.indexed.is_some());
     assert_eq!(
         scrubbed(&settle),
         Some(vec![path("b.md"), path("c.md")]),
@@ -634,7 +669,7 @@ fn a_launch_without_a_cache_scrubs_nothing() {
 
     let settle = h.run_merge();
 
-    assert!(settle.indexed);
+    assert!(settle.indexed.is_some());
     assert_eq!(scrubbed(&settle), None);
 }
 
@@ -653,7 +688,7 @@ fn the_scrub_draws_its_sample_from_the_file_crc() {
 
     let seed = seeded(&mut h, outcome);
 
-    assert!(seed.indexed, "nothing reloads");
+    assert!(seed.indexed.is_some(), "nothing reloads");
     assert_eq!(expected.len(), SCRUB);
     assert_eq!(scrubbed(&seed), Some(expected));
 }

@@ -182,7 +182,8 @@ alone.
   costs Arc bumps.
 - It encodes `merge(alive, fresh)`: the fresh tier is not in the segment
   until a merge, which is due only every 6,250 notes at 50k.
-- First write at `Done` if at least one note reloaded or was pruned.
+- First write at `Done` unless the file holds the seed's revision: no note
+  reloaded or was pruned, and no rebuild ran since the seed.
 - Then after 60 s without change, or after 500 changes, in `Status::Ready`
   only.
 - Never at quit: a stale cache heals through the stamp diff, and a 30 MB
@@ -195,7 +196,9 @@ alone.
 A palette action with no binding, like `SelectTheme`. It removes the file
 through the writer's seq; the mark moves even when the removal fails, so an
 in-flight write cannot bring the old file back. Then `indexed` is cleared
-and every live note is requeued.
+and every live note is requeued. A rebuild before `indexed` also drops the
+seed's revision from the launch facts, so the first write is due even when no
+revision moves.
 
 ### P16. The scrub
 
@@ -397,8 +400,9 @@ Each slice appends what it did differently from this spec, and why.
   proves the launch line names both: `cache {outcome} {at}, seed turn {took}`,
   `-` when absent. `Launch::Vault` gains the cache file, so the fixtures that
   build it (`shot/stage.rs`, `restore_lands`, `open_first`) pass `None`.
-  `Effects` holds four bools, so it carries a `struct_excessive_bools`
-  `expect`: the flags are independent and can be true in one turn. The
+  `Effects` held four bools under a `struct_excessive_bools` `expect`; the
+  launch-facts entry folds `indexed` and `scrub` into `Option<Indexed>`, so
+  three remain and the `expect` is gone. The
   not-found guard in `cache_file::read` only decides whether a line is logged,
   so its mutants are excluded as unobservable.
 - Slice 5a is split in two. 5a-1 moves `sources` into `Shards<EntryId, Arc<Source>>`,
@@ -460,3 +464,9 @@ Each slice appends what it did differently from this spec, and why.
   stay user-run (slice 0); the write cost is measured by a probe outside the app, as no log line
   times it.
 - File kinds slice 3: a link record carries `md`; `FORMAT_VERSION` 2.
+- Launch facts (arch/indexed-payload): `Seed::build` returns the seed and `LaunchFacts { pruned,
+  scrub }`. `LiveIndex` keeps them as `launch` until the turn that emits `indexed`, which hands
+  out `Indexed { held, scrub }` once. `held` is the seed's revision, `None` when the seed pruned
+  a note or a rebuild ran since. A getter readable on any turn outlived the rebuild that made it
+  false; on `main` that was reachable only for a seeded vault with no note, where the deferred
+  rebuild moves no revision. The payload makes the false record unrepresentable.

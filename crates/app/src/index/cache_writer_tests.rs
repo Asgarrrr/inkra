@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use futures::executor::block_on;
 use futures::lock::Mutex;
 use gpui::{Context, Entity, TestAppContext};
-use inkra_index::persist::{MAX_BYTES, QUIET, Writes, encode};
+use inkra_index::persist::{MAX_BYTES, QUIET, encode};
 use inkra_index::{FileRead, NoteContent};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{FileIdentity, Fs, Mtime, Stamp};
@@ -193,7 +193,7 @@ fn the_newer_of_two_writes_in_flight_lands(cx: &mut TestAppContext) {
 
     let newer = links.update(cx, |sync, cx| {
         let write_now = |sync: &mut IndexSync, cx: &mut Context<IndexSync>| {
-            sync.writer.as_mut().expect("a cache").writes = Some(Writes::new(None));
+            sync.writer.as_mut().expect("a cache").start(None);
             sync.write_if_due(cx);
         };
         write_now(sync, cx);

@@ -8,7 +8,7 @@ use crate::test_support::content;
 fn load_all_in_turns(h: &mut Harness) -> (Vec<Merge>, bool) {
     let (mut merges, mut indexed) = (Vec::new(), false);
     while !h.pending.loads.is_empty() {
-        indexed |= h.land_pending(0).indexed;
+        indexed |= h.land_pending(0).indexed.is_some();
         merges.extend(h.pending.merge.take());
     }
     (merges, indexed)
@@ -29,17 +29,20 @@ fn the_load_ending_settles_then_reports_indexed_once() {
     let mut h = Harness::new(&[("a.md", "alpha"), ("b.md", "beta")]);
     let first = h.built();
     assert!(
-        h.pending.merge.is_none() && !first.indexed,
+        h.pending.merge.is_none() && first.indexed.is_none(),
         "the loads are queued"
     );
     let merge = settle(&mut h);
 
     let end = h.merged(merge);
 
-    assert!(end.indexed);
+    assert!(end.indexed.is_some());
     assert!(h.live.index().words_settled());
     let later = h.idle_turn();
-    assert!(h.pending.merge.is_none() && !later.indexed, "reported once");
+    assert!(
+        h.pending.merge.is_none() && later.indexed.is_none(),
+        "reported once"
+    );
 }
 
 #[test]
@@ -49,7 +52,7 @@ fn a_settle_with_nothing_to_merge_reports_indexed_in_that_turn() {
     let end = h.built();
 
     assert!(h.pending.merge.is_none());
-    assert!(end.indexed);
+    assert!(end.indexed.is_some());
 }
 
 #[test]
@@ -64,13 +67,13 @@ fn a_save_during_the_settle_stays_fresh_and_indexed_is_reported() {
         t.landed(ticket, Ok(during));
     });
     assert!(
-        h.pending.merge.is_none() && !end.indexed,
+        h.pending.merge.is_none() && end.indexed.is_none(),
         "the settle still runs"
     );
 
     let end = h.merged(merge);
 
-    assert!(end.indexed, "the settle's apply ends the settle");
+    assert!(end.indexed.is_some(), "the settle's apply ends the settle");
     assert!(!h.live.index().words_settled(), "the save waits in fresh");
 }
 
@@ -85,14 +88,14 @@ fn building_again_before_indexed_settles_again() {
     assert!(h.live.is_building());
 
     let end = h.merged(merge);
-    assert!(!end.indexed, "c is loading");
+    assert!(end.indexed.is_none(), "c is loading");
     assert!(
         h.pending.merge.is_none(),
         "one fresh note is below the policy"
     );
 
     let merge = settle(&mut h);
-    assert!(h.merged(merge).indexed);
+    assert!(h.merged(merge).indexed.is_some());
 }
 
 #[test]
@@ -104,7 +107,7 @@ fn a_reload_after_indexed_starts_no_settle() {
     let mut h = Harness::new(&files);
     let _ = h.built();
     let merge = settle(&mut h);
-    assert!(h.merged(merge).indexed);
+    assert!(h.merged(merge).indexed.is_some());
 
     h.fs.insert_file(super::tests::path("a.md"), "changed");
     h.rescan();
@@ -145,7 +148,7 @@ fn a_load_past_the_policy_starts_a_due_merge() {
     };
     assert!(h.live.is_building(), "due before the loads end");
     let end = h.merged(merge);
-    assert!(!end.indexed, "a due merge is no settle");
+    assert!(end.indexed.is_none(), "a due merge is no settle");
 }
 
 #[test]
@@ -161,13 +164,13 @@ fn a_dirty_rebuild_ending_the_load_settles_before_indexed() {
 
     let applied = h.run_build();
 
-    assert!(!applied.indexed, "not before the settle");
+    assert!(applied.indexed.is_none(), "not before the settle");
     assert!(
         h.pending.merge.is_some(),
         "the settle starts beside the rerun"
     );
     assert!(h.pending.build.is_some(), "the rerun");
-    assert!(h.run_merge().indexed);
+    assert!(h.run_merge().indexed.is_some());
     assert!(h.live.index().words_settled());
-    assert!(!h.run_build().indexed, "reported once");
+    assert!(h.run_build().indexed.is_none(), "reported once");
 }
