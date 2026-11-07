@@ -130,6 +130,7 @@ pub fn run() {
             Launch::Nothing | Launch::Note(..) => Resolved::default(),
         };
         theme::install(resolved.theme.clone(), cx);
+        theme::set_code_block_wrap(resolved.code_block_wrap, cx);
         let bounds = Bounds::centered(None, WINDOW_SIZE, cx);
         let window = cx.open_window(
             WindowOptions {

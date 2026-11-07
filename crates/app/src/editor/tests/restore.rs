@@ -199,6 +199,7 @@ fn a_restored_view_clips_to_the_note(cx: &mut TestAppContext) {
     let view = ViewState {
         selection,
         top: TopLine::at(at(40)),
+        scrolls: Vec::new(),
     };
 
     window
@@ -256,7 +257,7 @@ fn a_reveal_with_no_viewport_height_waits_for_a_frame_with_one(cx: &mut TestAppC
             let mut fresh = Viewport::default();
             fresh.request(ScrollTo::Cursor(Reveal::Center));
             let origin = view.text_bounds().unwrap().top();
-            assert_eq!(fresh.resolve(origin, &layout, at(750)), px(0.));
+            assert_eq!(fresh.resolve(origin, &layout, at(750)).moved, px(0.));
             view.viewport = fresh;
             cx.notify();
         })
@@ -441,6 +442,7 @@ fn a_view_restored_onto_a_shorter_note_is_clipped(cx: &mut TestAppContext) {
     let view = ViewState {
         selection,
         top: TopLine::at(at(600)),
+        scrolls: Vec::new(),
     };
 
     window
@@ -510,6 +512,7 @@ fn park_clips_a_waiting_top_line_past_the_end(cx: &mut TestAppContext) {
                 ViewState {
                     selection: Selection::at(at(0)),
                     top: TopLine::at(at(600)),
+                    scrolls: Vec::new(),
                 },
                 cx,
             );

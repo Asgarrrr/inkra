@@ -38,6 +38,25 @@ pub(crate) fn follows_system(cx: &App) -> bool {
         .is_none_or(|global| global.follows_system)
 }
 
+/// Whether a code block wraps at the column rather than scrolling; `settings.json` sets it.
+struct CodeBlockWrap(bool);
+
+impl Global for CodeBlockWrap {}
+
+/// Off unless set, so a test needs no setup.
+pub(crate) fn code_block_wrap(cx: &App) -> bool {
+    cx.try_global::<CodeBlockWrap>().is_some_and(|wrap| wrap.0)
+}
+
+/// Redraws every window, and only on a change: the layouts shape differently.
+pub(crate) fn set_code_block_wrap(wrap: bool, cx: &mut App) {
+    if code_block_wrap(cx) == wrap {
+        return;
+    }
+    cx.set_global(CodeBlockWrap(wrap));
+    cx.refresh_windows();
+}
+
 /// Redraws every window; an equal theme keeps the current pointer, so its layouts stay cached.
 fn set(theme: Arc<Theme>, follows_system: bool, cx: &mut App) {
     let same = **current(cx) == *theme;
@@ -143,6 +162,17 @@ pub(crate) const CODE_BLOCK_RADIUS: Pixels = px(6.);
 
 /// A code block's language label, in the UI font.
 pub(crate) const CODE_BLOCK_LABEL_SIZE: Pixels = px(12.);
+
+/// Past a block's widest line, so its last glyph never touches the edge.
+pub(crate) const CODE_BLOCK_SCROLL_MARGIN: Pixels = px(16.);
+
+/// A scrollable block's position bar: its thickness.
+pub(crate) const CODE_BLOCK_BAR_HEIGHT: Pixels = px(3.);
+
+/// The gap between the bar and the block background's bottom edge.
+pub(crate) const CODE_BLOCK_BAR_INSET: Pixels = px(1.);
+
+pub(crate) const CODE_BLOCK_BAR_RADIUS: Pixels = px(1.5);
 
 /// Chrome: the sidebar today, a status line or tab bar later. Stated, not
 /// inherited — gpui's default line box (`phi()` on 16px) is taller than a 22px row.

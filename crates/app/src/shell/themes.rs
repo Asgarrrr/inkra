@@ -16,6 +16,7 @@ use crate::theme::{
 impl AppShell {
     pub(crate) fn adopt_theme(&mut self, resolved: Resolved, cx: &mut Context<Self>) {
         self.themes.adopt(resolved.choice);
+        theme::set_code_block_wrap(resolved.code_block_wrap, cx);
         // An open picker restores `before` on dismiss, so a reload must update it, not the preview.
         if let Some(picker) = self.modal_picker::<ThemeDelegate>() {
             picker.update(cx, |picker, _| picker.delegate.set_before(resolved.theme));

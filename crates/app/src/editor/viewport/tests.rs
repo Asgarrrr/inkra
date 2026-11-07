@@ -28,7 +28,7 @@ fn top(offset: usize) -> ScrollTo {
 fn a_reveal_before_the_first_paint_waits_for_it() {
     let mut viewport = Viewport::default();
 
-    viewport.reveal(None, ByteOffset::new(0), Reveal::Center);
+    assert!(!viewport.reveal(None, ByteOffset::new(0), Reveal::Center));
 
     assert_eq!(
         viewport.take_pending(),

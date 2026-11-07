@@ -98,7 +98,9 @@ pub(crate) fn shape_document(
         marked,
         style,
         wrap_width,
+        code_block_wrap,
         theme,
+        scrolls,
     } = inputs;
     let mut styles = RunStyles::new(style, theme);
     let body_size = style.font_size.to_pixels(window.rem_size());
@@ -151,27 +153,24 @@ pub(crate) fn shape_document(
             );
             let shown = display.text(text);
             let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
-            let wrap = wrap_width.map(|width| (width - indent(prefix.as_ref())).max(px(0.)));
-            let near = previous
-                .into_iter()
-                .flat_map(|previous| candidates(previous, index, start, buffer.len()));
+            let wrap = line_wrap(wrap_width, block, code_block_wrap, prefix.as_ref());
+            let near = candidates(previous, index, start, buffer.len());
             let shape = carry_or_shape(near, &shown, font_size, runs, wrap, start, window);
             let rows = rows(&shown, &shape.wrapped, &range, &display);
-            let first_row = row_count;
-            row_count += rows.len();
-            let line_top = top;
-            top += rows_height(rows.len(), row_height);
-            bars.extend(line_bars(prefix.as_ref(), line_top, top));
             let line = LineLayout {
                 shape,
                 range,
                 display,
-                first_row,
+                first_row: row_count,
                 rows,
-                top: line_top,
+                top,
                 row_height,
                 prefix,
+                block: blocks.index_of(block),
             };
+            row_count += line.rows.len();
+            top += rows_height(line.rows.len(), row_height);
+            bars.extend(line_bars(line.prefix.as_ref(), line.top, top));
             blocks.line(block, label, &line, top);
             line
         })
@@ -186,10 +185,12 @@ pub(crate) fn shape_document(
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
+        code_block_wrap,
         theme: Arc::clone(theme),
         version: buffer.version(),
         selection: selection.clone(),
         marked: marked.cloned(),
+        scrolls: scrolls.clone(),
     }
 }
 
@@ -258,25 +259,39 @@ fn label_text<'t>(
 /// The previous layout's line at `index`, then the one the edit moved to `start`, as reuse candidates.
 /// After one contiguous edit, the lines below it start `previous length - len` bytes from where they started.
 fn candidates(
-    previous: &DocumentLayout,
+    previous: Option<&DocumentLayout>,
     index: usize,
     start: ByteOffset,
     len: ByteOffset,
 ) -> impl Iterator<Item = &LineLayout> {
-    let moved = previous
-        .lines
-        .last()
-        .and_then(|last| (start.get() + last.range.end.get()).checked_sub(len.get()))
-        .and_then(|target| {
-            previous
-                .lines
-                .binary_search_by_key(&ByteOffset::new(target), |line| line.range.start)
-                .ok()
-        });
-    [Some(index), moved]
-        .into_iter()
-        .flatten()
-        .filter_map(|index| previous.lines.get(index))
+    previous.into_iter().flat_map(move |previous| {
+        let moved = previous
+            .lines
+            .last()
+            .and_then(|last| (start.get() + last.range.end.get()).checked_sub(len.get()))
+            .and_then(|target| {
+                previous
+                    .lines
+                    .binary_search_by_key(&ByteOffset::new(target), |line| line.range.start)
+                    .ok()
+            });
+        [Some(index), moved]
+            .into_iter()
+            .flatten()
+            .filter_map(|index| previous.lines.get(index))
+    })
+}
+
+/// A block line never wraps unless `code_block_wrap` (code block scroll spec, D2); any other wraps at the column less its indent.
+fn line_wrap(
+    wrap_width: Option<Pixels>,
+    block: Option<&CodeBlock>,
+    code_block_wrap: bool,
+    prefix: Option<&Prefix>,
+) -> Option<Pixels> {
+    wrap_width
+        .filter(|_| block.is_none() || code_block_wrap)
+        .map(|width| (width - indent(prefix)).max(px(0.)))
 }
 
 fn rows_height(rows: usize, row_height: Pixels) -> Pixels {

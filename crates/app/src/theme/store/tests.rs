@@ -39,6 +39,20 @@ fn no_choice_follows_the_system_silently() {
 }
 
 #[test]
+fn code_block_wrap_reads_true_false_missing_and_non_bool() {
+    for (settings, expected) in [
+        (r#"{"code_block_wrap":true}"#, true),
+        (r#"{"code_block_wrap":false}"#, false),
+        ("{}", false),
+        (r#"{"code_block_wrap":"yes"}"#, false),
+    ] {
+        let resolved = resolve(&vault(Some(settings)));
+        assert_eq!(resolved.code_block_wrap, expected, "{settings}");
+        assert!(resolved.notices.is_empty(), "{settings}");
+    }
+}
+
+#[test]
 fn a_builtin_name_wins_over_a_file_of_that_name() {
     let fs = vault(Some(r#"{"theme":"Flexoki Light"}"#));
     fs.insert_file("/v/.inkra/themes/Flexoki Light.json", SOLAR);
@@ -160,6 +174,14 @@ fn writing_the_choice_keeps_other_keys() {
         let value: Value = serde_json::from_str(&written).expect("JSON");
         assert_eq!(value, after, "{before:?}");
     }
+}
+
+#[test]
+fn write_choice_keeps_code_block_wrap() {
+    let fs = vault(Some(r#"{"code_block_wrap":true}"#));
+    assert_eq!(write(&fs, &Choice::Named("solar".into())), Ok(()));
+    let value: Value = serde_json::from_str(&settings(&fs).expect("written")).expect("JSON");
+    assert_eq!(value, json!({"code_block_wrap": true, "theme": "solar"}));
 }
 
 #[test]

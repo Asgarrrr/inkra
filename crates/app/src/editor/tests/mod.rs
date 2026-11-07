@@ -10,6 +10,11 @@ use super::EditorView;
 use crate::keymap::key_bindings;
 
 mod clipboard;
+mod code_block_anchors;
+mod code_block_bar;
+mod code_block_reveal;
+mod code_block_scroll;
+mod code_block_wrap;
 mod code_blocks;
 mod conceal;
 mod dispatch;
@@ -75,6 +80,13 @@ pub(super) fn notified_after_paint(
         })
     });
     (subscription, flag)
+}
+
+/// Releases the window's editor, so it forgets its block scrolls: the test harness drops
+/// entities without releasing them.
+pub(super) fn close(cx: &mut VisualTestContext) {
+    cx.update(|window, _| window.remove_window());
+    cx.run_until_parked();
 }
 
 pub(super) const TALL: usize = 200;

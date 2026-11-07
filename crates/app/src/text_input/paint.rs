@@ -9,16 +9,30 @@ use inkra_text::ByteOffset;
 use super::{InputAdapter, InputHost};
 use crate::editor::layout::DocumentLayout;
 
+#[cfg(test)]
+thread_local! {
+    static PAINTED_CARET: std::cell::Cell<Option<Bounds<Pixels>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The caret the last paint on this thread drew, in window coordinates.
+#[cfg(test)]
+pub(crate) fn painted_caret() -> Option<Bounds<Pixels>> {
+    PAINTED_CARET.with(std::cell::Cell::get)
+}
+
 /// What a host's prepaint hands to `paint`.
 pub(crate) type Prepainted = Option<(Rc<DocumentLayout>, Quads)>;
 
 pub(crate) struct Quads {
     selection: Vec<PaintQuad>,
+    bars: Vec<PaintQuad>,
     caret: Option<PaintQuad>,
 }
 
 impl Quads {
-    /// A caret for an empty selection, else one quad per row; `origin` is the text's.
+    /// A caret for an empty selection, unless its block scrolled it out, else one quad per row;
+    /// `origin` is the text's.
     pub(crate) fn new(
         layout: &DocumentLayout,
         selection: &Range<ByteOffset>,
@@ -28,10 +42,13 @@ impl Quads {
             let caret = layout.caret_bounds(selection.start);
             return Self {
                 selection: Vec::new(),
-                caret: Some(fill(
-                    Bounds::new(origin + caret.origin, caret.size),
-                    layout.theme().colors.accent,
-                )),
+                bars: Vec::new(),
+                caret: layout.caret_visible(selection.start).then(|| {
+                    fill(
+                        Bounds::new(origin + caret.origin, caret.size),
+                        layout.theme().colors.accent,
+                    )
+                }),
             };
         }
         let selection = layout
@@ -44,8 +61,14 @@ impl Quads {
             .collect();
         Self {
             selection,
+            bars: Vec::new(),
             caret: None,
         }
+    }
+
+    /// Code block scroll bars, painted over the text and under the caret.
+    pub(crate) fn with_bars(self, bars: Vec<PaintQuad>) -> Self {
+        Self { bars, ..self }
     }
 }
 
@@ -67,9 +90,13 @@ pub(crate) fn paint<V: InputHost>(
         window.paint_quad(quad);
     }
     layout.paint(bounds.origin, window, cx);
-    if focus_handle.is_focused(window)
-        && let Some(caret) = quads.caret
-    {
+    for bar in quads.bars {
+        window.paint_quad(bar);
+    }
+    let caret = quads.caret.filter(|_| focus_handle.is_focused(window));
+    #[cfg(test)]
+    PAINTED_CARET.with(|painted| painted.set(caret.as_ref().map(|caret| caret.bounds)));
+    if let Some(caret) = caret {
         window.paint_quad(caret);
     }
 

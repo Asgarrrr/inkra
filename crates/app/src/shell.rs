@@ -396,6 +396,11 @@ impl AppShell {
             .map(|bounds| bounds.center())
     }
 
+    /// Where the editor's code block `ix` was drawn last; `None` before it is drawn.
+    pub(crate) fn block_center(&self, ix: usize, cx: &App) -> Option<gpui::Point<Pixels>> {
+        self.editor()?.read(cx).block_center(ix)
+    }
+
     /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.
     pub(crate) fn quick_open_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
         self.modal_picker::<QuickOpenDelegate>()?

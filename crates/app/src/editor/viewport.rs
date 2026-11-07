@@ -127,6 +127,14 @@ impl TopLine {
     }
 }
 
+/// What `resolve` did this frame.
+pub(super) struct Resolution {
+    /// How far the offset moved.
+    pub(super) moved: Pixels,
+    /// A waiting reveal was applied, so the caret's block still needs its own.
+    pub(super) revealed: bool,
+}
+
 #[derive(Default)]
 pub(super) struct Viewport {
     /// Its `bounds` and `offset` are the viewport's; the parent `div` scrolls, not the element.
@@ -141,24 +149,30 @@ impl Viewport {
         &self.handle
     }
 
-    /// From prepaint, against this frame's measured layout; returns how far the offset moved.
+    /// From prepaint, against this frame's measured layout.
     pub(super) fn resolve(
         &mut self,
         text_origin_y: Pixels,
         layout: &DocumentLayout,
         cursor: ByteOffset,
-    ) -> Pixels {
+    ) -> Resolution {
         // The offset now is what translated this frame's origin (`elements/div.rs:2027`).
         let before = self.handle.offset().y;
         self.text_top = Some(text_origin_y - before);
         let Some(to) = self.pending.take() else {
-            return px(0.);
+            return Resolution {
+                moved: px(0.),
+                revealed: false,
+            };
         };
-        self.apply(&to, Some(layout), cursor);
+        let revealed = self.apply(&to, Some(layout), cursor);
         // This frame's clamp already ran; unclamped, the next one would jump.
         let after = self.handle.offset().y.max(-self.handle.max_offset().y);
         self.set_y(after);
-        after - before
+        Resolution {
+            moved: after - before,
+            revealed,
+        }
     }
 
     /// A reveal replaces any request; a reload's top line only fills an empty slot.
@@ -173,13 +187,14 @@ impl Viewport {
         self.pending.take()
     }
 
-    /// Scrolls now when the geometry is current, else requests it for `resolve` in the next prepaint.
+    /// Scrolls now when the geometry is current, else requests it for `resolve` in the next
+    /// prepaint; true when the geometry was current, moved or not.
     pub(super) fn reveal(
         &mut self,
         layout: Option<&DocumentLayout>,
         cursor: ByteOffset,
         how: Reveal,
-    ) {
+    ) -> bool {
         let viewport = self.handle.bounds();
         // Bounds stay default() until the first prepaint; a waiting request means a stale layout.
         let geometry = self
@@ -188,7 +203,7 @@ impl Viewport {
             .filter(|_| viewport.size.height > px(0.) && self.pending.is_none());
         let Some((text_top, layout)) = geometry else {
             self.request(ScrollTo::Cursor(how));
-            return;
+            return false;
         };
 
         let row = layout.row_for_offset(cursor);
@@ -204,12 +219,21 @@ impl Viewport {
         ) {
             self.set_y(offset);
         }
+        true
     }
 
-    /// `layout` must describe the current text.
-    fn apply(&mut self, to: &ScrollTo, layout: Option<&DocumentLayout>, cursor: ByteOffset) {
+    /// `layout` must describe the current text; true when it applied a reveal.
+    fn apply(
+        &mut self,
+        to: &ScrollTo,
+        layout: Option<&DocumentLayout>,
+        cursor: ByteOffset,
+    ) -> bool {
         match to {
-            ScrollTo::Top(top) => self.restore_top(layout, top),
+            ScrollTo::Top(top) => {
+                self.restore_top(layout, top);
+                false
+            }
             ScrollTo::Cursor(how) => self.reveal(layout, cursor, *how),
         }
     }

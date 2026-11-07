@@ -7,6 +7,7 @@ use super::{TALL, at, dispatching, geometry, notified_after_paint, tall_document
 use crate::buffer_events::Reloaded;
 use crate::editor::actions::Down;
 use crate::editor::viewport::{Reveal, ScrollTo};
+use crate::text_input::painted_caret;
 
 /// `max_offset` is non-zero only for a tracked handle on a genuinely
 /// overflowing container, so it catches wiring, flex-shrink, and layout bugs alike.
@@ -278,10 +279,29 @@ fn a_click_while_scrolled_lands_on_the_line_under_the_pointer(cx: &mut TestAppCo
         .unwrap();
 }
 
+/// Prepaint shifts the text by what `resolve` moved, not by where the page already was.
+#[gpui::test]
+fn a_reveal_resolved_in_place_paints_the_text_still(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, &tall_document());
+    cx.simulate_keystrokes("cmd-down");
+    cx.run_until_parked();
+    let before = painted_caret();
+    assert!(before.is_some(), "no caret was painted");
+
+    window
+        .update(&mut cx, |view, _, cx| {
+            view.viewport.request(ScrollTo::Cursor(Reveal::Minimal));
+            cx.notify();
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(painted_caret(), before);
+}
+
 /// Tall *and* wide on purpose: a wide-only document never scrolls, so the
 /// assertion would hold vacuously against an implementation that writes no offset at all.
 #[gpui::test]
-fn revealing_never_scrolls_horizontally(cx: &mut TestAppContext) {
+fn the_page_never_scrolls_horizontally(cx: &mut TestAppContext) {
     let wide_and_tall = format!("{}\n", "x".repeat(2000)).repeat(TALL);
     let (window, mut cx) = dispatching(cx, &wide_and_tall);
     cx.run_until_parked();

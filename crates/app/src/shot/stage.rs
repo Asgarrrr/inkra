@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    Focusable, Modifiers, MouseButton, Pixels, Point, VisualTestAppContext, WindowHandle, point, px,
+    Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase,
+    VisualTestAppContext, WindowHandle, point, px,
 };
 use image::RgbaImage;
 use inkra_layout::Side;
@@ -285,6 +286,39 @@ impl Stage {
         self.cx
             .simulate_mouse_up(window.into(), to, MouseButton::Left, Modifiers::default());
         self.settle();
+    }
+
+    /// One wheel event of `delta` pixels at `at`, as a trackpad swipe's first.
+    pub(crate) fn scroll(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        at: Point<Pixels>,
+        delta: Point<Pixels>,
+    ) {
+        self.cx.simulate_event(
+            window.into(),
+            ScrollWheelEvent {
+                position: at,
+                delta: ScrollDelta::Pixels(delta),
+                touch_phase: TouchPhase::Started,
+                ..ScrollWheelEvent::default()
+            },
+        );
+        self.settle();
+    }
+
+    pub(crate) fn block_center(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        ix: usize,
+    ) -> Point<Pixels> {
+        let Some(center) = window
+            .update(&mut self.cx, |shell, _, cx| shell.block_center(ix, cx))
+            .unwrap_or_else(|error| panic!("read code block {ix}: {error}"))
+        else {
+            panic!("code block {ix} is not drawn");
+        };
+        center
     }
 
     pub(crate) fn right_click(&mut self, window: WindowHandle<AppShell>, at: Point<Pixels>) {
