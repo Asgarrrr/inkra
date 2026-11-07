@@ -6,7 +6,8 @@ use foldhash::fast::RandomState;
 use super::NoteWords;
 use super::note_words::first_at_or_after;
 use super::ordinal::{Alive, Ordinal};
-use super::{narrow, varint, wide};
+use super::{narrow, wide};
+use crate::varint;
 
 /// The notes as of the last merge, in sorted arrays; every snapshot shares it.
 #[derive(Debug)]

@@ -1,9 +1,10 @@
 //! Section 2: the words segment, its alive bits, `next` and `total` (P2).
 
 use super::Rejected;
-use super::header::narrow;
-use super::notes::{CachedNote, blob, len, string, take};
-use crate::words::{Alive, Ordinal, Segment, WordsSnapshot, varint, wide};
+use super::bytes::{blob, len, narrow, put_blob, string, take};
+use super::notes::CachedNote;
+use crate::varint;
+use crate::words::{Alive, Ordinal, Segment, WordsSnapshot, wide};
 
 /// The words a cache file holds, checked so any lookup or merge over them is safe.
 #[derive(Debug)]
@@ -54,17 +55,16 @@ pub(super) fn encode(words: &CachedWords) -> Vec<u8> {
         out.extend_from_slice(&word.to_le_bytes());
     }
     varint::push(&mut out, narrow(parts.notes));
-    put_blob(&mut out, parts.bytes.as_bytes());
+    let Some(()) = put_blob(&mut out, parts.bytes.as_bytes()) else {
+        panic!("a words text of {} bytes", parts.bytes.len());
+    };
     put_u32s(&mut out, parts.bounds);
     put_u32s(&mut out, parts.starts);
-    put_blob(&mut out, parts.postings);
+    let Some(()) = put_blob(&mut out, parts.postings) else {
+        panic!("postings of {} bytes", parts.postings.len());
+    };
     put_u32s(&mut out, parts.lengths);
     out
-}
-
-fn put_blob(out: &mut Vec<u8>, blob: &[u8]) {
-    varint::push(out, narrow(blob.len()));
-    out.extend_from_slice(blob);
 }
 
 fn put_u32s(out: &mut Vec<u8>, values: &[u32]) {

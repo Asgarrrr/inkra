@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::ops::Range;
-use std::str;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -11,7 +10,9 @@ use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, FileIdentity, Mtime, Stamp};
 
 use super::Rejected;
-use crate::words::{Ordinal, varint};
+use super::bytes::{len, narrow, put_blob, string, take};
+use crate::varint;
+use crate::words::Ordinal;
 use crate::{IndexSnapshot, Source, SourceLink, Style, Target};
 
 /// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
@@ -43,9 +44,9 @@ pub(super) fn encode(
     let notes: Vec<_> = snapshot.loaded().collect();
     let mut out = Vec::new();
     let mut links = Vec::new();
-    varint::push(&mut out, super::header::narrow(notes.len()));
+    varint::push(&mut out, narrow(notes.len()));
     for (id, path, read, source) in notes {
-        let Some(()) = put_str(&mut out, path) else {
+        let Some(()) = put_blob(&mut out, path.as_bytes()) else {
             panic!("a note path of {} bytes", path.len());
         };
         links.clear();
@@ -84,22 +85,16 @@ pub(super) fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
         else {
             panic!("a source holds note links only");
         };
-        put_str(out, path)?;
+        put_blob(out, path.as_bytes())?;
         out.push(link_flags(*md, fragment.is_some()));
         if let Some(fragment) = fragment {
-            put_str(out, fragment)?;
+            put_blob(out, fragment.as_bytes())?;
         }
         out.push(style_code(*style));
         put_range(out, link.range.start.get()..link.range.end.get())?;
-        put_str(out, &link.context)?;
+        put_blob(out, link.context.as_bytes())?;
         put_range(out, link.context_link.clone())?;
     }
-    Some(())
-}
-
-fn put_str(out: &mut Vec<u8>, text: &str) -> Option<()> {
-    varint::push(out, u32::try_from(text.len()).ok()?);
-    out.extend_from_slice(text.as_bytes());
     Some(())
 }
 
@@ -244,34 +239,6 @@ fn range(bytes: &mut &[u8]) -> Result<Range<usize>, Rejected> {
     Ok(start..end)
 }
 
-pub(super) fn string<'a>(bytes: &mut &'a [u8]) -> Result<&'a str, Rejected> {
-    str::from_utf8(blob(bytes)?).map_err(|_| Rejected::Corrupt("utf8"))
-}
-
-/// A varint length, then that many bytes.
-pub(super) fn blob<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], Rejected> {
-    let len = len(bytes)?;
-    let (blob, rest) = bytes
-        .split_at_checked(len)
-        .ok_or(Rejected::Corrupt("truncated"))?;
-    *bytes = rest;
-    Ok(blob)
-}
-
-pub(super) fn len(bytes: &mut &[u8]) -> Result<usize, Rejected> {
-    varint::read_checked(bytes)
-        .and_then(|value| usize::try_from(value).ok())
-        .ok_or(Rejected::Corrupt("varint"))
-}
-
 fn byte(bytes: &mut &[u8]) -> Result<u8, Rejected> {
     take(bytes).map(|[byte]| byte)
-}
-
-pub(super) fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], Rejected> {
-    let (taken, rest) = bytes
-        .split_first_chunk::<N>()
-        .ok_or(Rejected::Corrupt("truncated"))?;
-    *bytes = rest;
-    Ok(*taken)
 }

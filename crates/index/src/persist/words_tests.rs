@@ -5,7 +5,8 @@ use std::sync::atomic::AtomicBool;
 use inkra_vault::{EntryId, Vault};
 use proptest::prelude::*;
 
-use super::header::{narrow, seal};
+use super::bytes::narrow;
+use super::header::seal;
 use super::notes_tests::Raw;
 use super::{Decoded, Rejected, decode, encode};
 use crate::test_support::{ROOT, find_all, id, indexed, load, note_set, vault};

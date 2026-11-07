@@ -11,7 +11,6 @@ mod score;
 mod segment;
 mod shards;
 mod store;
-pub(crate) mod varint;
 
 pub(crate) use fold::{cap, fold, word_spans};
 pub use lookup::{Lookup, TermHit};
@@ -55,5 +54,3 @@ fn narrow(offset: usize) -> u32 {
 mod model_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod varint_tests;

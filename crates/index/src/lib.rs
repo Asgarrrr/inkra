@@ -21,6 +21,9 @@ mod test_support;
 mod text_cache;
 #[cfg(test)]
 mod text_cache_tests;
+mod varint;
+#[cfg(test)]
+mod varint_tests;
 mod window;
 mod words;
 
