@@ -204,10 +204,6 @@ impl Fs for RealFs {
         fs::create_dir_all(parent).map_err(|source| io_error(parent, source))
     }
 
-    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
-        self.replace_bytes(path, text.as_bytes()).await
-    }
-
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         self.create_parents(path).await?;
         sweep(path);

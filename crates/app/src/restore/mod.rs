@@ -89,7 +89,7 @@ async fn replace_in_order(
     if seq < *written {
         return;
     }
-    match fs.replace(&file, &text).await {
+    match fs.replace_bytes(&file, text.as_bytes()).await {
         // A failed write leaves the mark, as `write_through`'s.
         Ok(()) => *written = seq,
         Err(error) => log::warn!("session not saved: {error}"),

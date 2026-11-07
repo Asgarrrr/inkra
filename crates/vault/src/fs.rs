@@ -188,9 +188,6 @@ pub trait Fs: Send + Sync {
     async fn create_parents(&self, path: &Path) -> Result<()>;
 
     /// Atomic, creating missing folders; no conflict check, so for the app's own state, never a note.
-    async fn replace(&self, path: &Path, text: &str) -> Result<()>;
-
-    /// As `replace`, with bytes that need not be UTF-8.
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()>;
 
     /// Removes a file; one already missing is `Ok`.

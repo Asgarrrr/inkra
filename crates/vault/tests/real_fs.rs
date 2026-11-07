@@ -630,8 +630,8 @@ fn replace_creates_missing_folders_overwrites_and_leaves_no_temp_file() {
     let dir = TempDir::new("replace-app-state");
     let file = dir.0.join("sessions").join("a.json");
 
-    block_on(RealFs.replace(&file, "one")).expect("replace under missing folders");
-    block_on(RealFs.replace(&file, "two")).expect("replace over an existing file");
+    block_on(RealFs.replace_bytes(&file, b"one")).expect("replace under missing folders");
+    block_on(RealFs.replace_bytes(&file, b"two")).expect("replace over an existing file");
 
     assert_eq!(fs::read_to_string(&file).expect("read"), "two");
     assert_eq!(names(&dir.0.join("sessions")), ["a.json"]);
