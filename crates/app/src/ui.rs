@@ -9,6 +9,7 @@ mod indicator;
 mod label;
 mod list_item;
 mod panel_header;
+mod strip;
 mod tab;
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,7 @@ pub(crate) use indicator::Indicator;
 pub(crate) use label::{Label, LabelSize};
 pub(crate) use list_item::{ListItem, ListItemStyle};
 pub(crate) use panel_header::PanelHeader;
+pub(crate) use strip::{lower_header, strip_rule, strip_slot};
 pub(crate) use tab::Tab;
 pub(crate) use tooltip::Tooltip;
 

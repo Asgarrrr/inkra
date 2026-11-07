@@ -16,6 +16,20 @@ pub(super) struct Notice {
     pub(super) cleared_by_save: Option<EntryId>,
 }
 
+impl Notice {
+    /// The platform refused to watch the vault; no save clears it.
+    pub(super) fn unwatched(error: &VaultError) -> Self {
+        Self {
+            text: format!(
+                "Inkra can't follow changes made outside the app: {}",
+                reason(error)
+            )
+            .into(),
+            cleared_by_save: None,
+        }
+    }
+}
+
 impl AppShell {
     /// All detached, as the shell's other subscriptions: the store reports, the shell words it.
     pub(super) fn watch_failures(notes: &Entity<NoteStore>, cx: &mut Context<Self>) {
@@ -118,7 +132,7 @@ impl AppShell {
 }
 
 /// The OS's words, without the path: the notice names the note by its title.
-pub(super) fn reason(error: &VaultError) -> String {
+fn reason(error: &VaultError) -> String {
     match error {
         VaultError::Io { source, .. } => source.to_string(),
         VaultError::NotUtf8 { .. } => "not valid UTF-8".into(),

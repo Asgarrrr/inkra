@@ -127,10 +127,16 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Group {
-        let was_last = group == self.layout.last_center();
-        if was_last {
+        if group == self.layout.last_center() {
             self.unfocus_editor(group, window, cx);
-        } else if let Some(editor) = self.editor_of(group) {
+        }
+        self.detach_group(group, cx)
+    }
+
+    /// `remove_group` for a group whose editor, if any, does not hold the focus.
+    pub(super) fn detach_group(&mut self, group: GroupId, cx: &mut Context<Self>) -> Group {
+        let was_last = group == self.layout.last_center();
+        if !was_last && let Some(editor) = self.editor_of(group) {
             editor.update(cx, EditorView::unpin);
         }
         let heir = self.layout.remove(group);
