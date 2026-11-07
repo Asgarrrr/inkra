@@ -512,3 +512,33 @@ fn a_fresh_reload_survives_a_relaunch() {
     );
     assert_eq!(zulu.len(), 1);
 }
+
+#[test]
+fn a_full_match_seed_is_the_revision_the_file_holds() {
+    let (mut h, outcome) = relaunch(loaded(&[("a.md", "alpha"), ("b.md", "beta")]));
+
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(h.live.cache_revision(), Some(h.live.revision()));
+}
+
+#[test]
+fn a_seed_that_pruned_a_note_holds_no_revision() {
+    let h = loaded(&[("a.md", "alpha"), ("b.md", "beta")]);
+    h.fs.remove(&path("a.md"));
+    let (mut h, outcome) = relaunch(h);
+
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(loading(&h), Vec::<PathBuf>::new());
+    assert_eq!(h.live.cache_revision(), None, "the file still holds a");
+}
+
+#[test]
+fn no_cache_holds_no_revision() {
+    let (mut h, _) = relaunch(loaded(&[("a.md", "alpha")]));
+
+    let _ = seeded(&mut h, Outcome::Missing);
+
+    assert_eq!(h.live.cache_revision(), None);
+}

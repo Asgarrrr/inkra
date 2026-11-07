@@ -554,6 +554,18 @@ fn replace_creates_missing_folders_overwrites_and_leaves_no_temp_file() {
     assert_eq!(names(&dir.0.join("sessions")), ["a.json"]);
 }
 
+#[test]
+fn replace_bytes_writes_bytes_that_are_not_utf8_under_missing_folders() {
+    let dir = TempDir::new("replace-bytes");
+    let file = dir.0.join("index").join("a.idx");
+
+    block_on(RealFs.replace_bytes(&file, &[0xff, 0x00, 0xfe]))
+        .expect("replace under missing folders");
+
+    assert_eq!(fs::read(&file).expect("read"), [0xff, 0x00, 0xfe]);
+    assert_eq!(names(&dir.0.join("index")), ["a.idx"]);
+}
+
 fn kind_of<T>(result: inkra_vault::Result<T>) -> Option<ErrorKind> {
     result.err().and_then(|error| error.io_kind())
 }

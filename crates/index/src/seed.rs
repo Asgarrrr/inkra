@@ -25,6 +25,8 @@ pub(crate) struct Seed {
     pub(crate) by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
     /// Each seeded note's cached stamp, the racy ones left out so they reload (P8).
     pub(crate) stamps: Vec<(EntryId, Stamp)>,
+    /// Some cached note matched no entry or had no stamp: the file holds a note the index does not.
+    pub(crate) pruned: bool,
 }
 
 impl Seed {
@@ -49,8 +51,10 @@ impl Seed {
         let mut sources = Shards::default();
         let mut by_stem: HashMap<Key, Vec<(EntryId, usize)>> = HashMap::new();
         let mut stamps = Vec::with_capacity(cached.len());
+        let mut pruned = false;
         for (note, at) in cached.into_iter().zip(matched) {
             let (Some(at), Some(stamp)) = (at, note.stamp) else {
+                pruned = true;
                 continue;
             };
             let id = entries[at].id;
@@ -92,6 +96,7 @@ impl Seed {
             sources,
             by_stem,
             stamps,
+            pruned,
         }
     }
 }

@@ -10,6 +10,7 @@ use gpui::{
     WeakEntity,
 };
 use inkra_index::live::{Effects, Status, Turn};
+use inkra_index::persist::Writes;
 use inkra_index::{FileRead, LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
 use inkra_vault::{EntryId, Fs, Vault};
 
@@ -18,10 +19,12 @@ use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
 mod cache_file;
+mod cache_writer;
 mod loading;
 mod reads;
 mod watch;
 
+use cache_writer::CacheWriter;
 use loading::Landed;
 pub(crate) use reads::Reader;
 #[cfg(test)]
@@ -62,6 +65,8 @@ pub(crate) struct IndexSync {
     live: LiveIndex,
     /// Filled by our saves and by the searches' reads.
     texts: Arc<Mutex<TextCache>>,
+    /// Writes the cache file `new` reads; `None` keeps no cache (P17).
+    writer: Option<CacheWriter>,
     /// `simulate_load`'s loads, added to the index's revision.
     #[cfg(test)]
     simulated_loads: u64,
@@ -104,6 +109,7 @@ impl IndexSync {
             notes: notes.downgrade(),
             live: LiveIndex::new(cx.background_executor().num_cpus() * loading::LOADS_PER_CORE),
             texts: Arc::new(Mutex::new(TextCache::new(TEXT_CACHE_BYTES))),
+            writer: None,
             #[cfg(test)]
             simulated_loads: 0,
             landed,
@@ -119,6 +125,11 @@ impl IndexSync {
             // Before the first turn: no note queues until the outcome lands (P7).
             sync.live.await_cache();
             let root = sync.vault.read(cx).root().to_path_buf();
+            sync.writer = Some(CacheWriter::new(
+                Arc::clone(&sync.fs),
+                file.clone(),
+                root.clone(),
+            ));
             let reading = cx.background_spawn(cache_file::read(Arc::clone(&sync.fs), file, root));
             // Detached, holding a weak handle: an outcome landing after this entity is gone is dropped.
             cx.spawn(async move |this, cx| {
@@ -172,7 +183,11 @@ impl IndexSync {
         }
         if indexed {
             self.mark_indexed(cx);
+            if let Some(writer) = &mut self.writer {
+                writer.writes = Some(Writes::new(self.live.cache_revision()));
+            }
         }
+        self.write_if_due(cx);
         result
     }
 
@@ -301,3 +316,6 @@ mod words_tests;
 
 #[cfg(test)]
 mod cache_file_tests;
+
+#[cfg(test)]
+mod cache_writer_tests;

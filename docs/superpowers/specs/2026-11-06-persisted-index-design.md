@@ -411,3 +411,14 @@ Each slice appends what it did differently from this spec, and why.
   stamp a held reload writes, and a fresh note after the settle. The larger
   `IndexSnapshot` trips clippy's `large_enum_variant` on the picker's `Ran`, so
   `Ran::Found` boxes its `Landed`.
+- Slice 5a-2: the 60 s quiet window lands here, not in 5b: the fresh-tier test saves after
+  the settle and advances 60 s. The 500-change window and the backoff stay in 5b. The due
+  rule is `persist::Writes`, pure, with the clock passed in. The first decision after
+  `Done` writes at once unless the revision equals the one the file holds. That revision is
+  `LiveIndex::cache_revision`: the seed's, or `None` when the seed pruned a note (`Seed`
+  gains `pruned`). So "reloaded or pruned" (P14) is one comparison. Each later change
+  restarts the window. `NoteIndex::seed` ignores `pruned`, and the D5 `Seen` check reads
+  `cache_revision`, so `index.rs` and `live/model_tests.rs` change. A test beyond the brief
+  pins the window's restart on a second edit. A write's seq is `next_seq` before the
+  increment, so the first write meets the mark at 0 and `<=` on the mark is observable. A
+  test puts two writes in flight across seeds, so the newer always lands.

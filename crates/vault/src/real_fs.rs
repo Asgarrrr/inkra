@@ -214,8 +214,12 @@ impl Fs for RealFs {
     }
 
     async fn replace(&self, path: &Path, text: &str) -> Result<()> {
+        self.replace_bytes(path, text.as_bytes()).await
+    }
+
+    async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         self.create_parents(path).await?;
-        replace(path, text, None)
+        replace(path, bytes, None)
     }
 
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
@@ -337,7 +341,7 @@ fn overwrite(
     if in_place {
         fs::write(path, text).map_err(|source| io_error(path, source))?;
     } else {
-        replace(path, text, existing)?;
+        replace(path, text.as_bytes(), existing)?;
     }
 
     let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
@@ -375,16 +379,16 @@ fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
     Ok(destination)
 }
 
-/// Writes `text` to a sibling temp file, then renames it over `path`. The
+/// Writes `bytes` to a sibling temp file, then renames it over `path`. The
 /// rename is what makes the write atomic. A sibling, not the system temp
 /// dir, since a cross-device rename fails with `EXDEV`.
-fn replace(path: &Path, text: &str, existing: Option<&fs::Metadata>) -> Result<()> {
+fn replace(path: &Path, bytes: &[u8], existing: Option<&fs::Metadata>) -> Result<()> {
     let temp = temp_path(path);
     // `?` unlinks nothing; disarmed only once the rename succeeds.
     let mut guard = TempFile(Some(temp.clone()));
 
     let mut file = fs::File::create(&temp).map_err(|source| io_error(&temp, source))?;
-    file.write_all(text.as_bytes())
+    file.write_all(bytes)
         .map_err(|source| io_error(&temp, source))?;
     // Bytes reach disk before the name points at them.
     file.sync_all().map_err(|source| io_error(&temp, source))?;

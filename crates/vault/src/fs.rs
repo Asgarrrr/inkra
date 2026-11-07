@@ -147,6 +147,9 @@ pub trait Fs: Send + Sync {
     /// Atomic, creating missing folders; no conflict check, so for the app's own state, never a note.
     async fn replace(&self, path: &Path, text: &str) -> Result<()>;
 
+    /// As `replace`, with bytes that need not be UTF-8.
+    async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()>;
+
     /// Creates an empty note or directory; fails if `path` already exists.
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
 
