@@ -188,10 +188,10 @@ fn language(text: &str, block: &Range<usize>, kind: &CodeBlockKind<'_>) -> Optio
     if matches!(kind, CodeBlockKind::Indented) {
         return None;
     }
-    let line = text[block.clone()]
-        .split('\n')
-        .next()
-        .unwrap_or_default()
+    let source = &text[block.clone()];
+    let line = source
+        .split_once('\n')
+        .map_or(source, |(first, _)| first)
         .as_bytes();
     let fence = line.iter().take_while(|&&byte| byte == line[0]).count();
     let blanks = line[fence..]
