@@ -197,7 +197,7 @@ impl Words {
         next: u32,
         total: u64,
     ) -> Self {
-        let named: HashSet<Ordinal> = ordinals.iter().map(|(_, &ordinal)| ordinal).collect();
+        let named: Alive = ordinals.iter().map(|(_, &ordinal)| ordinal).collect();
         assert!(
             named.len() == ordinals.len() && named.len() == alive.len(),
             "each alive ordinal names one note"
@@ -205,7 +205,7 @@ impl Words {
         assert!(
             alive
                 .iter()
-                .all(|ordinal| named.contains(&ordinal) && ordinal.get() < next),
+                .all(|ordinal| named.contains(ordinal) && ordinal.get() < next),
             "an alive ordinal names no note or is not minted"
         );
         assert!(alive.len() <= segment.notes(), "more alive than held");

@@ -8,9 +8,10 @@ use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Entry, FileIdentity, Kind, Mtime, Stamp, Vault};
 
-use crate::persist::{Decoded, decode, encode};
-use crate::seed::Seed;
+use crate::persist::{CachedWords, Decoded, decode, encode};
+use crate::seed::{Seed, restore_words};
 use crate::test_support::{ROOT, id, note_set};
+use crate::words::{Ordinal, Words};
 use crate::{FileRead, NoteContent, NoteIndex};
 
 /// A second and a half after the epoch: a sub-second mtime, as a real disk writes.
@@ -231,4 +232,101 @@ fn two_paths_one_lossy_name_match_nothing_by_path() {
     let seed = seed(decoded, &vault);
 
     assert_eq!(seeded(&seed, &vault), BTreeMap::new());
+}
+
+/// The cached words of each `(file, text)`, and a vault holding the files.
+fn words_of(notes: &[(&str, &str)]) -> (CachedWords, BTreeMap<String, Ordinal>, Vault) {
+    let loaded: Vec<_> = (70..)
+        .zip(notes)
+        .map(|(ino, &(file, text))| (file, text, ino, fine()))
+        .collect();
+    let files: Vec<_> = loaded
+        .iter()
+        .map(|&(file, _, ino, _)| (file, ino))
+        .collect();
+    let Decoded { notes, words, .. } = cached(&loaded);
+    let ordinals = notes
+        .into_iter()
+        .map(|note| {
+            let Some(ordinal) = note.ordinal else {
+                panic!("{} has words", note.path);
+            };
+            (note.path.to_string(), ordinal)
+        })
+        .collect();
+    (words, ordinals, scanned(&files))
+}
+
+/// `words` restored with only `files` named, each by its id in `vault`.
+fn restored(
+    words: CachedWords,
+    ordinals: &BTreeMap<String, Ordinal>,
+    vault: &Vault,
+    files: &[&str],
+) -> Words {
+    let named = files
+        .iter()
+        .map(|&file| (id(vault, file), ordinals[file]))
+        .collect();
+    restore_words(words, named)
+}
+
+/// Each held `(word, file)` and its count.
+fn postings(words: &Words, vault: &Vault) -> BTreeMap<(String, String), u32> {
+    words
+        .snapshot()
+        .entries()
+        .into_iter()
+        .map(|((word, id), count)| {
+            let Some(entry) = vault.entry(id) else {
+                panic!("a restored note is a vault note");
+            };
+            let path = entry.path.as_path().to_string_lossy().into_owned();
+            ((word, path), count)
+        })
+        .collect()
+}
+
+fn posting(word: &str, file: &str, count: u32) -> ((String, String), u32) {
+    ((word.to_owned(), file.to_owned()), count)
+}
+
+#[test]
+fn an_unnamed_ordinal_is_a_ghost() {
+    let (words, ordinals, vault) = words_of(&[("a.md", "alpha"), ("b.md", "beta")]);
+
+    let words = restored(words, &ordinals, &vault, &["b.md"]);
+
+    assert_eq!(
+        postings(&words, &vault),
+        BTreeMap::from([posting("beta", "b.md", 1)])
+    );
+}
+
+#[test]
+fn named_ordinals_keep_their_postings() {
+    let (words, ordinals, vault) =
+        words_of(&[("a.md", "one two two"), ("b.md", "three"), ("c.md", "four")]);
+
+    let words = restored(words, &ordinals, &vault, &["a.md", "c.md"]);
+
+    let expected = BTreeMap::from([
+        posting("four", "c.md", 1),
+        posting("one", "a.md", 1),
+        posting("two", "a.md", 2),
+    ]);
+    assert_eq!(postings(&words, &vault), expected);
+}
+
+#[test]
+fn ghost_total_is_the_unnamed_lengths() {
+    let (words, ordinals, vault) = words_of(&[
+        ("a.md", "one two two"),
+        ("b.md", "three"),
+        ("c.md", "four five"),
+    ]);
+
+    let words = restored(words, &ordinals, &vault, &["b.md"]);
+
+    assert_eq!(words.snapshot().total, 1, "a's three and c's two are gone");
 }
