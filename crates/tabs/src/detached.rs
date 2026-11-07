@@ -14,7 +14,7 @@ pub struct Detached<P, Q = P> {
 /// What `take` returns: the tab, and the slot that now shows when the active tab left.
 type Taken<P, Q> = (Detached<P, Q>, Option<(TabId, Q)>);
 
-impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
+impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
     /// Tab `id` out of the group, with its slot, or what `leave` returns if it is active (H8); the
     /// MRU's next then takes over and its slot comes back to show. The closed stack is untouched.
     ///

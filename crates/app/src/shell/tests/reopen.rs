@@ -1,7 +1,7 @@
 use gpui::{TestAppContext, px, size};
 
 use super::{
-    at, check, four_notes, keys, open, scroll_to, select, selected, showing, start_open, tab_notes,
+    at, check, four_notes, keys, open, scroll_to, select, selected, showing, start_open, tab_files,
     tall_notes, trash, view_of,
 };
 
@@ -14,12 +14,12 @@ fn cmd_shift_t_reopens_the_closed_tab_at_its_index(cx: &mut TestAppContext) {
     keys(&mut cx, "cmd-t");
     open(&window, &mut cx, c);
     keys(&mut cx, "cmd-2 cmd-w");
-    assert_eq!(tab_notes(&window, &mut cx).0, [Some(a), Some(c)]);
+    assert_eq!(tab_files(&window, &mut cx).0, [Some(a), Some(c)]);
 
     keys(&mut cx, "cmd-shift-t");
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), Some(c)], 1)
     );
     assert_eq!(showing(&window, &mut cx), Some(b));
@@ -44,7 +44,7 @@ fn the_last_closed_tab_reopens_first(cx: &mut TestAppContext) {
 
     assert_eq!(showing(&window, &mut cx), Some(b));
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), Some(c)], 1)
     );
     check(&window, &mut cx);
@@ -93,7 +93,7 @@ fn a_closed_tab_on_the_note_showing_reopens_with_the_view_its_anchors_moved_to(
 
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(a)], 0));
     assert_eq!(view_of(&window, &mut cx).0, at(614)..at(614));
     check(&window, &mut cx);
     keys(&mut cx, "ctrl-tab");
@@ -127,11 +127,11 @@ fn reopening_after_closing_the_last_tab_keeps_the_empty_tab(cx: &mut TestAppCont
     let (_fs, window, mut cx, [a, ..]) = four_notes(cx);
     open(&window, &mut cx, a);
     keys(&mut cx, "cmd-w");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None], 0));
 
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 0));
     check(&window, &mut cx);
 }
 
@@ -142,11 +142,11 @@ fn an_empty_tab_closed_with_no_history_is_skipped(cx: &mut TestAppContext) {
     keys(&mut cx, "cmd-t");
     open(&window, &mut cx, b);
     keys(&mut cx, "cmd-w cmd-t cmd-w");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
 
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     check(&window, &mut cx);
 }
 
@@ -161,7 +161,7 @@ fn trashing_a_closed_tabs_note_with_no_history_drops_it(cx: &mut TestAppContext)
     trash(&window, &mut cx, b);
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     check(&window, &mut cx);
 }
 
@@ -175,7 +175,7 @@ fn trashing_a_closed_tabs_note_keeps_its_history(cx: &mut TestAppContext) {
     trash(&window, &mut cx, b);
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, None], 0));
     keys(&mut cx, "cmd-[");
     assert_eq!(showing(&window, &mut cx), Some(a));
     check(&window, &mut cx);
@@ -219,7 +219,7 @@ fn reopen_cancels_a_pending_open(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!(showing(&window, &mut cx), Some(b));
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     check(&window, &mut cx);
 }
 
@@ -270,7 +270,7 @@ fn a_reopened_tab_scrolls_into_view(cx: &mut TestAppContext) {
 
     keys(&mut cx, "cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx).1, 29);
+    assert_eq!(tab_files(&window, &mut cx).1, 29);
     let bar = cx.debug_bounds("tab-bar").expect("the bar is drawn");
     let reopened = cx.debug_bounds("tab-29").expect("the tab is drawn");
     assert!(
@@ -295,6 +295,6 @@ fn cmd_shift_t_with_a_picker_open_dismisses_it_and_reopens(cx: &mut TestAppConte
         .update(&mut cx, |shell, _, _| shell.modal.is_some())
         .unwrap();
     assert!(!modal, "the picker is dismissed");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     check(&window, &mut cx);
 }

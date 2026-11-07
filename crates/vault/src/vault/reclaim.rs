@@ -36,6 +36,7 @@ impl Vault {
         let state = Arc::make_mut(&mut self.state);
         state.by_id.remove(&other);
         state.by_id.insert(id, at);
+        state.departures.renew();
         Arc::make_mut(&mut state.entries)[at].id = id;
         // A live id answers to its entry's inode alone: the gone inode a partial walk kept lets go of it.
         state.by_identity.retain(|_, mapped| *mapped != id);

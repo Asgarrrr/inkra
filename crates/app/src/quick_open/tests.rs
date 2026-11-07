@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{Entity, Focusable, TestAppContext, VisualTestContext};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Fs, New};
 
 use super::QuickOpenDelegate;
 use crate::keymap::key_bindings;
@@ -258,7 +258,7 @@ fn a_refresh_keeps_the_selected_note(cx: &mut TestAppContext) {
     opened.visual.simulate_keystrokes("down");
 
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
-        notes.create(None, Kind::Note, "plan a", cx)
+        notes.create(None, New::Note, "plan a", cx)
     });
     opened.visual.run_until_parked();
     drop(created);
@@ -283,7 +283,7 @@ fn a_move_during_the_refresh_wait_is_kept(cx: &mut TestAppContext) {
     search(&mut opened, "p l a n");
 
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
-        notes.create(None, Kind::Note, "plan a", cx)
+        notes.create(None, New::Note, "plan a", cx)
     });
     opened.visual.run_until_parked();
     drop(created);

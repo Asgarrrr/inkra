@@ -4,13 +4,13 @@ use inkra_layout::View;
 use serde_json::json;
 
 use super::{
-    Rejected, SavedAxis, SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session,
+    Rejected, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, Session,
     cache_file, dock_views, fnv1a, session_file,
 };
 
 fn note(note: &str) -> SavedTab {
-    SavedTab::Note(SavedNoteTab {
-        note: Some(note.to_owned()),
+    SavedTab::File(SavedFileTab {
+        file: Some(note.to_owned()),
         view: None,
     })
 }
@@ -31,8 +31,8 @@ fn session() -> Session {
         0,
         SavedMember::Group(group(
             vec![
-                SavedTab::Note(SavedNoteTab {
-                    note: Some("daily/2026-09-30.md".to_owned()),
+                SavedTab::File(SavedFileTab {
+                    file: Some("daily/2026-09-30.md".to_owned()),
                     view: Some(SavedView {
                         tail: 12,
                         head: 40,
@@ -41,8 +41,8 @@ fn session() -> Session {
                     }),
                 }),
                 note("projects/inkra.md"),
-                SavedTab::Note(SavedNoteTab {
-                    note: None,
+                SavedTab::File(SavedFileTab {
+                    file: None,
                     view: None,
                 }),
             ],
@@ -71,45 +71,6 @@ fn a_session_round_trips_through_its_text() {
     let session = session();
     let text = session.encode().unwrap();
     assert_eq!(decoded(&text), session);
-}
-
-/// The restore-tabs spec's example, verbatim: a version-1 file still reads.
-#[test]
-fn the_spec_example_decodes() {
-    let text = r#"{
-      "version": 1,
-      "root": "/Users/me/Notes",
-      "active": 1,
-      "tabs": [
-        { "note": "daily/2026-09-30.md", "view": { "tail": 12, "head": 40, "top": 0, "below": 0.0 } },
-        { "note": "projects/inkra.md", "view": { "tail": 880, "head": 880, "top": 512, "below": 6.5 } },
-        { "note": null }
-      ]
-    }"#;
-    let session = decoded(text);
-    let Some(SavedMember::Group(center)) = &session.center else {
-        panic!("one centre group");
-    };
-    assert_eq!(center.active, 1);
-    assert_eq!(
-        center.tabs[1],
-        SavedTab::Note(SavedNoteTab {
-            note: Some("projects/inkra.md".to_owned()),
-            view: Some(SavedView {
-                tail: 880,
-                head: 880,
-                top: 512,
-                below: 6.5
-            }),
-        })
-    );
-    assert_eq!(
-        center.tabs[2],
-        SavedTab::Note(SavedNoteTab {
-            note: None,
-            view: None
-        })
-    );
 }
 
 #[test]
@@ -141,7 +102,7 @@ fn another_version_is_rejected() {
 
 #[test]
 fn an_unknown_version_is_refused() {
-    for version in [0, 3, 1000] {
+    for version in [0, 1, 2, 4, 1000] {
         let text = format!(r#"{{ "version": {version}, "root": "/Users/me/Notes" }}"#);
         assert_eq!(
             Session::decode(&text, Path::new("/Users/me/Notes")),
@@ -165,66 +126,6 @@ fn another_root_is_rejected() {
         Session::decode(&text, Path::new("/Users/me/Other")),
         Err(Rejected::Root)
     );
-}
-
-/// A version-1 file: one tab on `a.md`, then `docks` verbatim as the `docks` field's text.
-fn with_docks(docks: &str) -> String {
-    format!(
-        r#"{{ "version": 1, "root": "/Users/me/Notes", "active": 0, "tabs": [{{ "note": "a.md" }}], "docks": {docks} }}"#
-    )
-}
-
-#[test]
-fn a_file_without_docks_decodes_with_none() {
-    let text =
-        r#"{ "version": 1, "root": "/Users/me/Notes", "active": 0, "tabs": [{ "note": "a.md" }] }"#;
-    let session = decoded(text);
-    assert_eq!((session.left, session.right), (None, None));
-    assert_eq!(session.shown, [true, true]);
-}
-
-#[test]
-fn a_malformed_docks_field_keeps_the_tabs() {
-    for docks in ["5", "null", r#"{"left":{"views":[1]}}"#] {
-        let session = decoded(&with_docks(docks));
-        assert_eq!((&session.left, &session.right), (&None, &None), "{docks}");
-        assert_eq!(tabs(&session), [note("a.md")], "{docks}");
-    }
-}
-
-#[test]
-fn a_v1_file_reads_as_one_centre_group_and_its_docks() {
-    let text = r#"{
-      "version": 1,
-      "root": "/Users/me/Notes",
-      "active": 1,
-      "tabs": [ { "note": "a.md" }, { "note": "b.md" } ],
-      "docks": {
-        "left": { "views": [], "active": 0, "shown": false },
-        "right": { "views": ["backlinks", "files"], "active": 1, "shown": true }
-      }
-    }"#;
-
-    let session = decoded(text);
-
-    assert_eq!(session.version, 2);
-    assert_eq!(session.active, 0);
-    assert_eq!(
-        session.center,
-        Some(SavedMember::Group(group(
-            vec![note("a.md"), note("b.md")],
-            1
-        )))
-    );
-    assert_eq!(session.left, Some(SavedMember::Group(group(Vec::new(), 0))));
-    assert_eq!(
-        session.right,
-        Some(SavedMember::Group(group(
-            vec![view("backlinks"), view("files")],
-            1
-        )))
-    );
-    assert_eq!(session.shown, [false, true]);
 }
 
 #[test]
@@ -271,7 +172,7 @@ fn a_malformed_center_keeps_the_docks() {
         nested_empty,
     ] {
         let text = format!(
-            r#"{{ "version": 2, "root": "/Users/me/Notes", "active": 0, "center": {center},
+            r#"{{ "version": 3, "root": "/Users/me/Notes", "active": 0, "center": {center},
               "left": {{ "tabs": [{{ "view": "files" }}], "active": 0 }} }}"#
         );
         let session = decoded(&text);
@@ -286,8 +187,8 @@ fn a_malformed_center_keeps_the_docks() {
 
 #[test]
 fn a_malformed_dock_keeps_the_centre() {
-    let text = r#"{ "version": 2, "root": "/Users/me/Notes", "active": 0,
-      "center": { "tabs": [{ "note": "a.md" }], "active": 0 },
+    let text = r#"{ "version": 3, "root": "/Users/me/Notes", "active": 0,
+      "center": { "tabs": [{ "file": "a.md" }], "active": 0 },
       "left": { "tabs": "files" }, "right": 5 }"#;
 
     let session = decoded(text);
@@ -298,12 +199,12 @@ fn a_malformed_dock_keeps_the_centre() {
 }
 
 #[test]
-fn a_view_tab_and_a_note_tab_decode_apart() {
-    let text = r#"{ "version": 2, "root": "/Users/me/Notes", "active": 0,
+fn a_view_tab_and_a_file_tab_decode_apart() {
+    let text = r#"{ "version": 3, "root": "/Users/me/Notes", "active": 0,
       "center": { "tabs": [
         { "view": "files" },
-        { "note": "a.md", "view": { "tail": 1, "head": 2, "top": 0, "below": 0.0 } },
-        { "note": null }
+        { "file": "a.md", "view": { "tail": 1, "head": 2, "top": 0, "below": 0.0 } },
+        { "file": null }
       ], "active": 0 } }"#;
 
     let session = decoded(text);
@@ -312,8 +213,8 @@ fn a_view_tab_and_a_note_tab_decode_apart() {
         tabs(&session),
         [
             view("files"),
-            SavedTab::Note(SavedNoteTab {
-                note: Some("a.md".to_owned()),
+            SavedTab::File(SavedFileTab {
+                file: Some("a.md".to_owned()),
                 view: Some(SavedView {
                     tail: 1,
                     head: 2,
@@ -321,8 +222,8 @@ fn a_view_tab_and_a_note_tab_decode_apart() {
                     below: 0.
                 }),
             }),
-            SavedTab::Note(SavedNoteTab {
-                note: None,
+            SavedTab::File(SavedFileTab {
+                file: None,
                 view: None
             }),
         ]
@@ -330,14 +231,23 @@ fn a_view_tab_and_a_note_tab_decode_apart() {
 }
 
 #[test]
+fn a_file_tab_round_trips() {
+    let tab = SavedTab::File(SavedFileTab {
+        file: Some("projects/2026/photo.png".to_owned()),
+        view: None,
+    });
+    let text = serde_json::to_string(&tab).unwrap();
+
+    assert_eq!(text, r#"{"file":"projects/2026/photo.png"}"#);
+    assert_eq!(serde_json::from_str::<SavedTab>(&text).unwrap(), tab);
+}
+
+#[test]
 fn an_unknown_view_name_is_dropped() {
-    let text = with_docks(
-        r#"{
-          "left": { "views": ["graph", "files"], "active": 0, "shown": true },
-          "right": { "views": ["backlinks"], "active": 0, "shown": true }
-        }"#,
-    );
-    let session = decoded(&text);
+    let text = r#"{ "version": 3, "root": "/Users/me/Notes", "active": 0,
+      "left": { "tabs": [{ "view": "graph" }, { "view": "files" }], "active": 0 },
+      "right": { "tabs": [{ "view": "backlinks" }], "active": 0 } }"#;
+    let session = decoded(text);
     let docks = dock_views([session.left.as_ref(), session.right.as_ref()]);
     assert_eq!(docks, dock_views([None, None]));
     assert_eq!(docks[0][0].0, [View::Files]);
@@ -391,7 +301,7 @@ fn no_docks_writes_no_docks_key() {
     assert!(!text.contains("\"right\""), "{text}");
 }
 
-/// A field a later build adds to a view tab must not turn it into a note tab or fail the file.
+/// A field a later build adds to a view tab must not turn it into a file tab or fail the file.
 #[test]
 fn a_view_tab_with_an_unknown_field_decodes() {
     let tab: SavedTab = serde_json::from_str(r#"{"view":"files","pinned":true}"#).unwrap();
@@ -401,8 +311,8 @@ fn a_view_tab_with_an_unknown_field_decodes() {
 /// A dock written as one group, before docks held trees, reads as a one-group tree.
 #[test]
 fn a_v2_single_group_dock_decodes() {
-    let text = r#"{ "version": 2, "root": "/Users/me/Notes", "active": 0,
-      "center": { "tabs": [{ "note": "a.md" }], "active": 0 },
+    let text = r#"{ "version": 3, "root": "/Users/me/Notes", "active": 0,
+      "center": { "tabs": [{ "file": "a.md" }], "active": 0 },
       "left": { "tabs": [{ "view": "files" }, { "view": "backlinks" }], "active": 1 } }"#;
 
     let session = decoded(text);

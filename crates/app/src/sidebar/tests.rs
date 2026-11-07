@@ -11,12 +11,12 @@ use gpui::{
 };
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs};
+use inkra_vault::{EntryId, Fs, New};
 
 use super::edit::Rejection;
 use super::rows::Item;
 use super::{Kind, Row, Sidebar};
-use crate::open::{NoteActivated, Open};
+use crate::open::{FileActivated, Open};
 use crate::test_support::{edit, opened, vault_of};
 use crate::ui::Indicator;
 use crate::vault::{AUTOSAVE_DELAY, NoteStore};
@@ -175,7 +175,7 @@ fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
     assert_eq!(sidebar.read_with(cx, |sidebar, _| sidebar.field_item()), 1);
 
     // Sorts first, so the swap moves `b` down a row.
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "0", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "0", cx));
     cx.run_until_parked();
 
     assert!(
@@ -201,7 +201,7 @@ fn a_create_field_is_pulled_back_inside_the_tree(cx: &mut TestAppContext) {
     let last = row(&sidebar, cx, "b");
     sidebar.update(cx, |sidebar, cx| sidebar.select_for_test(last.id, cx));
     sidebar.update(cx, |sidebar, cx| {
-        sidebar.open_create(Kind::Note, cx);
+        sidebar.open_create(New::Note, cx);
     });
 
     fs.remove(Path::new("/vault/b.md"));
@@ -247,11 +247,11 @@ fn a_file_appearing_in_the_vault_reaches_a_row(cx: &mut TestAppContext) {
 fn watch(
     sidebar: &Entity<Sidebar>,
     cx: &mut TestAppContext,
-) -> (Rc<RefCell<Vec<NoteActivated>>>, Subscription) {
+) -> (Rc<RefCell<Vec<FileActivated>>>, Subscription) {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let guard = cx.update(|cx| {
         let seen = Rc::clone(&seen);
-        cx.subscribe(sidebar, move |_, event: &NoteActivated, _| {
+        cx.subscribe(sidebar, move |_, event: &FileActivated, _| {
             seen.borrow_mut().push(*event);
         })
     });
@@ -268,7 +268,7 @@ fn labels(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext) -> Vec<String> {
 fn label(row: &Row) -> String {
     match row.kind {
         Kind::Dir => format!("{}/", row.name),
-        Kind::Note => row.name.clone(),
+        Kind::Note | Kind::Asset => row.name.clone(),
     }
 }
 
@@ -381,8 +381,8 @@ fn a_click_reports_the_row_it_landed_on(cx: &mut TestAppContext) {
     click_row(&sidebar, &mut visual, 2., Modifiers::none());
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated {
-            note: a.id,
+        [FileActivated {
+            file: a.id,
             open: Open::Here
         }]
     );
@@ -406,8 +406,8 @@ fn a_click_far_down_the_list_lands_on_the_row_it_names(cx: &mut TestAppContext) 
 
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated {
-            note: last.id,
+        [FileActivated {
+            file: last.id,
             open: Open::Here
         }],
         "the drawn pitch has drifted from `TREE_ROW_HEIGHT`"
@@ -501,8 +501,8 @@ fn a_cmd_click_on_a_note_row_activates_it_in_a_new_tab(cx: &mut TestAppContext) 
 
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated {
-            note: a.id,
+        [FileActivated {
+            file: a.id,
             open: Open::NewTab
         }]
     );
@@ -561,8 +561,8 @@ fn a_newline_in_a_file_name_keeps_the_row_one_line(cx: &mut TestAppContext) {
 
     assert_eq!(
         *seen.borrow(),
-        [NoteActivated {
-            note: c.id,
+        [FileActivated {
+            file: c.id,
             open: Open::Here
         }],
         "a two-line row 0 covers row 1"
@@ -580,7 +580,7 @@ fn the_rows_below_a_create_field_shift_down_by_one(cx: &mut TestAppContext) {
     let first = row(&sidebar, cx, "a");
     sidebar.update(cx, |sidebar, cx| {
         sidebar.select_for_test(first.id, cx);
-        sidebar.open_create(Kind::Note, cx);
+        sidebar.open_create(New::Note, cx);
     });
 
     let rows: Vec<Option<String>> = sidebar.read_with(cx, |sidebar, _| {

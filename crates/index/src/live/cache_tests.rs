@@ -12,9 +12,9 @@ use inkra_vault::{Fs, Kind, Mtime, Stamp, Vault};
 use super::tests::{Harness, Pending, SLOTS, path, paths};
 use super::{Effects, LiveIndex, Status, Turn};
 use crate::persist::{Outcome, Rejected, SCRUB, decode, encode, scrub_sample};
-use crate::test_support::{ROOT, find_all, loaded as stamps};
+use crate::test_support::{ROOT, find_all, loaded as stamps, target};
 use crate::words::FRESH_MIN;
-use crate::{FileRead, NoteContent, NoteIndex, NoteQuery};
+use crate::{FileRead, NoteContent, NoteIndex, NoteQuery, Resolution};
 
 /// `n` seconds and a half after the epoch: a sub-second mtime, as a real disk writes.
 fn fine(n: u64) -> Mtime {
@@ -439,6 +439,22 @@ fn no_merge_starts_while_waiting() {
 fn an_outcome_nobody_awaits_panics() {
     let mut h = Harness::new(&[("a.md", "")]);
     let _ = h.turn(|t| t.cached(Outcome::Missing));
+}
+
+#[test]
+fn a_seeded_start_resolves_an_embed_and_lists_the_asset_backlinks() {
+    let h = loaded(&[("a.md", "![[photo.png]]"), ("photo.png", "png")]);
+    let (mut h, outcome) = relaunch(h);
+
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(loading(&h), Vec::<PathBuf>::new(), "a is seeded");
+    assert_eq!(backlinks(&h, "photo.png"), ["a.md"]);
+    let a = Some(h.id("a.md"));
+    assert_eq!(
+        h.live.index().resolve(a, &target("![[photo.png]]")),
+        Resolution::File(h.id("photo.png"))
+    );
 }
 
 #[test]

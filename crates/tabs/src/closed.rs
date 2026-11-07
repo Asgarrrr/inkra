@@ -25,9 +25,9 @@ pub(crate) struct ClosedTab<P> {
 }
 
 impl<P: Place> ClosedTab<P> {
-    /// Nothing to reopen: no note and no history (invariant 7).
+    /// Nothing to reopen: no file and no history (invariant 7).
     pub(crate) fn is_blank(&self) -> bool {
-        self.place.note().is_none() && self.back.0.is_empty() && self.forward.0.is_empty()
+        self.place.file().is_none() && self.back.0.is_empty() && self.forward.0.is_empty()
     }
 }
 
@@ -49,13 +49,12 @@ impl<P, Q> Tabs<P, Q> {
     /// `closed` goes on top, its newest reopening first; the oldest past the cap drop (invariant 6).
     pub fn extend_closed(&mut self, closed: ClosedTabs<P>) {
         self.closed.extend(closed.0);
-        while self.closed.len() > HISTORY {
-            self.closed.pop_front();
-        }
+        let excess = self.closed.len().saturating_sub(HISTORY);
+        self.closed.drain(..excess);
     }
 }
 
-impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
+impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
     /// `closing` gets the closed tab's slot, `None` for the active tab (H8), and returns the plain
     /// place the closed stack keeps; it runs once, after the tab has left the list, so it must not
     /// look the tab up. The last tab gives way to an empty one with a fresh id: a load keyed by the
@@ -95,7 +94,7 @@ impl<P: Place + Clone, Q: Place<Note = P::Note>> Tabs<P, Q> {
     }
 }
 
-impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
+impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
     /// Leaves tab `id` if it is still active: the place left goes on back and forward clears.
     #[must_use]
     pub fn commit(&mut self, id: TabId, capture: impl FnOnce() -> P) -> bool {

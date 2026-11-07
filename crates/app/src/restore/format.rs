@@ -7,7 +7,7 @@ use inkra_layout::{Axis, StoredDock, View, restore_views};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// One vault's tree of tab groups, its docks, and the active group (splits spec, Session).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,13 +68,13 @@ pub(crate) struct SavedGroup {
 #[serde(untagged)]
 pub(crate) enum SavedTab {
     View { view: String },
-    Note(SavedNoteTab),
+    File(SavedFileTab),
 }
 
-/// `note` is vault-relative, `None` for an empty tab.
+/// `file` is vault-relative, `None` for an empty tab.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct SavedNoteTab {
-    pub(crate) note: Option<String>,
+pub(crate) struct SavedFileTab {
+    pub(crate) file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) view: Option<SavedView>,
 }
@@ -86,34 +86,6 @@ pub(crate) struct SavedView {
     pub(crate) head: usize,
     pub(crate) top: usize,
     pub(crate) below: f32,
-}
-
-/// Version 1: the centre's one group and the docks (restore-tabs spec).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct SessionV1 {
-    pub(crate) version: u32,
-    pub(crate) root: PathBuf,
-    pub(crate) active: usize,
-    pub(crate) tabs: Vec<SavedNoteTab>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "lenient"
-    )]
-    pub(crate) docks: Option<SavedDocks>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SavedDocks {
-    pub(crate) left: SavedDock,
-    pub(crate) right: SavedDock,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SavedDock {
-    pub(crate) views: Vec<String>,
-    pub(crate) active: usize,
-    pub(crate) shown: bool,
 }
 
 /// A malformed surface reads as absent, so the others still restore.
@@ -172,7 +144,7 @@ impl From<SavedAxis> for Axis {
 }
 
 impl SavedGroup {
-    /// The views its tabs name, its active index following them: a note tab drops (L2).
+    /// The views its tabs name, its active index following them: a file tab drops (L2).
     fn stored(&self) -> StoredDock {
         let (views, saved_ixs): (Vec<_>, Vec<_>) = self
             .tabs
@@ -180,7 +152,7 @@ impl SavedGroup {
             .enumerate()
             .filter_map(|(saved_ix, tab)| match tab {
                 SavedTab::View { view } => Some((view.clone(), saved_ix)),
-                SavedTab::Note(_) => None,
+                SavedTab::File(_) => None,
             })
             .unzip();
         // The saved active tab, else its nearest kept tab to the left, else the first.
@@ -200,44 +172,6 @@ pub(crate) fn dock_views(docks: [Option<&SavedMember>; 2]) -> [Vec<(Vec<View>, u
         })
     });
     restore_views(stored.each_ref().map(Vec::as_slice))
-}
-
-impl SavedDock {
-    fn group(self) -> SavedGroup {
-        SavedGroup {
-            tabs: self
-                .views
-                .into_iter()
-                .map(|view| SavedTab::View { view })
-                .collect(),
-            active: self.active,
-        }
-    }
-}
-
-/// Its tabs become one centre group, active, and each dock one group.
-impl From<SessionV1> for Session {
-    fn from(v1: SessionV1) -> Self {
-        let center = SavedMember::Group(SavedGroup {
-            tabs: v1.tabs.into_iter().map(SavedTab::Note).collect(),
-            active: v1.active,
-        });
-        let (left, right, shown) = v1.docks.map_or((None, None, both_shown()), |docks| {
-            let shown = [docks.left.shown, docks.right.shown];
-            let [left, right] =
-                [docks.left, docks.right].map(|dock| Some(SavedMember::Group(dock.group())));
-            (left, right, shown)
-        });
-        Self {
-            version: VERSION,
-            root: v1.root,
-            active: 0,
-            center: Some(center),
-            left,
-            right,
-            shown,
-        }
-    }
 }
 
 /// Why a session file restores nothing.
@@ -289,12 +223,10 @@ impl Session {
             version: u32,
         }
         let Versioned { version } = serde_json::from_str(text).map_err(|_| Rejected::Corrupt)?;
-        let session = match version {
-            1 => serde_json::from_str::<SessionV1>(text).map(Self::from),
-            VERSION => serde_json::from_str(text),
-            _ => return Err(Rejected::Version),
+        if version != VERSION {
+            return Err(Rejected::Version);
         }
-        .map_err(|_| Rejected::Corrupt)?;
+        let session: Self = serde_json::from_str(text).map_err(|_| Rejected::Corrupt)?;
         if session.root != root {
             return Err(Rejected::Root);
         }

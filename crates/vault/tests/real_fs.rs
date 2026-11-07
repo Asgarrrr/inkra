@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::StreamExt;
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind, Mtime, RealFs, Stamp, VaultError, Watch};
+use inkra_vault::{Fs, Kind, Mtime, New, RealFs, Stamp, VaultError, Watch};
 
 /// A temp directory that removes itself.
 struct TempDir(PathBuf);
@@ -298,36 +298,119 @@ fn read_dir_separates_directories_from_notes_and_skips_dotfiles() {
     assert_eq!(entries[1].kind, Kind::Dir);
 }
 
-#[test]
-fn read_dir_accepts_md_in_any_case() {
-    let dir = TempDir::new("md-case");
-    for file in ["a.md", "B.MD", "c.Md", "d.mdx", "e.markdown"] {
-        fs::write(dir.0.join(file), "x").expect("write");
-    }
-
-    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
-
-    let mut paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
-    paths.sort();
-    assert_eq!(
-        paths,
-        vec![dir.0.join("B.MD"), dir.0.join("a.md"), dir.0.join("c.Md")]
-    );
-    assert!(entries.iter().all(|entry| entry.kind == Kind::Note));
+/// `dir`'s listing as sorted child names and kinds.
+fn listed(fs: &dyn Fs, dir: &Path) -> Vec<(String, Kind)> {
+    let mut listed: Vec<_> = block_on(fs.read_dir(dir))
+        .expect("read_dir")
+        .into_iter()
+        .map(|entry| {
+            let name = entry.path.strip_prefix(dir).expect("a child");
+            (name.to_string_lossy().into_owned(), entry.kind)
+        })
+        .collect();
+    listed.sort_by(|a, b| a.0.cmp(&b.0));
+    listed
 }
 
 #[test]
-fn read_dir_skips_other_extensions_and_symlinks() {
+fn read_dir_maps_md_in_any_case_to_notes_and_the_rest_to_assets() {
+    let dir = TempDir::new("md-case");
+    for file in ["a.md", "B.MD", "c.Md", "d.mdx", "e.markdown", "photo.png"] {
+        fs::write(dir.0.join(file), "x").expect("write");
+    }
+
+    assert_eq!(
+        listed(&RealFs, &dir.0),
+        [
+            ("B.MD".to_owned(), Kind::Note),
+            ("a.md".to_owned(), Kind::Note),
+            ("c.Md".to_owned(), Kind::Note),
+            ("d.mdx".to_owned(), Kind::Asset),
+            ("e.markdown".to_owned(), Kind::Asset),
+            ("photo.png".to_owned(), Kind::Asset),
+        ]
+    );
+}
+
+#[test]
+fn read_dir_lists_other_files_as_assets_and_skips_symlinks_and_temp_files() {
     let dir = TempDir::new("filters");
     fs::write(dir.0.join("a.md"), "a").expect("write");
     fs::write(dir.0.join("notes.txt"), "t").expect("write");
+    fs::write(dir.0.join("a.md.inkra-1-2.tmp"), "t").expect("write");
     std::os::unix::fs::symlink(std::env::temp_dir(), dir.0.join("escape.md"))
         .expect("create symlink");
+    std::os::unix::fs::symlink(dir.0.join("notes.txt"), dir.0.join("link.txt"))
+        .expect("create symlink");
 
-    let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
+    assert_eq!(
+        listed(&RealFs, &dir.0),
+        [
+            ("a.md".to_owned(), Kind::Note),
+            ("notes.txt".to_owned(), Kind::Asset),
+        ]
+    );
+}
 
-    let paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
-    assert_eq!(paths, vec![dir.0.join("a.md")]);
+/// App tests run on `MemFs` only: a file it lists differently from `RealFs` passes them and breaks on disk.
+#[test]
+fn mem_fs_lists_what_real_fs_lists() {
+    let dir = TempDir::new("listing-parity");
+    let mem = MemFs::new();
+    for file in [
+        "a.md",
+        "B.MD",
+        "photo.png",
+        "README",
+        ".hidden.md",
+        ".git/config",
+        "a.md.inkra-1-2.tmp",
+        "sub/b.md",
+    ] {
+        let path = dir.0.join(file);
+        fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+        fs::write(&path, "x").expect("write");
+        mem.insert_file(Path::new("/vault").join(file), "x");
+    }
+    fs::create_dir(dir.0.join("empty")).expect("mkdir");
+    mem.insert_dir("/vault/empty");
+
+    let real = listed(&RealFs, &dir.0);
+    assert_eq!(listed(&mem, Path::new("/vault")), real);
+    assert_eq!(
+        real,
+        [
+            ("B.MD".to_owned(), Kind::Note),
+            ("README".to_owned(), Kind::Asset),
+            ("a.md".to_owned(), Kind::Note),
+            ("empty".to_owned(), Kind::Dir),
+            ("photo.png".to_owned(), Kind::Asset),
+            ("sub".to_owned(), Kind::Dir),
+        ]
+    );
+}
+
+/// Bytes as stored on both backends: an asset need not be UTF-8, which `load` refuses.
+#[test]
+fn read_bytes_returns_the_bytes_on_both_backends() {
+    let bytes = b"\x89PNG\r\n\x1a\n\xff\x00";
+    let dir = TempDir::new("read-bytes");
+    let real = dir.0.join("photo.png");
+    fs::write(&real, bytes).expect("write");
+    let mem = MemFs::new();
+    let virtual_path = Path::new("/vault/photo.png");
+    mem.insert_bytes(virtual_path, bytes.to_vec());
+
+    for (fs, path) in [(&RealFs as &dyn Fs, real.as_path()), (&mem, virtual_path)] {
+        assert_eq!(
+            block_on(fs.read_bytes(path, 64)).expect("read_bytes"),
+            bytes
+        );
+        assert!(matches!(
+            block_on(fs.load(path)),
+            Err(VaultError::NotUtf8 { .. })
+        ));
+    }
 }
 
 #[test]
@@ -452,12 +535,12 @@ fn create_makes_an_empty_note_and_refuses_an_occupied_name() {
     let dir = TempDir::new("create");
     let path = dir.0.join("new.md");
 
-    let identity = block_on(RealFs.create(&path, Kind::Note)).expect("create");
+    let identity = block_on(RealFs.create(&path, New::Note)).expect("create");
 
     assert_eq!(fs::read_to_string(&path).expect("read"), "");
     assert_eq!(identity.inode, fs::metadata(&path).expect("stat").ino());
     assert!(
-        block_on(RealFs.create(&path, Kind::Note)).is_err(),
+        block_on(RealFs.create(&path, New::Note)).is_err(),
         "a create must never take over an existing note"
     );
 }
@@ -467,7 +550,7 @@ fn create_makes_a_folder_the_scan_lists() {
     let dir = TempDir::new("create-folder");
     let path = dir.0.join("projects");
 
-    block_on(RealFs.create(&path, Kind::Dir)).expect("create");
+    block_on(RealFs.create(&path, New::Dir)).expect("create");
 
     let entries = block_on(RealFs.read_dir(&dir.0)).expect("read_dir");
     assert_eq!(entries.len(), 1);
@@ -613,17 +696,17 @@ fn kind_of<T>(result: inkra_vault::Result<T>) -> Option<ErrorKind> {
 /// The kind of each failure the app or the walk branches on, set up through `fs` alone.
 fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKind>)> {
     let (a, b, folder) = (root.join("a.md"), root.join("b.md"), root.join("f"));
-    block_on(fs.create(&a, Kind::Note)).expect("create a");
-    block_on(fs.create(&b, Kind::Note)).expect("create b");
-    block_on(fs.create(&folder, Kind::Dir)).expect("create f");
+    block_on(fs.create(&a, New::Note)).expect("create a");
+    block_on(fs.create(&b, New::Note)).expect("create b");
+    block_on(fs.create(&folder, New::Dir)).expect("create f");
     vec![
         (
             "create onto a note",
-            kind_of(block_on(fs.create(&a, Kind::Note))),
+            kind_of(block_on(fs.create(&a, New::Note))),
         ),
         (
             "create onto a folder",
-            kind_of(block_on(fs.create(&folder, Kind::Dir))),
+            kind_of(block_on(fs.create(&folder, New::Dir))),
         ),
         ("rename onto a note", kind_of(block_on(fs.rename(&a, &b)))),
         (
@@ -684,7 +767,7 @@ fn read_dir_reports_a_notes_size_and_identity_from_its_metadata() {
 
 #[test]
 fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
-    let dir = TempDir::new("read-bytes");
+    let dir = TempDir::new("read-bytes-cap");
     let file = dir.0.join("index.idx");
     fs::write(&file, b"\x00\xffcache").expect("write");
 

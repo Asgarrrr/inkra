@@ -90,6 +90,16 @@ fn a_folder_name_on_disk_is_compared_untrimmed() {
 }
 
 #[test]
+fn an_asset_does_not_collide_with_a_note_of_its_stem() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/photo.png", b"\x89PNG".to_vec());
+    let vault = scan(&fs);
+
+    assert!(!vault.name_taken(None, Kind::Note, "photo", None));
+    assert!(vault.name_taken(None, Kind::Asset, "photo.png", None));
+}
+
+#[test]
 fn a_parent_that_is_gone_answers_for_the_root() {
     let fs = MemFs::new();
     fs.insert_file("/vault/plan.md", "");

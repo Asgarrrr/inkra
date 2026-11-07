@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use futures::FutureExt;
 use gpui::{Entity, TestAppContext};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Fs, New};
 
 use crate::test_support::{edit, entry_id, index_sync, named, opened, scan_notes, unscanned_notes};
 use crate::timeline::Timeline;
@@ -37,7 +37,7 @@ fn a_create_during_a_held_scan_keeps_its_id_and_every_file_keeps_one(cx: &mut Te
     let gate = fs.block_read_dir("/vault/sub");
     let first = notes.update(cx, NoteStore::rescan);
     cx.run_until_parked();
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "c", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "c", cx));
     cx.run_until_parked();
     gate.release();
     cx.run_until_parked();
@@ -68,7 +68,7 @@ fn a_create_during_the_initial_scan_keeps_its_id(cx: &mut TestAppContext) {
     let after_root = ids(&notes, cx);
     assert_eq!(after_root.len(), 2, "{after_root:?}");
 
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "c", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "c", cx));
     cx.run_until_parked();
     // Holds the create's scan, so the full pass's result shows alone.
     let next = fs.block_read_dir("/vault");

@@ -7,9 +7,10 @@ use inkra_vault::{EntryId, Fs};
 
 use super::{
     ab_focused, activate, at, check, editor, finish_trash, open, scroll_to, select, showing,
-    start_trash, tab_notes, tall_notes, text_of, trash, view_of,
+    start_trash, tab_files, tall_notes, text_of, trash, view_of,
 };
 use crate::bootstrap::{Launch, root};
+use crate::file_kind::FileKind;
 use crate::keymap::key_bindings;
 use crate::shell::NextTab;
 use crate::text_input::InputHost;
@@ -180,11 +181,11 @@ fn opening_a_note_replaces_the_active_tabs_note(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     cx.simulate_keystrokes("cmd-t");
     open(&window, &mut cx, b);
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
 
     cx.simulate_keystrokes("ctrl-tab");
     open(&window, &mut cx, b);
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(b)], 0));
 }
 
 /// T4.
@@ -199,7 +200,7 @@ fn a_load_landing_after_a_tab_switch_changes_neither_tab(cx: &mut TestAppContext
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 1));
     assert_eq!(showing(&window, &mut cx), None);
     check(&window, &mut cx);
 }
@@ -268,7 +269,7 @@ fn showing_is_the_active_tabs_note(cx: &mut TestAppContext) {
         check(&window, &mut cx);
     }
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), None], 2)
     );
 }
@@ -304,7 +305,7 @@ fn closing_an_inactive_tab_does_not_seal_the_active_notes_undo_group(cx: &mut Te
             shell.close_tab(shell.layout.last_center(), inactive, window, cx);
         })
         .unwrap();
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     cx.simulate_input("y");
     cx.simulate_keystrokes("cmd-z");
 
@@ -322,7 +323,7 @@ fn a_load_landing_after_its_only_tab_was_closed_lands_nowhere(cx: &mut TestAppCo
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None], 0));
     assert!(
         window
             .update(&mut cx, |shell, _, _| shell.editor().is_none())
@@ -355,7 +356,7 @@ fn trashing_a_note_empties_every_tab_showing_it(cx: &mut TestAppContext) {
 
     trash(&window, &mut cx, a);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b), None], 2));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b), None], 2));
     check(&window, &mut cx);
     window
         .update(&mut cx, |shell, window, _| {
@@ -380,7 +381,7 @@ fn trashing_a_note_in_an_inactive_tab_keeps_the_editor(cx: &mut TestAppContext) 
 
     trash(&window, &mut cx, a);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b)], 1));
     assert_eq!(editor(&window, &mut cx).entity_id(), view);
     check(&window, &mut cx);
 }
@@ -398,11 +399,11 @@ fn switching_to_a_tab_whose_note_is_being_trashed_shows_it_empty(cx: &mut TestAp
 
     cx.simulate_keystrokes("ctrl-tab");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(a)], 1));
     assert_eq!(showing(&window, &mut cx), None, "no editor to type into");
     check(&window, &mut cx);
     finish_trash(&fs, gate, trashing, &mut cx);
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), None], 1));
     check(&window, &mut cx);
 }
 
@@ -417,11 +418,11 @@ fn going_back_to_a_note_being_trashed_shows_it_empty(cx: &mut TestAppContext) {
 
     cx.simulate_keystrokes("cmd-[");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(showing(&window, &mut cx), None);
     check(&window, &mut cx);
     finish_trash(&fs, gate, trashing, &mut cx);
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None], 0));
     cx.simulate_keystrokes("cmd-]");
     assert_eq!(showing(&window, &mut cx), Some(b));
     check(&window, &mut cx);
@@ -440,11 +441,11 @@ fn reopening_a_tab_whose_note_is_being_trashed_shows_it_empty(cx: &mut TestAppCo
 
     cx.simulate_keystrokes("cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(a)], 1));
     assert_eq!(showing(&window, &mut cx), None);
     check(&window, &mut cx);
     finish_trash(&fs, gate, trashing, &mut cx);
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), None], 1));
     check(&window, &mut cx);
 }
 
@@ -457,7 +458,7 @@ fn a_gone_note_keeps_its_tab(cx: &mut TestAppContext) {
 
     fs.remove(Path::new("/vault/a.md"));
     cx.run_until_parked();
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     // Gone from the vault's entries, the title comes from the note's last path.
     let titles = window
         .update(&mut cx, |shell, _, cx| {
@@ -516,12 +517,12 @@ fn every_tab_key_dismisses_an_open_picker_first(cx: &mut TestAppContext) {
                 .unwrap(),
             "{keys} left the picker open"
         );
-        let (notes, index) = tab_notes(&window, &mut cx);
+        let (notes, index) = tab_files(&window, &mut cx);
         assert_eq!((notes.len(), index), (count, active), "{keys}");
     }
 }
 
-/// The sidebar opens through `show_note`: a click on the note showing only takes focus.
+/// The sidebar opens through `show_file`: a click on the note showing only takes focus.
 #[gpui::test]
 fn a_sidebar_click_on_the_note_showing_keeps_its_caret_and_scroll(cx: &mut TestAppContext) {
     let (window, mut cx, a, _b) = tall_notes(cx);
@@ -546,14 +547,16 @@ fn closing_a_tab_onto_the_same_note_seals_its_undo_group(cx: &mut TestAppContext
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
     window
-        .update(&mut cx, |shell, _, cx| shell.open_in_new_tab(a, None, cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_in_new_tab(a, FileKind::Note, None, cx);
+        })
         .unwrap();
     cx.run_until_parked();
     cx.simulate_input("x");
     let typed = text_of(&window, &mut cx, a);
 
     cx.simulate_keystrokes("cmd-w");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     cx.simulate_input("y");
     cx.simulate_keystrokes("cmd-z");
 

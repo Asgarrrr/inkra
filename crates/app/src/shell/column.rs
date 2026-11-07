@@ -6,11 +6,11 @@ use gpui::{
 };
 use inkra_layout::{GroupId, SplitDirection, SplitPath};
 
-use super::AppShell;
 use super::dock_drag::DraggedView;
 use super::group::selector;
 use super::members::Slot;
 use super::tab_bar::{DraggedTab, strip_slot};
+use super::{AppShell, Shown};
 use crate::theme;
 use crate::ui::{Color, h_flex, keep_focus};
 
@@ -118,9 +118,10 @@ impl AppShell {
                     .children(self.render_view_body(view))
                     .into_any_element(),
             ],
-            None => vec![match self.editor_of(group) {
-                Some(editor) => editor.clone().into_any_element(),
-                None => self.render_empty(cx).into_any_element(),
+            None => vec![match (&self.group(group).shown, self.editor_of(group)) {
+                (Shown::Image(id), _) => self.render_image(*id, cx),
+                (_, Some(editor)) => editor.clone().into_any_element(),
+                (_, None) => self.render_empty(cx).into_any_element(),
             }],
         };
         let colors = theme::current(cx).colors;

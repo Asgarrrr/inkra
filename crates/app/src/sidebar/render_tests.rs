@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, px, size};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind};
+use inkra_vault::{Fs, New};
 
 use super::tests::{drawn, row};
 use crate::test_support::{edit, opened};
@@ -55,7 +55,7 @@ fn the_field_row_has_the_tree_rows_height(cx: &mut TestAppContext) {
     let a = row(&sidebar, cx, "a");
     sidebar.update(cx, |sidebar, cx| {
         sidebar.select_for_test(a.id, cx);
-        sidebar.open_create(Kind::Note, cx);
+        sidebar.open_create(New::Note, cx);
     });
 
     let plain = bounds(&mut visual, "tree-row-0");

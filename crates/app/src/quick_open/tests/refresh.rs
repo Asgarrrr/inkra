@@ -7,13 +7,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{Focusable, TestAppContext};
-use inkra_vault::{Fs, Kind};
+use inkra_vault::{Fs, New};
 
 use super::background::logged;
 use super::{Opened, footer, last_scan, listed, open, search, with_texts};
 use crate::index::{BUILDING_REFRESH, IndexSync};
 use crate::keymap::key_bindings;
-use crate::open::NoteActivated;
+use crate::open::FileActivated;
 use crate::picker::Picker;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::quick_open::QuickOpenDelegate;
@@ -191,7 +191,7 @@ fn notes_changed_during_a_scan_reruns_once(cx: &mut TestAppContext) {
     let before = runs(&mut opened);
 
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
-        notes.create(None, Kind::Note, "plan a", cx)
+        notes.create(None, New::Note, "plan a", cx)
     });
     opened.visual.run_until_parked();
     drop(created);
@@ -285,7 +285,7 @@ fn a_build_during_the_first_scan_does_not_cancel_it(cx: &mut TestAppContext) {
     );
     let cancel = last_scan(&mut opened);
     let created = opened.notes.update(&mut opened.visual, |notes, cx| {
-        notes.create(None, Kind::Note, "plan c", cx)
+        notes.create(None, New::Note, "plan c", cx)
     });
     opened.visual.run_until_parked();
     drop(created);
@@ -308,8 +308,8 @@ fn enter_during_a_dirty_scan_confirms_without_a_rerun(cx: &mut TestAppContext) {
     let activated = Rc::new(RefCell::new(Vec::new()));
     let _guard = opened.visual.update(|_, cx| {
         let activated = Rc::clone(&activated);
-        cx.subscribe(&opened.picker, move |_, event: &NoteActivated, _| {
-            activated.borrow_mut().push(event.note);
+        cx.subscribe(&opened.picker, move |_, event: &FileActivated, _| {
+            activated.borrow_mut().push(event.file);
         })
     });
     let release = hold_scans(&mut opened);

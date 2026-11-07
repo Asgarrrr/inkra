@@ -1,4 +1,4 @@
-//! Where an opener shows its note: the active tab, a new one (tabs spec, A5) or a split (splits spec, P5).
+//! Where an opener shows its file: the active tab, a new one (tabs spec, A5) or a split (splits spec, P5).
 
 use gpui::Modifiers;
 use inkra_vault::EntryId;
@@ -22,7 +22,7 @@ impl Open {
 
 /// A struct, not an enum: `EventEmitter<E>` needs one type per event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NoteActivated {
-    pub(crate) note: EntryId,
+pub(crate) struct FileActivated {
+    pub(crate) file: EntryId,
     pub(crate) open: Open,
 }

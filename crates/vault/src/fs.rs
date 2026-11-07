@@ -2,6 +2,7 @@
 //! it buys the shape: a remote backend later is a second `impl Fs`.
 
 use std::any::Any;
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -9,6 +10,7 @@ use std::time::SystemTime;
 use async_trait::async_trait;
 
 use crate::note_file_name;
+use crate::temp::is_temp;
 use crate::watch::Watch;
 
 /// Paired, not inode alone: an inode is unique only within one filesystem, and
@@ -34,17 +36,58 @@ pub struct Stamp {
 pub enum Kind {
     Dir,
     Note,
+    /// Any file that is not a note.
+    Asset,
 }
 
 impl Kind {
-    /// The file name `typed` gets as this kind: a note's via `note_file_name`, a folder's trimmed.
+    /// The file name `typed` gets as this kind: a note's via `note_file_name`, the others' trimmed.
     #[must_use]
     pub fn file_name(self, typed: &str) -> String {
         match self {
             Self::Note => note_file_name(typed),
-            Self::Dir => typed.trim().to_owned(),
+            Self::Dir | Self::Asset => typed.trim().to_owned(),
         }
     }
+
+    #[must_use]
+    pub fn is_file(self) -> bool {
+        matches!(self, Self::Note | Self::Asset)
+    }
+
+    /// A file's kind from its name: `.md` in any case is a note. Never asked of a folder.
+    #[must_use]
+    pub fn of_file(path: &Path) -> Self {
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            Self::Note
+        } else {
+            Self::Asset
+        }
+    }
+}
+
+/// What `Fs::create` makes: never an asset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum New {
+    Note,
+    Dir,
+}
+
+impl From<New> for Kind {
+    fn from(new: New) -> Self {
+        match new {
+            New::Note => Self::Note,
+            New::Dir => Self::Dir,
+        }
+    }
+}
+
+/// Whether `read_dir` lists a child of this name: no dotfile, no save's temp file.
+pub(crate) fn listable(name: &OsStr) -> bool {
+    !name.as_encoded_bytes().starts_with(b".") && !is_temp(name)
 }
 
 #[derive(Debug, Clone)]
@@ -117,8 +160,8 @@ impl Watcher {
 
 #[async_trait]
 pub trait Fs: Send + Sync {
-    /// Direct children only, filtering out dotfiles and symlinks itself so
-    /// the walk avoids link loops without detecting them.
+    /// Direct children only. Skips what `listable` refuses, and skips symlinks itself so the walk
+    /// avoids link loops without detecting them.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
     /// `dir`'s direct children that are regular files, any extension, no dotfiles or symlinks,
@@ -154,7 +197,7 @@ pub trait Fs: Send + Sync {
     async fn remove_file(&self, path: &Path) -> Result<()>;
 
     /// Creates an empty note or directory; fails if `path` already exists.
-    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
+    async fn create(&self, path: &Path, new: New) -> Result<FileIdentity>;
 
     /// Moves `from` to `to`, never replacing a *different* file at `to`, and
     /// never changing the inode.

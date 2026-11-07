@@ -57,7 +57,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let tabs = &self.group(group).tabs;
-        let showing = self.group(group).shown.note();
+        let showing = self.group(group).shown.file();
         slot.debug_selector(move || selector("nav", k))
             .pl(theme::ROW_INSET)
             .child(Self::render_arrow(
@@ -108,7 +108,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> bool {
         let tabs = &self.group(group).tabs;
-        let showing = self.group(group).shown.note();
+        let showing = self.group(group).shown.file();
         let forward: Vec<Stop<EntryId>> = tabs
             .stops(Way::Forward, showing)
             .take(HISTORY_MENU_REACH)
@@ -129,7 +129,7 @@ impl AppShell {
         let notes = self.notes.read(cx);
         let row = |stop: Stop<EntryId>, icon: IconName| {
             MenuEntry::new(
-                tab_title(Some(stop.note), notes, cx),
+                tab_title(Some(stop.file), notes, cx),
                 Box::new(GoToStop { group, stop }),
             )
             .icon(icon)
@@ -167,7 +167,7 @@ impl AppShell {
         let Some(Group { tabs, shown, .. }) = self.groups.get_mut(&group) else {
             return;
         };
-        let note = shown.note();
+        let note = shown.file();
         // Captured, not parked: the tab stays active, and the stack keeps plain offsets (A2).
         let leaving = || capture(shown, cx);
         let arriving = match walk {

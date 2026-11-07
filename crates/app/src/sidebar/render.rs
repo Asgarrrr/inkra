@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::path::Path;
 
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
@@ -8,6 +9,7 @@ use gpui::{
 use gpui::{Pixels, Point};
 use inkra_vault::Kind;
 
+use crate::file_kind::FileKind;
 use crate::one_line::one_line;
 use crate::open::Open;
 use crate::theme;
@@ -57,10 +59,17 @@ impl Sidebar {
         let label = one_line(&row.name).into_owned();
         // One test for the chevron and `aria_expanded`, so the two cannot disagree.
         let expanded = (row.kind == Kind::Dir).then(|| self.expanded.contains(&row.id));
-        let start = match expanded {
-            Some(true) => Icon::new(IconName::ChevronDown).into_any_element(),
-            Some(false) => Icon::new(IconName::ChevronRight).into_any_element(),
-            None => spacer().into_any_element(),
+        let start = match (row.kind, expanded) {
+            (_, Some(true)) => Icon::new(IconName::ChevronDown).into_any_element(),
+            (_, Some(false)) => Icon::new(IconName::ChevronRight).into_any_element(),
+            (Kind::Asset, None) => {
+                let icon = match FileKind::of(Path::new(&row.name)) {
+                    Some(FileKind::Image) => IconName::Image,
+                    Some(FileKind::Note) | None => IconName::File,
+                };
+                Icon::new(icon).into_any_element()
+            }
+            (Kind::Dir | Kind::Note, None) => spacer().into_any_element(),
         };
         let selected = self.selected == Some(row.id);
         ListItem::new(("tree-row", item))

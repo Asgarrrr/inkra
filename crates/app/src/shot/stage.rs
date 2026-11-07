@@ -13,7 +13,7 @@ use inkra_vault::{Fs, Vault};
 use crate::Quit;
 use crate::bootstrap::{Launch, WINDOW_SIZE, root};
 use crate::keymap::key_bindings;
-use crate::restore::{SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session};
+use crate::restore::{SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::theme::{self, Appearance};
 use crate::ui::Assets;
@@ -107,6 +107,15 @@ impl Stage {
         self.settle();
     }
 
+    /// As `write`, for a file that is no text.
+    pub(crate) fn write_bytes(&mut self, path: &str, bytes: Vec<u8>) {
+        let Some(fs) = self.fs.as_ref() else {
+            panic!("a scene writes only after `open_vault`");
+        };
+        fs.insert_bytes(PathBuf::from(VAULT_ROOT).join(path), bytes);
+        self.settle();
+    }
+
     /// A file of the vault `open_vault` opened, deleted outside the app.
     pub(crate) fn remove(&mut self, path: &str) {
         let Some(fs) = self.fs.as_ref() else {
@@ -155,7 +164,7 @@ impl Stage {
     pub(crate) fn open_restored(
         &mut self,
         files: &[(&str, &str)],
-        tabs: Vec<SavedNoteTab>,
+        tabs: Vec<SavedFileTab>,
         active: usize,
     ) -> WindowHandle<AppShell> {
         let fs = Arc::new(MemFs::new());
@@ -164,7 +173,7 @@ impl Stage {
         }
         let session = PathBuf::from("/support/session.json");
         let center = SavedMember::Group(SavedGroup {
-            tabs: tabs.into_iter().map(SavedTab::Note).collect(),
+            tabs: tabs.into_iter().map(SavedTab::File).collect(),
             active,
         });
         let text = Session::new(VAULT_ROOT.into(), 0, center, None, None, [true, true])

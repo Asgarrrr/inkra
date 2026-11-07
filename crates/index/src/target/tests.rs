@@ -11,6 +11,17 @@ fn parsed(text: &str) -> Target {
 fn note(path: &str, fragment: Option<&str>, style: Style) -> Target {
     Target::Note {
         path: path.to_owned(),
+        md: false,
+        fragment: fragment.map(str::to_owned),
+        style,
+    }
+}
+
+/// As `note`, for a link written with the `.md` extension.
+fn md_note(path: &str, fragment: Option<&str>, style: Style) -> Target {
+    Target::Note {
+        path: path.to_owned(),
+        md: true,
         fragment: fragment.map(str::to_owned),
         style,
     }
@@ -61,10 +72,10 @@ fn the_fragment_is_split_at_the_first_hash() {
 
 #[test]
 fn the_extension_is_stripped_in_any_case() {
-    assert_eq!(parsed("[[Plan.MD]]"), note("Plan", None, Style::Name));
+    assert_eq!(parsed("[[Plan.MD]]"), md_note("Plan", None, Style::Name));
     assert_eq!(
         parsed("[x](Plan.md#h)"),
-        note("Plan", Some("h"), Style::Relative)
+        md_note("Plan", Some("h"), Style::Relative)
     );
     assert_eq!(parsed("[[v1.2]]"), note("v1.2", None, Style::Name));
 }
@@ -73,9 +84,12 @@ fn the_extension_is_stripped_in_any_case() {
 fn only_an_inline_target_is_percent_decoded() {
     assert_eq!(
         parsed("[x](my%20note.md)"),
-        note("my note", None, Style::Relative)
+        md_note("my note", None, Style::Relative)
     );
-    assert_eq!(parsed("[x](a%23b.md)"), note("a#b", None, Style::Relative));
+    assert_eq!(
+        parsed("[x](a%23b.md)"),
+        md_note("a#b", None, Style::Relative)
+    );
     assert_eq!(
         parsed("[[my%20note]]"),
         note("my%20note", None, Style::Name)
@@ -86,7 +100,7 @@ fn only_an_inline_target_is_percent_decoded() {
 fn invalid_utf8_after_decoding_is_replaced_not_dropped() {
     assert_eq!(
         parsed("[x](a%FF.md)"),
-        note("a\u{fffd}", None, Style::Relative)
+        md_note("a\u{fffd}", None, Style::Relative)
     );
 }
 
@@ -94,11 +108,11 @@ fn invalid_utf8_after_decoding_is_replaced_not_dropped() {
 fn an_inline_link_is_relative_even_with_a_folder() {
     assert_eq!(
         parsed("[x](../work/Plan.md)"),
-        note("../work/Plan", None, Style::Relative)
+        md_note("../work/Plan", None, Style::Relative)
     );
     assert_eq!(
         parsed("[x](/Plan.md)"),
-        note("/Plan", None, Style::Relative)
+        md_note("/Plan", None, Style::Relative)
     );
 }
 
@@ -122,19 +136,19 @@ fn a_url_is_external() {
 fn a_drive_letter_or_odd_prefix_is_not_a_scheme() {
     assert_eq!(
         parsed("[x](C:notes.md)"),
-        note("C:notes", None, Style::Relative)
+        md_note("C:notes", None, Style::Relative)
     );
     assert_eq!(
         parsed("[x](1a:notes.md)"),
-        note("1a:notes", None, Style::Relative)
+        md_note("1a:notes", None, Style::Relative)
     );
     assert_eq!(
         parsed("[x](a_b:notes.md)"),
-        note("a_b:notes", None, Style::Relative)
+        md_note("a_b:notes", None, Style::Relative)
     );
     assert_eq!(
         parsed("[x](:notes.md)"),
-        note(":notes", None, Style::Relative)
+        md_note(":notes", None, Style::Relative)
     );
 }
 

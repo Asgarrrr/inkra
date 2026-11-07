@@ -18,7 +18,7 @@ fn the_scan_finds_notes_in_subdirectories() {
 
     let vault = scan(&fs);
 
-    let names: Vec<_> = vault.entries().map(|e| e.path.display_name()).collect();
+    let names: Vec<_> = vault.entries().map(Entry::display_name).collect();
     assert!(names.contains(&"a".to_owned()));
     assert!(names.contains(&"b".to_owned()));
 }
@@ -43,7 +43,7 @@ fn an_unreadable_subdirectory_does_not_lose_the_vault() {
 
     let vault = scan(&fs);
 
-    assert!(vault.entries().any(|e| e.path.display_name() == "a"));
+    assert!(vault.entries().any(|e| e.display_name() == "a"));
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn a_rename_keeps_the_entry_id() {
     block_on(vault.rescan(&fs)).expect("rescan");
 
     let entry = vault.entry(id).expect("the id must survive a rename");
-    assert_eq!(entry.path.display_name(), "b");
+    assert_eq!(entry.display_name(), "b");
 }
 
 /// The note's inode is found elsewhere, so the file at its old path is another (watcher spec, F5).
@@ -73,12 +73,12 @@ fn a_new_file_where_a_note_was_renamed_away_gets_a_new_id() {
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(
-        vault.entry(old).map(|e| e.path.display_name()).as_deref(),
+        vault.entry(old).map(Entry::display_name).as_deref(),
         Some("b")
     );
     let new = vault
         .entries()
-        .find(|e| e.path.display_name() == "a")
+        .find(|e| e.display_name() == "a")
         .expect("a")
         .id;
     assert_ne!(new, old, "a different file must not inherit the id");
@@ -114,10 +114,7 @@ fn a_hard_link_replacing_a_note_takes_its_inodes_id() {
     fs.hard_link(Path::new("/vault/b.md"), "/vault/a.md");
     block_on(vault.rescan(&fs)).expect("rescan");
 
-    let after: Vec<_> = vault
-        .entries()
-        .map(|e| (e.id, e.path.display_name()))
-        .collect();
+    let after: Vec<_> = vault.entries().map(|e| (e.id, e.display_name())).collect();
     assert_eq!(after, [(b, "a".to_owned())], "the links collapse to a.md");
 }
 
@@ -154,7 +151,7 @@ fn a_save_keeps_the_entry_id_across_a_rescan() {
     block_on(vault.rescan(&fs)).expect("rescan");
 
     assert_eq!(
-        vault.entry(id).map(|e| e.path.display_name()).as_deref(),
+        vault.entry(id).map(Entry::display_name).as_deref(),
         Some("a")
     );
 }
@@ -196,7 +193,7 @@ fn reidentify_reclaims_the_id_for_the_inode_our_save_produced() {
     assert!(vault.reidentify(ours, saved.identity, saved.stamp));
 
     assert_eq!(
-        vault.entry(ours).map(|e| e.path.display_name()).as_deref(),
+        vault.entry(ours).map(Entry::display_name).as_deref(),
         Some("b")
     );
     assert_eq!(
@@ -437,4 +434,74 @@ fn reidentify_sets_the_saved_stamp_and_identity() {
         (entry.stamp(), entry.identity),
         (saved.stamp, saved.identity)
     );
+}
+
+/// A rename shows `display_name` and commits `file_name` of what was typed: unchanged, they keep the name.
+#[test]
+fn display_name_round_trips_through_file_name_for_every_kind() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/plan.md", "");
+    fs.insert_dir("/vault/v1.2");
+    fs.insert_bytes("/vault/photo.png", b"\x89PNG".to_vec());
+    let vault = scan(&fs);
+
+    let kinds: Vec<_> = vault.entries().map(|e| e.kind).collect();
+    assert_eq!(kinds, [Kind::Dir, Kind::Asset, Kind::Note]);
+    for entry in vault.entries() {
+        let name = entry.path.as_path().file_name().expect("a name");
+        assert_eq!(
+            entry.kind.file_name(&entry.display_name()),
+            name.to_string_lossy(),
+            "{entry:?}"
+        );
+    }
+}
+
+#[test]
+fn an_asset_name_keeps_its_extension() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/sub/photo.png", b"\x89PNG".to_vec());
+    let vault = scan(&fs);
+
+    let asset = vault.entries().find(|e| e.kind == Kind::Asset);
+    assert_eq!(asset.map(Entry::display_name).as_deref(), Some("photo.png"));
+    assert_eq!(Kind::Asset.file_name(" photo.png "), "photo.png");
+}
+
+#[test]
+fn renaming_photo_png_to_photo_md_makes_it_a_note_with_the_same_id() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/photo.png", "");
+    let mut vault = scan(&fs);
+    let id = vault.entries().next().expect("one entry").id;
+
+    block_on(fs.rename(Path::new("/vault/photo.png"), Path::new("/vault/photo.md")))
+        .expect("rename");
+    block_on(vault.rescan(&fs)).expect("rescan");
+
+    let entry = vault.entry(id).expect("the id survives the rename");
+    assert_eq!(
+        (entry.kind, entry.display_name()),
+        (Kind::Note, "photo".to_owned())
+    );
+}
+
+/// An image editor saves as an external atomic save does: a new inode at the path (watcher spec, F5).
+#[test]
+fn replacing_an_asset_with_a_new_inode_keeps_its_id() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/vault/photo.png", b"before".to_vec());
+    let mut vault = scan(&fs);
+    let id = vault.entries().next().expect("one entry").id;
+    let identity = FileIdentity {
+        device: 1,
+        inode: 999,
+    };
+
+    fs.insert_file_with_identity("/vault/photo.png", "after", identity);
+    block_on(vault.rescan(&fs)).expect("rescan");
+
+    let entries: Vec<_> = vault.entries().map(|e| (e.id, e.kind)).collect();
+    assert_eq!(entries, [(id, Kind::Asset)]);
+    assert_eq!(vault.id_for(identity), Some(id));
 }

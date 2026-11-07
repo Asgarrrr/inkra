@@ -4,10 +4,11 @@ use std::path::Path;
 
 use gpui::TestAppContext;
 
-use super::restore_lands::{empty, id, launch, notes, notes_group, row, save, save_tree, vault};
+use super::restore_lands::{empty, files, id, launch, notes_group, row, save, save_tree, vault};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::centre;
-use crate::open::{NoteActivated, Open};
+use crate::file_kind::FileKind;
+use crate::open::{FileActivated, Open};
 use crate::shell::session::THROTTLE;
 
 #[gpui::test]
@@ -23,8 +24,8 @@ fn a_sidebar_open_before_the_walk_wins(cx: &mut TestAppContext) {
         .update(&mut cx, |shell, _, _| shell.panes().sidebar.clone())
         .unwrap();
     sidebar.update(&mut cx, |_, cx| {
-        cx.emit(NoteActivated {
-            note: a,
+        cx.emit(FileActivated {
+            file: a,
             open: Open::Here,
         });
     });
@@ -32,12 +33,12 @@ fn a_sidebar_open_before_the_walk_wins(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     wait(&mut cx, THROTTLE);
     let saved: Vec<_> = saved_tabs(&fs)
         .unwrap()
         .into_iter()
-        .map(|tab| tab.note)
+        .map(|tab| tab.file)
         .collect();
     assert_eq!(saved, [Some("a.md".to_owned())]);
 }
@@ -53,7 +54,9 @@ fn a_refused_restore_opens_no_saved_note(cx: &mut TestAppContext) {
 
     let a = id(&window, &mut cx, "a");
     window
-        .update(&mut cx, |shell, _, cx| shell.open_note(a, None, cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_file(a, FileKind::Note, None, cx);
+        })
         .unwrap();
     cx.run_until_parked();
     gate.release();
@@ -80,7 +83,7 @@ fn a_new_tab_before_the_walk_wins(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(notes(&window, &mut cx), (vec![None, None], 1));
+    assert_eq!(files(&window, &mut cx), (vec![None, None], 1));
 }
 
 /// The user's open is pending when the restore lands: the restore must neither cancel it nor apply.
@@ -95,19 +98,21 @@ fn a_user_open_pending_when_the_restore_lands_wins(cx: &mut TestAppContext) {
     let b = id(&window, &mut cx, "b");
     let load = fs.block_load("/vault/b.md");
     window
-        .update(&mut cx, |shell, _, cx| shell.open_note(b, None, cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_file(b, FileKind::Note, None, cx);
+        })
         .unwrap();
     walk.release();
     cx.run_until_parked();
     load.release();
     cx.run_until_parked();
 
-    assert_eq!(notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(b)], 0));
     wait(&mut cx, THROTTLE);
     let saved: Vec<_> = saved_tabs(&fs)
         .unwrap()
         .into_iter()
-        .map(|tab| tab.note)
+        .map(|tab| tab.file)
         .collect();
     assert_eq!(
         saved,
@@ -128,7 +133,9 @@ fn a_note_shown_by_back_before_the_walk_wins(cx: &mut TestAppContext) {
     let (a, b) = (id(&window, &mut cx, "a"), id(&window, &mut cx, "b"));
     for note in [a, b] {
         window
-            .update(&mut cx, |shell, _, cx| shell.open_note(note, None, cx))
+            .update(&mut cx, |shell, _, cx| {
+                shell.open_file(note, FileKind::Note, None, cx);
+            })
             .unwrap();
         cx.run_until_parked();
     }
@@ -136,7 +143,7 @@ fn a_note_shown_by_back_before_the_walk_wins(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
 }
 
 #[gpui::test]
@@ -149,14 +156,16 @@ fn a_tab_closed_before_the_walk_wins(cx: &mut TestAppContext) {
 
     let a = id(&window, &mut cx, "a");
     window
-        .update(&mut cx, |shell, _, cx| shell.open_note(a, None, cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_file(a, FileKind::Note, None, cx);
+        })
         .unwrap();
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-w");
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(files(&window, &mut cx), (vec![None], 0));
 }
 
 /// A failed walk sets `is_scanned` too; resolving on it would drop every tab, then overwrite the file.
@@ -209,7 +218,7 @@ fn a_corrupt_file_restores_nothing(cx: &mut TestAppContext) {
     fs.insert_file(SESSION, "{\"version\": 1, \"tabs\": [");
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
-    assert_eq!(notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(files(&window, &mut cx), (vec![None], 0));
 
     wait(&mut cx, THROTTLE);
 
@@ -236,19 +245,21 @@ fn a_refused_restore_leaves_no_empty_group(cx: &mut TestAppContext) {
 
     let a = id(&window, &mut cx, "a");
     window
-        .update(&mut cx, |shell, _, cx| shell.open_note(a, None, cx))
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_file(a, FileKind::Note, None, cx);
+        })
         .unwrap();
     cx.run_until_parked();
     gate.release();
     cx.run_until_parked();
 
     assert_eq!(centre(&window, &mut cx).len(), 1);
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     wait(&mut cx, THROTTLE);
     let saved: Vec<_> = saved_tabs(&fs)
         .unwrap()
         .into_iter()
-        .map(|tab| tab.note)
+        .map(|tab| tab.file)
         .collect();
     assert_eq!(saved, [Some("a.md".to_owned())]);
 }

@@ -228,23 +228,38 @@ fn stamps(corpus: &CorpusSnapshot) -> Vec<Option<Stamp>> {
 struct Model {
     /// Notes in vault order: id and NFC path without `.md`.
     notes: Vec<(EntryId, String)>,
+    /// Assets in vault order: id and NFC full path.
+    assets: Vec<(EntryId, String)>,
 }
 
 impl Model {
     fn new(vault: &Vault) -> Self {
-        let notes = vault
-            .entries()
-            .filter(|entry| entry.kind == Kind::Note)
-            .map(|entry| {
-                let path = entry.path.as_path().to_string_lossy();
-                (entry.id, strip_md(&path).nfc().collect())
-            })
-            .collect();
-        Self { notes }
+        let files = |kind: Kind, strip: fn(&str) -> &str| {
+            vault
+                .entries()
+                .filter(|entry| entry.kind == kind)
+                .map(|entry| {
+                    let path = entry.path.as_path().to_string_lossy();
+                    (entry.id, strip(&path).nfc().collect())
+                })
+                .collect()
+        };
+        Self {
+            notes: files(Kind::Note, strip_md),
+            assets: files(Kind::Asset, |path| path),
+        }
+    }
+
+    /// Every file the model resolves to: notes, then assets.
+    fn files(&self) -> impl Iterator<Item = &(EntryId, String)> {
+        self.notes.iter().chain(&self.assets)
     }
 
     fn resolve(&self, source: EntryId, target: &Target) -> Resolution {
-        let Target::Note { path, style, .. } = target else {
+        let Target::Note {
+            path, style, md, ..
+        } = target
+        else {
             return match target {
                 Target::External(url) => Resolution::External(url.clone()),
                 _ => Resolution::SelfLink,
@@ -266,28 +281,10 @@ impl Model {
             },
             _ => written,
         };
-        let wanted = Key::path(&written);
-        let last = |text: &str| text.rsplit('/').next().unwrap_or(text).to_owned();
-        let mut best: Option<(bool, usize, usize, EntryId)> = None;
-        for (order, (id, path)) in self.notes.iter().enumerate() {
-            let key = Key::path(path);
-            let matches = match style {
-                Style::Name => Key::fold(&last(path)) == Key::fold(&last(&written)),
-                Style::Suffix => {
-                    key == wanted || key.as_str().ends_with(&format!("/{}", wanted.as_str()))
-                }
-                Style::Relative => key == wanted,
-            };
-            if !matches {
-                continue;
-            }
-            let exact = *path == written || path.ends_with(&format!("/{written}"));
-            let rank = (!exact, path.matches('/').count(), order, *id);
-            if best.is_none_or(|current| rank < current) {
-                best = Some(rank);
-            }
+        match best(&self.notes, *style, &written) {
+            Resolution::Unresolved if !md => best(&self.assets, *style, &written),
+            found => found,
         }
-        best.map_or(Resolution::Unresolved, |(.., id)| Resolution::Note(id))
     }
 
     fn join(&self, source: EntryId, path: &str) -> Option<String> {
@@ -312,30 +309,73 @@ impl Model {
     }
 }
 
+/// The file of `files` that `written` in `style` names, ranked as resolution ranks.
+fn best(files: &[(EntryId, String)], style: Style, written: &str) -> Resolution {
+    let wanted = Key::path(written);
+    let last = |text: &str| text.rsplit('/').next().unwrap_or(text).to_owned();
+    let mut best: Option<(bool, usize, usize, EntryId)> = None;
+    for (order, (id, path)) in files.iter().enumerate() {
+        let key = Key::path(path);
+        let matches = match style {
+            Style::Name => Key::fold(&last(path)) == Key::fold(&last(written)),
+            Style::Suffix => {
+                key == wanted || key.as_str().ends_with(&format!("/{}", wanted.as_str()))
+            }
+            Style::Relative => key == wanted,
+        };
+        if !matches {
+            continue;
+        }
+        let exact = path == written || path.ends_with(&format!("/{written}"));
+        let rank = (!exact, path.matches('/').count(), order, *id);
+        if best.is_none_or(|current| rank < current) {
+            best = Some(rank);
+        }
+    }
+    best.map_or(Resolution::Unresolved, |(.., id)| Resolution::File(id))
+}
+
 const NAMES: &[&str] = &["a", "A", "b", "caf\u{e9}", "cafe\u{301}", "v1.2", "x.md"];
 const FOLDERS: &[&str] = &["", "f/", "F/", "f/g/"];
 const PREFIXES: &[&str] = &["", "./", "../", "/", "/f/", "f/", "g/"];
 
+/// Assets named like notes, and a note named like an asset.
+const ODD_FILES: &[&str] = &["x.png", "v1.2.png", "f/x.png", "x.png.md"];
+const ASSET_LINKS: &[&str] = &[
+    "[[x.png]]",
+    "![[x.png]]",
+    "[[f/x.png]]",
+    "[x](x.png)",
+    "[[x.png.md]]",
+    "[x](x.png.md)",
+];
+
 fn file() -> impl Strategy<Value = String> {
-    (prop::sample::select(FOLDERS), prop::sample::select(NAMES))
-        .prop_map(|(folder, name)| format!("{folder}{name}.md"))
+    prop_oneof![
+        3 => (prop::sample::select(FOLDERS), prop::sample::select(NAMES))
+            .prop_map(|(folder, name)| format!("{folder}{name}.md")),
+        1 => prop::sample::select(ODD_FILES).prop_map(str::to_owned),
+    ]
 }
 
 fn link() -> impl Strategy<Value = String> {
-    (
-        0..4u8,
-        prop::sample::select(PREFIXES),
-        prop::sample::select(NAMES),
-    )
-        .prop_map(|(form, prefix, name)| match form {
-            0 => format!("[[{name}]]"),
-            1 => format!("[[{prefix}{name}]]"),
-            2 => format!("[x]({prefix}{name}.md)"),
-            _ => format!(
-                "[x]({prefix}{name}{})",
-                ["/", "/.", "/..", "/../x.md"][name.len() % 4]
-            ),
-        })
+    prop_oneof![
+        4 => (
+            0..4u8,
+            prop::sample::select(PREFIXES),
+            prop::sample::select(NAMES),
+        )
+            .prop_map(|(form, prefix, name)| match form {
+                0 => format!("[[{name}]]"),
+                1 => format!("[[{prefix}{name}]]"),
+                2 => format!("[x]({prefix}{name}.md)"),
+                _ => format!(
+                    "[x]({prefix}{name}{})",
+                    ["/", "/.", "/..", "/../x.md"][name.len() % 4]
+                ),
+            }),
+        1 => prop::sample::select(ASSET_LINKS).prop_map(str::to_owned),
+    ]
 }
 
 fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, Source)]) {
@@ -349,7 +389,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
             );
         }
     }
-    for (note, _) in &model.notes {
+    for (file, _) in model.files() {
         let mut expected: Vec<(usize, EntryId, usize)> = Vec::new();
         for (source, parsed) in sources {
             // The index drops the source of a note gone from the vault.
@@ -357,15 +397,14 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
                 continue;
             };
             for link in &parsed.links {
-                if model.resolve(*source, &link.target) == Resolution::Note(*note) {
+                if model.resolve(*source, &link.target) == Resolution::File(*file) {
                     expected.push((order, *source, link.range.start.get()));
                     let Target::Note { path, .. } = &link.target else {
-                        panic!("only note links resolve to a note");
+                        panic!("only note links resolve to a file");
                     };
                     let stem = model
-                        .notes
-                        .iter()
-                        .find(|(id, _)| id == note)
+                        .files()
+                        .find(|(id, _)| id == file)
                         .map(|(_, p)| Key::stem(p));
                     assert_eq!(Some(Key::stem(path)), stem, "the stem property");
                 }
@@ -373,7 +412,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
         }
         expected.sort_unstable();
         let actual: Vec<(usize, EntryId, usize)> = index
-            .backlinks(*note)
+            .backlinks(*file)
             .into_iter()
             .flat_map(|backlink| {
                 let order = model
@@ -390,7 +429,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
         assert_eq!(
             actual,
             expected,
-            "backlinks of {note:?} in {vault_len} entries",
+            "backlinks of {file:?} in {vault_len} entries",
             vault_len = vault.entries().count()
         );
     }

@@ -2,7 +2,7 @@ use gpui::{WindowHandle, point, px};
 
 use super::LINKED;
 use crate::bootstrap::WINDOW_SIZE;
-use crate::restore::{SavedNoteTab, SavedView};
+use crate::restore::{SavedFileTab, SavedView};
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -64,9 +64,9 @@ pub(super) fn drop_split(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-fn saved(note: &str, tail: usize, head: usize) -> SavedNoteTab {
-    SavedNoteTab {
-        note: Some(note.to_owned()),
+fn saved(note: &str, tail: usize, head: usize) -> SavedFileTab {
+    SavedFileTab {
+        file: Some(note.to_owned()),
         view: Some(SavedView {
             tail,
             head,

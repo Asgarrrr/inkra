@@ -9,14 +9,15 @@ paths:
 
 # Shell, sidebar, keymap
 
-- `AppShell.shown` (`Shown`) is `Empty`, `Bound` (the editor and its note) or
-  `Trashing` (the tab stays on a note whose trash is pending, with no editor).
+- `AppShell.shown` (`Shown`) is `Empty`, `Bound` (the editor and its note),
+  `Image` (an image file, drawn from `Images`, with no editor), `Trashing` (the
+  tab stays on a note whose trash is pending, with no editor) or `View`.
   No editor until a note opens, so nothing untracked can be typed into.
   `render_empty` fills the slot. `set_shown` is its one writer. A note leaves
   the tabs only on `NoteClosed`; `TrashFailed` rebinds a `Trashing` tab.
 - Every tab action dismisses the picker first (`dismiss_modal`).
 - One modal at a time: a picker or a `ContextMenu`. A right press that opens a
-  menu calls `prevent_default`, or the root takes the focus. `change_docks`
+  menu calls `prevent_default`, or the root takes the focus. `change_layout`
   closes an open menu.
 - An inactive tab's slot in `Tabs<Place, Parked>` holds its `Parked` view, so
   each op's closure type picks `Parked::park` or `capture`; bind a `Parked` only
@@ -35,22 +36,23 @@ paths:
   left button held: a release outside the window reaches no listener. Never put
   a drag handler on the row: a tab's press would bubble to it.
 - With no vault, no dock is drawn; the note column starts at x 0.
-- `VaultPanes.docks` changes only through `change_docks`: it lands focus when Files stops being visible and cancels an open name field.
-- A drop on a dock icon moves the view to that icon's index; a drop on a dock column appends (`Docks::append`). Both go through `change_docks`.
-- `Tabs` holds no place for the active tab (H8): `active_note()` is its note
-  (`showing()` is the note bound in the editor, `None` while `Trashing`), and
+- `AppShell.layout` changes only through `change_layout`: it lands focus when Files stops being visible and cancels an open name field.
+- A drop on a dock icon moves the view to that icon's index; a drop on a dock column or a drop strip appends (`AppShell::append`). Both land in `move_tab_to`, which goes through `change_layout` across groups and `move_tab` within one.
+- `Tabs` holds no place for the active tab (H8): `showing()` is the file it
+  draws (`Bound`'s note or an `Image`, `None` while `Trashing`; `bound_note()`
+  is the editor's note), and
   `leaving` hands `Tabs` the place when the tab is left.
 - An action holds its window leased: `cx.with_window` returns `None` inside it,
   so tab code takes `&mut Window` (`unfocus_editor`). A subscription fired by
   a tab action runs after the lease ends, so `with_window` works there.
 - `AppShell` tracks its own `FocusHandle` on the root div; without it, with no
   editor, `cmd-s` never reaches its handler.
-- `AppShell::open_note` gets its `Window` via `update_in`; do not thread a
+- `AppShell::open_file` gets its `Window` via `update_in`; do not thread a
   `&mut Window` through `bootstrap::root`. The bind, `set_current` and the focus
   move happen in one `update_in`, with no `await` between them.
-- A widget that opens a note emits `NoteActivated`; it never holds an
+- A widget that opens a file emits `FileActivated`; it never holds an
   `Entity<EditorView>`. The emit is indirect because a synchronous callback would
-  re-lease the `Sidebar`. `NoteActivated` and `Open { Here, NewTab }` live in
+  re-lease the `Sidebar`. `FileActivated` and `Open { Here, NewTab }` live in
   `open.rs`; every opener carries an `Open`, and `AppShell::open` routes it.
 - A new-tab open (`open_in_new_tab`) inserts its tab when the note lands, in the
   one `activation` slot, and parks the tab left through `insert`'s closure. It

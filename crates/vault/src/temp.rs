@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const TEMP_MARK: &str = ".inkra-";
-/// Not `.md`, so `read_dir`'s filter hides a file left by a crash.
+/// `is_temp` matches it with `TEMP_MARK`, so `listable` hides a file a crash left.
 const TEMP_EXTENSION: &str = ".tmp";
 
 /// Unique per process and per call, so two concurrent saves can't collide.

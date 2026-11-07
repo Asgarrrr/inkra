@@ -16,9 +16,9 @@ struct Kept {
 }
 
 impl Place for Kept {
-    type Note = u8;
+    type File = u8;
 
-    fn note(&self) -> Option<u8> {
+    fn file(&self) -> Option<u8> {
         self.note
     }
 }

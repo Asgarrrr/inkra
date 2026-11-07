@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind};
+use inkra_vault::{Fs, New};
 
 use super::BacklinksPanel;
 use crate::index::IndexSync;
@@ -26,7 +26,7 @@ fn show(
     name: &str,
 ) {
     let id = entry_id(notes, cx, name);
-    panel.update(cx, |panel, cx| panel.set_note(Some(id), cx));
+    panel.update(cx, |panel, cx| panel.set_file(Some(id), cx));
 }
 
 /// Each row as its source's name and every occurrence's (context, linked text).
@@ -191,7 +191,7 @@ fn an_index_change_that_leaves_the_rows_alone_redraws_nothing(cx: &mut TestAppCo
     let (count, _guard) = redraws(cx, &panel);
 
     fs.insert_file("/vault/c.md", "still unrelated, [[elsewhere]]");
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "d", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "d", cx));
     cx.run_until_parked();
     drop(created);
 
@@ -202,7 +202,7 @@ fn an_index_change_that_leaves_the_rows_alone_redraws_nothing(cx: &mut TestAppCo
     );
 
     fs.insert_file("/vault/c.md", "now [[b]]");
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "e", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "e", cx));
     cx.run_until_parked();
     drop(created);
 

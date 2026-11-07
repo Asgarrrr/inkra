@@ -34,8 +34,9 @@ fn a_snapshot_splits_into_ranges_over_its_notes() {
     assert_eq!(names.len(), 10);
     assert!(!names.is_empty());
     assert_eq!(names.chunks(3), [0..3, 3..6, 6..10]);
-    assert!(NoteSet::build(Vec::new()).names.chunks(4).is_empty());
-    assert!(NoteSet::build(Vec::new()).names.is_empty());
+    let empty = NoteSet::build(Vec::<(_, String, _, _)>::new()).names;
+    assert!(empty.chunks(4).is_empty());
+    assert!(empty.is_empty());
 }
 
 #[test]

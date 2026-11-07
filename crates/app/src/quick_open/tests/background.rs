@@ -6,7 +6,7 @@ use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point, px};
 use super::refresh::{advance, hold_scans, notify, runs, selected};
 use super::{Opened, listed, open, search};
 use crate::index::BUILDING_REFRESH;
-use crate::open::NoteActivated;
+use crate::open::FileActivated;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::test_support::{entry_id, vault};
 use crate::theme;
@@ -42,8 +42,8 @@ fn enter_during_a_background_refresh_confirms_the_row_shown_at_once(cx: &mut Tes
     let activated = Rc::new(RefCell::new(Vec::new()));
     let _guard = opened.visual.update(|_, cx| {
         let activated = Rc::clone(&activated);
-        cx.subscribe(&opened.picker, move |_, event: &NoteActivated, _| {
-            activated.borrow_mut().push(event.note);
+        cx.subscribe(&opened.picker, move |_, event: &FileActivated, _| {
+            activated.borrow_mut().push(event.file);
         })
     });
     let release = hold_scans(&mut opened);

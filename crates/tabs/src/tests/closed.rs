@@ -330,6 +330,7 @@ fn closed_on(notes: &[u8]) -> Harness {
 
 fn reopened_notes(harness: &mut Harness) -> Vec<Option<u8>> {
     std::iter::from_fn(|| harness.reopen())
+        .take(HISTORY + 1)
         .map(|place| place.note)
         .collect()
 }

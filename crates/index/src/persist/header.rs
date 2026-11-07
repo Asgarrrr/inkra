@@ -6,7 +6,7 @@ use super::words::{self, CachedWords};
 use crate::IndexSnapshot;
 use crate::words::varint;
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 /// The reader refuses a larger file from its stat, before reading it.
 pub const MAX_BYTES: u64 = 256 << 20;
 

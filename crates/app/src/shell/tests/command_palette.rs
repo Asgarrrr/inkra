@@ -4,7 +4,7 @@ use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_layout::{Side, View};
 use inkra_vault::mem_fs::MemFs;
 
-use super::{activate, editor, no_vault, showing, tab_notes, tree_focused, two_notes, vault_names};
+use super::{activate, editor, no_vault, showing, tab_files, tree_focused, two_notes, vault_names};
 use crate::Quit;
 use crate::shell::{AppShell, NoteStore};
 use crate::sidebar::Sidebar;
@@ -210,7 +210,7 @@ fn new_tab_ranks_new_tab_first_with_a_note_showing(cx: &mut TestAppContext) {
     visual.simulate_keystrokes("enter");
     visual.run_until_parked();
 
-    let tabs = tab_notes(&window, &mut visual).0;
+    let tabs = tab_files(&window, &mut visual).0;
     assert_eq!(
         (tabs.len(), tabs.get(1)),
         (2, Some(&None)),

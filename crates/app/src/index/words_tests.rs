@@ -118,7 +118,7 @@ fn a_startup_load_past_the_merge_policy_merges_and_answers_as_a_fresh_build(
             .entries()
             .filter(|entry| entry.kind == Kind::Note)
             .map(|entry| {
-                let name = entry.path.display_name();
+                let name = entry.display_name();
                 let n = name[1..].parse().expect("a numbered note");
                 (entry.id, n)
             })

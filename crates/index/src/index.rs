@@ -26,6 +26,8 @@ use crate::words::{
 #[derive(Default)]
 pub struct NoteIndex {
     notes: NoteTable,
+    /// Searched only after `notes` misses (K6).
+    assets: NoteTable,
     names: NamesSnapshot,
     /// The build's scanned mtimes, handed back whole in the set `set_notes` returns.
     mtimes: Arc<[Mtime]>,
@@ -37,7 +39,7 @@ pub struct NoteIndex {
     words: Words,
 }
 
-/// The links of one source that resolve to a note, in document order.
+/// The links of one source that resolve to a file, in document order.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Backlink<'a> {
     pub source: EntryId,
@@ -57,6 +59,7 @@ impl NoteIndex {
             });
         let previous = NoteSet {
             notes: mem::replace(&mut self.notes, notes.notes),
+            assets: mem::replace(&mut self.assets, notes.assets),
             names: mem::replace(&mut self.names, notes.names),
             ids,
             mtimes: mem::replace(&mut self.mtimes, notes.mtimes),
@@ -233,7 +236,18 @@ impl NoteIndex {
 
     #[must_use]
     pub fn resolve(&self, source: Option<EntryId>, target: &Target) -> Resolution {
-        self.notes.resolve(source, target)
+        match self.notes.query(source, target) {
+            Ok(query) => self.search(&query),
+            Err(resolution) => resolution,
+        }
+    }
+
+    /// Notes first: an asset is found only when no note matches (K6).
+    fn search(&self, query: &Query) -> Resolution {
+        match self.notes.search(query) {
+            Resolution::Unresolved if !query.md => self.assets.search(query),
+            found => found,
+        }
     }
 
     #[must_use]
@@ -243,10 +257,11 @@ impl NoteIndex {
 
     /// Grouped by source in vault order; a note linking to itself is included.
     #[must_use]
-    pub fn backlinks(&self, note: EntryId) -> Vec<Backlink<'_>> {
+    pub fn backlinks(&self, file: EntryId) -> Vec<Backlink<'_>> {
         let Some(rows) = self
             .notes
-            .stem(note)
+            .stem(file)
+            .or_else(|| self.assets.stem(file))
             .and_then(|stem| self.by_stem.get(stem))
         else {
             return Vec::new();
@@ -254,24 +269,26 @@ impl NoteIndex {
         let mut grouped: BTreeMap<(usize, EntryId), Vec<usize>> = BTreeMap::new();
         // A shared name such as `index` is written the same way by thousands of links, and
         // only a relative link's resolution depends on its source.
-        let mut by_text: HashMap<(&str, Style), Resolution> = HashMap::new();
+        let mut by_text: HashMap<(&str, Style, bool), Resolution> = HashMap::new();
         let mut by_query: HashMap<Query, Resolution> = HashMap::new();
         for &(source, at) in rows {
             let link = &self.source(source).links[at];
             let resolution = match &link.target {
-                Target::Note { path, style, .. } if *style != Style::Relative => by_text
-                    .entry((path, *style))
+                Target::Note {
+                    path, style, md, ..
+                } if *style != Style::Relative => by_text
+                    .entry((path, *style, *md))
                     .or_insert_with(|| self.resolve(Some(source), &link.target))
                     .clone(),
                 target => match self.notes.query(Some(source), target) {
                     Ok(query) => by_query
                         .entry(query)
-                        .or_insert_with_key(|query| self.notes.search(query))
+                        .or_insert_with_key(|query| self.search(query))
                         .clone(),
                     Err(resolution) => resolution,
                 },
             };
-            if resolution == Resolution::Note(note) {
+            if resolution == Resolution::File(file) {
                 grouped
                     .entry((self.notes.order(source), source))
                     .or_default()
@@ -351,6 +368,8 @@ impl IndexSnapshot {
     }
 }
 
+#[cfg(test)]
+mod asset_tests;
 #[cfg(test)]
 mod corpus_tests;
 #[cfg(test)]

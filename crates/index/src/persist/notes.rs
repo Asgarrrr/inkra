@@ -18,6 +18,10 @@ use crate::{IndexSnapshot, Source, SourceLink, Style, Target};
 const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
 /// The flags bit of a record holding a stamp.
 const STAMPED: u8 = 1;
+/// The flag bits of a link holding a fragment, and of one written with `.md`; then every bit known.
+const FRAGMENT: u8 = 0b01;
+const MD: u8 = 0b10;
+const KNOWN_LINK_FLAGS: u8 = 0b11;
 
 /// A note as the cache holds it: the file its words came from, and its links.
 #[derive(Debug, PartialEq, Eq)]
@@ -73,6 +77,7 @@ fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
     for link in links {
         let Target::Note {
             path,
+            md,
             fragment,
             style,
         } = &link.target
@@ -80,12 +85,9 @@ fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
             panic!("a source holds note links only");
         };
         put_str(out, path)?;
-        match fragment {
-            Some(fragment) => {
-                out.push(1);
-                put_str(out, fragment)?;
-            }
-            None => out.push(0),
+        out.push(link_flags(*md, fragment.is_some()));
+        if let Some(fragment) = fragment {
+            put_str(out, fragment)?;
         }
         out.push(style_code(*style));
         put_range(out, link.range.start.get()..link.range.end.get())?;
@@ -106,6 +108,11 @@ fn put_range(out: &mut Vec<u8>, range: Range<usize>) -> Option<()> {
         varint::push(out, u32::try_from(at).ok()?);
     }
     Some(())
+}
+
+pub(super) fn link_flags(md: bool, fragment: bool) -> u8 {
+    let bit = |set: bool, bit: u8| if set { bit } else { 0 };
+    bit(md, MD) | bit(fragment, FRAGMENT)
 }
 
 pub(super) fn style_code(style: Style) -> u8 {
@@ -189,10 +196,14 @@ fn stamp(bytes: &mut &[u8]) -> Result<Stamp, Rejected> {
 
 fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
     let path = string(bytes)?.to_owned();
-    let fragment = match byte(bytes)? {
-        0 => None,
-        1 => Some(string(bytes)?.to_owned()),
-        _ => return Err(Rejected::Corrupt("flags")),
+    let flags = byte(bytes)?;
+    if flags & !KNOWN_LINK_FLAGS != 0 {
+        return Err(Rejected::Corrupt("flags"));
+    }
+    let fragment = if flags & FRAGMENT == 0 {
+        None
+    } else {
+        Some(string(bytes)?.to_owned())
     };
     let style = match byte(bytes)? {
         0 => Style::Name,
@@ -210,6 +221,7 @@ fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
     Ok(SourceLink {
         target: Target::Note {
             path,
+            md: flags & MD != 0,
             fragment,
             style,
         },

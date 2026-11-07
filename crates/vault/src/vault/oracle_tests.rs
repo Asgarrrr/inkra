@@ -228,7 +228,7 @@ pub(super) fn run(
             if let Some((_, from, kind)) = picks.get(pick) {
                 let file = match kind {
                     Kind::Note => format!("{}.md", NAMES[name]),
-                    Kind::Dir => NAMES[name].to_owned(),
+                    Kind::Dir | Kind::Asset => NAMES[name].to_owned(),
                 };
                 let to = from.with_file_name(file);
                 let _ = block_on(fs.rename(from, &to));
@@ -315,7 +315,7 @@ fn run_across(fs: &MemFs, vault: &Vault, under: &Path, cross: &Cross) -> Option<
     let folder = Path::new(ROOT).join(&folders[cross.folder % folders.len()]);
     let to = match entry.kind {
         Kind::Note => folder.join(format!("{}.md", NAMES[cross.name])),
-        Kind::Dir => folder.join(NAMES[cross.name]),
+        Kind::Dir | Kind::Asset => folder.join(NAMES[cross.name]),
     };
     let exists = fs.read_to_string(&to).is_some() || block_on(fs.read_dir(&to)).is_ok();
     if cross.link {

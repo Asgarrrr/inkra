@@ -4,7 +4,7 @@ use super::builds::Layout;
 
 /// What changed in the vault since the entries the index last applied, derived off the foreground.
 pub(super) enum Change {
-    /// The same notes, at the same paths, in the same order: the notes whose stamp moved.
+    /// The same files, at the same paths, in the same order: the notes whose stamp moved.
     Stamps(Vec<(EntryId, Stamp)>),
     Layout(Box<Layout>),
 }
@@ -19,15 +19,16 @@ impl Change {
     }
 }
 
-/// `None` when a note was added, removed, re-keyed, moved or reordered; folders are read by no build.
+/// `None` when a file was added, removed, re-keyed, moved or reordered, since links resolve to
+/// assets too; folders are read by no build, and an asset's stamp loads nothing.
 fn moved_stamps(last: &[Entry], entries: &[Entry]) -> Option<Vec<(EntryId, Stamp)>> {
-    let (mut before, mut after) = (notes(last), notes(entries));
+    let (mut before, mut after) = (files(last), files(entries));
     let mut moved = Vec::new();
     loop {
         match (before.next(), after.next()) {
             (None, None) => return Some(moved),
             (Some(old), Some(new)) if old.id == new.id && old.path == new.path => {
-                if old.stamp() != new.stamp() {
+                if new.kind == Kind::Note && old.stamp() != new.stamp() {
                     moved.push((new.id, new.stamp()));
                 }
             }
@@ -36,7 +37,12 @@ fn moved_stamps(last: &[Entry], entries: &[Entry]) -> Option<Vec<(EntryId, Stamp
     }
 }
 
-/// The entries a build reads: folders are dropped.
+/// The entries a build loads: folders and assets are dropped.
 pub(super) fn notes(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
     entries.iter().filter(|entry| entry.kind == Kind::Note)
+}
+
+/// The entries links resolve to: folders are dropped.
+pub(super) fn files(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
+    entries.iter().filter(|entry| entry.kind.is_file())
 }

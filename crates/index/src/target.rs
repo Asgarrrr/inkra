@@ -9,6 +9,8 @@ pub enum Target {
     Note {
         /// As written, `.md` stripped, `/`-separated.
         path: String,
+        /// Whether the written name ended in `.md`: only a note can match it, never an asset.
+        md: bool,
         fragment: Option<String>,
         style: Style,
     },
@@ -47,7 +49,9 @@ impl Target {
             }
             LinkKind::Wiki => path,
         };
-        let path = strip_md(path.trim());
+        let written = path.trim();
+        let path = strip_md(written);
+        let md = path.len() != written.len();
         if path.is_empty() {
             return Self::SelfLink;
         }
@@ -59,6 +63,7 @@ impl Target {
         };
         Self::Note {
             path: path.to_owned(),
+            md,
             fragment,
             style,
         }

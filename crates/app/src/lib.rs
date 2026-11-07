@@ -9,6 +9,8 @@ mod command_palette;
 mod count;
 mod editor;
 mod field;
+mod file_kind;
+mod images;
 mod index;
 mod keymap;
 mod logger;

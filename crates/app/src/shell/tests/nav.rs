@@ -1,7 +1,7 @@
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext};
 
 use super::tab_bar::click;
-use super::{ab_focused, editor_focused, open, showing, splits, tab_notes};
+use super::{ab_focused, editor_focused, open, showing, splits, tab_files};
 use crate::shell::split::SplitDown;
 
 #[gpui::test]
@@ -21,7 +21,7 @@ fn the_arrows_walk_the_tabs_history(cx: &mut TestAppContext) {
 fn a_dimmed_arrow_changes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, a, _b) = ab_focused(cx);
     open(&window, &mut cx, a);
-    let before = (showing(&window, &mut cx), tab_notes(&window, &mut cx));
+    let before = (showing(&window, &mut cx), tab_files(&window, &mut cx));
     assert!(editor_focused(&window, &mut cx));
 
     // The view lights an arrow from `Tabs`: a disabled `IconButton` draws as `{id}-disabled`.
@@ -32,7 +32,7 @@ fn a_dimmed_arrow_changes_nothing(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("nav-forward").is_none());
 
     assert_eq!(
-        (showing(&window, &mut cx), tab_notes(&window, &mut cx)),
+        (showing(&window, &mut cx), tab_files(&window, &mut cx)),
         before
     );
     assert!(

@@ -22,9 +22,9 @@ struct Fake {
 }
 
 impl Place for Fake {
-    type Note = u8;
+    type File = u8;
 
-    fn note(&self) -> Option<u8> {
+    fn file(&self) -> Option<u8> {
         self.note
     }
 }
@@ -46,17 +46,17 @@ fn entries(stack: &Stack<Fake>) -> Vec<Fake> {
 fn check_stack<P: Place>(stack: &Stack<P>) {
     let stack = &stack.0;
     assert!(stack.len() <= HISTORY, "H3");
-    assert!(stack.iter().all(|place| place.note().is_some()), "H2");
+    assert!(stack.iter().all(|place| place.file().is_some()), "H2");
     assert!(
         stack
             .iter()
             .zip(stack.iter().skip(1))
-            .all(|(older, newer)| older.note() != newer.note()),
+            .all(|(older, newer)| older.file() != newer.file()),
         "H1: no adjacent entries on one note"
     );
 }
 
-impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
+impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
     /// M1–M3, H1's adjacency, H2, H3, H8, C1, C3.
     fn check(&self) {
         assert!(!self.list.is_empty(), "at least one tab");
@@ -68,7 +68,7 @@ impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
         assert!(self.closed.len() <= HISTORY, "C3");
         for entry in &self.closed {
             assert!(
-                entry.place.note().is_some()
+                entry.place.file().is_some()
                     || !entry.back.0.is_empty()
                     || !entry.forward.0.is_empty(),
                 "C1: no closed entry without a note or history"

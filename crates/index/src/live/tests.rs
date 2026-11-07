@@ -8,9 +8,9 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Stamp, Vault, VaultError};
 
 use super::{BuildJob, Effects, LiveIndex, Load, Merge, Status, Ticket, Turn};
-use crate::test_support::{ROOT, content, id, loaded};
+use crate::test_support::{ROOT, content, find_all, id, loaded, target};
 use crate::words::{NoteWords, Words};
-use crate::{FileRead, NoteContent};
+use crate::{FileRead, NoteContent, NoteQuery, Resolution};
 
 /// Enough slots that no test below the slot tests waits for one.
 pub(super) const SLOTS: usize = 64;
@@ -730,4 +730,74 @@ fn a_stale_ticket_a_merge_and_a_mint_leave_the_revision() {
 
     assert!(h.landed(ticket, Ok(content)));
     assert_eq!(h.live.revision(), before + 1, "the save's parse");
+}
+
+#[test]
+fn an_asset_gives_no_name_no_word_and_no_load() {
+    let mut h = Harness::new(&[("a.md", "alpha"), ("photo.png", "png")]);
+    let mut effects = vec![h.built()];
+    while !h.pending.loads.is_empty() {
+        effects.push(h.land_pending(0));
+    }
+
+    let photo = path("photo.png");
+    assert!(
+        effects
+            .iter()
+            .flat_map(|effects| &effects.loads)
+            .all(|load| load.path != photo)
+    );
+    assert_eq!(h.loads("photo.png"), 0);
+    let snapshot = h.live.index().snapshot();
+    for query in ["photo", "png"] {
+        assert!(find_all(&snapshot, &NoteQuery::new(query, None, &[]), 10).is_empty());
+    }
+    assert_eq!(
+        find_all(&snapshot, &NoteQuery::new("alpha", None, &[]), 10).len(),
+        1
+    );
+}
+
+#[test]
+fn an_asset_written_loads_nothing_and_keeps_the_set() {
+    let mut h = Harness::loaded(&[("a.md", "alpha"), ("photo.png", "png")]);
+    let before = h.live.revision();
+
+    h.write("photo.png", "png, edited");
+    assert!(!h.built().layout, "a moved asset stamp is no note's");
+    assert!(h.pending.loads.is_empty());
+    assert_eq!(h.live.revision(), before);
+}
+
+#[test]
+fn adding_an_asset_rebuilds_the_layout() {
+    let mut h = Harness::loaded(&[("a.md", "![[x.png]]")]);
+    let a = h.id("a.md");
+
+    h.fs.insert_bytes(path("x.png"), *b"\x89PNG");
+    h.rescan();
+    let _ = h.vault_changed();
+    let effects = h.run_build();
+
+    assert!(effects.layout, "links resolve to the new asset");
+    assert!(h.pending.loads.is_empty());
+    assert_eq!(
+        h.live.index().resolve(Some(a), &target("![[x.png]]")),
+        Resolution::File(h.id("x.png"))
+    );
+}
+
+#[test]
+fn removing_or_renaming_an_asset_rebuilds_the_layout() {
+    let mut h = Harness::loaded(&[("a.md", "alpha"), ("x.png", "png"), ("y.png", "png")]);
+
+    let renamed = block_on(h.fs.rename(&path("x.png"), &path("z.png")));
+    assert!(renamed.is_ok());
+    h.rescan();
+    assert!(h.built().layout, "renamed");
+    assert!(h.pending.loads.is_empty());
+
+    h.remove("y.png");
+    assert!(h.built().layout, "removed");
+    assert!(h.pending.loads.is_empty());
 }

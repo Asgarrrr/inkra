@@ -16,7 +16,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   one test fake (`Fs` with `RealFs`/`MemFs`). No trait with one implementer, no
   layer for a future that is not on the roadmap.
 - **Modular by seams, not by indirection.** Crates have one role and one
-  dependency direction. Views talk through events (`NoteActivated`), never by
+  dependency direction. Views talk through events (`FileActivated`), never by
   holding each other's entities, so a new pane plugs in without touching the
   others. Extensibility is a property of these seams; do not build a plugin
   system ahead of need.
@@ -143,6 +143,8 @@ Read the spec before changing its area:
   `LiveIndex::turn`: `Turn`, `Effects`, the turn's end, `revision`, when `IndexSync` notifies
 - `docs/superpowers/specs/2026-11-06-persisted-index-design.md` — the cache
   file, the seed, text read on demand, the writer, Rebuild, the scrub
+- `docs/superpowers/specs/2026-11-06-file-kinds-design.md` — assets in the vault
+  and the tree, `FileKind`, `Images`, `Shown::Image`, session v3, links to files
 - `docs/superpowers/specs/2026-09-28-sidebar-rebuild-design.md` — the tree's
   walk: skipped subtrees, note runs, rows built when drawn
 - `docs/superpowers/specs/2026-09-29-sidebar-rows-design.md` — `Rows`: the

@@ -5,7 +5,7 @@ use gpui::{
 use inkra_vault::EntryId;
 
 use super::{
-    AppShell, ab_focused, check, four_notes, keys, open, showing, start_open, tab_notes, text_of,
+    AppShell, ab_focused, check, four_notes, keys, open, showing, start_open, tab_files, text_of,
 };
 
 /// Presses on `from`, moves past gpui's 2 px threshold (`div.rs:52`), onto `to`, and releases there.
@@ -52,7 +52,7 @@ fn dragging_a_tab_onto_a_later_one_puts_it_after(cx: &mut TestAppContext) {
     drag(&mut cx, "tab-0", "tab-2");
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(b), Some(c), Some(a)], 1)
     );
     assert_eq!(showing(&window, &mut cx), Some(c));
@@ -66,7 +66,7 @@ fn dragging_a_tab_onto_an_earlier_one_puts_it_before(cx: &mut TestAppContext) {
     drag(&mut cx, "tab-2", "tab-0");
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(c), Some(a), Some(b)], 0)
     );
     check(&window, &mut cx);
@@ -100,7 +100,7 @@ fn a_drop_outside_the_tabs_moves_nothing(cx: &mut TestAppContext) {
     drag_to(&mut cx, "tab-0", editor);
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), Some(c)], 2)
     );
     assert!(!cx.update(|_, cx| cx.has_active_drag()), "no drag remains");
@@ -119,7 +119,7 @@ fn a_drag_keeps_a_pending_open(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(b), Some(d), Some(a)], 1)
     );
     check(&window, &mut cx);
@@ -138,7 +138,7 @@ fn a_drag_under_a_picker_moves_nothing(cx: &mut TestAppContext) {
         .unwrap();
     assert!(!modal, "the press dismissed the picker");
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), Some(c)], 2)
     );
     check(&window, &mut cx);
@@ -159,7 +159,7 @@ fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppCont
         cx.simulate_keystrokes("ctrl-shift-tab");
     }
     cx.run_until_parked();
-    assert_eq!(tab_notes(&window, &mut cx).1, 20);
+    assert_eq!(tab_files(&window, &mut cx).1, 20);
 
     window
         .update(&mut cx, |shell, _, cx| {
@@ -169,7 +169,7 @@ fn moving_a_tab_from_before_the_active_one_keeps_it_in_view(cx: &mut TestAppCont
         .unwrap();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx).1, 19);
+    assert_eq!(tab_files(&window, &mut cx).1, 19);
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let active = cx.debug_bounds("tab-19").unwrap();
     assert!(
@@ -187,7 +187,7 @@ fn a_drag_started_on_the_x_and_released_on_it_closes_nothing(cx: &mut TestAppCon
     drag(&mut cx, "tab-close-0", "tab-close-0");
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), Some(c)], 2)
     );
     assert!(!cx.update(|_, cx| cx.has_active_drag()), "no drag remains");

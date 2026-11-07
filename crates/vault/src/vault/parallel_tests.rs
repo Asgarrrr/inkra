@@ -9,7 +9,7 @@ use futures::executor::block_on;
 
 use super::test_helpers::paths;
 use super::*;
-use crate::fs::{DirEntry, Loaded, Saved, Stamp};
+use crate::fs::{DirEntry, Loaded, New, Saved, Stamp};
 use crate::mem_fs::MemFs;
 use crate::watch::Watch;
 use crate::{Job, Jobs};
@@ -148,8 +148,8 @@ impl Fs for PanickingFs {
         self.inner.remove_file(path).await
     }
 
-    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
-        self.inner.create(path, kind).await
+    async fn create(&self, path: &Path, new: New) -> Result<FileIdentity> {
+        self.inner.create(path, new).await
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {

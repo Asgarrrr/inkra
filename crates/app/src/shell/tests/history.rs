@@ -158,7 +158,7 @@ fn a_jump_inside_the_note_showing_pushes_nothing(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     open(&window, &mut cx, b);
     keys(&mut cx, "cmd-[");
-    // Outside a window update, as the hit's subscription runs: `show_note` needs `with_window`.
+    // Outside a window update, as the hit's subscription runs: `show_file` needs `with_window`.
     let shell = window.root(&mut cx).unwrap();
     shell.update(&mut cx, |shell, cx| {
         shell.open(a, Some(at(1)..at(2)), Open::Here, cx);

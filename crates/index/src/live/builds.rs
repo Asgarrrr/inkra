@@ -8,7 +8,7 @@ use std::sync::Arc;
 use inkra_vault::{Entry, EntryId, Stamp, Vault};
 
 use super::LiveIndex;
-use super::diff::{Change, notes};
+use super::diff::{Change, files, notes};
 use crate::note_set::NoteSet;
 use crate::persist::{Decoded, Outcome};
 use crate::seed::Seed;
@@ -122,10 +122,9 @@ impl Retired {
 
 impl Layout {
     pub(super) fn new(entries: &[Entry]) -> Self {
-        let named = entries
-            .iter()
+        let named = files(entries)
             .map(|entry| {
-                let path = entry.path.as_path().to_string_lossy().into_owned();
+                let path = entry.path.as_path().to_string_lossy();
                 (entry.id, path, entry.kind, entry.mtime)
             })
             .collect();

@@ -145,6 +145,7 @@ impl AppShell {
                 self.enter_group(heir, cx);
             }
         }
+        Self::release_images_later(cx);
         removed
     }
 

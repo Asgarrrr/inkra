@@ -6,7 +6,7 @@ use gpui::{
 
 use super::{
     AppShell, ab_focused, click_row, editor_focused, four_notes, keys, no_vault, open, selected,
-    tab_notes,
+    tab_files,
 };
 use crate::theme;
 
@@ -353,7 +353,7 @@ fn a_tab_drag_never_arms_a_window_move(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx).0, [Some(b), Some(c), Some(a)]);
+    assert_eq!(tab_files(&window, &mut cx).0, [Some(b), Some(c), Some(a)]);
 }
 
 #[gpui::test]

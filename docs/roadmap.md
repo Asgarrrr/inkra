@@ -206,6 +206,28 @@ here, so the two cannot drift.
   dock widths never overflow a strip. **Trigger:** a third view, or resizing a
   dock.
 
+### File kinds
+
+Taken out of `superpowers/specs/2026-11-06-file-kinds-design.md`.
+
+- Images drawn inside the note text: embeds rendered. **Trigger:** the first
+  inline embed request.
+- Assets in `⌘P` and in `recent`. **Trigger:** `⌘P` lists assets.
+- Zoom and pan: `FileView { Note(ViewState), Image(zoom, pan) }` replaces
+  `OnFile`'s `ViewState`, and its parked twin `ParkedView`. **Trigger:** the
+  spec names none.
+- Reload of a shown image changed on disk: key `Images` by `(EntryId, Mtime)`.
+  **Trigger:** an external image editor workflow.
+- Open with the system app, from a context menu, with an allowlist of
+  extensions, behind a recorded seam. One click must never run a `.command`.
+  **Trigger:** the first non-image kind users ask for.
+- Galleries and a bounded image cache (LRU with a byte budget). **Trigger:**
+  more than one image drawn per group.
+- Bases: typed frontmatter, a property column in the index, a structured
+  query beside `find_notes`, a table view. **Trigger:** the spec names none.
+- A tab's icon from its `FileKind`; a tab draws its title and indicator only.
+  **Trigger:** a second viewable kind lands, or users mix note and image tabs.
+
 ## Startup performance
 
 Paused on 2026-09-26 by the user: slices 5–7 took the first frame from

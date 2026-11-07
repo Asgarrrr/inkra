@@ -13,7 +13,7 @@ use crate::words::SHARDS;
 use crate::{Group, NoteQuery, Resolution, Source};
 
 /// Each backlink as (source path, the linked text of each occurrence).
-fn backlinks(
+pub(super) fn backlinks(
     index: &NoteIndex,
     vault: &inkra_vault::Vault,
     note: &str,
@@ -37,7 +37,7 @@ fn backlinks(
         .collect()
 }
 
-fn pair(source: &str, lits: &[&str]) -> (String, Vec<String>) {
+pub(super) fn pair(source: &str, lits: &[&str]) -> (String, Vec<String>) {
     (
         source.to_owned(),
         lits.iter().map(|lit| (*lit).to_owned()).collect(),
@@ -266,7 +266,7 @@ fn resolve_link_parses_then_resolves() {
 
     assert_eq!(
         index.resolve_link(src, &found[0]),
-        Resolution::Note(id(&vault, "Plan.md"))
+        Resolution::File(id(&vault, "Plan.md"))
     );
     assert_eq!(
         index.resolve_link(src, &found[1]),

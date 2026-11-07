@@ -6,7 +6,7 @@ use inkra_text::ByteOffset;
 
 use std::path::PathBuf;
 
-use super::{SavedNoteTab, SavedView};
+use super::{SavedFileTab, SavedView};
 use crate::editor::{TopLine, ViewState};
 
 impl From<&ViewState> for SavedView {
@@ -20,12 +20,12 @@ impl From<&ViewState> for SavedView {
     }
 }
 
-impl SavedNoteTab {
-    /// A note with no UTF-8 path saves empty, with no view.
+impl SavedFileTab {
+    /// A file with no UTF-8 path saves empty, with no view.
     pub(crate) fn new(path: Option<PathBuf>, view: Option<&ViewState>) -> Self {
-        let note = path.and_then(|path| path.to_str().map(str::to_owned));
-        let view = view.filter(|_| note.is_some()).map(SavedView::from);
-        Self { note, view }
+        let file = path.and_then(|path| path.to_str().map(str::to_owned));
+        let view = view.filter(|_| file.is_some()).map(SavedView::from);
+        Self { file, view }
     }
 }
 

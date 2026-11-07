@@ -39,6 +39,10 @@ name = "index"
 harness = false
 
 [[bench]]
+name = "live"
+harness = false
+
+[[bench]]
 name = "names"
 harness = false
 

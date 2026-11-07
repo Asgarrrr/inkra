@@ -5,18 +5,23 @@ use gpui::{
     Bounds, Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds,
     WindowHandle, WindowOptions, point, px, size,
 };
+use inkra_index::Resolution;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use crate::bootstrap::{Launch, root};
 use crate::editor::LinkFollowed;
+use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::open::Open;
 use crate::shell::AppShell;
 use crate::test_support::entry_id;
 
 use super::splits::{centre, check_layout, close, last, shown_in};
-use super::{activate, check, editor, open_vault, showing, tab_notes, vault_names};
+use super::{
+    activate, at, check, editor, image_shown, keys, open, open_vault, select, shell_focused,
+    showing, tab_files, vault_names, view_of,
+};
 
 /// A vault whose `a` is showing, its caret at 0 (`open_buffer` leaves it at the end), with the
 /// index built.
@@ -147,7 +152,7 @@ fn cmd_shift_enter_on_a_wikilink_opens_its_note_in_a_new_tab(cx: &mut TestAppCon
     visual.simulate_keystrokes("cmd-shift-enter");
     visual.run_until_parked();
 
-    let (tabs, active) = tab_notes(&window, cx);
+    let (tabs, active) = tab_files(&window, cx);
     assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
     assert_eq!(shown_text(&window, cx), "beta");
     check(&window, cx);
@@ -175,7 +180,7 @@ fn a_relative_link_in_a_new_tab_resolves_from_the_note_left(cx: &mut TestAppCont
     });
     visual.run_until_parked();
 
-    let (tabs, active) = tab_notes(&window, cx);
+    let (tabs, active) = tab_files(&window, cx);
     assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
     assert_eq!(shown_text(&window, cx), "gamma");
     check(&window, cx);
@@ -241,7 +246,7 @@ fn a_link_split_refused_by_the_minimum_opens_a_new_tab(cx: &mut TestAppContext) 
     visual.run_until_parked();
 
     assert_eq!(centre(&window, &mut visual).len(), 1);
-    let (tabs, active) = tab_notes(&window, cx);
+    let (tabs, active) = tab_files(&window, cx);
     assert_eq!((tabs.len(), tabs[0], active), (2, a, 1));
     assert_eq!(shown_text(&window, cx), "beta");
     check(&window, cx);
@@ -298,5 +303,86 @@ fn a_wikilink_in_a_detached_note_changes_nothing(cx: &mut TestAppContext) {
 
     assert_eq!(visual.opened_url(), None);
     assert_eq!(showing(&window, &mut visual), Some(EntryId::DETACHED));
-    assert_eq!(tab_notes(&window, &mut visual).0.len(), 1);
+    assert_eq!(tab_files(&window, &mut visual).0.len(), 1);
+}
+
+/// `a.md` holding `text` showing, beside `photo.png` and `report.pdf`; returns the window, its
+/// context, `a`, `photo` and the PDF.
+fn beside_files(
+    cx: &mut TestAppContext,
+    text: &str,
+) -> (
+    WindowHandle<AppShell>,
+    VisualTestContext,
+    EntryId,
+    EntryId,
+    EntryId,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", text);
+    fs.insert_bytes("/vault/photo.png", png(40, 30));
+    fs.insert_bytes("/vault/report.pdf", b"%PDF".to_vec());
+    let (window, notes, mut visual) = shell_focused(cx, &fs);
+    let a = entry_id(&notes, &mut visual, "a");
+    let photo = entry_id(&notes, &mut visual, "photo.png");
+    let pdf = entry_id(&notes, &mut visual, "report.pdf");
+    open(&window, &mut visual, a);
+    (window, visual, a, photo, pdf)
+}
+
+/// What `link`, written in the note showing, resolves to.
+fn resolved(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, link: &str) -> Resolution {
+    let link = inkra_markdown::links(link).remove(0);
+    window
+        .update(cx, |shell, _, cx| {
+            let index = shell.panes().links.read(cx).index();
+            index.resolve_link(shell.showing(), &link)
+        })
+        .expect("the shell is open")
+}
+
+fn follow_here(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, link: &str) {
+    let link = inkra_markdown::links(link).remove(0);
+    editor(window, cx).update(cx, |_, cx| {
+        cx.emit(LinkFollowed {
+            link,
+            open: Open::Here,
+        });
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn following_an_embed_opens_the_image_and_back_returns_to_the_note_with_its_view(
+    cx: &mut TestAppContext,
+) {
+    let (window, mut visual, a, photo, _) = beside_files(cx, "![[photo.png]] tail");
+    select(&window, &mut visual, 1..3);
+
+    follow_here(&window, &mut visual, "![[photo.png]]");
+    assert_eq!(image_shown(&window, &mut visual), Some(photo));
+
+    keys(&mut visual, "cmd-[");
+
+    assert_eq!(showing(&window, &mut visual), Some(a));
+    assert_eq!(view_of(&window, &mut visual).0, at(1)..at(3));
+    check(&window, &mut visual);
+}
+
+#[gpui::test]
+fn following_a_link_to_a_pdf_opens_nothing(cx: &mut TestAppContext) {
+    let (window, mut visual, a, _, pdf) = beside_files(cx, "[[report.pdf]] ![[report.pdf]]");
+    let before = tab_files(&window, &mut visual);
+    assert_eq!(
+        resolved(&window, &mut visual, "[[report.pdf]]"),
+        Resolution::File(pdf)
+    );
+
+    follow_here(&window, &mut visual, "[[report.pdf]]");
+    follow_here(&window, &mut visual, "![[report.pdf]]");
+
+    assert_eq!(showing(&window, &mut visual), Some(a));
+    assert_eq!(image_shown(&window, &mut visual), None);
+    assert_eq!(tab_files(&window, &mut visual), before);
+    check(&window, &mut visual);
 }

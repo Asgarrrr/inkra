@@ -10,9 +10,11 @@ use inkra_vault::{EntryId, Fs};
 
 use super::splits::{close, split};
 use super::{keys, open, select, start_trash, text_of, trash};
+use crate::images::png;
 use crate::keymap::key_bindings;
+use crate::open::Open;
 use crate::restore::{
-    Opened, SavedAxis, SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session,
+    Opened, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, Session,
 };
 use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
@@ -65,20 +67,20 @@ pub(super) fn saved(fs: &MemFs) -> Option<Session> {
 }
 
 /// The note tabs of the saved centre's one group.
-pub(super) fn saved_tabs(fs: &MemFs) -> Option<Vec<SavedNoteTab>> {
+pub(super) fn saved_tabs(fs: &MemFs) -> Option<Vec<SavedFileTab>> {
     let Some(SavedMember::Group(group)) = saved(fs)?.center else {
         panic!("one centre group");
     };
     let tabs = group.tabs.into_iter().map(|tab| match tab {
-        SavedTab::Note(tab) => tab,
+        SavedTab::File(tab) => tab,
         SavedTab::View { view } => panic!("a view tab in the centre: {view}"),
     });
     Some(tabs.collect())
 }
 
-pub(super) fn tab(note: &str, tail: usize, head: usize) -> SavedNoteTab {
-    SavedNoteTab {
-        note: Some(note.to_owned()),
+pub(super) fn tab(file: &str, tail: usize, head: usize) -> SavedFileTab {
+    SavedFileTab {
+        file: Some(file.to_owned()),
         view: Some(SavedView {
             tail,
             head,
@@ -106,8 +108,8 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
 
     wait(&mut cx, THROTTLE);
 
-    let empty = SavedNoteTab {
-        note: None,
+    let empty = SavedFileTab {
+        file: None,
         view: None,
     };
     let tabs = [tab("a.md", 2, 4), tab("b.md", 1, 3), empty];
@@ -117,7 +119,7 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
             PathBuf::from("/vault"),
             0,
             SavedMember::Group(SavedGroup {
-                tabs: tabs.into_iter().map(SavedTab::Note).collect(),
+                tabs: tabs.into_iter().map(SavedTab::File).collect(),
                 active: 1,
             }),
             Some(view_group("files")),
@@ -148,9 +150,9 @@ fn view_group(view: &str) -> SavedMember {
     })
 }
 
-fn note_group(tab: SavedNoteTab) -> SavedMember {
+fn note_group(tab: SavedFileTab) -> SavedMember {
     SavedMember::Group(SavedGroup {
-        tabs: vec![SavedTab::Note(tab)],
+        tabs: vec![SavedTab::File(tab)],
         active: 0,
     })
 }
@@ -273,9 +275,9 @@ fn two_tabs_saved(
     (fs, window, cx, b)
 }
 
-fn notes_saved(fs: &MemFs) -> Vec<Option<String>> {
+fn files_saved(fs: &MemFs) -> Vec<Option<String>> {
     let tabs = saved_tabs(fs).expect("a session");
-    tabs.into_iter().map(|tab| tab.note).collect()
+    tabs.into_iter().map(|tab| tab.file).collect()
 }
 
 #[gpui::test]
@@ -291,7 +293,7 @@ fn a_tab_dropped_elsewhere_in_the_bar_is_saved(cx: &mut TestAppContext) {
     wait(&mut cx, THROTTLE);
 
     assert_eq!(
-        notes_saved(&fs),
+        files_saved(&fs),
         [Some("b.md".to_owned()), Some("a.md".to_owned())]
     );
 }
@@ -308,7 +310,7 @@ fn an_inactive_tab_closed_is_saved(cx: &mut TestAppContext) {
 
     wait(&mut cx, THROTTLE);
 
-    assert_eq!(notes_saved(&fs), [Some("b.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("b.md".to_owned())]);
 }
 
 #[gpui::test]
@@ -320,7 +322,7 @@ fn an_inactive_tab_emptied_by_a_trash_is_saved(cx: &mut TestAppContext) {
     trash(&window, &mut cx, b);
     wait(&mut cx, THROTTLE);
 
-    assert_eq!(notes_saved(&fs), [Some("a.md".to_owned()), None]);
+    assert_eq!(files_saved(&fs), [Some("a.md".to_owned()), None]);
 }
 
 /// A rename moves no tab and shows nothing new: only the vault's notify can arm the throttle.
@@ -329,7 +331,7 @@ fn a_rename_of_a_note_a_tab_shows_is_saved(cx: &mut TestAppContext) {
     let (fs, window, mut cx, a, _b) = saving(cx);
     open(&window, &mut cx, a);
     wait(&mut cx, THROTTLE);
-    assert_eq!(notes_saved(&fs), [Some("a.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("a.md".to_owned())]);
 
     let notes = window
         .update(&mut cx, |shell, _, _| shell.notes.clone())
@@ -339,7 +341,7 @@ fn a_rename_of_a_note_a_tab_shows_is_saved(cx: &mut TestAppContext) {
     assert!(futures::executor::block_on(renamed), "the rename succeeded");
     wait(&mut cx, THROTTLE);
 
-    assert_eq!(notes_saved(&fs), [Some("plan.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("plan.md".to_owned())]);
 }
 
 #[gpui::test]
@@ -348,15 +350,15 @@ fn back_and_forward_are_saved(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     open(&window, &mut cx, b);
     wait(&mut cx, THROTTLE);
-    assert_eq!(notes_saved(&fs), [Some("b.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("b.md".to_owned())]);
 
     cx.simulate_keystrokes("cmd-[");
     wait(&mut cx, THROTTLE);
-    assert_eq!(notes_saved(&fs), [Some("a.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("a.md".to_owned())]);
 
     cx.simulate_keystrokes("cmd-]");
     wait(&mut cx, THROTTLE);
-    assert_eq!(notes_saved(&fs), [Some("b.md".to_owned())]);
+    assert_eq!(files_saved(&fs), [Some("b.md".to_owned())]);
 }
 
 /// R5: a tab whose trash is pending saves empty, not the note on its way out.
@@ -377,7 +379,39 @@ fn a_tab_whose_trash_is_pending_is_saved_empty(cx: &mut TestAppContext) {
     let notes: Vec<_> = saved_tabs(&fs)
         .expect("a session")
         .into_iter()
-        .map(|tab| tab.note)
+        .map(|tab| tab.file)
         .collect();
     assert_eq!(notes, [Some("b.md".to_owned()), None]);
+}
+/// Active or parked, an image tab saves its path and no view.
+#[gpui::test]
+fn an_image_tab_is_saved_without_a_view(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, a, _b) = saving(cx);
+    fs.insert_bytes("/vault/photo.png", png(40, 30));
+    cx.run_until_parked();
+    let notes = window
+        .update(&mut cx, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let photo = test_support::entry_id(&notes, &mut cx, "photo.png");
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+    window
+        .update(&mut cx, |shell, _, cx| {
+            shell.open(photo, None, Open::Here, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    wait(&mut cx, THROTTLE);
+    let active = saved_tabs(&fs);
+    keys(&mut cx, "cmd-1");
+    wait(&mut cx, THROTTLE);
+    let parked = saved_tabs(&fs);
+
+    let image = SavedFileTab {
+        file: Some("photo.png".to_owned()),
+        view: None,
+    };
+    assert_eq!(active, Some(vec![tab("a.md", 5, 5), image.clone()]));
+    assert_eq!(parked, active);
 }

@@ -8,7 +8,7 @@ use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
 use super::{
-    at, check, click_row, editor, open, select, shell_focused, showing, tab_notes, text_of, trash,
+    at, check, click_row, editor, open, select, shell_focused, showing, tab_files, text_of, trash,
 };
 use crate::picker::runs::SEARCH_DEBOUNCE;
 use crate::shell::AppShell;
@@ -63,7 +63,7 @@ fn cmd_click_on_a_sidebar_row_opens_it_in_a_new_tab_after_the_active_one(cx: &mu
     click_row(&mut cx, 1., Modifiers::command());
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), None], 1)
     );
     assert_eq!(showing(&window, &mut cx), Some(b));
@@ -85,7 +85,7 @@ fn a_new_tab_opened_from_an_empty_tab_keeps_the_empty_tab(cx: &mut TestAppContex
     click_row(&mut cx, 1., Modifiers::command());
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), None, Some(b)], 2)
     );
     check(&window, &mut cx);
@@ -104,7 +104,7 @@ fn a_new_tab_on_the_note_showing_duplicates_its_view_and_parks_the_tab_left(
 
     click_row(&mut cx, 0., Modifiers::command());
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(a)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(a)], 1));
     assert_eq!(caret(&window, &mut cx), at(3));
     check(&window, &mut cx);
 
@@ -160,7 +160,7 @@ fn the_later_of_two_pending_new_tab_opens_wins(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(c)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(c)], 1));
     check(&window, &mut cx);
 }
 
@@ -183,7 +183,7 @@ fn a_tab_switch_cancels_a_pending_new_tab_open(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 0));
     check(&window, &mut cx);
 }
 
@@ -203,7 +203,7 @@ fn a_new_tab_opened_past_the_bar_edge_scrolls_into_view(cx: &mut TestAppContext)
 
     click_row(&mut cx, 1., Modifiers::command());
 
-    assert_eq!(tab_notes(&window, &mut cx).1, 30);
+    assert_eq!(tab_files(&window, &mut cx).1, 30);
     let bar = cx.debug_bounds("tab-bar").expect("the bar is drawn");
     let new = cx.debug_bounds("tab-30").expect("the new tab is drawn");
     assert!(
@@ -230,7 +230,7 @@ fn a_note_closed_on_the_active_tab_keeps_a_pending_new_tab_open(cx: &mut TestApp
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b)], 1));
     assert_eq!(showing(&window, &mut cx), Some(b));
     check(&window, &mut cx);
 }
@@ -251,7 +251,7 @@ fn cmd_click_on_a_backlink_opens_its_source_in_a_new_tab(cx: &mut TestAppContext
     cx.simulate_click(row.center(), Modifiers::command());
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(a)], 1));
     check(&window, &mut cx);
 }
 
@@ -277,7 +277,7 @@ fn cmd_enter_in_quick_open_opens_the_pick_in_a_new_tab(cx: &mut TestAppContext) 
     cx.simulate_keystrokes("cmd-p");
     cx.simulate_keystrokes("cmd-enter");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     assert!(!has_modal(&window, &mut cx));
     cx.simulate_input("z");
     assert_eq!(text_of(&window, &mut cx, b), "zbeta");
@@ -300,7 +300,7 @@ fn cmd_enter_in_vault_search_opens_the_hit_in_a_new_tab_with_it_selected(cx: &mu
     // a's header, a's hit, b's header, b's hit.
     cx.simulate_keystrokes("down cmd-enter");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     let selected =
         editor(&window, &mut cx).update(&mut cx, |editor, _| editor.view_state().selection.range());
     assert_eq!(selected, at(5)..at(9));
@@ -318,6 +318,6 @@ fn cmd_enter_in_the_palette_runs_the_command(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-shift-p n e w space t a b cmd-enter");
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 1));
     check(&window, &mut cx);
 }

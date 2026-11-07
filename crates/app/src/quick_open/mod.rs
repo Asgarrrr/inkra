@@ -12,7 +12,7 @@ use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
 use crate::index::{IndexSync, NotesChanged, SCANNING, indexing_footer};
-use crate::open::{NoteActivated, Open};
+use crate::open::{FileActivated, Open};
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
@@ -30,7 +30,7 @@ actions!(quick_open, [QuickOpen]);
 /// Zed's file finder lists 100 too.
 const LIMIT: usize = 100;
 
-impl EventEmitter<NoteActivated> for Picker<QuickOpenDelegate> {}
+impl EventEmitter<FileActivated> for Picker<QuickOpenDelegate> {}
 
 pub(crate) struct QuickOpenDelegate {
     links: Entity<IndexSync>,
@@ -223,8 +223,8 @@ impl PickerDelegate for QuickOpenDelegate {
 
     fn confirm(&mut self, ix: usize, open: Open, cx: &mut Context<Picker<Self>>) {
         if let Some(row) = self.list.rows.get(ix) {
-            cx.emit(NoteActivated {
-                note: row.found.id,
+            cx.emit(FileActivated {
+                file: row.found.id,
                 open,
             });
         }

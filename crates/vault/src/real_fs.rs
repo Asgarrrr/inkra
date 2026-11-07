@@ -15,8 +15,8 @@ use async_trait::async_trait;
 
 use crate::conflict::conflict_path;
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
-    normalize_line_endings,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
+    listable, normalize_line_endings,
 };
 use crate::temp::{sweep, temp_path};
 use crate::watch::Watch;
@@ -64,11 +64,8 @@ fn listed(path: PathBuf, metadata: io::Result<fs::Metadata>) -> Result<Option<Di
     }
     let kind = if metadata.is_dir() {
         Kind::Dir
-    } else if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-    {
-        Kind::Note
+    } else if metadata.is_file() {
+        Kind::of_file(&path)
     } else {
         return Ok(None);
     };
@@ -88,14 +85,8 @@ impl Fs for RealFs {
 
         let mut entries = Vec::new();
         for entry in reader {
-            let entry = entry.map_err(|source| io_error(path, source))?;
-            let entry_path = entry.path();
-
-            let hidden = entry_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with('.'));
-            if hidden {
+            let entry_path = entry.map_err(|source| io_error(path, source))?.path();
+            if !entry_path.file_name().is_some_and(listable) {
                 continue;
             }
 
@@ -230,16 +221,16 @@ impl Fs for RealFs {
         }
     }
 
-    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
-        match kind {
+    async fn create(&self, path: &Path, new: New) -> Result<FileIdentity> {
+        match new {
             // O_EXCL: the kernel refuses an existing path atomically, closing
             // the window an `exists()` check plus `File::create` would leave.
-            Kind::Note => fs::OpenOptions::new()
+            New::Note => fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(path)
                 .map(drop),
-            Kind::Dir => fs::create_dir(path),
+            New::Dir => fs::create_dir(path),
         }
         .map_err(|source| io_error(path, source))?;
 

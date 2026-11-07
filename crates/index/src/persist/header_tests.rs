@@ -27,12 +27,12 @@ fn rejected(bytes: &[u8]) -> (Rejected, &'static str) {
 #[test]
 fn golden_bytes() {
     assert_eq!(fold_fingerprint(), 0xC6D3_150D);
-    assert_eq!(derivation_fingerprint(), 0x2F13_6D1F);
+    assert_eq!(derivation_fingerprint(), 0x980F_A0A9);
     let golden: [u8; 55] = [
         b'I', b'N', b'K', b'R', b'A', b'I', b'X', 0, // magic
-        1, 0, 0, 0, // version
+        2, 0, 0, 0, // version
         0x0D, 0x15, 0xD3, 0xC6, // fold
-        0x1F, 0x6D, 0x13, 0x2F, // derivation
+        0xA9, 0xA0, 0x0F, 0x98, // derivation
         0xE9, 0x63, 0xF8, 0x38, // crc32 of the body
         3, 2, 1, 24, // three sections: two bytes, one, then 24
         b'/', b'v', // the root
@@ -91,7 +91,7 @@ fn each_header_field_rejects_by_name() {
 #[test]
 fn version_is_checked_before_the_crc() {
     let mut bytes = bytes();
-    bytes[8] = 2;
+    bytes[8] = 3;
     bytes[24] ^= 1;
     assert_eq!(rejected(&bytes).0, Rejected::Version);
 }

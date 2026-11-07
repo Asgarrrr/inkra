@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures::channel::oneshot;
 use gpui::{App, Context, Task, prelude::*};
-use inkra_vault::{EntryId, Fs, Kind};
+use inkra_vault::{EntryId, Fs, Kind, New};
 
 use super::NoteStore;
 use super::session::{Lifecycle, PendingSave, Writer};
@@ -89,7 +89,7 @@ impl NoteStore {
     pub(crate) fn create(
         &mut self,
         parent: Option<EntryId>,
-        kind: Kind,
+        new: New,
         name: &str,
         cx: &mut Context<Self>,
     ) -> Task<inkra_vault::Result<Option<EntryId>>> {
@@ -99,7 +99,7 @@ impl NoteStore {
         if inkra_vault::check_name(name).is_some() {
             return Task::ready(Ok(None));
         }
-        let file_name = kind.file_name(name);
+        let file_name = Kind::from(new).file_name(name);
 
         let root = {
             let vault = vault.read(cx);
@@ -118,7 +118,7 @@ impl NoteStore {
 
         cx.spawn(async move |this, cx| {
             let made = cx
-                .background_spawn(async move { fs.create(&path, kind).await })
+                .background_spawn(async move { fs.create(&path, new).await })
                 .await?;
 
             let Ok(applied) = this.update(cx, Self::rescan) else {

@@ -2,7 +2,7 @@ use gpui::{Context, ScrollStrategy, Window};
 use inkra_vault::{EntryId, Kind};
 
 use super::{Cursor, Row, SelectNext, SelectPrev, Sidebar};
-use crate::open::{NoteActivated, Open};
+use crate::open::{FileActivated, Open};
 
 impl Sidebar {
     pub(super) fn rebuild(&mut self, cx: &mut Context<Self>) {
@@ -28,11 +28,14 @@ impl Sidebar {
             return;
         }
         self.select(Some(row.id));
-        if row.kind == Kind::Dir {
-            self.toggle(row.id, cx);
-            return;
+        match row.kind {
+            Kind::Dir => self.toggle(row.id, cx),
+            Kind::Note | Kind::Asset => {
+                cx.emit(FileActivated { file: row.id, open });
+                // Repaints the selection: a file the shell cannot show opens nothing.
+                cx.notify();
+            }
         }
-        cx.emit(NoteActivated { note: row.id, open });
     }
 
     /// Every tree write of `selected`: a landing begun before it must not undo it (`follow`).

@@ -171,6 +171,7 @@ fn an_offset_past_u32_writes_no_stamp() {
     let link = SourceLink {
         target: Target::Note {
             path: "b".into(),
+            md: false,
             fragment: None,
             style: Style::Name,
         },
@@ -274,6 +275,7 @@ fn hand_built_records_decode() {
     let link = SourceLink {
         target: Target::Note {
             path: "b".into(),
+            md: false,
             fragment: None,
             style: Style::Relative,
         },
@@ -285,6 +287,28 @@ fn hand_built_records_decode() {
         device: 7,
         inode: 3,
     };
+    let md_link = SourceLink {
+        target: Target::Note {
+            path: "b".into(),
+            md: true,
+            fragment: Some("h".into()),
+            style: Style::Name,
+        },
+        ..link.clone()
+    };
+    let md = Raw::default()
+        .var(1)
+        .head(b"a.md", 0, 0)
+        .var(1)
+        .str(b"b")
+        .byte(3)
+        .str(b"h")
+        .byte(0)
+        .var(0)
+        .var(0)
+        .str(b"")
+        .var(0)
+        .var(0);
     let stamped = Raw::default().var(1).head(b"a.md", 1, 999_999_999).var(0);
     let empty = Raw::default().var(1).head(b"", 0, 0).var(0);
     let cases = [
@@ -296,6 +320,18 @@ fn hand_built_records_decode() {
                 identity,
                 ordinal: None,
                 source: Source { links: vec![link] },
+            },
+        ),
+        (
+            md,
+            CachedNote {
+                path: "a.md".into(),
+                stamp: None,
+                identity,
+                ordinal: None,
+                source: Source {
+                    links: vec![md_link],
+                },
             },
         ),
         (
@@ -363,7 +399,7 @@ fn each_field_rejects() {
         (raw().var(1).head(b"a.md", 2, 0).var(0), "flags"),
         (raw().var(1).head(b"a.md", 3, 0).var(0), "flags"),
         (
-            raw().var(1).head(b"a.md", 0, 0).var(1).str(b"b").byte(2),
+            raw().var(1).head(b"a.md", 0, 0).var(1).str(b"b").byte(4),
             "flags",
         ),
         (raw().var(1).head(b"\xff", 0, 0).var(0), "utf8"),

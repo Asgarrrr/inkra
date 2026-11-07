@@ -8,7 +8,7 @@ use gpui::{
 };
 use inkra_vault::{EntryId, Kind, Vault};
 
-use crate::open::NoteActivated;
+use crate::open::FileActivated;
 use crate::theme;
 use crate::ui::{Color, UiText};
 use crate::vault::NoteStore;
@@ -34,7 +34,7 @@ actions!(sidebar, [Trash, SelectPrev, SelectNext, Rename]);
 
 actions!(vault_tree, [NewNote, NewFolder]);
 
-impl EventEmitter<NoteActivated> for Sidebar {}
+impl EventEmitter<FileActivated> for Sidebar {}
 
 pub(crate) struct Sidebar {
     notes: Entity<NoteStore>,
