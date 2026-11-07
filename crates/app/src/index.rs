@@ -1,5 +1,6 @@
 //! Keeps a `NoteIndex` current: fed by the vault's scans and by our own writes.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -16,6 +17,7 @@ use crate::count::thousands;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
+mod cache_file;
 mod loading;
 mod reads;
 mod watch;
@@ -77,9 +79,11 @@ pub(crate) struct IndexSync {
 }
 
 impl IndexSync {
+    /// `cache`: the index cache file, read beside the scan; `None` keeps no cache (P17).
     pub(crate) fn new(
         notes: &Entity<NoteStore>,
         vault: Entity<Vault>,
+        cache: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
         let fs = notes.read(cx).fs();
@@ -111,6 +115,21 @@ impl IndexSync {
             hold: None,
             _subscriptions: subscriptions,
         };
+        if let Some(file) = cache {
+            // Before the first turn: no note queues until the outcome lands (P7).
+            sync.live.await_cache();
+            let root = sync.vault.read(cx).root().to_path_buf();
+            let reading = cx.background_spawn(cache_file::read(Arc::clone(&sync.fs), file, root));
+            // Detached, holding a weak handle: an outcome landing after this entity is gone is dropped.
+            cx.spawn(async move |this, cx| {
+                let outcome = reading.await;
+                let _ = this.update(cx, |this, cx| {
+                    Timeline::mark(Step::Cached(outcome.name()), cx);
+                    this.turn(cx, |turn| turn.cached(outcome));
+                });
+            })
+            .detach();
+        }
         sync.reconcile(cx);
         sync
     }
@@ -144,8 +163,13 @@ impl IndexSync {
         let started = Instant::now();
         let (result, effects) = self.live.turn(self.vault.read(cx), inputs);
         let indexed = effects.indexed;
+        let seeded = effects.seeded;
         self.run(effects, cx);
-        Timeline::turn(started.elapsed(), cx);
+        let took = started.elapsed();
+        Timeline::turn(took, cx);
+        if seeded {
+            Timeline::seed_turn(took, cx);
+        }
         if indexed {
             self.mark_indexed(cx);
         }
@@ -162,6 +186,7 @@ impl IndexSync {
             layout,
             notify,
             indexed: _,
+            seeded: _,
         } = effects;
         for load in loads {
             self.spawn_load(load, cx);
@@ -273,3 +298,6 @@ mod scanning_tests;
 
 #[cfg(test)]
 mod words_tests;
+
+#[cfg(test)]
+mod cache_file_tests;

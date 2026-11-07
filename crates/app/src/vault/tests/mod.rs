@@ -32,7 +32,7 @@ pub(super) fn open_shell(
     let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer, cx)));
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(Some(editor), notes, None, window, cx)
+        move |window, cx| AppShell::new(Some(editor), notes, None, None, window, cx)
     });
     window
         .update(cx, |shell, window, cx| {

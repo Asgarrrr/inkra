@@ -1,5 +1,7 @@
 //! The shell's vault-mode half: the panes that have no meaning without a vault.
 
+use std::path::PathBuf;
+
 use gpui::{AppContext as _, Context, Entity, Subscription};
 use inkra_vault::Vault;
 
@@ -25,10 +27,11 @@ impl VaultPanes {
     pub(super) fn new(
         vault: Entity<Vault>,
         notes: &Entity<NoteStore>,
+        cache: Option<PathBuf>,
         cx: &mut Context<AppShell>,
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), vault.clone(), cx));
-        let links = cx.new(|cx| IndexSync::new(notes, vault.clone(), cx));
+        let links = cx.new(|cx| IndexSync::new(notes, vault.clone(), cache, cx));
         let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), vault.clone(), cx));
         let subscriptions = [
             // A note linking to itself lists itself.

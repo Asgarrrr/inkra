@@ -87,7 +87,7 @@ impl Stage {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
         self.fs = Some(Arc::clone(&fs));
-        self.open(fs, Launch::Vault(scanned, None))
+        self.open(fs, Launch::Vault(scanned, None, None))
     }
 
     /// The vault `open_vault` opened, so a scene can inject a fault.
@@ -130,7 +130,7 @@ impl Stage {
             .push(fs.block_load(PathBuf::from(VAULT_ROOT).join(held)));
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
-        self.open(fs, Launch::Vault(scanned, None))
+        self.open(fs, Launch::Vault(scanned, None, None))
     }
 
     /// A vault the store scans behind the first frame; the walk is held at `held`, so the shot shows the root level only.
@@ -145,7 +145,10 @@ impl Stage {
         }
         self.gates
             .push(fs.block_read_dir(PathBuf::from(VAULT_ROOT).join(held)));
-        self.open(fs, Launch::Vault(Vault::new(Path::new(VAULT_ROOT)), None))
+        self.open(
+            fs,
+            Launch::Vault(Vault::new(Path::new(VAULT_ROOT)), None, None),
+        )
     }
 
     /// A vault launch whose session file holds `tabs`, `active` among them; the restore lands before the shot.
@@ -169,7 +172,7 @@ impl Stage {
             .unwrap_or_else(|error| panic!("encode the session: {error}"));
         fs.insert_file(session.clone(), text);
         let vault = Vault::new(Path::new(VAULT_ROOT));
-        self.open(fs, Launch::Vault(vault, Some(session)))
+        self.open(fs, Launch::Vault(vault, Some(session), None))
     }
 
     /// The one door to a window: every scene gets `WINDOW_SIZE`, never a literal of its own.

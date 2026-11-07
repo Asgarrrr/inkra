@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, px};
 use inkra_vault::{EntryId, Kind};
@@ -144,6 +145,7 @@ impl AppShell {
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
         session: Option<Opened>,
+        cache: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -157,7 +159,7 @@ impl AppShell {
             .read(cx)
             .vault()
             .cloned()
-            .map(|vault| VaultPanes::new(vault, &notes, cx));
+            .map(|vault| VaultPanes::new(vault, &notes, cache, cx));
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }

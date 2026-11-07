@@ -61,7 +61,18 @@ pub(crate) fn vault_of(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> En
 
 pub(crate) fn index_sync(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Entity<IndexSync> {
     let vault = vault_of(notes, cx);
-    cx.update(|cx| cx.new(|cx| IndexSync::new(notes, vault, cx)))
+    cx.update(|cx| cx.new(|cx| IndexSync::new(notes, vault, None, cx)))
+}
+
+/// As `index_sync`, reading the index cache at `cache` beside the scan.
+pub(crate) fn cached_index_sync(
+    notes: &Entity<NoteStore>,
+    cache: &Path,
+    cx: &mut TestAppContext,
+) -> Entity<IndexSync> {
+    let vault = vault_of(notes, cx);
+    let cache = cache.to_path_buf();
+    cx.update(|cx| cx.new(|cx| IndexSync::new(notes, vault, Some(cache), cx)))
 }
 
 /// By name, never by index: the comparator decides the order.

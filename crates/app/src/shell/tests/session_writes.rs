@@ -43,7 +43,7 @@ pub(super) fn saving(
                 file: PathBuf::from(SESSION),
                 session: None,
             };
-            AppShell::new(None, notes, Some(opened), window, cx)
+            AppShell::new(None, notes, Some(opened), None, window, cx)
         }
     });
     let mut visual = VisualTestContext::from_window(window.into(), cx);

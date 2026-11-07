@@ -392,3 +392,12 @@ Each slice appends what it did differently from this spec, and why.
   entry-side ambiguity by hand.
 - Slice 2a, accepted after review: the stop after 8 failed reads (P11) lands the hits found so
   far with `limit_reached` false, so the footer flags no partial answer.
+- Slice 4b: the gates `indexed` ≤ 0.35 s and seed turn ≤ 8 ms cannot be
+  measured before a launch writes the file; 5a measures them. This slice
+  proves the launch line names both: `cache {outcome} {at}, seed turn {took}`,
+  `-` when absent. `Launch::Vault` gains the cache file, so the fixtures that
+  build it (`shot/stage.rs`, `restore_lands`, `open_first`) pass `None`.
+  `Effects` holds four bools, so it carries a `struct_excessive_bools`
+  `expect`: the flags are independent and can be true in one turn. The
+  not-found guard in `cache_file::read` only decides whether a line is logged,
+  so its mutants are excluded as unobservable.

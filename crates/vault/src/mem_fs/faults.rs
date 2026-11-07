@@ -60,6 +60,13 @@ impl MemFs {
         Gate(release)
     }
 
+    /// Parks the next `read_bytes` of `path`, before it reads anything.
+    pub fn block_read_bytes(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_read_bytes.insert(path.into(), wait);
+        Gate(release)
+    }
+
     pub fn block_save(&self, path: impl Into<PathBuf>) -> Gate {
         let (release, wait) = oneshot::channel();
         self.state().blocked_saves.insert(path.into(), wait);

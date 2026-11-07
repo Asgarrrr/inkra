@@ -318,5 +318,15 @@ pub(crate) fn session_file(home: &Path, root: &Path) -> PathBuf {
         .join(format!("{key:016x}.json"))
 }
 
+/// Where the index cache of the vault at `root` lives under `home`, keyed as `session_file`;
+/// `None` when that place is inside the vault (persisted index spec, P4).
+pub(crate) fn cache_file(home: &Path, root: &Path) -> Option<PathBuf> {
+    let key = fnv1a(root.as_os_str().as_encoded_bytes());
+    let file = home
+        .join("Library/Caches/Inkra/index")
+        .join(format!("{key:016x}.idx"));
+    (!file.starts_with(root)).then_some(file)
+}
+
 #[cfg(test)]
 mod tests;

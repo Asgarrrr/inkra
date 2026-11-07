@@ -629,3 +629,25 @@ fn read_dir_reports_a_notes_size_and_identity_from_its_metadata() {
     assert_eq!(entries[0].identity.inode, metadata.ino());
     assert_eq!(entries[0].identity.device, metadata.dev());
 }
+
+#[test]
+fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
+    let dir = TempDir::new("read-bytes");
+    let file = dir.0.join("index.idx");
+    fs::write(&file, b"\x00\xffcache").expect("write");
+
+    let bytes = block_on(RealFs.read_bytes(&file, 7)).expect("exactly max_len");
+    let error = block_on(RealFs.read_bytes(&file, 6)).expect_err("one byte over max_len");
+
+    assert_eq!(bytes, b"\x00\xffcache");
+    assert_eq!(error.io_kind(), Some(ErrorKind::FileTooLarge));
+}
+
+#[test]
+fn read_bytes_of_a_missing_file_is_not_found() {
+    let dir = TempDir::new("read-bytes-missing");
+
+    let error = block_on(RealFs.read_bytes(&dir.0.join("gone.idx"), 64)).expect_err("missing");
+
+    assert_eq!(error.io_kind(), Some(ErrorKind::NotFound));
+}
