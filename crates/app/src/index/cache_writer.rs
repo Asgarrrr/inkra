@@ -17,8 +17,8 @@ pub(super) struct CacheWriter {
     fs: Arc<dyn Fs>,
     file: PathBuf,
     root: PathBuf,
-    /// The last write that landed; its guard is never held on the foreground.
-    written: Arc<Mutex<u64>>,
+    /// The seq of the last write that landed or removal that ran; never locked on the foreground.
+    mark: Arc<Mutex<u64>>,
     next_seq: u64,
     /// `None` until the startup's end.
     writes: Option<Writes>,
@@ -32,7 +32,7 @@ impl CacheWriter {
             fs,
             file,
             root,
-            written: Arc::default(),
+            mark: Arc::default(),
             next_seq: 0,
             writes: None,
             armed: None,
@@ -51,7 +51,7 @@ impl CacheWriter {
             writes.removed();
         }
         cx.background_spawn(remove_in_order(
-            Arc::clone(&self.written),
+            Arc::clone(&self.mark),
             Arc::clone(&self.fs),
             self.file.clone(),
             seq,
@@ -86,7 +86,7 @@ impl IndexSync {
                 let snapshot = self.live.index().snapshot();
                 let root = writer.root.clone();
                 let write = cx.background_spawn(write_in_order(
-                    Arc::clone(&writer.written),
+                    Arc::clone(&writer.mark),
                     Arc::clone(&writer.fs),
                     writer.file.clone(),
                     seq,
@@ -146,14 +146,14 @@ pub(super) enum Written {
 /// Dropping a `Task` stops no write already inside `RealFs`, and the lock has no fairness: the
 /// seq orders them. A stale write never encodes, and its snapshot drops off the foreground.
 pub(super) async fn write_in_order(
-    written: Arc<Mutex<u64>>,
+    mark: Arc<Mutex<u64>>,
     fs: Arc<dyn Fs>,
     file: PathBuf,
     seq: u64,
     bytes: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Written {
-    let mut written = written.lock().await;
-    if seq < *written {
+    let mut mark = mark.lock().await;
+    if seq < *mark {
         return Written::Skipped;
     }
     let Some(bytes) = bytes() else {
@@ -163,7 +163,7 @@ pub(super) async fn write_in_order(
     match fs.replace_bytes(&file, &bytes).await {
         // A failed write leaves the mark, as `write_through`'s.
         Ok(()) => {
-            *written = seq;
+            *mark = seq;
             Written::Landed
         }
         Err(error) => {
@@ -175,12 +175,12 @@ pub(super) async fn write_in_order(
 
 /// Moves the mark even when the removal fails, so an older write in flight cannot bring the file back.
 pub(super) async fn remove_in_order(
-    written: Arc<Mutex<u64>>,
+    mark: Arc<Mutex<u64>>,
     fs: Arc<dyn Fs>,
     file: PathBuf,
     seq: u64,
 ) {
-    let mut mark = written.lock().await;
+    let mut mark = mark.lock().await;
     if seq < *mark {
         return;
     }
