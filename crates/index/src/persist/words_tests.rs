@@ -103,7 +103,7 @@ proptest! {
     fn round_trip_equals_entries(ops in prop::collection::vec(op(), 0..24)) {
         let (_fs, before) = vault(FILES);
         let index = built(&before, &ops);
-        let decoded = decoded(&encode(&index, Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
         let shifted: Vec<&str> = ["0.md"].iter().chain(FILES).copied().collect();
         let (_fs, after) = vault(&shifted);
         let ids = ids_by_path(&decoded, &after);
@@ -120,7 +120,7 @@ proptest! {
         flips in prop::collection::vec((any::<prop::sample::Index>(), 1..=u8::MAX), 1..=8),
     ) {
         let (_fs, before) = vault(FILES);
-        let mut bytes = encode(&built(&before, &ops), Path::new(ROOT));
+        let mut bytes = encode(&built(&before, &ops).snapshot(), Path::new(ROOT));
         for (at, flip) in flips {
             let at = 24 + at.index(bytes.len() - 24);
             bytes[at] ^= flip;
@@ -156,7 +156,7 @@ proptest! {
     fn bm25_unchanged(ops in prop::collection::vec(op(), 0..24)) {
         let (_fs, vault) = vault(FILES);
         let index = built(&vault, &ops);
-        let decoded = decoded(&encode(&index, Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
         let ids = ids_by_path(&decoded, &vault);
         let restored = built(&vault, &ops).with_words(restored(decoded, &ids));
         for text in WORDS.iter().chain(&["pla", "é", "plan b", "ab plane"]) {
@@ -178,7 +178,7 @@ fn sparse(loaded: usize, removed: &[usize]) -> (Vault, NoteIndex, Decoded) {
     ops.push(Op::Merge);
     ops.extend(removed.iter().map(|&file| Op::Remove(file)));
     let index = built(&vault, &ops);
-    let decoded = decoded(&encode(&index, Path::new(ROOT)));
+    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
     (vault, index, decoded)
 }
 
@@ -557,7 +557,7 @@ fn total_other_than_the_live_lengths_is_total() {
 #[test]
 fn a_full_last_alive_word_decodes() {
     let (_, index) = indexed(&[Some("plan"); 64]);
-    let decoded = decoded(&encode(&index, Path::new(ROOT)));
+    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
     assert_eq!(decoded.words.next, 64);
     assert_eq!(decoded.words.alive.len(), 64);
 }

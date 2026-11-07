@@ -25,6 +25,9 @@ pub use query::NoteQuery;
 #[cfg(test)]
 pub(crate) use score::{bm25, idf};
 pub(crate) use segment::Segment;
+#[cfg(test)]
+pub(crate) use shards::SHARDS;
+pub(crate) use shards::Shards;
 pub(crate) use store::Ordinals;
 pub(crate) use store::Words;
 pub use store::{MergedWords, RetiredWords, WordsMerge, WordsSnapshot};

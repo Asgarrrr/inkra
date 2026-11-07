@@ -64,8 +64,14 @@ fn sources_by_path_across_shifted_ids() {
         cached("a.md", loads[0].1, loads[0].2, Some(0)),
         cached("b.md", loads[1].1, loads[1].2, Some(1)),
     ];
-    assert_eq!(decoded(&encode(&first, Path::new(ROOT))), expected);
-    assert_eq!(decoded(&encode(&second, Path::new(ROOT))), expected);
+    assert_eq!(
+        decoded(&encode(&first.snapshot(), Path::new(ROOT))),
+        expected
+    );
+    assert_eq!(
+        decoded(&encode(&second.snapshot(), Path::new(ROOT))),
+        expected
+    );
 }
 
 fn name() -> impl Strategy<Value = &'static str> {
@@ -118,7 +124,7 @@ proptest! {
             .filter_map(|(file, load)| load.as_ref().map(|(text, read)| (*file, text.as_str(), *read)))
             .collect();
         let (_, index) = index(&files, &loads);
-        let decoded = decoded(&encode(&index, Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
         let mut minted = 0..;
         let expected: BTreeMap<Arc<str>, CachedNote> = loads
             .iter()
@@ -153,7 +159,7 @@ fn pre_epoch_writes_no_stamp() {
         source: Source::default(),
     };
     assert_eq!(
-        decoded(&encode(&index, Path::new(ROOT))),
+        decoded(&encode(&index.snapshot(), Path::new(ROOT))),
         [unstamped, cached("b.md", "[[a]]", at_epoch, Some(1))]
     );
 }
@@ -185,7 +191,10 @@ fn an_offset_past_u32_writes_no_stamp() {
         ordinal: None,
         source: Source::default(),
     };
-    assert_eq!(decoded(&encode(&index, Path::new(ROOT))), [unstamped]);
+    assert_eq!(
+        decoded(&encode(&index.snapshot(), Path::new(ROOT))),
+        [unstamped]
+    );
 }
 
 /// A section's bytes, written field by field with no check, so each rule can be broken alone.
@@ -380,12 +389,12 @@ fn no_truncation_panics() {
         ("b.md", "[[a]]", read(6, 8, 5, 2)),
     ];
     let (_, index) = index(&["a.md", "b.md"], &loads);
-    let section = notes::encode(&index, |_| None);
+    let section = notes::encode(&index.snapshot(), |_| None);
     for len in 0..section.len() {
         let bytes = seal([ROOT.as_bytes(), &section[..len], &no_words()]);
         assert!(decode(&bytes, Path::new(ROOT)).is_err(), "{len}");
     }
-    let bytes = encode(&index, Path::new(ROOT));
+    let bytes = encode(&index.snapshot(), Path::new(ROOT));
     for len in 0..bytes.len() {
         assert!(decode(&bytes[..len], Path::new(ROOT)).is_err(), "{len}");
     }

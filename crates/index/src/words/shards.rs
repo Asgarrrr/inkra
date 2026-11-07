@@ -8,7 +8,7 @@ use inkra_vault::EntryId;
 use super::ordinal::Ordinal;
 
 /// Maps per `Shards`, by the words bench over 16 and 256.
-pub(super) const SHARDS: usize = 64;
+pub(crate) const SHARDS: usize = 64;
 
 /// The shard holding a key, the same in every snapshot.
 pub(crate) trait ShardKey: Copy + Eq + Hash {
@@ -48,22 +48,22 @@ impl<K, V> Default for Shards<K, V> {
 }
 
 impl<K: ShardKey, V: Clone> Shards<K, V> {
-    pub(super) fn get(&self, key: K) -> Option<&V> {
+    pub(crate) fn get(&self, key: K) -> Option<&V> {
         self.maps[key.shard()].get(&key)
     }
 
-    fn contains_key(&self, key: K) -> bool {
+    pub(crate) fn contains_key(&self, key: K) -> bool {
         self.maps[key.shard()].contains_key(&key)
     }
 
-    pub(super) fn insert(&mut self, key: K, value: V) {
+    pub(crate) fn insert(&mut self, key: K, value: V) {
         if self.shard_mut(key).insert(key, value).is_none() {
             self.len += 1;
         }
     }
 
     /// An absent key copies nothing.
-    pub(super) fn remove(&mut self, key: K) -> Option<V> {
+    pub(crate) fn remove(&mut self, key: K) -> Option<V> {
         if !self.contains_key(key) {
             return None;
         }
@@ -72,7 +72,7 @@ impl<K: ShardKey, V: Clone> Shards<K, V> {
         removed
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
@@ -80,7 +80,7 @@ impl<K: ShardKey, V: Clone> Shards<K, V> {
         self.len == 0
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.maps.iter().flat_map(|map| map.iter())
     }
 
@@ -97,7 +97,7 @@ impl<K: ShardKey, V: Clone> Shards<K, V> {
 
     /// How many shards both still hold.
     #[cfg(test)]
-    pub(super) fn shards_shared(&self, other: &Self) -> usize {
+    pub(crate) fn shards_shared(&self, other: &Self) -> usize {
         self.maps
             .iter()
             .zip(other.maps.iter())

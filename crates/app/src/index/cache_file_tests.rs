@@ -39,7 +39,9 @@ fn first_launch(cx: &mut TestAppContext) -> Arc<MemFs> {
     let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let links = index_sync(&notes, cx);
     cx.run_until_parked();
-    let bytes = links.read_with(cx, |links, _| encode(links.index(), Path::new("/vault")));
+    let bytes = links.read_with(cx, |links, _| {
+        encode(&links.index().snapshot(), Path::new("/vault"))
+    });
     fs.insert_bytes(CACHE, bytes);
     drop((notes, links));
     cx.run_until_parked();

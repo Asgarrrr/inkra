@@ -90,12 +90,13 @@ fn bench_persist(c: &mut Criterion) {
     let index = index();
     eprintln!("index of {NOTES} notes: {:?}", start.elapsed());
     let root = Path::new(ROOT);
-    let bytes = encode(&index, root);
+    let snapshot = index.snapshot();
+    let bytes = encode(&snapshot, root);
     eprintln!("cache file: {} bytes", bytes.len());
     assert!(decode(&bytes, root).is_ok(), "the bench file decodes");
     let mut group = c.benchmark_group("persist");
     group.sample_size(10);
-    group.bench_function("encode", |b| b.iter(|| black_box(encode(&index, root))));
+    group.bench_function("encode", |b| b.iter(|| black_box(encode(&snapshot, root))));
     group.bench_function("decode", |b| b.iter(|| black_box(decode(&bytes, root))));
     group.finish();
 }

@@ -12,7 +12,7 @@ use inkra_vault::{EntryId, FileIdentity, Mtime, Stamp};
 
 use super::Rejected;
 use crate::words::{Ordinal, varint};
-use crate::{NoteIndex, Source, SourceLink, Style, Target};
+use crate::{IndexSnapshot, Source, SourceLink, Style, Target};
 
 /// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
 const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
@@ -31,9 +31,12 @@ pub struct CachedNote {
     pub source: Source,
 }
 
-/// Each loaded note of `index`, in vault order, with its words' `ordinal` in section 2.
-pub(super) fn encode(index: &NoteIndex, ordinal: impl Fn(EntryId) -> Option<Ordinal>) -> Vec<u8> {
-    let notes: Vec<_> = index.loaded().collect();
+/// Each loaded note of `snapshot`, in vault order, with its words' `ordinal` in section 2.
+pub(super) fn encode(
+    snapshot: &IndexSnapshot,
+    ordinal: impl Fn(EntryId) -> Option<Ordinal>,
+) -> Vec<u8> {
+    let notes: Vec<_> = snapshot.loaded().collect();
     let mut out = Vec::new();
     let mut links = Vec::new();
     varint::push(&mut out, super::header::narrow(notes.len()));

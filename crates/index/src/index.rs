@@ -17,7 +17,8 @@ use crate::seed::Seed;
 use crate::source::{Source, SourceLink};
 use crate::target::{Style, Target};
 use crate::words::{
-    Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Words, WordsMerge, WordsSnapshot,
+    Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Shards, Words, WordsMerge,
+    WordsSnapshot,
 };
 
 /// Every note's links, resolved on demand against the current notes, so a create, rename or
@@ -28,7 +29,7 @@ pub struct NoteIndex {
     names: NamesSnapshot,
     /// The build's scanned mtimes, handed back whole in the set `set_notes` returns.
     mtimes: Arc<[Mtime]>,
-    sources: HashMap<EntryId, Source>,
+    sources: Shards<EntryId, Arc<Source>>,
     /// A note link's stem key → (source, index into its links). Every link resolving to `T`
     /// has `T`'s stem, so this finds backlinks without a reverse map.
     by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
@@ -60,21 +61,16 @@ impl NoteIndex {
             ids,
             mtimes: mem::replace(&mut self.mtimes, notes.mtimes),
         };
-        let notes = &self.notes;
-        let mut gone = HashSet::new();
+        let gone: HashSet<EntryId> = self
+            .sources
+            .iter()
+            .map(|(&id, _)| id)
+            .filter(|&id| !self.notes.contains(id))
+            .collect();
         let mut stems = HashSet::new();
-        self.sources.retain(|id, source| {
-            if notes.contains(*id) {
-                return true;
-            }
-            gone.insert(*id);
-            for link in &source.links {
-                if let Target::Note { path, .. } = &link.target {
-                    stems.insert(Key::stem(path));
-                }
-            }
-            false
-        });
+        for source in gone.iter().filter_map(|&id| self.sources.remove(id)) {
+            stems.extend(source.note_stems().map(|(_, key)| key));
+        }
         // Removing one note at a time rescans a shared row like `index` once per gone note.
         for key in stems {
             if let Some(rows) = self.by_stem.get_mut(&key) {
@@ -106,13 +102,14 @@ impl NoteIndex {
         self.words.snapshot()
     }
 
-    /// The names, corpus and words at this moment, so names and corpus are of one build.
+    /// The names, corpus, words and sources at this moment, so names and corpus are of one build.
     #[must_use]
     pub fn snapshot(&self) -> IndexSnapshot {
         IndexSnapshot {
             names: self.names(),
             corpus: self.corpus(),
             words: self.words(),
+            sources: self.sources.clone(),
         }
     }
 
@@ -166,7 +163,7 @@ impl NoteIndex {
         let held_reads = mem::replace(&mut self.corpus, corpus).snapshot();
         let held = mem::replace(&mut self.sources, sources);
         self.by_stem = by_stem;
-        for (id, source) in held {
+        for (&id, source) in held.iter() {
             let Some(read) = held_reads.read(self.notes.order(id)) else {
                 panic!("a held note has no read");
             };
@@ -174,7 +171,7 @@ impl NoteIndex {
             self.insert(
                 id,
                 NoteContent {
-                    source,
+                    source: (**source).clone(),
                     words,
                     read,
                 },
@@ -198,7 +195,7 @@ impl NoteIndex {
         for (at, key) in source.note_stems() {
             self.by_stem.entry(key).or_default().push((id, at));
         }
-        self.sources.insert(id, source);
+        self.sources.insert(id, Arc::new(source));
         self.corpus.write(self.notes.order(id), read);
         self.words.set(id, words);
     }
@@ -211,7 +208,7 @@ impl NoteIndex {
 
     /// `insert` calls this, not `remove`, so a reload keeps the note's word ordinal.
     fn remove_links(&mut self, id: EntryId) {
-        let Some(old) = self.sources.remove(&id) else {
+        let Some(old) = self.sources.remove(id) else {
             return;
         };
         for link in &old.links {
@@ -227,26 +224,9 @@ impl NoteIndex {
         }
     }
 
-    /// Each loaded note in vault order: its id, its file as scanned, the read its words came
-    /// from, and its links.
-    ///
-    /// # Panics
-    /// If a note was loaded but holds no source.
-    pub(crate) fn loaded(&self) -> impl Iterator<Item = (EntryId, &Arc<str>, FileRead, &Source)> {
-        let corpus = self.corpus.snapshot();
-        (0..self.names.len()).filter_map(move |order| {
-            let read = corpus.read(order)?;
-            let id = self.names.id(order);
-            let Some(source) = self.sources.get(&id) else {
-                panic!("note {id:?} was loaded but holds no source");
-            };
-            Some((id, self.names.file(order), read, source))
-        })
-    }
-
     #[must_use]
     pub fn is_indexed(&self, id: EntryId) -> bool {
-        self.sources.contains_key(&id)
+        self.sources.contains_key(id)
     }
 
     #[must_use]
@@ -275,7 +255,7 @@ impl NoteIndex {
         let mut by_text: HashMap<(&str, Style), Resolution> = HashMap::new();
         let mut by_query: HashMap<Query, Resolution> = HashMap::new();
         for &(source, at) in rows {
-            let link = &self.sources[&source].links[at];
+            let link = &self.source(source).links[at];
             let resolution = match &link.target {
                 Target::Note { path, style, .. } if *style != Style::Relative => by_text
                     .entry((path, *style))
@@ -300,7 +280,7 @@ impl NoteIndex {
             .into_iter()
             .map(|((_, source), mut at)| {
                 at.sort_unstable();
-                let links = &self.sources[&source].links;
+                let links = &self.source(source).links;
                 Backlink {
                     source,
                     links: at.into_iter().map(|at| &links[at]).collect(),
@@ -308,14 +288,23 @@ impl NoteIndex {
             })
             .collect()
     }
+
+    fn source(&self, id: EntryId) -> &Source {
+        let Some(source) = self.sources.get(id) else {
+            panic!("note {id:?} has a backlink row but holds no source");
+        };
+        source
+    }
 }
 
-/// Taken at one moment for `find_notes`, `search` and `excerpt`; a clone bumps three `Arc`s.
+/// Taken at one moment for `find_notes`, `search`, `excerpt` and the cache file; a clone bumps
+/// four `Arc`s.
 #[derive(Clone)]
 pub struct IndexSnapshot {
     names: NamesSnapshot,
     corpus: CorpusSnapshot,
     words: WordsSnapshot,
+    sources: Shards<EntryId, Arc<Source>>,
 }
 
 impl IndexSnapshot {
@@ -337,6 +326,26 @@ impl IndexSnapshot {
 
     pub(crate) fn corpus(&self) -> &CorpusSnapshot {
         &self.corpus
+    }
+
+    pub(crate) fn words(&self) -> &WordsSnapshot {
+        &self.words
+    }
+
+    /// Each loaded note in vault order: its id, its file as scanned, the read its words came
+    /// from, and its links.
+    ///
+    /// # Panics
+    /// If a note was loaded but holds no source.
+    pub(crate) fn loaded(&self) -> impl Iterator<Item = (EntryId, &Arc<str>, FileRead, &Source)> {
+        (0..self.names.len()).filter_map(move |order| {
+            let read = self.corpus.read(order)?;
+            let id = self.names.id(order);
+            let Some(source) = self.sources.get(id) else {
+                panic!("note {id:?} was loaded but holds no source");
+            };
+            Some((id, self.names.file(order), read, &**source))
+        })
     }
 }
 

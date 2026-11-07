@@ -50,7 +50,7 @@ pub(crate) trait IndexDelegate: PickerDelegate {
 /// A run's answer: `Settled` when the delegate already set rows that need no scan.
 pub(crate) enum Ran<F> {
     Settled,
-    Found(Landed<F>),
+    Found(Box<Landed<F>>),
 }
 
 /// A run's result, and what it answered.
@@ -147,14 +147,14 @@ impl Runs {
             }
             released.await;
             let found = D::search(reads, &snapshot, &query, &jobs, &cancel).await?;
-            Some(Ran::Found(Landed {
+            Some(Ran::Found(Box::new(Landed {
                 id,
                 run,
                 begun,
                 snapshot,
                 query,
                 found,
-            }))
+            })))
         }))
     }
 
@@ -173,7 +173,7 @@ impl Runs {
             .filter(|_| !landed.run.is_user())
             .and_then(|ix| delegate.key(ix));
         delegate.runs().scanning = false;
-        delegate.show(landed, cx);
+        delegate.show(*landed, cx);
         let row = kept.and_then(|kept| {
             (0..delegate.match_count()).find(|&ix| delegate.key(ix).as_ref() == Some(&kept))
         });

@@ -60,7 +60,7 @@ fn cached(notes: &[(&str, &str, u64, Mtime)]) -> Decoded {
         };
         index.insert(id(&vault, file), NoteContent::parse(text, read));
     }
-    match decode(&encode(&index, Path::new(ROOT)), Path::new(ROOT)) {
+    match decode(&encode(&index.snapshot(), Path::new(ROOT)), Path::new(ROOT)) {
         Ok(decoded) => decoded,
         Err(rejected) => panic!("rejected: {}", rejected.reason()),
     }
@@ -89,8 +89,8 @@ fn seeded(seed: &Seed, vault: &Vault) -> BTreeMap<String, Seeded> {
     let words = seed.words.snapshot().entries();
     let notes = note_set(vault);
     seed.sources
-        .keys()
-        .map(|&id| {
+        .iter()
+        .map(|(&id, _)| {
             let Some(entry) = vault.entry(id) else {
                 panic!("a seeded note is a vault note");
             };

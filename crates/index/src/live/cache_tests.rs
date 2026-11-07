@@ -57,7 +57,7 @@ fn loaded(files: &[(&str, &str)]) -> Harness {
 
 /// `index` as the cache file gives it back.
 fn cache_of(index: &NoteIndex) -> Outcome {
-    match decode(&encode(index, Path::new(ROOT)), Path::new(ROOT)) {
+    match decode(&encode(&index.snapshot(), Path::new(ROOT)), Path::new(ROOT)) {
         Ok(decoded) => Outcome::Decoded(decoded),
         Err(rejected) => panic!("rejected: {}", rejected.reason()),
     }
@@ -473,4 +473,42 @@ fn each_outcome_has_its_name() {
     assert_eq!(cache_of(&NoteIndex::default()).name(), "decoded");
     assert_eq!(Outcome::Rejected(Rejected::Short).name(), "rejected");
     assert_eq!(Outcome::Missing.name(), "missing");
+}
+
+#[test]
+fn a_reload_held_at_encode_writes_the_stamp_of_the_words() {
+    let mut h = loaded(&[("a.md", "alpha")]);
+    h.fs.insert_with_mtime(path("a.md"), "bravo", fine(2));
+    h.rescan();
+    let _ = h.built();
+    assert_eq!(loading(&h), [path("a.md")], "queued, not landed");
+    let (mut h, outcome) = relaunch(h);
+
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(loading(&h), [path("a.md")], "the file holds alpha's stamp");
+    h.load_all();
+    let snapshot = h.live.index().snapshot();
+    let bravo = find_all(&snapshot, &NoteQuery::new("bravo", None, &[]), 10);
+    assert_eq!(bravo.len(), 1);
+    assert!(find_all(&snapshot, &NoteQuery::new("alpha", None, &[]), 10).is_empty());
+}
+
+#[test]
+fn a_fresh_reload_survives_a_relaunch() {
+    let mut h = loaded(&[("a.md", "alpha")]);
+    let _ = h.run_merge();
+    let _ = save(&mut h, "a.md", "zulu", fine(3));
+    assert!(!h.live.index().words_settled(), "zulu waits in fresh");
+    let (mut h, outcome) = relaunch(h);
+
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(loading(&h), Vec::<PathBuf>::new());
+    let zulu = find_all(
+        &h.live.index().snapshot(),
+        &NoteQuery::new("zulu", None, &[]),
+        10,
+    );
+    assert_eq!(zulu.len(), 1);
 }

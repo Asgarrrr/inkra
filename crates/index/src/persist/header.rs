@@ -3,7 +3,7 @@ use std::path::Path;
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
 use super::notes::{self, CachedNote};
 use super::words::{self, CachedWords};
-use crate::NoteIndex;
+use crate::IndexSnapshot;
 use crate::words::varint;
 
 pub const FORMAT_VERSION: u32 = 1;
@@ -49,19 +49,19 @@ impl Rejected {
     }
 }
 
-/// The cache file of `index`, the vault at `root`.
+/// The cache file of `snapshot`, the vault at `root`.
 ///
 /// # Panics
 ///
 /// When the file would exceed `MAX_BYTES`, which no reader accepts.
 #[must_use]
-pub fn encode(index: &NoteIndex, root: &Path) -> Vec<u8> {
-    let snapshot = index.words();
-    let (cached, to) = words::cached(&snapshot);
-    let ordinal = |id| *to.get(snapshot.ordinal(id)?.index())?;
+pub fn encode(snapshot: &IndexSnapshot, root: &Path) -> Vec<u8> {
+    let words = snapshot.words();
+    let (cached, to) = words::cached(words);
+    let ordinal = |id| *to.get(words.ordinal(id)?.index())?;
     seal([
         root.as_os_str().as_encoded_bytes(),
-        &notes::encode(index, ordinal),
+        &notes::encode(snapshot, ordinal),
         &words::encode(&cached),
     ])
 }
