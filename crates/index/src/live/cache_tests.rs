@@ -57,7 +57,10 @@ fn loaded(files: &[(&str, &str)]) -> Harness {
 
 /// `index` as the cache file gives it back.
 fn cache_of(index: &NoteIndex) -> Outcome {
-    match decode(&encode(&index.snapshot(), Path::new(ROOT)), Path::new(ROOT)) {
+    match decode(
+        &encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"),
+        Path::new(ROOT),
+    ) {
         Ok(decoded) => Outcome::Decoded(decoded),
         Err(rejected) => panic!("rejected: {}", rejected.reason()),
     }

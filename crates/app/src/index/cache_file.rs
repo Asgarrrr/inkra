@@ -14,7 +14,7 @@ pub(super) async fn read(fs: Arc<dyn Fs>, file: PathBuf, root: PathBuf) -> Outco
         Ok(bytes) => bytes,
         Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => return Outcome::Missing,
         Err(error) => {
-            log::warn!("index cache not used: {}: {error}", file.display());
+            log::warn!("index cache not used: {error}");
             return Outcome::Missing;
         }
     };

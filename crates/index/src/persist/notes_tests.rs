@@ -65,11 +65,11 @@ fn sources_by_path_across_shifted_ids() {
         cached("b.md", loads[1].1, loads[1].2, Some(1)),
     ];
     assert_eq!(
-        decoded(&encode(&first.snapshot(), Path::new(ROOT))),
+        decoded(&encode(&first.snapshot(), Path::new(ROOT)).expect("under the cap")),
         expected
     );
     assert_eq!(
-        decoded(&encode(&second.snapshot(), Path::new(ROOT))),
+        decoded(&encode(&second.snapshot(), Path::new(ROOT)).expect("under the cap")),
         expected
     );
 }
@@ -124,7 +124,7 @@ proptest! {
             .filter_map(|(file, load)| load.as_ref().map(|(text, read)| (*file, text.as_str(), *read)))
             .collect();
         let (_, index) = index(&files, &loads);
-        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
         let mut minted = 0..;
         let expected: BTreeMap<Arc<str>, CachedNote> = loads
             .iter()
@@ -159,7 +159,7 @@ fn pre_epoch_writes_no_stamp() {
         source: Source::default(),
     };
     assert_eq!(
-        decoded(&encode(&index.snapshot(), Path::new(ROOT))),
+        decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap")),
         [unstamped, cached("b.md", "[[a]]", at_epoch, Some(1))]
     );
 }
@@ -193,7 +193,7 @@ fn an_offset_past_u32_writes_no_stamp() {
         source: Source::default(),
     };
     assert_eq!(
-        decoded(&encode(&index.snapshot(), Path::new(ROOT))),
+        decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap")),
         [unstamped]
     );
 }
@@ -267,7 +267,7 @@ fn no_words() -> Vec<u8> {
 }
 
 fn sealed(section: &Raw) -> Vec<u8> {
-    seal([ROOT.as_bytes(), &section.0, &no_words()])
+    seal([ROOT.as_bytes(), &section.0, &no_words()]).expect("under the cap")
 }
 
 #[test]
@@ -427,10 +427,10 @@ fn no_truncation_panics() {
     let (_, index) = index(&["a.md", "b.md"], &loads);
     let section = notes::encode(&index.snapshot(), |_| None);
     for len in 0..section.len() {
-        let bytes = seal([ROOT.as_bytes(), &section[..len], &no_words()]);
+        let bytes = seal([ROOT.as_bytes(), &section[..len], &no_words()]).expect("under the cap");
         assert!(decode(&bytes, Path::new(ROOT)).is_err(), "{len}");
     }
-    let bytes = encode(&index.snapshot(), Path::new(ROOT));
+    let bytes = encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap");
     for len in 0..bytes.len() {
         assert!(decode(&bytes[..len], Path::new(ROOT)).is_err(), "{len}");
     }

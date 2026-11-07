@@ -222,7 +222,7 @@ The cache is derived data. None of its errors shows a notice or blocks.
 **Read**
 
 - Missing: outcome "missing", no log.
-- I/O error: outcome "missing", one `log::warn!("index cache not used: {path}: {rejected}")`.
+- I/O error: outcome "missing", one `log::warn!("index cache not used: {error}")`; the error names the path.
 - `decode` returns `Rejected { Short, Version, Fold, Derivation, Root, Checksum, Corrupt(&'static str) }`,
   beside `decode` in `inkra-index`, after `restore/format.rs:37`. It is a
   list of reasons, not a second error enum.
@@ -258,6 +258,11 @@ arithmetic wraps silently.
   no process holds: the writer keeps `File::try_lock` on its temp, and a lock
   the sweeper acquires marks an orphan. No pid check, so no `libc`.
 - Disk full or permission denied: the old file stays; backoff; one log line.
+- Over `MAX_BYTES`: `seal_capped` returns `None` from the computed length, before it copies a
+  section, so `encode` returns `None`. The write ends `Failed`: the old file and the writer's
+  mark stay, and P14's backoff applies. Each retry encodes again and logs
+  `index cache not saved: over the cap of 268435456 bytes`. The line repeats after 1, 2, 4 and
+  8 min, then every 10 min, and the schedule starts again each launch.
 
 **Edge cases**
 
@@ -470,3 +475,5 @@ Each slice appends what it did differently from this spec, and why.
   a note or a rebuild ran since. A getter readable on any turn outlived the rebuild that made it
   false; on `main` that was reachable only for a seeded vault with no note, where the deferred
   rebuild moves no revision. The payload makes the false record unrepresentable.
+- Oversize (arch/cache-cap): the log names the cap, not the size, since `seal_capped` stops at
+  the computed length; `seal_capped` is `pub(super)` so `header_tests` reaches it.

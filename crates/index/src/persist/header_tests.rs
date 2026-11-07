@@ -1,13 +1,14 @@
 use std::path::Path;
 
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
+use super::header::seal_capped;
 use super::{Rejected, decode, encode};
 use crate::NoteIndex;
 
 const ROOT: &str = "/v";
 
 fn bytes() -> Vec<u8> {
-    encode(&NoteIndex::default().snapshot(), Path::new(ROOT))
+    encode(&NoteIndex::default().snapshot(), Path::new(ROOT)).expect("under the cap")
 }
 
 /// `bytes` with its crc over the body set again, so a later check sees the change.
@@ -57,11 +58,25 @@ fn round_trip_ok() {
         Ok(Vec::new())
     );
     let root = Path::new("/Users/me/Notes/Été 🌱");
-    let bytes = encode(&NoteIndex::default().snapshot(), root);
+    let bytes = encode(&NoteIndex::default().snapshot(), root).expect("under the cap");
     assert_eq!(
         decode(&bytes, root).map(|decoded| decoded.notes.len()),
         Ok(0)
     );
+}
+
+#[test]
+fn a_file_one_byte_over_the_cap_is_not_sealed() {
+    let words = [0u8; 300];
+    let sections: [&[u8]; 3] = [ROOT.as_bytes(), b"", &words];
+    let sealed = seal_capped(sections, u64::MAX).expect("no cap");
+    let at = u64::try_from(sealed.len()).expect("a small file");
+    assert_eq!(
+        seal_capped(sections, at),
+        Some(sealed),
+        "exactly at the cap"
+    );
+    assert_eq!(seal_capped(sections, at - 1), None, "one byte over");
 }
 
 #[test]
@@ -173,7 +188,7 @@ fn other_root_is_root() {
 #[test]
 fn no_truncation_panics() {
     let root = format!("/{}", "v".repeat(200));
-    let bytes = encode(&NoteIndex::default().snapshot(), Path::new(&root));
+    let bytes = encode(&NoteIndex::default().snapshot(), Path::new(&root)).expect("under the cap");
     for len in 0..bytes.len() {
         let prefix = &bytes[..len];
         assert!(decode(prefix, Path::new(ROOT)).is_err(), "{len}");

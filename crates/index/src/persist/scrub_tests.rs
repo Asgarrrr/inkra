@@ -66,7 +66,7 @@ proptest! {
 
 #[test]
 fn the_sample_is_seeded_by_the_body_crc_the_header_holds() {
-    let bytes = encode(&NoteIndex::default().snapshot(), Path::new(ROOT));
+    let bytes = encode(&NoteIndex::default().snapshot(), Path::new(ROOT)).expect("under the cap");
     let Ok(decoded) = decode(&bytes, Path::new(ROOT)) else {
         panic!("an empty index decodes");
     };

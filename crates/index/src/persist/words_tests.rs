@@ -103,7 +103,7 @@ proptest! {
     fn round_trip_equals_entries(ops in prop::collection::vec(op(), 0..24)) {
         let (_fs, before) = vault(FILES);
         let index = built(&before, &ops);
-        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
         let shifted: Vec<&str> = ["0.md"].iter().chain(FILES).copied().collect();
         let (_fs, after) = vault(&shifted);
         let ids = ids_by_path(&decoded, &after);
@@ -120,7 +120,7 @@ proptest! {
         flips in prop::collection::vec((any::<prop::sample::Index>(), 1..=u8::MAX), 1..=8),
     ) {
         let (_fs, before) = vault(FILES);
-        let mut bytes = encode(&built(&before, &ops).snapshot(), Path::new(ROOT));
+        let mut bytes = encode(&built(&before, &ops).snapshot(), Path::new(ROOT)).expect("under the cap");
         for (at, flip) in flips {
             let at = 24 + at.index(bytes.len() - 24);
             bytes[at] ^= flip;
@@ -156,7 +156,7 @@ proptest! {
     fn bm25_unchanged(ops in prop::collection::vec(op(), 0..24)) {
         let (_fs, vault) = vault(FILES);
         let index = built(&vault, &ops);
-        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
+        let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
         let ids = ids_by_path(&decoded, &vault);
         let restored = built(&vault, &ops).with_words(restored(decoded, &ids));
         for text in WORDS.iter().chain(&["pla", "é", "plan b", "ab plane"]) {
@@ -178,7 +178,7 @@ fn sparse(loaded: usize, removed: &[usize]) -> (Vault, NoteIndex, Decoded) {
     ops.push(Op::Merge);
     ops.extend(removed.iter().map(|&file| Op::Remove(file)));
     let index = built(&vault, &ops);
-    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
+    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
     (vault, index, decoded)
 }
 
@@ -285,7 +285,7 @@ impl Fields {
     }
 
     fn sealed(&self) -> Vec<u8> {
-        seal([ROOT.as_bytes(), &self.notes().0, &self.words().0])
+        seal([ROOT.as_bytes(), &self.notes().0, &self.words().0]).expect("under the cap")
     }
 }
 
@@ -302,7 +302,7 @@ fn rejects(fields: &Fields, expected: &'static str) {
 }
 
 fn rejects_words(words: &Raw, expected: &'static str) {
-    let bytes = seal([ROOT.as_bytes(), &valid().notes().0, &words.0]);
+    let bytes = seal([ROOT.as_bytes(), &valid().notes().0, &words.0]).expect("under the cap");
     let Err(rejected) = decode(&bytes, Path::new(ROOT)) else {
         panic!("{:?} decodes", words.0);
     };
@@ -348,7 +348,8 @@ fn a_cut_section_is_truncated() {
     rejects(&fields, "truncated");
     let section = valid().words().0;
     for len in 0..section.len() {
-        let bytes = seal([ROOT.as_bytes(), &valid().notes().0, &section[..len]]);
+        let bytes =
+            seal([ROOT.as_bytes(), &valid().notes().0, &section[..len]]).expect("under the cap");
         assert!(decode(&bytes, Path::new(ROOT)).is_err(), "{len}");
     }
 }
@@ -557,7 +558,7 @@ fn total_other_than_the_live_lengths_is_total() {
 #[test]
 fn a_full_last_alive_word_decodes() {
     let (_, index) = indexed(&[Some("plan"); 64]);
-    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)));
+    let decoded = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
     assert_eq!(decoded.words.next, 64);
     assert_eq!(decoded.words.alive.len(), 64);
 }

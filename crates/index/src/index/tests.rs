@@ -375,7 +375,10 @@ fn a_snapshot_keeps_the_sources_it_was_taken_with() {
     let held = index.snapshot();
     load(&mut index, id(&vault, "a.md"), "[[c]] bravo");
 
-    let Ok(decoded) = decode(&encode(&held, Path::new(ROOT)), Path::new(ROOT)) else {
+    let Ok(decoded) = decode(
+        &encode(&held, Path::new(ROOT)).expect("under the cap"),
+        Path::new(ROOT),
+    ) else {
         panic!("the file decodes");
     };
     let sources: Vec<&Source> = decoded.notes.iter().map(|note| &note.source).collect();
