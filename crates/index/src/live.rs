@@ -61,6 +61,8 @@ pub struct LiveIndex {
     loading: Vec<Loading>,
     build: Build,
     cache: Cache,
+    /// A rebuild asked while the cache waits; the build that ends the wait runs it.
+    rebuild_due: bool,
     /// The vault entries the last applied build was read from; `None` until the first applies.
     last: Option<Arc<[Entry]>>,
     /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
@@ -93,6 +95,7 @@ impl LiveIndex {
             loading: Vec::new(),
             build: Build::default(),
             cache: Cache::default(),
+            rebuild_due: false,
             last: None,
             note_sets: 0,
             revision: 0,

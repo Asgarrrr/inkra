@@ -144,6 +144,10 @@ impl Fs for PanickingFs {
         self.inner.replace_bytes(path, bytes).await
     }
 
+    async fn remove_file(&self, path: &Path) -> Result<()> {
+        self.inner.remove_file(path).await
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         self.inner.create(path, kind).await
     }

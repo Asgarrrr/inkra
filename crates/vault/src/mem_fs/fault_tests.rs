@@ -68,6 +68,21 @@ fn fail_next_replaces_fails_that_many_replaces_and_keeps_the_old_bytes() {
 }
 
 #[test]
+fn remove_file_fails_as_fail_next_removes_asks_then_removes() {
+    let fs = MemFs::new();
+    let path = Path::new("/cache/a.idx");
+    fs.insert_bytes(path, b"old".to_vec());
+
+    fs.fail_next_removes(path, 1, ErrorKind::PermissionDenied);
+    let error = block_on(fs.remove_file(path)).expect_err("an injected failure");
+    assert_eq!(error.io_kind(), Some(ErrorKind::PermissionDenied));
+    assert_eq!(fs.read_to_string(path).as_deref(), Some("old"));
+
+    block_on(fs.remove_file(path)).expect("the second remove removes");
+    assert_eq!(fs.read_to_string(path), None);
+}
+
+#[test]
 fn fail_next_saves_after_preserve_keeps_one_copy_and_reports_unwritten() {
     let fs = MemFs::new();
     let path = Path::new("/vault/a.md");

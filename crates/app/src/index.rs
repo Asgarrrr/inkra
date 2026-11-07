@@ -7,7 +7,7 @@ use std::time::Instant;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{
     AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription,
-    WeakEntity,
+    WeakEntity, actions,
 };
 use inkra_index::live::{Effects, Status, Turn};
 use inkra_index::persist::Writes;
@@ -30,6 +30,8 @@ pub(crate) use reads::Reader;
 #[cfg(test)]
 pub(crate) use watch::BUILDING_REFRESH;
 pub(crate) use watch::IndexWatch;
+
+actions!(index, [RebuildIndex]);
 
 /// A picker's empty text before the first build.
 pub(crate) const SCANNING: &str = "Scanning the vault…";
@@ -267,6 +269,14 @@ impl IndexSync {
         self.turn(cx, |turn: &mut Turn<'_>| turn.vault_changed());
     }
 
+    /// Removes the cache file, then loads every note again (P15).
+    pub(crate) fn rebuild(&mut self, cx: &mut Context<Self>) {
+        if let Some(writer) = &mut self.writer {
+            writer.remove(cx);
+        }
+        self.turn(cx, |turn: &mut Turn<'_>| turn.rebuild());
+    }
+
     /// Notes a search read changed or gone since their load: each loads again.
     pub(crate) fn stale(&mut self, ids: &[EntryId], cx: &mut Context<Self>) {
         self.turn(cx, |turn| turn.stale(ids));
@@ -319,3 +329,6 @@ mod cache_file_tests;
 
 #[cfg(test)]
 mod cache_writer_tests;
+
+#[cfg(test)]
+mod rebuild_tests;

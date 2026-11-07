@@ -163,3 +163,15 @@ fn an_older_failure_keeps_the_newer_revision_written() {
 
     assert_eq!(writes.due(7, true, t0 + MAX_BACKOFF), Due::Idle);
 }
+
+#[test]
+fn a_removed_file_is_due_again() {
+    let t0 = Instant::now();
+    let mut writes = Writes::new(Some(5));
+    assert_eq!(writes.due(5, true, t0), Due::Idle);
+
+    writes.removed();
+
+    assert_eq!(writes.due(5, true, t0), Due::At(t0 + QUIET));
+    assert_eq!(writes.due(5, true, t0 + QUIET), Due::Now);
+}

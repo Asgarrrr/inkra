@@ -150,6 +150,9 @@ pub trait Fs: Send + Sync {
     /// As `replace`, with bytes that need not be UTF-8.
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()>;
 
+    /// Removes a file; one already missing is `Ok`.
+    async fn remove_file(&self, path: &Path) -> Result<()>;
+
     /// Creates an empty note or directory; fails if `path` already exists.
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity>;
 

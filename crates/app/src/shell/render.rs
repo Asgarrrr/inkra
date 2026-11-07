@@ -9,6 +9,7 @@ use inkra_layout::{Axis, Member, Side, SplitPath, Surface};
 use super::AppShell;
 use super::dock_drag::SHELL_GROUP;
 use super::members::Slot;
+use crate::index::{IndexSync, RebuildIndex};
 
 impl AppShell {
     /// Under the title row: the left dock, the centre and the right dock.
@@ -101,6 +102,11 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::move_backlinks_to_other_dock))
             .on_action(cx.listener(Self::split_view))
             .on_action(cx.listener(Self::select_theme))
+            .on_action(cx.listener(|shell, _: &RebuildIndex, _, cx| {
+                if let Some(panes) = &shell.panes {
+                    panes.links.update(cx, IndexSync::rebuild);
+                }
+            }))
             .on_action(cx.listener(Self::quit))
             .on_mouse_move(cx.listener(Self::title_drag_move))
             .on_mouse_move(cx.listener(Self::press_move))

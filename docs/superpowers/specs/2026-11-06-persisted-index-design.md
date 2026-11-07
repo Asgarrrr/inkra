@@ -434,3 +434,13 @@ Each slice appends what it did differently from this spec, and why.
   `File::create` and `try_lock`; the loser's write fails and backs off. The seq-order plain
   test landed in 5a-2. `MemFs::fail_next_replaces` is tested in `mem_fs/fault_tests.rs`,
   beside `fail_next_saves`. Nothing writes at quit, and no quit hook is added.
+- Slice 5c: a Rebuild asked while the cache waits sets `LiveIndex.rebuild_due`; the build
+  that ends the wait runs it after its seed, so the seeded stamps are cleared too. A removal
+  takes the writes' next seq and moves the mark even when it fails. Writes and the removal take
+  their seq through one `CacheWriter::take_seq`, so the write tests pin its increment for both.
+  `MemFs::block_replace`
+  parks a write before it stores, and its first app test runs the turn between the Rebuild and
+  the release, so the removal is polled while the write holds the lock. A plain test pins a
+  first removal at seq 0, which meets the mark. `MemFs::fail_next_removes` is tested in
+  `mem_fs/fault_tests.rs`, beside its siblings. The palette test builds its `AppShell` with
+  the cache file, since `open_vault` passes `None`.

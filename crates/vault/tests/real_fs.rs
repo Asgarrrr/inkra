@@ -595,6 +595,17 @@ fn replace_bytes_sweeps_the_orphan_temps_of_its_file_that_no_process_holds() {
     );
 }
 
+#[test]
+fn remove_file_removes_the_file_and_a_missing_file_is_ok() {
+    let dir = TempDir::new("remove-file");
+    let file = dir.0.join("index.idx");
+    fs::write(&file, "index").expect("write");
+
+    block_on(RealFs.remove_file(&file)).expect("remove");
+    assert_eq!(names(&dir.0), Vec::<String>::new());
+    block_on(RealFs.remove_file(&file)).expect("a missing file is Ok");
+}
+
 fn kind_of<T>(result: inkra_vault::Result<T>) -> Option<ErrorKind> {
     result.err().and_then(|error| error.io_kind())
 }

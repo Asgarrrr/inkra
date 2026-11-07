@@ -47,6 +47,7 @@ mod pane_keys;
 mod parked;
 mod quick_open;
 mod quitting;
+mod rebuild_index;
 mod reload;
 mod renaming;
 mod reopen;

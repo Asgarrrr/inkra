@@ -38,6 +38,7 @@ struct State {
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_read_bytes: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_replaces: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Separate from `unwritable`: a note can be writable and still not
     /// removable (no trash on the volume, say).
     untrashable: BTreeSet<PathBuf>,
@@ -55,6 +56,7 @@ struct State {
     failing_saves: BTreeMap<PathBuf, (u32, ErrorKind)>,
     failing_after_preserve: BTreeMap<PathBuf, (u32, ErrorKind)>,
     failing_replaces: BTreeMap<PathBuf, (u32, ErrorKind)>,
+    failing_removes: BTreeMap<PathBuf, (u32, ErrorKind)>,
 }
 
 impl State {
@@ -337,6 +339,10 @@ impl Fs for MemFs {
     }
 
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        let blocked = self.state().blocked_replaces.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
         {
             let mut state = self.state();
             state.injected_replace_failure(path)?;
@@ -345,6 +351,15 @@ impl Fs for MemFs {
             }
         }
         self.insert_bytes(path, bytes);
+        Ok(())
+    }
+
+    async fn remove_file(&self, path: &Path) -> Result<()> {
+        let mut state = self.state();
+        state.injected_remove_failure(path)?;
+        if state.files.remove(path).is_some() {
+            state.changed(path);
+        }
         Ok(())
     }
 

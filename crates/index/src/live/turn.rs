@@ -132,6 +132,11 @@ impl Turn<'_> {
         self.live.landed(ticket, loaded, self.vault);
     }
 
+    /// Rebuild index: every note loads again; its seeded content stays until each reload lands.
+    pub fn rebuild(&mut self) {
+        self.live.rebuild();
+    }
+
     /// Notes a search read changed or gone since their load: each indexed one loads again.
     pub fn stale(&mut self, ids: &[EntryId]) {
         self.live.stale(ids);

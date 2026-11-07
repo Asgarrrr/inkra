@@ -10,7 +10,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Kind, Mtime, Stamp, Vault};
 
 use super::tests::{Harness, Pending, SLOTS, path, paths};
-use super::{Effects, LiveIndex, Status};
+use super::{Effects, LiveIndex, Status, Turn};
 use crate::persist::{Outcome, Rejected, decode, encode};
 use crate::test_support::{ROOT, find_all, loaded as stamps};
 use crate::words::FRESH_MIN;
@@ -541,4 +541,42 @@ fn no_cache_holds_no_revision() {
     let _ = seeded(&mut h, Outcome::Missing);
 
     assert_eq!(h.live.cache_revision(), None);
+}
+
+#[test]
+fn a_rebuild_requeues_every_note() {
+    let mut h = loaded(&[("a.md", "alpha"), ("b.md", "beta"), ("c.md", "gamma")]);
+    assert_eq!(h.live.status(), Status::Ready);
+
+    let _ = h.turn(|t: &mut Turn<'_>| t.rebuild());
+
+    assert_eq!(loading(&h), [path("a.md"), path("b.md"), path("c.md")]);
+    assert_eq!(
+        h.live.status(),
+        Status::Indexing {
+            loaded: 0,
+            total: 3
+        }
+    );
+    assert_eq!(words(&h, "a.md"), ["alpha"], "seen until its reload lands");
+}
+
+#[test]
+fn a_rebuild_while_the_cache_waits_runs_once_it_lands() {
+    let (mut h, outcome) = relaunch(loaded(&[
+        ("a.md", "alpha"),
+        ("b.md", "beta"),
+        ("c.md", "gamma"),
+    ]));
+    let _ = h.built();
+
+    let _ = h.turn(|t: &mut Turn<'_>| t.rebuild());
+    assert_eq!(
+        loading(&h),
+        Vec::<PathBuf>::new(),
+        "the wait queues nothing"
+    );
+    let _ = seeded(&mut h, outcome);
+
+    assert_eq!(loading(&h), [path("a.md"), path("b.md"), path("c.md")]);
 }

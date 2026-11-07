@@ -212,6 +212,10 @@ impl LiveIndex {
                 None
             }
         };
+        // After the seed, so a rebuild asked during the wait clears what it seeded.
+        if !self.cache.waits() && mem::take(&mut self.rebuild_due) {
+            self.rebuild();
+        }
         self.retry_forgotten(seq, vault);
         Applied {
             dirty,
@@ -280,7 +284,7 @@ impl LiveIndex {
     }
 
     /// Queues each note whose stamp is not the one indexed; `seq` is the counter at the build's read.
-    fn queue_changed(&mut self, seq: u64, stamps: Vec<(EntryId, Stamp)>) {
+    pub(super) fn queue_changed(&mut self, seq: u64, stamps: Vec<(EntryId, Stamp)>) {
         if self.cache.waits() {
             return;
         }

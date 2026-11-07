@@ -19,14 +19,14 @@ use super::tests::{found, saved_edit};
 use crate::test_support::{cached_index_sync, entry_id, scan_notes};
 use crate::vault::NoteStore;
 
-const CACHE: &str = "/cache/index.idx";
+pub(super) const CACHE: &str = "/cache/index.idx";
 
 /// `n` seconds and a half after the epoch: a sub-second mtime, so no stamp is racy (P8).
 fn fine(n: u64) -> Mtime {
     Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(n) + Duration::from_millis(500))
 }
 
-fn vault(files: &[(&str, &str)]) -> Arc<MemFs> {
+pub(super) fn vault(files: &[(&str, &str)]) -> Arc<MemFs> {
     let fs = Arc::new(MemFs::new());
     for (n, (file, text)) in (1..).zip(files) {
         fs.insert_with_mtime(format!("/vault/{file}"), text, fine(n));
@@ -35,7 +35,10 @@ fn vault(files: &[(&str, &str)]) -> Arc<MemFs> {
 }
 
 /// A launch over `fs` reading and writing `CACHE`, run until nothing is left to do.
-fn launch(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<IndexSync>) {
+pub(super) fn launch(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (Entity<NoteStore>, Entity<IndexSync>) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
     let links = cached_index_sync(&notes, Path::new(CACHE), cx);
     cx.run_until_parked();

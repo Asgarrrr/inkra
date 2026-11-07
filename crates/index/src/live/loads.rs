@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use inkra_vault::{EntryId, Stamp, Vault};
 
 use super::LiveIndex;
+use super::diff::notes;
 use crate::content::NoteContent;
 
 /// One load or save of one note; it acts only while it is the latest minted for that note.
@@ -108,6 +109,21 @@ impl LiveIndex {
                 self.queue_load(id);
             }
         }
+    }
+
+    /// Every note of the last build loads again; asked while the cache waits, it runs once the wait ends.
+    pub(super) fn rebuild(&mut self) {
+        if self.cache.waits() {
+            self.rebuild_due = true;
+            return;
+        }
+        let Some(last) = &self.last else {
+            return;
+        };
+        let stamps = notes(last).map(|entry| (entry.id, entry.stamp())).collect();
+        // None is current, so `queue_changed` queues every note.
+        self.indexed.clear();
+        self.queue_changed(self.next_seq, stamps);
     }
 
     pub(super) fn queue_load(&mut self, id: EntryId) {

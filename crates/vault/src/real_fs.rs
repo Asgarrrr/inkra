@@ -223,6 +223,13 @@ impl Fs for RealFs {
         replace(path, bytes, None)
     }
 
+    async fn remove_file(&self, path: &Path) -> Result<()> {
+        match fs::remove_file(path) {
+            Err(source) if source.kind() != io::ErrorKind::NotFound => Err(io_error(path, source)),
+            _ => Ok(()),
+        }
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         match kind {
             // O_EXCL: the kernel refuses an existing path atomically, closing

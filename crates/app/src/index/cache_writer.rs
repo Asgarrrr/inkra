@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::lock::Mutex;
-use gpui::{AppContext as _, Context, Task};
+use gpui::{App, AppContext as _, Context, Task};
 use inkra_index::persist::{Due, Writes, encode};
 use inkra_vault::Fs;
 
@@ -38,6 +38,28 @@ impl CacheWriter {
             armed: None,
         }
     }
+
+    /// Removes the file in the writes' seq order: no write started before it lands after it (P15).
+    pub(super) fn remove(&mut self, cx: &App) {
+        let seq = self.take_seq();
+        if let Some(writes) = &mut self.writes {
+            writes.removed();
+        }
+        cx.background_spawn(remove_in_order(
+            Arc::clone(&self.written),
+            Arc::clone(&self.fs),
+            self.file.clone(),
+            seq,
+        ))
+        .detach();
+    }
+
+    /// The seq a write or the removal is ordered by.
+    fn take_seq(&mut self) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        seq
+    }
 }
 
 impl IndexSync {
@@ -55,8 +77,7 @@ impl IndexSync {
             Due::Now => {
                 rule.started(revision);
                 writer.armed = None;
-                let seq = writer.next_seq;
-                writer.next_seq += 1;
+                let seq = writer.take_seq();
                 let snapshot = self.live.index().snapshot();
                 let root = writer.root.clone();
                 let write = cx.background_spawn(write_in_order(
@@ -141,4 +162,21 @@ pub(super) async fn write_in_order(
             Written::Failed
         }
     }
+}
+
+/// Moves the mark even when the removal fails, so an older write in flight cannot bring the file back.
+pub(super) async fn remove_in_order(
+    written: Arc<Mutex<u64>>,
+    fs: Arc<dyn Fs>,
+    file: PathBuf,
+    seq: u64,
+) {
+    let mut mark = written.lock().await;
+    if seq < *mark {
+        return;
+    }
+    if let Err(error) = fs.remove_file(&file).await {
+        log::warn!("index cache not removed: {error}");
+    }
+    *mark = seq;
 }
