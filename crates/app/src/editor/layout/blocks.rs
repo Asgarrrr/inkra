@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use gpui::{Bounds, Pixels, Point, ShapedLine, SharedString, TextStyle, Window, point, px};
 use inkra_markdown::CodeBlock;
+use inkra_text::ByteOffset;
 
 use super::{DocumentLayout, LineLayout};
 use crate::theme::{self, Theme};
@@ -60,14 +61,14 @@ impl<'a> Labels<'a> {
 }
 
 /// Builds the blocks' layouts from the lines `shape_document` visits in order.
-pub(super) struct Blocks<'m> {
+pub(super) struct Blocks {
     done: Vec<BlockLayout>,
-    open: Option<Building<'m>>,
+    open: Option<Building>,
     column: Option<Pixels>,
 }
 
-struct Building<'m> {
-    block: &'m CodeBlock,
+struct Building {
+    start: ByteOffset,
     label: Option<ShapedLine>,
     top: Pixels,
     left: Pixels,
@@ -75,7 +76,7 @@ struct Building<'m> {
     bottom: Pixels,
 }
 
-impl<'m> Blocks<'m> {
+impl Blocks {
     /// `column` is the wrap width, `None` off the editor: there the widest line stands in.
     pub(super) fn new(column: Option<Pixels>) -> Self {
         Self {
@@ -89,21 +90,23 @@ impl<'m> Blocks<'m> {
     /// bottom. `label` is read on the line that opens the block.
     pub(super) fn line(
         &mut self,
-        block: Option<&'m CodeBlock>,
+        block: Option<&CodeBlock>,
         label: Option<ShapedLine>,
         line: &LineLayout,
         bottom: Pixels,
     ) {
-        if self.open.as_ref().is_some_and(|open| {
-            block.is_none_or(|block| block.range.start != open.block.range.start)
-        }) {
+        if self
+            .open
+            .as_ref()
+            .is_some_and(|open| block.is_none_or(|block| block.range.start != open.start))
+        {
             self.close();
         }
         if let Some(block) = block
             && self.open.is_none()
         {
             self.open = Some(Building {
-                block,
+                start: block.range.start,
                 label,
                 top: line.top,
                 left: DocumentLayout::x_on_row(line, 0, block.range.start)
