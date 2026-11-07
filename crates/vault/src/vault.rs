@@ -1,8 +1,7 @@
 //! The vault model: what notes exist, and what each one is.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::RelPath;
@@ -12,10 +11,12 @@ use crate::jobs::Serial;
 mod departures;
 mod identity;
 mod names;
+mod order;
 mod reclaim;
 mod walk;
 
 pub use departures::Departures;
+use order::sorted;
 pub use walk::{Reach, Walk};
 
 /// Guards against a pathological tree; no real vault approaches it.
@@ -333,40 +334,6 @@ impl Vault {
     }
 }
 
-/// Directories first at each level, each followed by its subtree (vault spec, "Ordering").
-fn compare(a: &Key<'_>, b: &Key<'_>) -> Ordering {
-    let (a_components, b_components) = (&a.components, &b.components);
-    for (i, (x, y)) in a_components.iter().zip(b_components.iter()).enumerate() {
-        if x == y {
-            continue;
-        }
-        let x_is_dir = i + 1 < a_components.len() || a.kind == Kind::Dir;
-        let y_is_dir = i + 1 < b_components.len() || b.kind == Kind::Dir;
-        return match (x_is_dir, y_is_dir) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => x.cmp(y),
-        };
-    }
-    // An ancestor of the other: the ancestor comes first.
-    a_components.len().cmp(&b_components.len())
-}
-
-/// A path split once, not once per comparison.
-struct Key<'a> {
-    components: Vec<Component<'a>>,
-    kind: Kind,
-}
-
-impl<'a> Key<'a> {
-    fn new(path: &'a RelPath, kind: Kind) -> Self {
-        Self {
-            components: path.as_path().components().collect(),
-            kind,
-        }
-    }
-}
-
 /// A row of a walk being applied: a kept entry has its id, a found file has `None` until minted.
 struct Row {
     id: Option<EntryId>,
@@ -392,20 +359,6 @@ fn surviving_rows(rows: &[(Entry, FileIdentity)]) -> Vec<bool> {
             kept
         })
         .collect()
-}
-
-fn sorted(rows: Vec<Row>) -> Vec<Row> {
-    let order: Vec<usize> = {
-        let keys: Vec<Key<'_>> = rows
-            .iter()
-            .map(|row| Key::new(&row.path, row.kind))
-            .collect();
-        let mut order: Vec<usize> = (0..rows.len()).collect();
-        order.sort_by(|&a, &b| compare(&keys[a], &keys[b]));
-        order
-    };
-    let mut rows: Vec<Option<Row>> = rows.into_iter().map(Some).collect();
-    order.into_iter().filter_map(|at| rows[at].take()).collect()
 }
 
 #[cfg(test)]
@@ -437,3 +390,6 @@ mod names_tests;
 
 #[cfg(test)]
 mod departures_tests;
+
+#[cfg(test)]
+mod order_tests;

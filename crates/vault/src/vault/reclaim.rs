@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use super::{EntryId, Key, Vault, compare};
+use super::order::position;
+use super::{EntryId, Vault};
 use crate::RelPath;
 use crate::fs::Kind;
 
@@ -10,15 +11,8 @@ impl Vault {
     /// The note at `path`; `None` for a folder, whatever its name.
     #[must_use]
     pub(crate) fn id_at(&self, path: &RelPath) -> Option<EntryId> {
-        let query = Key::new(path, Kind::Note);
-        // `compare` reads a kind only where components diverge, so a row at exactly `path` is `Equal`.
-        let at = self
-            .state
-            .entries
-            .binary_search_by(|entry| compare(&Key::new(&entry.path, entry.kind), &query))
-            .ok()?;
-        let entry = &self.state.entries[at];
-        (entry.kind == Kind::Note).then_some(entry.id)
+        let at = position(&self.state.entries, path, Kind::Note)?;
+        Some(self.state.entries[at].id)
     }
 
     /// Gives `other`'s note row, and its inode, the id `id`; refuses a folder, an absent row or a live `id`.

@@ -596,6 +596,22 @@ fn list_files_lists_direct_regular_files_sorted() {
 }
 
 #[test]
+fn list_files_skips_save_temp_files_and_non_utf8_dotfiles() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let fs = MemFs::new();
+    let dir = Path::new("/vault/themes");
+    fs.insert_file(dir.join("a.json"), "x");
+    fs.insert_file(dir.join("a.json.inkra-1-2.tmp"), "x");
+    fs.insert_file(dir.join(OsStr::from_bytes(b".\xff")), "x");
+
+    let files = block_on(fs.list_files(dir)).ok();
+
+    assert_eq!(files, Some(vec![dir.join("a.json")]));
+}
+
+#[test]
 fn replace_honours_unwritable() {
     let fs = MemFs::new();
     fs.insert_file("/vault/.inkra/settings.json", "before");

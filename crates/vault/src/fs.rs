@@ -164,8 +164,8 @@ pub trait Fs: Send + Sync {
     /// avoids link loops without detecting them.
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>>;
 
-    /// `dir`'s direct children that are regular files, any extension, no dotfiles or symlinks,
-    /// sorted by path; a missing `dir` is an `Io` `NotFound` error.
+    /// `dir`'s direct children that are regular files, any extension, sorted by path. Skips what
+    /// `listable` refuses and symlinks, as `read_dir` does; a missing `dir` is an `Io` `NotFound` error.
     async fn list_files(&self, dir: &Path) -> Result<Vec<PathBuf>>;
 
     /// Fails unless `path` is a folder this process may list; lists nothing.
