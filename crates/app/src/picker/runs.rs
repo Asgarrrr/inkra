@@ -4,13 +4,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use gpui::{App, Context, Entity, Priority, Subscription};
+use gpui::{App, Context, Entity, Priority, SharedString, Subscription};
 use inkra_index::live::Status;
 use inkra_index::{IndexSnapshot, NoteQuery};
 use inkra_vault::Jobs;
 
 use super::{Arrival, Picker, PickerDelegate, Update};
 use crate::background::Background;
+use crate::count::thousands;
 use crate::index::{IndexSync, IndexWatch};
 
 mod ledger;
@@ -19,6 +20,24 @@ use ledger::{Ledger, Started};
 #[cfg(test)]
 pub(crate) use ledger::{NOTES_CHANGED_REFRESH, SEARCH_DEBOUNCE};
 pub(crate) use ledger::{Run, RunId};
+
+/// A picker's empty text before the first build.
+const SCANNING: &str = "Scanning the vault…";
+
+/// A picker's footer, "Indexing 1,204 of 50,000 notes", while `Indexing`; else `None`.
+pub(crate) fn indexing_footer(status: Status) -> Option<SharedString> {
+    let Status::Indexing { loaded, total } = status else {
+        return None;
+    };
+    Some(
+        format!(
+            "Indexing {} of {} notes",
+            thousands(loaded),
+            thousands(total)
+        )
+        .into(),
+    )
+}
 
 /// A picker delegate whose rows answer a query over the index; `Runs` drives its runs.
 pub(crate) trait IndexDelegate: PickerDelegate {
@@ -106,6 +125,11 @@ impl Runs {
 
     pub(crate) fn scanning(&self) -> bool {
         self.scanning
+    }
+
+    /// A picker's empty text while it waits on the first build.
+    pub(crate) fn scanning_text(&self) -> Option<SharedString> {
+        self.scanning.then(|| SCANNING.into())
     }
 
     /// The whole of an `IndexDelegate`'s `update_matches`.

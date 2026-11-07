@@ -6,14 +6,12 @@ use std::time::Instant;
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{
-    AppContext as _, Context, Entity, EventEmitter, Priority, SharedString, Subscription,
-    WeakEntity, actions,
+    AppContext as _, Context, Entity, EventEmitter, Priority, Subscription, WeakEntity, actions,
 };
 use inkra_index::live::{Effects, Status, Turn};
 use inkra_index::{FileRead, LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
 use inkra_vault::{EntryId, Fs, Vault};
 
-use crate::count::thousands;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{NoteSaved, NoteStore};
 
@@ -32,24 +30,6 @@ pub(crate) use watch::BUILDING_REFRESH;
 pub(crate) use watch::IndexWatch;
 
 actions!(index, [RebuildIndex]);
-
-/// A picker's empty text before the first build.
-pub(crate) const SCANNING: &str = "Scanning the vault…";
-
-/// A picker's footer, "Indexing 1,204 of 50,000 notes", while `Indexing`; else `None`.
-pub(crate) fn indexing_footer(status: Status) -> Option<SharedString> {
-    let Status::Indexing { loaded, total } = status else {
-        return None;
-    };
-    Some(
-        format!(
-            "Indexing {} of {} notes",
-            thousands(loaded),
-            thousands(total)
-        )
-        .into(),
-    )
-}
 
 /// A build applied: note names and link resolution may have changed.
 pub(crate) struct NotesChanged;

@@ -78,6 +78,7 @@ the 16 hex digits of FNV-1a 64 over the bytes of the vault's absolute root
 output Rust does not promise to keep stable. The file records `root`; a file
 whose `root` differs from the vault's is ignored (a hash collision, or a
 copied file).
+The file is never in the vault: a vault holding that place (a vault at `~`) has no session file, so nothing is restored and nothing is written (sync clients would copy it, the watcher would see it; persisted index spec, P4).
 
 ```json
 {

@@ -85,9 +85,18 @@ pub(super) fn launch(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
+    let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()), None);
+    launch_as(cx, fs, launched)
+}
+
+/// `launched` on `fs`, unscanned; the root focused, nothing run yet.
+pub(super) fn launch_as(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+    launched: Launch,
+) -> (WindowHandle<AppShell>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let fs = Arc::clone(fs) as Arc<dyn Fs>;
-    let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()), None);
     let window = cx
         .update(|cx| {
             let bounds = Bounds::maximized(None, cx);

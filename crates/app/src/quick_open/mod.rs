@@ -11,9 +11,9 @@ use gpui::{
 use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
-use crate::index::{IndexSync, NotesChanged, SCANNING, indexing_footer};
+use crate::index::{IndexSync, NotesChanged};
 use crate::open::{FileActivated, Open};
-use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs};
+use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
 use list::List;
@@ -185,8 +185,8 @@ impl PickerDelegate for QuickOpenDelegate {
     }
 
     fn empty_text(&self, _: &App) -> Option<SharedString> {
-        if self.runs.scanning() {
-            return Some(SCANNING.into());
+        if let Some(text) = self.runs.scanning_text() {
+            return Some(text);
         }
         let text = match self.answered {
             Answered::Nothing => None,
