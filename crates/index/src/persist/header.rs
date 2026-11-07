@@ -53,11 +53,9 @@ impl Rejected {
 
 /// The cache file of `snapshot`, the vault at `root`.
 ///
-/// # Panics
-///
-/// When the file would exceed `MAX_BYTES`, which no reader accepts.
+/// `None` when the file would exceed `MAX_BYTES`, which no reader accepts.
 #[must_use]
-pub fn encode(snapshot: &IndexSnapshot, root: &Path) -> Vec<u8> {
+pub fn encode(snapshot: &IndexSnapshot, root: &Path) -> Option<Vec<u8>> {
     let words = snapshot.words();
     let (cached, to) = words::cached(words);
     let ordinal = |id| *to.get(words.ordinal(id)?.index())?;
@@ -68,12 +66,25 @@ pub fn encode(snapshot: &IndexSnapshot, root: &Path) -> Vec<u8> {
     ])
 }
 
-/// The header, then `sections` as given, so a test can seal a section it built by hand.
-pub(super) fn seal(sections: [&[u8]; SECTIONS]) -> Vec<u8> {
+/// The header, then `sections` as given, so a test can seal a section it built by hand;
+/// `None` over `MAX_BYTES`.
+pub(super) fn seal(sections: [&[u8]; SECTIONS]) -> Option<Vec<u8>> {
+    seal_capped(sections, MAX_BYTES)
+}
+
+pub(super) fn seal_capped(sections: [&[u8]; SECTIONS], cap: u64) -> Option<Vec<u8>> {
     let mut body = Vec::new();
     varint::push(&mut body, narrow(sections.len()));
     for section in sections {
         varint::push(&mut body, narrow(section.len()));
+    }
+    let len = sections
+        .iter()
+        .fold(HEADER_BYTES + body.len(), |len, section| {
+            len.saturating_add(section.len())
+        });
+    if !u64::try_from(len).is_ok_and(|len| len <= cap) {
+        return None;
     }
     for section in sections {
         body.extend_from_slice(section);
@@ -84,12 +95,7 @@ pub(super) fn seal(sections: [&[u8]; SECTIONS]) -> Vec<u8> {
         bytes.extend_from_slice(&field.to_le_bytes());
     }
     bytes.extend_from_slice(&body);
-    assert!(
-        u64::try_from(bytes.len()).is_ok_and(|len| len <= MAX_BYTES),
-        "the index cache is {} bytes, over MAX_BYTES",
-        bytes.len()
-    );
-    bytes
+    Some(bytes)
 }
 
 /// Checks `bytes` as the cache file of the vault at `root`; no input panics.

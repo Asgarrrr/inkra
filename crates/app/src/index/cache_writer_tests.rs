@@ -14,7 +14,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{FileIdentity, Fs, Mtime, Stamp};
 
 use super::IndexSync;
-use super::cache_writer::write_in_order;
+use super::cache_writer::{Written, write_in_order};
 use super::tests::{found, saved_edit};
 use crate::test_support::{cached_index_sync, entry_id, scan_notes};
 use crate::vault::NoteStore;
@@ -202,7 +202,7 @@ fn the_newer_of_two_writes_in_flight_lands(cx: &mut TestAppContext) {
             turn.landed(ticket, Ok(NoteContent::parse("zulu", file)));
         });
         write_now(sync, cx);
-        encode(&sync.index().snapshot(), Path::new("/vault"))
+        encode(&sync.index().snapshot(), Path::new("/vault")).expect("under the cap")
     });
     cx.run_until_parked();
 
@@ -224,7 +224,7 @@ fn an_older_write_polled_last_is_never_encoded() {
         fs.clone(),
         file.into(),
         2,
-        || b"new".to_vec(),
+        || Some(b"new".to_vec()),
     ));
     block_on(write_in_order(
         Arc::clone(&written),
@@ -234,5 +234,39 @@ fn an_older_write_polled_last_is_never_encoded() {
         || panic!("stale write encoded"),
     ));
 
+    assert_eq!(fs.read_to_string(file).as_deref(), Some("new"));
+}
+
+/// An encode over the cap fails the write: the old file stays, and so does the mark.
+#[test]
+fn an_oversize_cache_fails_and_keeps_the_old_file_and_the_mark() {
+    let fs = Arc::new(MemFs::new());
+    let written = Arc::new(Mutex::new(0));
+    let file = Path::new(CACHE);
+    fs.insert_bytes(file, b"old".to_vec());
+
+    assert_eq!(
+        block_on(write_in_order(
+            Arc::clone(&written),
+            fs.clone(),
+            file.into(),
+            2,
+            || None,
+        )),
+        Written::Failed
+    );
+    assert_eq!(fs.read_to_string(file).as_deref(), Some("old"));
+
+    assert_eq!(
+        block_on(write_in_order(
+            Arc::clone(&written),
+            fs.clone(),
+            file.into(),
+            1,
+            || Some(b"new".to_vec()),
+        )),
+        Written::Landed,
+        "the failed write left the mark at 0"
+    );
     assert_eq!(fs.read_to_string(file).as_deref(), Some("new"));
 }

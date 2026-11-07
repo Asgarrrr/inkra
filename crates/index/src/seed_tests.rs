@@ -60,7 +60,10 @@ fn cached(notes: &[(&str, &str, u64, Mtime)]) -> Decoded {
         };
         index.insert(id(&vault, file), NoteContent::parse(text, read));
     }
-    match decode(&encode(&index.snapshot(), Path::new(ROOT)), Path::new(ROOT)) {
+    match decode(
+        &encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"),
+        Path::new(ROOT),
+    ) {
         Ok(decoded) => decoded,
         Err(rejected) => panic!("rejected: {}", rejected.reason()),
     }

@@ -91,7 +91,9 @@ fn bench_persist(c: &mut Criterion) {
     eprintln!("index of {NOTES} notes: {:?}", start.elapsed());
     let root = Path::new(ROOT);
     let snapshot = index.snapshot();
-    let bytes = encode(&snapshot, root);
+    let Some(bytes) = encode(&snapshot, root) else {
+        panic!("the bench index is under the cap");
+    };
     eprintln!("cache file: {} bytes", bytes.len());
     assert!(decode(&bytes, root).is_ok(), "the bench file decodes");
     let mut group = c.benchmark_group("persist");

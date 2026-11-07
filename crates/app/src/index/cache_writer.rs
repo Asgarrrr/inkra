@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use futures::lock::Mutex;
 use gpui::{App, AppContext as _, Context, Task};
-use inkra_index::persist::{Due, Writes, encode};
+use inkra_index::persist::{Due, MAX_BYTES, Writes, encode};
 use inkra_vault::Fs;
 
 use super::IndexSync;
@@ -135,7 +135,7 @@ impl IndexSync {
 }
 
 /// How a write ended.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Written {
     Landed,
     Failed,
@@ -150,13 +150,17 @@ pub(super) async fn write_in_order(
     fs: Arc<dyn Fs>,
     file: PathBuf,
     seq: u64,
-    bytes: impl FnOnce() -> Vec<u8>,
+    bytes: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Written {
     let mut written = written.lock().await;
     if seq < *written {
         return Written::Skipped;
     }
-    match fs.replace_bytes(&file, &bytes()).await {
+    let Some(bytes) = bytes() else {
+        log::warn!("index cache not saved: over the cap of {MAX_BYTES} bytes");
+        return Written::Failed;
+    };
+    match fs.replace_bytes(&file, &bytes).await {
         // A failed write leaves the mark, as `write_through`'s.
         Ok(()) => {
             *written = seq;

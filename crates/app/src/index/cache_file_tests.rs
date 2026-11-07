@@ -40,7 +40,7 @@ fn first_launch(cx: &mut TestAppContext) -> Arc<MemFs> {
     let links = index_sync(&notes, cx);
     cx.run_until_parked();
     let bytes = links.read_with(cx, |links, _| {
-        encode(&links.index().snapshot(), Path::new("/vault"))
+        encode(&links.index().snapshot(), Path::new("/vault")).expect("under the cap")
     });
     fs.insert_bytes(CACHE, bytes);
     drop((notes, links));
