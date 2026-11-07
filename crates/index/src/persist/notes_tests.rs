@@ -10,7 +10,8 @@ use proptest::prelude::*;
 use super::header::seal;
 use super::{CachedNote, Rejected, decode, encode, notes, words};
 use crate::test_support::{ROOT, id, note_set, vault};
-use crate::words::{NoteWords, Ordinal, varint};
+use crate::varint;
+use crate::words::{NoteWords, Ordinal};
 use crate::{FileRead, NoteContent, NoteIndex, Source, SourceLink, Style, Target};
 
 fn read(secs: u64, nanos: u32, size: u64, inode: u64) -> FileRead {

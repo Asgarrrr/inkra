@@ -27,22 +27,7 @@ pub(crate) fn read_checked(bytes: &mut &[u8]) -> Option<u32> {
     None
 }
 
-/// Reads one value off the front of `bytes`. A truncated value is a caller bug.
-pub(super) fn read(bytes: &mut &[u8]) -> u32 {
-    let mut value = 0;
-    let mut shift = 0;
-    loop {
-        let Some((&byte, rest)) = bytes.split_first() else {
-            panic!("a varint ends past its bytes");
-        };
-        *bytes = rest;
-        value |= u32::from(byte & 0x7f) << shift;
-        if byte < 0x80 {
-            return value;
-        }
-        shift += 7;
-    }
+/// Reads one value off the front of `bytes`, by `read_checked`'s rule; a failure is a caller bug.
+pub(crate) fn read(bytes: &mut &[u8]) -> u32 {
+    read_checked(bytes).unwrap_or_else(|| panic!("a varint the index wrote does not decode"))
 }
-
-#[cfg(test)]
-mod tests;

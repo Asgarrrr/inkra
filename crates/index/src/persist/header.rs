@@ -1,10 +1,11 @@
 use std::path::Path;
 
+use super::bytes::narrow;
 use super::fingerprint::{derivation_fingerprint, fold_fingerprint};
 use super::notes::{self, CachedNote};
 use super::words::{self, CachedWords};
 use crate::IndexSnapshot;
-use crate::words::varint;
+use crate::varint;
 
 pub const FORMAT_VERSION: u32 = 2;
 /// The reader refuses a larger file from its stat, before reading it.
@@ -166,11 +167,4 @@ fn fields(body: &[u8]) -> [u32; 4] {
         derivation_fingerprint(),
         crc32fast::hash(body),
     ]
-}
-
-pub(super) fn narrow(len: usize) -> u32 {
-    let Ok(len) = u32::try_from(len) else {
-        panic!("an index cache length of {len}, over u32::MAX");
-    };
-    len
 }
