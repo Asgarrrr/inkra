@@ -477,3 +477,6 @@ Each slice appends what it did differently from this spec, and why.
   rebuild moves no revision. The payload makes the false record unrepresentable.
 - Oversize (arch/cache-cap): the log names the cap, not the size, since `seal_capped` stops at
   the computed length; `seal_capped` is `pub(super)` so `header_tests` reaches it.
+- Derivation fingerprint (arch/fingerprint-encoder): it hashes each probe note's links as
+  `put_links` encodes them, so a link field the file gains joins the fingerprint with no second
+  list. The golden moved once; every older cache is rejected once as `Derivation`.

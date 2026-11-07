@@ -5,9 +5,9 @@ use std::time::SystemTime;
 use crc32fast::Hasher;
 use inkra_vault::{FileIdentity, Mtime, Stamp};
 
-use super::notes::{link_flags, style_code};
+use super::notes::put_links;
 use crate::words::{WORD_MAX_CHARS, fold};
-use crate::{FileRead, NoteContent, Target};
+use crate::{FileRead, NoteContent};
 
 /// Accents, a ligature, final sigma, Turkish i, CJK and emoji.
 const FOLD_PROBES: [&str; 9] = [
@@ -67,7 +67,7 @@ fn probe_notes() -> Vec<String> {
     notes
 }
 
-/// Each probe note's words and counts, then every persisted field of its links, in order.
+/// Each probe note's words and counts, then its links as the cache file encodes them.
 pub(crate) fn derivation_fingerprint() -> u32 {
     let file = FileRead {
         stamp: Stamp {
@@ -80,37 +80,18 @@ pub(crate) fn derivation_fingerprint() -> u32 {
         },
     };
     let mut hasher = Hasher::new();
+    let mut links = Vec::new();
     for note in probe_notes() {
         let content = NoteContent::parse(&note, file);
         for (word, count) in content.words.iter() {
             terminated(&mut hasher, word);
             hasher.update(&count.to_le_bytes());
         }
-        for link in &content.source.links {
-            if let Target::Note {
-                path,
-                md,
-                fragment,
-                style,
-            } = &link.target
-            {
-                terminated(&mut hasher, path);
-                hasher.update(&[link_flags(*md, fragment.is_some())]);
-                if let Some(fragment) = fragment {
-                    terminated(&mut hasher, fragment);
-                }
-                hasher.update(&[style_code(*style)]);
-            }
-            for at in [
-                link.range.start.get(),
-                link.range.end.get(),
-                link.context_link.start,
-                link.context_link.end,
-            ] {
-                hasher.update(&(at as u64).to_le_bytes());
-            }
-            terminated(&mut hasher, &link.context);
-        }
+        links.clear();
+        let Some(()) = put_links(&mut links, &content.source.links) else {
+            panic!("a probe link fits the format");
+        };
+        hasher.update(&links);
     }
     hasher.finalize()
 }

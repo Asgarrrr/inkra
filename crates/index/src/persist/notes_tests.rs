@@ -419,6 +419,17 @@ fn each_field_rejects() {
 }
 
 #[test]
+fn each_style_code_decodes_to_its_style() {
+    for style in [Style::Name, Style::Suffix, Style::Relative] {
+        assert_eq!(
+            notes::style_from_code(notes::style_code(style)),
+            Some(style)
+        );
+    }
+    assert_eq!(notes::style_from_code(3), None);
+}
+
+#[test]
 fn no_truncation_panics() {
     let loads = [
         ("a.md", "[[b#é]] and [x](c.md) 🎉", read(5, 7, 30, 1)),
