@@ -3,11 +3,14 @@
 mod fingerprint;
 mod header;
 mod notes;
+mod scrub;
 mod words;
 mod writes;
 
 pub use header::{Decoded, FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
 pub use notes::CachedNote;
+pub(crate) use scrub::scrub_sample;
+pub use scrub::{SCRUB, ScrubJob};
 pub use words::CachedWords;
 pub use writes::{CHANGES, Due, MAX_BACKOFF, QUIET, Writes};
 
@@ -36,6 +39,8 @@ impl Outcome {
 mod header_tests;
 #[cfg(test)]
 mod notes_tests;
+#[cfg(test)]
+mod scrub_tests;
 #[cfg(test)]
 mod words_tests;
 #[cfg(test)]

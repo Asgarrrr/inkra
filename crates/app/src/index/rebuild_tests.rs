@@ -16,7 +16,7 @@ use super::cache_writer::{remove_in_order, write_in_order};
 use super::cache_writer_tests::{CACHE, launch, vault};
 use super::tests::saved_edit;
 
-fn kind(fs: &MemFs) -> Option<ErrorKind> {
+pub(super) fn kind(fs: &MemFs) -> Option<ErrorKind> {
     block_on(fs.read_bytes(Path::new(CACHE), MAX_BYTES))
         .err()
         .and_then(|error| error.io_kind())

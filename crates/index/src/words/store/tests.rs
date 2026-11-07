@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -366,4 +366,44 @@ fn total_counts_the_live_words_through_writes_and_a_merge_applied_after_them() {
     );
     words.remove(c);
     assert_eq!(total(&words), 0);
+}
+
+#[test]
+fn held_is_entries_of_the_picked_notes_with_their_lengths() {
+    let ids = ids(7);
+    let mut words = Words::default();
+    set(&mut words, ids[0], "plan plan été");
+    set(&mut words, ids[1], "plan");
+    set(&mut words, ids[2], "autre");
+    set(&mut words, ids[4], "vide");
+    words.merge_all();
+    set(&mut words, ids[1], "vieux vieux");
+    set(&mut words, ids[3], "neuf");
+    set(&mut words, ids[4], "");
+    let picked: HashSet<EntryId> = [0, 1, 3, 4, 5].map(|n| ids[n]).into();
+    let snapshot = words.snapshot();
+
+    let mut expected: HashMap<EntryId, (Vec<(String, u32)>, u32)> = HashMap::new();
+    for ((word, id), count) in snapshot.entries() {
+        if picked.contains(&id) {
+            let (words, length) = expected.entry(id).or_default();
+            words.push((word, count));
+            *length += count;
+        }
+    }
+    let held: HashMap<EntryId, (Vec<(String, u32)>, u32)> = snapshot
+        .held(&picked)
+        .into_iter()
+        .map(|(id, (words, length))| {
+            let words = words.into_iter().map(|(word, count)| (word.into(), count));
+            (id, (words.collect(), length))
+        })
+        .collect();
+
+    assert_eq!(
+        expected.len(),
+        3,
+        "a merged note, a fresh one and a re-set one"
+    );
+    assert_eq!(held, expected);
 }

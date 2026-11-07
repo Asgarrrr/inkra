@@ -22,6 +22,7 @@ mod cache_file;
 mod cache_writer;
 mod loading;
 mod reads;
+mod scrub;
 mod watch;
 
 use cache_writer::CacheWriter;
@@ -204,9 +205,13 @@ impl IndexSync {
             notify,
             indexed: _,
             seeded: _,
+            scrub,
         } = effects;
         for load in loads {
             self.spawn_load(load, cx);
+        }
+        if let Some(job) = scrub {
+            self.scrub(job, cx);
         }
         if let Some(job) = build {
             #[cfg(test)]
@@ -332,3 +337,6 @@ mod cache_writer_tests;
 
 #[cfg(test)]
 mod rebuild_tests;
+
+#[cfg(test)]
+mod scrub_tests;

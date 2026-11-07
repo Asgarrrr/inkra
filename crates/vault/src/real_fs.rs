@@ -159,7 +159,7 @@ impl Fs for RealFs {
         }
         let mut bytes = Vec::with_capacity(usize::try_from(len).map_err(|_| too_large())?);
         // One byte past the cap: a file that grew since the stat is refused, not cut.
-        file.take(max_len + 1)
+        file.take(max_len.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|source| io_error(path, source))?;
         if bytes.len() as u64 > max_len {

@@ -20,6 +20,8 @@ const SECTIONS: usize = 3;
 pub struct Decoded {
     pub notes: Vec<CachedNote>,
     pub words: CachedWords,
+    /// The body's crc32, as the header holds it: the scrub's seed (P16).
+    pub crc: u32,
 }
 
 /// Why a cache file is not used: a list of reasons, not a second error enum.
@@ -104,13 +106,15 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<Decoded, Rejected> {
     }
     let (found, _) = header[MAGIC.len()..].as_chunks::<4>();
     let found = found.iter().map(|&field| u32::from_le_bytes(field));
+    let expected = fields(body);
+    let [.., crc] = expected;
     let rejections = [
         Rejected::Version,
         Rejected::Fold,
         Rejected::Derivation,
         Rejected::Checksum,
     ];
-    for ((found, expected), rejected) in found.zip(fields(body)).zip(rejections) {
+    for ((found, expected), rejected) in found.zip(expected).zip(rejections) {
         if found != expected {
             return Err(rejected);
         }
@@ -143,7 +147,7 @@ pub fn decode(bytes: &[u8], root: &Path) -> Result<Decoded, Rejected> {
     }
     let notes = notes::decode(stored_notes)?;
     let words = words::decode(stored_words, &notes)?;
-    Ok(Decoded { notes, words })
+    Ok(Decoded { notes, words, crc })
 }
 
 /// The header's fields after the magic, for a file whose body is `body`.

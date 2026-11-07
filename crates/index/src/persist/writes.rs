@@ -28,8 +28,8 @@ pub struct Writes {
     seen: Option<(u64, Instant)>,
     /// The revision `CHANGES` counts from.
     base: u64,
-    /// The last failure's delay and when the next try is due.
-    backoff: Option<(Duration, Instant)>,
+    /// The last failure's delay and when the next try is due; `None` once a write took the try.
+    backoff: Option<(Duration, Option<Instant>)>,
 }
 
 impl Writes {
@@ -51,7 +51,7 @@ impl Writes {
         if !ready || self.written == Some(revision) {
             return Due::Idle;
         }
-        if let Some((_, retry)) = self.backoff {
+        if let Some((_, Some(retry))) = self.backoff {
             return if now < retry {
                 Due::At(retry)
             } else {
@@ -76,6 +76,9 @@ impl Writes {
     pub fn started(&mut self, revision: u64) {
         self.written = Some(revision);
         self.base = revision;
+        if let Some((_, retry)) = &mut self.backoff {
+            *retry = None;
+        }
     }
 
     /// The write of `revision` failed at `now`: the old file stays, and the next try waits.
@@ -86,7 +89,7 @@ impl Writes {
         let delay = self
             .backoff
             .map_or(QUIET, |(delay, _)| (delay * 2).min(MAX_BACKOFF));
-        self.backoff = Some((delay, now + delay));
+        self.backoff = Some((delay, Some(now + delay)));
     }
 
     /// The file was removed: it holds no revision.

@@ -444,3 +444,18 @@ Each slice appends what it did differently from this spec, and why.
   first removal at seq 0, which meets the mark. `MemFs::fail_next_removes` is tested in
   `mem_fs/fault_tests.rs`, beside its siblings. The palette test builds its `AppShell` with
   the cache file, since `open_vault` passes `None`.
+- Slice 5d: the sample is drawn when the seed is built, from `Decoded.crc`, over the seed's
+  `stamps` in vault order, so a racy note is never sampled. `LiveIndex` takes it in
+  `apply_notes`, and the turn that emits `indexed` hands it out as `Effects.scrub`, a
+  `ScrubJob` with the picks' paths and the snapshot. An id the vault no longer lists is dropped
+  from the job. A failed read, a note the snapshot holds no read for, or a file at another stamp
+  proves nothing: only an equal stamp with other sources, words or length rejects. `mismatch`
+  finds each pick's stamp and sources in one pass over `IndexSnapshot::loaded`, which has no
+  id-to-slot map; it runs off the foreground, once per launch. The words come from
+  `WordsSnapshot::held`, one pass over the segment; its value type is the alias `Held`, for
+  clippy's `type_complexity`. The length term repeats the words term but stays, as the file
+  holds both. `index.rs` changes: `NoteIndex::seed` ignores `scrub`. Tests reuse
+  `cache_writer_tests`' `fine` and `loads` and `rebuild_tests`' `kind`, made `pub(super)`.
+  The relaunch assertions on `fs.loads` gain the scrub's read for each seeded note. Cold figures
+  stay user-run (slice 0); the write cost is measured by a probe outside the app, as no log line
+  times it.

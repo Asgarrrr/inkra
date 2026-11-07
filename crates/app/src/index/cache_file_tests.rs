@@ -74,15 +74,21 @@ fn reloads_every_note(cx: &mut TestAppContext, fs: &Arc<MemFs>) {
 #[gpui::test]
 fn a_relaunch_loads_only_the_note_the_cache_lacks(cx: &mut TestAppContext) {
     let fs = first_launch(cx);
+    // The scrub reads `a.md` first and parks there: only the seed turn's loads are counted.
+    let scrub = fs.block_load("/vault/a.md");
     let (notes, links) = relaunch(cx, &fs);
     cx.run_until_parked();
 
     assert_eq!(
         loads(&fs),
-        [1, 1, 1, 1],
-        "a, b and c at the first launch only"
+        [1, 2, 1, 1],
+        "0 at the seed turn, then the scrub's first read"
     );
     assert_eq!(status(cx, &links), Status::Ready);
+    scrub.release();
+    cx.run_until_parked();
+
+    assert_eq!(loads(&fs), [1, 2, 2, 2], "the scrub's reads of a, b and c");
     assert_eq!(backlinks(cx, &notes, &links, "a"), ["b", "c"]);
     let beta = ["0", "b", "c"].map(|name| entry_id(&notes, cx, name));
     assert_eq!(found(cx, &links, "beta"), beta);
@@ -102,7 +108,7 @@ fn no_note_loads_before_the_cache_lands(cx: &mut TestAppContext) {
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(loads(&fs), [1, 1, 1, 1]);
+    assert_eq!(loads(&fs), [1, 2, 2, 2], "0, then the scrub's reads");
     assert_eq!(status(cx, &links), Status::Ready);
 }
 
