@@ -338,10 +338,6 @@ impl Fs for MemFs {
         Ok(())
     }
 
-    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
-        self.replace_bytes(path, text.as_bytes()).await
-    }
-
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         let blocked = self.state().blocked_replaces.remove(path);
         if let Some(wait) = blocked {

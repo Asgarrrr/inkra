@@ -55,7 +55,7 @@ fn fail_next_replaces_fails_that_many_replaces_and_keeps_the_old_bytes() {
     fs.fail_next_replaces(path, 2, ErrorKind::StorageFull);
     let failures = [
         block_on(fs.replace_bytes(path, b"new")),
-        block_on(fs.replace(path, "new")),
+        block_on(fs.replace_bytes(path, b"new")),
     ];
     for result in failures {
         let error = result.expect_err("an injected failure");

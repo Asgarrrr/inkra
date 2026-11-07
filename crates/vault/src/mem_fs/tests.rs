@@ -523,10 +523,10 @@ fn replace_creates_missing_folders_and_overwrites() {
     let fs = MemFs::new();
     let path = Path::new("/support/sessions/a.json");
 
-    let Ok(()) = block_on(fs.replace(path, "one")) else {
+    let Ok(()) = block_on(fs.replace_bytes(path, b"one")) else {
         panic!("replace must succeed under missing folders");
     };
-    let Ok(()) = block_on(fs.replace(path, "two")) else {
+    let Ok(()) = block_on(fs.replace_bytes(path, b"two")) else {
         panic!("replace must succeed over an existing file");
     };
 
@@ -601,7 +601,7 @@ fn replace_honours_unwritable() {
     fs.insert_file("/vault/.inkra/settings.json", "before");
     fs.make_unwritable("/vault/.inkra/settings.json");
 
-    let result = block_on(fs.replace(Path::new("/vault/.inkra/settings.json"), "after"));
+    let result = block_on(fs.replace_bytes(Path::new("/vault/.inkra/settings.json"), b"after"));
 
     assert!(matches!(
         result,

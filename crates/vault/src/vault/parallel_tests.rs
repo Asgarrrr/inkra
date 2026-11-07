@@ -136,10 +136,6 @@ impl Fs for PanickingFs {
         self.inner.create_parents(path).await
     }
 
-    async fn replace(&self, path: &Path, text: &str) -> Result<()> {
-        self.inner.replace(path, text).await
-    }
-
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         self.inner.replace_bytes(path, bytes).await
     }

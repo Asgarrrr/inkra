@@ -244,7 +244,7 @@ pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> R
     settings["theme"] = Value::from(choice.setting());
     let mut text = serde_json::to_string_pretty(&settings).map_err(|error| failed(&error))?;
     text.push('\n');
-    fs.replace(&path, &text)
+    fs.replace_bytes(&path, text.as_bytes())
         .await
         .map_err(|error| failed(&error))
 }
