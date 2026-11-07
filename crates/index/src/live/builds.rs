@@ -249,6 +249,7 @@ impl LiveIndex {
             load.live &= live.contains(&load.id);
         }
         if let Some(seed) = seed {
+            self.cache_revision = (!seed.pruned).then_some(self.revision);
             for (id, stamp) in self.index.seed(seed) {
                 // A save since launch holds a newer stamp than the cache's, or must reload (P6).
                 if !self.latest.contains_key(&id) {

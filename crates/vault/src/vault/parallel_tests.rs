@@ -140,6 +140,10 @@ impl Fs for PanickingFs {
         self.inner.replace(path, text).await
     }
 
+    async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        self.inner.replace_bytes(path, bytes).await
+    }
+
     async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
         self.inner.create(path, kind).await
     }

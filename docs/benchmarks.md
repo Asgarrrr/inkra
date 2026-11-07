@@ -242,3 +242,16 @@ Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent
 Slice 3c adds `cargo bench -p inkra-index --bench persist -- --quick`: a synthetic index of 50,000
 notes of 1 to 5 KB, one link each, words merged; an 8,709,437-byte file. `persist/decode` median
 10.39 ms (10.36 to 10.49 ms), under the 60 ms gate; `persist/encode` 13.43 ms (13.33 to 13.81 ms).
+
+Slice 5a-2 writes the file, so the 4b gates are measured here. Same machine, vault and
+`launch-figure.sh`, with `--home /tmp/inkra-persist-home`; a first 20 s launch wrote the one
+6,921,909-byte `.idx` file. Warm launch, 5 runs: every line has `cache decoded`, `indexed` 230.6 to
+270.9 ms (gate 0.35 s), seed turn 1.59 to 1.76 ms (gate 8 ms).
+
+```
+launch: first frame 82.9ms, session read 115.71µs, root 113.6ms, scanned 201.8ms, names ready 230.6ms, cache decoded 89.9ms, seed turn 1.59ms, indexed 230.63ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.6ms) | rss 161360 kB | phys_footprint 124617520 B
+launch: first frame 121.6ms, session read 64.17µs, root 149.3ms, scanned 240.3ms, names ready 270.9ms, cache decoded 148.3ms, seed turn 1.76ms, indexed 270.92ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 163360 kB | phys_footprint 218317640 B
+launch: first frame 110.8ms, session read 70.62µs, root 142.5ms, scanned 231.0ms, names ready 260.2ms, cache decoded 118.2ms, seed turn 1.70ms, indexed 260.25ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 162768 kB | phys_footprint 217613128 B
+launch: first frame 106.2ms, session read 68.62µs, root 135.8ms, scanned 223.3ms, names ready 252.1ms, cache decoded 134.8ms, seed turn 1.69ms, indexed 252.07ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 162896 kB | phys_footprint 125584200 B
+launch: first frame 106.9ms, session read 66.79µs, root 137.8ms, scanned 224.4ms, names ready 252.9ms, cache decoded 136.4ms, seed turn 1.60ms, indexed 252.94ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.6ms) | rss 162160 kB | phys_footprint 217088816 B
+```

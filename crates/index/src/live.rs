@@ -66,6 +66,8 @@ pub struct LiveIndex {
     /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
     note_sets: u64,
     revision: u64,
+    /// The revision the cache file holds: the seed's, unless it pruned a note.
+    cache_revision: Option<u64>,
     startup: Startup,
     /// How many loads may run at once.
     slots: usize,
@@ -94,6 +96,7 @@ impl LiveIndex {
             last: None,
             note_sets: 0,
             revision: 0,
+            cache_revision: None,
             startup: Startup::default(),
             slots,
         }
@@ -108,6 +111,12 @@ impl LiveIndex {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The revision the cache file holds; `None` when it holds none or more than the index.
+    #[must_use]
+    pub fn cache_revision(&self) -> Option<u64> {
+        self.cache_revision
     }
 
     /// `(loaded, total)`: the notes of the last build, less those queued or loading; the cache

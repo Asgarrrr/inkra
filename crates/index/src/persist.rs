@@ -4,10 +4,12 @@ mod fingerprint;
 mod header;
 mod notes;
 mod words;
+mod writes;
 
 pub use header::{Decoded, FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
 pub use notes::CachedNote;
 pub use words::CachedWords;
+pub use writes::{Due, QUIET, Writes};
 
 /// What the cache read gave the index: the turn input that ends `LiveIndex::await_cache` (P7).
 #[derive(Debug)]
@@ -36,3 +38,5 @@ mod header_tests;
 mod notes_tests;
 #[cfg(test)]
 mod words_tests;
+#[cfg(test)]
+mod writes_tests;

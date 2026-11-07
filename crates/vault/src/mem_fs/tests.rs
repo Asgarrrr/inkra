@@ -529,6 +529,39 @@ fn replace_creates_missing_folders_and_overwrites() {
 }
 
 #[test]
+fn replace_bytes_writes_bytes_that_are_not_utf8_under_missing_folders() {
+    let fs = MemFs::new();
+    let path = Path::new("/cache/index/a.idx");
+
+    let Ok(()) = block_on(fs.replace_bytes(path, &[0xff, 0x00, 0xfe])) else {
+        panic!("replace_bytes must succeed under missing folders");
+    };
+
+    let bytes = block_on(fs.read_bytes(path, u64::MAX)).ok();
+    assert_eq!(bytes.as_deref(), Some(&[0xff, 0x00, 0xfe][..]));
+    let listed = block_on(fs.list_files(Path::new("/cache/index"))).ok();
+    assert_eq!(listed, Some(vec![path.to_path_buf()]));
+}
+
+#[test]
+fn replace_bytes_honours_unwritable() {
+    let fs = MemFs::new();
+    fs.insert_bytes("/cache/a.idx", b"before".to_vec());
+    fs.make_unwritable("/cache/a.idx");
+
+    let result = block_on(fs.replace_bytes(Path::new("/cache/a.idx"), b"after"));
+
+    assert!(matches!(
+        result,
+        Err(VaultError::Io { source, .. }) if source.kind() == std::io::ErrorKind::PermissionDenied
+    ));
+    assert_eq!(
+        fs.read_to_string(Path::new("/cache/a.idx")).as_deref(),
+        Some("before")
+    );
+}
+
+#[test]
 fn list_files_lists_direct_regular_files_sorted() {
     let fs = MemFs::new();
     for file in ["b.json", "a.txt", ".hidden", "sub/nested.json"] {
