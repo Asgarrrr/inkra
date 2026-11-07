@@ -73,28 +73,30 @@ pub(super) fn seal(sections: [&[u8]; SECTIONS]) -> Option<Vec<u8>> {
 }
 
 pub(super) fn seal_capped(sections: [&[u8]; SECTIONS], cap: u64) -> Option<Vec<u8>> {
-    let mut body = Vec::new();
-    varint::push(&mut body, narrow(sections.len()));
+    let mut lengths = Vec::new();
+    varint::push(&mut lengths, narrow(sections.len()));
     for section in sections {
-        varint::push(&mut body, narrow(section.len()));
+        varint::push(&mut lengths, narrow(section.len()));
     }
     let len = sections
         .iter()
-        .fold(HEADER_BYTES + body.len(), |len, section| {
+        .fold(HEADER_BYTES + lengths.len(), |len, section| {
             len.saturating_add(section.len())
         });
     if !u64::try_from(len).is_ok_and(|len| len <= cap) {
         return None;
     }
-    for section in sections {
-        body.extend_from_slice(section);
-    }
-    let mut bytes = Vec::with_capacity(HEADER_BYTES + body.len());
+    let mut bytes = Vec::with_capacity(len);
     bytes.extend_from_slice(&MAGIC);
-    for field in fields(&body) {
-        bytes.extend_from_slice(&field.to_le_bytes());
+    bytes.resize(HEADER_BYTES, 0);
+    bytes.extend_from_slice(&lengths);
+    for section in sections {
+        bytes.extend_from_slice(section);
     }
-    bytes.extend_from_slice(&body);
+    let (header, body) = bytes.split_at_mut(HEADER_BYTES);
+    for (slot, field) in header[MAGIC.len()..].chunks_exact_mut(4).zip(fields(body)) {
+        slot.copy_from_slice(&field.to_le_bytes());
+    }
     Some(bytes)
 }
 
