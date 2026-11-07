@@ -1,4 +1,4 @@
-//! Per-tab back and forward stacks, and dropping a note from all history (tabs spec, A1 invariants 4–6 and 9).
+//! Per-tab back and forward stacks, and dropping a file from all history (tabs spec, A1 invariants 4–6 and 9).
 
 use std::collections::VecDeque;
 use std::iter::successors;
@@ -36,15 +36,15 @@ impl Way {
     }
 }
 
-/// Where `steps` successive walks `way` arrive: a place on `note`.
+/// Where `steps` successive walks `way` arrive: a place on `file`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stop<N> {
     pub way: Way,
     pub steps: NonZeroUsize,
-    pub note: N,
+    pub file: N,
 }
 
-/// Oldest first; no empty place (H2) and no two adjacent entries on one note (H1).
+/// Oldest first; no empty place (H2) and no two adjacent entries on one file (H1).
 #[derive(Debug, Clone)]
 pub(crate) struct Stack<P>(pub(crate) VecDeque<P>);
 
@@ -55,10 +55,10 @@ impl<P> Default for Stack<P> {
 }
 
 impl<P: Place> Stack<P> {
-    /// Skips an empty place; replaces a top on the same note, else drops the oldest when full.
+    /// Skips an empty place; replaces a top on the same file, else drops the oldest when full.
     pub(crate) fn push(&mut self, place: P) {
-        let Some(note) = place.note() else { return };
-        if self.0.back().and_then(Place::note) == Some(note) {
+        let Some(file) = place.file() else { return };
+        if self.0.back().and_then(Place::file) == Some(file) {
             self.0.pop_back();
         } else if self.0.len() == HISTORY {
             self.0.pop_front();
@@ -66,10 +66,10 @@ impl<P: Place> Stack<P> {
         self.0.push_back(place);
     }
 
-    /// Re-pushes every entry not on `note`: the push rule collapses the runs a removal joined, keeping the newest.
-    pub(crate) fn forget(&mut self, note: P::Note) {
+    /// Re-pushes every entry not on `file`: the push rule collapses the runs a removal joined, keeping the newest.
+    pub(crate) fn forget(&mut self, file: P::File) {
         for place in std::mem::take(&mut self.0) {
-            if place.note() != Some(note) {
+            if place.file() != Some(file) {
                 self.push(place);
             }
         }
@@ -79,33 +79,41 @@ impl<P: Place> Stack<P> {
         self.0.clear();
     }
 
-    /// The newest entry off the note `showing`; the entries on it above that one are dropped.
-    pub(crate) fn pop(&mut self, showing: Option<P::Note>) -> Option<P> {
-        std::iter::from_fn(|| self.0.pop_back()).find(|place| place.note() != showing)
+    /// The newest entry off the file `showing`; the entries on it above that one are dropped.
+    pub(crate) fn pop(&mut self, showing: Option<P::File>) -> Option<P> {
+        std::iter::from_fn(|| self.0.pop_back()).find(|place| place.file() != showing)
     }
 }
 
-impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
-    /// The newest place behind on another note than `showing`; `None`, calling no `capture`, if
+/// The files on `back` then `forward`.
+fn stacked<'a, P: Place>(
+    back: &'a Stack<P>,
+    forward: &'a Stack<P>,
+) -> impl Iterator<Item = P::File> + 'a {
+    back.0.iter().chain(&forward.0).filter_map(Place::file)
+}
+
+impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
+    /// The newest place behind on another file than `showing`; `None`, calling no `capture`, if
     /// none.
-    pub fn back(&mut self, showing: Option<P::Note>, capture: impl FnOnce() -> P) -> Option<P> {
+    pub fn back(&mut self, showing: Option<P::File>, capture: impl FnOnce() -> P) -> Option<P> {
         self.walk(Way::Back, NonZeroUsize::MIN, showing, capture)
     }
 
     /// As `back`, the other way.
-    pub fn forward(&mut self, showing: Option<P::Note>, capture: impl FnOnce() -> P) -> Option<P> {
+    pub fn forward(&mut self, showing: Option<P::File>, capture: impl FnOnce() -> P) -> Option<P> {
         self.walk(Way::Forward, NonZeroUsize::MIN, showing, capture)
     }
 
     /// Whether `back(showing, _)` arrives; it reads and captures nothing.
     #[must_use]
-    pub fn can_go_back(&self, showing: Option<P::Note>) -> bool {
+    pub fn can_go_back(&self, showing: Option<P::File>) -> bool {
         self.stops(Way::Back, showing).next().is_some()
     }
 
     /// As `can_go_back`, the other way.
     #[must_use]
-    pub fn can_go_forward(&self, showing: Option<P::Note>) -> bool {
+    pub fn can_go_forward(&self, showing: Option<P::File>) -> bool {
         self.stops(Way::Forward, showing).next().is_some()
     }
 
@@ -113,51 +121,66 @@ impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
     pub fn stops(
         &self,
         way: Way,
-        showing: Option<P::Note>,
-    ) -> impl Iterator<Item = Stop<P::Note>> + '_ {
+        showing: Option<P::File>,
+    ) -> impl Iterator<Item = Stop<P::File>> + '_ {
         way.from(&self.list[self.active_index()])
             .0
             .iter()
             .rev()
-            .filter_map(Place::note)
-            .skip_while(move |&note| Some(note) == showing)
+            .filter_map(Place::file)
+            .skip_while(move |&file| Some(file) == showing)
             .zip(successors(Some(NonZeroUsize::MIN), |n| n.checked_add(1)))
-            .map(move |(note, steps)| Stop { way, steps, note })
+            .map(move |(file, steps)| Stop { way, steps, file })
     }
 
     /// Arrives where `stop.steps` walks would, capturing once (invariant 9); `None`, calling no
-    /// `capture` and changing no stack, if the walks stop short or arrive off `stop.note`.
+    /// `capture` and changing no stack, if the walks stop short or arrive off `stop.file`.
     pub fn walk_to(
         &mut self,
-        stop: Stop<P::Note>,
-        showing: Option<P::Note>,
+        stop: Stop<P::File>,
+        showing: Option<P::File>,
         capture: impl FnOnce() -> P,
     ) -> Option<P> {
         self.stops(stop.way, showing)
             .nth(stop.steps.get() - 1)
-            .filter(|at| at.note == stop.note)?;
+            .filter(|at| at.file == stop.file)?;
         self.walk(stop.way, stop.steps, showing, capture)
     }
 
-    /// Drops `note` from every inactive tab, closed tab and stack; the active tab's place is the caller's.
-    pub fn forget(&mut self, note: P::Note) {
+    /// Drops `file` from every inactive tab, closed tab and stack; the active tab's place is the caller's.
+    pub fn forget(&mut self, file: P::File) {
         for tab in &mut self.list {
             if let Some(place) = &mut tab.place
-                && place.note() == Some(note)
+                && place.file() == Some(file)
             {
                 *place = Q::default();
             }
-            tab.back.forget(note);
-            tab.forward.forget(note);
+            tab.back.forget(file);
+            tab.forward.forget(file);
         }
         for entry in &mut self.closed {
-            if entry.place.note() == Some(note) {
+            if entry.place.file() == Some(file) {
                 entry.place = P::default();
             }
-            entry.back.forget(note);
-            entry.forward.forget(note);
+            entry.back.forget(file);
+            entry.forward.forget(file);
         }
         self.closed.retain(|entry| !entry.is_blank());
+    }
+
+    /// The files `forget` would drop, with duplicates; never the active tab's place (H8).
+    pub fn files(&self) -> impl Iterator<Item = P::File> + '_ {
+        let tabs = self.list.iter().flat_map(|tab| {
+            let place = tab.place.as_ref().and_then(Place::file);
+            place.into_iter().chain(stacked(&tab.back, &tab.forward))
+        });
+        let closed = self.closed.iter().flat_map(|entry| {
+            let place = entry.place.file();
+            place
+                .into_iter()
+                .chain(stacked(&entry.back, &entry.forward))
+        });
+        tabs.chain(closed)
     }
 
     // Pops before `capture` runs: it seals an undo group, so it runs only when a place arrives.
@@ -165,7 +188,7 @@ impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
         &mut self,
         way: Way,
         steps: NonZeroUsize,
-        showing: Option<P::Note>,
+        showing: Option<P::File>,
         capture: impl FnOnce() -> P,
     ) -> Option<P> {
         let index = self.active_index();

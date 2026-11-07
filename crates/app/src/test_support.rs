@@ -83,7 +83,7 @@ pub(crate) fn entry_id(notes: &Entity<NoteStore>, cx: &mut TestAppContext, name:
             .expect("a vault")
             .read(cx)
             .entries()
-            .find(|entry| entry.path.display_name() == name)
+            .find(|entry| entry.display_name() == name)
             .map(|entry| entry.id)
             .expect("the entry is in the vault")
     })

@@ -4,6 +4,7 @@ use gpui::{Focusable, Modifiers, TestAppContext, VisualTestContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
+use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::test_support::entry_id;
 use crate::theme;
@@ -33,6 +34,27 @@ fn clicking_a_backlink_opens_its_source(cx: &mut TestAppContext) {
     editor(&window, cx).read_with(cx, |editor, cx| {
         assert_eq!(editor.buffer().read(cx).text(), "alpha links [[b]]");
     });
+}
+
+#[gpui::test]
+fn an_image_shown_lists_the_notes_that_embed_it(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "![[photo.png]]");
+    fs.insert_file("/vault/b.md", "[[photo]]");
+    fs.insert_bytes("/vault/photo.png", png(40, 30));
+    let (window, sidebar, notes) = open_vault(cx, fs as Arc<dyn Fs>);
+    cx.run_until_parked();
+    let photo = entry_id(&notes, cx, "photo.png");
+
+    activate(&sidebar, cx, photo);
+    cx.run_until_parked();
+
+    let sources = window
+        .update(cx, |shell, _, cx| {
+            shell.panes().backlinks.read(cx).source_names()
+        })
+        .expect("the shell is open");
+    assert_eq!(sources, ["a"]);
 }
 
 #[gpui::test]

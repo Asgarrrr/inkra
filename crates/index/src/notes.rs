@@ -10,14 +10,15 @@ use crate::target::{Style, Target};
 /// What a link resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
-    Note(EntryId),
-    /// A note link no note matches.
+    /// A note, or an asset when no note matches.
+    File(EntryId),
+    /// A file link no file matches.
     Unresolved,
     External(String),
     SelfLink,
 }
 
-/// The vault's notes, keyed for resolution. Folders are never candidates.
+/// The vault's notes, or its assets, keyed for resolution. Folders are never candidates.
 #[derive(Default)]
 pub(crate) struct NoteTable {
     notes: HashMap<EntryId, Note>,
@@ -30,10 +31,12 @@ pub(crate) struct NoteTable {
 pub(crate) struct Query {
     style: Style,
     written: String,
+    /// The link named a note by its `.md` file name, which no asset has.
+    pub(crate) md: bool,
 }
 
 struct Note {
-    /// On disk, NFC, `/`-separated, `.md` stripped.
+    /// On disk, NFC, `/`-separated; a note's `.md` stripped.
     path: Arc<str>,
     key: Key,
     stem: Key,
@@ -60,7 +63,11 @@ impl Note {
 impl NoteTable {
     /// `notes` in `Vault::entries()` order, which breaks the last tie; paths as `prepare` gives.
     pub(crate) fn new(notes: &[(EntryId, Arc<str>)]) -> Self {
-        let mut table = Self::default();
+        let mut table = Self {
+            notes: HashMap::with_capacity(notes.len()),
+            by_stem: HashMap::with_capacity(notes.len()),
+            by_path: HashMap::with_capacity(notes.len()),
+        };
         for (order, (id, path)) in notes.iter().enumerate() {
             let note = Note {
                 key: Key::path(path),
@@ -91,21 +98,16 @@ impl NoteTable {
         self.notes.get(&id).map_or(usize::MAX, |note| note.order)
     }
 
-    pub(crate) fn resolve(&self, source: Option<EntryId>, target: &Target) -> Resolution {
-        match self.query(source, target) {
-            Ok(query) => self.search(&query),
-            Err(resolution) => resolution,
-        }
-    }
-
     /// What `search` needs: it no longer depends on the source, so results can be shared.
     pub(crate) fn query(
         &self,
         source: Option<EntryId>,
         target: &Target,
     ) -> Result<Query, Resolution> {
-        let (path, style) = match target {
-            Target::Note { path, style, .. } => (path, *style),
+        let (path, style, md) = match target {
+            Target::Note {
+                path, style, md, ..
+            } => (path, *style, *md),
             Target::External(url) => return Err(Resolution::External(url.clone())),
             Target::SelfLink => return Err(Resolution::SelfLink),
         };
@@ -118,11 +120,11 @@ impl NoteTable {
             Style::Name | Style::Suffix => written,
             Style::Relative => self.join(source, &written).ok_or(Resolution::Unresolved)?,
         };
-        Ok(Query { style, written })
+        Ok(Query { style, written, md })
     }
 
     pub(crate) fn search(&self, query: &Query) -> Resolution {
-        let Query { style, written } = query;
+        let Query { style, written, .. } = query;
         let style = *style;
         let candidates = match style {
             Style::Name | Style::Suffix => self.by_stem.get(&Key::stem(written)),
@@ -141,7 +143,7 @@ impl NoteTable {
                     note.order,
                 )
             })
-            .map_or(Resolution::Unresolved, |(id, _)| Resolution::Note(id))
+            .map_or(Resolution::Unresolved, |(id, _)| Resolution::File(id))
     }
 
     /// `path` from the source's folder, or from the root after a leading `/`; `None` above the

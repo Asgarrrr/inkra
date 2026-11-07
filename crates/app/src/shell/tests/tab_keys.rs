@@ -1,6 +1,6 @@
 use gpui::TestAppContext;
 
-use super::{ab_focused, editor, open, showing, tab_notes};
+use super::{ab_focused, editor, open, showing, tab_files};
 
 fn text_shown(window: &gpui::WindowHandle<super::AppShell>, cx: &mut TestAppContext) -> String {
     editor(window, cx).update(cx, |editor, cx| editor.buffer().read(cx).text().to_owned())
@@ -13,12 +13,12 @@ fn cmd_t_opens_an_empty_tab_after_the_active_one(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-t");
     open(&window, &mut cx, b);
     cx.simulate_keystrokes("ctrl-tab");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 0));
 
     cx.simulate_keystrokes("cmd-t");
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), None, Some(b)], 1)
     );
     window
@@ -50,7 +50,7 @@ fn ctrl_tab_and_ctrl_shift_tab_switch_and_wrap(cx: &mut TestAppContext) {
         ("ctrl-shift-tab", 1, b),
     ] {
         cx.simulate_keystrokes(keys);
-        assert_eq!(tab_notes(&window, &mut cx).1, active, "{keys}");
+        assert_eq!(tab_files(&window, &mut cx).1, active, "{keys}");
         assert_eq!(showing(&window, &mut cx), Some(note), "{keys}");
         assert_eq!(
             text_shown(&window, &mut cx),
@@ -97,13 +97,13 @@ fn cmd_w_closes_the_active_tab_and_activates_the_most_recent(cx: &mut TestAppCon
     open(&window, &mut cx, b);
     cx.simulate_keystrokes("ctrl-tab cmd-t ctrl-tab ctrl-tab");
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), None, Some(b)], 0)
     );
 
     cx.simulate_keystrokes("cmd-w");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b)], 1));
     assert_eq!(showing(&window, &mut cx), Some(b));
     assert_eq!(text_shown(&window, &mut cx), "beta");
 }
@@ -115,7 +115,7 @@ fn cmd_w_on_the_last_tab_leaves_one_empty_tab(cx: &mut TestAppContext) {
 
     cx.simulate_keystrokes("cmd-w");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None], 0));
     let (editor, current) = window
         .update(&mut cx, |shell, _, cx| {
             (shell.editor().is_some(), shell.notes.read(cx).current())
@@ -135,7 +135,7 @@ fn tabs_after_a(
     for _ in 1..count {
         cx.simulate_keystrokes("cmd-t");
     }
-    assert_eq!(tab_notes(&window, &mut cx).0.len(), count);
+    assert_eq!(tab_files(&window, &mut cx).0.len(), count);
     (window, cx)
 }
 
@@ -144,7 +144,7 @@ fn cmd_n_activates_the_nth_tab(cx: &mut TestAppContext) {
     let (window, mut cx) = tabs_after_a(cx, 8);
     for n in [1, 8, 2, 7, 3, 6, 4, 5] {
         cx.simulate_keystrokes(&format!("cmd-{n}"));
-        assert_eq!(tab_notes(&window, &mut cx).1, n - 1, "cmd-{n}");
+        assert_eq!(tab_files(&window, &mut cx).1, n - 1, "cmd-{n}");
     }
 }
 
@@ -153,7 +153,7 @@ fn cmd_n_past_the_last_tab_does_nothing(cx: &mut TestAppContext) {
     let (window, mut cx) = tabs_after_a(cx, 2);
     cx.simulate_keystrokes("cmd-1");
     cx.simulate_keystrokes("cmd-5");
-    assert_eq!(tab_notes(&window, &mut cx).1, 0);
+    assert_eq!(tab_files(&window, &mut cx).1, 0);
     assert!(showing(&window, &mut cx).is_some());
 }
 
@@ -163,7 +163,7 @@ fn cmd_9_activates_the_last_tab(cx: &mut TestAppContext) {
     let (window, mut cx) = tabs_after_a(cx, 10);
     cx.simulate_keystrokes("cmd-1");
     cx.simulate_keystrokes("cmd-9");
-    assert_eq!(tab_notes(&window, &mut cx).1, 9);
+    assert_eq!(tab_files(&window, &mut cx).1, 9);
 }
 
 #[gpui::test]
@@ -173,10 +173,10 @@ fn cmd_shift_t_reopens_the_last_closed_tab(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-t");
     open(&window, &mut cx, b);
     cx.simulate_keystrokes("cmd-w");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
 
     cx.simulate_keystrokes("cmd-shift-t");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
     assert_eq!(text_shown(&window, &mut cx), "beta");
 }

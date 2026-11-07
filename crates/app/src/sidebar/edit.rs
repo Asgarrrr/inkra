@@ -3,8 +3,9 @@ use gpui::{
     Window,
 };
 use std::io::ErrorKind;
+use std::path::Path;
 
-use inkra_vault::{EntryId, Kind, NameProblem};
+use inkra_vault::{EntryId, Kind, NameProblem, New};
 
 use crate::field::{Cancelled, Confirmed, NameField};
 
@@ -12,7 +13,7 @@ use super::{Rename, Sidebar, Trash};
 
 pub(super) struct EditState {
     parent: Option<EntryId>,
-    kind: Kind,
+    editing: Editing,
     pub(super) depth: usize,
     pub(super) field: Entity<NameField>,
     /// Must not disappear silently on a refusal — Zed's own confirm does that.
@@ -20,6 +21,13 @@ pub(super) struct EditState {
     /// A create in flight keeps the field open and ignores a second Enter.
     creating: bool,
     _subscriptions: [Subscription; 2],
+}
+
+/// A create makes a note or a folder; a rename keeps the entry's kind, an asset included.
+#[derive(Clone, Copy)]
+enum Editing {
+    Create(New),
+    Rename(Kind),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,8 +65,8 @@ impl Sidebar {
         let Some(at) = visible.index_of(id) else {
             return;
         };
-        // Folders are not deletable yet: one gesture would take every note inside.
-        if visible.entry(at).kind == Kind::Dir {
+        // Only a note is trashed: a folder would take every note inside, and trash takes notes only (file kinds spec).
+        if visible.entry(at).kind != Kind::Note {
             return;
         }
         let row = visible.row(at);
@@ -95,19 +103,14 @@ impl Sidebar {
     }
 
     /// Called by `AppShell`, never registered as an action here.
-    pub(crate) fn start_creating(
-        &mut self,
-        kind: Kind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let field = self.open_create(kind, cx);
+    pub(crate) fn start_creating(&mut self, new: New, window: &mut Window, cx: &mut Context<Self>) {
+        let field = self.open_create(new, cx);
         window.focus(&field.focus_handle(cx), cx);
     }
 
-    pub(super) fn open_create(&mut self, kind: Kind, cx: &mut Context<Self>) -> Entity<NameField> {
+    pub(super) fn open_create(&mut self, new: New, cx: &mut Context<Self>) -> Entity<NameField> {
         let (parent, item, depth) = self.insertion_point(cx);
-        let edit = Self::edit_state(parent, kind, depth, "", cx);
+        let edit = Self::edit_state(parent, Editing::Create(new), depth, "", cx);
         let field = edit.field.clone();
         self.rows.insert(item, edit);
         self.show_field(item, cx);
@@ -116,7 +119,7 @@ impl Sidebar {
 
     fn edit_state(
         parent: Option<EntryId>,
-        kind: Kind,
+        editing: Editing,
         depth: usize,
         initial: &str,
         cx: &mut Context<Self>,
@@ -124,7 +127,7 @@ impl Sidebar {
         let (field, subscriptions) = Self::open_field(initial, cx);
         EditState {
             parent,
-            kind,
+            editing,
             depth,
             field,
             rejected: None,
@@ -176,7 +179,7 @@ impl Sidebar {
         let at = visible.index_of(id)?;
         let row = visible.row(at);
         let parent = visible.parent_of(at);
-        let edit = Self::edit_state(parent, row.kind, row.depth, &row.name, cx);
+        let edit = Self::edit_state(parent, Editing::Rename(row.kind), row.depth, &row.name, cx);
         let field = edit.field.clone();
         let item = self.rows.replace(id, edit)?;
         self.show_field(item, cx);
@@ -210,7 +213,15 @@ impl Sidebar {
         if edit.creating {
             return;
         }
-        let (target, parent, kind) = (self.rows.target(), edit.parent, edit.kind);
+        let (target, parent, editing) = (self.rows.target(), edit.parent, edit.editing);
+        let kind = match editing {
+            Editing::Create(new) => Kind::from(new),
+            // The kind of the file the name makes: an asset renamed `x.md` becomes a note.
+            Editing::Rename(kind) if kind.is_file() => {
+                Kind::of_file(Path::new(&kind.file_name(name)))
+            }
+            Editing::Rename(kind) => kind,
+        };
         // Before `check_name`: a note made outside the app may hold a name it now refuses.
         if self.is_current_name(target, name, cx) {
             self.rows.close();
@@ -235,19 +246,14 @@ impl Sidebar {
         }
 
         let name = name.to_owned();
-        if let Some(id) = target {
-            self.rows.close();
-            self.notes
-                .update(cx, |notes, cx| notes.rename(id, &name, cx))
-                .detach();
-        } else {
+        if let Editing::Create(new) = editing {
             if let Some(edit) = self.rows.edit_mut() {
                 edit.creating = true;
                 edit.rejected = None;
             }
             let created = self
                 .notes
-                .update(cx, |notes, cx| notes.create(parent, kind, &name, cx));
+                .update(cx, |notes, cx| notes.create(parent, new, &name, cx));
             cx.spawn(async move |sidebar, cx| {
                 let created = created.await;
                 let _ = sidebar.update(cx, |sidebar, cx| {
@@ -255,6 +261,11 @@ impl Sidebar {
                 });
             })
             .detach();
+        } else if let Some(id) = target {
+            self.rows.close();
+            self.notes
+                .update(cx, |notes, cx| notes.rename(id, &name, cx))
+                .detach();
         }
         cx.notify();
     }
@@ -289,6 +300,6 @@ impl Sidebar {
     fn is_current_name(&self, target: Option<EntryId>, name: &str, cx: &App) -> bool {
         target
             .and_then(|id| self.vault.read(cx).entry(id))
-            .is_some_and(|entry| entry.path.display_name() == name.trim())
+            .is_some_and(|entry| entry.display_name() == name.trim())
     }
 }

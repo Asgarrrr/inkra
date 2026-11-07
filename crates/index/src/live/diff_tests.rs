@@ -6,17 +6,17 @@ use std::time::{Duration, SystemTime};
 
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Entry, EntryId, Mtime, RelPath, Stamp, Vault};
+use inkra_vault::{Entry, EntryId, Kind, Mtime, RelPath, Stamp, Vault};
 use proptest::prelude::*;
 
-use super::diff::{Change, notes};
+use super::diff::{Change, files};
 use crate::find::{find_in, merge_found};
 use crate::{NoteIndex, NoteMatch, NoteQuery};
 
-/// Notes in two folders beside an empty one, as a scan lists them.
+/// Notes and an asset in two folders beside an empty one, as a scan lists them.
 fn snapshot() -> Vec<Entry> {
     let fs = MemFs::new();
-    for file in ["a.md", "b.md", "f/c.md", "f/d.md", "g/e.md"] {
+    for file in ["a.md", "b.md", "f/c.md", "f/d.md", "f/x.png", "g/e.md"] {
         fs.insert_file(format!("/vault/{file}"), "");
     }
     fs.insert_dir("/vault/empty");
@@ -90,6 +90,34 @@ fn a_folder_added_or_removed_moves_no_stamp() {
     entries.remove(position(&entries, "empty"));
     assert_eq!(stamps(Some(&last), &entries), Some(Vec::new()), "removed");
     assert_eq!(stamps(Some(&entries), &last), Some(Vec::new()), "added");
+}
+
+#[test]
+fn an_asset_stamp_moved_moves_no_stamp() {
+    let last = snapshot();
+    let mut entries = last.clone();
+    let x = position(&entries, "f/x.png");
+    entries[x].mtime = mtime(7);
+    assert_eq!(stamps(Some(&last), &entries), Some(Vec::new()));
+}
+
+#[test]
+fn an_asset_path_id_or_count_change_is_a_layout() {
+    let last = snapshot();
+    let x = position(&last, "f/x.png");
+
+    let mut moved = last.clone();
+    moved[x].path = RelPath::new(Path::new("f/y.png")).expect("a relative path");
+    assert_eq!(stamps(Some(&last), &moved), None, "path");
+
+    let mut rekeyed = last.clone();
+    rekeyed[x].id = EntryId::DETACHED;
+    assert_eq!(stamps(Some(&last), &rekeyed), None, "id");
+
+    let mut fewer = last.clone();
+    fewer.remove(x);
+    assert_eq!(stamps(Some(&last), &fewer), None, "removed");
+    assert_eq!(stamps(Some(&fewer), &last), None, "added");
 }
 
 #[test]
@@ -192,15 +220,15 @@ fn names(entries: &[Entry]) -> Vec<(EntryId, String)> {
 }
 
 proptest! {
-    /// `Stamps` exactly when the notes' ids and paths are equal position by position, holding
+    /// `Stamps` exactly when the files' ids and paths are equal position by position, holding
     /// the notes whose stamp differs.
     #[test]
-    fn stamps_exactly_when_the_notes_ids_and_paths_match(
+    fn stamps_exactly_when_the_files_ids_and_paths_match(
         edits in prop::collection::vec(edit(snapshot().len()), 0..4),
     ) {
         let (last, entries) = edited(&edits);
 
-        let (before, after): (Vec<_>, Vec<_>) = (notes(&last).collect(), notes(&entries).collect());
+        let (before, after): (Vec<_>, Vec<_>) = (files(&last).collect(), files(&entries).collect());
         let same = before.len() == after.len()
             && before
                 .iter()
@@ -210,7 +238,7 @@ proptest! {
             before
                 .iter()
                 .zip(&after)
-                .filter(|(old, new)| old.stamp() != new.stamp())
+                .filter(|(old, new)| new.kind == Kind::Note && old.stamp() != new.stamp())
                 .map(|(_, new)| (new.id, new.stamp()))
                 .collect()
         });

@@ -16,9 +16,9 @@ pub use history::{Stop, Way};
 
 /// What a tab shows, as far as history needs it.
 pub trait Place: Default {
-    type Note: Copy + Eq;
+    type File: Copy + Eq;
     /// `None`: an empty tab. Never pushed on a stack (invariant 5).
-    fn note(&self) -> Option<Self::Note>;
+    fn file(&self) -> Option<Self::File>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,7 +191,7 @@ impl<P, Q> Tabs<P, Q> {
     }
 }
 
-impl<P: Place, Q: Place<Note = P::Note>> Tabs<P, Q> {
+impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
     /// Tabs on `places` in bar order; the caller shows `active`'s (H8), and its `Q` is dropped.
     /// Fresh ids, MRU the active first.
     ///

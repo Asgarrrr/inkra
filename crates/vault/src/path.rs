@@ -108,15 +108,6 @@ impl RelPath {
     pub fn starts_with(&self, other: &Self) -> bool {
         self.0.starts_with(&other.0)
     }
-
-    /// Lossy rather than fallible: a filename that is not valid UTF-8 should
-    /// render with replacement characters, not vanish from the vault.
-    #[must_use]
-    pub fn display_name(&self) -> String {
-        self.0
-            .file_stem()
-            .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
-    }
 }
 
 #[cfg(test)]

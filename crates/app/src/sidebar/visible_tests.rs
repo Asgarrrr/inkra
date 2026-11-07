@@ -27,7 +27,7 @@ fn walked(vault: &Vault, open: &[&str], target: Option<EntryId>) -> (Vec<String>
             let row = visible.row(ix);
             match row.kind {
                 Kind::Dir => format!("{}/", row.name),
-                Kind::Note => row.name,
+                Kind::Note | Kind::Asset => row.name,
             }
         })
         .collect();
@@ -191,4 +191,21 @@ fn a_step_enters_at_an_end_and_clamps_at_both() {
     let (_, empty) = flat(&[]);
     assert_eq!(empty.step(None, 1), None);
     assert_eq!(empty.step(Some(a), -1), None);
+}
+
+#[test]
+fn an_expanded_folder_draws_its_notes_and_assets_in_name_order() {
+    let fs = MemFs::new();
+    for file in [
+        "Media/a.md",
+        "Media/b.png",
+        "Media/c.md",
+        "Media/d.pdf",
+        "Z/z.png",
+    ] {
+        fs.insert_file(format!("/vault/{file}"), "");
+    }
+    fs.insert_file("/vault/top.md", "");
+    let (labels, _) = walked(&scanned(&fs), &["Media"], None);
+    assert_eq!(labels, ["Media/", "a", "b.png", "c", "d.pdf", "Z/", "top"]);
 }

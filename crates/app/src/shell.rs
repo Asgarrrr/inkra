@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, px};
-use inkra_vault::{EntryId, Kind};
+use inkra_vault::{EntryId, New};
 
 use crate::editor::EditorView;
-use crate::open::NoteActivated;
+use crate::open::FileActivated;
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
@@ -14,6 +14,7 @@ use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, Tras
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
+mod closing;
 mod column;
 mod dock_chrome;
 mod dock_drag;
@@ -32,6 +33,7 @@ mod render;
 mod separator;
 mod session;
 mod split;
+mod surface;
 mod tab_bar;
 mod tab_moves;
 mod tabs;
@@ -78,6 +80,7 @@ struct Bound {
 enum Shown {
     Empty,
     Bound(Bound),
+    Image(EntryId),
     /// The note's trash is pending: no editor until `NoteClosed` or `TrashFailed`.
     /// Entered only from a bound note, so a failed trash always finds its buffer again.
     Trashing(EntryId),
@@ -88,22 +91,24 @@ impl Shown {
     fn bound(&self) -> Option<&Bound> {
         match self {
             Self::Bound(bound) => Some(bound),
-            Self::Empty | Self::Trashing(_) | Self::View(_) => None,
+            Self::Empty | Self::Image(_) | Self::Trashing(_) | Self::View(_) => None,
         }
     }
 
-    /// The note the tab is on, bound or being trashed.
-    fn note(&self) -> Option<EntryId> {
+    /// The file the tab is on: a note bound or being trashed, or an image.
+    fn file(&self) -> Option<EntryId> {
         match self {
             Self::Empty | Self::View(_) => None,
-            Self::Bound(Bound { note, .. }) | Self::Trashing(note) => Some(*note),
+            Self::Bound(Bound { note: file, .. }) | Self::Image(file) | Self::Trashing(file) => {
+                Some(*file)
+            }
         }
     }
 
     fn view(&self) -> Option<View> {
         match self {
             Self::View(view) => Some(*view),
-            Self::Empty | Self::Bound(_) | Self::Trashing(_) => None,
+            Self::Empty | Self::Bound(_) | Self::Image(_) | Self::Trashing(_) => None,
         }
     }
 }
@@ -159,7 +164,7 @@ impl AppShell {
             .read(cx)
             .vault()
             .cloned()
-            .map(|vault| VaultPanes::new(vault, &notes, cache, cx));
+            .map(|vault| VaultPanes::new(vault, &notes, cache, window, cx));
         if let Some(editor) = &editor {
             Self::watch_editor(editor, cx);
         }
@@ -185,7 +190,7 @@ impl AppShell {
         cx.subscribe_in(
             &notes,
             window,
-            |shell, _notes, event: &NoteClosed, window, cx| shell.note_closed(event.0, window, cx),
+            |shell, _notes, event: &NoteClosed, window, cx| shell.file_closed(event.0, window, cx),
         )
         .detach();
         cx.subscribe_in(
@@ -282,8 +287,16 @@ impl AppShell {
         self.group_mut(self.layout.last_center())
     }
 
-    /// The note bound in the editor; `None` on a tab whose note is being trashed.
+    /// The file the center tab draws: a bound note or an image.
     pub(super) fn showing(&self) -> Option<EntryId> {
+        match &self.center().shown {
+            Shown::Bound(Bound { note: file, .. }) | Shown::Image(file) => Some(*file),
+            Shown::Empty | Shown::Trashing(_) | Shown::View(_) => None,
+        }
+    }
+
+    /// The note bound in the editor; `None` on a tab whose note is being trashed.
+    pub(super) fn bound_note(&self) -> Option<EntryId> {
         self.center().shown.bound().map(|bound| bound.note)
     }
 
@@ -308,11 +321,11 @@ impl AppShell {
 
     /// Handled here, not in the tree, so it fires with the editor focused.
     fn new_note(&mut self, _: &NewNote, window: &mut Window, cx: &mut Context<Self>) {
-        self.create(Kind::Note, window, cx);
+        self.create(New::Note, window, cx);
     }
 
     fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
-        self.create(Kind::Dir, window, cx);
+        self.create(New::Dir, window, cx);
     }
 
     fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
@@ -324,7 +337,7 @@ impl AppShell {
             window,
             cx,
             |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
-            |shell, event: &NoteActivated, cx| shell.open(event.note, None, event.open, cx),
+            |shell, event: &FileActivated, cx| shell.open(event.file, None, event.open, cx),
         );
     }
 
@@ -344,11 +357,11 @@ impl AppShell {
     }
 
     /// Reveals the tree first: the name field it focuses must be drawn.
-    fn create(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
+    fn create(&mut self, new: New, window: &mut Window, cx: &mut Context<Self>) {
         self.reveal(View::Files, window, cx);
         if let Some(panes) = &self.panes {
             panes.sidebar.update(cx, |sidebar, cx| {
-                sidebar.start_creating(kind, window, cx);
+                sidebar.start_creating(new, window, cx);
             });
         }
     }

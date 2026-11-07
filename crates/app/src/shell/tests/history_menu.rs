@@ -160,7 +160,7 @@ fn a_row_walks_the_group_its_menu_was_opened_on(cx: &mut TestAppContext) {
     let stop = window
         .update(&mut cx, |shell, _, _| {
             let group = shell.group(groups[1]);
-            group.tabs.stops(Way::Back, group.shown.note()).nth(1)
+            group.tabs.stops(Way::Back, group.shown.file()).nth(1)
         })
         .unwrap()
         .expect("group 1 has been on b");
@@ -189,7 +189,7 @@ fn a_row_for_a_closed_group_walks_nothing(cx: &mut TestAppContext) {
     let stop = window
         .update(&mut cx, |shell, _, _| {
             let group = shell.group(group);
-            group.tabs.stops(Way::Back, group.shown.note()).next()
+            group.tabs.stops(Way::Back, group.shown.file()).next()
         })
         .unwrap()
         .expect("group 1 has been on b");

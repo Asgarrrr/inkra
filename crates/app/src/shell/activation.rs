@@ -10,9 +10,11 @@ use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
 use super::group::Group;
+use super::surface::Landing;
 use super::tabs::{Place, capture};
 use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
+use crate::file_kind::FileKind;
 use crate::open::Open;
 use crate::sidebar::Cursor;
 use crate::vault::NoteStore;
@@ -26,9 +28,10 @@ pub(super) struct Origin {
 
 impl AppShell {
     /// Commits into the tab active when it started, or nowhere; no `await` from bind to `set_current`.
-    pub(super) fn open_note(
+    pub(super) fn open_file(
         &mut self,
         id: EntryId,
+        kind: FileKind,
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
@@ -37,17 +40,19 @@ impl AppShell {
             since: self.tree_cursor(cx),
         };
         let tab = self.group(origin.group).tabs.active();
-        let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
+        let opening = self.opening(id, kind, cx);
         // Dropped with its group, so the group it began in still exists when it lands.
         self.group_mut(origin.group).activation = Some(cx.spawn(async move |shell, cx| {
-            let Some(buffer) = opened.await else { return };
+            let Some(landing) = opening.landed().await else {
+                return;
+            };
             let _ = shell.update_in(cx, |shell, window, cx| {
                 let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
                 if !tabs.commit(tab, || capture(shown, cx)) {
                     return;
                 }
-                shell.land(origin, id, buffer, at, window, cx);
+                shell.land(origin, id, landing, at, window, cx);
             });
         }));
     }
@@ -57,13 +62,13 @@ impl AppShell {
         &mut self,
         origin: Origin,
         id: EntryId,
-        buffer: Entity<Buffer>,
+        landing: Landing,
         at: Option<Range<ByteOffset>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let editor = self.bind(origin.group, id, buffer, None, origin.since, cx);
-        if let Some(range) = at {
+        let editor = self.show_landed(origin.group, id, landing, None, origin.since, cx);
+        if let (Some(editor), Some(range)) = (editor, at) {
             editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
         }
         if origin.group == self.layout.last_center()
@@ -81,16 +86,21 @@ impl AppShell {
         open: Open,
         cx: &mut Context<Self>,
     ) {
+        let Some(kind) = self.file_kind(id, cx) else {
+            return;
+        };
         match open {
             // A view's tab keeps its view: a commit would push it into the tab's history.
-            Open::Here if self.center().shown.view().is_none() => self.show_note(id, at, cx),
-            Open::Here | Open::NewTab => self.open_in_new_tab(id, at, cx),
+            Open::Here if self.center().shown.view().is_none() => {
+                self.show_file(id, kind, at, cx);
+            }
+            Open::Here | Open::NewTab => self.open_in_new_tab(id, kind, at, cx),
             Open::SplitRight => {
                 let shell = cx.weak_entity();
                 // A split needs the window, which `open`'s callers do not hold.
                 cx.defer(move |cx| {
                     let _ = shell.update_in(cx, |shell, window, cx| {
-                        shell.open_in_split(id, at, window, cx);
+                        shell.open_in_split(id, kind, at, window, cx);
                     });
                 });
             }
@@ -101,6 +111,7 @@ impl AppShell {
     fn open_in_split(
         &mut self,
         id: EntryId,
+        kind: FileKind,
         at: Option<Range<ByteOffset>>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -110,16 +121,17 @@ impl AppShell {
             .split_group(from, SplitDirection::Right, Place::Empty, window, cx)
             .is_some()
         {
-            self.open_note(id, at, cx);
+            self.open_file(id, kind, at, cx);
         } else {
-            self.open_in_new_tab(id, at, cx);
+            self.open_in_new_tab(id, kind, at, cx);
         }
     }
 
     /// Opens `id`, or only selects `at` if it is showing; either way no slower activation may land after it.
-    pub(super) fn show_note(
+    pub(super) fn show_file(
         &mut self,
         id: EntryId,
+        kind: FileKind,
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
@@ -135,7 +147,7 @@ impl AppShell {
                 cx.with_window(cx.entity_id(), |window, cx| window.focus(&focus, cx));
             }
         } else {
-            self.open_note(id, at, cx);
+            self.open_file(id, kind, at, cx);
         }
     }
 
@@ -187,25 +199,27 @@ impl AppShell {
             self.follow_center(since, cx);
         }
         self.save_session_later(cx);
+        Self::release_images_later(cx);
     }
 
     /// `last_center`'s shown reaches the note's followers and `current`; the highlight moves only if the
     /// tree's cursor is still `since`. A view leaves `current` alone.
     pub(super) fn follow_center(&mut self, since: Cursor, cx: &mut Context<Self>) {
-        let note = self.showing();
+        let note = self.bound_note();
         if let Some(id) = note {
             remember(&mut self.recent, id);
         }
         if let Some(panes) = &self.panes {
-            // No bound note keeps the highlight: a tree trash has already moved it to the neighbour.
-            if let Some(id) = note {
+            let file = self.showing();
+            // No file shown keeps the highlight: a tree trash has already moved it to the neighbour.
+            if let Some(id) = file {
                 panes
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
             }
             panes
                 .backlinks
-                .update(cx, |backlinks, cx| backlinks.set_note(note, cx));
+                .update(cx, |backlinks, cx| backlinks.set_file(file, cx));
         }
         match (&self.center().shown, note) {
             (Shown::View(_), _) => {}
@@ -232,14 +246,14 @@ impl AppShell {
                 .links
                 .read(cx)
                 .index()
-                .resolve_link(self.showing(), link),
+                .resolve_link(self.bound_note(), link),
             None => match Target::parse(link) {
                 Target::External(url) => Resolution::External(url),
                 _ => Resolution::Unresolved,
             },
         };
         match resolution {
-            Resolution::Note(id) => self.open(id, None, open, cx),
+            Resolution::File(id) => self.open(id, None, open, cx),
             Resolution::External(url) => cx.open_url(&url),
             Resolution::Unresolved | Resolution::SelfLink => {}
         }
@@ -264,7 +278,7 @@ impl AppShell {
                 editor.update(cx, |editor, cx| editor.open_buffer(buffer, view.take(), cx));
                 editor
             }
-            Shown::Empty | Shown::Trashing(_) | Shown::View(_) => {
+            Shown::Empty | Shown::Image(_) | Shown::Trashing(_) | Shown::View(_) => {
                 let editor = cx.new(|cx| EditorView::new(buffer, cx));
                 Self::watch_editor(&editor, cx);
                 if group != self.layout.last_center() {

@@ -11,7 +11,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::{
-    AppShell, ab_focused, check, editor, focus_tree, keys, no_vault, open, showing, tab_notes,
+    AppShell, ab_focused, check, editor, focus_tree, keys, no_vault, open, showing, tab_files,
 };
 use crate::bootstrap::{Launch, root};
 
@@ -111,7 +111,7 @@ fn clicking_a_tab_activates_it(cx: &mut TestAppContext) {
 
     click(&mut cx, "tab-0");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 0));
     let text = editor(&window, &mut cx).update(&mut cx, |editor, cx| {
         editor.buffer().read(cx).text().to_owned()
     });
@@ -128,7 +128,7 @@ fn clicking_x_closes_that_tab_and_keeps_the_active_one(cx: &mut TestAppContext) 
 
     click(&mut cx, "tab-close-0");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b)], 0));
     let showing = window
         .update(&mut cx, |shell, _, _| shell.showing())
         .unwrap();
@@ -144,7 +144,7 @@ fn clicking_the_active_tab_focuses_its_editor(cx: &mut TestAppContext) {
 
     click(&mut cx, "tab-0");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(focus(&window, &mut cx), (true, false));
 }
 
@@ -158,7 +158,7 @@ fn closing_an_inactive_tab_with_its_x_focuses_the_active_editor(cx: &mut TestApp
 
     click(&mut cx, "tab-close-0");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b)], 0));
     assert_eq!(focus(&window, &mut cx), (true, false));
 }
 
@@ -172,7 +172,7 @@ fn a_middle_click_on_an_inactive_tab_focuses_the_active_editor(cx: &mut TestAppC
 
     press(&mut cx, "tab-0", MouseButton::Middle);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b)], 0));
     assert_eq!(focus(&window, &mut cx), (true, false));
 }
 
@@ -247,7 +247,7 @@ fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext)
         cx.simulate_keystrokes("ctrl-shift-tab");
     }
     cx.run_until_parked();
-    assert_eq!(tab_notes(&window, &mut cx).1, 20);
+    assert_eq!(tab_files(&window, &mut cx).1, 20);
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let active = cx.debug_bounds("tab-20").unwrap();
     assert!(active.left() >= bar.left() && active.left() < bar.left() + px(1.));
@@ -260,7 +260,7 @@ fn closing_a_tab_before_the_active_one_keeps_it_in_view(cx: &mut TestAppContext)
         .unwrap();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx).1, 19);
+    assert_eq!(tab_files(&window, &mut cx).1, 19);
     let bar = cx.debug_bounds("tab-bar").unwrap();
     let active = cx.debug_bounds("tab-19").unwrap();
     assert!(
@@ -304,7 +304,7 @@ fn a_middle_click_closes_the_tab_under_it(cx: &mut TestAppContext) {
 
     press(&mut cx, "tab-0", MouseButton::Middle);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), None], 1));
     check(&window, &mut cx);
 }
 
@@ -319,7 +319,7 @@ fn a_right_click_on_a_tab_closes_nothing(cx: &mut TestAppContext) {
     press(&mut cx, "tab-0", MouseButton::Right);
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b), None], 0)
     );
 }
@@ -336,7 +336,7 @@ fn a_middle_click_on_the_active_tab_shows_the_most_recent_one(cx: &mut TestAppCo
 
     press(&mut cx, "tab-0", MouseButton::Middle);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b)], 1));
     assert_eq!(showing(&window, &mut cx), Some(b));
     check(&window, &mut cx);
 }
@@ -351,7 +351,7 @@ fn a_middle_click_on_the_x_closes_its_tab(cx: &mut TestAppContext) {
 
     press(&mut cx, "tab-close-0", MouseButton::Middle);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), None], 1));
     check(&window, &mut cx);
 }
 
@@ -366,5 +366,5 @@ fn a_middle_click_on_a_tab_under_cmd_p_closes_nothing(cx: &mut TestAppContext) {
 
     press(&mut cx, "tab-0", MouseButton::Middle);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(b)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(b)], 1));
 }

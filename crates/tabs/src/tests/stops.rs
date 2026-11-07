@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::{Fake, Harness, ops, run};
-use crate::{Stop, Way};
+use crate::{HISTORY, Stop, Way};
 
 impl Harness {
     /// `walk_to` from the note showing; the arrival and the place left, if any.
@@ -47,12 +47,12 @@ proptest! {
         let mut harness = run(&ops, |_, _, _, _, _| {});
         let stops: Vec<Stop<u8>> = harness.tabs.stops(way(back), harness.showing.note).collect();
 
-        let mut arrivals = Vec::new();
-        while let (Some(place), _) = harness.walk(back) {
-            arrivals.push(place.note);
-        }
+        let arrivals: Vec<Option<u8>> = std::iter::from_fn(|| harness.walk(back).0)
+            .take(HISTORY + 1)
+            .map(|place| place.note)
+            .collect();
 
-        prop_assert_eq!(stops.iter().map(|stop| Some(stop.note)).collect::<Vec<_>>(), arrivals);
+        prop_assert_eq!(stops.iter().map(|stop| Some(stop.file)).collect::<Vec<_>>(), arrivals);
         prop_assert!(stops.iter().map(|stop| stop.steps.get()).eq(1..=stops.len()));
         prop_assert!(stops.iter().all(|stop| stop.way == way(back)));
     }
@@ -112,14 +112,14 @@ proptest! {
             .tabs
             .stops(stop.way, harness.showing.note)
             .nth(stop.steps.get() - 1)
-            .is_some_and(|at| at.note == stop.note);
+            .is_some_and(|at| at.file == stop.file);
         let (stacks, left) = (harness.stacks(), harness.left.len());
 
         let (arrived, _) = harness.walk_to(stop);
 
         prop_assert_eq!(arrived.is_some(), expect);
         if let Some(place) = arrived {
-            prop_assert_eq!(place.note, Some(stop.note));
+            prop_assert_eq!(place.note, Some(stop.file));
         } else {
             prop_assert_eq!(harness.stacks(), stacks);
             prop_assert_eq!(harness.left.len(), left);
@@ -136,7 +136,7 @@ fn a_walk_of_n_steps_pushes_the_places_it_passes_as_stored() {
     let (arrived, left) = harness.walk_to(Stop {
         way: Way::Back,
         steps: steps(3),
-        note: 1,
+        file: 1,
     });
 
     assert_eq!(arrived, Some(back[0].clone()));
@@ -156,7 +156,7 @@ fn a_walk_beyond_the_last_stop_changes_nothing() {
     let walked = harness.walk_to(Stop {
         way: Way::Back,
         steps: steps(4),
-        note: 1,
+        file: 1,
     });
 
     assert_eq!(walked, (None, None));
@@ -174,7 +174,7 @@ fn a_stale_stop_walks_nothing() {
     let stop = Stop {
         way: Way::Back,
         steps: steps(2),
-        note: 1,
+        file: 1,
     };
     assert_eq!(harness.tabs.stops(Way::Back, Some(3)).nth(1), Some(stop));
     harness.commit(tab, Some(4));

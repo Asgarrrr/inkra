@@ -65,7 +65,7 @@ pub(super) fn tabs_in(
 ) -> Vec<Option<EntryId>> {
     let group = centre(window, cx)[k];
     window
-        .update(cx, |shell, _, _| shell.tab_notes(group).collect())
+        .update(cx, |shell, _, _| shell.tab_files(group).collect())
         .unwrap()
 }
 

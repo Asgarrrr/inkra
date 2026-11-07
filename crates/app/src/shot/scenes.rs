@@ -1,5 +1,6 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
+mod assets;
 mod code_blocks;
 mod command_palette;
 mod docks;
@@ -177,6 +178,21 @@ const CATALOGUE: &[Scene] = &[
         name: "sidebar-dirty",
         shows: "the dirty dot on a note edited but not written, at its row's right edge",
         open: sidebar_dirty,
+    },
+    Scene {
+        name: "assets",
+        shows: "assets in the tree: `projects` open with `diagram.svg` before `inkra`, `photo.png` and `report.pdf` among the root notes in name order, each with its icon in the chevron's column (the image icon for `photo.png`, the file icon for the others) and its whole name, aligned with the notes' names; notes with no icon; no `.tmp` row",
+        open: assets::tree,
+    },
+    Scene {
+        name: "image",
+        shows: "`photo.png` clicked in the tree: its tab titled `photo.png`, the 640 x 400 gradient centred in the group, fitted with its aspect kept, the row selected, and the backlinks panel listing `a`, which embeds it",
+        open: assets::image,
+    },
+    Scene {
+        name: "image_failed",
+        shows: "a `photo.png` that is no image clicked in the tree: its tab titled `photo.png`, and `Inkra can't show this file.` muted and centred in the group",
+        open: assets::image_failed,
     },
     Scene {
         name: "sidebar-hover",

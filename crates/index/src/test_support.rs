@@ -9,8 +9,6 @@ use inkra_markdown::links;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, FileIdentity, Fs, Kind, Mtime, Serial, Stamp, Vault};
 
-use crate::note_set::prepare;
-use crate::notes::NoteTable;
 use crate::{
     FileRead, IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Read, Searched,
     Target, TextSearch,
@@ -119,8 +117,11 @@ pub(crate) fn note_set(vault: &Vault) -> NoteSet {
     NoteSet::build(entries(vault))
 }
 
-pub(crate) fn table(vault: &Vault) -> NoteTable {
-    NoteTable::new(&prepare(entries(vault)).notes)
+/// An index of `vault`'s files with no text loaded.
+pub(crate) fn resolver(vault: &Vault) -> NoteIndex {
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(note_set(vault));
+    index
 }
 
 pub(crate) fn id(vault: &Vault, path: &str) -> EntryId {

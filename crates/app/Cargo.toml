@@ -8,7 +8,6 @@ publish.workspace = true
 [features]
 # Off-screen shots; `gpui_platform/test-support` gates the capture itself (offscreen-shots spec).
 shot = [
-    "dep:image",
     "gpui/test-support",
     "gpui_platform/test-support",
     "inkra-vault/test-support",
@@ -45,7 +44,14 @@ log = "0.4"
 # Same `^0.25` as gpui, so `RgbaImage` is one type on both sides.
 image = { version = "0.25", default-features = false, features = [
     "png",
-], optional = true }
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "tiff",
+    "ico",
+    "pnm",
+] }
 
 [dev-dependencies]
 gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [

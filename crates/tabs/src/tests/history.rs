@@ -333,3 +333,27 @@ fn forget_empties_only_matching_tabs() {
         vec![Some(Fake::default()), Some(Fake::default()), None]
     );
 }
+
+#[test]
+fn files_lists_every_file_but_the_active_place() {
+    let mut harness = Harness::new();
+    let active = harness.tabs.active();
+    let closing = harness.insert(1);
+    harness.commit(closing, Some(5));
+    harness.commit(closing, Some(4));
+    harness.close(closing);
+    let parked = harness.insert(1);
+    harness.commit(parked, Some(1));
+    harness.activate(active);
+    for note in [2, 9, 3] {
+        harness.commit(active, Some(note));
+    }
+    harness.walk(true);
+    assert_eq!(harness.showing.note, Some(9));
+
+    let mut files: Vec<u8> = harness.tabs.files().collect();
+    files.sort_unstable();
+    files.dedup();
+
+    assert_eq!(files, [1, 2, 3, 4, 5]);
+}

@@ -39,6 +39,6 @@ fn on_disk_name(entry: &Entry) -> String {
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
     match entry.kind {
         Kind::Note => note_file_name(&name),
-        Kind::Dir => name,
+        Kind::Dir | Kind::Asset => name,
     }
 }

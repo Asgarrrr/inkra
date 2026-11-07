@@ -72,22 +72,22 @@ pub(super) fn strip_slot() -> Div {
         .pb(theme::TAB_HOVER_INSET)
 }
 
-pub(super) fn tab_title(note: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString {
-    note.and_then(|id| notes.title(id, cx))
+pub(super) fn tab_title(file: Option<EntryId>, notes: &NoteStore, cx: &App) -> SharedString {
+    file.and_then(|id| notes.title(id, cx))
         .map_or(SharedString::new_static(NEW_TAB), |title| {
             one_line(&title).into_owned().into()
         })
 }
 
 impl AppShell {
-    /// The note each tab shows; `None` for an empty tab.
-    pub(super) fn tab_notes(&self, group: GroupId) -> impl Iterator<Item = Option<EntryId>> + '_ {
+    /// The file each tab shows; `None` for an empty tab.
+    pub(super) fn tab_files(&self, group: GroupId) -> impl Iterator<Item = Option<EntryId>> + '_ {
         let group = self.group(group);
-        let active = group.shown.note();
+        let active = group.shown.file();
         group
             .tabs
             .iter()
-            .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::note))
+            .map(move |tab| tab.place().map_or(active, inkra_tabs::Place::file))
     }
 
     /// The view each tab holds; `None` for a note's or an empty tab.
@@ -102,11 +102,11 @@ impl AppShell {
     /// Every tab's title, reading the store once.
     pub(super) fn tab_titles(&self, group: GroupId, cx: &App) -> Vec<SharedString> {
         let notes = self.notes.read(cx);
-        self.tab_notes(group)
+        self.tab_files(group)
             .zip(self.tab_views(group))
-            .map(|(note, view)| match view {
+            .map(|(file, view)| match view {
                 Some(view) => SharedString::new_static(title(view)),
-                None => tab_title(note, notes, cx),
+                None => tab_title(file, notes, cx),
             })
             .collect()
     }
@@ -127,7 +127,7 @@ impl AppShell {
         let notes = self.notes.read(cx);
         // Reading inside the draw is what repaints the dot; `Entity::cached` would break it.
         let indicators: Vec<Option<Indicator>> = self
-            .tab_notes(group)
+            .tab_files(group)
             .map(|note| {
                 note.and_then(|id| Indicator::of(notes.is_dirty(id, cx), notes.save_failed(id)))
             })

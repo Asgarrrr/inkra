@@ -5,21 +5,21 @@ use inkra_vault::{EntryId, Vault};
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
-use crate::open::NoteActivated;
+use crate::open::FileActivated;
 use crate::row_text::LitText;
 
 mod render;
 #[cfg(test)]
 mod tests;
 
-impl EventEmitter<NoteActivated> for BacklinksPanel {}
+impl EventEmitter<FileActivated> for BacklinksPanel {}
 
 pub(crate) struct BacklinksPanel {
     links: Entity<IndexSync>,
     vault: Entity<Vault>,
-    note: Option<EntryId>,
-    /// Rebuilt when the index or the note changes, never in a draw: `backlinks` walks every
-    /// link sharing the note's name.
+    file: Option<EntryId>,
+    /// Rebuilt when the index or the file changes, never in a draw: `backlinks` walks every
+    /// link sharing the file's name.
     rows: Vec<Row>,
     building: bool,
     /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
@@ -56,7 +56,7 @@ impl BacklinksPanel {
         Self {
             links,
             vault,
-            note: None,
+            file: None,
             rows: Vec::new(),
             building: false,
             watch: IndexWatch::default(),
@@ -76,8 +76,8 @@ impl BacklinksPanel {
         (!self.rows.is_empty()).then_some(self.rows.len())
     }
 
-    pub(crate) fn set_note(&mut self, note: Option<EntryId>, cx: &mut Context<Self>) {
-        self.note = note;
+    pub(crate) fn set_file(&mut self, file: Option<EntryId>, cx: &mut Context<Self>) {
+        self.file = file;
         self.rebuild(cx);
     }
 
@@ -93,11 +93,11 @@ impl BacklinksPanel {
         let name = |id: EntryId| {
             vault
                 .entry(id)
-                .map(|entry| one_line(&entry.path.display_name()).into_owned())
+                .map(|entry| one_line(&entry.display_name()).into_owned())
         };
         let rows: Vec<Row> = self
-            .note
-            .map(|note| links.index().backlinks(note))
+            .file
+            .map(|file| links.index().backlinks(file))
             .unwrap_or_default()
             .into_iter()
             // A load may notify after the vault changed and before its build applies.

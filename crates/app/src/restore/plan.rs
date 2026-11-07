@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 
 use inkra_layout::{GroupId, Layout, Shape, Side, View};
-use inkra_vault::{EntryId, Kind, Vault};
+use inkra_vault::{EntryId, Vault};
 
 use super::format::dock_views;
-use super::{SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session};
+use super::{SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::editor::ViewState;
+use crate::file_kind::FileKind;
 
 /// What restores before the first frame: the tree, each dock group's views and its active index,
 /// and the centre's saved groups still to load. No session restores docks rule 6's layout.
@@ -25,10 +26,11 @@ pub(crate) struct Pending {
     active: usize,
 }
 
-/// A saved tab whose path names a note.
+/// A saved tab whose path names a file a tab can show.
 struct Survivor {
     saved_ix: usize,
-    note: EntryId,
+    file: EntryId,
+    kind: FileKind,
     view: Option<ViewState>,
 }
 
@@ -39,29 +41,29 @@ struct GroupPlan {
     saved_active: usize,
 }
 
-/// Every centre group, depth-first, with the saved tabs whose path names a note, and the saved active index.
+/// Every centre group, depth-first, with the saved tabs whose path names a file, and the saved active index.
 pub(crate) struct Plan {
     groups: Vec<GroupPlan>,
     active: usize,
 }
 
-/// A tab whose note loaded, with its buffer.
-pub(crate) struct Arrival<B> {
-    pub(crate) note: EntryId,
-    pub(crate) buffer: B,
+/// A tab whose file's open landed.
+pub(crate) struct Arrival<L> {
+    pub(crate) file: EntryId,
+    pub(crate) landing: L,
     pub(crate) view: Option<ViewState>,
 }
 
-/// The tabs whose note loaded: the one to show, the rest in bar order, and where the shown one stands.
-pub(crate) struct Restored<B> {
-    pub(crate) shown: Arrival<B>,
-    pub(crate) parked: Vec<Arrival<B>>,
+/// The tabs whose file arrived: the one to show, the rest in bar order, and where the shown one stands.
+pub(crate) struct Restored<L> {
+    pub(crate) shown: Arrival<L>,
+    pub(crate) parked: Vec<Arrival<L>>,
     pub(crate) active: usize,
 }
 
-/// Each group whose notes loaded, and the groups that may take the saved active one's place, nearest first.
-pub(crate) struct Landed<B> {
-    pub(crate) groups: Vec<(GroupId, Restored<B>)>,
+/// Each group whose files arrived, and the groups that may take the saved active one's place, nearest first.
+pub(crate) struct Landed<L> {
+    pub(crate) groups: Vec<(GroupId, Restored<L>)>,
     pub(crate) active: Vec<GroupId>,
 }
 
@@ -140,31 +142,33 @@ fn shape(member: SavedMember, groups: &mut Vec<SavedGroup>) -> Shape {
     }
 }
 
-/// A view tab names no note: the centre drops it and the view returns to its default dock, since
+/// A view tab names no file: the centre drops it and the view returns to its default dock, since
 /// the centre lands after the walk and Files must show during it.
 fn path(tab: &SavedTab) -> Option<&OsStr> {
     match tab {
-        SavedTab::Note(SavedNoteTab { note, .. }) => note.as_deref().map(OsStr::new),
+        SavedTab::File(SavedFileTab { file, .. }) => file.as_deref().map(OsStr::new),
         SavedTab::View { .. } => None,
     }
 }
 
 fn view(tab: &SavedTab) -> Option<ViewState> {
     match tab {
-        SavedTab::Note(SavedNoteTab { view, .. }) => view.map(ViewState::from),
+        SavedTab::File(SavedFileTab { view, .. }) => view.map(ViewState::from),
         SavedTab::View { .. } => None,
     }
 }
 
 impl Plan {
-    /// Byte-exact on each path, in one pass over the entries; `None` if no tab names a note.
+    /// Byte-exact on each path, in one pass over the entries; `None` if no tab names a file.
     pub(crate) fn resolve(pending: &Pending, vault: &Vault) -> Option<Self> {
         let tabs = || pending.groups.iter().flat_map(|(_, group)| &group.tabs);
-        let mut found: HashMap<&OsStr, Option<EntryId>> =
+        let mut found: HashMap<&OsStr, Option<(EntryId, FileKind)>> =
             tabs().filter_map(path).map(|path| (path, None)).collect();
-        for entry in vault.entries().filter(|entry| entry.kind == Kind::Note) {
-            if let Some(id) = found.get_mut(entry.path.as_path().as_os_str()) {
-                *id = Some(entry.id);
+        for entry in vault.entries().filter(|entry| entry.kind.is_file()) {
+            if let Some(slot) = found.get_mut(entry.path.as_path().as_os_str())
+                && let Some(kind) = FileKind::of(entry.path.as_path())
+            {
+                *slot = Some((entry.id, kind));
             }
         }
         let groups: Vec<_> = pending
@@ -177,9 +181,11 @@ impl Plan {
                     .iter()
                     .enumerate()
                     .filter_map(|(saved_ix, tab)| {
+                        let (file, kind) = (*found.get(path(tab)?)?)?;
                         Some(Survivor {
                             saved_ix,
-                            note: (*found.get(path(tab)?)?)?,
+                            file,
+                            kind,
                             view: view(tab),
                         })
                     })
@@ -196,16 +202,16 @@ impl Plan {
             })
     }
 
-    /// The loads to join, depth-first, each group's in bar order.
-    pub(crate) fn notes(&self) -> impl Iterator<Item = EntryId> + '_ {
+    /// The opens to join, depth-first, each group's in bar order.
+    pub(crate) fn files(&self) -> impl Iterator<Item = (EntryId, FileKind)> + '_ {
         self.groups
             .iter()
             .flat_map(|group| &group.survivors)
-            .map(|survivor| survivor.note)
+            .map(|survivor| (survivor.file, survivor.kind))
     }
 
-    /// Keeps the tabs whose load gave a buffer; `buffers` follows `notes`.
-    pub(crate) fn restored<B>(self, buffers: Vec<Option<B>>) -> Landed<B> {
+    /// Keeps the tabs whose open landed; `landings` holds one per survivor, in `files`' order.
+    pub(crate) fn restored<L>(self, landings: Vec<Option<L>>) -> Landed<L> {
         let active = self
             .groups
             .iter()
@@ -214,15 +220,14 @@ impl Plan {
             .filter(|&(ix, _)| ix <= self.active)
             .map(|(_, group)| group.group)
             .collect();
-        let mut buffers = buffers.into_iter();
+        let mut landings = landings.into_iter();
         let groups = self
             .groups
             .into_iter()
             .filter_map(|plan| {
-                let buffers = buffers.by_ref().take(plan.survivors.len()).collect();
                 Some((
                     plan.group,
-                    restored(plan.survivors, buffers, plan.saved_active)?,
+                    restored(plan.survivors, &mut landings, plan.saved_active)?,
                 ))
             })
             .collect();
@@ -230,19 +235,19 @@ impl Plan {
     }
 }
 
-/// `None` if no load gave a buffer.
-fn restored<B>(
+/// `None` if no survivor arrived; takes one landing per survivor from `landings`.
+fn restored<L>(
     survivors: Vec<Survivor>,
-    buffers: Vec<Option<B>>,
+    landings: &mut impl Iterator<Item = Option<L>>,
     saved_active: usize,
-) -> Option<Restored<B>> {
+) -> Option<Restored<L>> {
     let (mut arrivals, saved_ixs): (Vec<_>, Vec<_>) = survivors
         .into_iter()
-        .zip(buffers)
-        .filter_map(|(survivor, buffer)| {
+        .zip(landings)
+        .filter_map(|(survivor, landing)| {
             let arrival = Arrival {
-                note: survivor.note,
-                buffer: buffer?,
+                file: survivor.file,
+                landing: landing?,
                 view: survivor.view,
             };
             Some((arrival, survivor.saved_ix))

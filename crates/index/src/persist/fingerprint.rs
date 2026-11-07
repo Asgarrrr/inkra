@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use crc32fast::Hasher;
 use inkra_vault::{FileIdentity, Mtime, Stamp};
 
-use super::notes::style_code;
+use super::notes::{link_flags, style_code};
 use crate::words::{WORD_MAX_CHARS, fold};
 use crate::{FileRead, NoteContent, Target};
 
@@ -89,16 +89,15 @@ pub(crate) fn derivation_fingerprint() -> u32 {
         for link in &content.source.links {
             if let Target::Note {
                 path,
+                md,
                 fragment,
                 style,
             } = &link.target
             {
                 terminated(&mut hasher, path);
+                hasher.update(&[link_flags(*md, fragment.is_some())]);
                 if let Some(fragment) = fragment {
-                    hasher.update(&[1]);
                     terminated(&mut hasher, fragment);
-                } else {
-                    hasher.update(&[0]);
                 }
                 hasher.update(&[style_code(*style)]);
             }

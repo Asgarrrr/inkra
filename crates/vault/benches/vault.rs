@@ -1,14 +1,15 @@
-//! `walk`, `applied` and a re-key on a shared state at 50,000 notes, on `RealFs` (open-first spec, Performance).
+//! `walk`, `applied` and a re-key on a shared state at 50,000 files, on `RealFs` (open-first spec, Performance).
+//! `assets` holds one note in ten, the rest images (file kinds spec, Performance gate).
 
 #![allow(clippy::expect_used)]
 
 use std::hint::black_box;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_vault::{Fs, Job, Jobs, Mtime, Reach, RealFs, RelPath, Serial, Stamp, Vault, Walk};
+use inkra_vault::{Fs, Job, Jobs, Kind, Mtime, Reach, RealFs, RelPath, Serial, Stamp, Vault, Walk};
 
 const NOTES: usize = 50_000;
 const FOLDERS: usize = 100;
@@ -27,7 +28,12 @@ fn tree(layout: &str, folders: usize) -> PathBuf {
             dir.join(format!("f{}", note % folders))
         };
         std::fs::create_dir_all(&folder).expect("folder");
-        std::fs::write(folder.join(format!("n{note}.md")), "").expect("note");
+        let name = if layout == "assets" && note % 10 != 0 {
+            format!("a{note}.png")
+        } else {
+            format!("n{note}.md")
+        };
+        std::fs::write(folder.join(name), "").expect("file");
     }
     std::fs::write(dir.join(WRITTEN), "").expect("marker");
     dir
@@ -71,6 +77,10 @@ fn walks(c: &mut Criterion) {
             });
         });
     }
+    let root = tree("assets", FOLDERS);
+    c.bench_function("walk serial assets 50k", |b| {
+        b.iter(|| block_on(Vault::walk(&RealFs, &root, &RelPath::root(), &Serial)).expect("walk"));
+    });
     // The initial scan's full pass after its root pass: the root is not listed again.
     let root = tree("flat", 0);
     let listing = block_on(RealFs.read_dir(&root)).expect("the root");
@@ -88,17 +98,32 @@ fn walks(c: &mut Criterion) {
 }
 
 fn apply(c: &mut Criterion) {
+    for layout in ["nested", "assets"] {
+        let root = tree(layout, FOLDERS);
+        let walk =
+            || block_on(Vault::walk(&RealFs, &root, &RelPath::root(), &Serial)).expect("walk");
+        let empty = Vault::new(&root);
+        c.bench_function(&format!("applied from empty {layout} 50k"), |b| {
+            b.iter_batched(
+                walk,
+                |walk| black_box(empty.applied(walk)),
+                criterion::BatchSize::LargeInput,
+            );
+        });
+        // A miss reads every entry: a create's or a rename's check.
+        let scanned = empty.applied(walk());
+        let folder = scanned
+            .entries()
+            .find(|e| e.path.as_path() == Path::new("f0"))
+            .expect("f0")
+            .id;
+        c.bench_function(&format!("name_taken {layout} 50k"), |b| {
+            b.iter(|| black_box(scanned.name_taken(Some(folder), Kind::Note, "missing", None)));
+        });
+    }
     let root = tree("nested", FOLDERS);
     let walk = || block_on(Vault::walk(&RealFs, &root, &RelPath::root(), &Serial)).expect("walk");
-    let empty = Vault::new(&root);
-    c.bench_function("applied from empty nested 50k", |b| {
-        b.iter_batched(
-            walk,
-            |walk| black_box(empty.applied(walk)),
-            criterion::BatchSize::LargeInput,
-        );
-    });
-    let scanned = empty.applied(walk());
+    let scanned = Vault::new(&root).applied(walk());
     c.bench_function("applied again nested 50k", |b| {
         b.iter_batched(
             walk,

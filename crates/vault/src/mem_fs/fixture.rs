@@ -92,6 +92,12 @@ impl MemFs {
         self.state().loads.get(path).copied().unwrap_or_default()
     }
 
+    /// How many byte reads of `path` have started.
+    #[must_use]
+    pub fn reads(&self, path: &Path) -> usize {
+        self.state().reads.get(path).copied().unwrap_or_default()
+    }
+
     /// How many listings of `path` have started.
     #[must_use]
     pub fn read_dirs(&self, path: &Path) -> usize {

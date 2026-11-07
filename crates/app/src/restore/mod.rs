@@ -13,9 +13,9 @@ use gpui::{App, AppContext as _, Task};
 use inkra_vault::Fs;
 
 #[cfg(test)]
-pub(crate) use format::{SavedAxis, SavedDock, SavedDocks, SessionV1};
+pub(crate) use format::SavedAxis;
 pub(crate) use format::{
-    SavedGroup, SavedMember, SavedNoteTab, SavedTab, SavedView, Session, cache_file, session_file,
+    SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, Session, cache_file, session_file,
 };
 pub(crate) use plan::{Landed, Pending, Plan, Restored, Surfaces};
 

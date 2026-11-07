@@ -179,7 +179,7 @@ fn a_pending_folder_that_no_longer_exists_is_skipped_and_its_parent_drops_it() {
 }
 
 #[test]
-fn a_pending_folder_replaced_by_a_file_is_skipped_and_its_parent_drops_it() {
+fn a_pending_folder_replaced_by_a_file_is_skipped_and_its_parent_lists_the_file() {
     let fs = MemFs::new();
     fs.insert_file("/vault/f/g/c.md", "");
     let vault = scan(&fs);
@@ -191,7 +191,8 @@ fn a_pending_folder_replaced_by_a_file_is_skipped_and_its_parent_drops_it() {
     assert_eq!(read(&walk), ["f"]);
     assert_eq!(walk.reach, Reach::Partial, "a folder gone needs no retry");
     let vault = vault.applied(walk);
-    assert_eq!(id_of(&vault, "f/g"), None);
+    let g = id_of(&vault, "f/g").and_then(|id| vault.entry(id));
+    assert_eq!(g.map(|entry| entry.kind), Some(Kind::Asset));
     assert_eq!(id_of(&vault, "f/g/c.md"), None);
 }
 

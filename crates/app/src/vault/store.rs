@@ -141,7 +141,7 @@ impl NoteStore {
             .as_ref()
             .and_then(|vault| vault.read(cx).entry(id))
         {
-            return Some(entry.path.display_name());
+            return Some(entry.display_name());
         }
         let name = match self.sessions.get(id)?.life.location()? {
             Location::Gone(path) => path.file_stem(),
@@ -149,6 +149,11 @@ impl NoteStore {
             Location::Vault => None,
         };
         name.map(|name| name.to_string_lossy().into_owned())
+    }
+
+    /// Whether `id` has a session: a note open, gone or detached, which leaves only on `NoteClosed`.
+    pub(crate) fn holds(&self, id: EntryId) -> bool {
+        self.sessions.get(id).is_some()
     }
 
     pub(crate) fn is_gone(&self, id: EntryId) -> bool {

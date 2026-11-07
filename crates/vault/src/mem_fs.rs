@@ -16,7 +16,8 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
+    listable,
 };
 use crate::temp::temp_path;
 use crate::watch::Watch;
@@ -46,6 +47,8 @@ struct State {
     trashed: BTreeMap<PathBuf, (Vec<u8>, Mtime, FileIdentity)>,
     /// Loads started per path, found or not.
     loads: BTreeMap<PathBuf, usize>,
+    /// Byte reads started per path, found or not.
+    reads: BTreeMap<PathBuf, usize>,
     blocked_read_dirs: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_after_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_after_renames: BTreeMap<PathBuf, oneshot::Receiver<()>>,
@@ -153,9 +156,11 @@ impl Fs for MemFs {
         let state = self.state();
         state.readable_dir(path)?;
 
+        let child =
+            |entry: &Path| entry.parent() == Some(path) && entry.file_name().is_some_and(listable);
         let mut entries = Vec::new();
         for (dir, (mtime, identity)) in &state.dirs {
-            if dir.parent() == Some(path) {
+            if child(dir) {
                 entries.push(DirEntry {
                     path: dir.clone(),
                     kind: Kind::Dir,
@@ -166,14 +171,10 @@ impl Fs for MemFs {
             }
         }
         for (file, (bytes, mtime, identity)) in &state.files {
-            // As `RealFs` does: only notes are listed.
-            let note = file
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-            if note && file.parent() == Some(path) {
+            if child(file) {
                 entries.push(DirEntry {
                     path: file.clone(),
-                    kind: Kind::Note,
+                    kind: Kind::of_file(file),
                     mtime: *mtime,
                     size: bytes.len() as u64,
                     identity: *identity,
@@ -232,13 +233,16 @@ impl Fs for MemFs {
         })
     }
 
-    /// Counts no load: `loads` counts the notes' loads.
+    /// Counts in `reads`, never in `loads`: reading a file's bytes is no note's load.
     async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>> {
-        let blocked = self.state().blocked_read_bytes.remove(path);
+        let blocked = {
+            let mut state = self.state();
+            *state.reads.entry(path.to_path_buf()).or_default() += 1;
+            state.blocked_read_bytes.remove(path)
+        };
         if let Some(wait) = blocked {
             let _ = wait.await;
         }
-
         let state = self.state();
         state.refused_load(path)?;
         let Some((bytes, _, _)) = state.files.get(path) else {
@@ -363,7 +367,7 @@ impl Fs for MemFs {
         Ok(())
     }
 
-    async fn create(&self, path: &Path, kind: Kind) -> Result<FileIdentity> {
+    async fn create(&self, path: &Path, new: New) -> Result<FileIdentity> {
         let mut state = self.state();
         if state.uncreatable.contains(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
@@ -374,13 +378,13 @@ impl Fs for MemFs {
 
         let identity = Self::fresh_identity(&mut state);
         let mtime = Self::tick(&mut state);
-        match kind {
-            Kind::Note => {
+        match new {
+            New::Note => {
                 state
                     .files
                     .insert(path.to_path_buf(), (Vec::new(), mtime, identity));
             }
-            Kind::Dir => {
+            New::Dir => {
                 state.dirs.insert(path.to_path_buf(), (mtime, identity));
             }
         }

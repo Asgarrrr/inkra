@@ -11,7 +11,7 @@ use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
 use super::{
-    ab_focused, at, check, editor, open, scroll_to, select, shell_focused, showing, tab_notes,
+    ab_focused, at, check, editor, open, scroll_to, select, shell_focused, showing, tab_files,
     tall_notes, text_of, trash,
 };
 use crate::shell::AppShell;
@@ -268,7 +268,7 @@ fn trashing_a_parked_note_drops_its_entry(cx: &mut TestAppContext) {
     check(&window, &mut cx);
     cx.simulate_keystrokes("ctrl-tab");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, Some(b)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, Some(b)], 0));
     check(&window, &mut cx);
 }
 
@@ -283,7 +283,7 @@ fn trashing_a_note_parked_in_two_tabs_and_showing_in_a_third(cx: &mut TestAppCon
 
     trash(&window, &mut cx, a);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![None, None, None], 2));
+    assert_eq!(tab_files(&window, &mut cx), (vec![None, None, None], 2));
     check(&window, &mut cx);
     window
         .update(&mut cx, |shell, window, _| {

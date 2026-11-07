@@ -59,6 +59,11 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 #
 # Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
 # one after another, so the first drains the queue: 0 and 1 give the same walk.
+#
+# Equivalent. An image whose longest side is exactly `DRAWN_SIDE` already fits, so
+# `thumbnail` keeps its size and its pixels: `>=` and `>` decode the same bytes.
+#
+# Equivalent. `MD` and `FRAGMENT` are disjoint bits, so `^` and `|` build the same byte.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/parse\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -74,4 +79,6 @@ exclude_re = [
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace match guard error\\.io_kind\\(\\) == Some\\(ErrorKind::NotFound\\) with (true|false) in read$",
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace == with != in read$",
     "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
+    "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
+    "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
 ]

@@ -4,7 +4,7 @@ use gpui::{Modifiers, MouseButton, TestAppContext, point, px};
 
 use super::session_writes::wait;
 use super::tab_bar::click;
-use super::{ab_focused, keys, open, tab_notes};
+use super::{ab_focused, keys, open, tab_files};
 use crate::theme;
 use crate::vault::AUTOSAVE_DELAY;
 
@@ -19,7 +19,7 @@ fn an_inactive_tabs_close_button_closes_it_without_a_hover(cx: &mut TestAppConte
 
     click(&mut cx, "tab-close-1");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
 }
 
 /// `a` and `b` are one letter: without a minimum title width, each tab's centre lies on its ×.
@@ -32,14 +32,14 @@ fn a_click_on_a_short_tabs_centre_never_closes_it(cx: &mut TestAppContext) {
 
     click(&mut cx, "tab-0");
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b)], 0),
         "the inactive tab"
     );
 
     click(&mut cx, "tab-0");
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(a), Some(b)], 0),
         "the active tab"
     );
@@ -147,7 +147,7 @@ fn the_new_tab_button_opens_a_tab(cx: &mut TestAppContext) {
 
     click(&mut cx, "tab-new");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 1));
 }
 
 #[test]

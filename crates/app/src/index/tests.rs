@@ -13,7 +13,7 @@ use inkra_index::live::Status;
 use inkra_index::{Candidate, NoteQuery, TermHit};
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{EntryId, FileIdentity, Fs, Kind, Mtime, Stamp};
+use inkra_vault::{Entry, EntryId, FileIdentity, Fs, Kind, Mtime, New, Stamp};
 
 use super::{IndexSync, NotesChanged};
 use crate::test_support::{entry_id, index_sync, named, scan_notes, vault_of};
@@ -54,7 +54,7 @@ pub(super) fn backlinks(
             .iter()
             .map(|id| {
                 let entry = vault.entry(*id).expect("a source is a note");
-                entry.path.display_name()
+                entry.display_name()
             })
             .collect()
     })
@@ -104,7 +104,7 @@ pub(super) fn rescan(cx: &mut TestAppContext, fs: &MemFs, notes: &Entity<NoteSto
 }
 
 pub(super) fn create(cx: &mut TestAppContext, notes: &Entity<NoteStore>, name: &str) {
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, name, cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, name, cx));
     cx.background_executor.run_until_parked();
     cx.run_until_parked();
     drop(created);
@@ -260,7 +260,7 @@ async fn two_saves_during_a_held_scan_reload_nothing_after_its_swap(cx: &mut Tes
     let (fs, notes, _links) = indexed_vault(cx, &[("a.md", "alpha"), ("sub/b.md", "")]);
     cx.run_until_parked();
     let root = fs.block_read_dir("/vault");
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "c", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "c", cx));
     cx.run_until_parked();
 
     saved_edit(cx, &notes, "a", "one").await;
@@ -313,7 +313,7 @@ async fn an_in_place_write_the_held_walk_read_is_reloaded_after_its_swap(cx: &mu
     let (fs, notes, links) = indexed_vault(cx, &[("a.md", "alpha"), ("b.md", "")]);
     cx.run_until_parked();
     let root = fs.block_read_dir("/vault");
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Note, "c", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "c", cx));
     cx.run_until_parked();
 
     saved_edit(cx, &notes, "a", "saved").await;
@@ -716,7 +716,7 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
                 }
                 0 => notes
                     .update(cx, |notes, cx| {
-                        notes.create(None, Kind::Note, &format!("n{made}"), cx)
+                        notes.create(None, New::Note, &format!("n{made}"), cx)
                     })
                     .detach(),
                 1 => notes
@@ -728,7 +728,7 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
                     cx.run_until_parked();
                     let Some(name) = notes.read_with(cx, |notes, cx| {
                         let vault = notes.vault().expect("a vault").read(cx);
-                        vault.entry(id).map(|entry| entry.path.display_name())
+                        vault.entry(id).map(Entry::display_name)
                     }) else {
                         continue;
                     };
@@ -740,7 +740,7 @@ async fn random_operations_leave_the_index_as_a_fresh_build(cx: &mut TestAppCont
     }
     // A last rescan reads the edits made outside the app.
     notes
-        .update(cx, |notes, cx| notes.create(None, Kind::Note, "last", cx))
+        .update(cx, |notes, cx| notes.create(None, New::Note, "last", cx))
         .detach();
     cx.run_until_parked();
 

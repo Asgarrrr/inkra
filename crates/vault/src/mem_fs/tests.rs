@@ -2,7 +2,7 @@ use futures::FutureExt;
 use futures::executor::block_on;
 
 use super::MemFs;
-use crate::fs::{Fs, Kind, Mtime, Stamp, VaultError};
+use crate::fs::{Fs, Kind, Mtime, New, Stamp, VaultError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -41,7 +41,7 @@ fn loads_are_counted_per_path_found_or_not() {
 }
 
 #[test]
-fn read_dir_lists_notes_in_any_case_and_nothing_else() {
+fn read_dir_lists_notes_in_any_case_and_other_files_as_assets() {
     let fs = MemFs::new();
     for file in ["a.md", "B.MD", "c.Md", "d.txt", "e.markdown", "md"] {
         fs.insert_file(format!("/vault/{file}"), "x");
@@ -54,16 +54,22 @@ fn read_dir_lists_notes_in_any_case_and_nothing_else() {
     let mut names: Vec<_> = entries
         .iter()
         .map(|entry| {
-            entry
-                .path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
+            let name = entry.path.file_name().unwrap_or_default();
+            (name.to_string_lossy().into_owned(), entry.kind)
         })
         .collect();
-    names.sort();
-    assert_eq!(names, ["B.MD", "a.md", "c.Md"]);
+    names.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        names,
+        [
+            ("B.MD".to_owned(), Kind::Note),
+            ("a.md".to_owned(), Kind::Note),
+            ("c.Md".to_owned(), Kind::Note),
+            ("d.txt".to_owned(), Kind::Asset),
+            ("e.markdown".to_owned(), Kind::Asset),
+            ("md".to_owned(), Kind::Asset),
+        ]
+    );
 }
 
 #[test]
@@ -240,7 +246,7 @@ fn create_refuses_a_name_that_is_taken() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "alpha");
 
-    assert!(block_on(fs.create(Path::new("/vault/a.md"), Kind::Note)).is_err());
+    assert!(block_on(fs.create(Path::new("/vault/a.md"), New::Note)).is_err());
     assert_eq!(
         fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
         Some("alpha")
@@ -252,7 +258,7 @@ fn create_mints_an_identity_the_scan_reports() {
     let fs = MemFs::new();
     fs.insert_dir("/vault");
 
-    let identity = block_on(fs.create(Path::new("/vault/new.md"), Kind::Note)).expect("create");
+    let identity = block_on(fs.create(Path::new("/vault/new.md"), New::Note)).expect("create");
 
     let entries = block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
     assert_eq!(entries.len(), 1);
@@ -708,6 +714,7 @@ fn a_blocked_read_bytes_waits_for_its_gate_and_counts_no_load() {
     gate.release();
     assert_eq!(block_on(read).ok().as_deref(), Some(&b"cache"[..]));
     assert_eq!(fs.loads(file), 0, "`loads` counts the notes' loads only");
+    assert_eq!(fs.reads(file), 1);
 }
 
 #[test]

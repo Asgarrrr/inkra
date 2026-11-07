@@ -8,7 +8,7 @@ use std::time::{Instant, SystemTime};
 use gpui::TestAppContext;
 use inkra_index::live::Status;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{FileIdentity, Fs, Kind, Mtime, Stamp};
+use inkra_vault::{FileIdentity, Fs, Mtime, New, Stamp};
 
 use super::tests::{backlinks, create, hold_builds, indexed_vault, notes_changed, rescan, status};
 use crate::test_support::{entry_id, index_sync, unscanned_notes};
@@ -137,7 +137,7 @@ fn an_empty_folder_builds_nothing_and_a_folder_renamed_builds_once(cx: &mut Test
     cx.run_until_parked();
     let (changed, _subscription) = notes_changed(cx, &links);
 
-    let created = notes.update(cx, |notes, cx| notes.create(None, Kind::Dir, "empty", cx));
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Dir, "empty", cx));
     cx.run_until_parked();
     drop(created);
     assert_eq!(changed.get(), 0, "no note moved");

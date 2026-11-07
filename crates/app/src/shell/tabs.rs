@@ -14,6 +14,7 @@ use super::nav::Walk;
 use super::parked::Parked;
 use super::{AppShell, Shown};
 use crate::editor::ViewState;
+use crate::file_kind::FileKind;
 
 actions!(
     tabs,
@@ -34,10 +35,10 @@ actions!(
 #[action(namespace = tabs, no_json)]
 pub(crate) struct ActivateTab(pub(crate) usize);
 
-/// A tab on a note; `view: None` opens it at the top.
+/// A tab on a file; `view: None` opens it at the top.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct OnNote<V> {
-    pub(super) note: EntryId,
+pub(super) struct OnFile<V> {
+    pub(super) file: EntryId,
     pub(super) view: Option<V>,
 }
 
@@ -46,16 +47,16 @@ pub(super) struct OnNote<V> {
 pub(super) enum Place {
     #[default]
     Empty,
-    Note(OnNote<ViewState>),
+    File(OnFile<ViewState>),
     View(View),
 }
 
 impl inkra_tabs::Place for Place {
-    type Note = EntryId;
+    type File = EntryId;
 
-    fn note(&self) -> Option<EntryId> {
+    fn file(&self) -> Option<EntryId> {
         match self {
-            Self::Note(on) => Some(on.note),
+            Self::File(on) => Some(on.file),
             Self::Empty | Self::View(_) => None,
         }
     }
@@ -66,12 +67,12 @@ pub(super) fn capture(shown: &Shown, cx: &mut App) -> Place {
     match shown {
         Shown::Empty => Place::Empty,
         Shown::View(view) => Place::View(*view),
-        Shown::Trashing(note) => Place::Note(OnNote {
-            note: *note,
+        Shown::Image(file) | Shown::Trashing(file) => Place::File(OnFile {
+            file: *file,
             view: None,
         }),
-        Shown::Bound(bound) => Place::Note(OnNote {
-            note: bound.note,
+        Shown::Bound(bound) => Place::File(OnFile {
+            file: bound.note,
             view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
         }),
     }
@@ -91,6 +92,7 @@ impl AppShell {
     pub(super) fn open_in_new_tab(
         &mut self,
         id: EntryId,
+        kind: FileKind,
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
@@ -99,9 +101,11 @@ impl AppShell {
             since: self.tree_cursor(cx),
         };
         let source = self.group(origin.group).tabs.active();
-        let opened = self.notes.update(cx, |notes, cx| notes.open_note(id, cx));
+        let opening = self.opening(id, kind, cx);
         self.group_mut(origin.group).activation = Some(cx.spawn(async move |shell, cx| {
-            let Some(buffer) = opened.await else { return };
+            let Some(landing) = opening.landed().await else {
+                return;
+            };
             let _ = shell.update_in(cx, |shell, window, cx| {
                 let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
@@ -109,7 +113,7 @@ impl AppShell {
                     return;
                 }
                 tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
-                shell.land(origin, id, buffer, at, window, cx);
+                shell.land(origin, id, landing, at, window, cx);
                 shell.keep_active_tab_visible(origin.group);
                 cx.notify();
             });
@@ -286,56 +290,6 @@ impl AppShell {
         );
     }
 
-    /// Drops the view with the note: a buffer with no file is still typable, and every keystroke would be lost.
-    pub(super) fn note_closed(&mut self, id: EntryId, window: &mut Window, cx: &mut Context<Self>) {
-        // No focus move: a trash from the tree keeps the focus there.
-        for group in self.forget_note(id) {
-            self.display(group, Place::Empty, window, cx);
-        }
-        self.save_session_later(cx);
-        cx.notify();
-    }
-
-    /// Binds `id` again in each group whose active tab waited on its trash.
-    pub(super) fn trash_failed(
-        &mut self,
-        id: EntryId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let waiting: Vec<_> = self
-            .layout
-            .center_groups()
-            .into_iter()
-            .filter(|&group| matches!(self.group(group).shown, Shown::Trashing(note) if note == id))
-            .collect();
-        if waiting.is_empty() {
-            return;
-        }
-        for group in waiting {
-            let place = Place::Note(OnNote {
-                note: id,
-                view: None,
-            });
-            self.display(group, place, window, cx);
-        }
-        self.focus_note_from_root(window, cx);
-        cx.notify();
-    }
-
-    /// Empties every centre tab on `id`, dropping its parked views; returns the groups whose active tab was one.
-    pub(super) fn forget_note(&mut self, id: EntryId) -> Vec<GroupId> {
-        let center = self.layout.center_groups();
-        center
-            .into_iter()
-            .filter(|&group| {
-                let group = self.group_mut(group);
-                group.tabs.forget(id);
-                group.shown.note() == Some(id)
-            })
-            .collect()
-    }
-
     /// After every change to the tab set or the active tab: a close to its left shifts it too.
     pub(super) fn keep_active_tab_visible(&self, group: GroupId) {
         let group = self.group(group);
@@ -385,14 +339,9 @@ impl AppShell {
         let shown = match place {
             Place::Empty => Shown::Empty,
             Place::View(view) => Shown::View(view),
-            Place::Note(on) => {
-                let buffer = self.notes.read(cx).buffer_for(on.note).cloned();
-                if let Some(buffer) = buffer {
-                    self.bind(group, on.note, buffer, on.view, since, cx);
-                    return;
-                }
-                // A place's note has no buffer only while its trash is pending; its tabs keep it until `NoteClosed`.
-                Shown::Trashing(on.note)
+            Place::File(on) => {
+                self.display_file(group, on, since, window, cx);
+                return;
             }
         };
         self.unfocus_editor(group, window, cx);

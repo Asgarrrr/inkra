@@ -5,7 +5,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use futures::executor::block_on;
 
 use super::MemFs;
-use crate::fs::{Fs, Kind};
+use crate::fs::{Fs, New};
 use crate::watch::{PathEvent, Watch};
 
 fn watch(fs: &MemFs) -> Watch {
@@ -81,7 +81,7 @@ fn create_rename_and_trash_send_every_path_they_touched() {
     let fs = MemFs::new();
     let mut watch = watch(&fs);
 
-    block_on(fs.create(Path::new("/vault/a.md"), Kind::Note)).expect("create");
+    block_on(fs.create(Path::new("/vault/a.md"), New::Note)).expect("create");
     block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/b.md"))).expect("rename");
     block_on(fs.trash(Path::new("/vault/b.md"))).expect("trash");
 
@@ -101,7 +101,7 @@ fn a_failed_mutation_sends_nothing() {
         .expect("load")
         .stamp;
 
-    assert!(block_on(fs.create(Path::new("/vault/a.md"), Kind::Note)).is_err());
+    assert!(block_on(fs.create(Path::new("/vault/a.md"), New::Note)).is_err());
     assert!(block_on(fs.rename(Path::new("/vault/x.md"), Path::new("/vault/y.md"))).is_err());
     assert!(block_on(fs.trash(Path::new("/vault/x.md"))).is_err());
     assert!(block_on(fs.save(Path::new("/vault/a.md"), "b", stamp)).is_err());

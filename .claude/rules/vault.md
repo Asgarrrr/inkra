@@ -41,5 +41,5 @@ paths:
   write calls `Fs::create_parents` first (F9): a present note whose folder left
   must fail, not recreate the folder beside a moved copy.
 - `vault` takes every `Mtime` from the filesystem, never `SystemTime::now`.
-- `RealFs` filters `.md`, dotfiles and symlinks; `vault/tests/real_fs.rs` is the
-  one test on a real disk.
+- `read_dir` lists every file, a note (`.md`) or an asset; it hides dotfiles, temp files and
+  symlinks. `vault/tests/real_fs.rs` is the one test on a real disk.

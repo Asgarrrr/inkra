@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use inkra_vault::{Entry, EntryId, Kind};
+use inkra_vault::{Entry, EntryId};
 
 use super::Row;
 
@@ -15,7 +15,7 @@ pub(super) struct Visible {
 
 impl Visible {
     /// Walks `entries` and returns where `target` landed. Cost: one step per
-    /// drawn folder, one binary search per folder, one copy per run of notes —
+    /// drawn folder, one binary search per folder, one copy per run of files —
     /// never one step per hidden entry.
     pub(super) fn rewalk(
         &mut self,
@@ -35,11 +35,11 @@ impl Visible {
                 ends.pop();
             }
             let entry = &entries[position];
-            let (run, next) = if entry.kind == Kind::Note {
+            let (run, next) = if entry.kind.is_file() {
                 // Folders sort first at each level, so every entry up to the
-                // enclosing folder's end is a note of this level.
+                // enclosing folder's end is a file of this level.
                 let end = ends.last().copied().unwrap_or(entries.len());
-                debug_assert!(entries[position..end].iter().all(|e| e.kind == Kind::Note));
+                debug_assert!(entries[position..end].iter().all(|e| e.kind.is_file()));
                 (position..end, end)
             } else {
                 let end = position + subtree_len(&entries[position..]);
@@ -78,7 +78,7 @@ impl Visible {
             id: entry.id,
             depth: entry.path.depth(),
             kind: entry.kind,
-            name: entry.path.display_name(),
+            name: entry.display_name(),
         }
     }
 

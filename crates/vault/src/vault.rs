@@ -9,11 +9,13 @@ use crate::RelPath;
 use crate::fs::{DirEntry, FileIdentity, Fs, Kind, Mtime, Result, Stamp};
 use crate::jobs::Serial;
 
+mod departures;
 mod identity;
 mod names;
 mod reclaim;
 mod walk;
 
+pub use departures::Departures;
 pub use walk::{Reach, Walk};
 
 /// Guards against a pathological tree; no real vault approaches it.
@@ -38,6 +40,18 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// A note's stem, a folder's or an asset's whole name. Lossy rather than fallible: a filename
+    /// that is not valid UTF-8 should render with replacement characters, not vanish from the vault.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        let path = self.path.as_path();
+        let name = match self.kind {
+            Kind::Note => path.file_stem(),
+            Kind::Dir | Kind::Asset => path.file_name(),
+        };
+        name.map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    }
+
     /// What `IndexSync` compares to reload a note, as conflict detection does.
     #[must_use]
     pub fn stamp(&self) -> Stamp {
@@ -67,6 +81,7 @@ struct State {
     scanned: bool,
     /// A `Reach::Whole` walk has applied; never turns back. Unlike `scanned`, O8 does not set it.
     read_whole: bool,
+    departures: Departures,
 }
 
 impl Vault {
@@ -82,6 +97,7 @@ impl Vault {
                 next_id: 1,
                 scanned: false,
                 read_whole: false,
+                departures: Departures::default(),
             }),
         }
     }
@@ -111,6 +127,11 @@ impl Vault {
         if !self.state.scanned {
             Arc::make_mut(&mut self.state).scanned = true;
         }
+    }
+
+    #[must_use]
+    pub fn departures(&self) -> &Departures {
+        &self.state.departures
     }
 
     #[must_use]
@@ -152,6 +173,7 @@ impl Vault {
         let Some(at) = live.or_else(|| {
             let at = state.by_id.remove(&minted?)?;
             state.by_id.insert(id, at);
+            state.departures.renew();
             Some(at)
         }) else {
             return false;
@@ -237,6 +259,11 @@ impl Vault {
         if !whole {
             self.carry_over(&mut by_identity, &by_id);
         }
+        let departures = if state.by_id.keys().any(|id| !by_id.contains_key(id)) {
+            Departures::default()
+        } else {
+            state.departures.clone()
+        };
         Self {
             state: Arc::new(State {
                 root: state.root.clone(),
@@ -246,6 +273,7 @@ impl Vault {
                 next_id,
                 scanned: state.scanned,
                 read_whole: state.read_whole || whole,
+                departures,
             }),
         }
     }
@@ -406,3 +434,6 @@ mod reclaim_tests;
 
 #[cfg(test)]
 mod names_tests;
+
+#[cfg(test)]
+mod departures_tests;

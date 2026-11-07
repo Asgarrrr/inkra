@@ -3,10 +3,10 @@
 use gpui::{App, Context, FocusHandle, Focusable, Window, actions};
 use inkra_layout::{Axis, GroupId, SplitDirection, Surface, View};
 
-use super::AppShell;
 use super::docks::SplitView;
 use super::group::Group;
-use super::tabs::{OnNote, Place};
+use super::tabs::{Place, capture};
+use super::{AppShell, Shown};
 
 actions!(
     pane,
@@ -139,16 +139,11 @@ impl AppShell {
         if let Some(view) = self.group(group).shown.view() {
             self.split_view(&SplitView { view, direction }, window, cx);
         } else if self.layout.surface_of(group) == Surface::Center {
-            let place = self
-                .group(group)
-                .shown
-                .bound()
-                .map_or(Place::Empty, |bound| {
-                    Place::Note(OnNote {
-                        note: bound.note,
-                        view: Some(bound.editor.update(cx, |editor, cx| editor.capture(cx))),
-                    })
-                });
+            let shown = &self.group(group).shown;
+            let place = match shown {
+                Shown::Bound(_) | Shown::Image(_) => capture(shown, cx),
+                Shown::Empty | Shown::Trashing(_) | Shown::View(_) => Place::Empty,
+            };
             self.split_group(group, direction, place, window, cx);
         }
     }

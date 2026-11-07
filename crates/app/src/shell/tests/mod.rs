@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
@@ -15,7 +16,8 @@ use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
 use super::{AppShell, EditorView, NoteStore, Shown};
-use crate::open::{NoteActivated, Open};
+use crate::file_kind::FileKind;
+use crate::open::{FileActivated, Open};
 use crate::sidebar::Sidebar;
 
 mod activation;
@@ -38,6 +40,7 @@ mod gone;
 mod history;
 mod history_hold;
 mod history_menu;
+mod images;
 mod modal;
 mod nav;
 mod notices;
@@ -55,6 +58,7 @@ mod restore_lands;
 mod restore_refused;
 mod separators;
 mod session_writes;
+mod sidebar_assets;
 mod sidebar_selection;
 mod split_close;
 mod splits;
@@ -125,6 +129,19 @@ pub(super) fn showing(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) 
         .expect("the shell is open")
 }
 
+/// The image the active group shows, if any.
+pub(super) fn image_shown(
+    window: &WindowHandle<AppShell>,
+    cx: &mut TestAppContext,
+) -> Option<EntryId> {
+    window
+        .update(cx, |shell, _, _| match shell.center().shown {
+            Shown::Image(id) => Some(id),
+            _ => None,
+        })
+        .expect("the shell is open")
+}
+
 /// Panics if no note has been activated yet — that is the contract.
 pub(super) fn editor(
     window: &WindowHandle<AppShell>,
@@ -156,8 +173,8 @@ pub(super) fn two_notes(
 
 pub(super) fn activate(sidebar: &Entity<Sidebar>, cx: &mut TestAppContext, id: EntryId) {
     sidebar.update(cx, |_, cx| {
-        cx.emit(NoteActivated {
-            note: id,
+        cx.emit(FileActivated {
+            file: id,
             open: Open::Here,
         });
     });
@@ -253,7 +270,9 @@ pub(super) fn ab_focused(
 /// Opens `id` into the active tab and lets it land.
 pub(super) fn open(window: &WindowHandle<AppShell>, cx: &mut TestAppContext, id: EntryId) {
     window
-        .update(cx, |shell, _, cx| shell.open_note(id, None, cx))
+        .update(cx, |shell, _, cx| {
+            shell.open_file(id, FileKind::Note, None, cx);
+        })
         .expect("the shell is open");
     cx.run_until_parked();
 }
@@ -262,15 +281,15 @@ pub(super) fn at(offset: usize) -> ByteOffset {
     ByteOffset::new(offset)
 }
 
-/// Each tab's note, and the active tab's index.
-pub(super) fn tab_notes(
+/// Each tab's file, and the active tab's index.
+pub(super) fn tab_files(
     window: &WindowHandle<AppShell>,
     cx: &mut TestAppContext,
 ) -> (Vec<Option<EntryId>>, usize) {
     window
         .update(cx, |shell, _, _| {
             (
-                shell.tab_notes(shell.layout.last_center()).collect(),
+                shell.tab_files(shell.layout.last_center()).collect(),
                 shell.center().tabs.active_index(),
             )
         })
@@ -318,7 +337,7 @@ pub(super) fn text_of(
         .unwrap()
 }
 
-/// H8, T3, and no buffer for a `Trashing` note; T2 holds by construction (`Shown`), T1 by H8.
+/// H8, T3, no buffer for a `Trashing` note, and an image held only while a group shows it; T2 holds by construction (`Shown`), T1 by H8.
 /// I1 and I2 hold by type, an inactive slot holding the `Parked`; `Tabs::close` panics on a slot that breaks H8.
 pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
     window
@@ -332,9 +351,21 @@ pub(super) fn check(window: &WindowHandle<AppShell>, cx: &mut TestAppContext) {
                     .all(|tab| tab.place().is_none() == (tab.id() == active)),
                 "H8"
             );
-            assert_eq!(shell.notes.read(cx).current(), shell.showing(), "T3");
+            assert_eq!(shell.notes.read(cx).current(), shell.bound_note(), "T3");
             if let Shown::Trashing(id) = shell.center().shown {
                 assert!(shell.notes.read(cx).buffer_for(id).is_none(), "Trashing");
+            }
+            let shown: HashSet<EntryId> = shell
+                .layout
+                .center_groups()
+                .into_iter()
+                .filter_map(|group| match shell.group(group).shown {
+                    Shown::Image(id) => Some(id),
+                    _ => None,
+                })
+                .collect();
+            if let Some(panes) = &shell.panes {
+                assert_eq!(panes.images.read(cx).ids(), shown, "images");
             }
         })
         .unwrap();
@@ -474,7 +505,9 @@ pub(super) fn keys(cx: &mut VisualTestContext, keys: &str) {
 /// Starts `id`'s load into the active tab and leaves it pending behind its gate.
 pub(super) fn start_open(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, id: EntryId) {
     window
-        .update(cx, |shell, _, cx| shell.open_note(id, None, cx))
+        .update(cx, |shell, _, cx| {
+            shell.open_file(id, FileKind::Note, None, cx);
+        })
         .unwrap();
     cx.run_until_parked();
 }

@@ -6,7 +6,7 @@ use inkra_vault::mem_fs::{Gate, MemFs};
 
 use super::{
     AppShell, ab_focused, at, check, editor, fail_trash, finish_trash, focus_tree, open, scroll_to,
-    select, shell_focused, showing, start_open, start_trash, tab_notes, text_of, view_of,
+    select, shell_focused, showing, start_open, start_trash, tab_files, text_of, view_of,
 };
 use crate::open::Open;
 use crate::test_support;
@@ -92,7 +92,7 @@ fn a_failed_trash_after_a_switch_reached_its_note_shows_it_again(cx: &mut TestAp
 
     fail_trash(gate, trashing, &mut cx);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(a)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(a)], 1));
     assert_eq!(showing(&window, &mut cx), Some(a));
     assert_eq!(text_of(&window, &mut cx, a), "alphax");
     check(&window, &mut cx);
@@ -115,7 +115,7 @@ fn a_failed_trash_keeps_its_note_in_inactive_tabs_and_history(cx: &mut TestAppCo
 
     fail_trash(gate, trashing, &mut cx);
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), Some(a)], 0));
     assert_eq!(showing(&window, &mut cx), Some(a));
     cx.simulate_keystrokes("cmd-]");
     assert_eq!(showing(&window, &mut cx), Some(b));
@@ -135,7 +135,7 @@ fn back_from_a_trashing_tab_skips_its_note(cx: &mut TestAppContext) {
     fs.make_untrashable("/vault/a.md");
     let trashing = start_trash(&window, &mut cx, a);
     cx.simulate_keystrokes("ctrl-tab");
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a), None], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a), None], 0));
 
     cx.simulate_keystrokes("cmd-[");
 
@@ -157,7 +157,7 @@ fn closing_onto_a_trashing_tab_shows_it_empty_then_again(cx: &mut TestAppContext
 
     cx.simulate_keystrokes("cmd-w");
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(showing(&window, &mut cx), None);
     check(&window, &mut cx);
     fail_trash(gate, trashing, &mut cx);
@@ -185,7 +185,7 @@ fn a_new_tab_from_a_trashing_tab_keeps_it(cx: &mut TestAppContext) {
         .unwrap();
     cx.run_until_parked();
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(b), Some(a), Some(b)], 2)
     );
     check(&window, &mut cx);
@@ -218,7 +218,7 @@ fn an_open_from_a_trashing_tab_lands_after_the_trash_fails(cx: &mut TestAppConte
     load.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(c)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(c)], 1));
     assert_eq!(showing(&window, &mut cx), Some(c));
     cx.simulate_keystrokes("cmd-[");
     assert_eq!(showing(&window, &mut cx), Some(a));
@@ -251,7 +251,7 @@ fn a_new_tab_open_from_a_trashing_tab_lands_after_the_trash_fails(cx: &mut TestA
     cx.run_until_parked();
 
     assert_eq!(
-        tab_notes(&window, &mut cx),
+        tab_files(&window, &mut cx),
         (vec![Some(b), Some(a), Some(c)], 2)
     );
     assert_eq!(showing(&window, &mut cx), Some(c));
@@ -280,7 +280,7 @@ fn an_open_from_a_trashing_tab_lands_after_the_trash_succeeds(cx: &mut TestAppCo
     load.release();
     cx.run_until_parked();
 
-    assert_eq!(tab_notes(&window, &mut cx), (vec![Some(b), Some(c)], 1));
+    assert_eq!(tab_files(&window, &mut cx), (vec![Some(b), Some(c)], 1));
     assert_eq!(showing(&window, &mut cx), Some(c));
     check(&window, &mut cx);
 }

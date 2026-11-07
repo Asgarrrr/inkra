@@ -17,14 +17,14 @@ mod watch;
 pub mod mem_fs;
 
 pub use fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError, Watcher,
-    normalize_line_endings,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
+    Watcher, normalize_line_endings,
 };
 pub use jobs::{Job, Jobs, Serial};
 pub use path::{NameProblem, RelPath, check_name, note_file_name};
 pub use real_fs::RealFs;
 pub use scans::{Claims, Listed, Scan, Scanned, Scans, Swapped};
-pub use vault::{Entry, EntryId, Reach, Vault, Walk};
+pub use vault::{Departures, Entry, EntryId, Reach, Vault, Walk};
 pub use watch::{Changed, PathEvent, Pending, Watch};
 
 /// The vault's own settings and themes, under its root.

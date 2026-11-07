@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use super::{BacklinksPanel, Row};
-use crate::open::{NoteActivated, Open};
+use crate::open::{FileActivated, Open};
 use crate::row_text::styled;
 use crate::theme;
 use crate::ui::{Color, Label, ListItem, UiText, v_flex};
@@ -23,8 +23,8 @@ impl BacklinksPanel {
                 MouseButton::Left,
                 cx.listener(move |_, event: &MouseDownEvent, _, cx| {
                     // The press's modifiers: the row acts at mouse-down, a picker row at the release.
-                    cx.emit(NoteActivated {
-                        note: source,
+                    cx.emit(FileActivated {
+                        file: source,
                         open: Open::from_click(event.modifiers),
                     });
                 }),

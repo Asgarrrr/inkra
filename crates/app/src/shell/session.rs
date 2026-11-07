@@ -8,15 +8,14 @@ use gpui::{App, Context, Entity, Subscription, Task, Window};
 use inkra_layout::{GroupId, Layout, Member, Side};
 use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
-use inkra_text::Buffer;
 use inkra_vault::EntryId;
 
-use super::AppShell;
 use super::group::Group;
 use super::parked::Parked;
-use crate::editor::ParkedView;
+use super::surface::Landing;
+use super::{AppShell, Shown};
 use crate::restore::{
-    Landed, Pending, Plan, Restored, SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session,
+    Landed, Pending, Plan, Restored, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session,
     SessionWriter, Surfaces,
 };
 use crate::vault::NoteStore;
@@ -178,14 +177,16 @@ impl AppShell {
                     view: view.name().to_owned(),
                 };
             }
-            // The bound note, not `shown.note()`: a tab whose trash is pending saves empty.
-            let (note, view) = match tab.place() {
-                None => group.shown.bound().map_or((None, None), |bound| {
+            // Not `shown.file()`: a tab whose trash is pending saves empty.
+            let (file, view) = match (tab.place(), &group.shown) {
+                (None, Shown::Bound(bound)) => {
                     (Some(bound.note), Some(bound.editor.read(cx).view_state()))
-                }),
-                Some(parked) => (parked.note(), parked.peek(cx)),
+                }
+                (None, Shown::Image(image)) => (Some(*image), None),
+                (None, Shown::Empty | Shown::Trashing(_) | Shown::View(_)) => (None, None),
+                (Some(parked), _) => (parked.file(), parked.peek(cx)),
             };
-            SavedTab::Note(SavedNoteTab::new(note.and_then(path_of), view.as_ref()))
+            SavedTab::File(SavedFileTab::new(file.and_then(path_of), view.as_ref()))
         });
         SavedGroup {
             tabs: tabs.collect(),
@@ -218,13 +219,14 @@ impl AppShell {
             return;
         };
         // Every note, not only the active one: a tab switch binds the buffer its note already has.
-        let opens: Vec<_> = self.notes.update(cx, |notes, cx| {
-            plan.notes().map(|note| notes.open_note(note, cx)).collect()
-        });
+        let opens: Vec<_> = plan
+            .files()
+            .map(|(file, kind)| self.opening(file, kind, cx).landed())
+            .collect();
         let loads = cx.spawn(async move |shell, cx| {
-            let buffers = futures::future::join_all(opens).await;
+            let landings = futures::future::join_all(opens).await;
             let _ = shell.update_in(cx, |shell, window, cx| {
-                shell.land_restore(plan, buffers, window, cx);
+                shell.land_restore(plan, landings, window, cx);
             });
         });
         self.restore = Restore::Landing { _loads: loads };
@@ -242,7 +244,7 @@ impl AppShell {
     fn land_restore(
         &mut self,
         plan: Plan,
-        buffers: Vec<Option<Entity<Buffer>>>,
+        landings: Vec<Option<Landing>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -250,7 +252,13 @@ impl AppShell {
             self.finish_restore(cx);
             return;
         }
-        let Landed { groups, active } = plan.restored(buffers);
+        // A file gone since the plan resolved lands as a failed load: no tab held it when the vault notified.
+        let landings = plan
+            .files()
+            .zip(landings)
+            .map(|((file, _), landing)| landing.filter(|_| !self.gone(file, cx)))
+            .collect();
+        let Landed { groups, active } = plan.restored(landings);
         for (group, restored) in groups {
             if self.groups.contains_key(&group) {
                 self.land_group(group, restored, cx);
@@ -278,23 +286,18 @@ impl AppShell {
             shown,
             parked,
             active,
-        }: Restored<Entity<Buffer>>,
+        }: Restored<Landing>,
         cx: &mut Context<Self>,
     ) {
         let mut places: Vec<_> = parked
             .into_iter()
-            .map(|arrival| {
-                let view = arrival
-                    .view
-                    .map(|view| ParkedView::new(arrival.buffer, view, cx));
-                Parked::new(arrival.note, view)
-            })
+            .map(|arrival| Self::park_landed(arrival.file, arrival.landing, arrival.view, cx))
             .collect();
         // `restored` drops the active entry: `bind` shows it, and a default one holds no anchor.
         places.insert(active, Parked::default());
         self.group_mut(group).tabs = Tabs::restored(places, active);
         let since = self.tree_cursor(cx);
-        self.bind(group, shown.note, shown.buffer, shown.view, since, cx);
+        self.show_landed(group, shown.file, shown.landing, shown.view, since, cx);
         self.keep_active_tab_visible(group);
     }
 

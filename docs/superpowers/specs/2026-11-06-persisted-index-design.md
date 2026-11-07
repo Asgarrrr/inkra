@@ -459,3 +459,4 @@ Each slice appends what it did differently from this spec, and why.
   The relaunch assertions on `fs.loads` gain the scrub's read for each seeded note. Cold figures
   stay user-run (slice 0); the write cost is measured by a probe outside the app, as no log line
   times it.
+- File kinds slice 3: a link record carries `md`; `FORMAT_VERSION` 2.

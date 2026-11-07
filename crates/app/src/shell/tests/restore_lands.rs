@@ -15,13 +15,11 @@ use inkra_vault::{EntryId, Fs, Vault};
 use super::dock_menu::{default_docks, docks, side_of};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::{centre, close, editor_in, last, shown_in, tabs_in};
-use super::{check, tab_notes};
+use super::{check, tab_files};
 use crate::bootstrap::{Launch, root};
+use crate::images::png;
 use crate::keymap::key_bindings;
-use crate::restore::{
-    SavedAxis, SavedDock, SavedDocks, SavedGroup, SavedMember, SavedNoteTab, SavedTab, Session,
-    SessionV1,
-};
+use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -35,41 +33,29 @@ pub(super) fn vault() -> Arc<MemFs> {
     fs
 }
 
-/// A version-1 session: a file written before splits still restores.
-pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedNoteTab>) -> String {
-    save_v1(fs, active, tabs, None)
+/// One centre group of `tabs`, and docks rule 6's docks.
+pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedFileTab>) -> String {
+    let center = notes_group(tabs, active);
+    let session = Session::new("/vault".into(), 0, center, None, None, [true, true]);
+    save_text(fs, session.encode().unwrap())
 }
 
-/// One tab on `a.md`, laid out as `docks`.
-fn save_docks(fs: &MemFs, docks: SavedDocks) {
-    save_v1(fs, 0, vec![tab("a.md", 0, 0)], Some(docks));
+/// One tab on `a.md`, and `left` as the left dock.
+fn save_docks(fs: &MemFs, left: SavedMember) {
+    let center = notes_group(vec![tab("a.md", 0, 0)], 0);
+    let session = Session::new("/vault".into(), 0, center, Some(left), None, [true, true]);
+    save_text(fs, session.encode().unwrap());
 }
 
-fn save_v1(
-    fs: &MemFs,
-    active: usize,
-    tabs: Vec<SavedNoteTab>,
-    docks: Option<SavedDocks>,
-) -> String {
-    let session = SessionV1 {
-        version: 1,
-        root: "/vault".into(),
-        active,
-        tabs,
-        docks,
-    };
-    save_text(fs, serde_json::to_string_pretty(&session).unwrap())
-}
-
-/// A version-2 session: `center`, and docks rule 6's docks.
+/// `center`, and docks rule 6's docks.
 pub(super) fn save_tree(fs: &MemFs, active: usize, center: SavedMember) {
     let session = Session::new("/vault".into(), active, center, None, None, [true, true]);
     save_text(fs, session.encode().unwrap());
 }
 
-pub(super) fn notes_group(tabs: Vec<SavedNoteTab>, active: usize) -> SavedMember {
+pub(super) fn notes_group(tabs: Vec<SavedFileTab>, active: usize) -> SavedMember {
     SavedMember::Group(SavedGroup {
-        tabs: tabs.into_iter().map(SavedTab::Note).collect(),
+        tabs: tabs.into_iter().map(SavedTab::File).collect(),
         active,
     })
 }
@@ -87,9 +73,9 @@ pub(super) fn save_text(fs: &MemFs, text: String) -> String {
     text
 }
 
-pub(super) fn empty() -> SavedNoteTab {
-    SavedNoteTab {
-        note: None,
+pub(super) fn empty() -> SavedFileTab {
+    SavedFileTab {
+        file: None,
         view: None,
     }
 }
@@ -134,11 +120,11 @@ pub(super) fn id(
     test_support::entry_id(&notes, cx, name)
 }
 
-pub(super) fn notes(
+pub(super) fn files(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
 ) -> (Vec<Option<EntryId>>, usize) {
-    tab_notes(window, cx)
+    tab_files(window, cx)
 }
 
 pub(super) fn selection(
@@ -174,7 +160,7 @@ fn the_saved_tabs_come_back_in_order_with_the_active_one_and_its_view(cx: &mut T
     cx.run_until_parked();
 
     let (a, c) = (id(&window, &mut cx, "a"), id(&window, &mut cx, "c"));
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a), Some(c)], 1));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a), Some(c)], 1));
     assert_eq!(selection(&window, &mut cx), at(2..4));
     assert!(
         editor_focused(&window, &mut cx),
@@ -227,7 +213,7 @@ fn a_note_that_fails_to_load_is_dropped(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     check(&window, &mut cx);
 }
 
@@ -243,7 +229,7 @@ fn a_missing_note_is_dropped_and_the_active_tab_moves_left(cx: &mut TestAppConte
     cx.run_until_parked();
 
     let (a, b) = (id(&window, &mut cx, "a"), id(&window, &mut cx, "b"));
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a), Some(b)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a), Some(b)], 0));
 }
 
 #[gpui::test]
@@ -258,7 +244,7 @@ fn a_missing_first_active_tab_gives_way_to_the_first_survivor(cx: &mut TestAppCo
     cx.run_until_parked();
 
     let (a, b) = (id(&window, &mut cx, "a"), id(&window, &mut cx, "b"));
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a), Some(b)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a), Some(b)], 0));
 }
 
 /// Nothing to restore still ends the restore: the next change is written.
@@ -268,7 +254,7 @@ fn all_notes_missing_leave_one_empty_tab_and_writes_resume(cx: &mut TestAppConte
     save(&fs, 0, vec![tab("gone.md", 0, 0), empty()]);
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
-    assert_eq!(notes(&window, &mut cx), (vec![None], 0));
+    assert_eq!(files(&window, &mut cx), (vec![None], 0));
 
     cx.simulate_keystrokes("cmd-t");
     wait(&mut cx, THROTTLE);
@@ -293,7 +279,7 @@ fn a_picker_opened_and_dismissed_before_landing_still_restores(cx: &mut TestAppC
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -311,7 +297,7 @@ fn a_name_being_typed_keeps_its_focus(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     let naming = window
         .update(&mut cx, |shell, window, cx| {
             shell.tree_focus_handle(cx).contains_focused(window, cx)
@@ -376,7 +362,7 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     gate.release();
     cx.run_until_parked();
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     assert!(
         !editor_focused(&window, &mut cx),
         "the picker keeps the keys"
@@ -388,16 +374,14 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     assert!(editor_focused(&window, &mut cx));
 }
 
-fn backlinks_left() -> SavedDocks {
-    let dock = |views: &[View], active| SavedDock {
-        views: views.iter().map(|view| view.name().to_owned()).collect(),
-        active,
-        shown: true,
-    };
-    SavedDocks {
-        left: dock(&[View::Files, View::Backlinks], 1),
-        right: dock(&[], 0),
-    }
+fn backlinks_left() -> SavedMember {
+    let views = [View::Files, View::Backlinks].map(|view| SavedTab::View {
+        view: view.name().to_owned(),
+    });
+    SavedMember::Group(SavedGroup {
+        tabs: views.into(),
+        active: 1,
+    })
 }
 
 #[gpui::test]
@@ -431,7 +415,7 @@ fn the_session_file_is_read_once(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(fs.loads(Path::new(SESSION)), 1);
 }
 
@@ -508,7 +492,7 @@ fn a_group_whose_notes_are_gone_is_removed(cx: &mut TestAppContext) {
     let groups = centre(&window, &mut cx);
     assert_eq!(groups.len(), 1);
     assert_eq!(last(&window, &mut cx), groups[0]);
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(selection(&window, &mut cx), at(2..2));
     assert!(editor_focused(&window, &mut cx));
 }
@@ -572,7 +556,7 @@ fn a_note_saved_in_a_dock_is_dropped(cx: &mut TestAppContext) {
     let fs = vault();
     let left = SavedGroup {
         tabs: vec![
-            SavedTab::Note(tab("a.md", 0, 0)),
+            SavedTab::File(tab("a.md", 0, 0)),
             SavedTab::View {
                 view: "files".to_owned(),
             },
@@ -594,7 +578,7 @@ fn a_note_saved_in_a_dock_is_dropped(cx: &mut TestAppContext) {
 
     let b = id(&window, &mut cx, "b");
     assert_eq!(docks(&window, &mut cx), default_docks());
-    assert_eq!(notes(&window, &mut cx), (vec![Some(b)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(b)], 0));
 }
 
 #[gpui::test]
@@ -605,7 +589,7 @@ fn a_view_saved_in_the_centre_is_dropped(cx: &mut TestAppContext) {
             SavedTab::View {
                 view: "backlinks".to_owned(),
             },
-            SavedTab::Note(tab("a.md", 0, 0)),
+            SavedTab::File(tab("a.md", 0, 0)),
         ],
         active: 0,
     });
@@ -614,6 +598,65 @@ fn a_view_saved_in_the_centre_is_dropped(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let a = id(&window, &mut cx, "a");
-    assert_eq!(notes(&window, &mut cx), (vec![Some(a)], 0));
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
     assert_eq!(docks(&window, &mut cx), default_docks());
+}
+
+/// Only the shown image is read at the landing; a parked one waits for its first switch.
+#[gpui::test]
+fn a_shown_image_tab_is_restored_and_a_parked_one_is_not_read(cx: &mut TestAppContext) {
+    let fs = vault();
+    fs.insert_bytes("/vault/photo.png", png(40, 30));
+    fs.insert_bytes("/vault/other.png", png(30, 40));
+    let image = |path: &str| SavedFileTab {
+        file: Some(path.to_owned()),
+        view: None,
+    };
+    save(
+        &fs,
+        0,
+        vec![image("photo.png"), tab("a.md", 1, 3), image("other.png")],
+    );
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    let [photo, a, other] = ["photo.png", "a", "other.png"].map(|name| id(&window, &mut cx, name));
+    assert_eq!(
+        files(&window, &mut cx),
+        (vec![Some(photo), Some(a), Some(other)], 0)
+    );
+    assert!(cx.debug_bounds("image-view").is_some());
+    assert_eq!(fs.reads(Path::new("/vault/photo.png")), 1);
+    assert_eq!(fs.reads(Path::new("/vault/other.png")), 0);
+    check(&window, &mut cx);
+
+    cx.simulate_keystrokes("cmd-3");
+    cx.run_until_parked();
+
+    assert_eq!(fs.reads(Path::new("/vault/other.png")), 1);
+    check(&window, &mut cx);
+}
+
+/// The landing runs after the vault's last notify, so it closes the tab of an asset deleted since the plan resolved.
+#[gpui::test]
+fn an_image_deleted_before_the_landing_closes_its_tab(cx: &mut TestAppContext) {
+    let fs = vault();
+    fs.insert_bytes("/vault/photo.png", png(40, 30));
+    let image = SavedFileTab {
+        file: Some("photo.png".to_owned()),
+        view: None,
+    };
+    save(&fs, 0, vec![image, tab("a.md", 0, 0)]);
+    let gate = fs.block_load("/vault/a.md");
+    let (window, mut cx) = launch(cx, &fs);
+    cx.run_until_parked();
+
+    fs.remove(Path::new("/vault/photo.png"));
+    cx.run_until_parked();
+    gate.release();
+    cx.run_until_parked();
+
+    let a = id(&window, &mut cx, "a");
+    assert_eq!(files(&window, &mut cx), (vec![Some(a)], 0));
+    check(&window, &mut cx);
 }
