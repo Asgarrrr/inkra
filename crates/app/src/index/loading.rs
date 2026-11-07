@@ -1,4 +1,5 @@
 use std::future::poll_fn;
+use std::path::Path;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -8,6 +9,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{AsyncApp, Context, Priority, WeakEntity};
 use inkra_index::live::{Load, Ticket};
 use inkra_index::{FileRead, NoteContent};
+use inkra_vault::Fs;
 
 use super::IndexSync;
 
@@ -43,13 +45,7 @@ impl IndexSync {
         // Low, as Zed's scanner: a query's scan goes first.
         cx.background_executor()
             .spawn_with_priority(Priority::Low, async move {
-                let loaded = fs.load(&path).await.map(|loaded| {
-                    let file = FileRead {
-                        stamp: loaded.stamp,
-                        identity: loaded.identity,
-                    };
-                    NoteContent::parse(&loaded.text, file)
-                });
+                let loaded = load_note(&*fs, &path).await;
                 // Closed only once this entity is gone, and then nobody waits for it.
                 let _ = landed.unbounded_send(Landed { ticket, loaded });
             })
@@ -84,6 +80,16 @@ impl IndexSync {
             }
         });
     }
+}
+
+/// One note read and parsed, as the index loads it and the scrub checks it.
+pub(super) async fn load_note(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<NoteContent> {
+    let loaded = fs.load(path).await?;
+    let file = FileRead {
+        stamp: loaded.stamp,
+        identity: loaded.identity,
+    };
+    Ok(NoteContent::parse(&loaded.text, file))
 }
 
 /// Pending once, so the task goes to the back of the foreground queue.
