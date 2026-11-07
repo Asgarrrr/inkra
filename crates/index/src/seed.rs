@@ -2,7 +2,7 @@
 //! foreground, so the foreground only moves the maps (persisted index spec, P5, P6, P8).
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -13,9 +13,9 @@ use crate::content::FileRead;
 use crate::corpus::Corpus;
 use crate::key::Key;
 use crate::note_set::NoteSet;
-use crate::persist::{CachedNote, Decoded, SCRUB, scrub_sample};
+use crate::persist::{CachedNote, CachedWords, Decoded, SCRUB, scrub_sample};
 use crate::source::Source;
-use crate::words::{Alive, Ordinals, Shards, Words};
+use crate::words::{Alive, Ordinal, Ordinals, Shards, Words};
 
 /// What `NoteIndex::seed` moves in, keyed by the scan's ids.
 pub(crate) struct Seed {
@@ -81,26 +81,11 @@ impl Seed {
                 stamps.push((id, stamp));
             }
         }
-        let kept: HashSet<_> = named.iter().map(|&(_, ordinal)| ordinal).collect();
-        let (alive, ghosts): (Vec<_>, Vec<_>) = words
-            .alive
-            .iter()
-            .partition(|ordinal| kept.contains(ordinal));
-        let ghost_words: u64 = ghosts
-            .into_iter()
-            .map(|ordinal| u64::from(words.segment.length(ordinal)))
-            .sum();
+        let words = restore_words(words, named);
         let scrub = scrub_sample(crc, stamps.len(), SCRUB)
             .into_iter()
             .map(|at| stamps[at].0)
             .collect();
-        let words = Words::restore(
-            words.segment,
-            alive.into_iter().collect::<Alive>(),
-            named.into_iter().collect::<Ordinals>(),
-            words.next,
-            words.total - ghost_words,
-        );
         (
             Self {
                 words,
@@ -112,6 +97,30 @@ impl Seed {
             LaunchFacts { pruned, scrub },
         )
     }
+}
+
+/// `words` with only the `named` ordinals alive; the ghosts' lengths leave the total.
+///
+/// # Panics
+///
+/// If the decoded words break an invariant the store keeps.
+pub(crate) fn restore_words(words: CachedWords, named: Vec<(EntryId, Ordinal)>) -> Words {
+    let kept: Alive = named.iter().map(|&(_, ordinal)| ordinal).collect();
+    let (alive, ghosts): (Vec<_>, Vec<_>) = words
+        .alive
+        .iter()
+        .partition(|&ordinal| kept.contains(ordinal));
+    let ghost_words: u64 = ghosts
+        .into_iter()
+        .map(|ordinal| u64::from(words.segment.length(ordinal)))
+        .sum();
+    Words::restore(
+        words.segment,
+        alive.into_iter().collect::<Alive>(),
+        named.into_iter().collect::<Ordinals>(),
+        words.next,
+        words.total - ghost_words,
+    )
 }
 
 /// Per cached note, the entry it is: by path, else by identity one to one among the notes and
@@ -132,7 +141,10 @@ fn matches(cached: &[CachedNote], entries: &[&Entry]) -> Vec<Option<usize>> {
                 .filter(|_| note.stamp.is_some())
         })
         .collect();
-    let taken: HashSet<usize> = matched.iter().flatten().copied().collect();
+    let mut taken = vec![false; entries.len()];
+    for &at in matched.iter().flatten() {
+        taken[at] = true;
+    }
     let mut notes = HashMap::new();
     for (n, note) in cached.iter().enumerate() {
         if matched[n].is_none() && note.stamp.is_some() {
@@ -141,7 +153,7 @@ fn matches(cached: &[CachedNote], entries: &[&Entry]) -> Vec<Option<usize>> {
     }
     let mut scanned = HashMap::new();
     for (at, entry) in entries.iter().enumerate() {
-        if !taken.contains(&at) {
+        if !taken[at] {
             unique(&mut scanned, entry.identity, at);
         }
     }

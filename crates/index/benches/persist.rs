@@ -2,10 +2,11 @@ use std::hint::black_box;
 use std::path::Path;
 use std::time::{Instant, UNIX_EPOCH};
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use inkra_index::persist::{decode, encode};
-use inkra_index::{FileRead, MergeWhen, NoteContent, NoteIndex, NoteSet};
+use inkra_index::live::{BuildJob, Turn};
+use inkra_index::persist::{Outcome, decode, encode};
+use inkra_index::{FileRead, LiveIndex, MergeWhen, NoteContent, NoteIndex, NoteSet};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{FileIdentity, Kind, Mtime, Stamp, Vault};
 
@@ -48,8 +49,8 @@ fn note_text(lcg: &mut Lcg) -> String {
     text
 }
 
-/// Every note loaded at a distinct stamp and identity, its words merged.
-fn index() -> NoteIndex {
+/// Every note loaded at a distinct stamp and identity, its words merged, and the vault it indexes.
+fn index() -> (NoteIndex, Vault) {
     let fs = MemFs::new();
     for note in 0..NOTES {
         fs.insert_file(format!("{ROOT}/f{}/n{note}.md", note % FOLDERS), "");
@@ -82,12 +83,12 @@ fn index() -> NoteIndex {
     while let Some(merge) = index.words_merge(MergeWhen::Settle) {
         let _ = index.words_apply(merge.run());
     }
-    index
+    (index, vault)
 }
 
 fn bench_persist(c: &mut Criterion) {
     let start = Instant::now();
-    let index = index();
+    let (index, vault) = index();
     eprintln!("index of {NOTES} notes: {:?}", start.elapsed());
     let root = Path::new(ROOT);
     let snapshot = index.snapshot();
@@ -100,6 +101,27 @@ fn bench_persist(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("encode", |b| b.iter(|| black_box(encode(&snapshot, root))));
     group.bench_function("decode", |b| b.iter(|| black_box(decode(&bytes, root))));
+    // The build that seeds a launch from the decoded file: the step between `scanned` and `indexed`.
+    group.bench_function("seed", |b| {
+        b.iter_batched(
+            || {
+                let mut live = LiveIndex::new(4);
+                live.await_cache();
+                let Ok(decoded) = decode(&bytes, root) else {
+                    panic!("the bench file decodes");
+                };
+                let ((), effects) = live.turn(&vault, |turn: &mut Turn<'_>| {
+                    turn.cached(Outcome::Decoded(decoded));
+                });
+                let Some(build) = effects.build else {
+                    panic!("a landed cache builds");
+                };
+                build
+            },
+            BuildJob::run,
+            BatchSize::LargeInput,
+        );
+    });
     group.finish();
 }
 
