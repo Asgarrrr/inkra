@@ -6,12 +6,14 @@ mod paint;
 mod prefix;
 mod rows;
 mod runs;
+mod scrolls;
 mod shape;
 
 #[cfg(test)]
 pub(crate) use blocks::label_shape_count;
 #[cfg(test)]
-pub(crate) use paint::{painted, painted_blocks};
+pub(crate) use paint::{painted, painted_blocks, painted_clips};
+pub(crate) use scrolls::BlockScrolls;
 pub(crate) use shape::shape_document;
 #[cfg(test)]
 pub(crate) use shape::{line_shape_count, shape_count};
@@ -42,6 +44,8 @@ struct LineLayout {
     row_height: Pixels,
     /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
     prefix: Option<Prefix>,
+    /// The index in `code_blocks` of the block holding this line.
+    block: Option<usize>,
 }
 
 impl LineLayout {
@@ -67,7 +71,11 @@ pub(crate) struct LayoutInputs<'a> {
     pub(crate) marked: Option<&'a Range<ByteOffset>>,
     pub(crate) style: &'a TextStyle,
     pub(crate) wrap_width: Option<Pixels>,
+    /// Block lines wrap at the column too, rather than scroll.
+    pub(crate) code_block_wrap: bool,
     pub(crate) theme: &'a Arc<Theme>,
+    /// Read live, never compared: a scroll reshapes nothing.
+    pub(crate) scrolls: &'a BlockScrolls,
 }
 
 /// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
@@ -85,11 +93,13 @@ pub(crate) struct DocumentLayout {
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
+    code_block_wrap: bool,
     /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
     theme: Arc<Theme>,
     version: Version,
     selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
+    scrolls: BlockScrolls,
 }
 
 impl DocumentLayout {
@@ -110,6 +120,7 @@ impl DocumentLayout {
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
         self.version == inputs.buffer.version()
             && self.wrap_width == inputs.wrap_width
+            && self.code_block_wrap == inputs.code_block_wrap
             && self.marked.as_ref() == inputs.marked
             && self.style == *inputs.style
             && Arc::ptr_eq(&self.theme, inputs.theme)
@@ -140,7 +151,7 @@ impl DocumentLayout {
         &self.bars
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "shot"))]
     pub(crate) fn block_backgrounds(&self) -> Vec<Bounds<Pixels>> {
         self.code_blocks
             .iter()
@@ -228,17 +239,34 @@ impl DocumentLayout {
         line.prefix.as_ref().filter(|_| within == 0)
     }
 
-    fn x_on_row(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
+    /// `offset`'s x on the row as shaped, before any block scroll.
+    fn content_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
         let offset = offset.clamp(line.range.start, line.range.end);
-        if let Some(x) = Self::prefix_on(line, within)
-            .filter(|prefix| offset < prefix.range().end)
-            .and_then(|prefix| prefix.x_for_offset(offset))
-        {
+        if let Some(x) = Self::prefix_x(line, within, offset) {
             return x;
         }
         let index = line.display.to_display(offset).get();
         line.indent() + line.shape.wrapped.unwrapped_layout.x_for_index(index)
             - line.rows[within].start_x
+    }
+
+    /// `offset`'s x in the prefix, when the prefix paints it.
+    fn prefix_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Option<Pixels> {
+        let offset = offset.clamp(line.range.start, line.range.end);
+        Self::prefix_on(line, within)
+            .filter(|prefix| offset < prefix.range().end)
+            .and_then(|prefix| prefix.x_for_offset(offset))
+    }
+
+    /// `content_x` less the line's block scroll; the prefix never moves.
+    fn x_on_row(&self, line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
+        let x = Self::content_x(line, within, offset);
+        match line.block {
+            Some(block) if Self::prefix_x(line, within, offset).is_none() => {
+                x - self.block_scroll(block)
+            }
+            _ => x,
+        }
     }
 
     fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
@@ -247,13 +275,13 @@ impl DocumentLayout {
             .map_or(line.range.end, |next| next.start)
     }
 
-    fn row_end_x(line: &LineLayout, within: usize) -> Pixels {
-        Self::x_on_row(line, within, Self::row_limit(line, within))
+    fn row_end_x(&self, line: &LineLayout, within: usize) -> Pixels {
+        self.x_on_row(line, within, Self::row_limit(line, within))
     }
 
     pub(crate) fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
         let (line, within) = self.locate(self.row_for_offset(offset));
-        Self::x_on_row(line, within, offset)
+        self.x_on_row(line, within, offset)
     }
 
     #[cfg(test)]
@@ -288,7 +316,8 @@ impl DocumentLayout {
             return prefix.offset_for_x(x).clamp(target.start, target.caret_end);
         }
         let layout = &line.shape.wrapped.unwrapped_layout;
-        let index = layout.closest_index_for_x(x - line.indent() + target.start_x);
+        let scroll = line.block.map_or(px(0.), |block| self.block_scroll(block));
+        let index = layout.closest_index_for_x(x + scroll - line.indent() + target.start_x);
         // At or past the display end, land after a hidden suffix (live-preview spec, D5).
         let bias = if index >= layout.len {
             Bias::Right
@@ -325,37 +354,42 @@ impl DocumentLayout {
             .max(range.start);
         let top = self.top_for_row(row);
         Bounds::from_corners(
-            point(Self::x_on_row(line, within, range.start), top),
-            point(Self::x_on_row(line, within, end), top + line.row_height),
+            point(self.x_on_row(line, within, range.start), top),
+            point(self.x_on_row(line, within, end), top + line.row_height),
         )
     }
 
     /// One quad per row touched. Four cases: a one-row selection is both first
     /// and last, and a row ending in a wrap gets no [`NEWLINE_STUB`] gap since a wrap isn't a character.
+    /// A scrollable block's rows stop at its background.
     pub(crate) fn selection_quads(&self, selection: &Range<ByteOffset>) -> Vec<PaintQuad> {
         let first = self.row_for_offset(selection.start);
         let last = self.row_for_offset(selection.end);
 
         (first..=last)
-            .map(|row| {
+            .filter_map(|row| {
                 let (line, within) = self.locate(row);
                 let left = if row == first {
-                    Self::x_on_row(line, within, selection.start)
+                    self.x_on_row(line, within, selection.start)
                 } else {
-                    Self::x_on_row(line, within, line.rows[within].start)
+                    self.x_on_row(line, within, line.rows[within].start)
                 };
                 let right = if row == last {
-                    Self::x_on_row(line, within, selection.end)
+                    self.x_on_row(line, within, selection.end)
                 } else if within + 1 == line.rows.len() {
-                    Self::row_end_x(line, within) + line.row_height * NEWLINE_STUB
+                    self.row_end_x(line, within) + line.row_height * NEWLINE_STUB
                 } else {
-                    Self::row_end_x(line, within)
+                    self.row_end_x(line, within)
+                };
+                let (left, right) = match line.block.and_then(|block| self.block_clip(block)) {
+                    Some(clip) => clip.span(left, right, line.row_height)?,
+                    None => (left, right),
                 };
                 let top = self.top_for_row(row);
-                fill(
+                Some(fill(
                     Bounds::from_corners(point(left, top), point(right, top + line.row_height)),
                     self.theme.colors.selection,
-                )
+                ))
             })
             .collect()
     }

@@ -60,6 +60,12 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Equivalent. `walk` starts `jobs.parallelism().max(1)` jobs, and `Serial` runs them
 # one after another, so the first drains the queue: 0 and 1 give the same walk.
 #
+# Equivalent. In `reveal_block`, a caret exactly at the scroll keeps it with either
+# `<`, and one exactly a margin inside the right edge asks for the scroll it has.
+#
+# Equivalent. `TextElement`'s wheel listener runs in the bubble phase and its hover listener in
+# the capture phase; swapped, each sees the same hitboxes, and nothing after it stops the event.
+#
 # Equivalent. An image whose longest side is exactly `DRAWN_SIDE` already fits, so
 # `thumbnail` keeps its size and its pixels: `>=` and `>` decode the same bytes.
 #
@@ -79,6 +85,9 @@ exclude_re = [
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace match guard error\\.io_kind\\(\\) == Some\\(ErrorKind::NotFound\\) with (true|false) in read$",
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace == with != in read$",
     "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
+    "^crates/app/src/editor/block_scroll\\.rs:[0-9]+:[0-9]+: replace (< with <=|> with >=) in EditorView::reveal_block$",
+    "^crates/app/src/editor/element\\.rs:[0-9]+:22: replace != with == in <impl Element for TextElement>::paint$",
+    "^crates/app/src/editor/element\\.rs:[0-9]+:26: replace == with != in <impl Element for TextElement>::paint$",
     "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
 ]

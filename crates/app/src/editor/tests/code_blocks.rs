@@ -138,8 +138,8 @@ fn a_background_spans_its_block_from_the_first_top_to_the_last_bottom(cx: &mut T
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            assert_block(&layout.block_backgrounds(), -8., Some(0.), Some(112.));
-            assert_eq!(layout.row_count(), 5);
+            assert_block(&layout.block_backgrounds(), -8., Some(0.), Some(84.));
+            assert_eq!(layout.row_count(), 4);
         })
         .unwrap();
 }

@@ -12,6 +12,7 @@ fn a_view_keeps_its_direction_and_drops_its_goal() {
     let view = ViewState {
         selection,
         top: TopLine::new(ByteOffset::new(2), px(6.5)),
+        scrolls: Vec::new(),
     };
 
     let back = ViewState::from(SavedView::from(&view));

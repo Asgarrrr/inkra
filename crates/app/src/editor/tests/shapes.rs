@@ -8,7 +8,7 @@ use inkra_text::{Buffer, ByteOffset};
 
 use super::{at, dispatching, window_on, with_editor};
 use crate::editor::layout::{
-    DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
+    BlockScrolls, DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
 use crate::theme::{self, Appearance, Theme, ThemeColors, builtin};
 
@@ -80,7 +80,9 @@ pub(super) fn shape(
         marked,
         style: &style,
         wrap_width,
+        code_block_wrap: false,
         theme: builtin::dark(),
+        scrolls: &BlockScrolls::default(),
     };
     shape_document(&inputs, previous, window)
 }
@@ -230,7 +232,9 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     marked: marked.as_ref(),
                     style: &style,
                     wrap_width: width,
+                    code_block_wrap: false,
                     theme: builtin::dark(),
+                    scrolls: &BlockScrolls::default(),
                 })
             };
             // `last_layout` still holds the end-of-document caret the window opened with.
@@ -251,10 +255,28 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     marked: None,
                     style,
                     wrap_width: width,
+                    code_block_wrap: false,
                     theme: builtin::dark(),
+                    scrolls: &BlockScrolls::default(),
                 })
             };
             assert!(!other(&bigger), "another style");
+
+            let other_wrap = |code_block_wrap: bool| {
+                layout.is_shaped_from(&LayoutInputs {
+                    buffer,
+                    markdown: view.markdown(),
+                    selection: &(at(0)..at(0)),
+                    marked: None,
+                    style: &style,
+                    wrap_width: width,
+                    code_block_wrap,
+                    theme: builtin::dark(),
+                    scrolls: &BlockScrolls::default(),
+                })
+            };
+            assert!(other_wrap(false), "the same code block wrap");
+            assert!(!other_wrap(true), "another code block wrap");
         })
         .unwrap();
 }

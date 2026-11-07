@@ -37,6 +37,7 @@ impl From<SavedView> for ViewState {
         Self {
             selection,
             top: TopLine::new(ByteOffset::new(saved.top), px(saved.below)),
+            scrolls: Vec::new(),
         }
     }
 }

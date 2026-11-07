@@ -12,7 +12,7 @@ use inkra_editor::Selection;
 use inkra_markdown::Markdown;
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::editor::layout::{LayoutInputs, shape_document};
+use crate::editor::layout::{BlockScrolls, LayoutInputs, shape_document};
 use crate::text_input::{self, FIELD_CONTEXT, InputHost, Mode, Prepainted, Quads, TextInput};
 use crate::theme;
 use crate::ui::Color;
@@ -154,7 +154,9 @@ impl Element for FieldElement {
             marked: marked.as_ref(),
             style: &style,
             wrap_width: None,
+            code_block_wrap: false,
             theme: theme::current(cx),
+            scrolls: &BlockScrolls::default(),
         };
         let layout = shape_document(&inputs, None, window);
         let quads = Quads::new(&layout, &range, bounds.origin);

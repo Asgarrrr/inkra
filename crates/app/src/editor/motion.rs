@@ -28,7 +28,7 @@ impl EditorView {
             state.move_to(buffer, buffer.clip_grapheme(range.end, Bias::Right), true);
         });
         // Over the gate's minimal reveal: the last reveal decides the offset, before any paint.
-        self.reveal_cursor(Reveal::Center);
+        self.reveal_cursor(Reveal::Center, cx);
     }
 
     pub(super) fn move_vertically(

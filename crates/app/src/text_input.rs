@@ -26,6 +26,8 @@ use crate::one_line::one_line;
 
 pub(crate) use actions::on_actions;
 pub(crate) use adapter::InputAdapter;
+#[cfg(test)]
+pub(crate) use paint::painted_caret;
 pub(crate) use paint::{Prepainted, Quads, paint};
 
 /// The key context every host adds: the shared bindings name it, so they match in each host.
@@ -125,7 +127,7 @@ impl TextInput {
     }
 
     /// Already scrolled when the host scrolls: gpui translates the element's bounds.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "shot"))]
     pub(crate) fn last_bounds(&self) -> Option<Bounds<Pixels>> {
         self.last_bounds
     }

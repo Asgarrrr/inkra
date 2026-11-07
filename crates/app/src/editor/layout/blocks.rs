@@ -20,6 +20,10 @@ pub(crate) fn label_shape_count() -> usize {
 
 /// What one code block paints (code blocks spec, C2-C3).
 pub(super) struct BlockLayout {
+    /// `CodeBlock.range.start`, which keys its scroll.
+    pub(super) start: ByteOffset,
+    /// How far its text scrolls: zero when every line fits.
+    pub(super) max: Pixels,
     pub(super) background: Bounds<Pixels>,
     pub(super) label: Option<(Point<Pixels>, ShapedLine)>,
 }
@@ -86,6 +90,16 @@ impl Blocks {
         }
     }
 
+    /// The index `block`'s layout takes in `finish`'s list, for the line it holds.
+    pub(super) fn index_of(&self, block: Option<&CodeBlock>) -> Option<usize> {
+        let block = block?;
+        let closes_first = self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.start != block.range.start);
+        Some(self.done.len() + usize::from(closes_first))
+    }
+
     /// `block` holds `line`, from the cursor `line_metrics` reads; `bottom` is the line's last row's
     /// bottom. `label` is read on the line that opens the block.
     pub(super) fn line(
@@ -109,7 +123,7 @@ impl Blocks {
                 start: block.range.start,
                 label,
                 top: line.top,
-                left: DocumentLayout::x_on_row(line, 0, block.range.start)
+                left: DocumentLayout::content_x(line, 0, block.range.start)
                     - theme::CODE_BLOCK_OUTSET,
                 widest: px(0.),
                 bottom,
@@ -130,7 +144,15 @@ impl Blocks {
     fn close(&mut self) {
         if let Some(open) = self.open.take() {
             let right = self.column.unwrap_or(open.widest) + theme::CODE_BLOCK_OUTSET;
+            let max = match self.column {
+                Some(column) if open.widest > column => {
+                    open.widest - column + theme::CODE_BLOCK_SCROLL_MARGIN
+                }
+                _ => px(0.),
+            };
             self.done.push(BlockLayout {
+                start: open.start,
+                max,
                 background: Bounds::from_corners(
                     point(open.left, open.top),
                     point(right, open.bottom),

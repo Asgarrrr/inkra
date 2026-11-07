@@ -4,15 +4,29 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, AvailableSpace, Bounds, ElementId, Entity, GlobalElementId, LayoutId, Pixels, Style,
-    TextStyle, Window, point, prelude::*, px, relative, size,
+    App, AvailableSpace, Bounds, DispatchPhase, ElementId, Entity, GlobalElementId, Hitbox,
+    HitboxBehavior, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ScrollWheelEvent, Style,
+    TextStyle, Window, fill, point, prelude::*, px, relative, size,
 };
 use inkra_markdown::{HEADING_LEVELS, Styles};
+use inkra_text::ByteOffset;
 
 use super::EditorView;
+use super::block_scroll::BAR_LINGER;
 use super::layout::DocumentLayout;
 use crate::text_input::{self, Prepainted, Quads};
 use crate::theme::{self, Theme};
+
+#[cfg(test)]
+thread_local! {
+    static PAINTED_BARS: RefCell<Vec<Bounds<Pixels>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The bars the last paint on this thread drew, in window coordinates.
+#[cfg(test)]
+pub(crate) fn painted_bars() -> Vec<Bounds<Pixels>> {
+    PAINTED_BARS.with(|painted| painted.borrow().clone())
+}
 
 pub(super) struct TextElement {
     pub(super) editor: Entity<EditorView>,
@@ -120,18 +134,38 @@ impl Element for TextElement {
         });
 
         let applied = window.element_offset().y;
-        let moved = self.editor.update(cx, |editor, _| {
+        let moved = self.editor.update(cx, |editor, cx| {
             let cursor = editor.cursor();
-            editor.viewport.resolve(text.origin.y, &layout, cursor)
+            let resolution = editor.viewport.resolve(text.origin.y, &layout, cursor);
+            // Before the hitboxes and the quads, so this frame paints the caret it revealed.
+            if resolution.revealed {
+                editor.reveal_block(&layout, cx);
+            }
+            resolution.moved
         });
         // `layout_bounds` snaps the element offset (`window.rs:5107`); so does the shift.
         text.origin.y += window.pixel_snap(applied + moved) - window.pixel_snap(applied);
+
+        let text_hitbox = window.insert_hitbox(text, HitboxBehavior::Normal);
+        let mask = window.content_mask().bounds;
+        let top = mask.top() - text.origin.y;
+        let blocks = layout
+            .scrollable_blocks(top, top + mask.size.height)
+            .map(|(index, start, max, background)| BlockHitbox {
+                hitbox: window.insert_hitbox(background + text.origin, HitboxBehavior::Normal),
+                index,
+                start,
+                max,
+            })
+            .collect();
 
         let selection = self.editor.read(cx).input.state().selection().range();
         let quads = Quads::new(&layout, &selection, text.origin);
         EditorPrepaint {
             painted: Some((layout, quads)),
             text,
+            text_hitbox,
+            blocks,
         }
     }
 
@@ -148,6 +182,64 @@ impl Element for TextElement {
         let Some((layout, quads)) = prepaint.painted.take() else {
             return;
         };
+        let blocks = Rc::new(std::mem::take(&mut prepaint.blocks));
+        let text_hitbox = prepaint.text_hitbox.clone();
+        let line_height = window.line_height();
+        let editor = self.editor.clone();
+        let wheel_blocks = Rc::clone(&blocks);
+        // Registered after the scroll container's listener, so it bubbles first.
+        window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            let over = wheel_blocks
+                .iter()
+                .find(|block| block.hitbox.should_handle_scroll(window))
+                .map(|block| (block.start, block.max));
+            // A block's padding lies outside the text hitbox.
+            if over.is_none() && !text_hitbox.should_handle_scroll(window) {
+                return;
+            }
+            if editor.update(cx, |editor, cx| {
+                editor.on_wheel(event, over, line_height, cx)
+            }) {
+                cx.stop_propagation();
+            }
+        });
+        let hovered = hovered_block(&blocks, window);
+        let now = cx.background_executor().now();
+        let scrolls = &self.editor.read(cx).scrolls;
+        let bars: Vec<PaintQuad> = blocks
+            .iter()
+            .filter(|block| {
+                hovered == Some(block.index)
+                    || scrolls
+                        .scrolled_at(block.start)
+                        .is_some_and(|at| now.duration_since(at) < BAR_LINGER)
+            })
+            .filter_map(|block| layout.scroll_bar(block.index))
+            .map(|bar| {
+                fill(
+                    bar + prepaint.text.origin,
+                    layout.theme().colors.text_placeholder,
+                )
+                .corner_radii(theme::CODE_BLOCK_BAR_RADIUS)
+            })
+            .collect();
+        #[cfg(test)]
+        PAINTED_BARS.with(|painted| {
+            *painted.borrow_mut() = bars.iter().map(|bar| bar.bounds).collect();
+        });
+        let entity = self.editor.entity_id();
+        // The hover has no event of its own: `is_hovered` is read at paint (div.rs:2689 does the same).
+        if !blocks.is_empty() {
+            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && hovered_block(&blocks, window) != hovered {
+                    cx.notify(entity);
+                }
+            });
+        }
+        let quads = quads.with_bars(bars);
         // The shifted bounds, not the parameter: hit tests and the IME read them until the next paint.
         text_input::paint(&self.editor, layout, quads, prepaint.text, window, cx);
     }
@@ -157,6 +249,25 @@ pub(super) struct EditorPrepaint {
     painted: Prepainted,
     /// Shifted by the offset prepaint resolved, so paint places the text where the next frame will.
     text: Bounds<Pixels>,
+    /// Every wheel event over the text feeds the gesture filter, prose included.
+    text_hitbox: Hitbox,
+    blocks: Vec<BlockHitbox>,
+}
+
+/// A scrollable block on screen, with what `on_wheel` needs to scroll it.
+struct BlockHitbox {
+    hitbox: Hitbox,
+    index: usize,
+    start: ByteOffset,
+    max: Pixels,
+}
+
+/// The scrollable block under the pointer, by its index in the layout.
+fn hovered_block(blocks: &[BlockHitbox], window: &Window) -> Option<usize> {
+    blocks
+        .iter()
+        .find(|block| block.hitbox.is_hovered(window))
+        .map(|block| block.index)
 }
 
 /// The width to lay out at, if the pass gave one, and the width to report.

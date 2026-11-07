@@ -22,6 +22,8 @@ use crate::sidebar::Sidebar;
 
 mod activation;
 mod backlinks;
+mod block_scrolls;
+mod code_block_wrap;
 mod column;
 mod command_palette;
 mod creating;

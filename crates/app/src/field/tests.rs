@@ -5,7 +5,7 @@ use gpui::{Entity, Focusable, Subscription, TestAppContext, VisualTestContext, p
 use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
-use super::{Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
+use super::{BlockScrolls, Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
 use crate::theme::builtin;
@@ -166,7 +166,9 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
                 marked: marked.as_ref(),
                 style: &style,
                 wrap_width: None,
+                code_block_wrap: false,
                 theme: builtin::dark(),
+                scrolls: &BlockScrolls::default(),
             };
             let layout = shape_document(&inputs, None, window);
 

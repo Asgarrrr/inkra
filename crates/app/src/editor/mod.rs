@@ -1,4 +1,5 @@
 pub(crate) mod actions;
+mod block_scroll;
 mod element;
 pub(crate) mod layout;
 mod motion;
@@ -47,6 +48,8 @@ impl EventEmitter<LinkFollowed> for EditorView {}
 pub(crate) struct ViewState {
     pub(crate) selection: Selection,
     pub(crate) top: TopLine,
+    /// Each scrolled block's start and offset; never saved to disk.
+    pub(crate) scrolls: Vec<(ByteOffset, Pixels)>,
 }
 
 impl ViewState {
@@ -58,6 +61,7 @@ impl ViewState {
         Self {
             selection,
             top: self.top.clipped(buffer),
+            scrolls: self.scrolls,
         }
     }
 }
@@ -71,6 +75,12 @@ pub(crate) struct EditorView {
     pinned: Option<ParkedSelection>,
     is_selecting: bool,
     viewport: Viewport,
+    /// Every layout holds a clone: never replaced, or a drawn layout would read a stale table.
+    scrolls: layout::BlockScrolls,
+    /// The pointer's gesture, not the note's: `open_buffer` keeps it.
+    gesture: block_scroll::Gesture,
+    /// Repaints once when a bar's linger ends (code block scroll spec, S3).
+    bar_expiry: Option<gpui::Task<()>>,
     /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
     /// no test failure short of a two-view test, and leaves a reload's caret on the old text.
     _buffer: [Subscription; 2],
@@ -88,8 +98,13 @@ impl EditorView {
             pinned: None,
             is_selecting: false,
             viewport: Viewport::default(),
+            scrolls: layout::BlockScrolls::default(),
+            gesture: block_scroll::Gesture::default(),
+            bar_expiry: None,
             _buffer: subscriptions,
         };
+        // The buffer outlives the view, so its anchors would only add to the count.
+        cx.on_release(|view, cx| view.forget_scrolls(cx)).detach();
         view.refresh(cx);
         view
     }
@@ -109,16 +124,19 @@ impl EditorView {
         let view = view.map(|view| view.clipped(buffer.read(cx)));
         // Rebuilt: the old `Subscription`s would observe the closed note.
         self._buffer = Self::watch_buffer(&buffer, cx);
-        let (selection, top) = view.map_or((Selection::at(ByteOffset::new(0)), None), |view| {
-            (view.selection, Some(view.top))
-        });
+        let (selection, top, scrolls) = view.map_or(
+            (Selection::at(ByteOffset::new(0)), None, Vec::new()),
+            |view| (view.selection, Some(view.top), view.scrolls),
+        );
         // Before the rebind: the anchors resolve only in the buffer they were set in.
         let pinned = self.drop_pin(cx);
+        self.forget_scrolls(cx);
         // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
         self.input.rebind(buffer, selection);
         if pinned {
             self.pinned = Some(self.park_selection(cx));
         }
+        self.anchor_scrolls(&scrolls, cx);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
         self.refresh(cx);
@@ -144,20 +162,30 @@ impl EditorView {
         &self.markdown
     }
 
-    /// Syncs only when the buffer moved since the last parse; a caret move costs nothing.
+    /// Parses only when the buffer moved since the last parse; the block scrolls sync on every
+    /// call, so never inside a buffer update.
     fn refresh(&mut self, cx: &mut App) {
         let version = self.input.buffer().read(cx).version();
-        if self.parsed_at == Some(version) {
-            return;
-        }
-        self.markdown = parses::parsed(self.input.buffer(), cx);
-        self.parsed_at = Some(version);
-        if let Some(pinned) = &self.pinned {
-            let peeked = pinned.peek(self.input.buffer().read(cx));
-            // Unfocused, so no composition to lose.
-            if &peeked != self.input.state().selection() {
-                self.input.reset_state(peeked);
+        if self.parsed_at != Some(version) {
+            self.markdown = parses::parsed(self.input.buffer(), cx);
+            self.parsed_at = Some(version);
+            if let Some(pinned) = &self.pinned {
+                let peeked = pinned.peek(self.input.buffer().read(cx));
+                // Unfocused, so no composition to lose.
+                if &peeked != self.input.state().selection() {
+                    self.input.reset_state(peeked);
+                }
             }
+        }
+        let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
+            self.is_block_start(offset)
+        });
+        if !dropped.is_empty() {
+            self.input.buffer().update(cx, |buffer, _| {
+                for anchor in dropped {
+                    buffer.forget(anchor);
+                }
+            });
         }
     }
 
@@ -238,7 +266,9 @@ impl EditorView {
             marked: marked.as_ref(),
             style,
             wrap_width,
+            code_block_wrap: theme::code_block_wrap(cx),
             theme: theme::current(cx),
+            scrolls: &self.scrolls,
         };
         let previous = self.input.last_layout();
         match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
@@ -276,6 +306,8 @@ impl EditorView {
         if pinned {
             self.pinned = Some(self.park_selection(cx));
         }
+        self.forget_scrolls(cx);
+        self.anchor_scrolls(&view.scrolls, cx);
         self.is_selecting = false;
         self.viewport = Viewport::default();
         self.viewport.request(ScrollTo::Top(view.top));
@@ -289,13 +321,20 @@ impl EditorView {
             top: self
                 .viewport
                 .capture(self.input.last_layout().map(Rc::as_ref), self.cursor()),
+            scrolls: self.scrolls.entries(),
         }
     }
 
-    fn reveal_cursor(&mut self, how: Reveal) {
+    /// The page, then the caret's block against the same layout; a deferred reveal reaches the
+    /// block in prepaint.
+    fn reveal_cursor(&mut self, how: Reveal, cx: &mut Context<Self>) {
         let cursor = self.cursor();
-        let layout = self.input.last_layout().map(Rc::as_ref);
-        self.viewport.reveal(layout, cursor, how);
+        let layout = self.input.last_layout().cloned();
+        if self.viewport.reveal(layout.as_deref(), cursor, how)
+            && let Some(layout) = layout
+        {
+            self.reveal_block(&layout, cx);
+        }
     }
 }
 
@@ -339,6 +378,10 @@ impl EditorView {
         self.viewport.offset_at_top(self.drawn_layout())
     }
 
+    pub(crate) fn row_count(&self) -> usize {
+        self.drawn_layout().row_count()
+    }
+
     pub(crate) fn scroll_y(&self) -> Pixels {
         self.viewport.handle().offset().y
     }
@@ -355,6 +398,10 @@ impl Drop for EditorView {
             self.pinned.is_none() || std::thread::panicking(),
             "an EditorView dropped while pinned leaks its anchors"
         );
+        debug_assert!(
+            self.scrolls.is_empty() || std::thread::panicking(),
+            "an EditorView dropped with block scrolls leaks their anchors"
+        );
     }
 }
 
@@ -370,7 +417,7 @@ impl InputHost for EditorView {
     /// Reshapes with the style stored in the layout: outside a draw, `window.text_style()` is gpui's default.
     fn after_edit(&mut self, _: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.reshape(window, cx);
-        self.reveal_cursor(Reveal::Minimal);
+        self.reveal_cursor(Reveal::Minimal, cx);
     }
 
     /// Reshapes when the move reveals or hides an element, so the layout is never stale (spec D7).
@@ -380,7 +427,7 @@ impl InputHost for EditorView {
         if !touched(conceals, &old).eq(touched(conceals, &new)) {
             self.reshape(window, cx);
         }
-        self.reveal_cursor(Reveal::Minimal);
+        self.reveal_cursor(Reveal::Minimal, cx);
     }
 }
 
@@ -426,6 +473,7 @@ impl Render for EditorView {
             .items_center()
             .size_full()
             .overflow_y_scroll()
+            .restrict_scroll_to_axis()
             .track_scroll(self.viewport.handle())
             .bg(colors.editor_background)
             .text_color(colors.md_text)

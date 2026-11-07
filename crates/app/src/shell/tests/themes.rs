@@ -132,7 +132,7 @@ fn a_lost_events_rescan_reloads_the_theme(cx: &mut TestAppContext) {
 }
 
 /// The open theme picker's row labels and selected row; `None` when it is not open.
-fn theme_picker(
+pub(super) fn theme_picker(
     window: WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
 ) -> Option<(Vec<String>, Option<usize>)> {
@@ -148,7 +148,7 @@ fn theme_picker(
 }
 
 /// From the palette, as a person picks it.
-fn open_theme_picker(cx: &mut VisualTestContext) {
+pub(super) fn open_theme_picker(cx: &mut VisualTestContext) {
     cx.simulate_keystrokes("cmd-shift-p");
     cx.simulate_input("theme");
     cx.simulate_keystrokes("enter");

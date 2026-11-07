@@ -451,13 +451,18 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "code-blocks",
-        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a wrapped line, in a quote past its bars, in a list at the fence column, no language, indented; the language label right-aligned in the opening row",
+        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a long line on one row scrolled 240 px and clipped at the background, in a quote past its bars with a long line scrolled 120 px, in a list at the fence column, no language, indented; the language label right-aligned in the opening row; the pointer over the rust block shows its 3 px scroll bar, and the quoted block's bar lingers from its swipe on the test clock",
         open: code_blocks::concealed,
     },
     Scene {
         name: "code-blocks-revealed",
-        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background",
+        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background and stops at its edges; the caret, scrolled out at column 0, paints nothing",
         open: code_blocks::revealed,
+    },
+    Scene {
+        name: "code-blocks-wrap",
+        shows: "code_block_wrap on, written to settings.json after the open: every long line wraps inside its background, nothing is clipped, the quoted block wraps past its bars",
+        open: code_blocks::wrapped,
     },
 ];
 
