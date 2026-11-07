@@ -1,8 +1,16 @@
+use std::path::Path;
+
 use inkra_markdown::links;
+use inkra_vault::Kind;
 
 use super::NoteIndex;
-use crate::test_support::{entries, find_all, id, load, loaded, note_set, rename, vault};
-use crate::{Group, NoteQuery, Resolution};
+use crate::persist::{decode, encode};
+use crate::seed::Seed;
+use crate::test_support::{
+    ROOT, entries, find_all, id, indexed, load, loaded, note_set, rename, vault,
+};
+use crate::words::SHARDS;
+use crate::{Group, NoteQuery, Resolution, Source};
 
 /// Each backlink as (source path, the linked text of each occurrence).
 fn backlinks(
@@ -356,4 +364,41 @@ fn set_notes_returns_the_previous_set() {
     );
     assert_eq!(*previous.mtimes, *note_set(&three).mtimes);
     assert_eq!(index.names().len(), 2);
+}
+
+#[test]
+fn a_snapshot_keeps_the_sources_it_was_taken_with() {
+    let (_fs, vault) = vault(&["a.md", "b.md", "c.md"]);
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(note_set(&vault));
+    load(&mut index, id(&vault, "a.md"), "[[b]] alpha");
+    let held = index.snapshot();
+    load(&mut index, id(&vault, "a.md"), "[[c]] bravo");
+
+    let Ok(decoded) = decode(&encode(&held, Path::new(ROOT)), Path::new(ROOT)) else {
+        panic!("the file decodes");
+    };
+    let sources: Vec<&Source> = decoded.notes.iter().map(|note| &note.source).collect();
+    assert_eq!(sources, [&Source::parse("[[b]] alpha")]);
+    let mut seeded = NoteIndex::default();
+    let _ = seeded.set_notes(note_set(&vault));
+    let notes = vault.entries().filter(|entry| entry.kind == Kind::Note);
+    let _ = seeded.seed(Seed::build(decoded, notes, &note_set(&vault)));
+    let words: Vec<String> = seeded
+        .words()
+        .entries()
+        .into_keys()
+        .map(|(word, _)| word)
+        .collect();
+    assert_eq!(words, ["alpha", "b"]);
+}
+
+#[test]
+fn an_insert_under_a_held_snapshot_copies_one_shard() {
+    let (ids, mut index) = indexed(&[Some("alpha"), Some("bravo")]);
+    let held = index.snapshot();
+
+    load(&mut index, ids[0], "charlie");
+
+    assert_eq!(index.sources.shards_shared(&held.sources), SHARDS - 1);
 }

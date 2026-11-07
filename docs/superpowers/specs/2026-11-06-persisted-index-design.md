@@ -401,3 +401,13 @@ Each slice appends what it did differently from this spec, and why.
   `expect`: the flags are independent and can be true in one turn. The
   not-found guard in `cache_file::read` only decides whether a line is logged,
   so its mutants are excluded as unobservable.
+- Slice 5a is split in two. 5a-1 moves `sources` into `Shards<EntryId, Arc<Source>>`,
+  in `NoteIndex` and `Seed`, and gives `IndexSnapshot` the sources and `loaded`, so
+  `encode` takes a snapshot and a write can encode off the foreground at one revision
+  (P14). 5a-2 is the writer. Orphan temps move to 5b and `remove_file` to 5c, their
+  first callers. `set_notes` collects the gone notes, then removes each, so a held
+  snapshot keeps every untouched shard. The byte format is unchanged: `FORMAT_VERSION`
+  stays 1. Two tests pin 5a's bugs at the index level before the writer exists: the
+  stamp a held reload writes, and a fresh note after the settle. The larger
+  `IndexSnapshot` trips clippy's `large_enum_variant` on the picker's `Ran`, so
+  `Ran::Found` boxes its `Landed`.

@@ -7,7 +7,7 @@ use crate::NoteIndex;
 const ROOT: &str = "/v";
 
 fn bytes() -> Vec<u8> {
-    encode(&NoteIndex::default(), Path::new(ROOT))
+    encode(&NoteIndex::default().snapshot(), Path::new(ROOT))
 }
 
 /// `bytes` with its crc over the body set again, so a later check sees the change.
@@ -57,7 +57,7 @@ fn round_trip_ok() {
         Ok(Vec::new())
     );
     let root = Path::new("/Users/me/Notes/Été 🌱");
-    let bytes = encode(&NoteIndex::default(), root);
+    let bytes = encode(&NoteIndex::default().snapshot(), root);
     assert_eq!(
         decode(&bytes, root).map(|decoded| decoded.notes.len()),
         Ok(0)
@@ -173,7 +173,7 @@ fn other_root_is_root() {
 #[test]
 fn no_truncation_panics() {
     let root = format!("/{}", "v".repeat(200));
-    let bytes = encode(&NoteIndex::default(), Path::new(&root));
+    let bytes = encode(&NoteIndex::default().snapshot(), Path::new(&root));
     for len in 0..bytes.len() {
         let prefix = &bytes[..len];
         assert!(decode(prefix, Path::new(ROOT)).is_err(), "{len}");

@@ -131,7 +131,7 @@ impl Model {
     /// The old launch's jobs die with it; the new one scans the same disk.
     fn relaunch(&mut self, kind: usize) {
         let root = Path::new(ROOT);
-        let bytes = encode(self.h.live.index(), root);
+        let bytes = encode(&self.h.live.index().snapshot(), root);
         self.outcome = Some(match kind {
             0 => Outcome::Missing,
             1 => match decode(&bytes[..bytes.len() / 2], root) {

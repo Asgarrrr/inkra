@@ -15,13 +15,13 @@ use crate::key::Key;
 use crate::note_set::NoteSet;
 use crate::persist::{CachedNote, Decoded};
 use crate::source::Source;
-use crate::words::{Alive, Ordinals, Words};
+use crate::words::{Alive, Ordinals, Shards, Words};
 
 /// What `NoteIndex::seed` moves in, keyed by the scan's ids.
 pub(crate) struct Seed {
     pub(crate) words: Words,
     pub(crate) corpus: Corpus,
-    pub(crate) sources: HashMap<EntryId, Source>,
+    pub(crate) sources: Shards<EntryId, Arc<Source>>,
     pub(crate) by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
     /// Each seeded note's cached stamp, the racy ones left out so they reload (P8).
     pub(crate) stamps: Vec<(EntryId, Stamp)>,
@@ -46,7 +46,7 @@ impl Seed {
         let matched = matches(&cached, &entries);
         let mut corpus = Corpus::new(Arc::clone(&notes.ids), &notes.mtimes);
         let mut named = Vec::with_capacity(cached.len());
-        let mut sources = HashMap::with_capacity(cached.len());
+        let mut sources = Shards::default();
         let mut by_stem: HashMap<Key, Vec<(EntryId, usize)>> = HashMap::new();
         let mut stamps = Vec::with_capacity(cached.len());
         for (note, at) in cached.into_iter().zip(matched) {
@@ -65,7 +65,7 @@ impl Seed {
             for (link, key) in note.source.note_stems() {
                 by_stem.entry(key).or_default().push((id, link));
             }
-            sources.insert(id, note.source);
+            sources.insert(id, Arc::new(note.source));
             if !is_racy(stamp) {
                 stamps.push((id, stamp));
             }
