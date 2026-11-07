@@ -47,6 +47,27 @@ fn fail_next_saves_fails_that_many_saves_then_writes() {
 }
 
 #[test]
+fn fail_next_replaces_fails_that_many_replaces_and_keeps_the_old_bytes() {
+    let fs = MemFs::new();
+    let path = Path::new("/cache/a.idx");
+    fs.insert_bytes(path, b"old".to_vec());
+
+    fs.fail_next_replaces(path, 2, ErrorKind::StorageFull);
+    let failures = [
+        block_on(fs.replace_bytes(path, b"new")),
+        block_on(fs.replace(path, "new")),
+    ];
+    for result in failures {
+        let error = result.expect_err("an injected failure");
+        assert_eq!(error.io_kind(), Some(ErrorKind::StorageFull));
+    }
+    assert_eq!(fs.read_to_string(path).as_deref(), Some("old"));
+
+    block_on(fs.replace_bytes(path, b"new")).expect("the third replace writes");
+    assert_eq!(fs.read_to_string(path).as_deref(), Some("new"));
+}
+
+#[test]
 fn fail_next_saves_after_preserve_keeps_one_copy_and_reports_unwritten() {
     let fs = MemFs::new();
     let path = Path::new("/vault/a.md");

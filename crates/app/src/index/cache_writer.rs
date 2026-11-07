@@ -59,13 +59,17 @@ impl IndexSync {
                 writer.next_seq += 1;
                 let snapshot = self.live.index().snapshot();
                 let root = writer.root.clone();
-                cx.background_spawn(write_in_order(
+                let write = cx.background_spawn(write_in_order(
                     Arc::clone(&writer.written),
                     Arc::clone(&writer.fs),
                     writer.file.clone(),
                     seq,
                     move || encode(&snapshot, &root),
-                ))
+                ));
+                cx.spawn(async move |this, cx| {
+                    let written = write.await;
+                    let _ = this.update(cx, |sync, cx| sync.written(written, revision, cx));
+                })
                 .detach();
             }
             Due::At(at) => {
@@ -83,6 +87,34 @@ impl IndexSync {
             Due::Idle => writer.armed = None,
         }
     }
+
+    /// Feeds a write's outcome back to `Writes`: a failure backs off, then asks again.
+    fn written(&mut self, written: Written, revision: u64, cx: &mut Context<Self>) {
+        let Some(rule) = self
+            .writer
+            .as_mut()
+            .and_then(|writer| writer.writes.as_mut())
+        else {
+            return;
+        };
+        match written {
+            Written::Landed => rule.wrote(),
+            Written::Failed => {
+                rule.failed(revision, cx.background_executor().now());
+                self.write_if_due(cx);
+            }
+            Written::Skipped => {}
+        }
+    }
+}
+
+/// How a write ended.
+#[derive(Clone, Copy)]
+pub(super) enum Written {
+    Landed,
+    Failed,
+    /// A newer write had landed first.
+    Skipped,
 }
 
 /// Dropping a `Task` stops no write already inside `RealFs`, and the lock has no fairness: the
@@ -93,14 +125,20 @@ pub(super) async fn write_in_order(
     file: PathBuf,
     seq: u64,
     bytes: impl FnOnce() -> Vec<u8>,
-) {
+) -> Written {
     let mut written = written.lock().await;
     if seq < *written {
-        return;
+        return Written::Skipped;
     }
     match fs.replace_bytes(&file, &bytes()).await {
         // A failed write leaves the mark, as `write_through`'s.
-        Ok(()) => *written = seq,
-        Err(error) => log::warn!("index cache not saved: {error}"),
+        Ok(()) => {
+            *written = seq;
+            Written::Landed
+        }
+        Err(error) => {
+            log::warn!("index cache not saved: {error}");
+            Written::Failed
+        }
     }
 }

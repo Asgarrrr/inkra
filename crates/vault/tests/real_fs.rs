@@ -566,6 +566,35 @@ fn replace_bytes_writes_bytes_that_are_not_utf8_under_missing_folders() {
     assert_eq!(names(&dir.0.join("index")), ["a.idx"]);
 }
 
+#[test]
+fn replace_bytes_sweeps_the_orphan_temps_of_its_file_that_no_process_holds() {
+    let dir = TempDir::new("sweep");
+    let file = dir.0.join("index.idx");
+    for name in [
+        "index.idx.inkra-999-0.tmp",
+        "index.idx.inkra-998-0.tmp",
+        "other.idx.inkra-1-0.tmp",
+    ] {
+        fs::write(dir.0.join(name), "orphan").expect("write a temp");
+    }
+    let held = fs::File::options()
+        .write(true)
+        .open(dir.0.join("index.idx.inkra-998-0.tmp"))
+        .expect("open a temp");
+    held.try_lock().expect("lock a temp");
+
+    block_on(RealFs.replace_bytes(&file, b"index")).expect("replace");
+
+    assert_eq!(
+        names(&dir.0),
+        [
+            "index.idx",
+            "index.idx.inkra-998-0.tmp",
+            "other.idx.inkra-1-0.tmp"
+        ]
+    );
+}
+
 fn kind_of<T>(result: inkra_vault::Result<T>) -> Option<ErrorKind> {
     result.err().and_then(|error| error.io_kind())
 }

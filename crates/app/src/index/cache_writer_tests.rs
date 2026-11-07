@@ -1,5 +1,6 @@
 //! The index cache file written by one launch and read by the next (persisted index spec, P14).
 
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -116,6 +117,48 @@ async fn a_second_edit_restarts_the_quiet_window(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_millis(1));
     cx.run_until_parked();
     assert_ne!(file(), startup);
+}
+
+#[gpui::test]
+async fn a_failed_write_keeps_the_old_file_and_retries_after_the_backoff(cx: &mut TestAppContext) {
+    let fs = vault(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let first = launch(cx, &fs);
+    let file = || block_on(fs.read_bytes(Path::new(CACHE), MAX_BYTES)).ok();
+    let startup = file();
+    let _ = saved_edit(cx, &first.0, "b", "zulu").await;
+    fs.fail_next_replaces(CACHE, 1, ErrorKind::StorageFull);
+
+    cx.executor().advance_clock(QUIET);
+    cx.run_until_parked();
+    assert_eq!(file(), startup, "a failed write keeps the old file");
+    cx.executor()
+        .advance_clock(QUIET.saturating_sub(Duration::from_secs(1)));
+    cx.run_until_parked();
+    assert_eq!(file(), startup, "the backoff holds the retry");
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_ne!(file(), startup);
+    drop(first);
+    cx.run_until_parked();
+
+    let _held = fs.block_load("/vault/b.md");
+    let (notes, links) = launch(cx, &fs);
+
+    assert_eq!(found(cx, &links, "zulu"), [entry_id(&notes, cx, "b")]);
+}
+
+#[gpui::test]
+async fn nothing_writes_the_file_at_quit(cx: &mut TestAppContext) {
+    let fs = vault(&[("a.md", "alpha"), ("b.md", "beta")]);
+    let (notes, _links) = launch(cx, &fs);
+    let file = || block_on(fs.read_bytes(Path::new(CACHE), MAX_BYTES)).ok();
+    let startup = file();
+    let _ = saved_edit(cx, &notes, "b", "zulu").await;
+
+    cx.quit();
+    cx.run_until_parked();
+
+    assert_eq!(file(), startup);
 }
 
 /// The background runs two writes in flight in either order; each seed tries one.

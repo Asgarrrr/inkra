@@ -9,7 +9,7 @@ mod writes;
 pub use header::{Decoded, FORMAT_VERSION, MAX_BYTES, Rejected, decode, encode};
 pub use notes::CachedNote;
 pub use words::CachedWords;
-pub use writes::{Due, QUIET, Writes};
+pub use writes::{CHANGES, Due, MAX_BACKOFF, QUIET, Writes};
 
 /// What the cache read gave the index: the turn input that ends `LiveIndex::await_cache` (P7).
 #[derive(Debug)]

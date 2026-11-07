@@ -54,6 +54,7 @@ struct State {
     unwatchable: BTreeSet<PathBuf>,
     failing_saves: BTreeMap<PathBuf, (u32, ErrorKind)>,
     failing_after_preserve: BTreeMap<PathBuf, (u32, ErrorKind)>,
+    failing_replaces: BTreeMap<PathBuf, (u32, ErrorKind)>,
 }
 
 impl State {
@@ -336,8 +337,12 @@ impl Fs for MemFs {
     }
 
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        if self.state().unwritable.contains(path) {
-            return Err(io(path, ErrorKind::PermissionDenied));
+        {
+            let mut state = self.state();
+            state.injected_replace_failure(path)?;
+            if state.unwritable.contains(path) {
+                return Err(io(path, ErrorKind::PermissionDenied));
+            }
         }
         self.insert_bytes(path, bytes);
         Ok(())

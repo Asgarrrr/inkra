@@ -18,7 +18,7 @@ use crate::fs::{
     DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, Result, Saved, Stamp, VaultError,
     normalize_line_endings,
 };
-use crate::temp::temp_path;
+use crate::temp::{sweep, temp_path};
 use crate::watch::Watch;
 
 pub struct RealFs;
@@ -219,6 +219,7 @@ impl Fs for RealFs {
 
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         self.create_parents(path).await?;
+        sweep(path);
         replace(path, bytes, None)
     }
 
@@ -388,11 +389,12 @@ fn replace(path: &Path, bytes: &[u8], existing: Option<&fs::Metadata>) -> Result
     let mut guard = TempFile(Some(temp.clone()));
 
     let mut file = fs::File::create(&temp).map_err(|source| io_error(&temp, source))?;
+    // Held through the rename, so `sweep` never takes a live temp for an orphan.
+    let _ = file.try_lock();
     file.write_all(bytes)
         .map_err(|source| io_error(&temp, source))?;
     // Bytes reach disk before the name points at them.
     file.sync_all().map_err(|source| io_error(&temp, source))?;
-    drop(file);
 
     // A fresh file carries the process umask, not the note's mode.
     if let Some(metadata) = existing {
@@ -401,6 +403,7 @@ fn replace(path: &Path, bytes: &[u8], existing: Option<&fs::Metadata>) -> Result
     }
 
     fs::rename(&temp, path).map_err(|source| io_error(path, source))?;
+    drop(file);
     guard.disarm();
     Ok(())
 }
