@@ -132,6 +132,18 @@ pub(crate) const BODY_COLUMN_CHARS: f32 = 70.;
 /// Ships with macOS, the only platform today; a second platform makes this per-platform.
 pub(crate) const CODE_FONT_FAMILY: &str = "Menlo";
 
+/// A code block's text: smaller than the body, in the body's row.
+pub(crate) const CODE_BLOCK_TEXT_SIZE: Pixels = px(16.);
+
+/// How far a code block's background reaches past its text on the left and past the column on the right.
+pub(crate) const CODE_BLOCK_OUTSET: Pixels = px(8.);
+
+/// A code block background's corners.
+pub(crate) const CODE_BLOCK_RADIUS: Pixels = px(6.);
+
+/// A code block's language label, in the UI font.
+pub(crate) const CODE_BLOCK_LABEL_SIZE: Pixels = px(12.);
+
 /// Chrome: the sidebar today, a status line or tab bar later. Stated, not
 /// inherited — gpui's default line box (`phi()` on 16px) is taller than a 22px row.
 pub(crate) const UI_TEXT_SIZE: Pixels = px(14.);

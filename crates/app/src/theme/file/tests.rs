@@ -6,7 +6,7 @@ use crate::theme::{Appearance, ThemeColors, builtin};
 
 #[test]
 fn every_token_name_round_trips_through_set_alone() {
-    assert_eq!(ThemeColors::NAMES.len(), 28);
+    assert_eq!(ThemeColors::NAMES.len(), 30);
     let base = builtin::dark().colors;
     let marked = rgba(0x01_02_03_04);
     for name in ThemeColors::NAMES {

@@ -53,6 +53,10 @@ tokens! {
     md_text,
     md_heading,
     md_code,
+    /// A code block's text; inline code keeps `md_code`.
+    md_code_block,
+    /// Behind a code block.
+    md_code_block_background,
     md_link,
     md_quote,
     md_quote_bar,

@@ -1,6 +1,7 @@
 //! Every pixel ↔ offset conversion, in rows: one `shape_text` call per line, so a
 //! keystroke does not re-shape the whole document.
 
+mod blocks;
 mod paint;
 mod prefix;
 mod rows;
@@ -8,7 +9,9 @@ mod runs;
 mod shape;
 
 #[cfg(test)]
-pub(crate) use paint::painted;
+pub(crate) use blocks::label_shape_count;
+#[cfg(test)]
+pub(crate) use paint::{painted, painted_blocks};
 pub(crate) use shape::shape_document;
 #[cfg(test)]
 pub(crate) use shape::{line_shape_count, shape_count};
@@ -17,6 +20,7 @@ use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use blocks::BlockLayout;
 use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset, Version};
@@ -75,6 +79,8 @@ pub(crate) struct DocumentLayout {
     /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3),
     /// in line order, so sorted by top.
     bars: Vec<Bounds<Pixels>>,
+    /// One per code block, in document order, so sorted by top.
+    code_blocks: Vec<BlockLayout>,
     body_row_height: Pixels,
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
@@ -132,6 +138,26 @@ impl DocumentLayout {
     #[cfg(test)]
     pub(crate) fn quote_bars(&self) -> &[Bounds<Pixels>] {
         &self.bars
+    }
+
+    #[cfg(test)]
+    pub(crate) fn block_backgrounds(&self) -> Vec<Bounds<Pixels>> {
+        self.code_blocks
+            .iter()
+            .map(|block| block.background)
+            .collect()
+    }
+
+    /// Each block's label: where it stands and its text.
+    #[cfg(test)]
+    pub(crate) fn block_labels(&self) -> Vec<Option<(Point<Pixels>, String)>> {
+        self.code_blocks
+            .iter()
+            .map(|block| {
+                let (at, shaped) = block.label.as_ref()?;
+                Some((*at, shaped.text.to_string()))
+            })
+            .collect()
     }
 
     /// Whether line `line`'s prefix paints its source text.

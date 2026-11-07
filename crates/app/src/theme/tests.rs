@@ -53,6 +53,24 @@ fn code_is_monospace() {
 }
 
 #[test]
+fn a_code_block_is_monospace_in_its_own_colour() {
+    let base = TextStyle::default();
+    let colors = &builtin::dark().colors;
+    let block = Styles::CODE | Styles::CODE_BLOCK;
+    let style = markdown_style(&base, block);
+    assert_eq!(style.font_family.as_ref(), CODE_FONT_FAMILY);
+    assert_eq!(style.color, Hsla::from(colors.md_code_block));
+    assert_eq!(
+        markdown_style(&base, block | Styles::QUOTE).color,
+        Hsla::from(colors.md_code_block)
+    );
+    assert_eq!(
+        markdown_style(&base, block | Styles::MARKER).color,
+        Hsla::from(colors.md_marker)
+    );
+}
+
+#[test]
 fn links_and_quotes_take_their_colours() {
     let base = TextStyle::default();
     assert_eq!(

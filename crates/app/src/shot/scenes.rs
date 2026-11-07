@@ -1,5 +1,6 @@
 //! No scene may reach a `Window::prompt`: only a person can answer one, so it would park forever.
 
+mod code_blocks;
 mod command_palette;
 mod docks;
 mod failures;
@@ -431,6 +432,16 @@ const CATALOGUE: &[Scene] = &[
         name: "markdown-blocks-revealed",
         shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
         open: markdown_blocks::revealed,
+    },
+    Scene {
+        name: "code-blocks",
+        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a wrapped line, in a quote past its bars, in a list at the fence column, no language, indented; the language label right-aligned in the opening row",
+        open: code_blocks::concealed,
+    },
+    Scene {
+        name: "code-blocks-revealed",
+        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background",
+        open: code_blocks::revealed,
     },
 ];
 

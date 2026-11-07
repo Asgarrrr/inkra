@@ -1,7 +1,7 @@
 # Markdown blocks: quote bars, code backgrounds, task boxes
 
-Status: **S1 built 2026-10-01** on `feat/markdown-blocks-s1`; S2 and S3
-pending.
+Status: **S1 merged** (#56). S2 is superseded by
+`2026-11-07-code-blocks-design.md`. S3 pending.
 
 ## Why
 

@@ -63,7 +63,7 @@ fn joining_two_lines_hands_only_the_joined_line_to_shape_text(cx: &mut TestAppCo
 }
 
 /// `text` shaped from scratch, or carrying what it can from `previous`.
-fn shape(
+pub(super) fn shape(
     text: &str,
     marked: Option<&Range<ByteOffset>>,
     wrap_width: Option<Pixels>,

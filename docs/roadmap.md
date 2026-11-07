@@ -158,9 +158,12 @@ Deferred table of its own.
 | Item | Trigger | Estimate |
 |---|---|---|
 | ~~Measure slice~~ | **Done 2026-09-24.** Figures under Editor, Measurements. | — |
-| Checkboxes, a bar for quotes, code-block background with hidden fences | **Asked 2026-09-30.** Specced in `superpowers/specs/2026-09-30-markdown-blocks-design.md`: a gutter, not only a quad per row. S1 (quote gutters and bars) built on `feat/markdown-blocks-s1`; S2 code blocks and S3 tasks remain. | 4–5 d |
+| Checkboxes, a bar for quotes, code-block background with hidden fences | **Asked 2026-09-30.** Specced in `superpowers/specs/2026-09-30-markdown-blocks-design.md`: a gutter, not only a quad per row. S1 (quote gutters and bars) merged (#56). Code blocks respecced and built 2026-11-07 in `superpowers/specs/2026-11-07-code-blocks-design.md` (C1–C3); S3 tasks remains. | 4–5 d |
 | ~~Clickable links~~ | **Shipped 2026-09-24**, with `inkra-index` and the backlinks panel. ⌘-click and ⌘↵ follow a link. See `superpowers/specs/2026-09-24-links-and-backlinks-design.md`, whose Deferred table holds what links left out. | — |
 | Inline images | Images need an element beside text. | — |
+| Code blocks: horizontal scroll per block, a wrap setting | The stated target after C1–C3. Its own spec. | — |
+| Code blocks: highlighting | The next step asked for; tree-sitter or syntect is that spec's choice. | — |
+| Code blocks: copy button on hover, editing comforts (Tab, closing fence, Enter keeps indent) | Asked 2026-11-07; the button needs a per-block hover state. | — |
 
 Known limits, accepted:
 
