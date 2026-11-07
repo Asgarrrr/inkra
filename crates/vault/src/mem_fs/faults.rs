@@ -26,6 +26,13 @@ impl MemFs {
             .insert(path.into(), (count, kind));
     }
 
+    /// The next `count` replaces of `path` fail with `kind` and keep its old bytes.
+    pub fn fail_next_replaces(&self, path: impl Into<PathBuf>, count: u32, kind: ErrorKind) {
+        self.state()
+            .failing_replaces
+            .insert(path.into(), (count, kind));
+    }
+
     /// The next `count` saves of `path` that preserve fail right after preserving, with `kind`.
     pub fn fail_next_saves_after_preserve(
         &self,
@@ -112,6 +119,10 @@ impl State {
 
     pub(super) fn injected_save_failure(&mut self, path: &Path) -> Result<()> {
         injected(&mut self.failing_saves, path)
+    }
+
+    pub(super) fn injected_replace_failure(&mut self, path: &Path) -> Result<()> {
+        injected(&mut self.failing_replaces, path)
     }
 
     pub(super) fn injected_failure_after_preserve(&mut self, path: &Path) -> Result<()> {

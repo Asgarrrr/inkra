@@ -422,3 +422,15 @@ Each slice appends what it did differently from this spec, and why.
   pins the window's restart on a second edit. A write's seq is `next_seq` before the
   increment, so the first write meets the mark at 0 and `<=` on the mark is observable. A
   test puts two writes in flight across seeds, so the newer always lands.
+- Slice 5b: `Writes` counts the 500 changes from `base`, the revision last started, and
+  holds `backoff`: 60 s after a failure, doubling up to `MAX_BACKOFF` (10 min). A backoff
+  holds even past 500 changes. The write task reports `Written` to the foreground: a landed
+  write clears the backoff, a failed one backs off and asks again. A failure of an older
+  revision keeps a newer one written. The sweep runs before every `replace_bytes`, not only
+  a launch's first write: `inkra-vault` has no notion of a launch, and the folder is small.
+  `is_temp` stays `pub(crate)`, since the sweep lives in `inkra-vault`. The private
+  `replace` holds `try_lock` on its temp through the rename, so note saves lock their temps
+  too, harmlessly. Accepted window: another Inkra process can lock a temp between its
+  `File::create` and `try_lock`; the loser's write fails and backs off. The seq-order plain
+  test landed in 5a-2. `MemFs::fail_next_replaces` is tested in `mem_fs/fault_tests.rs`,
+  beside `fail_next_saves`. Nothing writes at quit, and no quit hook is added.
