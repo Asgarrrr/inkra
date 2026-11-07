@@ -234,31 +234,5 @@ impl Session {
     }
 }
 
-/// FNV-1a 64, written out: `DefaultHasher`'s output may change between Rust releases.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    bytes.iter().fold(OFFSET, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
-    })
-}
-
-/// Where the session of the vault at `root`, absolute, lives under `home` (R1).
-pub(crate) fn session_file(home: &Path, root: &Path) -> PathBuf {
-    let key = fnv1a(root.as_os_str().as_encoded_bytes());
-    home.join("Library/Application Support/Inkra/sessions")
-        .join(format!("{key:016x}.json"))
-}
-
-/// Where the index cache of the vault at `root` lives under `home`, keyed as `session_file`;
-/// `None` when that place is inside the vault (persisted index spec, P4).
-pub(crate) fn cache_file(home: &Path, root: &Path) -> Option<PathBuf> {
-    let key = fnv1a(root.as_os_str().as_encoded_bytes());
-    let file = home
-        .join("Library/Caches/Inkra/index")
-        .join(format!("{key:016x}.idx"));
-    (!file.starts_with(root)).then_some(file)
-}
-
 #[cfg(test)]
 mod tests;

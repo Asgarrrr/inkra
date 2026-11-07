@@ -16,9 +16,9 @@ use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
-use crate::index::{IndexSync, Reader, SCANNING, indexing_footer};
+use crate::index::{IndexSync, Reader};
 use crate::open::Open;
-use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs};
+use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
 use crate::theme;
 use rows::{HitKey, Results, Row};
@@ -219,8 +219,8 @@ impl PickerDelegate for VaultSearchDelegate {
     }
 
     fn empty_text(&self, cx: &App) -> Option<SharedString> {
-        if self.runs.scanning() {
-            return Some(SCANNING.into());
+        if let Some(text) = self.runs.scanning_text() {
+            return Some(text);
         }
         match self.answered {
             Answered::Blank => None,

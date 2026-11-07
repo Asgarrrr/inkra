@@ -11,9 +11,10 @@ use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
 
 use crate::Quit;
+use crate::app_files::{cache_file, session_file};
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
-use crate::restore::{self, Opened, cache_file, session_file};
+use crate::restore::{self, Opened};
 use crate::shell::AppShell;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
@@ -79,6 +80,13 @@ fn vault_root(path: &Path) -> io::Result<PathBuf> {
     Ok(std::path::absolute(path)?.components().collect())
 }
 
+/// No `HOME`, or a vault holding the app's folder: no session and no cache, so none read or written.
+pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
+    let session = home.and_then(|home| session_file(home, root));
+    let cache = home.and_then(|home| cache_file(home, root));
+    Launch::Vault(Vault::new(root), session, cache)
+}
+
 /// Deliberately blocking: a failure should exit rather than flash an empty window.
 fn launch() -> Result<Launch, String> {
     // `args_os`, not `args`: the latter panics on a non-UTF-8 path.
@@ -90,12 +98,8 @@ fn launch() -> Result<Launch, String> {
         let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
         futures::executor::block_on(RealFs.check_dir(&root)).map_err(|error| format!("{error}"))?;
-        let home = std::env::var_os("HOME");
-        let session = home
-            .as_ref()
-            .map(|home| session_file(Path::new(home), &root));
-        let cache = home.and_then(|home| cache_file(Path::new(&home), &root));
-        return Ok(Launch::Vault(Vault::new(&root), session, cache));
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        return Ok(vault_launch(&root, home.as_deref()));
     }
     futures::executor::block_on(RealFs.load(&path))
         .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))

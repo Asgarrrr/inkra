@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{AppContext as _, Context, SharedString, Task};
-use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
+use inkra_vault::{CONFIG_DIR, Fs, RelPath};
 use serde_json::Value;
 
 use super::{Theme, builtin, file};
@@ -140,7 +140,7 @@ async fn choice(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> Choice
     let text = match fs.load(&config.join("settings.json")).await {
         Ok(loaded) => loaded.text,
         Err(error) => {
-            if !is_not_found(&error) {
+            if error.io_kind() != Some(ErrorKind::NotFound) {
                 notices.push(error.to_string());
             }
             return Choice::System;
@@ -176,7 +176,7 @@ async fn named(
     let path = config.join("themes").join(format!("{name}.json"));
     let text = match fs.load(&path).await {
         Ok(loaded) => loaded.text,
-        Err(error) if is_not_found(&error) => {
+        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => {
             notices.push(not_found());
             return None;
         }
@@ -238,7 +238,9 @@ pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> R
             .ok()
             .filter(Value::is_object)
             .ok_or_else(|| failed(&not_an_object))?,
-        Err(error) if is_not_found(&error) => Value::Object(serde_json::Map::new()),
+        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => {
+            Value::Object(serde_json::Map::new())
+        }
         Err(error) => return Err(failed(&error)),
     };
     settings["theme"] = Value::from(choice.setting());
@@ -247,10 +249,6 @@ pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> R
     fs.replace_bytes(&path, text.as_bytes())
         .await
         .map_err(|error| failed(&error))
-}
-
-fn is_not_found(error: &VaultError) -> bool {
-    matches!(error, VaultError::Io { source, .. } if source.kind() == ErrorKind::NotFound)
 }
 
 #[cfg(test)]
