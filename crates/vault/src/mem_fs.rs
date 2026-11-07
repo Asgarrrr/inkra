@@ -117,13 +117,19 @@ impl MemFs {
     }
 
     /// `None` keeps the path's identity, or mints one for a new path.
-    fn put_file(state: &mut State, path: PathBuf, bytes: Vec<u8>, identity: Option<FileIdentity>) {
+    fn put_file(
+        state: &mut State,
+        path: PathBuf,
+        bytes: Vec<u8>,
+        identity: Option<FileIdentity>,
+    ) -> Mtime {
         Self::insert_parents(state, &path);
         let identity = identity
             .or_else(|| state.files.get(&path).map(|(_, _, id)| *id))
             .unwrap_or_else(|| Self::fresh_identity(state));
         let mtime = Self::tick(state);
         state.files.insert(path, (bytes, mtime, identity));
+        mtime
     }
 
     fn insert_parents(state: &mut State, path: &Path) {
@@ -191,13 +197,7 @@ impl Fs for MemFs {
         Ok(state
             .files
             .keys()
-            .filter(|file| file.parent() == Some(dir))
-            .filter(|file| {
-                !file
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with('.'))
-            })
+            .filter(|file| file.parent() == Some(dir) && file.file_name().is_some_and(listable))
             .cloned()
             .collect())
     }
@@ -300,24 +300,12 @@ impl Fs for MemFs {
             }
         }
 
-        Self::put_file(
-            &mut self.state(),
-            path.to_path_buf(),
-            text.as_bytes().to_vec(),
-            None,
-        );
-
         let (stamp, identity, blocked) = {
             let mut state = self.state();
             let identity = Self::fresh_identity(&mut state);
-            let mtime = Self::tick(&mut state);
-            let Some((stored_text, stored_mtime, stored_identity)) = state.files.get_mut(path)
-            else {
-                return Err(io(path, ErrorKind::NotFound));
-            };
-            *stored_mtime = mtime;
-            *stored_identity = identity;
-            let stamp = stamp_of(stored_text, mtime);
+            let bytes = text.as_bytes().to_vec();
+            let mtime = Self::put_file(&mut state, path.to_path_buf(), bytes, Some(identity));
+            let stamp = stamp_of(text.as_bytes(), mtime);
             // As `RealFs::save`: a temporary file, renamed onto the note.
             state.changed(&temp_path(path));
             state.changed(path);

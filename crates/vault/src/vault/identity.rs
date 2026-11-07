@@ -2,7 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Entry, EntryId, Key, Row, Vault, compare};
+use super::order::position;
+use super::{Entry, EntryId, Row, Vault};
 use crate::RelPath;
 use crate::fs::FileIdentity;
 
@@ -72,13 +73,8 @@ impl Vault {
         let mut replaced: HashMap<RelPath, EntryId> = found()
             .filter(|row| !state.by_identity.contains_key(&row.identity))
             .filter_map(|row| {
-                let key = Key::new(&row.path, row.kind);
-                let at = state
-                    .entries
-                    .binary_search_by(|old| compare(&Key::new(&old.path, old.kind), &key))
-                    .ok()?;
-                let old = &state.entries[at];
-                (old.kind == row.kind).then(|| (row.path.clone(), old.id))
+                let at = position(&state.entries, &row.path, row.kind)?;
+                Some((row.path.clone(), state.entries[at].id))
             })
             .collect();
         if !replaced.is_empty() {

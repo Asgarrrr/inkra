@@ -102,11 +102,9 @@ impl Fs for RealFs {
         let mut files = Vec::new();
         for entry in reader {
             let path = entry.map_err(|source| io_error(dir, source))?.path();
-            let hidden = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with('.'));
-            if !hidden && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+            if path.file_name().is_some_and(listable)
+                && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file())
+            {
                 files.push(path);
             }
         }

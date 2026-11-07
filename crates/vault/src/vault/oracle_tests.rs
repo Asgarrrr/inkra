@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use futures::executor::block_on;
 use proptest::prelude::*;
 
+use super::order::{Key, compare};
 use super::*;
 use crate::fs::DirEntry;
 use crate::mem_fs::MemFs;

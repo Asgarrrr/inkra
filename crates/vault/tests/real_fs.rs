@@ -429,6 +429,19 @@ fn list_files_skips_dotfiles_dirs_and_symlinks() {
     assert_eq!(files, vec![dir.0.join("a.txt"), dir.0.join("b.json")]);
 }
 
+/// A crash between a save's write and its rename leaves the temp file beside the target.
+#[test]
+fn list_files_skips_save_temp_files() {
+    let dir = TempDir::new("list-files-temp");
+    fs::write(dir.0.join("index.idx"), "i").expect("write");
+    fs::write(dir.0.join("index.idx.inkra-1-2.tmp"), "t").expect("write");
+    fs::write(dir.0.join(".hidden.idx"), "h").expect("write");
+
+    let files = block_on(RealFs.list_files(&dir.0)).expect("list_files");
+
+    assert_eq!(files, vec![dir.0.join("index.idx")]);
+}
+
 #[test]
 fn rename_moves_the_note_and_keeps_its_identity() {
     let dir = TempDir::new("rename-identity");
