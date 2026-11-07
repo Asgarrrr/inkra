@@ -10,7 +10,6 @@ use gpui::{
     WeakEntity, actions,
 };
 use inkra_index::live::{Effects, Status, Turn};
-use inkra_index::persist::Writes;
 use inkra_index::{FileRead, LiveIndex, NoteContent, NoteIndex, TEXT_CACHE_BYTES, TextCache};
 use inkra_vault::{EntryId, Fs, Vault};
 
@@ -176,7 +175,7 @@ impl IndexSync {
     fn turn<R>(&mut self, cx: &mut Context<Self>, inputs: impl FnOnce(&mut Turn<'_>) -> R) -> R {
         let started = Instant::now();
         let (result, effects) = self.live.turn(self.vault.read(cx), inputs);
-        let indexed = effects.indexed;
+        let held = effects.indexed.as_ref().map(|indexed| indexed.held);
         let seeded = effects.seeded;
         self.run(effects, cx);
         let took = started.elapsed();
@@ -184,10 +183,10 @@ impl IndexSync {
         if seeded {
             Timeline::seed_turn(took, cx);
         }
-        if indexed {
+        if let Some(held) = held {
             self.mark_indexed(cx);
             if let Some(writer) = &mut self.writer {
-                writer.writes = Some(Writes::new(self.live.cache_revision()));
+                writer.start(held);
             }
         }
         self.write_if_due(cx);
@@ -203,14 +202,13 @@ impl IndexSync {
             retired,
             layout,
             notify,
-            indexed: _,
+            indexed,
             seeded: _,
-            scrub,
         } = effects;
         for load in loads {
             self.spawn_load(load, cx);
         }
-        if let Some(job) = scrub {
+        if let Some(job) = indexed.and_then(|indexed| indexed.scrub) {
             self.scrub(job, cx);
         }
         if let Some(job) = build {

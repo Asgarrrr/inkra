@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use inkra_vault::{Entry, EntryId, Stamp, Vault};
 
-use super::LiveIndex;
 use super::diff::{Change, files, notes};
+use super::{Launch, LiveIndex};
 use crate::note_set::NoteSet;
 use crate::persist::{Decoded, Outcome};
-use crate::seed::Seed;
+use crate::seed::{LaunchFacts, Seed};
 use crate::words::RetiredWords;
 
 /// One build at a time: an input during it marks it `Dirty` rather than starting another.
@@ -50,7 +50,7 @@ pub struct Built {
     seq: u64,
     entries: Arc<[Entry]>,
     change: Change,
-    seed: Option<Seed>,
+    seed: Option<(Seed, LaunchFacts)>,
 }
 
 /// A note set built off the foreground, with what `apply_build` queues and prunes by.
@@ -233,7 +233,7 @@ impl LiveIndex {
         &mut self,
         seq: u64,
         layout: Layout,
-        seed: Option<Seed>,
+        seed: Option<(Seed, LaunchFacts)>,
     ) -> (NoteSet, HashSet<EntryId>) {
         let Layout {
             notes,
@@ -251,9 +251,11 @@ impl LiveIndex {
         for load in &mut self.loading {
             load.live &= live.contains(&load.id);
         }
-        if let Some(mut seed) = seed {
-            self.cache_revision = (!seed.pruned).then_some(self.revision);
-            self.scrub = Some(mem::take(&mut seed.scrub));
+        if let Some((seed, facts)) = seed {
+            self.launch = Some(Launch {
+                held: (!facts.pruned).then_some(self.revision),
+                scrub: facts.scrub,
+            });
             for (id, stamp) in self.index.seed(seed) {
                 // A save since launch holds a newer stamp than the cache's, or must reload (P6).
                 if !self.latest.contains_key(&id) {

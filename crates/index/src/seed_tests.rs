@@ -77,7 +77,7 @@ fn seed_over<'a>(
     vault: &Vault,
 ) -> Seed {
     let notes = entries.filter(|entry| entry.kind == Kind::Note);
-    Seed::build(decoded, notes, &note_set(vault))
+    Seed::build(decoded, notes, &note_set(vault)).0
 }
 
 /// What the seed holds for one note: its words, its read's inode, whether `stamps` lists it.

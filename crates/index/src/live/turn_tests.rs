@@ -11,7 +11,7 @@ use crate::test_support::{ROOT, stamp};
 /// Built, every note loaded, and the settle applied, each in its own turn.
 fn indexed(files: &[(&str, &str)]) -> Harness {
     let mut h = Harness::loaded(files);
-    assert!(h.run_merge().indexed);
+    assert!(h.run_merge().indexed.is_some());
     h
 }
 
@@ -57,7 +57,7 @@ fn a_turn_that_changes_no_answer_does_not_notify() {
 
     let settled = h.run_merge();
 
-    assert!(settled.indexed);
+    assert!(settled.indexed.is_some());
     assert!(!settled.notify, "a merge changes no answer");
     assert!(!h.idle_turn().notify, "an idle turn");
 }
@@ -105,7 +105,7 @@ fn a_save_minted_in_its_own_turn_does_no_work() {
     assert!(h.pending.build.is_none(), "no build");
     assert!(h.pending.merge.is_none(), "no merge");
     assert!(minted.retired.is_none());
-    assert!(!minted.layout && !minted.notify && !minted.indexed);
+    assert!(!minted.layout && !minted.notify && minted.indexed.is_none());
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn a_vault_change_before_the_scan_does_no_work() {
     assert!(early.loads.is_empty());
     assert!(h.pending.merge.is_none(), "no merge");
     assert!(early.retired.is_none());
-    assert!(!early.layout && !early.notify && !early.indexed);
+    assert!(!early.layout && !early.notify && early.indexed.is_none());
 }
 
 #[test]

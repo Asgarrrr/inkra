@@ -19,7 +19,7 @@ mod turn;
 pub use builds::{BuildJob, Built, Retired};
 pub use loads::{Load, Ticket};
 pub use startup::{Merge, Merged};
-pub use turn::{Effects, Turn};
+pub use turn::{Effects, Indexed, Turn};
 
 use builds::{Applied, Build, Cache};
 use loads::Loading;
@@ -68,13 +68,18 @@ pub struct LiveIndex {
     /// Note sets applied; a failed load compares it to retry after a build that may have moved its note.
     note_sets: u64,
     revision: u64,
-    /// The revision the cache file holds: the seed's, unless it pruned a note.
-    cache_revision: Option<u64>,
-    /// The seeded notes the turn that emits `indexed` hands to the scrub (P16).
-    scrub: Option<Vec<EntryId>>,
+    /// What the seed left for the turn that emits `indexed`; taken there, once.
+    launch: Option<Launch>,
     startup: Startup,
     /// How many loads may run at once.
     slots: usize,
+}
+
+struct Launch {
+    /// The revision the cache file holds: the seed's, unless it pruned a note or a rebuild ran since.
+    held: Option<u64>,
+    /// The seeded notes the scrub re-parses (P16).
+    scrub: Vec<EntryId>,
 }
 
 // A getter added to this `impl` joins `Seen` in `live/model_tests.rs`, or D5's check misses it.
@@ -101,8 +106,7 @@ impl LiveIndex {
             last: None,
             note_sets: 0,
             revision: 0,
-            cache_revision: None,
-            scrub: None,
+            launch: None,
             startup: Startup::default(),
             slots,
         }
@@ -117,12 +121,6 @@ impl LiveIndex {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
-    }
-
-    /// The revision the cache file holds; `None` when it holds none or more than the index.
-    #[must_use]
-    pub fn cache_revision(&self) -> Option<u64> {
-        self.cache_revision
     }
 
     /// `(loaded, total)`: the notes of the last build, less those queued or loading; the cache

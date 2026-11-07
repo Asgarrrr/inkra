@@ -21,7 +21,7 @@ pub(super) struct CacheWriter {
     written: Arc<Mutex<u64>>,
     next_seq: u64,
     /// `None` until the startup's end.
-    pub(super) writes: Option<Writes>,
+    writes: Option<Writes>,
     /// The timer that asks `Writes` again, and the instant it fires at.
     armed: Option<(Instant, Task<()>)>,
 }
@@ -37,6 +37,11 @@ impl CacheWriter {
             writes: None,
             armed: None,
         }
+    }
+
+    /// Starts `Writes` at `indexed`: `held` is the revision the file holds (P14).
+    pub(super) fn start(&mut self, held: Option<u64>) {
+        self.writes = Some(Writes::new(held));
     }
 
     /// Removes the file in the writes' seq order: no write started before it lands after it (P15).

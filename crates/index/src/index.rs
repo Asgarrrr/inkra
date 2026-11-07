@@ -161,8 +161,6 @@ impl NoteIndex {
             sources,
             by_stem,
             stamps,
-            pruned: _,
-            scrub: _,
         } = seed;
         let mut held_words = mem::replace(&mut self.words, words).into_fresh();
         let held_reads = mem::replace(&mut self.corpus, corpus).snapshot();
