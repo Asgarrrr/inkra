@@ -72,7 +72,7 @@ pub(super) fn encode(
 }
 
 /// `None` when a length or an offset exceeds `u32::MAX`; `out` then holds a part.
-fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
+pub(super) fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
     varint::push(out, u32::try_from(links.len()).ok()?);
     for link in links {
         let Target::Note {
@@ -110,7 +110,7 @@ fn put_range(out: &mut Vec<u8>, range: Range<usize>) -> Option<()> {
     Some(())
 }
 
-pub(super) fn link_flags(md: bool, fragment: bool) -> u8 {
+fn link_flags(md: bool, fragment: bool) -> u8 {
     let bit = |set: bool, bit: u8| if set { bit } else { 0 };
     bit(md, MD) | bit(fragment, FRAGMENT)
 }
@@ -120,6 +120,16 @@ pub(super) fn style_code(style: Style) -> u8 {
         Style::Name => 0,
         Style::Suffix => 1,
         Style::Relative => 2,
+    }
+}
+
+/// The inverse of `style_code`; `None` for a code no build writes.
+pub(super) fn style_from_code(code: u8) -> Option<Style> {
+    match code {
+        0 => Some(Style::Name),
+        1 => Some(Style::Suffix),
+        2 => Some(Style::Relative),
+        _ => None,
     }
 }
 
@@ -205,12 +215,7 @@ fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
     } else {
         Some(string(bytes)?.to_owned())
     };
-    let style = match byte(bytes)? {
-        0 => Style::Name,
-        1 => Style::Suffix,
-        2 => Style::Relative,
-        _ => return Err(Rejected::Corrupt("style")),
-    };
+    let style = style_from_code(byte(bytes)?).ok_or(Rejected::Corrupt("style"))?;
     let within_note = range(bytes)?;
     let context = string(bytes)?.to_owned();
     let context_link = range(bytes)?;
