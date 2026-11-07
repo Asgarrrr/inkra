@@ -252,8 +252,9 @@ impl LiveIndex {
         for load in &mut self.loading {
             load.live &= live.contains(&load.id);
         }
-        if let Some(seed) = seed {
+        if let Some(mut seed) = seed {
             self.cache_revision = (!seed.pruned).then_some(self.revision);
+            self.scrub = Some(mem::take(&mut seed.scrub));
             for (id, stamp) in self.index.seed(seed) {
                 // A save since launch holds a newer stamp than the cache's, or must reload (P6).
                 if !self.latest.contains_key(&id) {

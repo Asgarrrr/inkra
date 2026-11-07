@@ -4,7 +4,7 @@ use inkra_vault::{EntryId, Stamp, Vault};
 
 use super::{Applied, BuildJob, Built, LiveIndex, Load, Merge, Merged, Retired, Ticket, TurnEnd};
 use crate::content::NoteContent;
-use crate::persist::Outcome;
+use crate::persist::{Outcome, ScrubJob};
 use crate::words::RetiredWords;
 
 /// The inputs of one foreground turn; only `LiveIndex::turn` makes one.
@@ -41,6 +41,8 @@ pub struct Effects {
     pub indexed: bool,
     /// True once: this turn applied the build carrying the cache's seed.
     pub seeded: bool,
+    /// On the turn that emits `indexed` after a seed: load and check its notes off the foreground.
+    pub scrub: Option<ScrubJob>,
 }
 
 impl LiveIndex {
@@ -72,6 +74,10 @@ impl LiveIndex {
         let slots = self.slots;
         let loads = std::iter::from_fn(|| self.next_load(vault, slots)).collect();
         let TurnEnd { merge, indexed } = self.end_turn();
+        let scrub = indexed
+            .then(|| self.scrub.take())
+            .flatten()
+            .map(|ids| ScrubJob::new(ids, vault, self.index.snapshot()));
         // One build, after the full scan: the root pass alone would cost a build the next swap discards.
         let build = if changed && vault.is_scanned() {
             self.start_build(vault.shared_entries())
@@ -88,6 +94,7 @@ impl LiveIndex {
             notify,
             indexed,
             seeded,
+            scrub,
         };
         (result, effects)
     }

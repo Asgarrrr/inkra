@@ -13,7 +13,7 @@ use crate::content::FileRead;
 use crate::corpus::Corpus;
 use crate::key::Key;
 use crate::note_set::NoteSet;
-use crate::persist::{CachedNote, Decoded};
+use crate::persist::{CachedNote, Decoded, SCRUB, scrub_sample};
 use crate::source::Source;
 use crate::words::{Alive, Ordinals, Shards, Words};
 
@@ -27,6 +27,8 @@ pub(crate) struct Seed {
     pub(crate) stamps: Vec<(EntryId, Stamp)>,
     /// Some cached note matched no entry or had no stamp: the file holds a note the index does not.
     pub(crate) pruned: bool,
+    /// The notes of `stamps` the scrub re-parses, drawn from the file's crc (P16).
+    pub(crate) scrub: Vec<EntryId>,
 }
 
 impl Seed {
@@ -43,6 +45,7 @@ impl Seed {
         let Decoded {
             notes: cached,
             words,
+            crc,
         } = decoded;
         let entries: Vec<&Entry> = entries.collect();
         let matched = matches(&cached, &entries);
@@ -83,6 +86,10 @@ impl Seed {
             .into_iter()
             .map(|ordinal| u64::from(words.segment.length(ordinal)))
             .sum();
+        let scrub = scrub_sample(crc, stamps.len(), SCRUB)
+            .into_iter()
+            .map(|at| stamps[at].0)
+            .collect();
         let words = Words::restore(
             words.segment,
             alive.into_iter().collect::<Alive>(),
@@ -97,6 +104,7 @@ impl Seed {
             by_stem,
             stamps,
             pruned,
+            scrub,
         }
     }
 }

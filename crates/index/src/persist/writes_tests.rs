@@ -175,3 +175,18 @@ fn a_removed_file_is_due_again() {
     assert_eq!(writes.due(5, true, t0), Due::At(t0 + QUIET));
     assert_eq!(writes.due(5, true, t0 + QUIET), Due::Now);
 }
+
+#[test]
+fn a_retry_that_started_is_not_due_again_before_the_quiet_window() {
+    let t0 = Instant::now();
+    let mut writes = Writes::new(None);
+    let _ = writes.due(5, true, t0);
+    writes.started(6);
+    writes.failed(6, t0);
+    let retry = t0 + QUIET;
+    assert_eq!(writes.due(7, true, retry), Due::Now);
+
+    writes.started(7);
+
+    assert_eq!(writes.due(8, true, retry), Due::At(retry + QUIET));
+}

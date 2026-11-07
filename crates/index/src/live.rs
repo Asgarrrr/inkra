@@ -70,6 +70,8 @@ pub struct LiveIndex {
     revision: u64,
     /// The revision the cache file holds: the seed's, unless it pruned a note.
     cache_revision: Option<u64>,
+    /// The seeded notes the turn that emits `indexed` hands to the scrub (P16).
+    scrub: Option<Vec<EntryId>>,
     startup: Startup,
     /// How many loads may run at once.
     slots: usize,
@@ -100,6 +102,7 @@ impl LiveIndex {
             note_sets: 0,
             revision: 0,
             cache_revision: None,
+            scrub: None,
             startup: Startup::default(),
             slots,
         }

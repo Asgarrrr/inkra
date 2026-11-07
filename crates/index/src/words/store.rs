@@ -374,6 +374,8 @@ impl WordsSnapshot {
     }
 }
 
+mod held;
+
 #[cfg(test)]
 mod entries;
 #[cfg(test)]

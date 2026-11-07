@@ -22,7 +22,7 @@ use crate::vault::NoteStore;
 pub(super) const CACHE: &str = "/cache/index.idx";
 
 /// `n` seconds and a half after the epoch: a sub-second mtime, so no stamp is racy (P8).
-fn fine(n: u64) -> Mtime {
+pub(super) fn fine(n: u64) -> Mtime {
     Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(n) + Duration::from_millis(500))
 }
 
@@ -45,7 +45,7 @@ pub(super) fn launch(
     (notes, links)
 }
 
-fn loads(fs: &MemFs) -> [usize; 2] {
+pub(super) fn loads(fs: &MemFs) -> [usize; 2] {
     ["a.md", "b.md"].map(|file| fs.loads(&Path::new("/vault").join(file)))
 }
 
@@ -57,9 +57,19 @@ fn the_startup_writes_the_file_the_next_launch_reads(cx: &mut TestAppContext) {
     assert!(block_on(fs.read_bytes(Path::new(CACHE), MAX_BYTES)).is_ok());
     drop(first);
     cx.run_until_parked();
+    // The scrub reads `a.md` first and parks there: a rejected cache would load `b.md` again.
+    let scrub = fs.block_load("/vault/a.md");
     let (notes, links) = launch(cx, &fs);
 
-    assert_eq!(loads(&fs), [1, 1], "the first launch's loads only");
+    assert_eq!(
+        loads(&fs),
+        [2, 1],
+        "the first launch's loads, then the scrub's first read"
+    );
+    scrub.release();
+    cx.run_until_parked();
+
+    assert_eq!(loads(&fs), [2, 2], "then the scrub's read of b");
     assert_eq!(found(cx, &links, "beta"), [entry_id(&notes, cx, "b")]);
 }
 

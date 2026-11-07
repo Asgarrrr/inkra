@@ -11,7 +11,7 @@ use inkra_vault::{Fs, Kind, Mtime, Stamp, Vault};
 
 use super::tests::{Harness, Pending, SLOTS, path, paths};
 use super::{Effects, LiveIndex, Status, Turn};
-use crate::persist::{Outcome, Rejected, decode, encode};
+use crate::persist::{Outcome, Rejected, SCRUB, decode, encode, scrub_sample};
 use crate::test_support::{ROOT, find_all, loaded as stamps};
 use crate::words::FRESH_MIN;
 use crate::{FileRead, NoteContent, NoteIndex, NoteQuery};
@@ -579,4 +579,65 @@ fn a_rebuild_while_the_cache_waits_runs_once_it_lands() {
     let _ = seeded(&mut h, outcome);
 
     assert_eq!(loading(&h), [path("a.md"), path("b.md"), path("c.md")]);
+}
+
+fn scrubbed(effects: &Effects) -> Option<Vec<PathBuf>> {
+    let job = effects.scrub.as_ref()?;
+    Some(job.paths().map(Path::to_path_buf).collect())
+}
+
+#[test]
+fn the_indexed_turn_hands_the_seeded_notes_to_the_scrub() {
+    let whole = Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(7));
+    let (mut h, outcome) = relaunch(loaded_at(&[
+        ("a.md", "alpha", whole),
+        ("b.md", "beta", fine(8)),
+        ("c.md", "gamma", fine(9)),
+    ]));
+
+    let seed = seeded(&mut h, outcome);
+    let reload = h.land_pending(0);
+    let settle = h.run_merge();
+
+    assert_eq!(scrubbed(&seed), None, "a's reload is pending");
+    assert_eq!(scrubbed(&reload), None, "the settle is pending");
+    assert!(settle.indexed);
+    assert_eq!(
+        scrubbed(&settle),
+        Some(vec![path("b.md"), path("c.md")]),
+        "the racy a is not seeded"
+    );
+    assert_eq!(scrubbed(&h.idle_turn()), None, "once");
+}
+
+#[test]
+fn a_launch_without_a_cache_scrubs_nothing() {
+    let (mut h, _) = relaunch(loaded(&[("a.md", "alpha")]));
+    let _ = seeded(&mut h, Outcome::Missing);
+    h.load_all();
+
+    let settle = h.run_merge();
+
+    assert!(settle.indexed);
+    assert_eq!(scrubbed(&settle), None);
+}
+
+#[test]
+fn the_scrub_draws_its_sample_from_the_file_crc() {
+    let names: Vec<String> = (0..100).map(|n| format!("n{n:03}.md")).collect();
+    let files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), "word")).collect();
+    let (mut h, outcome) = relaunch(loaded(&files));
+    let Outcome::Decoded(decoded) = &outcome else {
+        panic!("the cache decodes");
+    };
+    let expected: Vec<PathBuf> = scrub_sample(decoded.crc, decoded.notes.len(), SCRUB)
+        .into_iter()
+        .map(|at| path(&decoded.notes[at].path))
+        .collect();
+
+    let seed = seeded(&mut h, outcome);
+
+    assert!(seed.indexed, "nothing reloads");
+    assert_eq!(expected.len(), SCRUB);
+    assert_eq!(scrubbed(&seed), Some(expected));
 }

@@ -255,3 +255,25 @@ launch: first frame 110.8ms, session read 70.62µs, root 142.5ms, scanned 231.0m
 launch: first frame 106.2ms, session read 68.62µs, root 135.8ms, scanned 223.3ms, names ready 252.1ms, cache decoded 134.8ms, seed turn 1.69ms, indexed 252.07ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 162896 kB | phys_footprint 125584200 B
 launch: first frame 106.9ms, session read 66.79µs, root 137.8ms, scanned 224.4ms, names ready 252.9ms, cache decoded 136.4ms, seed turn 1.60ms, indexed 252.94ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.6ms) | rss 162160 kB | phys_footprint 217088816 B
 ```
+
+Slice 5d adds the scrub, so this is the final check against the slice-0 baseline. Same machine,
+vault and command as 5a-2, on the file that launch wrote; no run rejected it, and the file kept its
+01:19 stamp. Warm launch, 5 runs, medians against slice 0: `indexed` 306 ms (1.13 s), rss 164,512 kB
+(344,176 kB), `phys_footprint` 217.7 MB (399.2 MB). Every line has `cache decoded`, 95.5 to
+117.2 ms; seed turn 1.66 to 2.01 ms (gate 8 ms). The first run's scan took 1.2 s, likely a page
+cache cooled by the `cargo mutants` runs before it, so its `indexed` is 1.20 s; the other four are
+231 to 319 ms (gate 0.35 s). The scrub's 64 reads run after `indexed`, so no line includes them.
+
+```
+launch: first frame 86.6ms, session read 777.88µs, root 126.7ms, scanned 1.2s, names ready 1.2s, cache decoded 114.7ms, seed turn 1.89ms, indexed 1.20s (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 166304 kB | phys_footprint 221102920 B
+launch: first frame 88.3ms, session read 75.29µs, root 118.8ms, scanned 286.3ms, names ready 319.1ms, cache decoded 95.5ms, seed turn 1.87ms, indexed 319.07ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 162704 kB | phys_footprint 217695072 B
+launch: first frame 77.6ms, session read 85.12µs, root 107.5ms, scanned 199.4ms, names ready 231.7ms, cache decoded 106.3ms, seed turn 2.01ms, indexed 231.66ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.0ms) | rss 163856 kB | phys_footprint 126616392 B
+launch: first frame 87.3ms, session read 82.96µs, root 118.4ms, scanned 272.3ms, names ready 306.2ms, cache decoded 117.2ms, seed turn 1.86ms, indexed 306.22ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 164512 kB | phys_footprint 128271176 B
+launch: first frame 79.1ms, session read 84.38µs, root 106.6ms, scanned 198.7ms, names ready 231.1ms, cache decoded 105.7ms, seed turn 1.66ms, indexed 231.07ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 165824 kB | phys_footprint 220545864 B
+```
+
+The file is 6,921,909 bytes at 50,000 notes. A write costs the encode plus the durable replace.
+`persist/encode --quick` takes 9.87 ms (9.82 to 9.88 ms) on the bench's synthetic 8.7 MB index. No
+log line times the replace, so a throwaway probe outside the app wrote the file's bytes to a temp,
+called `F_FULLFSYNC` and renamed it, 7 times: 6.0 to 20.6 ms, median 9.9 ms. A write is about
+20 ms, off the foreground. Cold figures stay user-run, as slice 0 records.
