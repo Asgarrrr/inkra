@@ -47,20 +47,20 @@ Read from the reference's theme variables (`obsidian eval`, Flexoki dark).
 The reference's chrome is translucent: `#100f0f` at 70 % over the window's
 vibrancy, so its colour on screen depends on the desktop behind it. Inkra does
 the same on the user's request (2026-11-04): the window is
-`WindowBackgroundAppearance::Blurred` and the chrome `#181717` at 95 %: the user
-wants a hint of the desktop without discerning it, and gpui's blur, stripped of
-its dark tint, shows more than the reference's. The base was matched by the
-user's eye beside the reference: `#201f1f`, tuned to the reference's measured
-`#2a2929`, read too light. The note
-and the active tab stay opaque. Compare on a full-screen capture: a one-window
-capture (`screencapture -l`) draws the blur over nothing. An off-screen shot has
-no blur either, so the stage paints `shot_backdrop` under the root; the chrome
-then shows opaque `#181717`.
+`WindowBackgroundAppearance::Blurred` and the chrome `#181717` at 65 %. It was
+95 % first, a hint of the desktop without discerning it; on 2026-11-08 the user
+found the translucency barely visible, and 65 % was chosen from captures at 85,
+75 and 60 %. The light theme stays at 95 %. The base was matched by the user's
+eye beside the reference: `#201f1f`, tuned to the reference's measured
+`#2a2929`, read too light. The note and the active tab stay opaque. Compare
+on a full-screen capture: a one-window capture (`screencapture -l`) draws the
+blur over nothing. An off-screen shot has no blur either, so the stage paints
+`shot_backdrop` under the root; the chrome then shows opaque `#181717`.
 
 | Token | Value | Replaces |
 |---|---|---|
 | note, active tab | `#100f0f` | `editor_background` `#1e1e1e`, `tab_active_background` |
-| chrome | `#181717` at 95 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
+| chrome | `#181717` at 65 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
 | hairline | `#282726` | `tab_rule`, the panel header rule |
 | hover, selected row | `rgba(254,252,240,.05)` over the chrome | the white overlays, on chrome only |
 | text | `#cecdc3` | `sidebar_text`, `tab_text` |
