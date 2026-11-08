@@ -130,7 +130,9 @@ one monospace span. A note application is not an IDE.
 Zed's editor never hides a heading marker, so it has no reference for where a
 revealed one goes. Its gutter holds line numbers and fold controls, painted
 beside the text, never text of the buffer. D12 paints buffer text in a margin
-left of the column. The user chose it from a mock-up on 2026-09-23.
+left of the column. The user chose it from a mock-up on 2026-09-23. In a pane
+too narrow for the margin, a revealed marker shows inline instead, as Obsidian
+does everywhere (D13).
 
 ## Decisions
 
@@ -531,7 +533,8 @@ back to the `#` after a vertical move away and back. `Home` goes to `line.start`
 margin. An empty heading `#` follows the same rule: `x >= 0` lands at
 `marker.end`.
 
-**The margin is measured, not guessed.** `TextElement` measures the margin
+**The margin is measured, not guessed.** D13 replaces this paragraph's fixed
+margin with one that shrinks to a floor. `TextElement` measures the margin
 where it measures the column (`element.rs`, `column_width`): the widest
 opening marker, `#` × n and a space, shaped at level n's size and weight, over
 n = 1 to 6, rounded up to a whole pixel so taffy's snapping does not shift
@@ -558,6 +561,64 @@ Accepted.
 
 Cost: one extra `shape_line` per revealed heading, and six cached ones per
 layout for the margin.
+
+### D13. The margin shrinks with the pane; a marker that does not fit shows inline
+
+**Problem.** D12's margin is a fixed 74 px on each side of the text. Below a
+pane of `column + 2 × 74`, the margins stop shrinking and the text narrows
+instead: a 600 px window keeps 92 px of empty space on each side. The user
+asked on 2026-11-08 for the margins to keep shrinking, and for a marker that no
+longer fits to show inline rather than be clipped.
+
+**Rule.** `TextElement` keeps D12's measured margin as the margin's maximum,
+`margin_max`, and adds a floor, `theme::EDITOR_MARGIN_MIN` (16 px). For an
+element `E` wide:
+
+- `margin = clamp((E − column) / 2, EDITOR_MARGIN_MIN, margin_max)`;
+- the text starts at `margin` and is `max(0, min(column, E − 2 × margin))` wide.
+
+The element is still capped at `column + 2 × margin_max` and centred, so a wide
+pane is unchanged. As the pane narrows, both margins shrink together while the
+text keeps the full column; once they reach the floor, the text narrows.
+`margin_max` stays the widest marker over the six levels, not over the
+headings in the note: a margin that jumps when a `######` is typed would move
+every line.
+
+**A revealed marker hangs only where it fits.** `LayoutInputs` and
+`DocumentLayout` gain `margin: Option<Pixels>`, the room left of the text;
+`None` off the editor, where nothing hangs. In `line_prefix`, a revealed
+marker's shape is already made; when its width exceeds `margin`, the line gets
+no `Prefix` and the marker's `Conceal` goes back to the text's conceals. The
+line then takes the path `> # q` already takes (D12, "only at the line start"):
+the marker is inline, revealed by the same reveal rule, and may re-wrap the
+heading. A concealed marker shows no glyph in either path, so it keeps D12's
+`Hanging` with `shaped: None`, and D12's coordinates on a concealed heading are
+unchanged. The decision is per line: at one width, `# T` can hang while
+`#### T` shows inline. It replaces D12's "a marker with extra spaces paints
+into the padding": `#   T` wider than the margin now shows inline.
+
+**D12's invariant narrows.** "No reveal of a heading can move text" holds when
+the marker fits the margin. In a pane too narrow for it, a reveal shifts the
+heading's text right by the marker and can add a row, as slice 3 did. The
+heading moves only while the caret is on it, and only in a narrow pane.
+Accepted.
+
+**The cache.** In the band where the margins shrink, the wrap width stays the
+column while `margin` changes, so `wrap_width` alone no longer keys the layout.
+`is_shaped_from` adds: `margin` equal, or no heading marker among the
+conceals the selection touches. Without a revealed marker no line depends on
+`margin`, so a resize in that band reshapes nothing. With one, a resize
+reshapes, and `carry_or_shape` carries every line whose display text did not
+change. A resize across a marker's width toggles that heading between hanging
+and inline; no hysteresis, since it happens only with the caret on a heading
+during a resize.
+
+Rejected:
+
+- *Clip the marker at the pane's edge.* It shows half a `#`, which reads as a
+  rendering bug.
+- *A margin measured over the note's own headings.* It changes the column's
+  position when a heading of a new level is typed.
 
 ## Deferred
 
@@ -630,9 +691,19 @@ D12:
 - A selection across a heading covers the marker; the IME rectangle of a
   range in the marker is in the margin.
 - `> # q` keeps its inline conceal.
-- Margin: a wide window keeps the column centred at its old `x`; a narrow
-  window loses `2 × margin` from the text's width, one per side; a pane
-  narrower than both margins gives the text zero width. Tests that assume the text starts 16 px in from the pane change
+- Margin (D13): a wide window keeps the column centred at its old `x`; a pane
+  between `column + 2 × EDITOR_MARGIN_MIN` and `column + 2 × margin_max` keeps
+  the full column with two equal margins; a narrower one keeps the floor on each
+  side and narrows the text; a pane narrower than both floors gives the text
+  zero width.
+- A revealed `# T` hangs when its marker fits the margin, with its text at the
+  concealed `x`; in a narrower margin it shows inline, its text shifted by the
+  marker, and a click or the caret in it maps through the display text. Both
+  `# T` and `#### T` at one width where only the second does not fit: one
+  hangs, one is inline.
+- A resize in the shrinking band reshapes nothing without a revealed marker
+  (`SHAPES` unchanged) and reshapes with one.
+- A shot scene: a narrow pane, the caret on a heading whose marker shows inline. Tests that assume the text starts 16 px in from the pane change
   their constants, not their intent.
 
 No key binding is added. Existing `simulate_keystrokes` tests must pass
