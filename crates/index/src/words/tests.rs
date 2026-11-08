@@ -3,9 +3,26 @@ use std::sync::atomic::AtomicBool;
 
 use inkra_vault::EntryId;
 
-use super::{NoteWords, TERM_MAX_CHARS, WORD_MAX_CHARS, bm25, idf};
+use super::{NoteWords, TERM_MAX_CHARS, WORD_MAX_CHARS, bm25, first_at_or_after, idf};
 use crate::test_support::indexed;
 use crate::{Lookup, NoteQuery, TermHit};
+
+fn first_in(words: &[&str], term: &str) -> usize {
+    first_at_or_after(words.len(), |n| words[n], term)
+}
+
+#[test]
+fn the_first_word_at_or_after_a_term_is_found_by_binary_search() {
+    let words = ["b", "d", "dd", "f"];
+    assert_eq!(first_in(&[], "a"), 0, "empty");
+    assert_eq!(first_in(&words, "a"), 0, "before all");
+    assert_eq!(first_in(&words, "b"), 0, "exact first");
+    assert_eq!(first_in(&words, "d"), 1, "exact");
+    assert_eq!(first_in(&words, "c"), 1, "between");
+    assert_eq!(first_in(&words, "de"), 3, "between, past a prefix");
+    assert_eq!(first_in(&words, "f"), 3, "exact last");
+    assert_eq!(first_in(&words, "g"), 4, "after all");
+}
 
 fn counts(text: &str) -> Vec<(String, u32)> {
     NoteWords::parse(text)

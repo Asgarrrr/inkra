@@ -9,12 +9,12 @@ use inkra_vault::{EntryId, Mtime, Stamp};
 
 use crate::content::{FileRead, NoteContent};
 use crate::corpus::{Corpus, CorpusSnapshot};
-use crate::key::Key;
 use crate::names::NamesSnapshot;
 use crate::note_set::NoteSet;
 use crate::notes::{NoteTable, Query, Resolution};
 use crate::seed::Seed;
 use crate::source::{Source, SourceLink};
+use crate::stems::Stems;
 use crate::target::{Style, Target};
 use crate::words::{
     Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Shards, Words, WordsMerge,
@@ -32,9 +32,7 @@ pub struct NoteIndex {
     /// The build's scanned mtimes, handed back whole in the set `set_notes` returns.
     mtimes: Arc<[Mtime]>,
     sources: Shards<EntryId, Arc<Source>>,
-    /// A note link's stem key → (source, index into its links). Every link resolving to `T`
-    /// has `T`'s stem, so this finds backlinks without a reverse map.
-    by_stem: HashMap<Key, Vec<(EntryId, usize)>>,
+    by_stem: Stems,
     corpus: Corpus,
     words: Words,
 }
@@ -70,19 +68,12 @@ impl NoteIndex {
             .map(|(&id, _)| id)
             .filter(|&id| !self.notes.contains(id))
             .collect();
-        let mut stems = HashSet::new();
-        for source in gone.iter().filter_map(|&id| self.sources.remove(id)) {
-            stems.extend(source.note_stems().map(|(_, key)| key));
-        }
-        // Removing one note at a time rescans a shared row like `index` once per gone note.
-        for key in stems {
-            if let Some(rows) = self.by_stem.get_mut(&key) {
-                rows.retain(|(source, _)| !gone.contains(source));
-                if rows.is_empty() {
-                    self.by_stem.remove(&key);
-                }
-            }
-        }
+        let sources: Vec<Arc<Source>> = gone
+            .iter()
+            .filter_map(|&id| self.sources.remove(id))
+            .collect();
+        self.by_stem
+            .remove_all(&gone, sources.iter().map(|source| &**source));
         self.words.remove_all(&gone);
         previous
     }
@@ -195,9 +186,7 @@ impl NoteIndex {
             words,
             read,
         } = content;
-        for (at, key) in source.note_stems() {
-            self.by_stem.entry(key).or_default().push((id, at));
-        }
+        self.by_stem.insert(id, &source);
         self.sources.insert(id, Arc::new(source));
         self.corpus.write(self.notes.order(id), read);
         self.words.set(id, words);
@@ -214,17 +203,7 @@ impl NoteIndex {
         let Some(old) = self.sources.remove(id) else {
             return;
         };
-        for link in &old.links {
-            if let Target::Note { path, .. } = &link.target {
-                let key = Key::stem(path);
-                if let Some(rows) = self.by_stem.get_mut(&key) {
-                    rows.retain(|(source, _)| *source != id);
-                    if rows.is_empty() {
-                        self.by_stem.remove(&key);
-                    }
-                }
-            }
-        }
+        self.by_stem.remove(id, &old);
     }
 
     #[must_use]
