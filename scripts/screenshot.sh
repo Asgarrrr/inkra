@@ -168,7 +168,8 @@ end tell
 EOF
 # With the apps hidden, the band shows the wallpaper, not a window.
 sleep 0.5
-if [[ -n $wallpaper ]]; then
+# Setting the wallpaper already shown changes no pixel, so the wait would fail.
+if [[ -n $wallpaper && $(printf '%s\n' "${old_pictures[@]}" | sort -u) != "$wallpaper" ]]; then
   band "$home/before.png"
   wallpapers "$wallpaper" > /dev/null
   await_wallpaper
@@ -179,7 +180,9 @@ defaults write com.apple.dock autohide -bool true
 killall Dock
 sleep 2
 
-HOME=$home ./target/release/inkra-app "$root" 2> /dev/null &
+# System Events resolves a process by name: a copy under its own name keeps a running inkra-app out of reach.
+cp target/release/inkra-app "$home/inkra-shot"
+HOME=$home "$home/inkra-shot" "$root" 2> /dev/null &
 pid=$!
 
 # Centred on the main screen; prints the window's frame as "x y w h". Run again after the settle:
@@ -215,6 +218,9 @@ end run
 EOF
 }
 place > /dev/null
+# A pointer over the window leaves a row hovered. A posted move, not a warp, so the app sees the pointer leave;
+# the left edge, since the bottom one shows the hidden Dock and a corner can fire a hot corner.
+osascript -l JavaScript -e "ObjC.import('CoreGraphics'); \$.CGEventPost(0, \$.CGEventCreateMouseEvent(null, 5, {x: 2, y: ${screen_h%.*} / 2}, 0))" > /dev/null
 sleep "$settle"
 read -r x y w h < <(place)
 want="$(((${screen_w%.*} - width) / 2)) $(((${screen_h%.*} - height) / 2)) $width $height"
