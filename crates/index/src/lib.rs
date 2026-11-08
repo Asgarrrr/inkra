@@ -15,6 +15,7 @@ mod seed;
 #[cfg(test)]
 mod seed_tests;
 mod source;
+mod stems;
 mod target;
 #[cfg(test)]
 mod test_support;

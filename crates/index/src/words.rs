@@ -50,6 +50,20 @@ fn narrow(offset: usize) -> u32 {
     offset
 }
 
+/// The first of `len` sorted words not below `term`, by binary search; `word(n)` reads word `n`.
+fn first_at_or_after<'a>(len: usize, word: impl Fn(usize) -> &'a str, term: &str) -> usize {
+    let (mut low, mut high) = (0, len);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if word(mid) < term {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]

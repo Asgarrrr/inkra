@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use foldhash::fast::RandomState;
 
-use super::{WORD_MAX_CHARS, cap, fold, word_spans};
+use super::{WORD_MAX_CHARS, cap, first_at_or_after, fold, word_spans};
 
 /// A note's distinct folded words, each capped, sorted, with how often each occurs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,24 +100,6 @@ impl NoteWords {
     fn word(&self, n: usize) -> &str {
         &self.bytes[self.bounds[n]..self.bounds[n + 1]]
     }
-}
-
-/// The first of `len` sorted words not below `term`, by binary search; `word(n)` reads word `n`.
-pub(super) fn first_at_or_after<'a>(
-    len: usize,
-    word: impl Fn(usize) -> &'a str,
-    term: &str,
-) -> usize {
-    let (mut low, mut high) = (0, len);
-    while low < high {
-        let mid = low + (high - low) / 2;
-        if word(mid) < term {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    low
 }
 
 /// `word` cut to `WORD_MAX_CHARS`, without a second allocation when the fold made one.
