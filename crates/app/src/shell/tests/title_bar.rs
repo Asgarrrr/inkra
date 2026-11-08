@@ -43,6 +43,14 @@ fn the_tab_row_spans_the_window_above_every_column(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_rule_under_the_tabs_runs_over_both_docks(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    let row = cx.debug_bounds("tab-row").unwrap();
+    assert_eq!(cx.debug_bounds("title-rule").unwrap(), row);
+}
+
+#[gpui::test]
 fn the_traffic_lights_have_their_space(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
     let lights = cx.debug_bounds("title-drag-start").unwrap();

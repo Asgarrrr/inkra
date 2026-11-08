@@ -77,9 +77,10 @@ values unless the comparison shows a clash; record any change here.
   button starts 88 px in, as the reference's container padding.
 - The sidebar's segment is the sidebar's width; with the backlinks shown, a
   segment as wide as them ends the row and holds their toggle at its right end;
-  the tab segment fills the rest. One hairline under the tab segment only,
-  broken by the active tab: both side panels run unbroken to the window's top,
-  as the reference's (user request, 2026-11-04).
+  the tab segment fills the rest. One hairline under the whole row, broken by
+  the active tab: it carries the tabs' floor over both docks, so the row reads
+  as one band (user request, 2026-11-08; until then the side panels ran
+  unbroken to the window's top, as the reference's).
 - Backlinks hidden: their toggle ends the tab segment.
 - Sidebar hidden: the traffic lights' padding and the sidebar toggle lead the
   tab segment, as in S3's `panels-hidden`.

@@ -102,8 +102,6 @@ impl AppShell {
             .flex_1()
             .min_w_0()
             .h_full()
-            // Under the tabs only, so the side panels run to the window's top (D3).
-            .child(strip_rule(cx))
             .children(segments);
         h_flex()
             .debug_selector(|| "tab-row".into())
@@ -111,6 +109,7 @@ impl AppShell {
             .flex_none()
             .h(theme::TITLE_BAR_HEIGHT)
             .bg(colors.background)
+            .child(strip_rule(cx).debug_selector(|| "title-rule".into()))
             .children(left_title)
             .child(title_tabs)
             .children(right_title)
