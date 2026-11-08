@@ -241,4 +241,4 @@ Each step builds, passes its tests, and is one commit.
   `names_are_in_vault_order_and_folders_are_not`, `a_candidate_index_is_its_note_order` →
   `a_name_position_is_its_note_order`, `the_matcher_types_cross_threads` →
   `the_name_table_and_note_set_cross_threads`.
-- **Restore point.** `fee89d1`, the base on `main`, still has the matcher.
+- **Restore point.** `9772a24`, the base on `main`, still has the matcher.

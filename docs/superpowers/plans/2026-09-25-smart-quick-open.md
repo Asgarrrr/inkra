@@ -12,7 +12,7 @@
 
 **Continues:** `docs/superpowers/plans/2026-09-24-search.md`, which holds slices 1–4 (built) and vault search, renumbered slice 10.
 
-**Branches:** `plan/smart-quick-open` from `main` at `ef07bad` holds this plan. Then `search/5-corpus-feed` from it, `search/6-open-first` from slice 5 (its own spec and plan, moved 2026-09-25), `search/7-word-index` from slice 6, `search/8-smart-quick-open` from slice 7. One PR per branch, squash-merged, in order.
+**Branches:** `plan/smart-quick-open` from `main` at `51336b5` holds this plan. Then `search/5-corpus-feed` from it, `search/6-open-first` from slice 5 (its own spec and plan, moved 2026-09-25), `search/7-word-index` from slice 6, `search/8-smart-quick-open` from slice 7. One PR per branch, squash-merged, in order.
 
 ## Global Constraints
 

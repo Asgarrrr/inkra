@@ -159,7 +159,7 @@ cost.
 
 ## Results
 
-Full run on 2026-11-08, commit `fb0405bb` (main `611f7faa` plus the benchmark
+Full run on 2026-11-08, commit `fb0405bb` (main `68e42bd2` plus the benchmark
 scripts), Apple M5 Pro, 48 GB, macOS 26.5 (25F71), on AC power, Zed and
 Obsidian closed. Inkra 0.1.0 (release binary, 17 MB, no `.app` bundle yet),
 Obsidian 1.14.5 (530 MB `.app`). Warm rows are medians of 5 runs. Memory is in
@@ -297,7 +297,7 @@ What the run shows, and what it does not:
 ## Persisted index baseline (2026-11-06)
 
 What the persisted index (docs/superpowers/specs/2026-11-06-persisted-index-design.md) is gated
-against. Release build of `08afc2a8` plus the slice-0 log line, Apple M5 Pro, 48 GB, macOS 26.5.
+against. Release build of `3b6b64ae` plus the slice-0 log line, Apple M5 Pro, 48 GB, macOS 26.5.
 
 Warm launch, 50,000-note `startup_vault` vault, 5 runs. The command was
 `scripts/launch-figure.sh --home "$TMPDIR/inkra-home" target/release/inkra-app "$V" 5`, with
@@ -389,8 +389,8 @@ called `F_FULLFSYNC` and renamed it, 7 times: 6.0 to 20.6 ms, median 9.9 ms. A w
 
 The architecture audit (#165–#179) was meant to cost nothing on the launch path, and this checks
 it. #171 (one sealed cache buffer) and #177 (seed sets as bitsets) touch the decode and the seed.
-The A/B compares `2a30f5c6`, the persisted index before the audit, with `fb0405bb`. `fb0405bb` is
-main `611f7faa` plus the benchmark scripts; `611f7faa` also adds code blocks, file kinds and
+The A/B compares `4a191391`, the persisted index before the audit, with `fb0405bb`. `fb0405bb` is
+main `68e42bd2` plus the benchmark scripts; `68e42bd2` also adds code blocks, file kinds and
 horizontal scroll. Same machine as Results, same run.
 
 `scripts/bench-refresh.sh` primes one `HOME` per build with a first launch that writes the cache

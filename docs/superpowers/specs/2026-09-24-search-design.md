@@ -297,7 +297,7 @@ its match rule in its own spec, per the word-start spec, S6.)
 > (word-start matching on names and text, a word index). `match_names` stays
 > for `[[` completion. The slice list below is renumbered there.
 >
-> **Amended 2026-09-29.** The matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `fee89d1` or start from Zed's `fuzzy`.
+> **Amended 2026-09-29.** The matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `9772a24` or start from Zed's `fuzzy`.
 
 Candidates are notes, never folders. A candidate is the note's path as the
 vault stores it, NFC, `/`-separated, `.md` stripped. Its stem is the last
@@ -1284,6 +1284,6 @@ differential oracle, and is justified by a bench figure before and after.
 | Find in note (`⌘F`) | The user asks | ~~`find_in` over the buffer~~ Superseded 2026-09-28: `find_in` is deleted and its own spec decides the rule (word-start spec, S6); Zed splits the buffer into chunks (`editor/src/items.rs:2010-2087`) |
 | Search in unsaved buffers | Two seconds of lag is observed | Links spec, D5; ~~`find_in` over open buffers~~ superseded 2026-09-28: the word-start walk over open buffers (word-start spec) |
 | Unlinked mentions | The user asks | A `search` for each note's name |
-| `[[` completion | Links spec, Deferred | ~~Reuses `match_names`~~ The matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `fee89d1` or start from Zed's `fuzzy` |
+| `[[` completion | Links spec, Deferred | ~~Reuses `match_names`~~ The matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `9772a24` or start from Zed's `fuzzy` |
 | Backlinks open at their line | Links spec, Deferred | Reuses `open_note` with a range |
 | Query and selected-row announcement | A screen-reader user asks | Two conflicting fixes, decided by a manual screen-reader probe; see `docs/gpui-accessibility.md` |

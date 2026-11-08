@@ -529,7 +529,7 @@ touch; they were not examined here. The machine ran other builds (load 20
 to 40) against the 20 s auto timeout.
 
 **Performance.** Release, the 50,000-note nested vault, runs alternated with
-`fc742d8` (this branch's `main`), six each, on a machine shared with other
+`bba9340` (this branch's `main`), six each, on a machine shared with other
 builds (load 24 to 44). Both binaries carried a probe that timed each
 `reconcile` before `is_scanned`. Longest turn: 2.6–3.1 ms after, 2.5–2.7 ms
 before. Indexed: 1.18–1.57 s after, 1.25–1.33 s before. First frame:

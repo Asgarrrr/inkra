@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Runs every published benchmark, warm then cold, into one directory; method in docs/benchmarks.md.
 # usage: scripts/bench-refresh.sh [--runs N] [--before REV] [--skip-compare]
-# The A/B launch figure compares REV (default 2a30f5c6, before the architecture audit) with HEAD
+# The A/B launch figure compares REV (default 4a191391, before the architecture audit) with HEAD
 # on the 50,000-note startup vault. Then bench-compare.sh runs warm, then with --cold.
 # Run it from a terminal: sudo asks for the password once, for purge.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-runs=5 before=2a30f5c6 compare=true
+runs=5 before=4a191391 compare=true
 while (($#)); do
   case $1 in
     --runs) runs=$2; shift 2 ;;

@@ -7,7 +7,7 @@ keystroke still shapes the note once (`docs/roadmap.md`, Measurements).
 
 ## Context
 
-Checked against `arch/deepening` at `e108302`. The brief was imprecise in
+Checked against `arch/deepening` at `fe2e418`. The brief was imprecise in
 three places, corrected here.
 
 The editor's geometry is five pieces of state in two owners:
