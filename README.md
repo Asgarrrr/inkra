@@ -115,9 +115,10 @@ tables: [docs/benchmarks.md](docs/benchmarks.md). Reproduce with
 Requires macOS and Rust 1.96 or later.
 
 ```sh
-./scripts/vendor-gpui.sh          # once: fetches gpui at the pinned commit
 cargo run --release -p inkra-app -- ~/path/to/vault
 ```
+
+The first build fetches gpui from Zed's repository, at a pinned commit.
 
 ## Accessibility
 

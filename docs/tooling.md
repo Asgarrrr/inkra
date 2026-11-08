@@ -6,11 +6,9 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 ## `check.sh`
 
-- **`cargo fmt`, never `--all`.** Without a flag, from the root, it formats every workspace
-  member and nothing else: its file set equals the old `-p` list's. `--all`
-  also formats path dependencies, and gpui is one. In `--check` mode it couples
-  the gate to Zed's formatting. Run bare, it rewrites the vendored source and
-  breaks its match with the pinned commit.
+- **`cargo fmt`, without `--all`.** From the root, it formats every workspace
+  member and nothing else. `--all` also formats path dependencies; gpui was one
+  until it became a git dependency, and a new path dependency would be again.
 - **The gpui isolation check.** It must catch gpui below `app` by any route.
   One `cargo tree --workspace --exclude inkra-app` covers every member but
   `app`, so a new crate is checked without an edit to the script:
@@ -38,8 +36,11 @@ pins 1.98.1; do not copy it. Bump by re-running `check.sh`.
 
 ## Vendored gpui
 
-`scripts/vendor-gpui.sh` pins Zed by commit, never by branch, so the source we
-read is the source we compile. To bump: edit `REV`, re-run the script, re-run
+`crates/app/Cargo.toml` takes gpui and `gpui_platform` from Zed's repository,
+pinned by `rev`, never by branch. Cargo fetches it, so a fresh clone builds
+with no setup step. `scripts/vendor-gpui.sh` checks out the same rev, read from
+`Cargo.lock`, into `vendor/zed-reference`: the source we read is the source we
+compile. To bump: edit the three `rev`s, build, re-run the script, re-run
 `check.sh`, and re-check every `file:line` citation in `docs/`.
 
 The sparse checkout includes `tooling/` and `extensions/`. They are members of

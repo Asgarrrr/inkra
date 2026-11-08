@@ -31,10 +31,10 @@ inkra-layout = { workspace = true }
 futures = { workspace = true }
 # Wrap snapping per line; `Buffer`'s grapheme steps scan the whole document.
 unicode-segmentation = { workspace = true }
-# Path, not git, so the source we read is the source we compile; see vendor-gpui.sh.
-gpui = { path = "../../vendor/zed-reference/crates/gpui" }
+# Pinned by commit; vendor-gpui.sh checks out this same rev for reading.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
 # Without font-kit macOS renders no text, and only logs a warning.
-gpui_platform = { path = "../../vendor/zed-reference/crates/gpui_platform", features = [
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
     "font-kit",
 ] }
 # The session file (restore-tabs spec, R2); the majors gpui already locks.
@@ -55,7 +55,7 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-gpui = { path = "../../vendor/zed-reference/crates/gpui", features = [
+gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
     "test-support",
 ] }
 # `MemFs` — tests must never reach the real filesystem.

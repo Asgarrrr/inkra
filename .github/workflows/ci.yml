@@ -26,25 +26,11 @@ jobs:
       - name: Show toolchain
         run: rustup show
 
-      - name: Cache vendored gpui
-        uses: actions/cache@v6
-        with:
-          path: vendor/zed-reference
-          key: vendor-gpui-${{ hashFiles('scripts/vendor-gpui.sh') }}
-
-      # Always runs, cache hit or miss: the script fetches and checks out REV
-      # on an existing checkout, so a stale or partial cache still ends up correct.
-      - name: Restore vendored gpui
-        run: ./scripts/vendor-gpui.sh
-
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
 
-      # Caches registry dependencies only. rust-cache prunes every package whose
-      # manifest sits under the repo root, and vendor/ does, so the gpui path
-      # crates recompile on each run. Caching all of target/ instead does not
-      # fit the 10 GB cache quota.
+      # Caches the registry, cargo's git checkout of Zed, and their builds.
       - uses: Swatinem/rust-cache@v2
 
       # check.sh is the definition of done; run it, not a reimplementation of

@@ -6,9 +6,9 @@ paths:
 
 # gpui
 
-- The gpui we compile is `vendor/zed-reference/crates/gpui/src/` (a path
-  dependency). Read it before writing or reviewing gpui code; cite it, not
-  memory or the web.
+- Read gpui in `vendor/zed-reference/crates/gpui/src/`: `vendor-gpui.sh` checks
+  out the rev cargo compiles, from `Cargo.lock`. Read it before writing or
+  reviewing gpui code; cite it, not memory or the web.
 - Never read `~/.cargo/registry/src/*/gpui-*` or `~/.cargo/git/checkouts/zed-*`:
   stale copies whose APIs and line numbers disagree with what we build.
 - macOS platform code lives in the sibling crates `gpui_macos` and `gpui_apple`.

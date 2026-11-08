@@ -38,7 +38,6 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
   and the no-gpui-below-app check. Green is the definition of done.
 - fmt: `cargo fmt`, from the repo root, formats every workspace member.
-  **Never `cargo fmt --all`**: it rewrites the vendored gpui source.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
   renders scenes off-screen to `target/shots/*.png`. `check.sh` renders nothing.
 - run: `cargo run -p inkra-app [path]`
@@ -51,8 +50,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
   `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
-- `vendor/zed-reference` is gitignored; `./scripts/vendor-gpui.sh` restores it
-  at the pinned commit. Nothing builds before it runs.
+- gpui is a git dependency pinned by `rev`; cargo fetches it. `vendor/zed-reference`
+  is gitignored, for reading only: `./scripts/vendor-gpui.sh` checks out the rev in `Cargo.lock`.
 
 ## Architecture
 

@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "==> cargo fmt --check"
-# Every workspace member. Not `--all`: it would format the vendored gpui too.
+# Every workspace member.
 cargo fmt -- --check
 
 echo "==> colour literal check"

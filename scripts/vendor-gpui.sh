@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Restores the gitignored gpui checkout, pinned by commit; bumping it is in docs/tooling.md.
+# Checks out Zed, for reading, at the rev cargo builds gpui from; bumping it is in docs/tooling.md.
 
-REV=526c95d474b2bf800e95aab30222fa0341f08e19
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REV=$(sed -nE 's|^source = "git\+https://github.com/zed-industries/zed\?rev=([0-9a-f]{40})#.*|\1|p' "$ROOT/Cargo.lock" | sort -u)
+if [ "$(wc -l <<< "$REV")" -ne 1 ] || [ -z "$REV" ]; then
+  echo "expected one zed rev in Cargo.lock, found: ${REV:-none}" >&2
+  exit 1
+fi
 REPO=https://github.com/zed-industries/zed.git
-DEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vendor/zed-reference"
+DEST="$ROOT/vendor/zed-reference"
 
 # Cargo resolution needs every member of zed's workspace on disk, not just gpui's.
 SPARSE=(crates tooling extensions)

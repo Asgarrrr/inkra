@@ -8,7 +8,6 @@ are in this repository, so anyone can run it again or contest it.
 ## Reproduce
 
 ```sh
-./scripts/vendor-gpui.sh        # once, nothing builds before it
 ./scripts/bench-compare.sh      # all sizes, 5 warm runs each
 ```
 
