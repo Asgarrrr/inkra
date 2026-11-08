@@ -15,7 +15,7 @@ use crate::notes::{NoteTable, Query, Resolution};
 use crate::seed::Seed;
 use crate::source::{Source, SourceLink};
 use crate::stems::Stems;
-use crate::target::{Style, Target};
+use crate::target::{NoteRef, Style, Target};
 use crate::words::{
     Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Shards, Words, WordsMerge,
     WordsSnapshot,
@@ -213,10 +213,26 @@ impl NoteIndex {
 
     #[must_use]
     pub fn resolve(&self, source: Option<EntryId>, target: &Target) -> Resolution {
-        match self.notes.query(source, target) {
-            Ok(query) => self.search(&query),
-            Err(resolution) => resolution,
+        match target {
+            Target::Note {
+                path, md, style, ..
+            } => self.resolve_note(
+                source,
+                NoteRef {
+                    path,
+                    md: *md,
+                    style: *style,
+                },
+            ),
+            Target::External(url) => Resolution::External(url.clone()),
+            Target::SelfLink => Resolution::SelfLink,
         }
+    }
+
+    fn resolve_note(&self, source: Option<EntryId>, note: NoteRef<'_>) -> Resolution {
+        self.notes
+            .query(source, note)
+            .map_or(Resolution::Unresolved, |query| self.search(&query))
     }
 
     /// Notes first: an asset is found only when no note matches (K6).
@@ -246,23 +262,21 @@ impl NoteIndex {
         let mut grouped: BTreeMap<(usize, EntryId), Vec<usize>> = BTreeMap::new();
         // A shared name such as `index` is written the same way by thousands of links, and
         // only a relative link's resolution depends on its source.
-        let mut by_text: HashMap<(&str, Style, bool), Resolution> = HashMap::new();
+        let mut by_text: HashMap<NoteRef<'_>, Resolution> = HashMap::new();
         let mut by_query: HashMap<Query, Resolution> = HashMap::new();
         for &(source, at) in rows {
-            let link = &self.source(source).links[at];
-            let resolution = match &link.target {
-                Target::Note {
-                    path, style, md, ..
-                } if *style != Style::Relative => by_text
-                    .entry((path, *style, *md))
-                    .or_insert_with(|| self.resolve(Some(source), &link.target))
+            let note = self.source(source).links[at].note();
+            let resolution = match note {
+                NoteRef { style, .. } if style != Style::Relative => by_text
+                    .entry(note)
+                    .or_insert_with(|| self.resolve_note(Some(source), note))
                     .clone(),
-                target => match self.notes.query(Some(source), target) {
-                    Ok(query) => by_query
+                _ => match self.notes.query(Some(source), note) {
+                    Some(query) => by_query
                         .entry(query)
                         .or_insert_with_key(|query| self.search(query))
                         .clone(),
-                    Err(resolution) => resolution,
+                    None => Resolution::Unresolved,
                 },
             };
             if resolution == Resolution::File(file) {

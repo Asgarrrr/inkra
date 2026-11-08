@@ -1,10 +1,11 @@
 use std::ops::Range;
+use std::sync::Arc;
 
 use inkra_markdown::links;
 use inkra_text::ByteOffset;
 
 use crate::key::Key;
-use crate::target::Target;
+use crate::target::{NoteRef, Style, Target};
 
 /// Bytes of a link's line kept for the backlinks panel, and how many of them precede the link.
 const CONTEXT: usize = 160;
@@ -18,7 +19,11 @@ pub struct Source {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceLink {
-    pub target: Target,
+    /// As written, `.md` stripped, `/`-separated.
+    pub path: Arc<str>,
+    pub fragment: Option<Box<str>>,
+    pub md: bool,
+    pub style: Style,
     pub range: Range<ByteOffset>,
     /// Part of the link's line, for display only: nothing resolves by it.
     pub context: String,
@@ -32,16 +37,25 @@ impl Source {
         let links = links(text)
             .into_iter()
             .filter_map(|link| {
-                let target = Target::parse(&link);
-                matches!(target, Target::Note { .. }).then(|| {
-                    let (context, context_link) =
-                        context(text, link.range.start.get()..link.range.end.get());
-                    SourceLink {
-                        target,
-                        range: link.range,
-                        context,
-                        context_link,
-                    }
+                let Target::Note {
+                    path,
+                    md,
+                    fragment,
+                    style,
+                } = Target::parse(&link)
+                else {
+                    return None;
+                };
+                let (context, context_link) =
+                    context(text, link.range.start.get()..link.range.end.get());
+                Some(SourceLink {
+                    path: Arc::from(path),
+                    fragment: fragment.map(String::into_boxed_str),
+                    md,
+                    style,
+                    range: link.range,
+                    context,
+                    context_link,
                 })
             })
             .collect();
@@ -53,10 +67,18 @@ impl Source {
         self.links
             .iter()
             .enumerate()
-            .filter_map(|(at, link)| match &link.target {
-                Target::Note { path, .. } => Some((at, Key::stem(path))),
-                _ => None,
-            })
+            .map(|(at, link)| (at, Key::stem(&link.path)))
+    }
+}
+
+impl SourceLink {
+    #[must_use]
+    pub fn note(&self) -> NoteRef<'_> {
+        NoteRef {
+            path: &self.path,
+            md: self.md,
+            style: self.style,
+        }
     }
 }
 
