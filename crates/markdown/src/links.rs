@@ -3,7 +3,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, LinkType, Parser, Tag};
 
-use crate::parse::options;
+use crate::cmark::options;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Link {

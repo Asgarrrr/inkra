@@ -4,7 +4,8 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Parser, Tag};
 
-use crate::parse::{backtick_runs, options};
+use crate::cmark::options;
+use crate::spans::backtick_runs;
 
 /// Leads a mid-line piece: whitespace to the emphasis rules, yet no block marker can follow it.
 const INSIDE: &str = "\u{a0}";

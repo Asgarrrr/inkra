@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use pulldown_cmark::{Event, Parser, Tag};
 
 use super::front_matter;
-use crate::parse::options;
+use crate::cmark::options;
 
 /// `front_matter` of `text`, checked against pulldown-cmark.
 fn lines(text: &str) -> Option<usize> {

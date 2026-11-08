@@ -1,9 +1,11 @@
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
+use crate::cmark::options;
 use crate::gutters::{cut, gutters, quote_conceals};
+use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::{Conceal, Gutter, Styles};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -81,23 +83,11 @@ pub fn parse(text: &str) -> Markdown {
                         language: language(text, &range, kind).map(to_offsets),
                     });
                 }
-                // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
-                let leading = matches!(tag, Tag::BlockQuote(_))
-                    && current.as_ref().is_none_or(|open| open.leading);
-                if leading {
+                let entered = Open::enter(text, &tag, &range, current.as_ref());
+                if entered.leading {
                     quotes.push(without_line_ending(text, &range));
                 }
-                open.push(Open {
-                    styles: styles | tag_styles(&tag),
-                    indent: if matches!(tag, Tag::CodeBlock(_)) {
-                        styles
-                    } else {
-                        styles | tag_styles(&tag)
-                    },
-                    end: range.end,
-                    element: concealable(text, &tag, &range),
-                    leading,
-                });
+                open.push(entered);
             }
             Event::End(_) => {
                 out.markers_until(range.end, current.as_ref());
@@ -108,14 +98,8 @@ pub fn parse(text: &str) -> Markdown {
                 out.leaf(range, styles);
             }
             Event::Code(_) => {
+                let code = Open::code_span(&range, current.as_ref());
                 let (content_start, content_end) = backtick_runs(text, &range);
-                let code = Open {
-                    styles: styles | Styles::CODE,
-                    indent: styles | Styles::CODE,
-                    end: range.end,
-                    element: Some(range.clone()),
-                    leading: false,
-                };
                 out.markers_until(range.start, current.as_ref());
                 out.markers_until(content_start, Some(&code));
                 out.leaf(content_start..content_end, code.styles);
@@ -143,14 +127,6 @@ pub fn parse(text: &str) -> Markdown {
         gutters,
         code_blocks,
     }
-}
-
-pub(crate) fn options() -> Options {
-    Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_WIKILINKS
-        | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
-        | Options::ENABLE_TABLES
 }
 
 fn tag_styles(tag: &Tag<'_>) -> Styles {
@@ -243,18 +219,6 @@ fn opening_sequence(heading: &str) -> Option<usize> {
     atx.then_some(hashes + blanks)
 }
 
-/// A `Code` event's range includes its backticks; returns where the content starts and ends.
-pub(crate) fn backtick_runs(text: &str, range: &Range<usize>) -> (usize, usize) {
-    let code = &text.as_bytes()[range.clone()];
-    let open = code.iter().take_while(|&&byte| byte == b'`').count();
-    let close = code[open..]
-        .iter()
-        .rev()
-        .take_while(|&&byte| byte == b'`')
-        .count();
-    (range.start + open, range.end - close)
-}
-
 /// An open element: the union of its and its ancestors' tags, its end, and its range when its
 /// markers can hide.
 #[derive(Clone)]
@@ -267,6 +231,38 @@ struct Open {
     element: Option<Range<usize>>,
     /// A quote whose ancestors are all quotes.
     leading: bool,
+}
+
+impl Open {
+    /// The element `tag` starts inside `parent`, the innermost open one.
+    fn enter(text: &str, tag: &Tag<'_>, range: &Range<usize>, parent: Option<&Open>) -> Self {
+        let inherited = parent.map_or(Styles::NONE, |open| open.styles);
+        let styles = inherited | tag_styles(tag);
+        Self {
+            styles,
+            indent: if matches!(tag, Tag::CodeBlock(_)) {
+                inherited
+            } else {
+                styles
+            },
+            end: range.end,
+            element: concealable(text, tag, range),
+            // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
+            leading: matches!(tag, Tag::BlockQuote(_)) && parent.is_none_or(|open| open.leading),
+        }
+    }
+
+    /// A code span, backticks included: no tag opens it, and its backticks always hide.
+    fn code_span(range: &Range<usize>, parent: Option<&Open>) -> Self {
+        let styles = parent.map_or(Styles::NONE, |open| open.styles) | Styles::CODE;
+        Self {
+            styles,
+            indent: styles,
+            end: range.end,
+            element: Some(range.clone()),
+            leading: false,
+        }
+    }
 }
 
 struct Out<'a> {
@@ -352,38 +348,6 @@ impl Out<'_> {
     fn push(&mut self, range: Range<usize>, styles: Styles) {
         push(&mut self.spans, range, styles);
     }
-}
-
-/// Appends a span, merged into the last one when they touch and share their styles.
-pub(crate) fn push(spans: &mut Vec<Span>, range: Range<usize>, styles: Styles) {
-    if range.is_empty() || styles.is_empty() {
-        return;
-    }
-    let range = to_offsets(range);
-    if let Some(last) = spans.last_mut()
-        && last.range.end == range.start
-        && last.styles == styles
-    {
-        last.range.end = range.end;
-        return;
-    }
-    spans.push(Span { range, styles });
-}
-
-/// The pieces of `range` between its `\n` bytes, which they exclude.
-fn lines(text: &str, range: Range<usize>) -> impl Iterator<Item = Range<usize>> {
-    let mut start = range.start;
-    text.as_bytes()[range]
-        .split(|&byte| byte == b'\n')
-        .map(move |line| {
-            let piece = start..start + line.len();
-            start = piece.end + 1;
-            piece
-        })
-}
-
-fn to_offsets(range: Range<usize>) -> Range<ByteOffset> {
-    ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
 #[cfg(test)]

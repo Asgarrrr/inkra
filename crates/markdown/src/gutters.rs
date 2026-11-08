@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-use crate::parse::push;
+use crate::spans::push;
 use crate::{Conceal, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
