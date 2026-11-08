@@ -11,8 +11,8 @@ static DARK: LazyLock<Arc<Theme>> = LazyLock::new(|| {
     Arc::new(Theme {
         appearance: Appearance::Dark,
         colors: ThemeColors {
-            // At 65 % over the window's blur: the desktop's colours show through, never its shapes.
-            background: rgba(0x181717a6),
+            // At 85 % over the window's blur: the desktop's colours show through, never its shapes.
+            background: rgba(0x181717d9),
             editor_background: rgb(0x100f0f),
             elevated_background: rgb(0x252526),
             border: rgb(0x3c3c3c),
