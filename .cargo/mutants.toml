@@ -73,7 +73,7 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/cmark\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
-    "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard \\*style != Style::Relative with false in NoteIndex::backlinks$",
+    "^crates/index/src/index\\.rs:[0-9]+:[0-9]+: replace match guard style != Style::Relative with false in NoteIndex::backlinks$",
     "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",
     "^crates/index/src/words/segment\\.rs:[0-9]+:[0-9]+: replace < with <= in merged$",
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",

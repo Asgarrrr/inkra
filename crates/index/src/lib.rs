@@ -40,7 +40,7 @@ pub use search::{
     Candidate, HITS_PER_NOTE, Hit, NoteHits, READ_FAILURES, Read, Searched, TextFound, TextSearch,
 };
 pub use source::{Source, SourceLink};
-pub use target::{Style, Target};
+pub use target::{NoteRef, Style, Target};
 pub use text_cache::{TEXT_CACHE_BYTES, TextCache};
 pub use words::{
     Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, TermHit, WordsMerge, WordsSnapshot,

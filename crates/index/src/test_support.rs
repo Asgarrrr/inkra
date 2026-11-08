@@ -11,7 +11,7 @@ use inkra_vault::{EntryId, FileIdentity, Fs, Kind, Mtime, Serial, Stamp, Vault};
 
 use crate::{
     FileRead, IndexSnapshot, NoteContent, NoteIndex, NoteMatch, NoteQuery, NoteSet, Read, Searched,
-    Target, TextSearch,
+    SourceLink, Target, TextSearch,
 };
 
 pub(crate) const ROOT: &str = "/vault";
@@ -139,6 +139,16 @@ pub(crate) fn target(text: &str) -> Target {
     let found = links(text);
     assert_eq!(found.len(), 1, "one link in {text:?}");
     Target::parse(&found[0])
+}
+
+/// The `Target::Note` `link` was parsed from.
+pub(crate) fn link_target(link: &SourceLink) -> Target {
+    Target::Note {
+        path: link.path.to_string(),
+        md: link.md,
+        fragment: link.fragment.as_deref().map(str::to_owned),
+        style: link.style,
+    }
 }
 
 /// `text` parsed as a load at `mtime` gives it, its size the text's length.

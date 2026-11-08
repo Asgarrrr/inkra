@@ -33,12 +33,13 @@ kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
 # A stack under `decode` counts there whatever it calls. A stack counts for the seed only when
 # its innermost `inkra_index` frame is `Seed::build`: its callees (`Stems`, `Corpus`) are not links.
+# A release build may inline `Seed::build` into `BuildJob::run`, which allocates nothing of its own.
 heap=$(awk '
   /^[0-9]+ calls? for [0-9]+ bytes: / {
     if (index($0, "persist::notes::decode")) { decode += $4; next }
     n = split($0, frames, " \\| ")
     for (i = n; i > 0; i--) if (frames[i] ~ /inkra_index(::|\.\.)/) break
-    if (i > 0 && index(frames[i], "Seed::build")) seed += $4
+    if (i > 0 && frames[i] ~ /Seed::build|BuildJob::run/) seed += $4
   }
   END {
     mib = 1048576

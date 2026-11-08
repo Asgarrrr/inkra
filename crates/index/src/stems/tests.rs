@@ -5,7 +5,7 @@ use proptest::prelude::*;
 
 use super::Stems;
 use crate::key::Key;
-use crate::test_support::{id, vault};
+use crate::test_support::{id, link_target, vault};
 use crate::{Source, Target};
 
 const NOTES: [&str; 4] = ["n0.md", "n1.md", "n2.md", "n3.md"];
@@ -122,8 +122,8 @@ fn model(ids: &[EntryId], live: &BTreeMap<usize, Source>) -> HashMap<Key, Vec<(E
     let mut rows: HashMap<Key, Vec<(EntryId, usize)>> = HashMap::new();
     for (&n, source) in live {
         for (at, link) in source.links.iter().enumerate() {
-            if let Target::Note { path, .. } = &link.target {
-                rows.entry(Key::stem(path)).or_default().push((ids[n], at));
+            if let Target::Note { path, .. } = link_target(link) {
+                rows.entry(Key::stem(&path)).or_default().push((ids[n], at));
             }
         }
     }

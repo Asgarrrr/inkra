@@ -1,5 +1,4 @@
 use super::{BEFORE, CONTEXT, Source};
-use crate::Target;
 
 fn contexts(text: &str) -> Vec<(String, String)> {
     Source::parse(text)
@@ -15,14 +14,7 @@ fn contexts(text: &str) -> Vec<(String, String)> {
 #[test]
 fn only_note_links_are_kept() {
     let source = Source::parse("[[a]] <https://x.org> [[#h]] [x](b.md)");
-    let paths: Vec<_> = source
-        .links
-        .iter()
-        .map(|link| match &link.target {
-            Target::Note { path, .. } => path.clone(),
-            other => panic!("{other:?} kept"),
-        })
-        .collect();
+    let paths: Vec<_> = source.links.iter().map(|link| &*link.path).collect();
     assert_eq!(paths, ["a", "b"]);
 }
 

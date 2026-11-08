@@ -5,7 +5,7 @@ use inkra_vault::EntryId;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::key::Key;
-use crate::target::{Style, Target};
+use crate::target::{NoteRef, Style};
 
 /// What a link resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,28 +99,19 @@ impl NoteTable {
     }
 
     /// What `search` needs: it no longer depends on the source, so results can be shared.
-    pub(crate) fn query(
-        &self,
-        source: Option<EntryId>,
-        target: &Target,
-    ) -> Result<Query, Resolution> {
-        let (path, style, md) = match target {
-            Target::Note {
-                path, style, md, ..
-            } => (path, *style, *md),
-            Target::External(url) => return Err(Resolution::External(url.clone())),
-            Target::SelfLink => return Err(Resolution::SelfLink),
-        };
+    /// `None` for a folder, or a relative path no join reaches: the link is unresolved.
+    pub(crate) fn query(&self, source: Option<EntryId>, note: NoteRef<'_>) -> Option<Query> {
+        let NoteRef { path, md, style } = note;
         // `sub/`, `sub/.` and `sub/..` name a folder, and a folder is never a candidate.
         if matches!(path.rsplit('/').next(), Some("" | "." | "..")) {
-            return Err(Resolution::Unresolved);
+            return None;
         }
         let written: String = path.nfc().collect();
         let written = match style {
             Style::Name | Style::Suffix => written,
-            Style::Relative => self.join(source, &written).ok_or(Resolution::Unresolved)?,
+            Style::Relative => self.join(source, &written)?,
         };
-        Ok(Query { style, written, md })
+        Some(Query { style, written, md })
     }
 
     pub(crate) fn search(&self, query: &Query) -> Resolution {

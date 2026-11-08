@@ -20,6 +20,14 @@ pub enum Target {
     SelfLink,
 }
 
+/// A note link, borrowed: what note resolution reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NoteRef<'a> {
+    pub path: &'a str,
+    pub md: bool,
+    pub style: Style,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Style {
     /// A wikilink with no `/`: any note of that name.
