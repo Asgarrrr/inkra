@@ -31,6 +31,23 @@ pub(super) fn down(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
+/// `index` split right, then `draft` opened into the right group with the caret on its heading:
+/// the pane is too narrow for `## ` in the margin (live-preview spec, D13).
+pub(super) fn narrow_heading(stage: &mut Stage) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(&[
+        (
+            "draft.md",
+            "## A heading in a narrow pane\n\nIts marker shows inline, where a wide pane hangs it in the margin.\n",
+        ),
+        ("index.md", "# Index\n\nThe vault's front page.\n"),
+    ]);
+    stage.click_tree_row(window, 1.);
+    stage.keys(window, "cmd-shift-p s p l i t space r i g h t enter");
+    stage.click_tree_row(window, 0.);
+    stage.keys(window, "cmd-up");
+    window
+}
+
 /// `right`, then the right group split down by the palette.
 pub(super) fn grid(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = right(stage);

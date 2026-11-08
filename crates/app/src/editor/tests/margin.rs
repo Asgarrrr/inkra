@@ -1,11 +1,14 @@
-//! D12's margin: reserved left of the text column, measured from the heading markers.
+//! D12's margin, measured from the heading markers, and D13's: it shrinks with the pane to a floor.
+
+use std::rc::Rc;
 
 use gpui::{Bounds, Modifiers, Pixels, TestAppContext, point, px, size};
 use inkra_markdown::{HEADING_LEVELS, Styles};
 
-use super::geometry::{HEADING_MARGIN, PADDING};
-use super::{at, dispatching};
-use crate::editor::element::{column_width, margin_width};
+use super::geometry::{HEADING_MARGIN, MARGIN_FLOOR, PADDING};
+use super::shapes::shape;
+use super::{at, dispatching, with_editor};
+use crate::editor::element::{Place, Stash, column_width, margin_width};
 use crate::theme::{self, builtin};
 
 #[gpui::test]
@@ -73,35 +76,63 @@ fn a_wide_pane_centres_the_column(cx: &mut TestAppContext) {
     assert_eq!(bounds.size.width, px(column));
 }
 
-/// Centred, this column would start 20 px short of the margin.
 #[gpui::test]
-fn a_pane_short_of_two_margins_shifts_the_full_column_right(cx: &mut TestAppContext) {
+fn a_pane_short_of_two_margins_shrinks_both(cx: &mut TestAppContext) {
     let (column, bounds) = text_in_pane(cx, 2. * HEADING_MARGIN - 40.);
-    assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
+    assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN - 20.));
     assert_eq!(bounds.size.width, px(column));
 }
 
 #[gpui::test]
-fn a_narrow_pane_loses_the_margin_on_the_left_only(cx: &mut TestAppContext) {
+fn a_narrow_pane_keeps_the_floor_on_each_side(cx: &mut TestAppContext) {
     let (column, bounds) = text_in_pane(cx, 0.);
-    assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
-    assert_eq!(bounds.size.width, px(column - HEADING_MARGIN));
+    assert_eq!(bounds.origin.x, px(PADDING + MARGIN_FLOOR));
+    assert_eq!(bounds.size.width, px(column - 2. * MARGIN_FLOOR));
 }
 
 #[gpui::test]
-fn a_pane_narrower_than_the_margin_leaves_the_text_no_width(cx: &mut TestAppContext) {
+fn a_pane_narrower_than_both_floors_leaves_the_text_no_width(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "abc");
-    cx.simulate_resize(size(px(2. * PADDING + HEADING_MARGIN - 20.), px(600.)));
+    cx.simulate_resize(size(px(2. * PADDING + 2. * MARGIN_FLOOR - 10.), px(600.)));
     cx.run_until_parked();
 
     window
         .update(&mut cx, |view, _, _| {
             let bounds = view.text_bounds().unwrap();
-            assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
+            assert_eq!(bounds.origin.x, px(PADDING + MARGIN_FLOOR));
             assert_eq!(bounds.size.width, px(0.));
             assert_eq!(view.input.last_layout().unwrap().row_count(), 3);
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn the_text_starts_on_a_whole_pixel_in_the_band(cx: &mut TestAppContext) {
+    for extra in [41.3, 87.7, 100.9, 150.5] {
+        let (_, bounds) = text_in_pane(cx, extra);
+        assert_eq!(bounds.origin.x, bounds.origin.x.round(), "extra {extra}");
+    }
+}
+
+/// Both entries wrap at the column, as in the band; only their margins differ.
+#[gpui::test]
+fn the_stash_hands_each_width_its_own_measure(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let wide = Rc::new(shape("#### T\n", None, Some(px(756.)), None, window));
+        let narrow = Rc::new(shape("#### T\n", None, Some(px(756.)), None, window));
+        let place = |margin: f32| Place {
+            margin: px(margin),
+            width: px(756.),
+        };
+        let stash = Stash::default();
+        stash.measure(px(896.), place(70.), || Rc::clone(&wide));
+        stash.measure(px(856.), place(50.), || Rc::clone(&narrow));
+        stash.measure(px(856.), place(50.), || panic!("measured twice"));
+
+        let (taken, layout) = stash.take(px(856.3)).unwrap();
+        assert_eq!(taken, place(50.));
+        assert!(Rc::ptr_eq(&layout, &narrow));
+    });
 }
 
 /// Resolved against the element's edge instead, this click would land a margin's worth of glyphs in.
