@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Compares Inkra with Obsidian on generated vaults; method in docs/benchmarks.md.
-# usage: scripts/bench-compare.sh [--runs N] [--sizes 500,5000,50000] [--apps inkra,obsidian] [--cap-first S] [--cap-warm S]
+# usage: scripts/bench-compare.sh [--runs N] [--sizes 500,5000,50000] [--apps inkra,obsidian] [--cap-first S] [--cap-warm S] [--cold]
+# --cold purges the disk cache before every run; scripts/bench-refresh.sh keeps sudo valid for it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # A first open may index 50,000 notes from nothing, so it gets the longer busy cap.
-runs=5 sizes=500,5000,50000 apps=inkra,obsidian cap_first=600 cap_warm=180
+runs=5 sizes=500,5000,50000 apps=inkra,obsidian cap_first=600 cap_warm=180 cold=false
 # Between runs, so the disk cache and the CPU settle.
 pause=5
 while (($#)); do
@@ -15,7 +16,8 @@ while (($#)); do
     --apps) apps=$2; shift 2 ;;
     --cap-first) cap_first=$2; shift 2 ;;
     --cap-warm) cap_warm=$2; shift 2 ;;
-    *) echo "usage: $0 [--runs N] [--sizes 500,5000,50000] [--apps inkra,obsidian] [--cap-first S] [--cap-warm S]" >&2; exit 2 ;;
+    --cold) cold=true; shift ;;
+    *) echo "usage: $0 [--runs N] [--sizes 500,5000,50000] [--apps inkra,obsidian] [--cap-first S] [--cap-warm S] [--cold]" >&2; exit 2 ;;
   esac
 done
 IFS=, read -ra sizes <<< "$sizes"
@@ -43,6 +45,10 @@ check_no_obsidian() {
 uses_obsidian=false
 [[ " ${apps[*]} " == *" obsidian "* ]] && uses_obsidian=true
 $uses_obsidian && check_no_obsidian
+if $cold && ! sudo -n purge 2> /dev/null; then
+  echo "--cold needs sudo purge without a password prompt: run sudo -v first" >&2
+  exit 2
+fi
 
 cargo build --release -p inkra-app
 mkdir -p "$out" "$profiles" "$logs"
@@ -68,7 +74,7 @@ jq -nc \
   --arg obsidian_version "$(defaults read "$obsidian_app/Contents/Info.plist" CFBundleShortVersionString)" \
   --argjson inkra_binary_kb "$(du -sk "$inkra" | cut -f1)" \
   --argjson obsidian_app_kb "$(du -sk "$obsidian_app" | cut -f1)" \
-  --argjson runs "$runs" --argjson cap_first_s "$cap_first" --argjson cap_warm_s "$cap_warm" \
+  --argjson runs "$runs" --argjson cold "$cold" --argjson cap_first_s "$cap_first" --argjson cap_warm_s "$cap_warm" \
   '{meta: $ARGS.named}' > "$results"
 
 # usage: measure <app> <size> <first|warm> <run>; reads $vault, $home and $profile.
@@ -76,6 +82,7 @@ measure() {
   local app=$1 size=$2 kind=$3 run=$4 log json cap=$cap_warm
   [[ $kind == first ]] && cap=$cap_first
   log=$logs/$app-$size-$kind-$run.log
+  if $cold; then sudo -n purge; fi
   case $app in
     inkra) json=$(HOME=$home "$out/measure" --cap "$cap" -- "$inkra" "$vault" 2> "$log") ;;
     obsidian)
@@ -111,7 +118,8 @@ done
 {
   jq -r '.meta | "Date \(.date), commit \(.commit). \(.cpu), \(.memory_gb) GB, \(.os).",
     "Inkra \(.inkra_version): \(.inkra_binary_kb / 1024 | round) MB (binary, no .app bundle yet). Obsidian \(.obsidian_version): \(.obsidian_app_kb / 1024 | round) MB (.app).",
-    "Warm rows: median of \(.runs) runs. Busy cap \(.cap_first_s) s on first open, \(.cap_warm_s) s warm.", ""' < <(head -1 "$results")
+    "Warm rows: median of \(.runs) runs. Busy cap \(.cap_first_s) s on first open, \(.cap_warm_s) s warm.",
+    (if .cold then "Cold: sudo purge before every run, so each run reads the vault from disk." else empty end), ""' < <(head -1 "$results")
   jq -rs '
     def median: sort | if length == 0 then null elif length % 2 == 1 then .[length / 2 | floor]
       else (.[length / 2 - 1] + .[length / 2]) / 2 end;

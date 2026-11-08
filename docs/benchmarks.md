@@ -14,7 +14,8 @@ are in this repository, so anyone can run it again or contest it.
 
 Flags: `--runs N` (default 5), `--sizes 500,5000,50000`,
 `--apps inkra,obsidian`, `--cap-first S` (default 600), `--cap-warm S`
-(default 180). The script needs Obsidian in `/Applications/Obsidian.app`, and
+(default 180), `--cold` (`sudo -n purge` before every run; `bench-refresh.sh`
+keeps `sudo` valid for it). The script needs Obsidian in `/Applications/Obsidian.app`, and
 refuses to start while any Obsidian runs.
 
 It writes the raw runs to `target/bench/results-<timestamp>.jsonl`, one JSON
@@ -22,6 +23,12 @@ line per run after one `meta` line, and the summary to
 `target/bench/summary-<timestamp>.md` and stdout: bar charts of the main
 figures, then the full table. Each app's stderr goes to
 `target/bench/logs-<timestamp>/`.
+
+`scripts/bench-refresh.sh` runs the Results tables and the audit A/B in one
+go. It runs the launch A/B warm and cold, then `bench-compare.sh` warm and with
+`--cold`. Run it from a terminal: `sudo` asks for the password once, for
+`purge`. It refuses to start while Zed, Obsidian, cargo or rustc run. It writes
+everything to `target/bench/refresh-<timestamp>/`.
 
 ## The vaults
 
@@ -97,6 +104,10 @@ The script sleeps 5 s between runs. The vault's files are in the disk cache
 for every run, first open included: the generator has just read or written
 them. First open means no app state, not a cold disk.
 
+With `--cold`, the script runs `sudo -n purge` before every run, first open
+included. Each run then reads the vault and the app from disk, and probably
+most of its system frameworks.
+
 Before the first run, the script launches the fresh Inkra build once, untimed,
 on an empty vault. The first exec of a new binary pays the code-signature
 check (`docs/startup-floor.md`): an install cost, paid once, not a first-open
@@ -120,9 +131,11 @@ cost.
 
 ## Caveats
 
-- **Inkra has no persisted index.** It scans and indexes the whole vault on
-  every launch, so its warm runs do the work of a first open. Obsidian keeps
-  its metadata cache in the profile, so its warm runs reuse it.
+- **Both apps persist their index.** Since the persisted index
+  (2026-11-07), a warm Inkra run decodes its cache file and reads only the
+  notes whose stamp changed; Obsidian reuses the metadata cache in its
+  profile. Results before 2026-11-07 show Inkra rebuilding its index on every
+  launch.
 - **"Window on screen" is not "content visible"** for either app. Inkra
   shows its window before its scan ends (the open-first spec), and Obsidian
   probably shows its window before its workspace loads. Neither figure says
@@ -147,45 +160,140 @@ cost.
 
 ## Results
 
-Full run on 2026-09-30, commit `698daa8`, Apple M5 Pro, 48 GB, macOS 26.5
-(25F71). Inkra 0.1.0 (release binary, 12 MB, no `.app` bundle yet), Obsidian
-1.12.7 (482 MB `.app`). Warm rows are medians of 5 runs. Memory is in MiB.
-Raw lines: `target/bench/results-20260930-213650.jsonl` (not committed).
+Full run on 2026-11-08, commit `fb0405bb` (main `611f7faa` plus the benchmark
+scripts), Apple M5 Pro, 48 GB, macOS 26.5 (25F71), on AC power, Zed and
+Obsidian closed. Inkra 0.1.0 (release binary, 17 MB, no `.app` bundle yet),
+Obsidian 1.14.5 (530 MB `.app`). Warm rows are medians of 5 runs. Memory is in
+MiB. Raw lines: `target/bench/refresh-20261108-103637/results-{warm,cold}.jsonl`
+(not committed).
+
+### Disk cache warm
+
+```text
+Window on screen, warm (lower is better)
+   500  inkra     ███████████████ 112 ms
+   500  obsidian  ████████████████████████████████████████ 296 ms
+  5000  inkra     ███████████████ 112 ms
+  5000  obsidian  ████████████████████████████████████████ 295 ms
+ 50000  inkra     ███████████████ 114 ms
+ 50000  obsidian  ████████████████████████████████████████ 294 ms
+
+CPU until idle, warm (lower is better)
+   500  inkra     █ 0.11 s
+   500  obsidian  ██████ 0.75 s
+  5000  inkra     █ 0.17 s
+  5000  obsidian  ████████ 1.07 s
+ 50000  inkra     ██████ 0.75 s
+ 50000  obsidian  ████████████████████████████████████████ 5.42 s
+
+CPU until idle, first open (lower is better)
+   500  inkra     ▏ 0.17 s
+   500  obsidian  █ 1.84 s
+  5000  inkra     ▏ 0.78 s
+  5000  obsidian  ████ 9.92 s
+ 50000  inkra     ████ 11.52 s
+ 50000  obsidian  ████████████████████████████████████████ 105.77 s
+
+Memory at idle, warm (lower is better)
+   500  inkra     ██ 52 MiB
+   500  obsidian  ██████████ 228 MiB
+  5000  inkra     ████ 82 MiB
+  5000  obsidian  ████████████████ 372 MiB
+ 50000  inkra     ███████████ 261 MiB
+ 50000  obsidian  ████████████████████████████████████████ 924 MiB
+```
 
 | Notes | App | Open | Window on screen (ms) | Busy until idle (s) | CPU until idle (s) | Memory at idle (MiB) | Resident (MiB) | Processes | Idle CPU (%) |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 500 | Inkra | first | 157 | 0.3 | 0.29 | 73 | 90 | 1 | 0.42 |
-| 500 | Inkra | warm | 159 | 0.3 | 0.28 | 50 | 79 | 1 | 0.01 |
-| 500 | Obsidian | first | 471 | 1.3 | 2.52 | 304 | 593 | 4 | 0.14 |
-| 500 | Obsidian | warm | 424 | 1.3 | 0.99 | 222 | 509 | 4 | 0.07 |
-| 5,000 | Inkra | first | 145 | 0.5 | 1.58 | 110 | 139 | 1 | 0.01 |
-| 5,000 | Inkra | warm | 150 | 0.3 | 1.74 | 106 | 134 | 1 | 0.01 |
-| 5,000 | Obsidian | first | 457 | 10 | 14.98 | 441 | 788 | 4 | 0.18 |
-| 5,000 | Obsidian | warm | 444 | 1.3 | 1.49 | 340 | 642 | 4 | 0.06 |
-| 50,000 | Inkra | first | 141 | 1.6 | 15.02 | 462 | 557 | 1 | 0.02 |
-| 50,000 | Inkra | warm | 154 | 1.6 | 19.58 | 465 | 561 | 1 | 0.03 |
-| 50,000 | Obsidian | first | 476 | 64.3 | 161.43 | 881 | 1501 | 4 | 0.38 |
-| 50,000 | Obsidian | warm | 426 | 13 | 7.87 | 909 | 1483 | 4 | 10.37 |
+| 500 | Inkra | first | 117 | 0.3 | 0.17 | 60 | 84 | 1 | 0.29 |
+| 500 | Inkra | warm | 112 | 0.3 | 0.11 | 52 | 76 | 1 | 0.3 |
+| 500 | Obsidian | first | 648 | 1.6 | 1.84 | 309 | 607 | 4 | 0.2 |
+| 500 | Obsidian | warm | 296 | 1.1 | 0.75 | 228 | 521 | 4 | 0.06 |
+| 5,000 | Inkra | first | 84 | 0.3 | 0.78 | 96 | 145 | 1 | 0.31 |
+| 5,000 | Inkra | warm | 112 | 0.3 | 0.17 | 82 | 106 | 1 | 0.29 |
+| 5,000 | Obsidian | first | 320 | 9.4 | 9.92 | 499 | 867 | 4 | 0.29 |
+| 5,000 | Obsidian | warm | 295 | 1.1 | 1.07 | 372 | 681 | 4 | 0.05 |
+| 50,000 | Inkra | first | 92 | 1.1 | 11.52 | 546 | 636 | 1 | 0.32 |
+| 50,000 | Inkra | warm | 114 | 0.5 | 0.75 | 261 | 306 | 1 | 0.28 |
+| 50,000 | Obsidian | first | 322 | 41.9 | 105.77 | 1393 | 1979 | 4 | 9.11 |
+| 50,000 | Obsidian | warm | 294 | 10.3 | 5.42 | 924 | 1463 | 4 | 0.04 |
+
+### Disk cache cold
+
+`--cold`: `sudo purge` before every run. "Warm" still means a second open, with the app's own
+state; only the disk cache is cold.
+
+```text
+Window on screen, warm (lower is better)
+   500  inkra     ████████████████ 527 ms
+   500  obsidian  ████████████████████████████████████████ 1317 ms
+  5000  inkra     ████████████████ 529 ms
+  5000  obsidian  █████████████████████████████████████ 1236 ms
+ 50000  inkra     ████████████████ 540 ms
+ 50000  obsidian  ████████████████████████████████████████ 1323 ms
+
+CPU until idle, warm (lower is better)
+   500  inkra     ██ 0.33 s
+   500  obsidian  ████████ 1.15 s
+  5000  inkra     ███ 0.39 s
+  5000  obsidian  ███████████ 1.48 s
+ 50000  inkra     ███████ 0.98 s
+ 50000  obsidian  ████████████████████████████████████████ 5.41 s
+
+CPU until idle, first open (lower is better)
+   500  inkra     ▏ 0.4 s
+   500  obsidian  ▏ 2.12 s
+  5000  inkra     ▏ 1.3 s
+  5000  obsidian  ██ 10.78 s
+ 50000  inkra     ██ 9.56 s
+ 50000  obsidian  ████████████████████████████████████████ 236.43 s
+
+Memory at idle, warm (lower is better)
+   500  inkra     ██ 52 MiB
+   500  obsidian  █████████ 228 MiB
+  5000  inkra     ███ 82 MiB
+  5000  obsidian  ██████████████ 374 MiB
+ 50000  inkra     ██████████ 261 MiB
+ 50000  obsidian  ████████████████████████████████████████ 1069 MiB
+```
+
+| Notes | App | Open | Window on screen (ms) | Busy until idle (s) | CPU until idle (s) | Memory at idle (MiB) | Resident (MiB) | Processes | Idle CPU (%) |
+|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 500 | Inkra | first | 504 | 0.8 | 0.4 | 61 | 85 | 1 | 0.28 |
+| 500 | Inkra | warm | 527 | 0.8 | 0.33 | 52 | 76 | 1 | 0.29 |
+| 500 | Obsidian | first | 1339 | 2.1 | 2.12 | 304 | 603 | 4 | 0.27 |
+| 500 | Obsidian | warm | 1317 | 2 | 1.15 | 228 | 525 | 4 | 0.06 |
+| 5,000 | Inkra | first | 529 | 2.6 | 1.3 | 118 | 142 | 1 | 0.3 |
+| 5,000 | Inkra | warm | 529 | 0.8 | 0.39 | 82 | 106 | 1 | 0.29 |
+| 5,000 | Obsidian | first | 1188 | 11.1 | 10.78 | 499 | 866 | 4 | 0.59 |
+| 5,000 | Obsidian | warm | 1236 | 2 | 1.48 | 374 | 683 | 4 | 0.06 |
+| 50,000 | Inkra | first | 551 | 2.4 | 9.56 | 516 | 602 | 1 | 7.5 |
+| 50,000 | Inkra | warm | 540 | 1 | 0.98 | 261 | 306 | 1 | 0.29 |
+| 50,000 | Obsidian | first | 1296 | 161.8 | 236.43 | 960 | 1620 | 4 | 0.09 |
+| 50,000 | Obsidian | warm | 1323 | 8.1 | 5.41 | 1069 | 1501 | 4 | 0.82 |
 
 What the run shows, and what it does not:
 
-- **Window on screen:** Inkra 141–159 ms, Obsidian 424–476 ms, at every size.
-- **Memory at idle:** Inkra uses 4.4× less at 500 notes, 3.2× less at 5,000,
-  2× less at 50,000. Inkra's figure at 50,000 varies between runs (453–722 MiB);
-  the median is 465.
-- **Work at launch, warm:** Obsidian caches its index; Inkra rebuilds its index
-  on every launch. At 50,000 notes Inkra spends 19.6 CPU-seconds (1.6 s of wall
-  time over every core) against Obsidian's 7.9. At 500 and 5,000 notes Inkra
-  still spends less. A persisted index (roadmap, Index row 6) is the lever.
-- **First open:** at 50,000 notes Obsidian is busy for 64 s and 161
-  CPU-seconds; Inkra for 1.6 s and 15.
+- **Window on screen:** with a warm disk cache, Inkra 84–117 ms and Obsidian
+  294–648 ms over every row. Cold, Inkra 504–551 ms and Obsidian 1,188–1,339 ms. The cold
+  figure is mostly the app and its frameworks read from disk: it barely moves
+  with the vault's size.
+- **Memory at idle, warm:** Inkra uses 4.4× less at 500 notes, 4.5× less at
+  5,000, 3.5× less at 50,000 (261 against 924 MiB).
+- **Work at launch, warm:** at 50,000 notes Inkra spends 0.75 CPU-seconds
+  (0.5 s busy) against Obsidian's 5.42 (10.3 s busy). Cold, 0.98 against 5.41.
+- **First open:** at 50,000 notes Obsidian is busy for 41.9 s and 105.8
+  CPU-seconds warm, 161.8 s and 236.4 cold; Inkra for 1.1 s and 11.5 warm,
+  2.4 s and 9.6 cold.
 - **Idle CPU:** gpui runs its display link on every vsync while the window is
-  visible, about 0.4 % of a core; a covered window stops it, which is why most
-  Inkra rows read 0.01–0.04 %. The runs did not control whether the window was
-  covered. Obsidian's warm 50,000-note rows idle at 5–11 % after its quiet
-  window, which the run measured but did not explain.
-- The first warm Obsidian run at 50,000 was still indexing (busy 161 s); the
-  median of 5 absorbs it.
+  visible, about 0.3 % of a core, which is what most Inkra rows read. The cold
+  50,000-note first open idles at 7.5 % after its quiet window. It is a single
+  run, and the run does not explain it.
+- **Against 2026-09-30** (commit `698daa8`, before the persisted index), Inkra
+  at 50,000 notes, warm: CPU until idle 19.58 → 0.75 s, busy 1.6 → 0.5 s,
+  memory at idle 465 → 261 MiB, window on screen 154 → 114 ms. Obsidian moved
+  from 1.12.7 to 1.14.5 in between: its warm window went from 426 to 294 ms,
+  its memory went from 909 to 924 MiB.
 
 ## Persisted index baseline (2026-11-06)
 
@@ -236,8 +344,8 @@ launch: first frame 97.1ms, session read 91.17µs, root 127.9ms, scanned 217.5ms
 `read_search --quick`, where `resident` now searches texts held by the bench, not by the index:
 resident 7.44 ms (7.44 to 7.47 ms), `read4` 14.31 ms (14.29 to 14.31 ms), under the 57.72 ms gate.
 
-Cold figures (`--cold`, `sudo -n purge` before each run) are not here. The agent has no passwordless
-`sudo`, so the user runs them and adds the lines to this section.
+Cold figures (`--cold`, `sudo -n purge` before each run) are in "Architecture audit A/B
+(2026-11-08)".
 
 Slice 3c adds `cargo bench -p inkra-index --bench persist -- --quick`: a synthetic index of 50,000
 notes of 1 to 5 KB, one link each, words merged; an 8,709,437-byte file. `persist/decode` median
@@ -276,4 +384,63 @@ The file is 6,921,909 bytes at 50,000 notes. A write costs the encode plus the d
 `persist/encode --quick` takes 9.87 ms (9.82 to 9.88 ms) on the bench's synthetic 8.7 MB index. No
 log line times the replace, so a throwaway probe outside the app wrote the file's bytes to a temp,
 called `F_FULLFSYNC` and renamed it, 7 times: 6.0 to 20.6 ms, median 9.9 ms. A write is about
-20 ms, off the foreground. Cold figures stay user-run, as slice 0 records.
+20 ms, off the foreground. Cold figures are in the next section.
+
+## Architecture audit A/B (2026-11-08)
+
+The architecture audit (#165–#179) was meant to cost nothing on the launch path, and this checks
+it. #171 (one sealed cache buffer) and #177 (seed sets as bitsets) touch the decode and the seed.
+The A/B compares `2a30f5c6`, the persisted index before the audit, with `fb0405bb`. `fb0405bb` is
+main `611f7faa` plus the benchmark scripts; `611f7faa` also adds code blocks, file kinds and
+horizontal scroll. Same machine as Results, same run.
+
+`scripts/bench-refresh.sh` primes one `HOME` per build with a first launch that writes the cache
+file. It then runs `scripts/launch-figure.sh` on the 50,000-note `startup_vault` vault, alternating
+the builds, 5 runs each. Cold runs `sudo purge` first.
+
+| Median of 5 | warm, before | warm, after | cold, before | cold, after |
+|---|---:|---:|---:|---:|
+| first frame | 85.0 ms | 83.6 ms | 547.4 ms | 551.3 ms |
+| cache decoded | 100.0 ms | 106.6 ms | 558.9 ms | 652.2 ms |
+| seed turn | 2.44 ms | 1.88 ms | 1.83 ms | 1.77 ms |
+| indexed | 195.7 ms | 192.2 ms | 686.6 ms | 739.4 ms |
+| rss | 155,632 kB | 158,080 kB | 159,648 kB | 158,080 kB |
+
+Warm, no difference stands above the noise. Cold, `indexed` runs fall in two groups for both
+builds: 662 to 690 ms and 739 to 774 ms. Three after runs fell in the slower group, against two
+before runs, so the cold medians differ by one run.
+`phys_footprint` is bimodal as in the slices above (112 to 119 MB or 204 to 232 MB), so its median
+is not compared. Cold costs about 460 ms before the first frame, probably the app and its
+frameworks read from disk. From the first frame to `indexed`, cold adds about 30 ms over warm
+before and about 80 ms after. Within each group the after build is no slower, so the group split
+accounts for this 50 ms difference.
+
+Warm:
+
+```
+before launch: first frame 75.3ms, session read 121.29µs, root 100.8ms, scanned 183.3ms, names ready 212.5ms, cache decoded 100.0ms, seed turn 2.52ms, indexed 212.50ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.5ms) | rss 155328 kB | phys_footprint 205374280 B
+after launch: first frame 83.5ms, session read 120.17µs, root 107.5ms, scanned 168.0ms, names ready 190.7ms, cache decoded 106.6ms, seed turn 1.88ms, indexed 190.70ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 158080 kB | phys_footprint 210797384 B
+before launch: first frame 85.0ms, session read 97.50µs, root 106.7ms, scanned 168.0ms, names ready 195.7ms, cache decoded 105.9ms, seed turn 1.62ms, indexed 195.72ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.6ms) | rss 155536 kB | phys_footprint 115360584 B
+after launch: first frame 79.9ms, session read 103.54µs, root 101.7ms, scanned 161.9ms, names ready 184.1ms, cache decoded 100.9ms, seed turn 2.47ms, indexed 184.12ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.5ms) | rss 153984 kB | phys_footprint 203932488 B
+before launch: first frame 81.9ms, session read 118.50µs, root 104.3ms, scanned 165.6ms, names ready 193.3ms, cache decoded 103.1ms, seed turn 2.43ms, indexed 193.31ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.4ms) | rss 156192 kB | phys_footprint 204833608 B
+after launch: first frame 83.6ms, session read 94.04µs, root 108.7ms, scanned 170.8ms, names ready 193.4ms, cache decoded 107.8ms, seed turn 1.82ms, indexed 193.37ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 158272 kB | phys_footprint 211239752 B
+before launch: first frame 86.7ms, session read 97.25µs, root 93.6ms, scanned 154.9ms, names ready 182.8ms, cache decoded 92.7ms, seed turn 2.44ms, indexed 182.83ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.4ms) | rss 155888 kB | phys_footprint 111821640 B
+after launch: first frame 87.2ms, session read 96.17µs, root 109.6ms, scanned 169.3ms, names ready 192.2ms, cache decoded 93.0ms, seed turn 2.81ms, indexed 192.17ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.8ms) | rss 153968 kB | phys_footprint 203653960 B
+before launch: first frame 85.6ms, session read 96.79µs, root 107.6ms, scanned 169.0ms, names ready 196.7ms, cache decoded 91.3ms, seed turn 2.46ms, indexed 196.69ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.5ms) | rss 155632 kB | phys_footprint 205833032 B
+after launch: first frame 88.2ms, session read 87.46µs, root 115.3ms, scanned 176.0ms, names ready 197.8ms, cache decoded 114.0ms, seed turn 1.59ms, indexed 197.76ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.6ms) | rss 158624 kB | phys_footprint 232145736 B
+```
+
+Cold:
+
+```
+before launch: first frame 547.4ms, session read 647.08µs, root 559.8ms, scanned 656.2ms, names ready 686.6ms, cache decoded 558.9ms, seed turn 1.96ms, indexed 686.58ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.0ms) | rss 159488 kB | phys_footprint 211272520 B
+after launch: first frame 534.0ms, session read 1.09ms, root 545.7ms, scanned 636.1ms, names ready 661.7ms, cache decoded 544.6ms, seed turn 1.87ms, indexed 661.66ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 158080 kB | phys_footprint 210305864 B
+before launch: first frame 547.4ms, session read 596.58µs, root 559.1ms, scanned 654.8ms, names ready 684.7ms, cache decoded 558.2ms, seed turn 2.78ms, indexed 684.70ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 2.8ms) | rss 155808 kB | phys_footprint 205112136 B
+after launch: first frame 575.5ms, session read 1.10ms, root 679.1ms, scanned 741.3ms, names ready 764.6ms, cache decoded 677.3ms, seed turn 1.88ms, indexed 764.64ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.9ms) | rss 158336 kB | phys_footprint 118965088 B
+before launch: first frame 539.1ms, session read 610.46µs, root 634.4ms, scanned 717.4ms, names ready 747.5ms, cache decoded 633.0ms, seed turn 1.83ms, indexed 747.52ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 160160 kB | phys_footprint 119259976 B
+after launch: first frame 561.1ms, session read 1.02ms, root 659.7ms, scanned 724.5ms, names ready 746.9ms, cache decoded 657.7ms, seed turn 1.74ms, indexed 746.90ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 157872 kB | phys_footprint 210813768 B
+before launch: first frame 539.3ms, session read 602.79µs, root 551.2ms, scanned 644.1ms, names ready 674.4ms, cache decoded 550.2ms, seed turn 1.76ms, indexed 674.40ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 159648 kB | phys_footprint 211288904 B
+after launch: first frame 551.3ms, session read 866.04µs, root 653.8ms, scanned 716.2ms, names ready 739.4ms, cache decoded 652.2ms, seed turn 1.77ms, indexed 739.43ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 158400 kB | phys_footprint 211632968 B
+before launch: first frame 580.3ms, session read 1.05ms, root 683.9ms, scanned 745.0ms, names ready 774.2ms, cache decoded 682.9ms, seed turn 1.70ms, indexed 774.23ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 159696 kB | phys_footprint 211993416 B
+after launch: first frame 510.4ms, session read 920.42µs, root 605.3ms, scanned 666.7ms, names ready 689.5ms, cache decoded 603.3ms, seed turn 1.76ms, indexed 689.54ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 156656 kB | phys_footprint 210633544 B
+```
