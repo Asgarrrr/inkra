@@ -75,6 +75,8 @@ pub(crate) struct EditorView {
     pinned: Option<ParkedSelection>,
     is_selecting: bool,
     viewport: Viewport,
+    /// Where prepaint last put the text: a reused layout can keep an older margin (D13).
+    place: Option<element::Place>,
     /// Every layout holds a clone: never replaced, or a drawn layout would read a stale table.
     scrolls: layout::BlockScrolls,
     /// The pointer's gesture, not the note's: `open_buffer` keeps it.
@@ -98,6 +100,7 @@ impl EditorView {
             pinned: None,
             is_selecting: false,
             viewport: Viewport::default(),
+            place: None,
             scrolls: layout::BlockScrolls::default(),
             gesture: block_scroll::Gesture::default(),
             bar_expiry: None,
@@ -243,7 +246,8 @@ impl EditorView {
         let Some(last) = self.input.last_layout().cloned() else {
             return;
         };
-        let layout = self.layout_at(last.style(), last.wrap_width(), last.margin(), window, cx);
+        let margin = self.place.map_or(last.margin(), |place| place.margin);
+        let layout = self.layout_at(last.style(), last.wrap_width(), margin, window, cx);
         if !Rc::ptr_eq(&layout, &last) {
             self.input.set_layout(layout);
         }

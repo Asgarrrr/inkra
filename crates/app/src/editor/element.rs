@@ -130,15 +130,9 @@ impl Element for TextElement {
             window.request_measured_layout(style, move |known, available, window, cx| {
                 let (definite, reported) = widths(known.width, available.width, widest);
                 let editor = editor.read(cx);
-                // An intrinsic query asks only for a width, so it reuses the last one's place.
+                // An intrinsic query asks only for a width, so it reuses the last painted place.
                 let place = definite.map_or_else(
-                    || {
-                        editor
-                            .input
-                            .last_layout()
-                            .and_then(|layout| Place::of(layout))
-                            .unwrap_or_else(|| inset.place(widest))
-                    },
+                    || editor.place.unwrap_or_else(|| inset.place(widest)),
                     |element| inset.place(element),
                 );
                 let element = definite.unwrap_or(place.width + place.margin * 2.);
@@ -177,6 +171,7 @@ impl Element for TextElement {
 
         let applied = window.element_offset().y;
         let moved = self.editor.update(cx, |editor, cx| {
+            editor.place = Some(place);
             let cursor = editor.cursor();
             let resolution = editor.viewport.resolve(text.origin.y, &layout, cursor);
             // Before the hitboxes and the quads, so this frame paints the caret it revealed.
@@ -397,14 +392,6 @@ pub(super) struct Place {
 }
 
 impl Place {
-    /// Where `layout` was shaped for; `None` for one that never wraps.
-    fn of(layout: &DocumentLayout) -> Option<Self> {
-        Some(Self {
-            margin: layout.margin(),
-            width: layout.wrap_width()?,
-        })
-    }
-
     fn bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
         Bounds::new(
             point(element.origin.x + self.margin, element.origin.y),

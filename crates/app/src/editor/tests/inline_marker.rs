@@ -128,3 +128,20 @@ fn a_resize_in_the_band_ignores_a_heading_in_a_quote(cx: &mut TestAppContext) {
     resize_to(window, &mut cx, 30.);
     assert_eq!(shape_count() - before, 0, "`> # q` never hangs");
 }
+
+/// The resize reused a layout with no revealed marker; the reveal must shape at the new margin.
+#[gpui::test]
+fn a_reveal_after_a_resize_in_the_band_shapes_once(cx: &mut TestAppContext) {
+    let (window, mut cx) = with_margin(cx, "#### T\nbody", 70.);
+    cx.simulate_keystrokes("cmd-up down");
+    resize_to(window, &mut cx, 50.);
+    let before = shape_count();
+    cx.simulate_keystrokes("up");
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 1);
+    window
+        .update(&mut cx, |view, _, _| {
+            assert_eq!(view.input.last_layout().unwrap().shown(0), "#### T");
+        })
+        .unwrap();
+}

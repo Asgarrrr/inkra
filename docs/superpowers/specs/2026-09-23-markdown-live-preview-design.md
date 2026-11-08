@@ -624,8 +624,10 @@ alone hands a second measure the first one's layout, hanging where it should be
 inline. `Stash::take` matches the nearest element width, and prepaint places
 the text at that entry's margin; it never recomputes the margin from the
 snapped bounds, so measure and paint agree on hang or inline. `reshape` and an
-intrinsic query take `margin` from `last_layout`, as they take `wrap_width`, so
-a keystroke on a heading in the band still shapes once (`shapes.rs`). A resize across a marker's width toggles that
+intrinsic query take `margin` from the place prepaint last painted at, kept on
+`EditorView`, never from `last_layout`: a layout reused across a resize keeps
+its older margin. So a keystroke on a heading in the band shapes once, even the
+first reveal after such a resize (`inline_marker.rs`). A resize across a marker's width toggles that
 heading between hanging and inline; no hysteresis, since it happens only with the caret on a heading
 during a resize.
 
