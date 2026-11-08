@@ -47,10 +47,11 @@ Read from the reference's theme variables (`obsidian eval`, Flexoki dark).
 The reference's chrome is translucent: `#100f0f` at 70 % over the window's
 vibrancy, so its colour on screen depends on the desktop behind it. Inkra does
 the same on the user's request (2026-11-04): the window is
-`WindowBackgroundAppearance::Blurred` and the chrome `#181717` at 65 %. It was
+`WindowBackgroundAppearance::Blurred` and the chrome `#181717` at 85 %. It was
 95 % first, a hint of the desktop without discerning it; on 2026-11-08 the user
 found the translucency barely visible, and 65 % was chosen from captures at 85,
-75 and 60 %. The light theme stays at 95 %. The base was matched by the user's
+75 and 60 %; later that day 65 % read too transparent, then 75 % and 80 %, and
+85 % replaced them. The light theme stays at 95 %. The base was matched by the user's
 eye beside the reference: `#201f1f`, tuned to the reference's measured
 `#2a2929`, read too light. The note and the active tab stay opaque. Compare
 on a full-screen capture: a one-window capture (`screencapture -l`) draws the
@@ -60,7 +61,7 @@ blur over nothing. An off-screen shot has no blur either, so the stage paints
 | Token | Value | Replaces |
 |---|---|---|
 | note, active tab | `#100f0f` | `editor_background` `#1e1e1e`, `tab_active_background` |
-| chrome | `#181717` at 65 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
+| chrome | `#181717` at 85 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
 | hairline | `#282726` | `tab_rule`, the panel header rule |
 | hover, selected row | `rgba(254,252,240,.05)` over the chrome | the white overlays, on chrome only |
 | text | `#cecdc3` | `sidebar_text`, `tab_text` |
@@ -77,9 +78,10 @@ values unless the comparison shows a clash; record any change here.
   button starts 88 px in, as the reference's container padding.
 - The sidebar's segment is the sidebar's width; with the backlinks shown, a
   segment as wide as them ends the row and holds their toggle at its right end;
-  the tab segment fills the rest. One hairline under the tab segment only,
-  broken by the active tab: both side panels run unbroken to the window's top,
-  as the reference's (user request, 2026-11-04).
+  the tab segment fills the rest. One hairline under the whole row, broken by
+  the active tab: it carries the tabs' floor over both docks, so the row reads
+  as one band (user request, 2026-11-08; until then the side panels ran
+  unbroken to the window's top, as the reference's).
 - Backlinks hidden: their toggle ends the tab segment.
 - Sidebar hidden: the traffic lights' padding and the sidebar toggle lead the
   tab segment, as in S3's `panels-hidden`.
