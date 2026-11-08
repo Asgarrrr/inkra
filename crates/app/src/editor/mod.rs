@@ -243,7 +243,7 @@ impl EditorView {
         let Some(last) = self.input.last_layout().cloned() else {
             return;
         };
-        let layout = self.layout_at(last.style(), last.wrap_width(), window, cx);
+        let layout = self.layout_at(last.style(), last.wrap_width(), last.margin(), window, cx);
         if !Rc::ptr_eq(&layout, &last) {
             self.input.set_layout(layout);
         }
@@ -254,6 +254,7 @@ impl EditorView {
         &self,
         style: &TextStyle,
         wrap_width: Option<Pixels>,
+        margin: Pixels,
         window: &mut Window,
         cx: &App,
     ) -> Rc<layout::DocumentLayout> {
@@ -266,6 +267,7 @@ impl EditorView {
             marked: marked.as_ref(),
             style,
             wrap_width,
+            margin,
             code_block_wrap: theme::code_block_wrap(cx),
             theme: theme::current(cx),
             scrolls: &self.scrolls,

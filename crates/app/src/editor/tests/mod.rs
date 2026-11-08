@@ -22,6 +22,7 @@ mod follow;
 mod gutter;
 mod hanging;
 mod headings;
+mod inline_marker;
 mod margin;
 mod markdown;
 mod paint;
@@ -111,6 +112,8 @@ pub(crate) mod geometry {
     pub(crate) const PADDING: f32 = 16.;
     /// `###### ` headless: seven glyphs of 0.6 × 18 px, 75.6 rounded up.
     pub(crate) const HEADING_MARGIN: f32 = 76.;
+    /// `theme::EDITOR_MARGIN_MIN`: what a narrow pane keeps on each side of the text.
+    pub(crate) const MARGIN_FLOOR: f32 = 16.;
     pub(crate) const TEXT_TOP: f32 = PADDING;
     pub(crate) const LINE_HEIGHT: f32 = 28.;
     /// `theme::heading_metrics(1)`'s line height.

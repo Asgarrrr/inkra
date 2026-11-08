@@ -3,8 +3,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
-use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Span, is_active};
-use inkra_text::ByteOffset;
+use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Markdown, Span, is_active};
+use inkra_text::{Buffer, ByteOffset};
 
 use super::blocks::{Blocks, Labels};
 use super::prefix::{GutterCarry, Hanging, Prefix, indent};
@@ -101,6 +101,7 @@ pub(crate) fn shape_document(
         code_block_wrap,
         theme,
         scrolls,
+        ..
     } = inputs;
     let mut styles = RunStyles::new(style, theme);
     let body_size = style.font_size.to_pixels(window.rem_size());
@@ -125,7 +126,6 @@ pub(crate) fn shape_document(
             let range = start..start + text.len();
             let heading = line_holder(&mut headings, &range, |heading| &heading.range);
             let block = line_holder(&mut code_blocks, &range, |block| &block.range);
-            let opening = heading_opening(heading, &range);
             let (font_size, row_height) = line_metrics(heading, block, (body_size, body_height));
             let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
             let line_conceals =
@@ -139,10 +139,9 @@ pub(crate) fn shape_document(
             let (prefix, text_conceals) = line_prefix(
                 gutter,
                 &mut carry,
-                opening,
+                heading_opening(heading, &range, font_size, inputs.margin),
                 line_conceals,
                 selection,
-                font_size,
                 |range, size| show(range, text, line_spans, marked, size, &mut styles, window),
             );
             let display = display_line(
@@ -185,6 +184,7 @@ pub(crate) fn shape_document(
         body_row_height: body_height,
         style: style.clone(),
         wrap_width,
+        margin: inputs.margin,
         code_block_wrap,
         theme: Arc::clone(theme),
         version: buffer.version(),
@@ -211,15 +211,53 @@ fn carry_or_shape<'p>(
     }
 }
 
+/// A heading's marker that opens its line, at the heading's size, with the room left of the text.
+struct Opening {
+    range: Range<ByteOffset>,
+    font_size: Pixels,
+    margin: Pixels,
+}
+
 /// The marker that opens the line as a margin. Inside a container it keeps its inline conceal:
 /// no margin exists there.
 fn heading_opening(
     heading: Option<&Heading>,
     range: &Range<ByteOffset>,
-) -> Option<Range<ByteOffset>> {
+    font_size: Pixels,
+    margin: Pixels,
+) -> Option<Opening> {
     heading
         .and_then(|heading| heading.marker.clone())
         .filter(|marker| marker.start == range.start)
+        .map(|range| Opening {
+            range,
+            font_size,
+            margin,
+        })
+}
+
+/// Whether a revealed heading marker opens its line, so `margin` decides whether it hangs (D13).
+/// Only touched conceals reach the heading lookup, and a selection touches few.
+pub(super) fn reads_margin(
+    buffer: &Buffer,
+    markdown: &Markdown,
+    selection: &Range<ByteOffset>,
+) -> bool {
+    let text = buffer.text().as_bytes();
+    markdown
+        .conceals
+        .iter()
+        .filter(|conceal| !is_active(conceal, selection))
+        .filter(|conceal| {
+            let start = conceal.marker.start.get();
+            start == 0 || text[start - 1] == b'\n'
+        })
+        .any(|conceal| {
+            markdown
+                .headings
+                .iter()
+                .any(|heading| heading.marker.as_ref() == Some(&conceal.marker))
+        })
 }
 
 /// A heading line takes its level's size and row height; a block line the code size in the body's
@@ -335,19 +373,19 @@ fn line_items<'a, T>(rest: &mut &'a [T], on_line: impl Fn(&T) -> bool) -> &'a [T
 }
 
 /// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
-/// prefix and the conceals left for the text.
+/// prefix and the conceals left for the text. A revealed marker wider than `margin` gets no prefix
+/// and leaves its conceal to the text, so it shows inline (live-preview spec, D13).
 fn line_prefix<'a, 'c>(
     gutter: Option<(&Gutter, &'a str)>,
     carry: &mut GutterCarry<'a>,
-    opening: Option<Range<ByteOffset>>,
+    opening: Option<Opening>,
     conceals: &'c [Conceal],
     selection: &Range<ByteOffset>,
-    font_size: Pixels,
     mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
 ) -> (Option<Prefix>, &'c [Conceal]) {
     let own = gutter
         .map(|(gutter, _)| &gutter.range)
-        .or(opening.as_ref())
+        .or(opening.as_ref().map(|opening| &opening.range))
         .map_or(0, |prefix| {
             conceals.partition_point(|conceal| conceal.marker.start < prefix.end)
         });
@@ -360,21 +398,29 @@ fn line_prefix<'a, 'c>(
             own.len() <= 1
                 && own
                     .iter()
-                    .all(|conceal| Some(&conceal.marker) == opening.as_ref()),
+                    .all(|conceal| Some(&conceal.marker) == opening.as_ref().map(|o| &o.range)),
     });
     let revealed = own.iter().any(|conceal| !is_active(conceal, selection));
-    let prefix = match gutter {
-        Some((gutter, source)) => Some(Prefix::Gutter(
-            carry.layout(gutter, source, revealed, &mut shape),
-        )),
-        None => opening.map(|range| {
-            Prefix::Margin(Hanging {
-                shaped: revealed.then(|| shape(&range, font_size)),
-                range,
-            })
-        }),
+    if let Some((gutter, source)) = gutter {
+        let layout = carry.layout(gutter, source, revealed, &mut shape);
+        return (Some(Prefix::Gutter(layout)), rest);
+    }
+    let Some(Opening {
+        range,
+        font_size,
+        margin,
+    }) = opening
+    else {
+        return (None, rest);
     };
-    (prefix, rest)
+    let shaped = revealed.then(|| shape(&range, font_size));
+    if shaped
+        .as_ref()
+        .is_some_and(|shaped| shaped.width() > margin)
+    {
+        return (None, conceals);
+    }
+    (Some(Prefix::Margin(Hanging { range, shaped })), rest)
 }
 
 /// The prefix never enters the shaped text, so no reveal can re-wrap its line.

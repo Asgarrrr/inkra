@@ -27,7 +27,7 @@ use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
 use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset, Version};
 use prefix::Prefix;
-use shape::LineShape;
+use shape::{LineShape, reads_margin};
 
 use crate::theme::Theme;
 
@@ -71,6 +71,8 @@ pub(crate) struct LayoutInputs<'a> {
     pub(crate) marked: Option<&'a Range<ByteOffset>>,
     pub(crate) style: &'a TextStyle,
     pub(crate) wrap_width: Option<Pixels>,
+    /// The room left of the text: a revealed heading marker wider than it shows inline (D13).
+    pub(crate) margin: Pixels,
     /// Block lines wrap at the column too, rather than scroll.
     pub(crate) code_block_wrap: bool,
     pub(crate) theme: &'a Arc<Theme>,
@@ -93,6 +95,7 @@ pub(crate) struct DocumentLayout {
     /// What this was shaped with; outside a draw, `window.text_style()` is the default.
     style: TextStyle,
     wrap_width: Option<Pixels>,
+    margin: Pixels,
     code_block_wrap: bool,
     /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
     theme: Arc<Theme>,
@@ -111,6 +114,10 @@ impl DocumentLayout {
         self.wrap_width
     }
 
+    pub(crate) fn margin(&self) -> Pixels {
+        self.margin
+    }
+
     pub(crate) fn theme(&self) -> &Arc<Theme> {
         &self.theme
     }
@@ -120,6 +127,8 @@ impl DocumentLayout {
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
         self.version == inputs.buffer.version()
             && self.wrap_width == inputs.wrap_width
+            && (self.margin == inputs.margin
+                || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
             && self.code_block_wrap == inputs.code_block_wrap
             && self.marked.as_ref() == inputs.marked
             && self.style == *inputs.style

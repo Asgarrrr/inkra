@@ -325,6 +325,11 @@ const CATALOGUE: &[Scene] = &[
         open: splits::tab_menu,
     },
     Scene {
+        name: "split-narrow-heading",
+        shows: "the split-right scene with `draft` in the right group and the caret on its H2: the column keeps 16 px each side, and `## ` shows dimmed inline before the heading's text, which shifts right by it; the left group's `index` heading shows no marker",
+        open: splits::narrow_heading,
+    },
+    Scene {
         name: "split-down",
         shows: "two note columns of equal height stacked under the title row, a 1 px hairline between them; the title row holds the upper group's strip, showing `index`, its active tab muted; the lower group starts with a 34 px header holding its own strip and `+`, showing `reading` in the note colour, the caret in it; `reading` highlighted in the sidebar",
         open: splits::down,

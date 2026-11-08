@@ -148,6 +148,9 @@ pub(crate) fn heading_metrics(level: HeadingLevel) -> HeadingMetrics {
 
 pub(crate) const BODY_COLUMN_CHARS: f32 = 70.;
 
+/// What a narrow pane keeps on each side of the text (live-preview spec, D13).
+pub(crate) const EDITOR_MARGIN_MIN: Pixels = px(16.);
+
 /// Ships with macOS, the only platform today; a second platform makes this per-platform.
 pub(crate) const CODE_FONT_FAMILY: &str = "Menlo";
 

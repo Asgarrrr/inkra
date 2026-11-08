@@ -166,6 +166,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
                 marked: marked.as_ref(),
                 style: &style,
                 wrap_width: None,
+                margin: px(0.),
                 code_block_wrap: false,
                 theme: builtin::dark(),
                 scrolls: &BlockScrolls::default(),

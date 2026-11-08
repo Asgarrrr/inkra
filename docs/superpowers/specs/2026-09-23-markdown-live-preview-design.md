@@ -607,13 +607,13 @@ Accepted.
 
 **The cache.** In the band where the margins shrink, the wrap width stays the
 column while `margin` changes, so `wrap_width` alone no longer keys the layout.
-`is_shaped_from` adds: `margin` equal, or no touched element is a heading
-whose `marker.start` is its line's start. `Conceal` has no kind, so the check
-reads `markdown.headings`; `touched` is the predicate `line_prefix` reveals by,
-so the two cannot disagree. `> # q` never hangs and does not count. Without a
-revealed marker no line depends on `margin`, so a resize in that band reshapes
-nothing. With one, a resize
-reshapes, and `carry_or_shape` carries every line whose display text did not
+`is_shaped_from` adds: `margin` equal, or the layout read no margin.
+`reads_margin` answers the second: some touched conceal starts a line and is a
+heading's marker, so a revealed marker can hang or show inline. The touched
+elements already match when the margin is compared, so the check reads the new
+inputs. `> # q` starts no line and does not count. Without such a marker no line
+depends on `margin`, so a resize in that band reshapes nothing. With one, a
+resize reshapes, and `carry_or_shape` carries every line whose display text did not
 change.
 
 **Every width source carries the margin.** `TextElement`'s per-frame stash
@@ -621,12 +621,12 @@ keys each layout by the `(text width, margin)` it was measured for, never by
 the layout's own fields: a reused `last_layout` keeps an older `margin`. In the
 band every entry has the column as its text width, so a lookup by wrap width
 alone hands a second measure the first one's layout, hanging where it should be
-inline. `take_measured` matches the nearest element width, and prepaint places
+inline. `Stash::take` matches the nearest element width, and prepaint places
 the text at that entry's margin; it never recomputes the margin from the
 snapped bounds, so measure and paint agree on hang or inline. `reshape` and an
 intrinsic query take `margin` from `last_layout`, as they take `wrap_width`, so
-a keystroke on a heading in the band still shapes once (`shapes.rs`). A resize across a marker's width toggles that heading between hanging
-and inline; no hysteresis, since it happens only with the caret on a heading
+a keystroke on a heading in the band still shapes once (`shapes.rs`). A resize across a marker's width toggles that
+heading between hanging and inline; no hysteresis, since it happens only with the caret on a heading
 during a resize.
 
 Rejected:

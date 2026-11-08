@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gpui::{
     App, Bounds, Context, CursorStyle, Element, ElementId, Entity, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, InteractiveElement, IntoElement, LayoutId, Pixels, Render, Style,
-    Styled, Window, actions, prelude::*, relative,
+    Styled, Window, actions, prelude::*, px, relative,
 };
 use inkra_editor::Selection;
 use inkra_markdown::Markdown;
@@ -154,6 +154,7 @@ impl Element for FieldElement {
             marked: marked.as_ref(),
             style: &style,
             wrap_width: None,
+            margin: px(0.),
             code_block_wrap: false,
             theme: theme::current(cx),
             scrolls: &BlockScrolls::default(),

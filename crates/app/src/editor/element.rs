@@ -40,9 +40,52 @@ impl IntoElement for TextElement {
     }
 }
 
-/// Every layout shaped this frame, keyed by width: taffy may call the measure
-/// closure several times and answer its final pass from a cache, so the last call isn't necessarily final.
-type Stash = Rc<RefCell<Vec<Rc<DocumentLayout>>>>;
+/// Every layout shaped this frame: taffy may call the measure closure several times and answer
+/// its final pass from a cache, so the last call isn't necessarily final.
+#[derive(Clone, Default)]
+pub(super) struct Stash(Rc<RefCell<Vec<Measured>>>);
+
+/// Keyed by the place it was measured for, never by the layout's fields: a reused `last_layout`
+/// keeps the margin it was shaped with (live-preview spec, D13).
+struct Measured {
+    element: Pixels,
+    place: Place,
+    layout: Rc<DocumentLayout>,
+}
+
+impl Stash {
+    /// The height of the layout measured for `place`, shaping it on the first ask.
+    pub(super) fn measure(
+        &self,
+        element: Pixels,
+        place: Place,
+        shape: impl FnOnce() -> Rc<DocumentLayout>,
+    ) -> Pixels {
+        let mut stash = self.0.borrow_mut();
+        if let Some(measured) = stash.iter().find(|measured| measured.place == place) {
+            return measured.layout.height();
+        }
+        let layout = shape();
+        let height = layout.height();
+        stash.push(Measured {
+            element,
+            place,
+            layout,
+        });
+        height
+    }
+
+    /// The layout measured nearest the element's width — not equal, since bounds are
+    /// pixel-snapped after taffy measured them — and the place it was measured for.
+    pub(super) fn take(&self, element: Pixels) -> Option<(Place, Rc<DocumentLayout>)> {
+        let mut stash = self.0.borrow_mut();
+        let distance = |measured: &Measured| f32::from((measured.element - element).abs());
+        let index = (0..stash.len())
+            .min_by(|&a, &b| distance(&stash[a]).total_cmp(&distance(&stash[b])))?;
+        let measured = stash.swap_remove(index);
+        Some((measured.place, measured.layout))
+    }
+}
 
 impl Element for TextElement {
     type RequestLayoutState = (Stash, Inset);
@@ -87,27 +130,21 @@ impl Element for TextElement {
             window.request_measured_layout(style, move |known, available, window, cx| {
                 let (definite, reported) = widths(known.width, available.width, widest);
                 let editor = editor.read(cx);
-                // An intrinsic query asks only for a width, so it reuses the last one's layout.
-                let text = definite.map_or_else(
+                // An intrinsic query asks only for a width, so it reuses the last one's place.
+                let place = definite.map_or_else(
                     || {
                         editor
                             .input
                             .last_layout()
-                            .and_then(|layout| layout.wrap_width())
-                            .unwrap_or_else(|| inset.text_width(widest))
+                            .and_then(|layout| Place::of(layout))
+                            .unwrap_or_else(|| inset.place(widest))
                     },
-                    |width| inset.text_width(width),
+                    |element| inset.place(element),
                 );
-                let mut stash = measured.borrow_mut();
-                if let Some(layout) = stash
-                    .iter()
-                    .find(|layout| layout.wrap_width() == Some(text))
-                {
-                    return size(reported, layout.height());
-                }
-                let layout = editor.layout_at(&text_style, Some(text), window, cx);
-                let height = layout.height();
-                stash.push(layout);
+                let element = definite.unwrap_or(place.width + place.margin * 2.);
+                let height = measured.measure(element, place, || {
+                    editor.layout_at(&text_style, Some(place.width), place.margin, window, cx)
+                });
                 size(reported, height)
             });
         (layout_id, (stash, inset))
@@ -122,16 +159,21 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let mut text = inset.text_bounds(bounds);
-        let layout = take_measured(stash, text.size.width).unwrap_or_else(|| {
+        // The measured place, never one recomputed from the snapped bounds: both must agree on
+        // which markers hang (D13).
+        let (place, layout) = stash.take(bounds.size.width).unwrap_or_else(|| {
             // One frame stale height; corrects next frame. gpui's own `Text`
             // panics here (`elements/text.rs:782-790`) — a note editor must not.
-            log::warn!("no layout measured at width {}", text.size.width);
+            log::warn!("no layout measured at width {}", bounds.size.width);
+            let place = inset.place(bounds.size.width);
             let style = window.text_style();
-            self.editor
-                .read(cx)
-                .layout_at(&style, Some(text.size.width), window, cx)
+            let layout =
+                self.editor
+                    .read(cx)
+                    .layout_at(&style, Some(place.width), place.margin, window, cx);
+            (place, layout)
         });
+        let mut text = place.bounds(bounds);
 
         let applied = window.element_offset().y;
         let moved = self.editor.update(cx, |editor, cx| {
@@ -294,20 +336,6 @@ fn widths(
     (definite, reported)
 }
 
-/// The measured layout nearest the element's width — not equal, since bounds
-/// are pixel-snapped after taffy measured them.
-fn take_measured(stash: &Stash, width: Pixels) -> Option<Rc<DocumentLayout>> {
-    let mut stash = stash.borrow_mut();
-    let distance = |layout: &DocumentLayout| {
-        layout.wrap_width().map_or(f32::INFINITY, |measured| {
-            f32::from((measured - width).abs())
-        })
-    };
-    let index =
-        (0..stash.len()).min_by(|&a, &b| distance(&stash[a]).total_cmp(&distance(&stash[b])))?;
-    Some(stash.swap_remove(index))
-}
-
 pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
     let font_size = style.font_size.to_pixels(window.rem_size());
     let font = window.text_system().resolve_font(&style.font());
@@ -337,24 +365,50 @@ pub(super) fn margin_width(style: &TextStyle, theme: &Theme, window: &mut Window
         .ceil()
 }
 
-/// Where the text sits in the element (live-preview spec, D12).
+/// Where the text sits in the element (live-preview spec, D12, D13).
 #[derive(Clone, Copy)]
 pub(super) struct Inset {
     column: Pixels,
+    /// The widest heading marker: the margin of a pane wide enough for it.
     margin: Pixels,
 }
 
 impl Inset {
-    /// The parent centres the element, capped at `column + 2 × margin`, so the text starts one
-    /// margin in and ends one margin short; a pane narrower than both margins leaves it no width.
-    fn text_width(self, element: Pixels) -> Pixels {
-        self.column.min(element - self.margin * 2.).max(px(0.))
+    /// The parent centres the element, capped at `column + 2 × margin`; narrower, both margins
+    /// shrink together to `EDITOR_MARGIN_MIN`, then the text narrows between them.
+    fn place(self, element: Pixels) -> Place {
+        let margin = ((element - self.column) / 2.)
+            .floor()
+            .max(theme::EDITOR_MARGIN_MIN)
+            .min(self.margin);
+        Place {
+            margin,
+            width: self.column.min(element - margin * 2.).max(px(0.)),
+        }
+    }
+}
+
+/// The text's offset in the element and its width; a whole-pixel margin keeps the text's
+/// origin where the element's is snapped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Place {
+    pub(super) margin: Pixels,
+    pub(super) width: Pixels,
+}
+
+impl Place {
+    /// Where `layout` was shaped for; `None` for one that never wraps.
+    fn of(layout: &DocumentLayout) -> Option<Self> {
+        Some(Self {
+            margin: layout.margin(),
+            width: layout.wrap_width()?,
+        })
     }
 
-    fn text_bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
+    fn bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
         Bounds::new(
             point(element.origin.x + self.margin, element.origin.y),
-            size(self.text_width(element.size.width), element.size.height),
+            size(self.width, element.size.height),
         )
     }
 }
