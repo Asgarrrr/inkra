@@ -7,7 +7,7 @@ Written in Rust on [GPUI](https://github.com/zed-industries/zed/tree/main/crates
 the GPU-rendered UI framework of the Zed editor. No Electron, no web view:
 one 17 MB binary, one process.
 
-![Inkra: the file tree, a note, and its backlinks](docs/assets/screenshot.png)
+![Inkra: the file tree, a note, and its backlinks](docs/assets/screenshot.webp)
 
 > **Status: early.** Inkra is usable day to day but young. macOS only, built
 > from source, no `.app` bundle yet. Formats may change between commits.

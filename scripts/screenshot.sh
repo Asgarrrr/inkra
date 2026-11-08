@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Captures the README screenshot: one note in a centred window, over a chosen wallpaper.
-# usage: scripts/screenshot.sh --vault DIR --note PATH [--wallpaper IMAGE] [--size 1200x760] [--padding 80] [--settle 3] [--out docs/assets/screenshot.png]
+# usage: scripts/screenshot.sh --vault DIR --note PATH [--wallpaper IMAGE] [--size 1200x760] [--padding 80] [--settle 3] [--out docs/assets/screenshot.webp]
 # PATH is vault-relative. The wallpaper, the Dock, the desktop icons and the hidden apps are restored on exit.
 # Needs Accessibility and Screen Recording for the terminal, in System Settings > Privacy & Security.
+# A .webp output is lossless, half the PNG's size; it needs cwebp (brew install webp).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-vault= note= wallpaper= size=1200x760 padding=80 settle=3 out=docs/assets/screenshot.png
+vault= note= wallpaper= size=1200x760 padding=80 settle=3 out=docs/assets/screenshot.webp
 while (($#)); do
   case $1 in
     --vault) vault=$2; shift 2 ;;
@@ -23,6 +24,7 @@ done
 root=$(cd "$vault" && pwd)
 [[ -f $root/$note ]] || { echo "no note $note in $root" >&2; exit 1; }
 [[ -z $wallpaper || -f $wallpaper ]] || { echo "no image $wallpaper" >&2; exit 1; }
+[[ $out != *.webp ]] || command -v cwebp > /dev/null || { echo "a .webp output needs cwebp: brew install webp" >&2; exit 1; }
 [[ -n $wallpaper ]] && wallpaper=$(cd "$(dirname "$wallpaper")" && pwd)/$(basename "$wallpaper")
 width=${size%x*} height=${size#*x}
 
@@ -219,5 +221,9 @@ want="$(((${screen_w%.*} - width) / 2)) $(((${screen_h%.*} - height) / 2)) $widt
 [[ "$x $y $w $h" == "$want" ]] || { echo "the window's frame is $x $y $w $h, not $want; run again" >&2; exit 1; }
 
 mkdir -p "$(dirname "$out")"
-screencapture -x -R "$((x - padding)),$((y - padding)),$((w + 2 * padding)),$((h + 2 * padding))" "$out"
+screencapture -x -R "$((x - padding)),$((y - padding)),$((w + 2 * padding)),$((h + 2 * padding))" "$home/shot.png"
+case $out in
+  *.webp) cwebp -quiet -lossless -z 9 -metadata icc "$home/shot.png" -o "$out" ;;
+  *) mv "$home/shot.png" "$out" ;;
+esac
 echo "$out: $(sips -g pixelWidth -g pixelHeight "$out" | awk '/pixel/ {printf "%s ", $2}')px, window ${w}x${h} at ${x},${y}"
