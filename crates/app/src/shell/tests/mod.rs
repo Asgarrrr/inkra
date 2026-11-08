@@ -76,6 +76,7 @@ mod themes;
 mod title_bar;
 mod trashing;
 mod vault_search;
+mod window_bounds;
 
 impl AppShell {
     pub(crate) fn tree_row_names(&self, cx: &gpui::App) -> Vec<String> {

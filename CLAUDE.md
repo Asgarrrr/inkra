@@ -178,7 +178,7 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-29-tabs-design.md` — tabs: `inkra-tabs`,
   `Place`, per-tab history, parked anchors, one rebound `EditorView`
 - `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
-  its one writer and throttle, `Restore`'s states, the landing predicate
+  its one writer and throttle, `Restore`'s states, the landing predicate, the window frame
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
   `Tab`, `Icon`, `Indicator`, `IconButton`, `PanelHeader`, `Assets`), row overlays, Lucide
   icons; the panel toggles (`cmd-\`, `cmd-|`), headers and hiding; the chrome slices

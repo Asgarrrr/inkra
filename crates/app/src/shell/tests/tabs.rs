@@ -220,7 +220,7 @@ fn single_file_mode_switches_back_to_its_file(cx: &mut TestAppContext) {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(Arc::clone(&fs) as Arc<dyn Fs>, launch, window, cx),
+                |window, cx| root(Arc::clone(&fs) as Arc<dyn Fs>, launch, None, window, cx),
             )
         })
         .unwrap();

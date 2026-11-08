@@ -15,8 +15,8 @@ use super::parked::Parked;
 use super::surface::Landing;
 use super::{AppShell, Shown};
 use crate::restore::{
-    Landed, Pending, Plan, Restored, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session,
-    SessionWriter, Surfaces,
+    Landed, Pending, Plan, Restored, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow,
+    Session, SessionWriter, Surfaces,
 };
 use crate::vault::NoteStore;
 
@@ -38,7 +38,10 @@ pub(super) struct SessionFile {
     writer: SessionWriter,
     /// One write per `THROTTLE` at most: a change arms it only if it is not armed.
     throttle: Option<Task<()>>,
+    /// `None` while the window is on no display.
+    window: Option<SavedWindow>,
     _quit: Subscription,
+    _moved: Subscription,
 }
 
 impl AppShell {
@@ -70,6 +73,7 @@ impl AppShell {
         file: Option<PathBuf>,
         pending: Option<Pending>,
         notes: &Entity<NoteStore>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Option<SessionFile>, Restore) {
         let Some(file) = file else {
@@ -78,6 +82,7 @@ impl AppShell {
         let session = SessionFile {
             writer: SessionWriter::new(notes.read(cx).fs(), file),
             throttle: None,
+            window: saved_window(window, cx),
             // Spawned before the future: shutdown holds the app borrowed.
             _quit: cx.on_app_quit(|shell, cx| {
                 let write = shell.write_session(cx);
@@ -86,6 +91,12 @@ impl AppShell {
                         write.await;
                     }
                 }
+            }),
+            _moved: cx.observe_window_bounds(window, |shell, window, cx| {
+                if let Some(session) = &mut shell.session {
+                    session.window = saved_window(window, cx);
+                }
+                shell.save_session_later(cx);
             }),
         };
         (
@@ -138,7 +149,10 @@ impl AppShell {
         });
         let shown = [Side::Left, Side::Right].map(|side| self.layout.is_shown(side));
         let center = self.saved_member(self.layout.center(), &path_of, cx);
-        Some(Session::new(root, active, center, left, right, shown))
+        Some(Session {
+            window: self.session.as_ref()?.window.clone(),
+            ..Session::new(root, active, center, left, right, shown)
+        })
     }
 
     fn saved_member(
@@ -323,4 +337,17 @@ impl AppShell {
             }
         }
     }
+}
+
+/// The restore frame: a fullscreen window reopens at the frame it left; a zoomed one at its zoomed frame.
+fn saved_window(window: &Window, cx: &App) -> Option<SavedWindow> {
+    let display = window.display(cx)?.uuid().ok()?.to_string();
+    let frame = window.window_bounds().get_bounds();
+    Some(SavedWindow {
+        display,
+        x: frame.origin.x.into(),
+        y: frame.origin.y.into(),
+        width: frame.size.width.into(),
+        height: frame.size.height.into(),
+    })
 }

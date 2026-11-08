@@ -73,7 +73,7 @@ fn single_file_mode_titles_the_tab_with_the_file_name(cx: &mut TestAppContext) {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(fs as Arc<dyn Fs>, launch, window, cx),
+                |window, cx| root(fs as Arc<dyn Fs>, launch, None, window, cx),
             )
         })
         .unwrap();

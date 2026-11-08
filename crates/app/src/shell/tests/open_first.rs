@@ -35,6 +35,7 @@ fn unscanned(
                     root(
                         fs,
                         Launch::Vault(Vault::new(Path::new("/vault")), None, None),
+                        None,
                         window,
                         cx,
                     )
