@@ -3,7 +3,7 @@
 # usage: scripts/screenshot.sh --vault DIR --note PATH [--wallpaper IMAGE] [--size 1200x760] [--padding 80] [--settle 3] [--out docs/assets/screenshot.webp]
 # PATH is vault-relative. The wallpaper, the Dock, the desktop icons and the hidden apps are restored on exit.
 # Needs Accessibility and Screen Recording for the terminal, in System Settings > Privacy & Security.
-# A .webp output is lossless, half the PNG's size; it needs cwebp (brew install webp).
+# A .webp output is sized for a README: at most 2000 px wide, twice GitHub's column, at quality 90; it needs cwebp.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -223,7 +223,10 @@ want="$(((${screen_w%.*} - width) / 2)) $(((${screen_h%.*} - height) / 2)) $widt
 mkdir -p "$(dirname "$out")"
 screencapture -x -R "$((x - padding)),$((y - padding)),$((w + 2 * padding)),$((h + 2 * padding))" "$home/shot.png"
 case $out in
-  *.webp) cwebp -quiet -lossless -z 9 -metadata icc "$home/shot.png" -o "$out" ;;
+  *.webp)
+    shot_w=$(sips -g pixelWidth "$home/shot.png" | awk '/pixelWidth/ {print $2}')
+    cwebp -quiet -q 90 -m 6 -sharp_yuv -metadata icc -resize "$((shot_w < 2000 ? shot_w : 2000))" 0 "$home/shot.png" -o "$out"
+    ;;
   *) mv "$home/shot.png" "$out" ;;
 esac
 echo "$out: $(sips -g pixelWidth -g pixelHeight "$out" | awk '/pixel/ {printf "%s ", $2}')px, window ${w}x${h} at ${x},${y}"
