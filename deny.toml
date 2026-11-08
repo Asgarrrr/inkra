@@ -29,7 +29,7 @@ allow = [
 ]
 
 [licenses.private]
-# Our crates are `publish = false` and carry no licence field.
+# Our crates are `publish = false`; their GPL-3.0-or-later is not in `allow`.
 ignore = true
 
 [bans]
