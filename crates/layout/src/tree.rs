@@ -1,5 +1,6 @@
 //! The centre's tree of groups, normalised after every mutation (splits spec, Layout and L7).
 
+use crate::flex::{rescale, valid};
 use crate::{GroupId, Layout, SplitDirection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,9 +63,6 @@ pub struct Rect {
     pub width: f32,
     pub height: f32,
 }
-
-/// Zed's flex epsilon (S1).
-pub(crate) const EPSILON: f32 = 0.001;
 
 impl Member {
     /// Depth-first.
@@ -340,24 +338,4 @@ pub(crate) fn normalised(member: Member) -> Member {
         children,
         flexes: kept_flexes,
     }
-}
-
-/// As Zed's `PaneAxis::load`: one per child, each finite and above 0, summing to their count.
-fn valid(flexes: &[f32], len: usize) -> bool {
-    flexes.len() == len
-        && flexes.iter().all(|&flex| flex.is_finite() && flex > 0.0)
-        && (flexes.iter().sum::<f32>() - count(len)).abs() <= EPSILON
-}
-
-/// Keeps each flex's share.
-fn rescale(flexes: &mut [f32]) {
-    let scale = count(flexes.len()) / flexes.iter().sum::<f32>();
-    for flex in flexes {
-        *flex *= scale;
-    }
-}
-
-#[allow(clippy::cast_precision_loss)]
-pub(crate) fn count(len: usize) -> f32 {
-    len as f32
 }

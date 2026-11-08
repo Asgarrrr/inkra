@@ -26,7 +26,7 @@ pub(crate) struct Stage {
     appearance: Appearance,
     /// Held walks and loads, released on drop, after the shot.
     gates: Vec<Gate>,
-    /// `open_vault`'s, so a scene can change a file after opening.
+    /// The opened window's, so a scene can change a file after opening.
     fs: Option<Arc<MemFs>>,
 }
 
@@ -64,11 +64,7 @@ impl Stage {
     }
 
     pub(crate) fn open_vault(&mut self, files: &[(&str, &str)]) -> WindowHandle<AppShell> {
-        let fs = Arc::new(MemFs::new());
-        for (path, text) in files {
-            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
-        }
-        self.open_scanned(fs)
+        self.open_scanned(mem_vault(files))
     }
 
     /// A vault whose platform refuses the watch, so the shell opens with its notice.
@@ -76,10 +72,7 @@ impl Stage {
         &mut self,
         files: &[(&str, &str)],
     ) -> WindowHandle<AppShell> {
-        let fs = Arc::new(MemFs::new());
-        for (path, text) in files {
-            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
-        }
+        let fs = mem_vault(files);
         fs.make_unwatchable(VAULT_ROOT);
         self.open_scanned(fs)
     }
@@ -87,42 +80,34 @@ impl Stage {
     fn open_scanned(&mut self, fs: Arc<MemFs>) -> WindowHandle<AppShell> {
         let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
             .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
-        self.fs = Some(Arc::clone(&fs));
         self.open(fs, Launch::Vault(scanned, None, None))
     }
 
-    /// The vault `open_vault` opened, so a scene can inject a fault.
+    /// The opened window's disk, so a scene can inject a fault.
     pub(crate) fn fs(&self) -> &MemFs {
         let Some(fs) = self.fs.as_ref() else {
-            panic!("a scene reaches the disk only after `open_vault`");
+            panic!("a scene reaches the disk only after opening a window");
         };
         fs
     }
 
-    /// A change outside the app to a file of the vault `open_vault` opened.
+    /// A change outside the app to a file of the opened vault.
     pub(crate) fn write(&mut self, path: &str, text: &str) {
-        let Some(fs) = self.fs.as_ref() else {
-            panic!("a scene writes only after `open_vault`");
-        };
-        fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), text);
+        self.fs()
+            .insert_file(PathBuf::from(VAULT_ROOT).join(path), text);
         self.settle();
     }
 
     /// As `write`, for a file that is no text.
     pub(crate) fn write_bytes(&mut self, path: &str, bytes: Vec<u8>) {
-        let Some(fs) = self.fs.as_ref() else {
-            panic!("a scene writes only after `open_vault`");
-        };
-        fs.insert_bytes(PathBuf::from(VAULT_ROOT).join(path), bytes);
+        self.fs()
+            .insert_bytes(PathBuf::from(VAULT_ROOT).join(path), bytes);
         self.settle();
     }
 
-    /// A file of the vault `open_vault` opened, deleted outside the app.
+    /// A file of the opened vault, deleted outside the app.
     pub(crate) fn remove(&mut self, path: &str) {
-        let Some(fs) = self.fs.as_ref() else {
-            panic!("a scene removes only after `open_vault`");
-        };
-        fs.remove(&PathBuf::from(VAULT_ROOT).join(path));
+        self.fs().remove(&PathBuf::from(VAULT_ROOT).join(path));
         self.settle();
     }
 
@@ -132,15 +117,10 @@ impl Stage {
         files: &[(&str, &str)],
         held: &str,
     ) -> WindowHandle<AppShell> {
-        let fs = Arc::new(MemFs::new());
-        for (path, text) in files {
-            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
-        }
+        let fs = mem_vault(files);
         self.gates
             .push(fs.block_load(PathBuf::from(VAULT_ROOT).join(held)));
-        let scanned = futures::executor::block_on(Vault::scan(&*fs, Path::new(VAULT_ROOT)))
-            .unwrap_or_else(|error| panic!("scan {VAULT_ROOT}: {error}"));
-        self.open(fs, Launch::Vault(scanned, None, None))
+        self.open_scanned(fs)
     }
 
     /// A vault the store scans behind the first frame; the walk is held at `held`, so the shot shows the root level only.
@@ -149,10 +129,7 @@ impl Stage {
         files: &[(&str, &str)],
         held: &str,
     ) -> WindowHandle<AppShell> {
-        let fs = Arc::new(MemFs::new());
-        for (path, text) in files {
-            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
-        }
+        let fs = mem_vault(files);
         self.gates
             .push(fs.block_read_dir(PathBuf::from(VAULT_ROOT).join(held)));
         self.open(
@@ -168,10 +145,7 @@ impl Stage {
         tabs: Vec<SavedFileTab>,
         active: usize,
     ) -> WindowHandle<AppShell> {
-        let fs = Arc::new(MemFs::new());
-        for (path, text) in files {
-            fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
-        }
+        let fs = mem_vault(files);
         let session = PathBuf::from("/support/session.json");
         let center = SavedMember::Group(SavedGroup {
             tabs: tabs.into_iter().map(SavedTab::File).collect(),
@@ -186,7 +160,8 @@ impl Stage {
     }
 
     /// The one door to a window: every scene gets `WINDOW_SIZE`, never a literal of its own.
-    fn open(&mut self, fs: Arc<dyn Fs>, launched: Launch) -> WindowHandle<AppShell> {
+    fn open(&mut self, fs: Arc<MemFs>, launched: Launch) -> WindowHandle<AppShell> {
+        self.fs = Some(Arc::clone(&fs));
         let window = self
             .cx
             .open_offscreen_window(WINDOW_SIZE, |window, cx| root(fs, launched, window, cx))
@@ -414,6 +389,14 @@ impl Stage {
     fn settle(&mut self) {
         self.cx.run_until_parked();
     }
+}
+
+fn mem_vault(files: &[(&str, &str)]) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
+    for (path, text) in files {
+        fs.insert_file(PathBuf::from(VAULT_ROOT).join(path), *text);
+    }
+    fs
 }
 
 impl Drop for Stage {

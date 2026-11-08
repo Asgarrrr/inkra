@@ -1,6 +1,7 @@
 //! Where each tab group sits and which dock shows (splits spec).
 
 mod direction;
+mod flex;
 mod resize;
 mod surface;
 mod tree;

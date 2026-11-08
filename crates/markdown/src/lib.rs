@@ -1,3 +1,4 @@
+mod cmark;
 mod display;
 mod front_matter;
 mod gutters;
@@ -5,6 +6,7 @@ mod links;
 mod markup;
 mod parse;
 mod reveal;
+mod spans;
 mod styles;
 
 pub use display::{DisplayLine, DisplayOffset};

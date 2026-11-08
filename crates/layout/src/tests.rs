@@ -7,6 +7,7 @@ use super::{
 };
 
 mod direction;
+mod flex;
 mod resize;
 mod surface;
 mod tree;

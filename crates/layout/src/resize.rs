@@ -1,6 +1,6 @@
 //! A separator's drag and double-click: flexes moved between two neighbours (splits spec, P2).
 
-use crate::tree::{EPSILON, count};
+use crate::flex::{EPSILON, count};
 use crate::{Axis, GroupId, Layout, Member, Surface};
 
 /// A member of `surface`'s tree: the child indices from its root, which `steps` empty names.
