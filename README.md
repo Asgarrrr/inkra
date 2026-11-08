@@ -15,7 +15,7 @@ one 17 MB binary, one process.
 ## Features
 
 - **Markdown live preview**: styled as you type, markup hidden until the caret
-  or the selection touches it. Quotes, lists, task boxes and code blocks.
+  or the selection touches it. Quotes, lists and code blocks.
 - **Links**: `[[wikilinks]]` to notes and files, a backlinks panel, `⌘Enter`
   to follow a link.
 - **Search**: `⌘P` quick open by word start on names and text, `⌘⇧F` vault
@@ -31,7 +31,8 @@ one 17 MB binary, one process.
   that follows edits made outside the app.
 - **Instant reopen**: the index is cached on disk, the last tabs come back.
 
-Not yet: syntax highlighting in code blocks, plugins, sync, Windows and Linux.
+Not yet: task boxes, syntax highlighting in code blocks, plugins, sync, Windows
+and Linux.
 
 ## Performance
 
