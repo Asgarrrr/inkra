@@ -535,12 +535,14 @@ margin. An empty heading `#` follows the same rule: `x >= 0` lands at
 where it measures the column (`element.rs`, `column_width`): the widest
 opening marker, `#` × n and a space, shaped at level n's size and weight, over
 n = 1 to 6, rounded up to a whole pixel so taffy's snapping does not shift
-the text. Only the left side needs it: no marker hangs on the right. The text
+the text. Markers hang on the left only, but the right side mirrors the margin. The text
 starts at `left = max(margin, (pane − column) / 2)` and is
-`min(column, pane − left)` wide, never below zero. A wide window keeps the
-column centred where it was. A narrow one gives up the margin from the
-column's width, on the left only; a symmetric margin cost a 748 px pane
-148 px of text. A pane narrower than the margin leaves the text zero wide,
+`min(column, pane − 2 × margin)` wide, never below zero. A wide window keeps the
+column centred where it was. A narrow one gives up both margins from the
+column's width, so the text stays centred. The first version reserved the left
+margin only, to save 74 px of text in a narrow pane; it left the text visibly off
+centre beside the docks, and the user chose centring on 2026-11-08. A pane
+narrower than both margins leaves the text zero wide,
 one glyph per row (`text_system/line_layout.rs:251`). The editor's `p_4()`
 stays. `NameField` shapes with `Markdown::default()` and gets
 no margin. A marker with extra spaces, `#   T`, can be wider than the margin;
@@ -629,8 +631,8 @@ D12:
   range in the marker is in the margin.
 - `> # q` keeps its inline conceal.
 - Margin: a wide window keeps the column centred at its old `x`; a narrow
-  window loses `margin` from the text's width, left side only; a pane
-  narrower than the margin gives the text zero width. Tests that assume the text starts 16 px in from the pane change
+  window loses `2 × margin` from the text's width, one per side; a pane
+  narrower than both margins gives the text zero width. Tests that assume the text starts 16 px in from the pane change
   their constants, not their intent.
 
 No key binding is added. Existing `simulate_keystrokes` tests must pass

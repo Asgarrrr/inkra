@@ -73,9 +73,12 @@ fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
 
     window
         .update(&mut cx, |view, _, _| {
-            assert_eq!(column_width(view), px(400. - 2. * PADDING - HEADING_MARGIN));
+            assert_eq!(
+                column_width(view),
+                px(400. - 2. * PADDING - 2. * HEADING_MARGIN)
+            );
             let layout = view.input.last_layout().unwrap();
-            assert!(layout.row_count() > 1, "68 chars cannot fit 292 px");
+            assert!(layout.row_count() > 1, "68 chars cannot fit 216 px");
             #[allow(clippy::cast_precision_loss)]
             let rows = layout.row_count() as f32;
             assert_eq!(
@@ -384,7 +387,7 @@ fn up_steps_over_a_row_with_no_caret_position(cx: &mut TestAppContext) {
     // Five glyphs in one cluster, in a text column two glyphs wide.
     let text = format!("ab{}cd", "e\u{301}\u{302}\u{303}\u{304}");
     let (window, mut cx) = dispatching(cx, &text);
-    cx.simulate_resize(size(px(2. * PADDING + HEADING_MARGIN + 25.), px(600.)));
+    cx.simulate_resize(size(px(2. * PADDING + 2. * HEADING_MARGIN + 25.), px(600.)));
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-down");
 

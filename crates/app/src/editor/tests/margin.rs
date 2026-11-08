@@ -73,19 +73,18 @@ fn a_wide_pane_centres_the_column(cx: &mut TestAppContext) {
     assert_eq!(bounds.size.width, px(column));
 }
 
-/// Centred, this column would start 20 px short of the margin.
 #[gpui::test]
-fn a_pane_short_of_two_margins_shifts_the_full_column_right(cx: &mut TestAppContext) {
+fn a_pane_short_of_two_margins_narrows_the_column_between_them(cx: &mut TestAppContext) {
     let (column, bounds) = text_in_pane(cx, 2. * HEADING_MARGIN - 40.);
     assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
-    assert_eq!(bounds.size.width, px(column));
+    assert_eq!(bounds.size.width, px(column - 40.));
 }
 
 #[gpui::test]
-fn a_narrow_pane_loses_the_margin_on_the_left_only(cx: &mut TestAppContext) {
+fn a_narrow_pane_keeps_a_margin_on_each_side(cx: &mut TestAppContext) {
     let (column, bounds) = text_in_pane(cx, 0.);
     assert_eq!(bounds.origin.x, px(PADDING + HEADING_MARGIN));
-    assert_eq!(bounds.size.width, px(column - HEADING_MARGIN));
+    assert_eq!(bounds.size.width, px(column - 2. * HEADING_MARGIN));
 }
 
 #[gpui::test]

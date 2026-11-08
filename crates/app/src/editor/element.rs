@@ -70,7 +70,7 @@ impl Element for TextElement {
             column: column_width(&text_style, window),
             margin: margin_width(&text_style, theme::current(cx), window),
         };
-        // Wide enough to centre the column between two margins; D12 reserves only the left one.
+        // D12's markers hang in the left margin; the right one mirrors it so the text stays centred.
         let widest = inset.column + inset.margin * 2.;
 
         let mut style = Style::default();
@@ -346,9 +346,9 @@ pub(super) struct Inset {
 
 impl Inset {
     /// The parent centres the element, capped at `column + 2 × margin`, so the text starts one
-    /// margin in; a pane narrower than the margin leaves it no width.
+    /// margin in and ends one margin short; a pane narrower than both margins leaves it no width.
     fn text_width(self, element: Pixels) -> Pixels {
-        self.column.min(element - self.margin).max(px(0.))
+        self.column.min(element - self.margin * 2.).max(px(0.))
     }
 
     fn text_bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
