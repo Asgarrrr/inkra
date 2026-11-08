@@ -36,6 +36,11 @@ and Linux.
 
 ## Performance
 
+![Inkra opening a 50,000-note vault, then ⌘P and ⌘⇧F](docs/assets/launch.webp)
+
+*Real time, 50,000 notes: launch, `⌘P` "ada lo", `⌘⇧F` "enigma turing".
+Content: [Simple English Wikipedia](https://simple.wikipedia.org/), CC BY-SA 4.0.*
+
 Inkra against Obsidian on the same generated vaults, measured from outside
 both apps by the same script. Warm open, median of 5 runs, Apple M5 Pro,
 macOS 26.5, 2026-11-08. Inkra 0.1.0, Obsidian 1.14.5 with no plugins.
