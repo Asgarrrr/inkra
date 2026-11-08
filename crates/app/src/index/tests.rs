@@ -651,7 +651,7 @@ fn snapshot(
                 let backlinks = index
                     .backlinks(id)
                     .into_iter()
-                    .map(|backlink| (backlink.source, backlink.links.len()))
+                    .map(|backlink| (backlink.source, backlink.at.len()))
                     .collect();
                 let indexed = index.is_indexed(id);
                 let stamp = stamps.remove(&id);

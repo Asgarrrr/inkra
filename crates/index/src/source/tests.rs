@@ -3,10 +3,10 @@ use super::{BEFORE, CONTEXT, Source};
 fn contexts(text: &str) -> Vec<(String, String)> {
     Source::parse(text)
         .links
-        .into_iter()
+        .iter()
         .map(|link| {
             let lit = link.context[link.context_link.clone()].to_owned();
-            (link.context, lit)
+            (link.context.clone(), lit)
         })
         .collect()
 }

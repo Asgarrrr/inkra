@@ -17,6 +17,8 @@ use crate::{IndexSnapshot, Source, SourceLink, Style};
 
 /// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
 const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
+/// A link's path length, flags, style, 2 range ends, context length, 2 context ends: a byte each.
+const MIN_LINK_RECORD: usize = 8;
 /// The flags bit of a record holding a stamp.
 const STAMPED: u8 = 1;
 /// The flag bits of a link holding a fragment, and of one written with `.md`; then every bit known.
@@ -166,8 +168,15 @@ fn record<'a>(
         .ok_or(Rejected::Corrupt("varint"))?
         .checked_sub(1)
         .map(Ordinal::new);
-    let mut links = Vec::new();
-    for _ in 0..len(bytes)? {
+    let count = len(bytes)?;
+    if count
+        .checked_mul(MIN_LINK_RECORD)
+        .is_none_or(|least| least > bytes.len())
+    {
+        return Err(Rejected::Corrupt("links"));
+    }
+    let mut links = Vec::with_capacity(count);
+    for _ in 0..count {
         links.push(link(bytes, written)?);
     }
     Ok(CachedNote {
@@ -175,7 +184,9 @@ fn record<'a>(
         stamp,
         identity: FileIdentity { device, inode },
         ordinal,
-        source: Source { links },
+        source: Source {
+            links: Arc::from(links),
+        },
     })
 }
 

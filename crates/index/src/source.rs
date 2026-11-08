@@ -14,7 +14,7 @@ const BEFORE: usize = 60;
 /// A note's links to other notes, parsed from its text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Source {
-    pub links: Vec<SourceLink>,
+    pub links: Arc<[SourceLink]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

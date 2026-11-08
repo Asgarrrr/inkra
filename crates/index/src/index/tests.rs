@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use inkra_markdown::links;
 use inkra_vault::Kind;
@@ -28,8 +29,7 @@ pub(super) fn backlinks(
                 .map(|entry| entry.path.as_path().to_string_lossy().into_owned())
                 .unwrap_or_default();
             let lits = backlink
-                .links
-                .iter()
+                .occurrences()
                 .map(|link| link.context[link.context_link.clone()].to_owned())
                 .collect();
             (source, lits)
@@ -109,6 +109,26 @@ fn replacing_a_source_with_fewer_links_leaves_no_stale_row() {
     load(&mut index, src, "nothing");
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
     assert!(index.by_stem.is_empty());
+}
+
+#[test]
+fn backlinks_share_the_source_slice_until_it_reloads() {
+    let (_fs, vault) = vault(&["a.md", "b.md"]);
+    let mut index = NoteIndex::default();
+    let _ = index.set_notes(note_set(&vault));
+    let (a, b) = (id(&vault, "a.md"), id(&vault, "b.md"));
+    load(&mut index, a, "[[b]] [[x]] [[b]]");
+    let links = |index: &NoteIndex| Arc::clone(&index.backlinks(b)[0].links);
+
+    let held = links(&index);
+    assert_eq!(index.backlinks(b)[0].at, [0, 2]);
+    assert!(Arc::ptr_eq(&held, &links(&index)));
+    let _ = index.set_notes(note_set(&vault));
+    assert!(Arc::ptr_eq(&held, &links(&index)));
+    load(&mut index, a, "[[b]] [[x]] [[b]]");
+    let reloaded = links(&index);
+    assert!(!Arc::ptr_eq(&held, &reloaded));
+    assert_eq!(held, reloaded);
 }
 
 #[test]

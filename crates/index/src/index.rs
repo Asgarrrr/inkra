@@ -31,17 +31,26 @@ pub struct NoteIndex {
     names: NamesSnapshot,
     /// The build's scanned mtimes, handed back whole in the set `set_notes` returns.
     mtimes: Arc<[Mtime]>,
-    sources: Shards<EntryId, Arc<Source>>,
+    sources: Shards<EntryId, Source>,
     by_stem: Stems,
     corpus: Corpus,
     words: Words,
 }
 
-/// The links of one source that resolve to a file, in document order.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Backlink<'a> {
+/// One source's links that resolve to a file: its whole slice, and the occurrences' indices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Backlink {
     pub source: EntryId,
-    pub links: Vec<&'a SourceLink>,
+    pub links: Arc<[SourceLink]>,
+    /// Ascending, never empty.
+    pub at: Vec<usize>,
+}
+
+impl Backlink {
+    /// The links that resolve to the file, in document order.
+    pub fn occurrences(&self) -> impl Iterator<Item = &SourceLink> {
+        self.at.iter().map(|&at| &self.links[at])
+    }
 }
 
 impl NoteIndex {
@@ -68,12 +77,11 @@ impl NoteIndex {
             .map(|(&id, _)| id)
             .filter(|&id| !self.notes.contains(id))
             .collect();
-        let sources: Vec<Arc<Source>> = gone
+        let sources: Vec<Source> = gone
             .iter()
             .filter_map(|&id| self.sources.remove(id))
             .collect();
-        self.by_stem
-            .remove_all(&gone, sources.iter().map(|source| &**source));
+        self.by_stem.remove_all(&gone, &sources);
         self.words.remove_all(&gone);
         previous
     }
@@ -165,7 +173,7 @@ impl NoteIndex {
             self.insert(
                 id,
                 NoteContent {
-                    source: (**source).clone(),
+                    source: source.clone(),
                     words,
                     read,
                 },
@@ -187,7 +195,7 @@ impl NoteIndex {
             read,
         } = content;
         self.by_stem.insert(id, &source);
-        self.sources.insert(id, Arc::new(source));
+        self.sources.insert(id, source);
         self.corpus.write(self.notes.order(id), read);
         self.words.set(id, words);
     }
@@ -250,7 +258,7 @@ impl NoteIndex {
 
     /// Grouped by source in vault order; a note linking to itself is included.
     #[must_use]
-    pub fn backlinks(&self, file: EntryId) -> Vec<Backlink<'_>> {
+    pub fn backlinks(&self, file: EntryId) -> Vec<Backlink> {
         let Some(rows) = self
             .notes
             .stem(file)
@@ -265,6 +273,7 @@ impl NoteIndex {
         let mut by_text: HashMap<NoteRef<'_>, Resolution> = HashMap::new();
         let mut by_query: HashMap<Query, Resolution> = HashMap::new();
         for &(source, at) in rows {
+            let at = at as usize;
             let note = self.source(source).links[at].note();
             let resolution = match note {
                 NoteRef { style, .. } if style != Style::Relative => by_text
@@ -290,10 +299,10 @@ impl NoteIndex {
             .into_iter()
             .map(|((_, source), mut at)| {
                 at.sort_unstable();
-                let links = &self.source(source).links;
                 Backlink {
                     source,
-                    links: at.into_iter().map(|at| &links[at]).collect(),
+                    links: Arc::clone(&self.source(source).links),
+                    at,
                 }
             })
             .collect()
@@ -314,7 +323,7 @@ pub struct IndexSnapshot {
     names: NamesSnapshot,
     corpus: CorpusSnapshot,
     words: WordsSnapshot,
-    sources: Shards<EntryId, Arc<Source>>,
+    sources: Shards<EntryId, Source>,
 }
 
 impl IndexSnapshot {
@@ -354,7 +363,7 @@ impl IndexSnapshot {
             let Some(source) = self.sources.get(id) else {
                 panic!("note {id:?} was loaded but holds no source");
             };
-            Some((id, self.names.file(order), read, &**source))
+            Some((id, self.names.file(order), read, source))
         })
     }
 }

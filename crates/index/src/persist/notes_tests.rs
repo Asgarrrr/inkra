@@ -204,7 +204,9 @@ fn an_offset_past_u32_writes_no_stamp() {
         context_link: 0..5,
     };
     let content = NoteContent {
-        source: Source { links: vec![link] },
+        source: Source {
+            links: vec![link].into(),
+        },
         words: NoteWords::parse(""),
         read: file,
     };
@@ -338,7 +340,9 @@ fn hand_built_records_decode() {
                 stamp: None,
                 identity,
                 ordinal: None,
-                source: Source { links: vec![link] },
+                source: Source {
+                    links: vec![link].into(),
+                },
             },
         ),
         (
@@ -349,7 +353,7 @@ fn hand_built_records_decode() {
                 identity,
                 ordinal: None,
                 source: Source {
-                    links: vec![md_link],
+                    links: vec![md_link].into(),
                 },
             },
         ),
@@ -418,9 +422,17 @@ fn each_field_rejects() {
         (raw().var(1).head(b"a.md", 2, 0).var(0), "flags"),
         (raw().var(1).head(b"a.md", 3, 0).var(0), "flags"),
         (
-            raw().var(1).head(b"a.md", 0, 0).var(1).str(b"b").byte(4),
+            raw()
+                .var(1)
+                .head(b"a.md", 0, 0)
+                .var(1)
+                .str(b"b")
+                .byte(4)
+                .u32(0)
+                .byte(0),
             "flags",
         ),
+        (raw().var(1).head(b"a.md", 0, 0).var(u32::MAX), "links"),
         (raw().var(1).head(b"\xff", 0, 0).var(0), "utf8"),
         (
             raw().var(1).str(b"aaaaaaaaaaaaaaaaaaaa").byte(0).u64(7),

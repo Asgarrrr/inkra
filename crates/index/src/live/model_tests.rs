@@ -405,7 +405,7 @@ fn answers(h: &Harness) -> Vec<Answer> {
             let backlinks = index
                 .backlinks(id)
                 .into_iter()
-                .map(|backlink| (backlink.source, backlink.links.len()))
+                .map(|backlink| (backlink.source, backlink.at.len()))
                 .collect();
             let path = entry.path.as_path().to_string_lossy().into_owned();
             (

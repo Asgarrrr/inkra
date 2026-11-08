@@ -380,7 +380,7 @@ fn link() -> impl Strategy<Value = String> {
 
 fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, Source)]) {
     for (source, parsed) in sources {
-        for link in &parsed.links {
+        for link in parsed.links.iter() {
             let target = link_target(link);
             assert_eq!(
                 index.resolve(Some(*source), &target),
@@ -396,7 +396,7 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
             let Some(order) = model.notes.iter().position(|(id, _)| id == source) else {
                 continue;
             };
-            for link in &parsed.links {
+            for link in parsed.links.iter() {
                 let target = link_target(link);
                 if model.resolve(*source, &target) == Resolution::File(*file) {
                     expected.push((order, *source, link.range.start.get()));
@@ -422,9 +422,9 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
                     .position(|(id, _)| *id == backlink.source)
                     .unwrap_or(usize::MAX);
                 backlink
-                    .links
-                    .into_iter()
-                    .map(move |link| (order, backlink.source, link.range.start.get()))
+                    .occurrences()
+                    .map(|link| (order, backlink.source, link.range.start.get()))
+                    .collect::<Vec<_>>()
             })
             .collect();
         assert_eq!(
