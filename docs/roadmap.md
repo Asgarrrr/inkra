@@ -205,6 +205,13 @@ here, so the two cannot drift.
   (`superpowers/specs/2026-11-05-splits-design.md`, D4). Two views and fixed
   dock widths never overflow a strip. **Trigger:** a third view, or resizing a
   dock.
+- A backlinks row and a `⌘⇧F` hit draw their line's markdown raw:
+  `[[International System of Units|SI]]`, with its brackets and target. On a
+  note where most lines hold a link, both panels read as source, not text.
+  Fix in `LitText::context` (`superpowers/specs/2026-09-29-row-text-design.md`):
+  draw a link as its label, and move the lit ranges with the dropped bytes.
+  **Trigger:** met 2026-11-08, on a vault converted from Wikipedia for the
+  README demo.
 
 ### File kinds
 
@@ -296,6 +303,7 @@ priority: a note changed while the app runs must show in the app.
 | 6 | ~~Persisted index~~ | **Done 2026-11-07**: a warm launch decodes the cache and reloads only the notes whose stamp changed; `indexed` median 306 ms at 50,000 notes (1.13 s before), RSS median 164,512 kB (344,176 kB before). See `superpowers/specs/2026-11-06-persisted-index-design.md`, `benchmarks.md` and Persisted index, deferred, below. Before it: only a spec. **Measured 2026-09-28**, release, 50,000-note nested vault (`startup_vault`), warm cache, runs 2–4 of `launch-figure.sh`: first frame 172–184 ms (the window floor above, not the vault), names ready 306–318 ms, indexed 1.18–1.26 s, longest turn 2.5 ms, RSS 349–352 MB (corpus 158 MB). Until `indexed`, quick open matches names only. A persisted words index would bring text matches to about the scan's end (~0.3–0.4 s) and cost a versioned format; the files are still read for the resident corpus. Not built: trigger is a user noticing text matches arrive late | Measure cold start first: the corpus stays resident, so a warm start still reads every file and saves only the parse, about 100 ms. If built: validate by `(mtime, size)` (the scan's `Entry` has no size yet), key by path plus stamp with inode for rename pairing only, embed a format version and a fold fingerprint so a Unicode table bump cannot silently miss notes, write the cache outside the vault |
 | 7 | ~~`Sidebar::rebuild` walks every entry on each vault change~~ | Measured 2026-09-28 (watcher branch review): 1.1–2.2 ms of foreground work per real vault change at 50,000 notes, even with folders collapsed, against the 0.1 ms target. An echo that changes nothing no longer reaches it | **Done 2026-09-28**: a collapsed folder is skipped by binary search, a level's notes are copied as one run, and rows are built only when drawn. 0.005–0.051 ms. See `superpowers/specs/2026-09-28-sidebar-rebuild-design.md` |
 | 8 | `⌘⇧F` walk over a huge note | The word-start spec's 10 MB walk case takes 48.7 ms against 16: `word_spans` alone costs about 27 ms. Trigger: a user-visible slow `⌘⇧F` on a huge note | Scan for the chars whose fold can start a term before splitting words. See `superpowers/specs/2026-09-28-search-word-start-design.md`, Evolution |
+| 9 | `⌘⇧F` on a query with a common word | Seen 2026-11-08 on a 50,000-note Simple English Wikipedia vault: `speed of light` put `1,000,000` first, and its hits were lines that hold only `of`. A note needs every term, but a line is a hit for any one term, and no word is too common to light. **Trigger:** met; the README demo avoids it with `black hole` | Probably: rank and list first the lines that hold the most terms, or the terms in order, and light a term in a line only when the line holds a rarer one too. Proximity re-ranking (below) is the general form |
 
 Additive later, no rewrite: typo tolerance (FST or bounded edit distance at
 merge), NFKC folding, camelCase splitting, proximity re-ranking of the top K
