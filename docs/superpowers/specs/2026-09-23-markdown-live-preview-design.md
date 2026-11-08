@@ -538,8 +538,8 @@ margin with one that shrinks to a floor. `TextElement` measures the margin
 where it measures the column (`element.rs`, `column_width`): the widest
 opening marker, `#` × n and a space, shaped at level n's size and weight, over
 n = 1 to 6, rounded up to a whole pixel so taffy's snapping does not shift
-the text. Markers hang on the left only, but the right side mirrors the margin. The text
-starts at `left = max(margin, (pane − column) / 2)` and is
+the text. Markers hang on the left only, but the right side mirrors the margin. Before
+D13 the text started at `left = max(margin, (pane − column) / 2)` and was
 `min(column, pane − 2 × margin)` wide, never below zero. A wide window keeps the
 column centred where it was. A narrow one gives up both margins from the
 column's width, so the text stays centred. The first version reserved the left
@@ -549,9 +549,7 @@ narrower than both margins leaves the text zero wide,
 one glyph per row (`text_system/line_layout.rs:251`). The editor's `p_4()`
 stays. `NameField` shapes with `Markdown::default()` and gets
 no margin. A marker with extra spaces, `#   T`, can be wider than the margin;
-it then paints into the pane's padding. Nothing clips it: gpui's content mask
-ignores padding (`gpui/src/style.rs:638-660`), and no ancestor of the editor
-sets an overflow.
+before D13 it painted into the pane's padding, and D13 shows it inline instead.
 
 The marker and the body share a baseline only when they share metrics. A
 heading holding inline code takes Menlo's larger descent, so its body sits
@@ -574,7 +572,9 @@ longer fits to show inline rather than be clipped.
 `margin_max`, and adds a floor, `theme::EDITOR_MARGIN_MIN` (16 px). For an
 element `E` wide:
 
-- `margin = clamp((E − column) / 2, EDITOR_MARGIN_MIN, margin_max)`;
+- `margin = clamp(floor((E − column) / 2), EDITOR_MARGIN_MIN, margin_max)`, a
+  whole pixel: `column` is fractional (`ch × BODY_COLUMN_CHARS`), and D12 keeps
+  the text's origin on a whole pixel so a live resize does not drift it;
 - the text starts at `margin` and is `max(0, min(column, E − 2 × margin))` wide.
 
 The element is still capped at `column + 2 × margin_max` and centred, so a wide
@@ -585,10 +585,12 @@ headings in the note: a margin that jumps when a `######` is typed would move
 every line.
 
 **A revealed marker hangs only where it fits.** `LayoutInputs` and
-`DocumentLayout` gain `margin: Option<Pixels>`, the room left of the text;
-`None` off the editor, where nothing hangs. In `line_prefix`, a revealed
-marker's shape is already made; when its width exceeds `margin`, the line gets
-no `Prefix` and the marker's `Conceal` goes back to the text's conceals. The
+`DocumentLayout` gain `margin: Pixels`, the room left of the text, with
+`DocumentLayout::margin()` beside `wrap_width()`. `NameField` passes `px(0.)`:
+it parses with `Markdown::default()` and never meets a heading. `line_prefix`
+takes `margin`. A revealed marker's shape is already made there; when its width,
+extra spaces included, exceeds `margin`, the line gets no `Prefix` and the
+marker's `Conceal` goes back to the text's conceals. The
 line then takes the path `> # q` already takes (D12, "only at the line start"):
 the marker is inline, revealed by the same reveal rule, and may re-wrap the
 heading. A concealed marker shows no glyph in either path, so it keeps D12's
@@ -605,11 +607,25 @@ Accepted.
 
 **The cache.** In the band where the margins shrink, the wrap width stays the
 column while `margin` changes, so `wrap_width` alone no longer keys the layout.
-`is_shaped_from` adds: `margin` equal, or no heading marker among the
-conceals the selection touches. Without a revealed marker no line depends on
-`margin`, so a resize in that band reshapes nothing. With one, a resize
+`is_shaped_from` adds: `margin` equal, or no touched element is a heading
+whose `marker.start` is its line's start. `Conceal` has no kind, so the check
+reads `markdown.headings`; `touched` is the predicate `line_prefix` reveals by,
+so the two cannot disagree. `> # q` never hangs and does not count. Without a
+revealed marker no line depends on `margin`, so a resize in that band reshapes
+nothing. With one, a resize
 reshapes, and `carry_or_shape` carries every line whose display text did not
-change. A resize across a marker's width toggles that heading between hanging
+change.
+
+**Every width source carries the margin.** `TextElement`'s per-frame stash
+keys each layout by the `(text width, margin)` it was measured for, never by
+the layout's own fields: a reused `last_layout` keeps an older `margin`. In the
+band every entry has the column as its text width, so a lookup by wrap width
+alone hands a second measure the first one's layout, hanging where it should be
+inline. `take_measured` matches the nearest element width, and prepaint places
+the text at that entry's margin; it never recomputes the margin from the
+snapped bounds, so measure and paint agree on hang or inline. `reshape` and an
+intrinsic query take `margin` from `last_layout`, as they take `wrap_width`, so
+a keystroke on a heading in the band still shapes once (`shapes.rs`). A resize across a marker's width toggles that heading between hanging
 and inline; no hysteresis, since it happens only with the caret on a heading
 during a resize.
 
@@ -687,7 +703,10 @@ D12:
 - A click at a negative `x` on a revealed heading lands in the marker; on a
   concealed one at `line.start`; on a body line at the line's start. A click
   at `x >= 0` on a heading lands at `marker.end` or later.
-- `Home`, down, up on a revealed heading comes back to `line.start`.
+- `Home`, down, up on a revealed heading whose marker hangs comes back to
+  `line.start`. On an inline heading it lands at `marker.end`: back on the
+  line, the marker is concealed, so the line is `Hanging` again and
+  `offset_on_row` sends `x >= 0` to `marker.end`.
 - A selection across a heading covers the marker; the IME rectangle of a
   range in the marker is in the margin.
 - `> # q` keeps its inline conceal.
@@ -703,7 +722,12 @@ D12:
   hangs, one is inline.
 - A resize in the shrinking band reshapes nothing without a revealed marker
   (`SHAPES` unchanged) and reshapes with one.
-- A shot scene: a narrow pane, the caret on a heading whose marker shows inline. Tests that assume the text starts 16 px in from the pane change
+- Two measures in one frame at two widths in the band, the caret on
+  `#### T`: prepaint paints the layout measured for its own width and margin.
+- A keystroke on a heading in the band shapes once.
+- The text's origin `x` is a whole pixel at every width in the band.
+- A shot scene: a narrow pane, the caret on a heading whose marker shows inline.
+  `editor-heading-revealed` still shows `# ` dimmed in the margin at its own width. Tests that assume the text starts 16 px in from the pane change
   their constants, not their intent.
 
 No key binding is added. Existing `simulate_keystrokes` tests must pass
