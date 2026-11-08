@@ -177,7 +177,7 @@ States: `Waiting(Session)` (read, the vault not yet walked whole),
 `Landing(Task)` (the active note loading), `Done`. No `Loading`: the read
 ends before the shell exists. Only `Done` writes.
 
-1. `bootstrap::root` reads the file with `block_on`, once, and hands the
+1. `bootstrap::read_session` reads the file with `block_on`, once, and hands the
    `Opened` to `AppShell::new`, which starts in `Waiting`, or in `Done` on a
    missing or bad file. A test never gates the file's load: `block_on` would
    hang.
@@ -321,6 +321,32 @@ Spec: `docs/superpowers/specs/2026-09-30-tab-views-one-owner-design.md`.
   `Parked::new` per inactive tab, and `Parked::default()` at `active`, which `restored` drops.
   `shell.md`'s `land_restore` exception is gone.
 - `write_session` reads an inactive tab's view with `Parked::peek` on its slot.
+
+## As built (window frame)
+
+Trigger: the README's launch animation needs a window larger than `WINDOW_SIZE`, and a resize after
+launch would show on screen.
+
+- `Session.window` is `{ display, x, y, width, height }`: the display's uuid and the frame in that
+  display's coordinates, which is what gpui's `Window::bounds` and `WindowOptions` both use. It is
+  optional and lenient, so a file without it, or with a malformed one, still restores the rest.
+- `bootstrap::read_session` reads the file before `open_window`, not inside it: `placement` picks the
+  saved frame and its `display_id` while that display is plugged in, else `WINDOW_SIZE` centred.
+  `root` takes the `Opened`, so the file is still read once.
+- `SessionFile` keeps the frame. `observe_window_bounds` refreshes it and arms the throttle; the
+  snapshot copies it. The saved frame is `window_bounds().get_bounds()`, the restore frame, so a
+  fullscreen window reopens windowed at the frame it left. A zoomed window is `Windowed` on macOS,
+  so it reopens at its zoomed frame.
+
+Deviations from Zed (`Workspace::save_window_bounds`, `workspace.rs`):
+
+| Zed | Inkra | Why |
+|---|---|---|
+| Bounds and display uuid in the workspace DB | In the session file | The session file is our one store for what a launch puts back |
+| Saves `WindowBounds`, reopens maximized or fullscreen | Saves the restore frame, reopens windowed | A note app has no case yet for launching fullscreen |
+| Opens a frame on a known display unchecked | Centres one that no longer overlaps its display | A display can keep its uuid and shrink; macOS does not clamp the frame back on screen |
+| Saves only while the window is active, after 100 ms | Any bounds change arms the 1 s throttle | One window; the throttle already bounds the writes |
+| Default bounds from the last window for a new workspace | `WINDOW_SIZE` centred for a vault with no session | One window per vault |
 
 ## Deferred
 

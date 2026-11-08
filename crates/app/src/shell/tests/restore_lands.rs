@@ -16,7 +16,7 @@ use super::dock_menu::{default_docks, docks, side_of};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::{centre, close, editor_in, last, shown_in, tabs_in};
 use super::{check, tab_files};
-use crate::bootstrap::{Launch, root};
+use crate::bootstrap::{Launch, read_session, root};
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
@@ -105,7 +105,10 @@ pub(super) fn launch_as(
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(fs, launched, window, cx),
+                |window, cx| {
+                    let opened = read_session(&fs, &launched, cx);
+                    root(fs, launched, opened, window, cx)
+                },
             )
         })
         .unwrap();
@@ -415,7 +418,7 @@ fn a_saved_layout_is_drawn_by_the_first_frame(cx: &mut TestAppContext) {
     assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
 }
 
-/// The restore reuses the session `bootstrap::root` read before the first frame.
+/// The restore reuses the session `bootstrap::read_session` read before the window opened.
 #[gpui::test]
 fn the_session_file_is_read_once(cx: &mut TestAppContext) {
     let fs = vault();

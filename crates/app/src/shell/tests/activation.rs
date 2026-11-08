@@ -258,7 +258,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         ..Default::default()
                     },
-                    |window, cx| root(fs, launched, window, cx),
+                    |window, cx| root(fs, launched, None, window, cx),
                 )
             })
             .expect("open the window");

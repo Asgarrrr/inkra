@@ -113,8 +113,12 @@ fn the_session_holds_the_tabs_in_bar_order_the_active_one_and_each_view(cx: &mut
         view: None,
     };
     let tabs = [tab("a.md", 2, 4), tab("b.md", 1, 3), empty];
+    assert!(saved(&fs).is_some_and(|session| session.window.is_some()));
     assert_eq!(
-        saved(&fs),
+        saved(&fs).map(|session| Session {
+            window: None,
+            ..session
+        }),
         Some(Session::new(
             PathBuf::from("/vault"),
             0,

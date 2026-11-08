@@ -268,7 +268,7 @@ fn detached(cx: &mut TestAppContext, text: &str) -> (WindowHandle<AppShell>, Vis
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(fs as Arc<dyn Fs>, launch, window, cx),
+                |window, cx| root(fs as Arc<dyn Fs>, launch, None, window, cx),
             )
         })
         .unwrap();

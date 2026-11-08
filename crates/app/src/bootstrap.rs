@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Entity, Focusable, Pixels, Size, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
+    App, AppContext as _, Bounds, DisplayId, Entity, Focusable, Pixels, Size, TitlebarOptions,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px, size,
 };
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
@@ -14,7 +14,7 @@ use crate::Quit;
 use crate::app_files::{cache_file, session_file};
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
-use crate::restore::{self, Opened};
+use crate::restore::{self, Opened, SavedWindow};
 use crate::shell::AppShell;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
@@ -34,44 +34,75 @@ pub(crate) enum Launch {
     Vault(Vault, Option<PathBuf>, Option<PathBuf>),
 }
 
+/// Read once, before the window opens: its frame places the window, the first frame draws the saved layout,
+/// and the tabs' restore reuses it.
+pub(crate) fn read_session(fs: &Arc<dyn Fs>, launched: &Launch, cx: &mut App) -> Option<Opened> {
+    let Launch::Vault(vault, Some(file), _) = launched else {
+        return None;
+    };
+    let started = Instant::now();
+    let session = futures::executor::block_on(restore::read(
+        Arc::clone(fs),
+        file.clone(),
+        vault.root().to_path_buf(),
+    ));
+    Timeline::session_read(started.elapsed(), cx);
+    Some(Opened {
+        file: file.clone(),
+        session,
+    })
+}
+
+/// The saved frame on its display while that display is plugged in and the frame overlaps it; else centred on the main one.
+pub(crate) fn placement(
+    saved: Option<&SavedWindow>,
+    cx: &App,
+) -> (Option<DisplayId>, Bounds<Pixels>) {
+    let on_display = saved.and_then(|saved| {
+        let display = cx.displays().into_iter().find(|display| {
+            display
+                .uuid()
+                .is_ok_and(|uuid| uuid.to_string() == saved.display)
+        })?;
+        let frame = Bounds::new(
+            point(px(saved.x), px(saved.y)),
+            size(px(saved.width), px(saved.height)),
+        );
+        display
+            .bounds()
+            .intersects(&frame)
+            .then(|| (Some(display.id()), frame))
+    });
+    on_display.unwrap_or_else(|| (None, Bounds::centered(None, WINDOW_SIZE, cx)))
+}
+
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
 /// runner gets the same composition the real window gets.
 pub(crate) fn root(
     fs: Arc<dyn Fs>,
     launched: Launch,
+    opened: Option<Opened>,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    let (editor, notes, session, cache) = match launched {
-        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None, None),
+    let (editor, notes, cache) = match launched {
+        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
         Launch::Note(path, text, stamp) => {
             let buffer = cx.new(|_| Buffer::new(text));
             let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
             let notes = cx.new(|cx| NoteStore::detached(fs, buffer, path, stamp, cx));
-            (Some(editor), notes, None, None)
+            (Some(editor), notes, None)
         }
-        Launch::Vault(vault, session, cache) => {
-            // Read once, here: the first frame draws the saved layout, and the tabs' restore reuses it.
-            let opened = session.map(|file| {
-                let started = Instant::now();
-                let session = futures::executor::block_on(restore::read(
-                    Arc::clone(&fs),
-                    file.clone(),
-                    vault.root().to_path_buf(),
-                ));
-                Timeline::session_read(started.elapsed(), cx);
-                Opened { file, session }
-            });
+        Launch::Vault(vault, _, cache) => {
             let vault = cx.new(|_| vault);
             (
                 None,
                 cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
-                opened,
                 cache,
             )
         }
     };
-    cx.new(|cx| AppShell::new(editor, notes, session, cache, window, cx))
+    cx.new(|cx| AppShell::new(editor, notes, opened, cache, window, cx))
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
@@ -131,10 +162,16 @@ pub fn run() {
         };
         theme::install(resolved.theme.clone(), cx);
         theme::set_code_block_wrap(resolved.code_block_wrap, cx);
-        let bounds = Bounds::centered(None, WINDOW_SIZE, cx);
+        let fs: Arc<dyn Fs> = Arc::new(RealFs);
+        let opened = read_session(&fs, &launched, cx);
+        let saved = opened
+            .as_ref()
+            .and_then(|opened| opened.session.as_ref()?.window.as_ref());
+        let (display_id, bounds) = placement(saved, cx);
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                display_id,
                 titlebar: Some(TitlebarOptions {
                     title: None,
                     appears_transparent: true,
@@ -146,7 +183,7 @@ pub fn run() {
                 window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
-            |window, cx| root(Arc::new(RealFs), launched, window, cx),
+            |window, cx| root(fs, launched, opened, window, cx),
         );
 
         match window {

@@ -128,7 +128,7 @@ too, so it is not a cold-launch figure.
 The docks spec saves the dock layout in the session file. The base build read
 that file on the background executor. Its read landed a median 27.8 ms after
 the first frame in the runs below, so the default layout drew first and then
-jumped. The new build reads the file in `bootstrap::root`, once, with
+jumped. The new build reads the file in `bootstrap::read_session`, once, with
 `block_on`, before the window opens. The tabs' restore reuses the decoded
 session.
 

@@ -214,7 +214,7 @@ impl AppShell {
         Self::quit_on_close(window, cx);
         let first = notes.read(cx).current();
         let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
-        let (session, restore) = Self::open_session(file, pending, &notes, cx);
+        let (session, restore) = Self::open_session(file, pending, &notes, window, cx);
         if let Some((editor, note)) = editor.zip(first) {
             // `root` adopts the note it launches with, so its editor comes with `current`.
             groups.insert(

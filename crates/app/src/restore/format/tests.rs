@@ -4,8 +4,8 @@ use inkra_layout::View;
 use serde_json::json;
 
 use super::{
-    Rejected, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, Session,
-    dock_views,
+    Rejected, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, SavedWindow,
+    Session, dock_views,
 };
 
 fn note(note: &str) -> SavedTab {
@@ -328,4 +328,24 @@ fn a_v2_single_group_dock_decodes() {
         dock_views([session.left.as_ref(), session.right.as_ref()]),
         [vec![(vec![View::Files, View::Backlinks], 1)], Vec::new()]
     );
+}
+
+#[test]
+fn the_window_round_trips_and_a_malformed_one_keeps_the_rest() {
+    let mut saved = session();
+    saved.window = Some(SavedWindow {
+        display: "37D8832A-2D66-02CA-B9F7-8F30A301B230".to_owned(),
+        x: 120.,
+        y: 80.,
+        width: 1200.,
+        height: 760.,
+    });
+    assert_eq!(decoded(&saved.encode().unwrap()), saved);
+
+    let text = r#"{ "version": 3, "root": "/Users/me/Notes", "active": 0,
+      "center": { "tabs": [{ "file": "a.md" }], "active": 0 },
+      "window": { "display": "37D8832A", "x": "left" } }"#;
+    let session = decoded(text);
+    assert_eq!(session.window, None);
+    assert_eq!(tabs(&session), [note("a.md")]);
 }

@@ -37,6 +37,22 @@ pub(crate) struct Session {
     pub(crate) right: Option<SavedMember>,
     #[serde(default = "both_shown")]
     pub(crate) shown: [bool; 2],
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub(crate) window: Option<SavedWindow>,
+}
+
+/// The window's frame on its display, in that display's coordinates; another display's reads as unknown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedWindow {
+    pub(crate) display: String,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -209,6 +225,7 @@ impl Session {
             left,
             right,
             shown,
+            window: None,
         }
     }
 
