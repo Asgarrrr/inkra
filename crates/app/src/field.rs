@@ -99,14 +99,6 @@ struct FieldElement {
     field: Entity<NameField>,
 }
 
-impl IntoElement for FieldElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for FieldElement {
     type RequestLayoutState = ();
     type PrepaintState = Prepainted;

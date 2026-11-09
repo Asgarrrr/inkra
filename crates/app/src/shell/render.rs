@@ -70,7 +70,7 @@ impl Render for AppShell {
             // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
             .key_context("AppShell")
             .group(SHELL_GROUP)
-            // Load-bearing: with no editor, focus lives on `self.focus_handle`; untracked, `cmd-s` is unreachable (gpui/src/window.rs:6244-6251).
+            // Load-bearing: with no editor, focus lives on `self.focus_handle`; untracked, `cmd-s` is unreachable (gpui/src/window.rs:6757-6764).
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::new_note))

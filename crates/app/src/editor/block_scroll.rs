@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use gpui::{App, Context, Pixels, Point, ScrollWheelEvent, TouchPhase, px};
+use gpui::{App, Context, Pixels, Point, ScrollEvent, TouchPhase, px};
 use inkra_text::{Bias, ByteOffset};
 
 use super::EditorView;
@@ -84,7 +84,7 @@ impl EditorView {
     /// the event, at its limit too, so the page never takes the rest of the gesture.
     pub(super) fn on_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         over: Option<(ByteOffset, Pixels)>,
         line_height: Pixels,
         cx: &mut Context<Self>,

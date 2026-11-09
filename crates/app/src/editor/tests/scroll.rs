@@ -171,10 +171,10 @@ fn typing_after_a_wheel_scroll_brings_the_caret_back(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     cx.simulate_keystrokes("cmd-up");
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: gpui::point(gpui::px(17.), middle_of_line(2.)),
         delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-1000.))),
-        ..gpui::ScrollWheelEvent::default()
+        ..gpui::ScrollEvent::default()
     });
 
     window

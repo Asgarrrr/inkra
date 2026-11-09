@@ -161,7 +161,7 @@ impl AppShell {
         self.focus_handle.contains(handle, window)
     }
 
-    /// Both layers occlude: gpui's hit test stops only at an occluding hitbox (`gpui/src/window.rs:1106-1123`).
+    /// Both layers occlude: gpui's hit test stops only at an occluding hitbox (`gpui/src/window.rs:1169-1186`).
     /// A menu also closes on a right press outside, as macOS's do.
     pub(super) fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let modal = self.modal.as_ref()?;

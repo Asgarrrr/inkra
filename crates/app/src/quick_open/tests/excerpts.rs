@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::FutureExt as _;
 use futures::channel::oneshot;
-use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point, px};
+use gpui::{Modifiers, ScrollDelta, ScrollEvent, TestAppContext, point, px};
 
 use super::refresh::{advance, hold_scans};
 use super::{Opened, SEARCH_DEBOUNCE, listed, open, search, with_texts};
@@ -116,11 +116,11 @@ fn scrolling_asks_for_the_rows_it_shows(cx: &mut TestAppContext) {
     let list = opened.visual.debug_bounds("picker-list");
     assert!(list.is_some(), "the list is drawn");
 
-    opened.visual.simulate_event(ScrollWheelEvent {
+    opened.visual.simulate_event(ScrollEvent {
         position: list.map(|list| list.center()).unwrap_or_default(),
         delta: ScrollDelta::Pixels(point(px(0.), -(theme::UI_LINE_HEIGHT * 2. * 20.))),
         modifiers: Modifiers::none(),
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     });
     opened.visual.run_until_parked();
 

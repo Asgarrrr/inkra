@@ -28,11 +28,11 @@ fn every_shown_name_is_unique(cx: &mut gpui::TestAppContext) {
     });
 }
 
-fn keystroke(source: &str) -> KeybindingKeystroke {
+fn keystroke(source: &'static str) -> KeybindingKeystroke {
     KeybindingKeystroke::from_keystroke(Keystroke::parse(source).expect(source))
 }
 
-fn label(source: &str) -> String {
+fn label(source: &'static str) -> String {
     key_label(&keystroke(source))
 }
 

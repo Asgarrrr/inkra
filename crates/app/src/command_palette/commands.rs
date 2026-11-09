@@ -62,7 +62,7 @@ pub(super) fn humanize(name: &str) -> String {
     out
 }
 
-/// A symbol macOS reports with shift cleared (`gpui_macos/src/events.rs:461-479`), and the key pressed for it (US layout).
+/// A symbol macOS reports with shift cleared (`gpui_macos/src/events.rs:467-485`), and the key pressed for it (US layout).
 const SHIFTED: &[(&str, &str)] = &[("|", "\\"), ("}", "]"), ("{", "[")];
 
 /// Apple order, `⌃⌥⇧⌘`, then the key's glyph (spec D5); gpui's `Display` orders `⌘⇧` and prints `enter`.

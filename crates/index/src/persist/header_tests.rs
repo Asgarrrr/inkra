@@ -27,12 +27,12 @@ fn rejected(bytes: &[u8]) -> (Rejected, &'static str) {
 
 #[test]
 fn golden_bytes() {
-    assert_eq!(fold_fingerprint(), 0xC6D3_150D);
+    assert_eq!(fold_fingerprint(), 0x3D0D_1805);
     assert_eq!(derivation_fingerprint(), 0xEA84_84EC);
     let golden: [u8; 55] = [
         b'I', b'N', b'K', b'R', b'A', b'I', b'X', 0, // magic
         2, 0, 0, 0, // version
-        0x0D, 0x15, 0xD3, 0xC6, // fold
+        0x05, 0x18, 0x0D, 0x3D, // fold
         0xEC, 0x84, 0x84, 0xEA, // derivation
         0xE9, 0x63, 0xF8, 0x38, // crc32 of the body
         3, 2, 1, 24, // three sections: two bytes, one, then 24

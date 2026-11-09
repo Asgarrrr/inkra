@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use gpui::{
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext,
+    Pixels, Point, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, VisualTestContext,
     WindowHandle, point, px,
 };
 
@@ -36,11 +36,11 @@ fn center(
 }
 
 fn wheel(cx: &mut VisualTestContext, at: Point<Pixels>, delta: ScrollDelta, phase: TouchPhase) {
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at,
         delta,
         touch_phase: phase,
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     });
     cx.run_until_parked();
 }

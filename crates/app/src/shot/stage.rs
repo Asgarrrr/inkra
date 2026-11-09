@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase,
+    Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, TouchPhase,
     VisualTestAppContext, WindowHandle, point, px,
 };
 use image::RgbaImage;
@@ -276,11 +276,11 @@ impl Stage {
     ) {
         self.cx.simulate_event(
             window.into(),
-            ScrollWheelEvent {
+            ScrollEvent {
                 position: at,
                 delta: ScrollDelta::Pixels(delta),
                 touch_phase: TouchPhase::Started,
-                ..ScrollWheelEvent::default()
+                ..ScrollEvent::default()
             },
         );
         self.settle();

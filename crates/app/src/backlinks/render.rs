@@ -25,7 +25,7 @@ impl BacklinksPanel {
                     // The press's modifiers: the row acts at mouse-down, a picker row at the release.
                     cx.emit(FileActivated {
                         file: source,
-                        open: Open::from_click(event.modifiers),
+                        open: Open::from_click(event.modifiers, cx),
                     });
                 }),
             )

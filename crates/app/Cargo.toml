@@ -32,9 +32,9 @@ futures = { workspace = true }
 # Wrap snapping per line; `Buffer`'s grapheme steps scan the whole document.
 unicode-segmentation = { workspace = true }
 # Pinned by commit; vendor-gpui.sh checks out this same rev for reading.
-gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19" }
+gpui = { git = "https://github.com/zed-industries/zed", rev = "a1f2e21c2c95c6679945d88996e8324a6cc97e47" }
 # Without font-kit macOS renders no text, and only logs a warning.
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a1f2e21c2c95c6679945d88996e8324a6cc97e47", features = [
     "font-kit",
 ] }
 # The session file (restore-tabs spec, R2); the majors gpui already locks.
@@ -55,7 +55,7 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", rev = "526c95d474b2bf800e95aab30222fa0341f08e19", features = [
+gpui = { git = "https://github.com/zed-industries/zed", rev = "a1f2e21c2c95c6679945d88996e8324a6cc97e47", features = [
     "test-support",
 ] }
 # `MemFs` — tests must never reach the real filesystem.

@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, AvailableSpace, Bounds, DispatchPhase, ElementId, Entity, GlobalElementId, Hitbox,
-    HitboxBehavior, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ScrollWheelEvent, Style,
-    TextStyle, Window, fill, point, prelude::*, px, relative, size,
+    HitboxBehavior, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ScrollEvent, Style, TextStyle,
+    Window, fill, point, prelude::*, px, relative, size,
 };
 use inkra_markdown::{HEADING_LEVELS, Styles};
 use inkra_text::ByteOffset;
@@ -30,14 +30,6 @@ pub(crate) fn painted_bars() -> Vec<Bounds<Pixels>> {
 
 pub(super) struct TextElement {
     pub(super) editor: Entity<EditorView>,
-}
-
-impl IntoElement for TextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 /// Every layout shaped this frame: taffy may call the measure closure several times and answer
@@ -225,7 +217,7 @@ impl Element for TextElement {
         let editor = self.editor.clone();
         let wheel_blocks = Rc::clone(&blocks);
         // Registered after the scroll container's listener, so it bubbles first.
-        window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+        window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
