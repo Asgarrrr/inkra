@@ -79,6 +79,8 @@ pub struct SourceLink {
 - `decode` interns `path` through one `HashMap<&str, Arc<str>>` that lives for
   the decode only. It keys the written form, so case and `../` variants stay
   distinct: count the distinct paths on the bench vault before fixing the gate.
+  `Source::parse` interns the same way for one parse, so a reload keeps the
+  sharing (added after the code review of #11).
 - Rejected: a vault-wide interner (it never frees, and parse workers would
   share it with the foreground); `compact_str`/`smol_str` (the bench vault's
   short names would flatter them); a CSR graph (after B3 the per-note overhead
