@@ -151,12 +151,13 @@ fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
     );
 }
 
-#[test]
-fn the_traffic_lights_sit_mid_row() {
-    assert_eq!(
-        theme::TRAFFIC_LIGHT_POSITION.y,
-        (theme::TITLE_BAR_HEIGHT - px(16.)) / 2.
-    );
+/// gpui centres the 16 px lights in a `16 + 2y` container at the window's top.
+#[gpui::test]
+fn the_traffic_lights_sit_on_the_tab_titles_line(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    let line = cx.debug_bounds("tab-new").unwrap().center().y;
+    assert_eq!(theme::TRAFFIC_LIGHT_POSITION.y + px(8.), line);
 }
 
 /// The bar is as wide as its tabs and `+` follows it, so the row's empty space after `+` is the region's.
