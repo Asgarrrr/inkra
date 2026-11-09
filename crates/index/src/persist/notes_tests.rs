@@ -12,7 +12,7 @@ use super::{CachedNote, Rejected, decode, encode, notes, words};
 use crate::test_support::{ROOT, id, note_set, vault};
 use crate::varint;
 use crate::words::{NoteWords, Ordinal};
-use crate::{FileRead, NoteContent, NoteIndex, Source, SourceLink, Style, Target};
+use crate::{FileRead, NoteContent, NoteIndex, Source, SourceLink, Style};
 
 fn read(secs: u64, nanos: u32, size: u64, inode: u64) -> FileRead {
     FileRead {
@@ -85,6 +85,8 @@ fn name() -> impl Strategy<Value = &'static str> {
 fn piece() -> impl Strategy<Value = &'static str> {
     prop::sample::select(vec![
         "[[a]]",
+        "[[A]]",
+        "[x](a.md)",
         "[[b/c#h]]",
         "[[./d]]",
         "[[../e#é]]",
@@ -144,6 +146,29 @@ proptest! {
 }
 
 #[test]
+fn two_links_to_one_path_share_their_arc() {
+    let (_, index) = index(
+        &["a.md", "c.md"],
+        &[
+            ("a.md", "[[b]] [[B]]", read(1, 0, 11, 1)),
+            ("c.md", "[[b]]", read(2, 0, 5, 2)),
+        ],
+    );
+    let notes = decoded(&encode(&index.snapshot(), Path::new(ROOT)).expect("under the cap"));
+    let [a, c] = &notes[..] else {
+        panic!("two records, not {}", notes.len());
+    };
+    let (b, upper, other) = (
+        &a.source.links[0].path,
+        &a.source.links[1].path,
+        &c.source.links[0].path,
+    );
+    assert_eq!((&**b, &**upper, &**other), ("b", "B", "b"));
+    assert!(Arc::ptr_eq(b, other), "one decode shares a path");
+    assert!(!Arc::ptr_eq(b, upper), "the written form is the key");
+}
+
+#[test]
 fn pre_epoch_writes_no_stamp() {
     let mut before = read(0, 0, 4, 3);
     before.stamp.mtime = Mtime(SystemTime::UNIX_EPOCH - Duration::from_nanos(1));
@@ -170,18 +195,18 @@ fn an_offset_past_u32_writes_no_stamp() {
     let (ids, mut index) = index(&["a.md"], &[]);
     let file = read(1, 0, 4, 3);
     let link = SourceLink {
-        target: Target::Note {
-            path: "b".into(),
-            md: false,
-            fragment: None,
-            style: Style::Name,
-        },
+        path: "b".into(),
+        fragment: None,
+        md: false,
+        style: Style::Name,
         range: ByteOffset::new(0)..ByteOffset::new(1 << 32),
         context: "[[b]]".into(),
         context_link: 0..5,
     };
     let content = NoteContent {
-        source: Source { links: vec![link] },
+        source: Source {
+            links: vec![link].into(),
+        },
         words: NoteWords::parse(""),
         read: file,
     };
@@ -274,12 +299,10 @@ fn sealed(section: &Raw) -> Vec<u8> {
 #[test]
 fn hand_built_records_decode() {
     let link = SourceLink {
-        target: Target::Note {
-            path: "b".into(),
-            md: false,
-            fragment: None,
-            style: Style::Relative,
-        },
+        path: "b".into(),
+        fragment: None,
+        md: false,
+        style: Style::Relative,
         range: ByteOffset::new(0)..ByteOffset::new(0),
         context: String::new(),
         context_link: 0..0,
@@ -289,12 +312,9 @@ fn hand_built_records_decode() {
         inode: 3,
     };
     let md_link = SourceLink {
-        target: Target::Note {
-            path: "b".into(),
-            md: true,
-            fragment: Some("h".into()),
-            style: Style::Name,
-        },
+        md: true,
+        fragment: Some("h".into()),
+        style: Style::Name,
         ..link.clone()
     };
     let md = Raw::default()
@@ -320,7 +340,9 @@ fn hand_built_records_decode() {
                 stamp: None,
                 identity,
                 ordinal: None,
-                source: Source { links: vec![link] },
+                source: Source {
+                    links: vec![link].into(),
+                },
             },
         ),
         (
@@ -331,7 +353,7 @@ fn hand_built_records_decode() {
                 identity,
                 ordinal: None,
                 source: Source {
-                    links: vec![md_link],
+                    links: vec![md_link].into(),
                 },
             },
         ),
@@ -400,9 +422,17 @@ fn each_field_rejects() {
         (raw().var(1).head(b"a.md", 2, 0).var(0), "flags"),
         (raw().var(1).head(b"a.md", 3, 0).var(0), "flags"),
         (
-            raw().var(1).head(b"a.md", 0, 0).var(1).str(b"b").byte(4),
+            raw()
+                .var(1)
+                .head(b"a.md", 0, 0)
+                .var(1)
+                .str(b"b")
+                .byte(4)
+                .u32(0)
+                .byte(0),
             "flags",
         ),
+        (raw().var(1).head(b"a.md", 0, 0).var(u32::MAX), "links"),
         (raw().var(1).head(b"\xff", 0, 0).var(0), "utf8"),
         (
             raw().var(1).str(b"aaaaaaaaaaaaaaaaaaaa").byte(0).u64(7),

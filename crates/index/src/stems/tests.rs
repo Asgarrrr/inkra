@@ -5,7 +5,7 @@ use proptest::prelude::*;
 
 use super::Stems;
 use crate::key::Key;
-use crate::test_support::{id, vault};
+use crate::test_support::{id, link_target, vault};
 use crate::{Source, Target};
 
 const NOTES: [&str; 4] = ["n0.md", "n1.md", "n2.md", "n3.md"];
@@ -17,7 +17,7 @@ fn ids() -> (Vault, Vec<EntryId>) {
 }
 
 /// Each row of `stems`, sorted, so the order sources arrived in does not count.
-fn rows(stems: &Stems) -> HashMap<Key, Vec<(EntryId, usize)>> {
+fn rows(stems: &Stems) -> HashMap<Key, Vec<(EntryId, u32)>> {
     stems
         .0
         .iter()
@@ -41,6 +41,17 @@ fn removing_a_stem_s_last_entry_drops_its_row() {
     stems.remove(ids[1], &b);
     assert_eq!(stems.get(&Key::stem("plan")), None);
     assert_eq!(stems, Stems::default());
+}
+
+#[test]
+fn a_row_is_8_bytes() {
+    let (_, ids) = ids();
+    let mut stems = Stems::default();
+    stems.insert(ids[0], &Source::parse("[[a]]"));
+    let Some([row]) = stems.get(&Key::stem("a")) else {
+        panic!("one row");
+    };
+    assert_eq!(size_of_val(row), 8);
 }
 
 #[test]
@@ -118,12 +129,12 @@ fn op() -> impl Strategy<Value = Op> {
 }
 
 /// Every note link of the live sources under its stem, scanning each link's target.
-fn model(ids: &[EntryId], live: &BTreeMap<usize, Source>) -> HashMap<Key, Vec<(EntryId, usize)>> {
-    let mut rows: HashMap<Key, Vec<(EntryId, usize)>> = HashMap::new();
+fn model(ids: &[EntryId], live: &BTreeMap<usize, Source>) -> HashMap<Key, Vec<(EntryId, u32)>> {
+    let mut rows: HashMap<Key, Vec<(EntryId, u32)>> = HashMap::new();
     for (&n, source) in live {
-        for (at, link) in source.links.iter().enumerate() {
-            if let Target::Note { path, .. } = &link.target {
-                rows.entry(Key::stem(path)).or_default().push((ids[n], at));
+        for (at, link) in (0..).zip(source.links.iter()) {
+            if let Target::Note { path, .. } = link_target(link) {
+                rows.entry(Key::stem(&path)).or_default().push((ids[n], at));
             }
         }
     }

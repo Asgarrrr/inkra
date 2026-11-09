@@ -1,6 +1,6 @@
 //! Section 1: each loaded note's stamp, identity and links, keyed by its vault path (P2).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -13,10 +13,12 @@ use super::Rejected;
 use super::bytes::{len, narrow, put_blob, string, take};
 use crate::varint;
 use crate::words::Ordinal;
-use crate::{IndexSnapshot, Source, SourceLink, Style, Target};
+use crate::{IndexSnapshot, Source, SourceLink, Style};
 
 /// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
 const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
+/// A link's path length, flags, style, 2 range ends, context length, 2 context ends: a byte each.
+const MIN_LINK_RECORD: usize = 8;
 /// The flags bit of a record holding a stamp.
 const STAMPED: u8 = 1;
 /// The flag bits of a link holding a fragment, and of one written with `.md`; then every bit known.
@@ -76,21 +78,12 @@ pub(super) fn encode(
 pub(super) fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
     varint::push(out, u32::try_from(links.len()).ok()?);
     for link in links {
-        let Target::Note {
-            path,
-            md,
-            fragment,
-            style,
-        } = &link.target
-        else {
-            panic!("a source holds note links only");
-        };
-        put_blob(out, path.as_bytes())?;
-        out.push(link_flags(*md, fragment.is_some()));
-        if let Some(fragment) = fragment {
+        put_blob(out, link.path.as_bytes())?;
+        out.push(link_flags(link.md, link.fragment.is_some()));
+        if let Some(fragment) = &link.fragment {
             put_blob(out, fragment.as_bytes())?;
         }
-        out.push(style_code(*style));
+        out.push(style_code(link.style));
         put_range(out, link.range.start.get()..link.range.end.get())?;
         put_blob(out, link.context.as_bytes())?;
         put_range(out, link.context_link.clone())?;
@@ -140,8 +133,10 @@ pub(super) fn decode(mut section: &[u8]) -> Result<Vec<CachedNote>, Rejected> {
     }
     let mut notes = Vec::with_capacity(count);
     let mut paths = HashSet::with_capacity_and_hasher(count, RandomState::default());
+    // Each link path as written, shared by every link of this decode that writes it.
+    let mut written = HashMap::with_hasher(RandomState::default());
     for _ in 0..count {
-        let note = record(bytes)?;
+        let note = record(bytes, &mut written)?;
         if !paths.insert(Arc::clone(&note.path)) {
             return Err(Rejected::Corrupt("duplicate"));
         }
@@ -153,7 +148,10 @@ pub(super) fn decode(mut section: &[u8]) -> Result<Vec<CachedNote>, Rejected> {
     Ok(notes)
 }
 
-fn record(bytes: &mut &[u8]) -> Result<CachedNote, Rejected> {
+fn record<'a>(
+    bytes: &mut &'a [u8],
+    written: &mut HashMap<&'a str, Arc<str>, RandomState>,
+) -> Result<CachedNote, Rejected> {
     let path = Arc::from(string(bytes)?);
     let flags = byte(bytes)?;
     if flags & !STAMPED != 0 {
@@ -170,16 +168,25 @@ fn record(bytes: &mut &[u8]) -> Result<CachedNote, Rejected> {
         .ok_or(Rejected::Corrupt("varint"))?
         .checked_sub(1)
         .map(Ordinal::new);
-    let mut links = Vec::new();
-    for _ in 0..len(bytes)? {
-        links.push(link(bytes)?);
+    let count = len(bytes)?;
+    if count
+        .checked_mul(MIN_LINK_RECORD)
+        .is_none_or(|least| least > bytes.len())
+    {
+        return Err(Rejected::Corrupt("links"));
+    }
+    let mut links = Vec::with_capacity(count);
+    for _ in 0..count {
+        links.push(link(bytes, written)?);
     }
     Ok(CachedNote {
         path,
         stamp,
         identity: FileIdentity { device, inode },
         ordinal,
-        source: Source { links },
+        source: Source {
+            links: Arc::from(links),
+        },
     })
 }
 
@@ -199,8 +206,12 @@ fn stamp(bytes: &mut &[u8]) -> Result<Stamp, Rejected> {
     })
 }
 
-fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
-    let path = string(bytes)?.to_owned();
+fn link<'a>(
+    bytes: &mut &'a [u8],
+    written: &mut HashMap<&'a str, Arc<str>, RandomState>,
+) -> Result<SourceLink, Rejected> {
+    let path = string(bytes)?;
+    let path = Arc::clone(written.entry(path).or_insert_with(|| Arc::from(path)));
     let flags = byte(bytes)?;
     if flags & !KNOWN_LINK_FLAGS != 0 {
         return Err(Rejected::Corrupt("flags"));
@@ -208,7 +219,7 @@ fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
     let fragment = if flags & FRAGMENT == 0 {
         None
     } else {
-        Some(string(bytes)?.to_owned())
+        Some(Box::from(string(bytes)?))
     };
     let style = style_from_code(byte(bytes)?).ok_or(Rejected::Corrupt("style"))?;
     let within_note = range(bytes)?;
@@ -219,12 +230,10 @@ fn link(bytes: &mut &[u8]) -> Result<SourceLink, Rejected> {
         return Err(Rejected::Corrupt("context"));
     }
     Ok(SourceLink {
-        target: Target::Note {
-            path,
-            md: flags & MD != 0,
-            fragment,
-            style,
-        },
+        path,
+        fragment,
+        md: flags & MD != 0,
+        style,
         range: ByteOffset::new(within_note.start)..ByteOffset::new(within_note.end),
         context,
         context_link,

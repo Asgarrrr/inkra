@@ -7,7 +7,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::NoteIndex;
 use crate::key::{Key, strip_md};
-use crate::test_support::{content, id, mtime, note_set, try_rename, vault};
+use crate::test_support::{content, id, link_target, mtime, note_set, try_rename, vault};
 use crate::{CorpusSnapshot, Resolution, Source, Style, Target};
 
 #[derive(Debug, Clone)]
@@ -380,12 +380,12 @@ fn link() -> impl Strategy<Value = String> {
 
 fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, Source)]) {
     for (source, parsed) in sources {
-        for link in &parsed.links {
+        for link in parsed.links.iter() {
+            let target = link_target(link);
             assert_eq!(
-                index.resolve(Some(*source), &link.target),
-                model.resolve(*source, &link.target),
-                "{:?} from {source:?}",
-                link.target
+                index.resolve(Some(*source), &target),
+                model.resolve(*source, &target),
+                "{target:?} from {source:?}"
             );
         }
     }
@@ -396,10 +396,11 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
             let Some(order) = model.notes.iter().position(|(id, _)| id == source) else {
                 continue;
             };
-            for link in &parsed.links {
-                if model.resolve(*source, &link.target) == Resolution::File(*file) {
+            for link in parsed.links.iter() {
+                let target = link_target(link);
+                if model.resolve(*source, &target) == Resolution::File(*file) {
                     expected.push((order, *source, link.range.start.get()));
-                    let Target::Note { path, .. } = &link.target else {
+                    let Target::Note { path, .. } = &target else {
                         panic!("only note links resolve to a file");
                     };
                     let stem = model
@@ -421,9 +422,9 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
                     .position(|(id, _)| *id == backlink.source)
                     .unwrap_or(usize::MAX);
                 backlink
-                    .links
-                    .into_iter()
-                    .map(move |link| (order, backlink.source, link.range.start.get()))
+                    .occurrences()
+                    .map(|link| (order, backlink.source, link.range.start.get()))
+                    .collect::<Vec<_>>()
             })
             .collect();
         assert_eq!(

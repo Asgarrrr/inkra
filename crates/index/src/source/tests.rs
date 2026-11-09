@@ -1,13 +1,14 @@
+use std::sync::Arc;
+
 use super::{BEFORE, CONTEXT, Source};
-use crate::Target;
 
 fn contexts(text: &str) -> Vec<(String, String)> {
     Source::parse(text)
         .links
-        .into_iter()
+        .iter()
         .map(|link| {
             let lit = link.context[link.context_link.clone()].to_owned();
-            (link.context, lit)
+            (link.context.clone(), lit)
         })
         .collect()
 }
@@ -15,15 +16,24 @@ fn contexts(text: &str) -> Vec<(String, String)> {
 #[test]
 fn only_note_links_are_kept() {
     let source = Source::parse("[[a]] <https://x.org> [[#h]] [x](b.md)");
-    let paths: Vec<_> = source
-        .links
-        .iter()
-        .map(|link| match &link.target {
-            Target::Note { path, .. } => path.clone(),
-            other => panic!("{other:?} kept"),
-        })
-        .collect();
+    let paths: Vec<_> = source.links.iter().map(|link| &*link.path).collect();
     assert_eq!(paths, ["a", "b"]);
+}
+
+#[test]
+fn one_parse_shares_a_path() {
+    let source = Source::parse("[[a]] [[B]] [[a#h]]");
+    let [a, upper, again] = &*source.links else {
+        panic!("three links, not {}", source.links.len());
+    };
+    assert!(
+        Arc::ptr_eq(&a.path, &again.path),
+        "a reload shares as a decode does"
+    );
+    assert!(
+        !Arc::ptr_eq(&a.path, &upper.path),
+        "the written form is the key"
+    );
 }
 
 #[test]

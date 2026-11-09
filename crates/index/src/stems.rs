@@ -8,12 +8,19 @@ use crate::source::Source;
 /// A note link's stem key → (source, index into its links). Every link resolving to `T`
 /// has `T`'s stem, so this finds backlinks without a reverse map. No row is empty.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct Stems(HashMap<Key, Vec<(EntryId, usize)>>);
+pub(crate) struct Stems(HashMap<Key, Vec<(EntryId, u32)>>);
 
 impl Stems {
     /// Adds a row per note link of `source`; `id` holds none beforehand.
+    ///
+    /// # Panics
+    ///
+    /// If `source` holds more than `u32::MAX` links.
     pub(crate) fn insert(&mut self, id: EntryId, source: &Source) {
         for (at, key) in source.note_stems() {
+            let Ok(at) = u32::try_from(at) else {
+                panic!("a note of more than u32::MAX links");
+            };
             self.0.entry(key).or_default().push((id, at));
         }
     }
@@ -41,7 +48,7 @@ impl Stems {
         }
     }
 
-    pub(crate) fn get(&self, stem: &Key) -> Option<&[(EntryId, usize)]> {
+    pub(crate) fn get(&self, stem: &Key) -> Option<&[(EntryId, u32)]> {
         self.0.get(stem).map(Vec::as_slice)
     }
 
@@ -51,7 +58,7 @@ impl Stems {
     }
 
     #[cfg(test)]
-    pub(crate) fn values(&self) -> impl Iterator<Item = &Vec<(EntryId, usize)>> {
+    pub(crate) fn values(&self) -> impl Iterator<Item = &Vec<(EntryId, u32)>> {
         self.0.values()
     }
 

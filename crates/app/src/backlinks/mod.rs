@@ -103,11 +103,10 @@ impl BacklinksPanel {
             // A load may notify after the vault changed and before its build applies.
             .filter_map(|backlink| {
                 Some(Row {
-                    source: backlink.source,
-                    name: name(backlink.source)?.into(),
+                    source: backlink.source(),
+                    name: name(backlink.source())?.into(),
                     occurrences: backlink
-                        .links
-                        .into_iter()
+                        .occurrences()
                         .map(|link| Occurrence {
                             context: LitText::context(&link.context, [link.context_link.clone()]),
                         })

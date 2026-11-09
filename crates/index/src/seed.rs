@@ -21,7 +21,7 @@ use crate::words::{Alive, Ordinal, Ordinals, Shards, Words};
 pub(crate) struct Seed {
     pub(crate) words: Words,
     pub(crate) corpus: Corpus,
-    pub(crate) sources: Shards<EntryId, Arc<Source>>,
+    pub(crate) sources: Shards<EntryId, Source>,
     pub(crate) by_stem: Stems,
     /// Each seeded note's cached stamp, the racy ones left out so they reload (P8).
     pub(crate) stamps: Vec<(EntryId, Stamp)>,
@@ -74,7 +74,7 @@ impl Seed {
             };
             corpus.write(notes.notes.order(id), read);
             by_stem.insert(id, &note.source);
-            sources.insert(id, Arc::new(note.source));
+            sources.insert(id, note.source);
             if !is_racy(stamp) {
                 stamps.push((id, stamp));
             }
