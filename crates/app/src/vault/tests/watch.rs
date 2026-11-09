@@ -40,7 +40,7 @@ fn backlinks(links: &Entity<IndexSync>, cx: &mut TestAppContext, note: EntryId) 
             .index()
             .backlinks(note)
             .into_iter()
-            .map(|backlink| backlink.source)
+            .map(|backlink| backlink.source())
             .collect()
     })
 }

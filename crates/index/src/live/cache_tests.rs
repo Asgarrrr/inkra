@@ -131,7 +131,7 @@ fn backlinks(h: &Harness, file: &str) -> Vec<String> {
     let mut sources: Vec<String> = index
         .backlinks(h.id(file))
         .iter()
-        .map(|backlink| file_of(h, backlink.source))
+        .map(|backlink| file_of(h, backlink.source()))
         .collect();
     sources.sort();
     sources

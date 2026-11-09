@@ -45,7 +45,7 @@ pub(super) fn backlinks(
             .index()
             .backlinks(note)
             .into_iter()
-            .map(|backlink| backlink.source)
+            .map(|backlink| backlink.source())
             .collect()
     });
     notes.read_with(cx, |notes, cx| {
@@ -651,7 +651,7 @@ fn snapshot(
                 let backlinks = index
                     .backlinks(id)
                     .into_iter()
-                    .map(|backlink| (backlink.source, backlink.at.len()))
+                    .map(|backlink| (backlink.source(), backlink.occurrences().count()))
                     .collect();
                 let indexed = index.is_indexed(id);
                 let stamp = stamps.remove(&id);

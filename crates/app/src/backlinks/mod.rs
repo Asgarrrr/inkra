@@ -103,8 +103,8 @@ impl BacklinksPanel {
             // A load may notify after the vault changed and before its build applies.
             .filter_map(|backlink| {
                 Some(Row {
-                    source: backlink.source,
-                    name: name(backlink.source)?.into(),
+                    source: backlink.source(),
+                    name: name(backlink.source())?.into(),
                     occurrences: backlink
                         .occurrences()
                         .map(|link| Occurrence {

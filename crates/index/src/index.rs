@@ -40,16 +40,21 @@ pub struct NoteIndex {
 /// One source's links that resolve to a file: its whole slice, and the occurrences' indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Backlink {
-    pub source: EntryId,
-    pub links: Arc<[SourceLink]>,
-    /// Ascending, never empty.
-    pub at: Vec<usize>,
+    source: EntryId,
+    links: Arc<[SourceLink]>,
+    /// Ascending, never empty, each below `links.len()`.
+    at: Vec<u32>,
 }
 
 impl Backlink {
+    #[must_use]
+    pub fn source(&self) -> EntryId {
+        self.source
+    }
+
     /// The links that resolve to the file, in document order.
     pub fn occurrences(&self) -> impl Iterator<Item = &SourceLink> {
-        self.at.iter().map(|&at| &self.links[at])
+        self.at.iter().map(|&at| &self.links[at as usize])
     }
 }
 
@@ -267,14 +272,13 @@ impl NoteIndex {
         else {
             return Vec::new();
         };
-        let mut grouped: BTreeMap<(usize, EntryId), Vec<usize>> = BTreeMap::new();
+        let mut grouped: BTreeMap<(usize, EntryId), Vec<u32>> = BTreeMap::new();
         // A shared name such as `index` is written the same way by thousands of links, and
         // only a relative link's resolution depends on its source.
         let mut by_text: HashMap<NoteRef<'_>, Resolution> = HashMap::new();
         let mut by_query: HashMap<Query, Resolution> = HashMap::new();
         for &(source, at) in rows {
-            let at = at as usize;
-            let note = self.source(source).links[at].note();
+            let note = self.source(source).links[at as usize].note();
             let resolution = match note {
                 NoteRef { style, .. } if style != Style::Relative => by_text
                     .entry(note)
