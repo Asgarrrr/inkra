@@ -43,7 +43,10 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - run: `cargo run -p inkra-app [path]`
 - tests moved: `./scripts/test-names.sh` — diff before and after splitting a
   file; a forgotten `mod` line drops tests and still compiles green.
-- mutants: `cargo mutants` after changing `text`, `editor`, `markdown`, `index`, `tabs` or `layout` logic.
+- mutants: after changing `text`, `editor`, `markdown`, `index`, `tabs` or `layout` logic,
+  `git diff main... > $TMPDIR/m.diff && cargo mutants -j 4 --in-diff $TMPDIR/m.diff`.
+  A whole crate is ~1000 mutants run one by one, near two hours; the diff is a few
+  dozen. Run plain `cargo mutants` once, before the PR.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
