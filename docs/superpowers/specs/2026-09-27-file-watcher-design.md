@@ -27,12 +27,12 @@ reloads only those notes.
 Paths are under `vendor/zed-reference/crates/`.
 
 - **Watch.** `Fs::watch(path, latency)` returns a stream of `Vec<PathEvent>`
-  and a `Watcher` handle (`fs/src/fs.rs:171-178`). `PathEventKind` is
+  and a `Watcher` handle (`fs/src/fs.rs:175-182`). `PathEventKind` is
   `Removed | Created | Changed | Rescan` (`fs.rs:80-91`). `RealFs` wraps
   `notify`'s `RecommendedWatcher`, FSEvents on macOS, recursive
   (`fs/src/fs_watcher.rs:28-33`, `:1143-1166`). Events are merged by path and
   handed over every `latency`, 100 ms for a worktree
-  (`fs_watcher.rs:86-101`, `worktree/src/worktree.rs:83`); the fake uses zero.
+  (`fs_watcher.rs:86-101`, `worktree/src/worktree.rs:84`); the fake uses zero.
 - **Dropped events.** `notify`'s `Flag::Rescan` (FSEvents'
   `MustScanSubDirs`) becomes a `Rescan` event on the named path, or the root;
   a rescan swallows the events under it (`fs_watcher.rs:679-760`).
@@ -43,9 +43,9 @@ Paths are under `vendor/zed-reference/crates/`.
   (`:3302-3325`).
 - **Its own writes** are not filtered. The save records the new mtime; the
   echo event builds an identical `File` and changes nothing
-  (`project/src/buffer_store.rs:564-592`).
+  (`project/src/buffer_store.rs:573-601`).
 - **Reload.** A buffer whose disk state changed and has no unsaved edits emits
-  `ReloadNeeded` (`language/src/buffer.rs:1778-1810`). The reload diffs old
+  `ReloadNeeded` (`language/src/buffer.rs:1795-1827`). The reload diffs old
   and new text on a background task and applies the hunks as one ordinary
   transaction, so anchors and undo survive; if the buffer changed meanwhile,
   it is marked conflicted instead (`buffer.rs:1668-1757`, `:2353-2491`).
@@ -257,7 +257,7 @@ elsewhere in the same walk (renamed away) mints a fresh id.
   unrelated one created at its path, now keeps the id when both land between
   two reads of the folder. No signal tells the two apart: F1 discards event
   kinds. Zed accepts the same ambiguity: a path updated with no observed gap
-  keeps its entry id (`worktree.rs:3302-3325`, the `entry_for_path` fallback).
+  keeps its entry id (`worktree.rs:3326-3358`, the `entry_for_path` fallback).
   W1 updates both documents in the same change.
 - Our own save reaches it only in the open-first O2 race: a scan reads the
   saved file before the save's re-key lands, and the rule gives the new inode
@@ -393,7 +393,7 @@ Two checks queued on one note need no flag. The second finds the expected
 stamp already advanced by the first and stops, or loads a newer file.
 
 Deviation from Zed: `file_updated` decides from `is_dirty` when the worktree
-event arrives (`language/src/buffer.rs:1778-1810`). We decide at the swap and
+event arrives (`language/src/buffer.rs:1795-1827`). We decide at the swap and
 check again at the chain's start, at the snapshot and at the apply (F8). Our
 saves run on a per-note chain, so the reload joins it.
 
@@ -466,7 +466,7 @@ Invariants:
   hold the note's chain for `AUTOSAVE_DELAY` and delay that reload by up to
   2 s (`a_reload_schedules_no_autosave`, test 17b).
 - `Reloaded` is emitted before `notify`. gpui runs effects in order
-  (`gpui/src/app.rs:1760-1785`), so the view maps its offsets (below) before
+  (`gpui/src/app.rs:2117-2142`), so the view maps its offsets (below) before
   `on_buffer_changed` reparses (`editor/mod.rs`).
 - A diff with no hunks (a touch, or the same bytes rewritten) edits nothing,
   emits nothing and notifies nothing. Step 4 still adopts the loaded stamp.
@@ -508,7 +508,7 @@ stack (`buffer.rs:125`).
 #### The caret and the scroll
 
 The selection and the marked range are plain `ByteOffset`s in `EditorState`
-(`editor/src/selection.rs:12-17`, `state.rs:30-34`), owned by `EditorView`
+(`editor/src/selection.rs:23-28`, `state.rs:30-34`), owned by `EditorView`
 (`app/src/editor/mod.rs`). The `Buffer` entity is `NoteStore`'s
 (`store.rs:20-27`), shared with the view.
 
@@ -526,7 +526,7 @@ Three options:
 - **(a) Anchors around the reload.** Rejected. `Buffer::anchor` takes
   `&mut self` (`buffer.rs:380`), so the view would lease the buffer before the
   transaction. The view hears of the reload only through an effect, which gpui
-  runs after the update that applied it (`gpui/src/app.rs:1760-1785`). "Before"
+  runs after the update that applied it (`gpui/src/app.rs:2117-2142`). "Before"
   would need a second event and a second turn, with typing possible between
   them. Each anchor also stays in the table as a tombstone, walked on every
   later edit (`docs/buffer-model.md`, Anchors).
@@ -584,7 +584,7 @@ the editor receives it through its multibuffer (`multi_buffer.rs:2039`,
 2. It records the top line (below).
 3. `cx.notify()`.
 
-The biases are Zed's (`editor/src/selections_collection.rs:1166-1182`): a
+The biases are Zed's (`editor/src/selections_collection.rs:1175-1191`): a
 caret anchors after, a selection's start after and its end before. So:
 
 - A caret inside a replaced word lands after its replacement. A caret at the
@@ -608,7 +608,7 @@ external text at its edges. `marked_text_range` answers the mapped range
 the composition.
 
 **The scroll keeps the top line's text at the top.** The handler has no
-`Window`: `cx.subscribe` gives none (`gpui/src/app/context.rs:94-106`), and
+`Window`: `cx.subscribe` gives none (`gpui/src/app/context.rs:93-105`), and
 `subscribe_in` needs one when it subscribes (`context.rs:341-346`), which
 `EditorView::new` lacks (`bootstrap.rs:41`; `.claude/rules/shell.md` forbids
 threading one through `bootstrap::root`). So the work is split:
@@ -636,7 +636,7 @@ threading one through `bootstrap::root`). So the work is split:
   layout), and sets the scroll offset's y to
   `min(0, viewport.top() - last_text_top - (top_for_row(row_for_offset(offset)) + below))`.
   `render` runs before the div's `Interactivity::prepaint` reads the handle
-  through `clamp_scroll_position` (`gpui/src/elements/div.rs:2390-2391`,
+  through `clamp_scroll_position` (`gpui/src/elements/div.rs:2491-2492`,
   clamp at `:2475-2480`). So the first frame that shows the new text shows it
   at the kept position; from `prepaint` it would land a frame late (the
   `reveal_cursor` rule in `.claude/rules/editor.md`). Superseded by tabs S0:
@@ -693,7 +693,7 @@ reload diff shows in a profile.
 Built in W2a as `inkra_text::diff(base_version, old, new) -> Diff` and
 `Buffer::apply_diff(now, &diff) -> bool`. The app snapshots the text and
 `Buffer::version()` together and diffs off-thread. A `Diff` carries its base
-version, as Zed's `Diff::base_version` (`language/src/buffer.rs:583`), and
+version, as Zed's `Diff::base_version` (`language/src/buffer.rs:594`), and
 `apply_diff` applies it only if the buffer is still at that version; else it
 edits nothing and returns false. So the version check holds by construction,
 not by a caller remembering it. `diff` is the only constructor, so a `Diff`'s
@@ -744,7 +744,7 @@ gone at once. `NoteStore::is_gone(id)` answers it for the shell.
 `Vault`, the variant's path otherwise.
 
 - **Deviation from Zed.** Zed's `DiskState::Deleted`
-  (`language/src/buffer.rs:406-416`) carries no path: the buffer's `File`
+  (`language/src/buffer.rs:413-423`) carries no path: the buffer's `File`
   keeps the path beside it, valid in every state. Our path is not always
   valid: a vault note's path is the vault's, and only a detached or gone note
   holds its own. So the path lives in the variant that needs it.

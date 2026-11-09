@@ -322,7 +322,7 @@ the cheapest case. If it does not, the baseline is re-run through the same
 ## Risks
 
 - **A dropped scoped run blocks the thread that drops it.** `Scope`'s `Drop`
-  blocks until every spawned job ends (`gpui/src/executor.rs:510-524`). If the
+  blocks until every spawned job ends (`gpui/src/executor.rs:543-557`). If the
   picker's foreground task awaited the scoped future itself, replacing
   `Picker::pending` (`picker/mod.rs:120`) would drop it in place, on the
   foreground: the foreground executor is `!Send` (`executor.rs:29`), so no
@@ -331,7 +331,7 @@ the cheapest case. If it does not, the baseline is re-run through the same
   awaits that `Task`. Dropping a `Task` of an idle future schedules it once
   more so that its executor drops the future
   (`async-task-4.7.1/src/task.rs:183-226`, wrapped by
-  `scheduler/src/executor.rs:392-399`): the `Scope` drops on a background
+  `scheduler/src/executor.rs:440-447`): the `Scope` drops on a background
   thread. The wait there is bounded by cancel latency, since `Runs::start`
   set `cancel` first and a scan reads it every 1,024 notes and 64 KB of text.
   `dropping_the_picker_cancels_its_scan` must stay green without a hang.

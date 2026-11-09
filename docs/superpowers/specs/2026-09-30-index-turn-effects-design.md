@@ -68,7 +68,7 @@ callers. Concentrating it in one Module passes the test.
 Every input to `LiveIndex` runs inside a turn, and every turn ends inside
 `LiveIndex`. The turn is a closure, as gpui's `App::update` runs its closure
 and then `finish_update` flushes the effects
-(`vendor/zed-reference/crates/gpui/src/app.rs:1158-1177`). A caller cannot
+(`vendor/zed-reference/crates/gpui/src/app.rs:1425-1442`). A caller cannot
 start a turn and forget to end it.
 
 ```rust

@@ -39,12 +39,12 @@ default, keeps full snapshots at least five minutes apart for seven days,
 outside the vault, keyed by absolute path and deliberately not synced.
 
 Zed sits at the other end. `AutosaveSetting`
-(`vendor/zed-reference/crates/settings_content/src/workspace.rs:640-649`) offers
+(`vendor/zed-reference/crates/settings_content/src/workspace.rs:644-653`) offers
 `Off`, `AfterDelay { milliseconds }`, `OnFocusChange` and `OnWindowChange`, and
 **defaults to `Off`** — `ctrl-s` only. `AfterDelay` is an idle-debounce, not a
 periodic write: each `ItemEvent::Edit` cancels the pending save and restarts the
-timer (`crates/workspace/src/item.rs:936-952`, driving
-`DelayedDebouncedEditAction` at `crates/workspace/src/workspace.rs:1445-1490`).
+timer (`crates/workspace/src/item.rs:939-955`, driving
+`DelayedDebouncedEditAction` at `crates/workspace/src/workspace.rs:1505-1550`).
 
 We take Obsidian's cadence and Zed's mechanism. Periodic, not debounced: an
 idle-debounce bounds nothing, because ten minutes of continuous typing never
@@ -63,13 +63,13 @@ settings system and adding one to hold a single number is the wrong order.
 
 | Piece | Zed | Verdict |
 |---|---|---|
-| Hold the pending save as a `Task`, and have the *next* one `await` the previous rather than drop it | `workspace.rs:1476-1481` | **Take.** Dropping a `Task` cancels it (`scheduler/src/executor.rs:389-390`), so the obvious "replace the slot" cancels a write already in flight |
+| Hold the pending save as a `Task`, and have the *next* one `await` the previous rather than drop it | `workspace.rs:1476-1481` | **Take.** Dropping a `Task` cancels it (`scheduler/src/executor.rs:437-438`), so the obvious "replace the slot" cancels a write already in flight |
 | A cancel channel, so a new edit restarts the delay | `workspace.rs:1469-1474` | **Refuse.** That is the debounce we just rejected |
 | Skip formatting on an autosave | `pane.rs:2539-2551` | **Not applicable.** We have no formatter |
-| `atomic_write` via a temp file in the destination's own directory, then rename | `fs/src/fs.rs:974-987` | **Take**, hand-rolled. See "Atomic writes" |
-| `tempfile::NamedTempFile` to get there | `fs/src/fs.rs:978` | **Refuse.** A new dependency for about fifteen lines, and its Unix mode is 0600, which is the exact failure we have to correct afterwards anyway |
+| `atomic_write` via a temp file in the destination's own directory, then rename | `fs/src/fs.rs:982-995` | **Take**, hand-rolled. See "Atomic writes" |
+| `tempfile::NamedTempFile` to get there | `fs/src/fs.rs:986` | **Refuse.** A new dependency for about fifteen lines, and its Unix mode is 0600, which is the exact failure we have to correct afterwards anyway |
 | Autosave as a user setting with four modes | `workspace.rs:640-649` | **Refuse.** One cadence, one constant, until someone asks |
-| Atomic writes for buffer saves | — | **Zed does not.** `Fs::save` for buffers is `File::create`, truncating (`fs/src/fs.rs:1019-1033`); `atomic_write` is used for Zed's own config files. Zed can afford it because its default is `Off` — the user chose the moment. Ours writes unprompted, so we diverge deliberately |
+| Atomic writes for buffer saves | — | **Zed does not.** `Fs::save` for buffers is `File::create`, truncating (`fs/src/fs.rs:1027-1041`); `atomic_write` is used for Zed's own config files. Zed can afford it because its default is `Off` — the user chose the moment. Ours writes unprompted, so we diverge deliberately |
 
 ## The tension this slice exists to resolve
 
@@ -117,7 +117,7 @@ Symmetric with `Loaded`, which already carries both.
 1. `fs::metadata(path)` — the existing file's permissions, if it exists.
 2. Create `<path>.inkra-<pid>-<counter>.tmp` in the **same directory**. Same
    directory, not the system temp dir: a rename across devices fails with
-   `EXDEV`, which is why Zed does the same (`fs/src/fs.rs:976-978`).
+   `EXDEV`, which is why Zed does the same (`fs/src/fs.rs:984-986`).
 3. Write and `sync_all`, so the rename cannot publish a name whose contents are
    still in flight.
 4. Restore the original file's mode onto the temp file, when there was one. A
@@ -239,7 +239,7 @@ before recording the new one. It is the single writer of `current`
 
 ### `app`: flush on quit
 
-`cx.on_app_quit` (`gpui/src/app.rs:2454-2470`) registers a handler returning a
+`cx.on_app_quit` (`gpui/src/app.rs:2842-2853`) registers a handler returning a
 future; `App::shutdown` (`:1057-1082`) collects them, clears the windows,
 `flush_effects`, then blocks the foreground executor on all of them for
 `SHUTDOWN_TIMEOUT`, 200 ms (`:75`). Nothing registers one today, which is the
@@ -251,7 +251,7 @@ whole Deferred row.
 > returning the future, and the future then does nothing but `fs.save`.
 
 The future must never call `this.update`. `TestAppContext::quit`
-(`gpui/src/app/test_context.rs:233-235`) calls `shutdown()` while holding the
+(`gpui/src/app/test_context.rs:243-245`) calls `shutdown()` while holding the
 app's `RefCell` borrow; a future that re-enters the `App` to update `NoteStore`
 would panic on the second borrow. Bookkeeping at quit is pointless anyway —
 nothing reads `saved_version` after the process exits.
@@ -338,7 +338,7 @@ meaningful and writes the least. Rejected as the most work of the three — a
 exercise it in a headless test.
 
 **Keeping the truncating write.** What Zed does for buffers
-(`fs/src/fs.rs:1019-1033`), and it would leave `EntryId` alone entirely.
+(`fs/src/fs.rs:1027-1041`), and it would leave `EntryId` alone entirely.
 Rejected because Zed's default is `Off`: a truncating write at a moment the user
 chose is a different risk from one every two seconds, unprompted.
 
@@ -367,7 +367,7 @@ Each touches the filesystem layer, the behaviour above it, and its own tests.
    > **Corrected — this slice was a third of the size it looked.** The flush
    > cannot route through the per-note chain: `App::shutdown` blocks the
    > foreground session while it polls the quit futures
-   > (`gpui/src/app.rs:1073`, `scheduler/src/test_scheduler.rs:100`, `:362`),
+   > (`gpui/src/app.rs:1310`, `scheduler/src/test_scheduler.rs:100`, `:362`),
    > so the chain's `cx.spawn` half can never resume during the block. It
    > issues its own write, which means one note briefly has two writers whose
    > `rename()`s race — and the loser can be the *older* text. Ordering them
