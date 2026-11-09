@@ -51,18 +51,24 @@ the same on the user's request (2026-11-04): the window is
 95 % first, a hint of the desktop without discerning it; on 2026-11-08 the user
 found the translucency barely visible, and 65 % was chosen from captures at 85,
 75 and 60 %; later that day 65 % read too transparent, then 75 % and 80 %, and
-85 % replaced them. The light theme stays at 95 %. The base was matched by the user's
+85 % replaced them. A stronger blur, through the window server's private
+`CGSSetWindowBackgroundBlurRadius`, was tried at radii 20 to 100 and dropped:
+it hid little more than the system blur. The light theme stays at 95 %. The base was matched by the user's
 eye beside the reference: `#201f1f`, tuned to the reference's measured
 `#2a2929`, read too light. The note and the active tab stay opaque. Compare
 on a full-screen capture: a one-window capture (`screencapture -l`) draws the
 blur over nothing. An off-screen shot has no blur either, so the stage paints
 `shot_backdrop` under the root; the chrome then shows opaque `#181717`.
 
+A hairline is an overlay, not a colour (2026-11-09): an opaque `#282726` cut a
+dark groove into the blur, while white at 8 % follows it. The active tab's foot
+stops above the row's rule, so the two overlays never add up where they touch.
+
 | Token | Value | Replaces |
 |---|---|---|
 | note, active tab | `#100f0f` | `editor_background` `#1e1e1e`, `tab_active_background` |
 | chrome | `#181717` at 85 % over the blur | `sidebar_background`, `tab_bar_background` `#181818` |
-| hairline | `#282726` | `tab_rule`, the panel header rule |
+| hairline | white at 8 % (dark), black at 10 % (light) | `tab_rule`, the panel header rule |
 | hover, selected row | `rgba(254,252,240,.05)` over the chrome | the white overlays, on chrome only |
 | text | `#cecdc3` | `sidebar_text`, `tab_text` |
 | muted text, icons | `#878580` | `tab_inactive_text`, `icon_muted` |

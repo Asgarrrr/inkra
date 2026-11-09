@@ -178,13 +178,23 @@ fn foot(side: Side, colors: &ThemeColors) -> impl IntoElement {
                 .border_color(colors.editor_background),
         )
         .child(
+            // Stops above the row's own rule: the two translucent hairlines would add up where they touch.
             div()
                 .absolute()
-                .left(centre - curve)
-                .top(-curve)
-                .size(curve * 2.)
-                .rounded_full()
-                .border(rule)
-                .border_color(colors.border_variant),
+                .top_0()
+                .left_0()
+                .w_full()
+                .h(curve - rule)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .absolute()
+                        .left(centre - curve)
+                        .top(-curve)
+                        .size(curve * 2.)
+                        .rounded_full()
+                        .border(rule)
+                        .border_color(colors.border_variant),
+                ),
         )
 }

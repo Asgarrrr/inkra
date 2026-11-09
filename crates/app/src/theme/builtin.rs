@@ -16,7 +16,8 @@ static DARK: LazyLock<Arc<Theme>> = LazyLock::new(|| {
             editor_background: rgb(0x100f0f),
             elevated_background: rgb(0x252526),
             border: rgb(0x3c3c3c),
-            border_variant: rgb(0x282726),
+            // An overlay, so a rule follows the blur instead of cutting a dark groove in it.
+            border_variant: rgba(0xffffff14),
             // White overlays, so they read on any surface: #232323 and #2d2d2d on the sidebar.
             element_hover: rgba(0xffffff0c),
             element_selected: rgba(0xffffff17),
@@ -61,7 +62,7 @@ static LIGHT: LazyLock<Arc<Theme>> = LazyLock::new(|| {
             editor_background: rgb(0xfffcf0),
             elevated_background: rgb(0xfffcf0),
             border: rgb(0xdad8ce),
-            border_variant: rgb(0xe6e4d9),
+            border_variant: rgba(0x0000001a),
             element_hover: rgba(0x0000000a),
             element_selected: rgba(0x00000014),
             chrome_element_hover: rgba(0x100f0f0d),
