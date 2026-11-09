@@ -16,7 +16,8 @@ pub(crate) fn strip_rule(cx: &App) -> Div {
         .border_color(theme::current(cx).colors.border_variant)
 }
 
-/// A strip's slot for icon buttons, outside the bar's scroll, on the tabs' content centreline.
+/// A strip's slot for icon buttons, outside the bar's scroll, on the tabs' content centreline:
+/// optically level with the titles, 1.5 px under the row's centre.
 pub(crate) fn strip_slot() -> Div {
     h_flex()
         .flex_none()

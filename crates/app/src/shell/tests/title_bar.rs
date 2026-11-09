@@ -118,6 +118,28 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
     }
 }
 
+/// Optical, not geometric: a button centred on the 40 px row reads below-left of the tab titles.
+#[gpui::test]
+fn every_title_button_sits_on_the_tab_titles_line(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    let tab = cx.debug_bounds("tab-0").unwrap();
+    let line = (tab.top() + theme::RULE_WIDTH + tab.bottom() - theme::TAB_HOVER_INSET) / 2.;
+    for button in [
+        "dock-icon-files",
+        "dock-icon-backlinks",
+        "dock-toggle-left",
+        "dock-toggle-right",
+        "nav-back-disabled",
+        "nav-forward-disabled",
+        "tab-new",
+    ] {
+        let bounds = cx.debug_bounds(button).unwrap();
+        assert_eq!(bounds.center().y, line, "{button}");
+    }
+}
+
 #[gpui::test]
 fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
