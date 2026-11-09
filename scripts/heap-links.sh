@@ -2,9 +2,10 @@
 # usage: heap-links.sh [--home DIR] [--settle S] <binary> <vault>
 # The launch line, then the live heap the links hold at idle, warm: what `malloc_history`
 # lists under `persist::notes::decode`, and what `Seed::build` allocates itself.
-# --home DIR starts the binary with HOME=DIR; --settle S waits S seconds after the launch line (10).
+# --home DIR starts the binary with HOME=DIR, a fresh temporary folder by default so the user's
+# session and cache stay untouched; --settle S waits S seconds after the launch line (10).
 usage="usage: heap-links.sh [--home DIR] [--settle S] <binary> <vault>"
-home=$HOME; settle=10
+home=; settle=10
 while case $1 in
   --home) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; home=$2; shift 2 ;;
   --settle) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; settle=$2; shift 2 ;;
@@ -13,15 +14,24 @@ while case $1 in
 esac; do :; done
 [ $# -eq 2 ] || { echo "$usage" >&2; exit 2; }
 bin=$1; vault=$2
-cache=$home/Library/Caches/Inkra/index
+[ -d "$vault" ] || { echo "ERROR: no vault at $vault" >&2; exit 2; }
+if [ -z "$home" ]; then home=$(mktemp -d); trap 'rm -rf "$home"' EXIT; fi
 mkdir -p "$home"
-idx() { find "$cache" -name '*.idx' 2>/dev/null | head -1; }
+
+# The app's key: FNV-1a 64 of the vault's lexical absolute path (app_files.rs).
+key() {
+  local h=$(( 0xcbf29ce484222325 )) b
+  for b in $(printf %s "$1" | od -An -tu1 -v); do h=$(( (h ^ b) * 0x100000001b3 )); done
+  printf %016x "$h"
+}
+cache=$home/Library/Caches/Inkra/index/$(key "$(cd "$vault" && pwd -L)").idx
+idx() { [ -f "$cache" ] && echo "$cache"; }
 
 if [ -z "$(idx)" ]; then
   HOME="$home" "$bin" "$vault" 2> /dev/null & pid=$!
   for _ in $(seq 1 180); do [ -n "$(idx)" ] && break; sleep 1; done
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-  [ -n "$(idx)" ] || { echo "ERROR: no index cache under $cache after 180 s" >&2; exit 1; }
+  [ -n "$(idx)" ] || { echo "ERROR: no index cache at $cache after 180 s" >&2; exit 1; }
 fi
 
 log=$(mktemp); report=$(mktemp)
