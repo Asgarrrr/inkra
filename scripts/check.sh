@@ -16,6 +16,41 @@ if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --in
   exit 1
 fi
 
+echo "==> inline test module check"
+# Tests live in their own file: `#[cfg(test)] mod tests;`, never a `{ ... }` body.
+if inline=$(grep -rnE -A1 '#\[cfg\(test\)\]' crates --include='*.rs' | grep -E '(^|[^A-Za-z0-9_])mod [A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{'); then
+  echo "ERROR: an inline test module — move its body to its own file and keep \`mod <name>;\`:" >&2
+  echo "$inline" >&2
+  exit 1
+fi
+
+echo "==> crate graph check"
+# The edges CLAUDE.md's Architecture allows, any dependency kind. A new edge fails until listed here.
+allowed_edges="inkra-editor inkra-text
+inkra-markdown inkra-text
+inkra-index inkra-vault
+inkra-index inkra-markdown
+inkra-index inkra-text
+inkra-app inkra-text
+inkra-app inkra-editor
+inkra-app inkra-vault
+inkra-app inkra-markdown
+inkra-app inkra-index
+inkra-app inkra-tabs
+inkra-app inkra-layout"
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is not installed — run: brew install jq" >&2
+  exit 1
+fi
+edges=$(cargo metadata --format-version 1 --no-deps |
+  jq -r '.packages[] | .name as $from | .dependencies[] | select(.path != null and .name != $from) | "\($from) \(.name)"' |
+  sort -u)
+if forbidden=$(grep -vxF "$allowed_edges" <<< "$edges"); then
+  echo "ERROR: a workspace dependency CLAUDE.md's Architecture does not allow (crate, dependency):" >&2
+  echo "$forbidden" >&2
+  exit 1
+fi
+
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 

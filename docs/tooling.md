@@ -28,6 +28,17 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 - **The colour literal check.** `rgb(`, `rgba(` or `hsla(` with a numeric first argument fails
   outside `theme/` and `shot/`; `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
+- **The inline test module check.** CLAUDE.md puts tests in their own file. The
+  check reads `grep -A1` after each `#[cfg(test)]`; a context line prints as
+  `file-12-mod tests {`, so `mod` may follow a `-`, not only a space.
+- **The crate graph check.** The edges CLAUDE.md's Architecture allows are listed
+  in the script, any dependency kind, a crate's dependency on itself excepted
+  (the `test-support` pattern below). The `jq` filter keeps dependencies with a
+  `path`, so registry and git crates never match. A new crate with no
+  workspace dependency passes; its first edge fails until it is listed.
+- **The ~400-line warning is in the hook, not here.** Dozens of files are past it
+  today, tests included; `check.sh` would print them on every run. The
+  PostToolUse hook warns on the file just edited, when the split is cheap.
 
 ## Toolchain
 
