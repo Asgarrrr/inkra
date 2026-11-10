@@ -1,0 +1,52 @@
+# CLAUDE.md, Architecture: "reading or writing a file → `vault`, behind `Fs`; `app` opens no file".
+id: no-fs-in-app
+language: Rust
+severity: error
+message: "`std::fs` in `app`; read and write through `inkra_vault::Fs`"
+files:
+  - crates/app/src/**/*.rs
+ignores:
+  # shot is the off-screen render dev tool: it writes under target/, never the vault. check.sh's colour literal check exempts it too.
+  - crates/app/src/shot/**
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+utils:
+  in-std-use-list:
+    inside:
+      kind: use_list
+      inside:
+        kind: scoped_use_list
+        has:
+          field: path
+          regex: '^(::)?std$'
+rule:
+  all:
+    - any:
+        - kind: scoped_identifier
+          regex: '^(::)?std::fs$'
+        - kind: identifier
+          regex: '^fs$'
+          any:
+            - matches: in-std-use-list
+            - inside:
+                field: path
+                any:
+                  - kind: scoped_identifier
+                  - kind: scoped_use_list
+                  - kind: use_as_clause
+                matches: in-std-use-list
+        # Macro arguments stay unparsed tokens; match the innermost tree's text.
+        - kind: token_tree
+          regex: '\bstd\s*::\s*fs\b'
+          not:
+            has:
+              stopBy: end
+              kind: token_tree
+              regex: '\bstd\s*::\s*fs\b'
+    - not:
+        inside:
+          stopBy: end
+          matches: cfg-test-item

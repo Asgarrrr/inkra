@@ -1,0 +1,19 @@
+# CLAUDE.md, How we build: "Tests live in their own file": `#[cfg(test)] mod tests;`, never a `{ ... }` body.
+id: inline-test-module
+language: Rust
+severity: error
+message: "an inline test module; move its body to its own file and keep `mod <name>;`"
+files:
+  - crates/**/*.rs
+ignores:
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  kind: mod_item
+  has:
+    field: body
+    kind: declaration_list
+  matches: cfg-test-item

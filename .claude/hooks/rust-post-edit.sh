@@ -39,7 +39,7 @@ lines=$(wc -l < "$file" | tr -d ' ')
 if [ "$lines" -gt 400 ]; then
   context="${context:+$context
 
-}${file#"$repo_root"/} has $lines lines, past the ~400 of CLAUDE.md. If this change adds a subject to it, split by concern (sidebar/{tree,edit,render}.rs); do not split as a drive-by, and run scripts/test-names.sh around a test file move."
+}${file#"$repo_root"/} has $lines lines, past the ~400 of CLAUDE.md. check.sh's line ceilings fail it when it grows past its entry in scripts/line-ceilings.tsv, or past 400 when unlisted. If this change adds a subject to it, split by concern (sidebar/{tree,edit,render}.rs); do not split as a drive-by, and run scripts/test-names.sh around a test file move."
 fi
 
 if [ -n "$context" ]; then

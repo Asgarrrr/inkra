@@ -16,14 +16,6 @@ if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --in
   exit 1
 fi
 
-echo "==> inline test module check"
-# Tests live in their own file: `#[cfg(test)] mod tests;`, never a `{ ... }` body.
-if inline=$(grep -rnE -A1 '#\[cfg\(test\)\]' crates --include='*.rs' | grep -E '(^|[^A-Za-z0-9_])mod [A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{'); then
-  echo "ERROR: an inline test module — move its body to its own file and keep \`mod <name>;\`:" >&2
-  echo "$inline" >&2
-  exit 1
-fi
-
 echo "==> crate graph check"
 # The edges CLAUDE.md's Architecture allows, any dependency kind. A new edge fails until listed here.
 allowed_edges="inkra-editor inkra-text
@@ -50,6 +42,17 @@ if forbidden=$(grep -vxF "$allowed_edges" <<< "$edges"); then
   echo "$forbidden" >&2
   exit 1
 fi
+
+echo "==> ast-grep"
+# The structural rules in .ast-grep/rules/. Not installed by default, so fail with the install command.
+if ! command -v ast-grep >/dev/null 2>&1; then
+  echo "ERROR: ast-grep is not installed — run: cargo install --locked ast-grep" >&2
+  exit 1
+fi
+ast-grep scan
+
+echo "==> line ceilings"
+./scripts/line-ceilings.sh
 
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings

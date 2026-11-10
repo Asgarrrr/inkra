@@ -1,0 +1,13 @@
+# The item a `#[test]` or `#[cfg(test)]` applies to; other attributes and comments may sit between.
+id: cfg-test-item
+language: Rust
+rule:
+  follows:
+    stopBy:
+      not:
+        any:
+          - kind: attribute_item
+          - kind: line_comment
+          - kind: block_comment
+    kind: attribute_item
+    regex: '^#\[(test|cfg\(test\))\]$'

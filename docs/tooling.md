@@ -28,17 +28,27 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 - **The colour literal check.** `rgb(`, `rgba(` or `hsla(` with a numeric first argument fails
   outside `theme/` and `shot/`; `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
-- **The inline test module check.** CLAUDE.md puts tests in their own file. The
-  check reads `grep -A1` after each `#[cfg(test)]`; a context line prints as
-  `file-12-mod tests {`, so `mod` may follow a `-`, not only a space.
 - **The crate graph check.** The edges CLAUDE.md's Architecture allows are listed
   in the script, any dependency kind, a crate's dependency on itself excepted
   (the `test-support` pattern below). The `jq` filter keeps dependencies with a
   `path`, so registry and git crates never match. A new crate with no
   workspace dependency passes; its first edge fails until it is listed.
-- **The ~400-line warning is in the hook, not here.** Dozens of files are past it
-  today, tests included; `check.sh` would print them on every run. The
-  PostToolUse hook warns on the file just edited, when the split is cheap.
+- **ast-grep.** The rules live in `.ast-grep/rules/`, one file each, and cite
+  the CLAUDE.md rule they enforce. `ast-grep scan` fails `check.sh` on any match.
+  Test code is exempt in two ways. Each rule's `ignores` skips `tests.rs`,
+  `*_tests.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
+  `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]` or `#[cfg(test)]`.
+  Macro arguments are unparsed tokens, so the clock and fs rules also match the
+  innermost token tree's text. They stay guards, not proofs: an alias
+  (`use std::time::Instant as Clock`) or `start.elapsed()` passes.
+- **The line ceilings.** `scripts/line-ceilings.tsv` lists every file past 400
+  lines, tests included, with its length as a ceiling. A listed file fails when
+  it grows past its ceiling; an unlisted file fails past 400. The ceilings only
+  go down, so a split is never undone by later growth. A file that shrinks fails
+  too, until `scripts/line-ceilings.sh --lower` locks the gain in. `--lower`
+  never raises a ceiling or adds a file.
+- **The ~400-line warning stays in the hook.** The PostToolUse hook warns on the
+  file just edited, when the split is cheap; the ceilings only stop growth.
 
 ## Toolchain
 
