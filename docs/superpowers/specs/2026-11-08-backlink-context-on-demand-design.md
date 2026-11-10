@@ -218,6 +218,11 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
 - The rebuild's cache fill keeps only a proven `Read`.
 - A context line is one truncated line, because a long context landing would
   otherwise grow its row and move the rows below.
+- A range disproved at a matching stamp also drops that text from the text
+  cache (`TextCache::forget`), so the reload's new try reads the disk, not the
+  same text.
+- The 8-failure stop counts in a pure `Failures` in `index`, as `MemFs` cannot
+  fail 8 distinct loads.
 
 ## Out of scope, measured next
 

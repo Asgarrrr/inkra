@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use futures::{Stream, StreamExt as _};
 use gpui::{App, BackgroundExecutor, Task};
 use inkra_index::{Candidate, Read, TextCache};
-use inkra_vault::Fs;
+use inkra_vault::{EntryId, Fs, Stamp};
 
 use super::IndexSync;
 
@@ -116,6 +116,11 @@ impl IndexSync {
     /// `candidate`'s text if the cache holds it at its stamp; never reads the disk.
     pub(crate) fn cached(&self, candidate: &Candidate) -> Option<Read> {
         cached(&self.texts, candidate)
+    }
+
+    /// Drops `id`'s cached text at `stamp`, so its next read is from disk.
+    pub(crate) fn forget(&self, id: EntryId, stamp: Stamp) {
+        lock(&self.texts).forget(id, stamp);
     }
 
     /// A reader of the vault this index follows; the open notes' texts stay cached.

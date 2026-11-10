@@ -143,15 +143,19 @@ impl BacklinksPanel {
                 }
             })
             .collect();
+        let mut restarted = false;
         if pending.is_empty() {
             self.job = None;
         } else if !self.job.as_ref().is_some_and(|job| job.covers(&pending)) {
             self.job = Some(Job::new(pending));
+            restarted = true;
         }
-        // A redraw reshapes the whole editor; most index changes leave this panel as it was.
+        // A redraw reshapes the whole editor; most index changes leave this panel as it was. A new
+        // job starts only in a draw.
         let shown = |rows: &[Row], building: bool| rows.is_empty() && building;
-        let changed =
-            rows != self.rows || shown(&rows, building) != shown(&self.rows, self.building);
+        let changed = restarted
+            || rows != self.rows
+            || shown(&rows, building) != shown(&self.rows, self.building);
         self.rows = rows;
         self.building = building;
         if changed {
@@ -187,7 +191,7 @@ fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
                 context: LitText::context(&context.text, [context.link.clone()]),
             })
             .collect(),
-        Some(Slot::NoContext { .. }) | None => backlink
+        Some(Slot::NoContext { .. } | Slot::Failed { .. }) | None => backlink
             .occurrences()
             .map(|_| Occurrence {
                 context: LitText::default(),

@@ -46,7 +46,7 @@ pub use notes::Resolution;
 pub use search::{
     Candidate, HITS_PER_NOTE, Hit, NoteHits, READ_FAILURES, Read, Searched, TextFound, TextSearch,
 };
-pub use slot::{Landed, Slot};
+pub use slot::{Failures, Landed, Slot};
 pub use source::{Source, SourceLink};
 pub use target::{NoteRef, Style, Target};
 pub use text_cache::{TEXT_CACHE_BYTES, TextCache};

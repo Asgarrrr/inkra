@@ -162,6 +162,34 @@ fn a_held_read_hides_no_row_and_no_other_context(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_held_read_outlives_an_unrelated_change_and_redraws_once_it_lands(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file(A, "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "unrelated");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    let loads = fs.loads(Path::new(A));
+    let gate = fs.block_load(A);
+    show(cx, &notes, &panel, "b");
+    let c = entry_id(&notes, cx, "c");
+    let links = panel.read_with(cx, |panel, _| panel.links.clone());
+
+    links.update(cx, |links, cx| links.stale(&[c], cx));
+    cx.run_until_parked();
+
+    assert_eq!(fs.loads(Path::new(A)) - loads, 1, "the held read is kept");
+    let (count, _guard) = redraws(cx, &panel);
+    gate.release();
+    cx.run_until_parked();
+    assert_eq!(count.get(), 1);
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("see [[b]]", "[[b]]")])]
+    );
+}
+
+#[gpui::test]
 fn only_the_first_thousand_sources_are_read(cx: &mut TestAppContext) {
     let fs = Arc::new(MemFs::new());
     let source = |n: usize| format!("/vault/s{n:04}.md");

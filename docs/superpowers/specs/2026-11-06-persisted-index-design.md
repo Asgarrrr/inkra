@@ -154,6 +154,8 @@ hit present only in its new text is missing.
 
 - `stale(id)` is sent only on `NotFound`, `NotUtf8` or a stamp mismatch,
   batched per query; it queues a load, and the load decides.
+- Amended by the backlink context spec (B7): a link range that fails at a
+  matching stamp is a stale cause too.
 - After 8 I/O failures in one query, the query stops and sends nothing. An
   ejected volume must not empty the index.
 - A blocking read (a dataless iCloud placeholder) can hold at most 4 threads.

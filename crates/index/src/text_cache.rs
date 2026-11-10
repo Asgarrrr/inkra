@@ -60,6 +60,17 @@ impl TextCache {
         self.evict();
     }
 
+    /// Drops `id`'s text only at `stamp`, pinned or not; its pin stays for the next insert.
+    pub fn forget(&mut self, id: EntryId, stamp: Stamp) {
+        if self
+            .entries
+            .get(&id)
+            .is_some_and(|cached| cached.stamp == stamp)
+        {
+            self.remove(id);
+        }
+    }
+
     /// Pins `ids` alone.
     pub fn pin_only(&mut self, ids: &HashSet<EntryId>) {
         self.pinned.clone_from(ids);

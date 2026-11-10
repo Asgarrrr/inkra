@@ -5,7 +5,7 @@ use std::pin::pin;
 
 use futures::StreamExt as _;
 use gpui::{Context, Task};
-use inkra_index::{Backlink, Read, Slot};
+use inkra_index::{Backlink, Failures, Read, Slot};
 use inkra_vault::EntryId;
 
 use super::{BacklinksPanel, occurrences};
@@ -17,7 +17,8 @@ pub(super) const READ_SOURCES: usize = 1_000;
 pub(super) struct Job {
     /// In row order.
     wanted: Vec<Backlink>,
-    /// `None` until the panel is drawn; dropping it stops the reads left.
+    /// `None` until the panel is drawn; dropping it stops the reads left. A task that stopped
+    /// on its failures stays, so a draw does not start it again.
     task: Option<Task<()>>,
 }
 
@@ -59,11 +60,11 @@ impl BacklinksPanel {
             .ready_chunks(READERS);
         job.task = Some(cx.spawn(async move |this, cx| {
             let mut reads = pin!(reads);
+            let mut failures = Failures::default();
             while let Some(batch) = reads.next().await {
-                if this
-                    .update(cx, |panel, cx| panel.land_batch(batch, cx))
-                    .is_err()
-                {
+                let stop = this.update(cx, |panel, cx| panel.land_batch(batch, &mut failures, cx));
+                // A dropped panel stops it too.
+                if stop.unwrap_or(true) {
                     return;
                 }
             }
@@ -71,10 +72,15 @@ impl BacklinksPanel {
     }
 
     /// The reads ready now, landed as one update; an item whose row's backlink no longer
-    /// reads as its own is dropped, as a rebuild replaced it.
-    fn land_batch(&mut self, batch: Vec<(Backlink, Read)>, cx: &mut Context<Self>) {
-        let mut stale = Vec::new();
-        let mut changed = false;
+    /// reads as its own is dropped, as a rebuild replaced it. Whether the job stops.
+    fn land_batch(
+        &mut self,
+        batch: Vec<(Backlink, Read)>,
+        failures: &mut Failures,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (mut stale, mut forget) = (Vec::new(), Vec::new());
+        let (mut changed, mut stop) = (false, false);
         for (backlink, read) in batch {
             let Some(row) = self
                 .rows
@@ -88,16 +94,26 @@ impl BacklinksPanel {
             let occurrences = occurrences(&backlink, Some(&landed.slot));
             changed |= row.occurrences != occurrences;
             row.occurrences = occurrences;
+            stop |= failures.count(&landed.slot);
             self.slots.insert(id, landed.slot);
             if landed.stale {
                 stale.push(id);
             }
+            if landed.forget {
+                forget.push((id, backlink.candidate().stamp));
+            }
         }
-        if !stale.is_empty() {
-            self.links.update(cx, |links, cx| links.stale(&stale, cx));
-        }
+        self.links.update(cx, |links, cx| {
+            for (id, stamp) in forget {
+                links.forget(id, stamp);
+            }
+            if !stale.is_empty() {
+                links.stale(&stale, cx);
+            }
+        });
         if changed {
             cx.notify();
         }
+        stop
     }
 }

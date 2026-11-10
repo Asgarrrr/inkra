@@ -13,12 +13,16 @@ pub struct LinkContext {
     pub link: Range<usize>,
 }
 
-/// `None` unless `link` is in `text` and on char boundaries: a matching stamp does not prove it.
+/// `None` unless `link` is in `text`, on char boundaries and starts with `[` or `![`: a matching
+/// stamp does not prove it.
 #[must_use]
 pub fn link_context(text: &str, link: Range<ByteOffset>) -> Option<LinkContext> {
     let (start, end) = (link.start.get(), link.end.get());
     // `get` checks the order, the bounds and both char boundaries.
     text.get(start..end)?;
+    if !(text[start..].starts_with('[') || text[start..].starts_with("![")) {
+        return None;
+    }
     let window = window::around(text, start..start);
     Some(LinkContext {
         text: text[window.clone()].into(),
