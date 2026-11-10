@@ -28,10 +28,23 @@ esac
 check_output=$(cd "$repo_root" && cargo check --workspace --message-format=short 2>&1)
 check_status=$?
 
+context=""
 if [ "$check_status" -ne 0 ]; then
-  context=$(printf '%s' "$check_output" | tail -100)
+  context="cargo check failed after this edit:
+$(printf '%s' "$check_output" | tail -100)"
+fi
+
+# CLAUDE.md: split a file past ~400 lines. A warning, so it never blocks an edit.
+lines=$(wc -l < "$file" | tr -d ' ')
+if [ "$lines" -gt 400 ]; then
+  context="${context:+$context
+
+}${file#"$repo_root"/} has $lines lines, past the ~400 of CLAUDE.md. If this change adds a subject to it, split by concern (sidebar/{tree,edit,render}.rs); do not split as a drive-by, and run scripts/test-names.sh around a test file move."
+fi
+
+if [ -n "$context" ]; then
   jq -n --arg ctx "$context" \
-    '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: ("cargo check failed after this edit:\n" + $ctx)}}'
+    '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
 fi
 
 exit 0
