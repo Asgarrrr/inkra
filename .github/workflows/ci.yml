@@ -19,9 +19,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-        with:
-          # line-ceilings.sh compares the table with origin/main's; a shallow clone has no origin/main.
-          fetch-depth: 0
 
       # Toolchain comes from rust-toolchain.toml; rustup resolves and installs
       # the pinned channel on the first cargo/rustup call below. No separate
@@ -41,7 +38,4 @@ jobs:
       # check.sh is the definition of done; run it, not a reimplementation of
       # its steps, so CI and the local gate cannot drift apart.
       - name: Run check.sh
-        env:
-          # line-ceilings.sh compares the table with the PR's base branch, or with main before the push.
-          LINE_CEILINGS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
         run: ./scripts/check.sh

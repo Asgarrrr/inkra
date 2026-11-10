@@ -18,7 +18,7 @@ rule:
     - any:
         - kind: line_comment
         - kind: block_comment
-      regex: '\b(TODO|XXX)\b|(?i:\bfor now\b|workaround|stopgap|\bhack(y|ish)?\b|\btodo:|\bfix ?me\b)'
+      regex: '\b(TODO|XXX)\b|(?i:\btodo:|\bfix ?me\b)'
     # `todo!` and `unimplemented!` are denied; a panic saying the same is the same shortcut.
     - kind: macro_invocation
       has:

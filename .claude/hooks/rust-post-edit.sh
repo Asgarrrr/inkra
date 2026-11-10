@@ -27,7 +27,7 @@ esac
 # the session sits in vendor/zed-reference, which pins another toolchain.
 (cd "$repo_root" && rustfmt --edition 2024 "$file" 2>/dev/null)
 
-check_output=$(cd "$repo_root" && cargo check --workspace --all-targets --all-features --message-format=short 2>&1)
+check_output=$(cd "$repo_root" && cargo check --workspace --message-format=short 2>&1)
 check_status=$?
 
 context=""

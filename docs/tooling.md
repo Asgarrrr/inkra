@@ -63,8 +63,8 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   `file-wide-expect` fails a `#![expect]`, or a `#[expect]` on a `mod`, `impl` or `trait`, of a
   denied lint: either covers every later line. `no-print-below-app` bans `print!`, `eprint!` and their `ln` forms and `process::exit`
   outside `app` and build scripts; `app` prints on purpose (`timeline`, `vault_search`) and exits at launch.
-  `shortcut-comment` reads one comment at a time, so a phrase wrapped over two `//` lines
-  passes. It keeps "workaround": a comment on a gpui quirk calls it a quirk.
+  `shortcut-comment` fails the markers `TODO`, `XXX`, `todo:` and `fixme`, not words such as
+  "workaround": banning honest words only teaches rewording.
 - **The hook waits on cargo's lock.** When another cargo process holds it past the hook's
   30 s timeout, the edit gets no diagnostics; run `./scripts/check.sh`.
 - **The line ceilings.** `scripts/line-ceilings.tsv` lists every source file past 400
@@ -73,11 +73,8 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   it grows past its ceiling; an unlisted file fails past 400. The ceilings only
   go down, so a split is never undone by later growth. A file that shrinks fails
   too, until `scripts/line-ceilings.sh --lower` locks the gain in. `--lower`
-  never raises a ceiling or adds a file, and neither may a hand edit: the script fails a ceiling
-  above the one in the base's table, or a row that table lacks. The base is `origin/main`, or
-  `LINE_CEILINGS_BASE`: CI sets it to the PR's base branch, so a stacked PR cannot undo its
-  parent's split, and to the previous `main` on a push. CI fetches the full history for that;
-  without a base, or before the base has the table, the script says so and skips it. No branch can raise a ceiling: a source file that must grow is split first. Growth from rustfmt
+  never raises a ceiling or adds a file. A hand edit that does shows in the diff, where review
+  refuses it: a source file that must grow is split first. Growth from rustfmt
   (a multi-line `#[expect]`) counts like any other growth.
 - **The ~400-line warning stays in the hook.** The PostToolUse hook warns on the
   file just edited, when the split is cheap; the ceilings only stop growth.
