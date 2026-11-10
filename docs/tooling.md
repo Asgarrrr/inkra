@@ -44,9 +44,11 @@ nothing; "touch" touches `crates/text/src/lib.rs` first, an edit cycle.
 |---|---|---|
 | default | 32.6–34.0 | 88.6–91.8 |
 | `[profile.dev] debug = "line-tables-only"` | 29.4–32.5 | 101.9–104.4 |
-| `[profile.dev.package.proptest] opt-level = 3` | 35.9–39.0 | 82.0–91.7 |
+| `[profile.dev.package.proptest] opt-level = 3` | 35.9–39.0* | 82.0–91.7 |
 
-- `line-tables-only` slows the edit cycle by ~12 s, all in `cargo test`. The
+\* A third run, 72.5 s, spiked outside the test step and is left out.
+
+- `line-tables-only` slows the edit cycle by ~12 s, ~9 of them in `cargo test`. The
   release steps, which no dev profile reaches, moved ~1 s, so it is not noise.
 - proptest at `opt-level = 3` stays within the spread; the tests' time is probably in
   the code under test, which stays unoptimized.
