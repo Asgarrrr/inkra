@@ -16,6 +16,12 @@ check() {
   local failed=0 path ceiling lines listed
   while IFS=$'\t' read -r path ceiling || [ -n "$path" ]; do
     [ -n "$path" ] || continue
+    case "$ceiling" in
+      '' | *[!0-9]*)
+        echo "ERROR: $table: no line count after $path" >&2
+        exit 1
+        ;;
+    esac
     if [ ! -f "$path" ]; then
       echo "ERROR: $path is listed but gone — run: $lower_command" >&2
       failed=1
@@ -49,6 +55,12 @@ lower() {
   out=$(mktemp "${TMPDIR:-/tmp}/line-ceilings.XXXXXX")
   while IFS=$'\t' read -r path ceiling || [ -n "$path" ]; do
     [ -n "$path" ] || continue
+    case "$ceiling" in
+      '' | *[!0-9]*)
+        echo "ERROR: $table: no line count after $path" >&2
+        exit 1
+        ;;
+    esac
     if [ ! -f "$path" ]; then
       echo "dropped $path: gone"
       continue

@@ -16,7 +16,7 @@ rule:
     - kind: line_comment
     - kind: block_comment
   # Not `temporar`: "temporary file" is vault vocabulary.
-  regex: '(?i)(for now|workaround|stopgap|\bhack\b|todo|fixme)'
+  regex: '(?i)(for now|workaround|stopgap|\bhack\b|\btodo\b|\bfixme\b)'
   # A comment between `#[cfg(test)]` and its item matches the utility itself.
   not:
     any:

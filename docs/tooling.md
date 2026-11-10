@@ -38,6 +38,9 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   Test code is exempt in two ways. Each rule's `ignores` skips `tests.rs`,
   `*_tests.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
   `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]` or `#[cfg(test)]`.
+  Macro arguments are unparsed tokens, so the clock and fs rules also match the
+  innermost token tree's text. They stay guards, not proofs: an alias
+  (`use std::time::Instant as Clock`) or `start.elapsed()` passes.
 - **The line ceilings.** `scripts/line-ceilings.tsv` lists every file past 400
   lines, tests included, with its length as a ceiling. A listed file fails when
   it grows past its ceiling; an unlisted file fails past 400. The ceilings only

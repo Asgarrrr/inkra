@@ -13,9 +13,19 @@ ignores:
   - '**/benches/**'
   - '**/examples/**'
 rule:
-  kind: scoped_identifier
-  regex: '^(.*::)?(Instant|SystemTime)::now$'
-  not:
-    inside:
-      stopBy: end
-      matches: cfg-test-item
+  all:
+    - any:
+        - kind: scoped_identifier
+          regex: '^(.*::)?(Instant|SystemTime)::now$'
+        # Macro arguments stay unparsed tokens; match the innermost tree's text.
+        - kind: token_tree
+          regex: '\b(Instant|SystemTime)\s*::\s*now\b'
+          not:
+            has:
+              stopBy: end
+              kind: token_tree
+              regex: '\b(Instant|SystemTime)\s*::\s*now\b'
+    - not:
+        inside:
+          stopBy: end
+          matches: cfg-test-item

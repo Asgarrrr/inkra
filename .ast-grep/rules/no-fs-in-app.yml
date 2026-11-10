@@ -38,6 +38,14 @@ rule:
                   - kind: scoped_use_list
                   - kind: use_as_clause
                 matches: in-std-use-list
+        # Macro arguments stay unparsed tokens; match the innermost tree's text.
+        - kind: token_tree
+          regex: '\bstd\s*::\s*fs\b'
+          not:
+            has:
+              stopBy: end
+              kind: token_tree
+              regex: '\bstd\s*::\s*fs\b'
     - not:
         inside:
           stopBy: end
