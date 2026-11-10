@@ -11,7 +11,9 @@
 > cheapest path to paying the debt off.
 
 Checked 2026-09-20 against `gpui` 0.2.2 from crates.io and Zed at
-`526c95d474b2bf800e95aab30222fa0341f08e19`. Re-check both if either moves.
+`526c95d474b2bf800e95aab30222fa0341f08e19`; citations re-pointed to
+`a1f2e21c2c95c6679945d88996e8324a6cc97e47` on 2026-11-09, the cited code unchanged.
+Re-check both if either moves.
 
 Screen-reader support was stated as a **requirement** for Inkra, which made
 this — not multi-line layout, not input handling — the finding that decided
@@ -127,12 +129,12 @@ query field while the arrows move the selection.
 
 A screen reader hears neither the query nor the selected row. `NameField`'s
 div has no id and no role, so it has no accessibility node. gpui then reports
-focus on the whole window (`gpui/src/elements/div.rs:2330-2336`).
+focus on the whole window (`gpui/src/elements/div.rs:2431-2437`).
 
 gpui has an element-level API for the selected row: `.aria_active_descendant()`
-on the selected child (`gpui/src/elements/div.rs:1365`). The bridge honours the
+on the selected child (`gpui/src/elements/div.rs:1418`). The bridge honours the
 claim only when the focused node is an ancestor of that child
-(`gpui/src/window/a11y.rs:254`). The query field is a sibling of the list, not
+(`gpui/src/window/a11y.rs:258`). The query field is a sibling of the list, not
 its ancestor.
 
 The two fixes conflict. Record both; a manual screen-reader probe decides:

@@ -40,7 +40,7 @@ The editor has no test for `ctrl-a`, `ctrl-e`, `cmd-left` or `cmd-right`.
 ## What Zed does
 
 - One `Editor` entity with `EditorMode::SingleLine | AutoHeight | Full`
-  (`editor/src/editor.rs:1800`). One `EditorElement` draws every mode and
+  (`editor/src/editor.rs:1825`). One `EditorElement` draws every mode and
   branches on it (`element.rs:8512`). The key context is `Editor` plus
   `mode = single_line | full` (`editor.rs:2772-2786`).
 - The keymap binds every editing key once, in `Editor`. Keys that only make
@@ -152,7 +152,7 @@ impl<V: InputHost> gpui::InputHandler for InputAdapter<V> {
 `InputAdapter` keeps the whole surface `ElementInputHandler` gives both
 views today, not only the 8 protocol calls. `prefers_ime_for_printable_keys`
 answers `true`: `ElementInputHandler` forwards it to `accepts_text_input`
-(`gpui/src/input.rs:262-264`), which neither view overrides, while the bare
+(`gpui/src/input.rs:297-299`), which neither view overrides, while the bare
 `InputHandler` default is `false` (`gpui/src/platform.rs`). Losing it would
 route printable keys past the IME, ahead of keybinding matching
 (`key_dispatch.rs`). `element_bounds` answers `Some(bounds)` for the same
@@ -160,7 +160,7 @@ parity.
 
 `InputAdapter` exists because the orphan rule forbids
 `impl<V: InputHost> EntityInputHandler for V`. `Window::handle_input` takes
-any `impl InputHandler` (`gpui/src/window.rs:5213`), so neither view
+any `impl InputHandler` (`gpui/src/window.rs:5643`), so neither view
 implements `EntityInputHandler` any more.
 
 `actions.rs` holds the shared actions and their generic handlers:

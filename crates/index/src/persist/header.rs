@@ -95,7 +95,12 @@ pub(super) fn seal_capped(sections: [&[u8]; SECTIONS], cap: u64) -> Option<Vec<u
         bytes.extend_from_slice(section);
     }
     let (header, body) = bytes.split_at_mut(HEADER_BYTES);
-    for (slot, field) in header[MAGIC.len()..].chunks_exact_mut(4).zip(fields(body)) {
+    for (slot, field) in header[MAGIC.len()..]
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(fields(body))
+    {
         slot.copy_from_slice(&field.to_le_bytes());
     }
     Some(bytes)

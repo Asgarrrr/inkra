@@ -8,7 +8,7 @@ Status: implemented
 `check.sh` rasterizes nothing. It runs 269 tests and not one of them draws a
 pixel: `TestWindow::draw` renders only when a renderer was installed —
 `if let Some(renderer) = &mut state.renderer`
-(`gpui/src/platform/test/window.rs:527-535`) — and a `#[gpui::test]` installs
+(`gpui/src/platform/test/window.rs:558-566`) — and a `#[gpui::test]` installs
 none. A `#[gpui::test]` can assert that a quad was requested; it cannot assert
 that anything was drawn, in the right colour, at the right place, with text in
 it.
@@ -35,7 +35,7 @@ Nothing here is invented. `vendor/zed-reference` ships the whole mechanism:
   platform for rendering, a `TestDispatcher` for scheduling. Off-screen windows
   at (−10000, −10000) (`:105`), `simulate_keystrokes` (`:225`), `simulate_click`
   (`:314`), `advance_clock` (`:159`), `run_until_parked` (`:152`).
-- `Window::render_to_image` (`gpui/src/window.rs:2713`) — renders the last
+- `Window::render_to_image` (`gpui/src/window.rs:3095`) — renders the last
   frame's scene to a Metal texture and reads the pixels back. Direct texture
   readback, not ScreenCaptureKit: no Screen Recording permission, no visible
   window, no system chrome in the frame.
@@ -46,10 +46,10 @@ Nothing here is invented. `vendor/zed-reference` ships the whole mechanism:
 
 **The capture is gated on `gpui_platform/test-support`, not
 `gpui/test-support`.** `MacWindow::render_to_image`
-(`gpui_macos/src/window.rs:2342`) carries `#[cfg(any(test, feature =
+(`gpui_macos/src/window.rs:2401`) carries `#[cfg(any(test, feature =
 "test-support"))]` for *its own* crate. With only gpui's feature the impl
 compiles out, the call falls through to `PlatformWindow`'s default
-(`gpui/src/platform.rs:1087`), and the runner dies at capture time with
+(`gpui/src/platform.rs:1458`), and the runner dies at capture time with
 `render_to_image not implemented for this platform`. The feature list has to
 name the platform crate. `gpui_platform/Cargo.toml` forwards it:
 `test-support = ["gpui/test-support", "gpui_macos/test-support", ...]`.
@@ -120,8 +120,8 @@ composition is shared, the surrounding wiring is mirrored deliberately, and
 
 - **Not a `#[test]`.** `VisualTestAppContext` needs a real `MacPlatform`, whose
   constructor asserts the main thread:
-  `MainThreadMarker::new().expect("Mac platform not created on main thread")`
-  (`gpui_macos/src/platform.rs:210`). `cargo test` runs tests on worker threads.
+  `main_thread_marker().expect("Mac platform not created on main thread")`
+  (`gpui_macos/src/platform.rs:217`). `cargo test` runs tests on worker threads.
   (`crates/zed/src/zed/visual_tests.rs:11`, in the **zed** crate, says the same
   in prose; the assertion is the load-bearing evidence.)
 - **Not a `[[bin]]`,** though the reason is narrower than it first appears. A

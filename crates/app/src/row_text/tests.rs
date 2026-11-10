@@ -33,8 +33,14 @@ fn valid() -> impl Strategy<Value = (String, Vec<Range<usize>>)> {
             .chain([text.len()])
             .collect();
         let count = bounds.len();
-        let ranges = prop::sample::subsequence(bounds, 0..=count)
-            .prop_map(|picked| picked.chunks_exact(2).map(|p| p[0]..p[1]).collect());
+        let ranges = prop::sample::subsequence(bounds, 0..=count).prop_map(|picked| {
+            picked
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[start, end]| start..end)
+                .collect()
+        });
         (Just(text), ranges)
     })
 }

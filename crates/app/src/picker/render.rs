@@ -30,7 +30,7 @@ impl<D: PickerDelegate> Picker<D> {
                     .selected(selected)
                     .on_click(cx.listener(move |picker, event: &ClickEvent, _, cx| {
                         // The release's modifiers: a picker row acts at mouse-up, a sidebar row at the press.
-                        picker.click(ix, Open::from_click(event.modifiers()), cx);
+                        picker.click(ix, Open::from_click(event.modifiers(), cx), cx);
                     }))
                     .child(
                         div()

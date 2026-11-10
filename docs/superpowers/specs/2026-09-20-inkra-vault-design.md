@@ -47,7 +47,7 @@ the **edit**, not the transaction.
 open buffers weakly, for deduplication. `EditorView::buffer`
 (`crates/app/src/editor/mod.rs:33`) is the only strong handle, so switching
 notes dropped it and `upgrade()` returned `None`
-(`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:788`). Returning to
+(`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:872`). Returning to
 the note reloaded it from disk: the text and the whole undo history, gone,
 with no prompt.
 
@@ -68,14 +68,14 @@ comparator did not support the walk built on it.
 
 | Piece | Zed | Verdict |
 |---|---|---|
-| `Fs` behind a narrow trait | `crates/fs/src/fs.rs:100` — 39 methods | **Take**, reduced to 3 |
-| Entry identity from `(device, inode)` | `crates/worktree/src/worktree.rs:3959` | **Take.** See "identity" below |
-| `PathEvent { path, kind }` + `Rescan` | `crates/fs/src/fs.rs:79-91` | Take, at the watcher slice |
-| Diff-based reload, never `set_text` | `crates/language/src/buffer.rs:2459` | Take, at the watcher slice |
-| `has_conflict` derived from mtime | `crates/language/src/buffer.rs:2531` | Take, at the watcher slice |
-| `SumTree<Entry>` | `crates/worktree/src/worktree.rs:191` | **Refuse.** Pays off over 100k files |
-| `BackgroundScanner` | `crates/worktree/src/worktree.rs:4339-6288`, ~1950 lines | **Refuse.** Restatting 200 files takes milliseconds |
-| `FakeFs` | `crates/fs/src/fs.rs:1440-3646`, 2207 lines | **Refuse.** Inodes and a fake kernel watcher amortize over hundreds of scanner tests, not ours |
+| `Fs` behind a narrow trait | `crates/fs/src/fs.rs:104` — 39 methods | **Take**, reduced to 3 |
+| Entry identity from `(device, inode)` | `crates/worktree/src/worktree.rs:3996` | **Take.** See "identity" below |
+| `PathEvent { path, kind }` + `Rescan` | `crates/fs/src/fs.rs:83-95` | Take, at the watcher slice |
+| Diff-based reload, never `set_text` | `crates/language/src/buffer.rs:2484` | Take, at the watcher slice |
+| `has_conflict` derived from mtime | `crates/language/src/buffer.rs:2556` | Take, at the watcher slice |
+| `SumTree<Entry>` | `crates/worktree/src/worktree.rs:192` | **Refuse.** Pays off over 100k files |
+| `BackgroundScanner` | `crates/worktree/src/worktree.rs:4376-6345`, ~1970 lines | **Refuse.** Restatting 200 files takes milliseconds |
+| `FakeFs` | `crates/fs/src/fs.rs:1448-3594`, 2147 lines | **Refuse.** Inodes and a fake kernel watcher amortize over hundreds of scanner tests, not ours |
 | Git, ignore rules, trash-by-id, legacy encodings, remote/collab | — | **Refuse.** Orthogonal |
 
 Note on one citation the first draft got wrong: `worktree.rs:191` is only the
@@ -127,7 +127,7 @@ The real cost is **one new crate**: `async-trait`. Its own dependencies —
 `smol`.** This is deliberate. `smol::fs` is implemented over the `blocking`
 crate's thread pool, so on local disk it only moves a blocking read to a
 different pool. Our callers already run under `cx.background_spawn`
-(`vendor/zed-reference/crates/gpui/src/gpui.rs:237`), which is itself a thread
+(`vendor/zed-reference/crates/gpui/src/gpui.rs:238`), which is itself a thread
 pool. Copying Zed as far as `smol` would add six crates and buy no
 performance. The async *shape* is what we are paying for: a remote backend
 later is a second `impl Fs` and nothing else moves.
@@ -207,7 +207,7 @@ of its claim, in three ways:
 - **Case-only rename on APFS.** `Notes.md` → `notes.md` is the same file on a
   case-insensitive, case-preserving filesystem. Hashing path bytes makes it a
   new id and loses the old entry. Zed handles this case explicitly
-  (`crates/worktree/src/worktree.rs:5693-5699`).
+  (`crates/worktree/src/worktree.rs:5718-5724`).
 - **Delete `a.md`, create an unrelated `a.md`.** The id is *retained*, so the
   open buffer and its `saved_mtime` now describe a different file.
 
@@ -232,7 +232,7 @@ recreates it. An unrelated file created at that path is taken as the note's
 return, the same ambiguity.
 
 Zed's `Entry` carries `inode: u64` alone, without a device
-(`crates/worktree/src/worktree.rs:3963`). We pair it with the device because an
+(`crates/worktree/src/worktree.rs:4000`). We pair it with the device because an
 inode is only unique within one filesystem, and nothing stops a vault root from
 spanning a mount point. The cost is one more `u64` from the same `stat` we
 already perform.
@@ -372,7 +372,7 @@ Two consequences the first draft missed:
   throwaway test code.
 
 **Superseded.** This section originally said saving was not atomic, matching
-Zed: `save` truncates and writes (`crates/fs/src/fs.rs:1019-1035`), and Zed's
+Zed: `save` truncates and writes (`crates/fs/src/fs.rs:1027-1043`), and Zed's
 `atomic_write` (`:974`) is reserved for its own config files. `RealFs::save`
 now writes a temp file and renames over the destination. Zed can afford to
 truncate because its autosave defaults to off and the user picks the moment;
@@ -408,7 +408,7 @@ The property holds through undo and redo:
   history it replaced.
 
 Zed reaches the same place with a `clock::Global` version vector and a memoized
-`has_unsaved_edits` (`crates/language/src/buffer.rs:139`, `:2493`). It counts
+`has_unsaved_edits` (`crates/language/src/buffer.rs:140`, `:2493`). It counts
 operations, which is exactly the granularity adopted here. Ours is a single
 `u64` because we have one writer.
 
@@ -442,7 +442,7 @@ The map deduplicates: opening an already-open note returns the same entity.
 That is the shape "two panes on one note" needs later, which CLAUDE.md
 currently forbids because `Selection` holds raw offsets. Zed's equivalent is
 `BufferStore::open_buffer` with its `loading_buffers` dedup
-(`crates/project/src/buffer_store.rs:908`).
+(`crates/project/src/buffer_store.rs:922`).
 
 `NoteStore` is an `Entity<NoteStore>` owned by `AppShell`, which is the only
 view holding both it and the editor.
@@ -460,7 +460,7 @@ critical defect 1.
 
 The clicking view holds its activation `Task` rather than detaching it, so a
 new click drops the previous one and cancels it
-(`vendor/zed-reference/crates/scheduler/src/executor.rs:389-390`). Without
+(`vendor/zed-reference/crates/scheduler/src/executor.rs:437-438`). Without
 that, a load abandoned mid-flight still lands and rebinds the editor behind a
 later, deliberate click. This is the opposite of `AppShell::save`, which
 detaches deliberately: a save has no successor, and dropping its task would
@@ -568,7 +568,7 @@ and is the only way to reach the `dirty_views` check at `view.rs:483-498`.
 CLAUDE.md's rule still applies wherever an observer is added: **no observer on
 an `Entity<Buffer>` may call `.update()` or `.as_mut()` on that same buffer** —
 a second lease panics
-(`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:231`). The save path
+(`vendor/zed-reference/crates/gpui/src/app/entity_map.rs:311`). The save path
 wants `finalize_transaction()` on the buffer, so it runs in the `Save` action
 handler.
 
@@ -585,7 +585,7 @@ All four were undefined in the first draft, and `EditorView::new` requires an
 | Vault with zero `.md` files | Empty tree, empty state |
 | Vault scanned, nothing opened yet | The empty state, reading `Select a note.`, until a row is clicked |
 
-The native picker exists (`vendor/zed-reference/crates/gpui/src/app.rs:1687`
+The native picker exists (`vendor/zed-reference/crates/gpui/src/app.rs:2032`
 `prompt_for_paths`) and is deferred: this slice is about the vault, not a
 dialog.
 
@@ -679,7 +679,7 @@ Not a follow-up. Each of these is wrong the moment this ships:
 | A home for user-visible errors | The first of these that a user rather than a developer hits. | Both failure paths above end in `eprintln!` or silence, and a released binary has no terminal attached. Needs a status line or a transient banner; `AppShell` is where it would live |
 | ~~Save the unnamed launch buffer~~ | **Closed 2026-09-21**, by removal rather than by saving. There is no unnamed launch buffer any more: `bootstrap::root` builds a `Buffer` and an `EditorView` only for `Launch::Note`, and `AppShell` renders an empty state for the other two. Nothing can be typed into a buffer nobody tracks, because there is nothing to type into. Naming and saving such a buffer still needs the create/rename/delete row above. See `docs/superpowers/plans/2026-09-21-empty-state.md` |
 | ~~Focusable sidebar~~ | **Closed 2026-09-22**, as a dependency of create/rename/delete rather than on its own trigger: a command needs a target, and a target needs a selection. The tree holds a `FocusHandle`, `selected` is its own state, and the arrows move it. The original note follows. | Keyboard navigation of the tree — arrows to move, enter to open — or any row that must show a focus ring. | Built as mouse-only: a row is a `div` with `on_mouse_down`, and nothing in the sidebar takes focus, so `AppShell::focus_handle` never returns a sidebar handle — it returns the editor's when there is one, and `AppShell`'s own otherwise. `⌘S` is already bound at the `AppShell` context rather than `EditorView`'s, so the binding does not move when this lands; the `⌘S`-with-the-sidebar-focused test does, and cannot be written before it |
-| Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:1687` |
+| Native folder picker | A user who is not us opens the app. | `prompt_for_paths`, `crates/gpui/src/app.rs:2032` |
 | Incremental scan | A profile on a real vault shows the full scan costing anything. | `(device, inode)` identity is what makes this a drop-in |
 | `Vault::by_path` | A caller needs to resolve a `RelPath` to an `EntryId` — following a `[[link]]`, or reopening the last note by name across sessions. | Listed in the model above, not built: nothing reads it yet, and a private field that is only ever written fails `-D warnings`. The scan already builds every `(path, id)` pair, so adding it is three lines |
 | `SumTree` entries | The same profile shows the `Vec` costing anything. | Internal to `Vault`; no consumer changes |

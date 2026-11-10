@@ -86,7 +86,7 @@ impl Sidebar {
                     // Focus first, so the tree's bindings resolve from the next keystroke.
                     window.focus(&sidebar.focus_handle, cx);
                     // The press's modifiers: the row acts at mouse-down, a picker row at the release.
-                    sidebar.activate(&row, Open::from_click(event.modifiers), cx);
+                    sidebar.activate(&row, Open::from_click(event.modifiers, cx), cx);
                 }),
             )
             .child(

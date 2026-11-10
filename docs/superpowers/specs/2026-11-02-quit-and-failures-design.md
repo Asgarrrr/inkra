@@ -7,7 +7,7 @@ Status: **S1, S2, S3, S4 and S5 built 2026-11-02.** Later slices append their se
 Two quits lose text today.
 
 - **The close button.** gpui's default `QuitMode` on macOS is `Explicit`
-  (`gpui/src/app.rs:386-395`): a closed window leaves the app running with no
+  (`gpui/src/app.rs:526-535`): a closed window leaves the app running with no
   window. The window owns `AppShell`, and the shell owns the `NoteStore`. So a
   close drops the store, its `on_app_quit` subscription and every pending
   autosave. Nothing writes the last two seconds of typing.
@@ -17,7 +17,7 @@ Two quits lose text today.
 
 ## What Zed does
 
-- `zed/src/zed.rs:492-500`: the window's should-close handler calls
+- `zed/src/zed.rs:494-502`: the window's should-close handler calls
   `MultiWorkspace::close_window` and answers `false`. The close is
   asynchronous: it asks about unsaved items, then calls `remove_window`.
 - The app stays alive with no window (`QuitMode::Explicit`). Quitting is a
@@ -31,7 +31,7 @@ Two quits lose text today.
    holds nothing the user can reach, so the close button quits the app, after
    the same writes as `⌘Q`.
 2. **A failed autosave retries.** Zed retries no save: `Pane::autosave_item`
-   (`workspace/src/pane.rs:2539-2563`) saves once and returns the error. In
+   (`workspace/src/pane.rs:2551-2575`) saves once and returns the error. In
    Zed a save is explicit and autosave is opt-in. Every Inkra save is
    implicit, so a failure nobody retries is a data-loss path (Q8).
 
@@ -84,9 +84,9 @@ deleted.
 The Dock's Quit, the app menu's Quit, logout and restart send AppKit's
 `terminate:`. They never dispatch `Quit`, because Inkra sets no menus.
 `gpui_macos` implements no `applicationShouldTerminate:`; it calls the quit
-callback from `applicationWillTerminate:` (`gpui_macos/src/platform.rs:1392`),
+callback from `applicationWillTerminate:` (`gpui_macos/src/platform.rs:1395`),
 and gpui's `shutdown` gives `on_app_quit` futures `SHUTDOWN_TIMEOUT`, 200 ms
-(`gpui/src/app.rs:75,1073`).
+(`gpui/src/app.rs:80,1073`).
 
 So for those quits, `on_app_quit(flush_all)` is the main path, not a rare last
 resort. It is off-chain (Q2) and bounded at 200 ms. `gpui_macos` is vendored
@@ -266,7 +266,7 @@ listing, for the `open-failed` scene and its test.
   and a note whose rename runs is skipped (Q7). Closing this
   needs `applicationShouldTerminate:` in the vendored `gpui_macos`.
 - **The quit's tests cannot see `cx.quit()`.** gpui's test platform quits as a
-  no-op (`gpui/src/platform/test/platform.rs:435`). A test sees the step after
+  no-op (`gpui/src/platform/test/platform.rs:536`). A test sees the step after
   `QUIT_WAIT` through the prompt (`pending_prompt`), and a quit with nothing
   unsaved through its writes.
 

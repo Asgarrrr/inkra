@@ -1,7 +1,7 @@
 //! With `code_block_wrap` set, a code block line wraps at the column and nothing scrolls (code block
 //! scroll spec, D7). Headless, a 120-glyph line is 1152 px against a 756 px column: two rows.
 
-use gpui::{ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, WindowHandle, point, px};
+use gpui::{ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, WindowHandle, point, px};
 
 use super::code_block_scroll::{block, swipe_block};
 use super::{assert_x, at, close, dispatching, tall_document};
@@ -53,11 +53,11 @@ fn a_vertical_tick_over_a_wrapping_block_scrolls_the_page(cx: &mut TestAppContex
         .update(&mut cx, |view, _, _| view.block_center(0))
         .unwrap()
         .unwrap();
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Pixels(point(px(0.), px(-30.))),
         touch_phase: TouchPhase::Started,
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     });
     cx.run_until_parked();
 

@@ -75,8 +75,8 @@ Taken:
   stops propagation (`workspace/src/modal_layer.rs:299-327`). The layer stores
   the focused handle when a modal opens and restores it on dismiss
   (`:160`, `:254-257`). It dismisses on focus-out (`:189-193`).
-- **Cancellation in three layers** (`file_finder/src/file_finder.rs:1069-1105`,
-  `picker/src/picker.rs:1244-1250`). Replacing the pending `Task` drops it. A
+- **Cancellation in three layers** (`file_finder/src/file_finder.rs:1352-1394`,
+  `picker/src/picker.rs:1236-1242`). Replacing the pending `Task` drops it. A
   shared `AtomicBool` stops the matcher mid-run. A monotonic search id drops a
   result that arrives after a newer query.
 - **A name bonus.** A match in the file name outranks a match in the folder
@@ -87,31 +87,31 @@ Taken:
   finds `été`, `été` does not find `ete`.
 - **A character-set prefilter.** Each path's `CharBag` is computed once, at
   scan time. A candidate that lacks a query character is rejected before any
-  scoring (`fuzzy/src/char_bag.rs:8-31`, `worktree/src/worktree.rs:6521-6525`).
+  scoring (`fuzzy/src/char_bag.rs:8-31`, `worktree/src/worktree.rs:6578-6582`).
 - **Parallel segments on the gpui executor**, counted by
   `BackgroundExecutor::num_cpus()`, which returns 4 under test
-  (`gpui/src/executor.rs:261-267`, `fuzzy_nucleo/src/paths.rs:290-354`).
+  (`gpui/src/executor.rs:278-284`, `fuzzy_nucleo/src/paths.rs:305-369`).
 - **Hits grouped under a non-selectable header per file** (Text Finder,
   `text_finder/delegate.rs:113-117`, `:822`).
 - **Case and whole-word toggles** in the search field's trailer
   (`text_finder/delegate.rs:733-775`).
-- **Caps with a "limit reached" signal** (`project/src/project_search.rs:165-166`,
+- **Caps with a "limit reached" signal** (`project/src/project_search.rs:166-167`,
   `:635-662`).
 - **A stale finder re-runs its query** when the worktree changes, after 200 ms
   (`file_finder.rs:843-844`, `:1003-1016`).
 - **An MRU of about 20 notes** for an empty query, deduplicated from the
-  results (`file_finder.rs:557-613`, `workspace/src/workspace.rs:178`).
+  results (`file_finder.rs:557-613`, `workspace/src/workspace.rs:177`).
 - **A placeholder and a "no matches" text** per picker
   (`picker/src/picker.rs:222-225`).
 - **Startup loads bounded by the core count, at low priority** (slice 5).
   The `BackgroundScanner` runs `num_cpus()` workers under
-  `scoped_priority(Priority::Low, …)` (`worktree/src/worktree.rs:5289-5343`),
+  `scoped_priority(Priority::Low, …)` (`worktree/src/worktree.rs:5312-5366`),
   so at most one scan job per core runs at once, and user work goes first.
   `IndexSync` keeps at most one load per core in flight, each spawned at
   `Priority::Low`.
 - **Take everything already landed in one go.** Zed drains every ready batch
   of file events with `poll!` before it processes them
-  (`worktree/src/worktree.rs:4544-4547`). `IndexSync` applies every landed
+  (`worktree/src/worktree.rs:4581-4584`). `IndexSync` applies every landed
   load in one foreground turn, up to its time budget.
 
 Deviations:
@@ -138,7 +138,7 @@ Deviations:
 - **Startup results applied in timed turns, not in 100 ms snapshots**
   (slice 5). Zed's workers write into one background snapshot under a mutex.
   One worker sends it to the foreground at most every 100 ms
-  (`FS_WATCH_LATENCY`, `worktree/src/worktree.rs:83`, `:5310-5329`), and the
+  (`FS_WATCH_LATENCY`, `worktree/src/worktree.rs:84`, `:5310-5329`), and the
   foreground swaps it in whole (`:1407-1426`). Our index lives on the
   foreground and has no executor (D1), so each load crosses to it and is
   applied note by note. A per-note apply has a cost, so a turn stops after
@@ -633,7 +633,7 @@ owns:
 - the selected row. A delegate can mark rows as not selectable (vault-search
   headers); the selection skips them.
 
-**Keys.** The deepest context wins in gpui (`gpui/src/keymap.rs:150-190`), and
+**Keys.** The deepest context wins in gpui (`gpui/src/keymap.rs:150-271`), and
 the focused `NameField` already binds `enter` and `escape`
 (`crates/app/src/keymap.rs:52-53`). So:
 
@@ -743,7 +743,7 @@ handle that was focused when the first picker opened. It follows Zed's
 - Render adds a full-window child, `.absolute().inset_0().occlude()`, over the
   flex row. A left click on it dismisses. Inside, a 600 px container 15 % from
   the top, also `.occlude()`, stops propagation on mouse down. gpui's hit test
-  stops only at an occluding hitbox (`gpui/src/window.rs:1106-1123`), so
+  stops only at an occluding hitbox (`gpui/src/window.rs:1169-1186`), so
   without both, a click on a row also reaches the editor below.
 - Opening a picker replaces the other one and keeps the stored handle.
   Pressing the key of the picker showing dismisses it.
@@ -755,7 +755,7 @@ handle that was focused when the first picker opened. It follows Zed's
 - The pickers do not open when no vault is open.
 - Accessibility: the modal has a dialog role and an `aria_label` ("Quick
   open" or "Search notes"), the list a list role, and each row an
-  `aria_label` with its plain text (`gpui/src/elements/div.rs:1304`, `:1326`).
+  `aria_label` with its plain text (`gpui/src/elements/div.rs:1357`, `:1326`).
   The selected row is not announced until `set_active_descendant` is wired;
   `docs/gpui-accessibility.md` records it.
 
@@ -1281,7 +1281,7 @@ differential oracle, and is justified by a bench figure before and after.
 | `path:`, `tag:`, `-exclude` | The user asks | A small query parser in front of ~~`TextQuery`~~ `NoteQuery` (superseded 2026-09-28, word-start spec) |
 | ~~Accent folding and NFD in note text (`ete` finds `été`)~~ | **Done 2026-09-28** | Word-start spec: the fold of `⌘P`, hits lit on the saved text |
 | Relevance ranking of content hits | Vault order is not useful | Notes whose name matches first is the cheap step |
-| Find in note (`⌘F`) | The user asks | ~~`find_in` over the buffer~~ Superseded 2026-09-28: `find_in` is deleted and its own spec decides the rule (word-start spec, S6); Zed splits the buffer into chunks (`editor/src/items.rs:2010-2087`) |
+| Find in note (`⌘F`) | The user asks | ~~`find_in` over the buffer~~ Superseded 2026-09-28: `find_in` is deleted and its own spec decides the rule (word-start spec, S6); Zed splits the buffer into chunks (`editor/src/items.rs:2013-2090`) |
 | Search in unsaved buffers | Two seconds of lag is observed | Links spec, D5; ~~`find_in` over open buffers~~ superseded 2026-09-28: the word-start walk over open buffers (word-start spec) |
 | Unlinked mentions | The user asks | A `search` for each note's name |
 | `[[` completion | Links spec, Deferred | ~~Reuses `match_names`~~ The matcher is deleted 2026-09-29, see [`2026-09-29-names-delete-design.md`](2026-09-29-names-delete-design.md); restore from `9772a24` or start from Zed's `fuzzy` |

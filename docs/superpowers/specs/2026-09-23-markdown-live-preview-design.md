@@ -17,7 +17,7 @@ That spec also said live preview needs virtualization, because `uniform_list`
 places rows at `item_height * ix`. That no longer holds: since soft wrap, rows
 are our own table in `DocumentLayout` (`crates/app/src/editor/layout/mod.rs:70`),
 and gpui shapes and paints one line per call with its own font size and line
-height (`gpui/src/text_system.rs:750`, `text_system/line.rs:460`).
+height (`gpui/src/text_system.rs:716`, `text_system/line.rs:460`).
 
 ## Behaviour
 
@@ -51,13 +51,13 @@ Read in `vendor/zed-reference/`:
   (`crates/grammars/src/markdown/injections.scm:6-10`). The editor keeps every
   marker visible, styled as punctuation.
 - **Reparse.** The reparse is incremental, first synchronous with a 1 ms
-  budget (`crates/language/src/buffer.rs:1166-1170`, `:1949`), then on a
+  budget (`crates/language/src/buffer.rs:1177-1181`, `:1949`), then on a
   background task.
 - **Style.** A capture resolves to a `HighlightStyle`, then to a `TextRun`
-  (`crates/editor/src/element.rs:7574-7592`). Neither carries a size, and the
+  (`crates/editor/src/element.rs:7566-7584`). Neither carries a size, and the
   editor never enlarges a heading. The rendered preview is a separate view
   (`crates/markdown`), with pulldown-cmark 0.13 and `into_offset_iter`
-  (`crates/markdown/src/parser.rs:258-266`).
+  (`crates/markdown/src/parser.rs:314-329`).
 - **Hiding text.** Zed hides and replaces text in its `DisplayMap`, a stack of
   layers (`crates/editor/src/display_map.rs:1-40`). `FoldMap` hides a range
   behind a `FoldPlaceholder` (`display_map/fold_map.rs:27`). Each layer keeps
@@ -267,7 +267,7 @@ impl DisplayLine {
 ```
 
 `DisplayOffset` is a UTF-8 byte index into the display text — what gpui's
-`x_for_index` and `closest_index_for_x` take (`gpui/src/text_system/line_layout.rs:108`).
+`x_for_index` and `closest_index_for_x` take (`gpui/src/text_system/line_layout.rs:109`).
 It is a third offset kind, so it gets a newtype, like `ByteOffset` and
 `Utf16Offset`; CLAUDE.md's "never mix them" extends to it.
 

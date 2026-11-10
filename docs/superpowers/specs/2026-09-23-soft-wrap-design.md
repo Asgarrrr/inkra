@@ -24,7 +24,7 @@ configurable when a settings system exists; until then it is a constant in
 Wrapping inside one logical line is already built, cached and painted:
 
 - `WindowTextSystem::shape_text(text, font_size, runs, wrap_width, line_clamp)`
-  returns one `WrappedLine` per `\n`-separated line (`gpui/src/text_system.rs:750`).
+  returns one `WrappedLine` per `\n`-separated line (`gpui/src/text_system.rs:716`).
   We keep shaping one logical line per call, as today, for the cache reason in
   `element.rs`'s module doc.
 - `WrappedLineLayout` (`text_system/line_layout.rs:277`) holds the unwrapped
@@ -92,7 +92,7 @@ What taffy 0.13.0 passes the closure, from its source
 clamped by `max_size`. The closure may run several times per frame, once per
 pass or probe, and taffy may answer the final pass from its cache without
 calling the closure again. gpui's wrapper forwards the arguments unchanged
-(`gpui/src/taffy.rs:236-264`).
+(`gpui/src/taffy.rs:236-273`).
 
 So the closure:
 
@@ -191,7 +191,7 @@ clipping rule and make the ambiguity unreachable from row N:
 - Nothing that targets row N produces `B`. End, a click past row N's end, and
   an up or down landing on row N all clamp to `row.caret_end`, one grapheme
   before `B`. This is Zed's `WrapSnapshot::clip_point` with `Bias::Left`, which
-  steps a row-end point back one column (`editor/src/display_map/wrap_map.rs:969-981`),
+  steps a row-end point back one column (`editor/src/display_map/wrap_map.rs:1000-1012`),
   reached from `line_end` (`editor/src/movement.rs:238-252`).
 
 gpui breaks at a **glyph**, and a glyph boundary need not be a grapheme
@@ -250,7 +250,7 @@ row within its own line. The two gates differ in whether that can have changed:
   `shape_document(&buffer, marked, &last.style, last.wrap_width, window)`,
   stores the result as `last_layout`, and reveals the caret's row from it. The
   lease must be dropped first: `shape_document` reads the buffer, and a second
-  lease of one entity panics (`gpui/src/app/entity_map.rs:231`). It reads, so
+  lease of one entity panics (`gpui/src/app/entity_map.rs:311`). It reads, so
   it takes `buffer.read`, never `as_mut`.
 
 The reveal cannot move to `prepaint`: the `div` has already applied its scroll
@@ -356,7 +356,7 @@ macOS precedent, and `⌃A` / `⌃E` reach the logical line directly.
 ## Tests
 
 Headless text is measured: `NoopTextSystem::layout_line` places one glyph per
-char at `font_size * 0.6` (`gpui/src/platform.rs:1288-1305`), so breaks in a
+char at `font_size * 0.6` (`gpui/src/platform.rs:1659-1676`), so breaks in a
 `#[gpui::test]` are deterministic. The advance depends only on a char's UTF-16
 length (`platform.rs:1268-1275`): `0` and `m` agree, a surrogate-pair char is
 twice as wide. Fixtures therefore stay in the BMP unless a test is about a wide

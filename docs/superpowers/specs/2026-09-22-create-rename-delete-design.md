@@ -27,22 +27,22 @@ Deferred with a trigger: *a user creates a folder they then want rid of.*
 ## What Zed does, and what we take from it
 
 Taken: one edit state discriminated by an `Option`
-(`crates/project_panel/src/project_panel.rs:239-256`); the editable row inside
+(`crates/project_panel/src/project_panel.rs:241-258`); the editable row inside
 the list rather than an overlay (`:5914`, `:6573-6608`); a stricter re-check at
 confirm (`:2082-2285`); blur tries to confirm and discards when invalid
 (`:818-838`); block on a duplicate, never auto-uniquify — Zed auto-suffixes
 only for paste (`:3537-3599`); a native prompt whose wording names the unsaved
 changes about to be lost (`:2768-2828`); selection follows deterministically —
 next sibling, else previous (`:2993-3070`); identity survives a rename by
-inode, reconciled during the rescan (`crates/worktree/src/worktree.rs:3302-3325`),
+inode, reconciled during the rescan (`crates/worktree/src/worktree.rs:3326-3358`),
 which `Vault::apply` already does; an explicit rescan after our own mutation
-rather than waiting on a watcher (`crates/project/src/worktree_store.rs:719-728`).
+rather than waiting on a watcher (`crates/project/src/worktree_store.rs:721-730`).
 
 Rejected: `RelPath` semantics that let a typed name create nested directories;
 the undo manager over filesystem operations (`:2159-2181`) — Trash is the
 recovery story; `temporarily_unfolded` and folded ancestor chains; the
 synthetic `NEW_ENTRY_ID` spliced into a git-aware snapshot (`:93`, `:4475-4502`);
-`CreateOptions`/`RenameOptions`/`RemoveOptions` (`crates/fs/src/fs.rs:291-315`),
+`CreateOptions`/`RenameOptions`/`RemoveOptions` (`crates/fs/src/fs.rs:295-319`),
 because every call site of ours wants one policy — never overwrite — and
 encoding one policy as a parameter invites a second.
 
@@ -50,7 +50,7 @@ encoding one policy as a parameter invites a second.
 
 > **Corrected.** The draft claimed a context-less binding "beats every scoped
 > one, always". It does not. `binding_enabled` scores a predicate-less binding
-> at `contexts.len()` (`gpui/src/keymap.rs:246-252`), and `depth_of` scores a
+> at `contexts.len()` (`gpui/src/keymap.rs:274-280`), and `depth_of` scores a
 > predicate naming the **leaf** frame at that same value
 > (`keymap/context.rs:260-268`). They **tie**. The tie breaks on `BindingIndex`
 > — insertion order into the `Vec`, later wins (`keymap.rs:188-190`). So a
@@ -250,7 +250,7 @@ One change makes it usable: the chain moves off `OpenNote` and into
 `NoteStore`, keyed by `EntryId`, living whether or not the note is open. Loads,
 writes, renames and trashes all append to it. `Writer` stays exactly as it is,
 for the one caller that cannot chain — the quit flush, which `App::shutdown`
-polls while the foreground session is blocked (`gpui/src/app.rs:1073`).
+polls while the foreground session is blocked (`gpui/src/app.rs:1310`).
 
 Two consequences to close explicitly:
 

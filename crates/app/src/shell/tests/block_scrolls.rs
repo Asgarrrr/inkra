@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    Pixels, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext,
-    WindowHandle, point, px,
+    Pixels, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, VisualTestContext, WindowHandle,
+    point, px,
 };
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
@@ -31,11 +31,11 @@ fn block_notes(
 
 fn swipe(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, x: f32) {
     let at = editor(window, cx).update(cx, |editor, _| editor.block_center(0));
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at.expect("the block is drawn"),
         delta: ScrollDelta::Pixels(point(px(x), px(0.))),
         touch_phase: TouchPhase::Started,
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     });
     cx.run_until_parked();
 }

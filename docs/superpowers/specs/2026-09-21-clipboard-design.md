@@ -17,15 +17,15 @@ Two primitives, and nothing built on them:
 
 - `App::write_to_clipboard(ClipboardItem)` and
   `App::read_from_clipboard() -> Option<ClipboardItem>`
-  (`gpui/src/app.rs:1546`, `:1518`). `read_from_clipboard_async` (`:1529`)
+  (`gpui/src/app.rs:1868`, `:1518`). `read_from_clipboard_async` (`:1529`)
   exists for platforms where the read is permission-gated; macOS is not one.
 - `ClipboardItem { entries: Vec<ClipboardEntry> }`, where an entry is a
-  `String`, an `Image` or `ExternalPaths` (`gpui/src/platform.rs:2652`,
+  `String`, an `Image` or `ExternalPaths` (`gpui/src/platform.rs:3102`,
   `:2693`).
 
 There is no default binding and no `NSTextView` underneath. The macOS
 `cut:`/`copy:`/`paste:` selectors are registered
-(`gpui_macos/src/platform.rs:110-122`) but every one of them routes to
+(`gpui_macos/src/platform.rs:98-110`) but every one of them routes to
 `handle_menu_item`, which dispatches the gpui action; the comment above them
 says they exist so the OS save panels show the right key equivalents. The menu
 mapping is `:364-374`. So a clipboard action is an ordinary application action,
@@ -70,7 +70,7 @@ machinery. `Selection` is one range by construction, so none of it applies.
 
 We still need one bit across the round trip — whether the copy was a whole
 line. `ClipboardItem::new_string_with_metadata(text, String)`
-(`gpui/src/platform.rs:2711`) carries an opaque string, so no `serde`
+(`gpui/src/platform.rs:3161`) carries an opaque string, so no `serde`
 dependency is needed; neither `app` nor `editor` has one today.
 
 Inferring the flag instead — "the text ends in `\n` and the selection is
@@ -84,7 +84,7 @@ internal clipboard metadata, CodeMirror 6 in a module-level `lastLinewiseCopy`
 guarded by an exact text match.
 
 The macOS pasteboard stores it under a custom type literally named
-`"zed-metadata"` (`gpui_macos/src/pasteboard.rs:48`), which is not
+`"zed-metadata"` (`gpui_macos/src/pasteboard.rs:55`), which is not
 configurable. Two consequences, recorded rather than discovered:
 
 - Reading is guarded by a hash of the text (`:126-138`): the metadata is
@@ -98,9 +98,9 @@ configurable. Two consequences, recorded rather than discovered:
   is acceptable; guessing at a foreign format is not.
 
 `TestPlatform` stores the whole `ClipboardItem` in a mutex
-(`gpui/src/platform/test/platform.rs:671-676`), with no hash guard, and
+(`gpui/src/platform/test/platform.rs:795-800`), with no hash guard, and
 `TestAppContext::{write,read}_from_clipboard` exposes it
-(`gpui/src/app/test_context.rs:376`, `:382`). So tests round-trip the metadata
+(`gpui/src/app/test_context.rs:386`, `:382`). So tests round-trip the metadata
 faithfully but cannot exercise the hash guard. Noted as a known blind spot, not
 worked around.
 
@@ -179,7 +179,7 @@ Gates:
   mutates nothing and owes no repaint, so `update_state` and `move_cursor` are
   both wrong: either would notify for a frame identical to the last one, and
   `edit_buffer`'s `as_mut` notifies unconditionally
-  (`gpui/src/app.rs:3280-3286`), which would schedule an autosave for a
+  (`gpui/src/app.rs:3674-3680`), which would schedule an autosave for a
   keystroke that changed no text. It reads with `self.buffer.read(cx)` and
   nothing else. CLAUDE.md's gates paragraph and
   `app/src/editor/actions.rs`'s module comment both claim every action goes
@@ -201,9 +201,9 @@ edit *and* again after it.
 Superseded: `cut`, `paste` and `apply_diff` now edit through `Buffer::transact`, which needs no seal.
 
 **An empty clipboard must change nothing — and `Some("")` is empty.**
-`item.text()` returns `Option<String>` (`gpui/src/platform.rs:2738`), but a
+`item.text()` returns `Option<String>` (`gpui/src/platform.rs:3188`), but a
 pasteboard holding a present-but-empty string entry yields `Some("")`, not
-`None` (`gpui_macos/src/pasteboard.rs:114-141`). Either one means return
+`None` (`gpui_macos/src/pasteboard.rs:130-156`). Either one means return
 before touching the buffer. Not merely "insert an empty string": `Buffer::close`
 returns early on an empty edit list (`text/src/buffer.rs:174`), so
 `grouping_blocked` is never cleared, and an ineffective paste in the middle of
@@ -217,7 +217,7 @@ owes the same guard, and must also skip both `finalize_transaction` calls, for
 the reason above.
 
 **Pasted text may carry CRLF.** `read_from_clipboard` returns the pasteboard
-string verbatim (`gpui_macos/src/platform.rs:1159-1162`). `Buffer` assumes LF —
+string verbatim (`gpui_macos/src/platform.rs:1206-1209`). `Buffer` assumes LF —
 that is why `Fs::load` normalizes — so paste is a second door into the buffer
 that bypasses the first door's guard. Copying from a Windows-authored document
 would put lone `\r` bytes in the text.

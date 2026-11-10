@@ -36,7 +36,7 @@ pub(crate) fn decode(bytes: &[u8], named: Option<ImageFormat>) -> image::ImageRe
     }
     image.apply_orientation(orientation);
     let mut buffer = image.into_rgba8();
-    for pixel in buffer.chunks_exact_mut(4) {
+    for pixel in buffer.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(RenderImage::new([Frame::new(buffer)]))

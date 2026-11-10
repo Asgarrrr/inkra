@@ -298,7 +298,7 @@ Plan: `docs/superpowers/plans/2026-09-29-tabs-s1.md`. Built as planned, with
 these deviations and facts:
 
 - **`⌘}` / `⌘{`, not `⌘⇧]` / `⌘⇧[`.** macOS clears `shift` for a non-letter
-  key and reports the shifted character (`gpui_macos/src/events.rs:470-479`).
+  key and reports the shifted character (`gpui_macos/src/events.rs:476-485`).
   A `cmd-shift-]` binding passes `simulate_keystrokes` and never fires on
   hardware. `⌃Tab` / `⌃⇧Tab` work on every layout.
 - **`leaving` is a closure.** `Tabs` calls it from one private place,

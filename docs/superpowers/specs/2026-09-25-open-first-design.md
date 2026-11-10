@@ -56,7 +56,7 @@ slice 2); it is not profiled.
 Zed's worktree runs a `BackgroundScanner` that owns the snapshot. It sends
 `ScanState::Updated { snapshot, changes, scanning }` to the foreground, which
 only calls `set_snapshot` and sets an `is_scanning` flag
-(`vendor/zed-reference/crates/worktree/src/worktree.rs:1415-1422`). A snapshot
+(`vendor/zed-reference/crates/worktree/src/worktree.rs:1417-1424`). A snapshot
 is a `SumTree` of entries, cloned cheaply (`:184-206`). `scan_dirs` walks with
 one job per core, each reading one folder and queueing its subfolders
 (`:5276-5345`). A watcher event reloads only the touched paths
@@ -311,7 +311,7 @@ Evolution.
   (`a_job_that_panics_ends_the_walk_instead_of_hanging_it`). Under gpui's
   dispatcher, a background panic aborts the app: no `catch_unwind` wraps a
   task, and the macOS dispatcher runs each one through an `extern "C"`
-  trampoline (`vendor/zed-reference/crates/gpui_macos/src/dispatcher.rs:198`).
+  trampoline (`vendor/zed-reference/crates/gpui_apple/src/dispatcher.rs:192`).
 
 ### O5. `scanned`
 

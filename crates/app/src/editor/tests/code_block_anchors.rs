@@ -3,8 +3,8 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use gpui::{
-    Entity, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext,
-    WindowHandle, point, px,
+    Entity, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, VisualTestContext, WindowHandle,
+    point, px,
 };
 use inkra_editor::Selection;
 use inkra_text::{Anchor, Buffer, ByteOffset};
@@ -114,10 +114,10 @@ fn zero_and_back_reuses_the_anchor(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_hitbox_drawn_before_an_edit_takes_no_wheel(cx: &mut TestAppContext) {
     let (window, mut cx) = swiped(cx, -100.);
-    let event = ScrollWheelEvent {
+    let event = ScrollEvent {
         delta: ScrollDelta::Pixels(point(px(-50.), px(0.))),
         touch_phase: TouchPhase::Started,
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     };
 
     window

@@ -31,8 +31,8 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 ## Toolchain
 
-`rust-toolchain.toml` pins 1.96.1, the version `check.sh` is green on. Zed
-pins 1.98.1; do not copy it. Bump by re-running `check.sh`.
+`rust-toolchain.toml` pins 1.98.1, the version `check.sh` is green on; it
+matches Zed's pin at the gpui rev, which needs it. Bump by re-running `check.sh`.
 
 ## Vendored gpui
 

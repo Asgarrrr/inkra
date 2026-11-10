@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point, px};
+use gpui::{Modifiers, ScrollDelta, ScrollEvent, TestAppContext, point, px};
 
 use super::refresh::{advance, hold_scans, notify, runs, selected};
 use super::{Opened, listed, open, search};
@@ -76,11 +76,11 @@ fn a_background_refresh_keeps_the_selection_and_the_scroll(cx: &mut TestAppConte
     assert!(list_bounds.is_some(), "the list is drawn");
     let row_height = theme::UI_LINE_HEIGHT * 2.;
     // Past the end: the list stops at its last row, with row 3 out of view.
-    opened.visual.simulate_event(ScrollWheelEvent {
+    opened.visual.simulate_event(ScrollEvent {
         position: list_bounds.map(|list| list.center()).unwrap_or_default(),
         delta: ScrollDelta::Pixels(point(px(0.), -(row_height * 6.))),
         modifiers: Modifiers::none(),
-        ..ScrollWheelEvent::default()
+        ..ScrollEvent::default()
     });
     assert!(opened.visual.debug_bounds("picker-row-3").is_none());
     let last = opened.visual.debug_bounds("picker-row-14");
