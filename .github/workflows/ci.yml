@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          # line-ceilings.sh compares the table with origin/main's; a shallow clone has no origin/main.
+          fetch-depth: 0
 
       # Toolchain comes from rust-toolchain.toml; rustup resolves and installs
       # the pinned channel on the first cargo/rustup call below. No separate
@@ -27,9 +30,10 @@ jobs:
         run: rustup show
 
       # ast-grep is not in install-action's list; its default cargo-binstall fallback fetches it.
+      # Pinned to the versions check.sh is green on: a new typos dictionary must not fail an unrelated PR.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,ast-grep,typos
+          tool: cargo-deny@0.20.2,ast-grep@0.51.1,typos@1.52.1
 
       # Caches the registry, cargo's git checkout of Zed, and their builds.
       - uses: Swatinem/rust-cache@v2

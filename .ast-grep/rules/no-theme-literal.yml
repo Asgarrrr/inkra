@@ -1,0 +1,48 @@
+# CLAUDE.md, Architecture: "a colour or text size → `app/src/theme.rs`, never a literal".
+id: no-theme-literal
+language: Rust
+severity: error
+message: "a colour or text size outside the theme; add a token in crates/app/src/theme/"
+files:
+  - crates/app/src/**/*.rs
+ignores:
+  - crates/app/src/theme.rs
+  - crates/app/src/theme/**
+  # shot paints its own test backdrops; scripts/shot-diff.sh catches a changed scene.
+  - crates/app/src/shot/**
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  any:
+    # Any argument: a constant is as much a literal as `0x1e1e1e`. A method (`.rgba(theme)`) is a field expression and never matches.
+    - kind: call_expression
+      has:
+        field: function
+        regex: '^(gpui::)?(rgba?|hsla|black|white|red|blue|green|yellow|transparent_black|transparent_white|opaque_grey)$'
+    - kind: struct_expression
+      has:
+        field: name
+        regex: '^(gpui::)?(Hsla|Rgba)$'
+    - kind: call_expression
+      has:
+        field: function
+        kind: field_expression
+        has:
+          field: field
+          regex: '^text_(xs|sm|base|lg|xl|[2-6]xl)$'
+    - kind: call_expression
+      all:
+        - has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: '^text_size$'
+        - has:
+            field: arguments
+            has:
+              kind: call_expression
+              regex: '^(gpui::)?(px|rems)\(\s*[0-9]'

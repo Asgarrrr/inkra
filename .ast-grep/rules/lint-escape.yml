@@ -1,0 +1,13 @@
+# CLAUDE.md, Code: "Never disable a lint, test or type check to get green."
+id: lint-escape
+language: Rust
+severity: error
+message: "a lint expectation with an empty reason, or code hidden from clippy; fix the lint or give the reason"
+files:
+  - crates/**/*.rs
+rule:
+  any:
+    - kind: attribute_item
+    - kind: inner_attribute_item
+  # `cfg(not(clippy))` ships code clippy never reads.
+  regex: '\breason\s*=\s*"\s*"|^#!?\[cfg(_attr)?\([^\]]*\bclippy\b'

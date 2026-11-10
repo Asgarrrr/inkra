@@ -16,14 +16,6 @@ if ! command -v typos >/dev/null 2>&1; then
 fi
 typos
 
-echo "==> colour literal check"
-# A numeric first argument: `fn rgba(self` and `.rgba(theme)` are not literals.
-if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --include='*.rs' | grep -vE '^crates/app/src/(theme\.rs|theme/|shot/)'); then
-  echo "ERROR: a colour literal outside theme/ and shot/ — add a token in crates/app/src/theme/colors.rs:" >&2
-  echo "$literals" >&2
-  exit 1
-fi
-
 echo "==> crate graph check"
 # The edges CLAUDE.md's Architecture allows, any dependency kind. A new edge fails until listed here.
 allowed_edges="inkra-editor inkra-text
@@ -51,6 +43,21 @@ if forbidden=$(grep -vxF "$allowed_edges" <<< "$edges"); then
   exit 1
 fi
 
+echo "==> lint inheritance check"
+# A member without `[lints] workspace = true` escapes every workspace lint; a tracked rustflag can silence one.
+manifests=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[].manifest_path')
+while IFS= read -r manifest; do
+  if ! awk '/^\[/ { section = $0 } section == "[lints]" && /^workspace *= *true/ { found = 1 } END { exit !found }' "$manifest"; then
+    echo "ERROR: $manifest has no [lints] workspace = true" >&2
+    exit 1
+  fi
+done <<< "$manifests"
+if flags=$(git grep -nE 'rustflags|RUSTFLAGS' -- '.cargo/' '*/.cargo/' '.github/'); then
+  echo "ERROR: rustflags in a tracked config bypass the workspace lints; set lints in Cargo.toml:" >&2
+  echo "$flags" >&2
+  exit 1
+fi
+
 echo "==> ast-grep"
 # The structural rules in .ast-grep/rules/. Not installed by default, so fail with the install command.
 if ! command -v ast-grep >/dev/null 2>&1; then
@@ -58,6 +65,12 @@ if ! command -v ast-grep >/dev/null 2>&1; then
   exit 1
 fi
 ast-grep scan
+# A suppression comment silences any rule; narrow the rule's `ignores` instead, where review sees it.
+if suppressed=$(grep -rn 'ast-grep-ignore' crates); then
+  echo "ERROR: an ast-grep-ignore comment — fix the code or the rule:" >&2
+  echo "$suppressed" >&2
+  exit 1
+fi
 
 echo "==> line ceilings"
 ./scripts/line-ceilings.sh

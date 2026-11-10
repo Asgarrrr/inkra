@@ -32,3 +32,8 @@ scap = "scap"
 # French search fixtures, in 100+ places; no narrower scope fits.
 projet = "projet"
 projets = "projets"
+
+[files]
+# `.claude/`, `.ast-grep/` and `.github/` hold prose and rules too. `.claude/worktrees/` holds untracked agent checkouts.
+ignore-hidden = false
+extend-exclude = [".git/", ".claude/worktrees/"]

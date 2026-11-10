@@ -17,6 +17,18 @@ rule:
     - any:
         - kind: scoped_identifier
           regex: '^(.*::)?(Instant|SystemTime)::now$'
+        # `elapsed` reads the clock on an `Instant` taken as an argument.
+        - kind: call_expression
+          all:
+            - has:
+                field: function
+                kind: field_expression
+                has:
+                  field: field
+                  regex: '^elapsed$'
+            - has:
+                field: arguments
+                regex: '^\(\s*\)$'
         # Macro arguments stay unparsed tokens; match the innermost tree's text.
         - kind: token_tree
           regex: '\b(Instant|SystemTime)\s*::\s*now\b'

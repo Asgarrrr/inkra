@@ -1,0 +1,27 @@
+# CLAUDE.md, Architecture: below `app` a crate has no platform; a print or an exit there is drift, not logging.
+id: no-print-below-app
+language: Rust
+severity: error
+message: "a print or a process exit outside `app`; return the value or the error to the caller"
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/app/**
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  all:
+    - any:
+        - kind: macro_invocation
+          has:
+            field: macro
+            regex: '^(.*::)?e?print(ln)?$'
+        - kind: scoped_identifier
+          regex: '^(.*::)?process::exit$'
+    - not:
+        inside:
+          stopBy: end
+          matches: cfg-test-item
