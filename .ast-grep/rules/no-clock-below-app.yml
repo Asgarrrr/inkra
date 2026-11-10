@@ -1,0 +1,21 @@
+# CLAUDE.md, Code: "Only `app` reads a clock; `text` and `editor` take the `Instant` as an argument."
+id: no-clock-below-app
+language: Rust
+severity: error
+message: "a clock read outside `app`; take the `Instant` as an argument"
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/app/**
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  kind: scoped_identifier
+  regex: '^(.*::)?(Instant|SystemTime)::now$'
+  not:
+    inside:
+      stopBy: end
+      matches: cfg-test-item

@@ -36,7 +36,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 ## Commands
 
 - verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
-  the no-gpui-below-app check, the crate graph, no inline test module. Green is the definition of done.
+  the no-gpui-below-app check, the crate graph, the ast-grep rules in `.ast-grep/rules/`,
+  the line ceilings. Green is the definition of done.
 - fmt: `cargo fmt`, from the repo root, formats every workspace member.
 - look: `cargo run -p inkra-app --features shot --example shot [scene|--list]`
   renders scenes off-screen to `target/shots/*.png`. `check.sh` renders nothing.

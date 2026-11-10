@@ -1,0 +1,26 @@
+# CLAUDE.md, How we build: a comment is "for a why the code cannot show"; deferred work goes in docs/roadmap.md.
+id: shortcut-comment
+language: Rust
+severity: error
+message: "a comment admits a shortcut; fix it or record it in docs/roadmap.md"
+files:
+  - crates/**/*.rs
+ignores:
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  any:
+    - kind: line_comment
+    - kind: block_comment
+  # Not `temporar`: "temporary file" is vault vocabulary.
+  regex: '(?i)(for now|workaround|stopgap|\bhack\b|todo|fixme)'
+  # A comment between `#[cfg(test)]` and its item matches the utility itself.
+  not:
+    any:
+      - matches: cfg-test-item
+      - inside:
+          stopBy: end
+          matches: cfg-test-item
