@@ -104,6 +104,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 - An external dependency used by two crates is declared in
   `[workspace.dependencies]`.
 - Never disable a lint, test or type check to get green.
+- A justified suppression is `#[expect(lint, reason = "...")]`; clippy denies `#[allow]`,
+  and an expectation that stops firing fails the build.
 
 ## Testing
 

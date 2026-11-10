@@ -49,7 +49,10 @@ impl AppShell {
         }
         for side in [Side::Left, Side::Right] {
             for group in self.layout.dock_groups(side) {
-                #[allow(clippy::cast_precision_loss)]
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a count far below 2^24 converts to f32 exactly"
+                )]
                 let views = self.group(group).views().count() as f32;
                 chrome.insert(
                     group,

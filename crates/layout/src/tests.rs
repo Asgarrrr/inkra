@@ -579,7 +579,7 @@ proptest! {
             let (center, flexes) = row(&layout);
             prop_assert_eq!(flexes.len(), center.len());
             prop_assert!(flexes.iter().all(|&flex| flex > 0.0));
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_precision_loss, reason = "a count far below 2^24 converts to f32 exactly")]
             let len = flexes.len() as f32;
             prop_assert!((flexes.iter().sum::<f32>() - len).abs() < 0.001);
             let after = fractions(&layout);

@@ -44,13 +44,20 @@ impl CaretRows for Grid {
 
     fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
         let (start, _) = self.0[self.row_for_offset(offset)];
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count far below 2^24 converts to f32 exactly"
+        )]
         px((offset.get() - start) as f32 * BYTE)
     }
 
     fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
         let (start, caret_end) = self.0[row];
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "clamped at zero, and a test row is far below usize::MAX"
+        )]
         let bytes = (f32::from(x) / BYTE).round().max(0.) as usize;
         ByteOffset::new((start + bytes).min(caret_end))
     }

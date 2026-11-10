@@ -18,7 +18,10 @@ pub(crate) fn rescale(flexes: &mut [f32]) {
     }
 }
 
-#[allow(clippy::cast_precision_loss)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a count far below 2^24 converts to f32 exactly"
+)]
 pub(crate) fn count(len: usize) -> f32 {
     len as f32
 }

@@ -14,7 +14,11 @@ fn a_frame_paints_only_the_lines_in_view(cx: &mut TestAppContext) {
     let fit = window
         .update(&mut cx, |view, window, _| {
             let row = f32::from(view.input.last_layout().unwrap().body_row_height());
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the quotient is non-negative and far below usize::MAX"
+            )]
             let fit = (f32::from(window.viewport_size().height) / row).ceil() as usize;
             fit
         })

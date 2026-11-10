@@ -59,7 +59,10 @@ fn nested() -> Layout {
 
 /// Group `n`'s minimum is `10 * (n + 1)` wide and `1000 + n` high.
 fn by_id(group: GroupId, axis: Axis) -> f32 {
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a test group id far below 2^24 converts to f32 exactly"
+    )]
     let n = group.raw() as f32;
     match axis {
         Axis::Horizontal => 10.0 * (n + 1.0),
@@ -353,7 +356,7 @@ proptest! {
         let changed = layout.resize(path, ix, delta, size, min);
 
         let now = flexes(&layout, path);
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss, reason = "a count far below 2^24 converts to f32 exactly")]
         let count = len as f32;
         prop_assert!((now.iter().sum::<f32>() - count).abs() < 1e-3, "{now:?}");
         for ((child, was), now) in children.iter().zip(was).zip(&now) {

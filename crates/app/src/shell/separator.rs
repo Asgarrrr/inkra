@@ -122,7 +122,10 @@ impl AppShell {
                 };
                 let (origin, extent, cursor) = along(axis, event.bounds, event.event.position);
                 let size = f32::from(extent - lead - trail);
-                #[allow(clippy::cast_precision_loss)]
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a count far below 2^24 converts to f32 exactly"
+                )]
                 let unit = size / flexes.len() as f32;
                 let boundary = origin + lead + px(flexes[..ix].iter().sum::<f32>() * unit);
                 let delta = f32::from(cursor - boundary);

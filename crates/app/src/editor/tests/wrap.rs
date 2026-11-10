@@ -58,7 +58,10 @@ fn the_column_is_seventy_ch_and_centred(cx: &mut TestAppContext) {
             assert_eq!(bounds.origin.x, px(PADDING) + (pane - column) / 2.);
 
             let layout = view.input.last_layout().unwrap();
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count far below 2^24 converts to f32 exactly"
+            )]
             let rows = layout.row_count() as f32;
             assert_eq!(bounds.size.height, px(LINE_HEIGHT) * rows);
         })
@@ -79,7 +82,10 @@ fn a_narrow_window_wraps_at_the_pane(cx: &mut TestAppContext) {
             );
             let layout = view.input.last_layout().unwrap();
             assert!(layout.row_count() > 1, "68 chars cannot fit 336 px");
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count far below 2^24 converts to f32 exactly"
+            )]
             let rows = layout.row_count() as f32;
             assert_eq!(
                 view.input.last_bounds().unwrap().size.height,
@@ -214,7 +220,10 @@ fn pasting_a_long_url_reveals_its_last_row(cx: &mut TestAppContext) {
             let layout = view.input.last_layout().unwrap();
             let row = layout.row_for_offset(view.cursor());
             assert!(row > 61, "the URL wrapped onto rows past line 60");
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count far below 2^24 converts to f32 exactly"
+            )]
             let row_bottom = PADDING + LINE_HEIGHT * (row as f32 + 1.);
             let expected = VIEWPORT - MARGIN - row_bottom;
             assert_eq!(view.viewport.handle().offset().y, px(expected));

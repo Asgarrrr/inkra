@@ -49,7 +49,10 @@ fn reaching_the_end_of_a_tall_document_scrolls_it_into_view(cx: &mut TestAppCont
             let offset = view.viewport.handle().offset().y;
             assert!(offset < gpui::px(0.), "a 201-line document did not scroll");
 
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count far below 2^24 converts to f32 exactly"
+            )]
             let last = view.input.buffer().read(cx).line_count() as f32 - 1.;
             assert!(
                 geometry::line_is_visible(last, offset),
@@ -233,7 +236,10 @@ fn deleting_and_restoring_lines_moves_the_caret_both_ways(cx: &mut TestAppContex
     cx.simulate_keystrokes("cmd-z");
     window
         .update(&mut cx, |view, _, cx| {
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a count far below 2^24 converts to f32 exactly"
+            )]
             let line = view.input.buffer().read(cx).line_for_offset(view.cursor()) as f32;
             let offset = view.viewport.handle().offset().y;
             assert!(offset < gpui::px(0.), "the undo did not scroll back down");

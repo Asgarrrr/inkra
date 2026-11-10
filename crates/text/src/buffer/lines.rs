@@ -54,9 +54,10 @@ impl Buffer {
     }
 
     /// Counts by byte, not char: a `\n` byte never appears inside a multi-byte sequence.
-    // clippy wants the `bytecount` crate; a dependency to count one byte fails the dependency rule,
-    // and the char-boundary-free scan is exactly the point, so the lint is allowed instead.
-    #[allow(clippy::naive_bytecount)]
+    #[expect(
+        clippy::naive_bytecount,
+        reason = "the `bytecount` crate is a dependency to count one byte"
+    )]
     fn newlines_before(&self, end: usize) -> usize {
         self.text.as_bytes()[..end]
             .iter()

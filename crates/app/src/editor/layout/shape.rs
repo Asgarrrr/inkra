@@ -333,7 +333,10 @@ fn line_wrap(
 }
 
 fn rows_height(rows: usize, row_height: Pixels) -> Pixels {
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count far below 2^24 converts to f32 exactly"
+    )]
     let rows = rows as f32;
     row_height * rows
 }

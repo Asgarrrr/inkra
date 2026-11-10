@@ -1,7 +1,10 @@
 //! No save destroys bytes it did not write. Conditional on the expectation:
 //! a save that finds what it expected is replacing its own bytes, and may.
 
-#![allow(clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "a harness setup failure should panic; allow-expect-in-tests skips helpers outside #[test] and #[cfg(test)]"
+)]
 
 use std::path::{Path, PathBuf};
 
