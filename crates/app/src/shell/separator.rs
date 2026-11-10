@@ -57,7 +57,7 @@ impl AppShell {
         let line = div().absolute().bg(colors.border_variant);
         let separator = div()
             .id(ElementId::Name(id.clone().into()))
-            .debug_selector(move || id.clone())
+            .debug_selector(move || id)
             .absolute()
             .occlude();
         let separator = match slot.axis {

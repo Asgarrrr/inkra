@@ -61,7 +61,7 @@ pub fn diff(base_version: Version, old: &str, new: &str) -> Diff {
         &old.split_inclusive('\n').collect::<Vec<_>>(),
         &new.split_inclusive('\n').collect::<Vec<_>>(),
         |old_range, new_range, old_lines, new_lines| {
-            let (old_hunk, new_hunk) = (&old[old_range.clone()], &new[new_range.clone()]);
+            let (old_hunk, new_hunk) = (&old[old_range.clone()], &new[new_range]);
             if word_diffable(old_hunk, old_lines) && word_diffable(new_hunk, new_lines) {
                 diff_tokens(
                     &tokenize(old_hunk),

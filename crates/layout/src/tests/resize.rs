@@ -243,7 +243,7 @@ fn a_drag_that_names_no_boundary_changes_nothing() {
         );
         assert_eq!(resized, layout);
     }
-    let mut resized = layout.clone();
+    let mut resized = layout;
     assert!(resized.resize(&root(), 1, 0.2, 200.0, flat(10.0)));
 }
 

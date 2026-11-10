@@ -67,14 +67,11 @@ fn a_saved_window_opens_on_its_display_and_one_gone_or_off_its_display_centres(
 
         let gone = SavedWindow {
             display: "a display unplugged since".to_owned(),
-            ..saved.clone()
+            ..saved
         };
         let centred = (None, Bounds::centered(None, WINDOW_SIZE, cx));
         assert_eq!(placement(Some(&gone), cx), centred);
-        let off = SavedWindow {
-            x: 2000.,
-            ..saved.clone()
-        };
+        let off = SavedWindow { x: 2000., ..saved };
         assert_eq!(placement(Some(&off), cx), centred);
         assert_eq!(placement(None, cx), centred);
     });
