@@ -17,6 +17,9 @@ const FRESH_SLOT_BYTES: usize =
 type Fresh = Shards<Ordinal, Arc<NoteWords>>;
 pub(crate) type Ordinals = Shards<EntryId, Ordinal>;
 
+// One entry per note with words.
+const _: () = assert!(size_of::<(EntryId, Ordinal)>() == 8);
+
 /// Every note's folded words: one merged segment, the bits of its live notes, the notes set since.
 #[derive(Default)]
 pub(crate) struct Words {
