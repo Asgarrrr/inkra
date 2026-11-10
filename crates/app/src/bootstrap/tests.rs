@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use gpui::{Bounds, TestAppContext, point, px, size};
+use inkra_vault::mem_fs::MemFs;
 
-use super::{WINDOW_SIZE, placement, vault_root};
+use super::{Launch, WINDOW_SIZE, open_argument, placement, vault_root};
 use crate::restore::SavedWindow;
 
 /// One vault, one session file: the key hashes these bytes, so compare bytes, not `Path`'s components.
@@ -14,6 +15,38 @@ fn a_vault_root_drops_a_trailing_slash_and_dot_components() {
             "/Users/me/Notes"
         );
     }
+}
+
+/// `Fs` tells a vault from a note, so the launch never stats the disk behind it.
+#[test]
+fn an_argument_opens_a_folder_as_a_vault_and_a_file_as_a_note() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    fs.insert_file("/vault/a.md", "alpha");
+    assert!(matches!(
+        open_argument(&fs, "/vault".into(), None),
+        Ok(Launch::Vault(vault, None, None)) if vault.root() == Path::new("/vault")
+    ));
+    assert!(matches!(
+        open_argument(&fs, "/vault/a.md".into(), None),
+        Ok(Launch::Note(path, text, _)) if path == Path::new("/vault/a.md") && text == "alpha"
+    ));
+}
+
+/// An unreadable folder fails the launch itself; loading it as a note would hide why.
+#[test]
+fn a_missing_argument_or_an_unreadable_folder_is_an_error_naming_it() {
+    let fs = MemFs::new();
+    fs.insert_dir("/locked");
+    fs.make_unreadable("/locked");
+    assert!(
+        open_argument(&fs, "/nowhere.md".into(), None)
+            .is_err_and(|error| error.contains("/nowhere.md"))
+    );
+    assert!(
+        open_argument(&fs, "/locked".into(), None).is_err_and(|error| error.contains("/locked"))
+    );
+    assert_eq!(fs.loads(Path::new("/locked")), 0);
 }
 
 #[gpui::test]
