@@ -12,6 +12,7 @@ ignores:
   - crates/app/src/bootstrap.rs
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'
@@ -40,7 +41,7 @@ rule:
                   - kind: scoped_use_list
                   - kind: use_as_clause
                 matches: in-std-use-list
-        # A stat through `Path` reaches the disk too, and a `MemFs` test never sees it. Argumentless: `Fs::read_dir` takes a path.
+        # A stat through `Path` reaches the disk too, and a `MemFs` test never sees it. Argumentless: `Fs::read_dir` takes a path. Not `is_dir`/`exists`: `Kind` has them too.
         - kind: call_expression
           all:
             - has:
@@ -48,12 +49,12 @@ rule:
                 kind: field_expression
                 has:
                   field: field
-                  regex: '^(exists|try_exists|is_dir|is_symlink|canonicalize|symlink_metadata|read_link|read_dir)$'
+                  regex: '^(try_exists|is_symlink|canonicalize|symlink_metadata|read_link|read_dir)$'
             - has:
                 field: arguments
                 regex: '^\(\s*\)$'
         - kind: scoped_identifier
-          regex: '^(::)?image::(open|ImageReader::open)$'
+          regex: '^((::)?image::open|(.*::)?ImageReader::open)$'
         # Macro arguments stay unparsed tokens; match the innermost tree's text.
         - kind: token_tree
           regex: '\bstd\s*::\s*fs\b'

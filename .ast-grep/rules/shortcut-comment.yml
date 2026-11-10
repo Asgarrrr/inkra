@@ -8,6 +8,7 @@ files:
 ignores:
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'
@@ -23,7 +24,7 @@ rule:
       has:
         field: macro
         regex: '^(panic|unreachable)$'
-      regex: '(?i)\bnot (yet )?implemented\b|\btodo\b'
+      regex: '(?i)\bnot (yet )?implemented\b|!\s*\(\s*"todo\b'
   # A comment between `#[cfg(test)]` and its item matches the utility itself.
   not:
     any:

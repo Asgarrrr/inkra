@@ -12,6 +12,7 @@ ignores:
   - crates/app/src/shot/**
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'
@@ -26,6 +27,11 @@ rule:
       has:
         field: name
         regex: '^(gpui::)?(Hsla|Rgba)$'
+      # `Hsla { a: 0.4, ..theme.colors.accent }` derives from a token.
+      not:
+        has:
+          stopBy: end
+          kind: base_field_initializer
     - kind: call_expression
       has:
         field: function

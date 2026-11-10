@@ -9,6 +9,9 @@ ignores:
   - crates/app/**
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
+  # A build script talks to cargo through println!.
+  - '**/build.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'

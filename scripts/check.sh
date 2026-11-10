@@ -52,8 +52,9 @@ while IFS= read -r manifest; do
     exit 1
   fi
 done <<< "$manifests"
-if flags=$(git grep -nE 'rustflags|RUSTFLAGS' -- '.cargo/' '*/.cargo/' '.github/'); then
-  echo "ERROR: rustflags in a tracked config bypass the workspace lints; set lints in Cargo.toml:" >&2
+# --untracked: a config not yet added overrides lints locally all the same.
+if flags=$(git grep --untracked -nE 'rustflags|RUSTFLAGS' -- ':(glob)**/.cargo/**' '.github/' ':(exclude).claude/worktrees'); then
+  echo "ERROR: rustflags in a cargo or CI config bypass the workspace lints; set lints in Cargo.toml:" >&2
   echo "$flags" >&2
   exit 1
 fi

@@ -33,7 +33,8 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 - **The colour and text size rule.** `.ast-grep/rules/no-theme-literal.yml` fails `rgb`, `rgba`,
   `hsla`, gpui's named colours, an `Hsla` or `Rgba` literal, `.text_sm()` and its siblings, and
   `.text_size(px(13.))` outside `theme/`, `shot/` and test files, whatever the arguments: a constant is
-  a literal too. `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
+  a literal too. A struct update from a token (`Hsla { a: 0.4, ..accent }`) passes. A text size
+  through a `Pixels` constant or a `font_size:` field passes too: review catches those. `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
 - **The crate graph check.** The edges CLAUDE.md's Architecture allows are listed
   in the script, any dependency kind, a crate's dependency on itself excepted
   (the `test-support` pattern below). The `jq` filter keeps dependencies with a
@@ -45,15 +46,17 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 - **ast-grep.** The rules live in `.ast-grep/rules/`, one file each, and cite
   the CLAUDE.md rule they enforce. `ast-grep scan` fails `check.sh` on any match.
   Test code is exempt in two ways. Each rule's `ignores` skips `tests.rs`,
-  `*_tests.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
-  `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]` or `#[cfg(test)]`.
+  `*_tests.rs`, `test_support.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
+  `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]`, `#[cfg(test)]` or
+  `#[cfg(any(test, ...))]`.
   Macro arguments are unparsed tokens, so the clock and fs rules also match the
   innermost token tree's text. They stay guards, not proofs: an alias
   (`use std::time::Instant as Clock`) passes, and so does a disk read through a crate other than
-  `std::fs` and `image`. `check.sh` fails any `ast-grep-ignore` comment: a rule that is wrong for a
+  `std::fs` and `image`, or a `Path::is_dir`/`exists`, whose names `Kind` shares. `check.sh` fails any `ast-grep-ignore` comment: a rule that is wrong for a
   site gets a narrower `ignores`, which review sees.
-  `no-print-below-app` bans `print!`, `eprint!` and their `ln` forms and `process::exit`
-  outside `app`; `app` prints on purpose (`timeline`, `vault_search`) and exits at launch.
+  `file-wide-expect` fails a `#![expect]`, or a `#[expect]` on a `mod`, `impl` or `trait`, of a
+  denied lint: either covers every later line. `no-print-below-app` bans `print!`, `eprint!` and their `ln` forms and `process::exit`
+  outside `app` and build scripts; `app` prints on purpose (`timeline`, `vault_search`) and exits at launch.
   `shortcut-comment` reads one comment at a time, so a phrase wrapped over two `//` lines
   passes. It keeps "workaround": a comment on a gpui quirk calls it a quirk.
 - **The hook waits on cargo's lock.** When another cargo process holds it past the hook's
@@ -65,9 +68,10 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   go down, so a split is never undone by later growth. A file that shrinks fails
   too, until `scripts/line-ceilings.sh --lower` locks the gain in. `--lower`
   never raises a ceiling or adds a file, and neither may a hand edit: the script fails a ceiling
-  above the one in `origin/main`'s table, or a row that table lacks. CI fetches the full history
-  for that comparison; without `origin/main`, or before `main` has the table, the script says so and
-  skips it. No branch can raise a ceiling: a source file that must grow is split first. Growth from rustfmt
+  above the one in the base's table, or a row that table lacks. The base is `origin/main`, or
+  `LINE_CEILINGS_BASE`: CI sets it to the PR's base branch, so a stacked PR cannot undo its
+  parent's split, and to the previous `main` on a push. CI fetches the full history for that;
+  without a base, or before the base has the table, the script says so and skips it. No branch can raise a ceiling: a source file that must grow is split first. Growth from rustfmt
   (a multi-line `#[expect]`) counts like any other growth.
 - **The ~400-line warning stays in the hook.** The PostToolUse hook warns on the
   file just edited, when the split is cheap; the ceilings only stop growth.

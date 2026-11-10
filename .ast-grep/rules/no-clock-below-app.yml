@@ -9,6 +9,7 @@ ignores:
   - crates/app/**
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'

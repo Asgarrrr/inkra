@@ -11,5 +11,20 @@ ignores:
   - '**/benches/**'
   - '**/examples/**'
 rule:
-  kind: inner_attribute_item
-  regex: '^#!\[expect\([^\]]*\bclippy::(unwrap_used|expect_used|dbg_macro|todo|unimplemented)\b'
+  any:
+    - kind: inner_attribute_item
+      regex: '^#!\[expect\([^\]]*\bclippy::(unwrap_used|expect_used|dbg_macro|todo|unimplemented)\b'
+    # On a `mod`, `impl` or `trait`, an outer expectation covers as much as an inner one.
+    - kind: attribute_item
+      regex: '^#\[expect\([^\]]*\bclippy::(unwrap_used|expect_used|dbg_macro|todo|unimplemented)\b'
+      precedes:
+        stopBy:
+          not:
+            any:
+              - kind: attribute_item
+              - kind: line_comment
+              - kind: block_comment
+        any:
+          - kind: mod_item
+          - kind: impl_item
+          - kind: trait_item
