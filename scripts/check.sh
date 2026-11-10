@@ -79,6 +79,11 @@ echo "==> line ceilings"
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+echo "==> clock check (library code below app)"
+# Clippy resolves names, so an alias or `.elapsed()` cannot hide a clock read. --lib --bins leaves tests and benches out.
+CLIPPY_CONF_DIR="$PWD/scripts/clippy/below-app" \
+  cargo clippy --workspace --exclude inkra-app --lib --bins --all-features -- -D clippy::disallowed_methods
+
 echo "==> gpui isolation check (every crate below app must not depend on gpui, any dependency kind, any target)"
 # Every member but `app`. Each flag and the here-string are load-bearing; see docs/tooling.md.
 below_app=(--workspace --exclude inkra-app -e normal,build,dev --target=all --all-features)

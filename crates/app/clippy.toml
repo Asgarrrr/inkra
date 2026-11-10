@@ -1,0 +1,19 @@
+# Replaces the root clippy.toml for this crate, so its two settings are repeated here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# CLAUDE.md: `app` opens no file; disk access goes through `inkra_vault::Fs`, which a `MemFs` test sees.
+disallowed-methods = [
+  { path = "std::path::Path::exists", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::try_exists", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::is_dir", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::is_file", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::is_symlink", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::metadata", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::symlink_metadata", reason = "a disk stat behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::canonicalize", reason = "a disk read behind `Fs`; a vault path stays lexical" },
+  { path = "std::path::Path::read_dir", reason = "a disk read behind `Fs`; ask `Fs`" },
+  { path = "std::path::Path::read_link", reason = "a disk read behind `Fs`; ask `Fs`" },
+  { path = "image::open", reason = "a disk read behind `Fs`; decode bytes from `Fs`" },
+  { path = "image::ImageReader::open", reason = "a disk read behind `Fs`; decode bytes from `Fs`" },
+]

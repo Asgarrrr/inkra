@@ -8,8 +8,6 @@ files:
 ignores:
   # shot is the off-screen render dev tool: it writes under target/, never the vault. no-theme-literal exempts it too.
   - crates/app/src/shot/**
-  # The launch picks vault or note from the argument; it is where `RealFs` is chosen.
-  - crates/app/src/bootstrap.rs
   - '**/tests.rs'
   - '**/*_tests.rs'
   - '**/test_support.rs'
@@ -41,20 +39,6 @@ rule:
                   - kind: scoped_use_list
                   - kind: use_as_clause
                 matches: in-std-use-list
-        # A stat through `Path` reaches the disk too, and a `MemFs` test never sees it. Argumentless: `Fs::read_dir` takes a path. Not `is_dir`/`exists`: `Kind` has them too.
-        - kind: call_expression
-          all:
-            - has:
-                field: function
-                kind: field_expression
-                has:
-                  field: field
-                  regex: '^(try_exists|is_symlink|canonicalize|symlink_metadata|read_link|read_dir)$'
-            - has:
-                field: arguments
-                regex: '^\(\s*\)$'
-        - kind: scoped_identifier
-          regex: '^((::)?image::open|(.*::)?ImageReader::open)$'
         # Macro arguments stay unparsed tokens; match the innermost tree's text.
         - kind: token_tree
           regex: '\bstd\s*::\s*fs\b'

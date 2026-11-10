@@ -49,11 +49,17 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   `*_tests.rs`, `test_support.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
   `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]`, `#[cfg(test)]` or
   `#[cfg(any(test, ...))]`.
-  Macro arguments are unparsed tokens, so the clock and fs rules also match the
-  innermost token tree's text. They stay guards, not proofs: an alias
-  (`use std::time::Instant as Clock`) passes, and so does a disk read through a crate other than
-  `std::fs` and `image`, or a `Path::is_dir`/`exists`, whose names `Kind` shares. `check.sh` fails any `ast-grep-ignore` comment: a rule that is wrong for a
+  Macro arguments are unparsed tokens, so the fs rule also matches the innermost token tree's
+  text. ast-grep reads syntax, not names or types: what needs them is clippy's, below.
+  `check.sh` fails any `ast-grep-ignore` comment: a rule that is wrong for a
   site gets a narrower `ignores`, which review sees.
+- **Clippy's `disallowed-methods`, for what needs a type.** Clippy resolves names, so an alias
+  (`use std::time::Instant as Clock`) cannot hide a call, and `Path::is_dir` is told from
+  `Kind::is_dir`. `crates/app/clippy.toml` bans disk access through `Path` and `image::open`
+  in `app`; it replaces the root `clippy.toml` for that crate, so it repeats its settings. The
+  clock check runs clippy a second time on library code below `app`, with
+  `scripts/clippy/below-app/clippy.toml` as `CLIPPY_CONF_DIR`: `--lib --bins` leaves tests and
+  benches out, so they may time themselves. A disk read through a crate neither config lists still passes.
   `file-wide-expect` fails a `#![expect]`, or a `#[expect]` on a `mod`, `impl` or `trait`, of a
   denied lint: either covers every later line. `no-print-below-app` bans `print!`, `eprint!` and their `ln` forms and `process::exit`
   outside `app` and build scripts; `app` prints on purpose (`timeline`, `vault_search`) and exits at launch.

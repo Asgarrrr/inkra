@@ -1,0 +1,8 @@
+# Read by check.sh's clock pass only (CLIPPY_CONF_DIR), on library code below `app`.
+# CLAUDE.md: only `app` reads a clock; `text` and `editor` take the `Instant` as an argument.
+disallowed-methods = [
+  { path = "std::time::Instant::now", reason = "only `app` reads a clock; take the `Instant` as an argument" },
+  { path = "std::time::Instant::elapsed", reason = "reads the clock; take the elapsed `Duration` or a later `Instant`" },
+  { path = "std::time::SystemTime::now", reason = "only `app` reads a clock; take the time as an argument" },
+  { path = "std::time::SystemTime::elapsed", reason = "reads the clock; take the elapsed `Duration` as an argument" },
+]
