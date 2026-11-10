@@ -10,6 +10,9 @@ use inkra_vault::EntryId;
 
 use super::{BacklinksPanel, occurrences};
 
+/// Sources read per note; the rows past them show their name only.
+pub(super) const READ_SOURCES: usize = 1_000;
+
 pub(super) struct Job {
     /// In row order.
     wanted: Vec<Backlink>,
@@ -49,7 +52,7 @@ impl BacklinksPanel {
             .map(|backlink| (backlink.candidate().clone(), backlink.clone()))
             .collect();
         let reader = self.links.read(cx).reader(cx);
-        let reads = reader.stream_with(items, |backlink, read| (backlink, read));
+        let reads = reader.stream_unordered_with(items, |backlink, read| (backlink, read));
         job.task = Some(cx.spawn(async move |this, cx| {
             let mut reads = pin!(reads);
             while let Some((_, (backlink, read))) = reads.next().await {

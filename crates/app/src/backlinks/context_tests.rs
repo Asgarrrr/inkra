@@ -6,6 +6,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, New};
 
 use super::BacklinksPanel;
+use super::job::READ_SOURCES;
 use super::tests::{one, panel, redraws, rows, show};
 use crate::test_support::{entry_id, index_sync, scan_notes, vault_of};
 
@@ -126,4 +127,62 @@ fn a_note_shown_again_lands_its_cached_contexts_at_once(cx: &mut TestAppContext)
     assert_eq!(count.get(), 1);
     cx.run_until_parked();
     assert_eq!([A, C].map(|path| fs.loads(Path::new(path))), loads);
+}
+
+#[gpui::test]
+fn a_held_read_hides_no_row_and_no_other_context(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file(A, "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "[[b]] too");
+    fs.insert_file("/vault/d.md", "and [[b]]");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    let gate = fs.block_load(A);
+
+    show(cx, &notes, &panel, "b");
+
+    assert_eq!(panel.read_with(cx, |panel, _| panel.count()), Some(3));
+    assert_eq!(
+        rows(cx, &panel),
+        [
+            ("a".to_owned(), vec![one("", "")]),
+            ("c".to_owned(), vec![one("[[b]] too", "[[b]]")]),
+            ("d".to_owned(), vec![one("and [[b]]", "[[b]]")]),
+        ]
+    );
+
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(
+        rows(cx, &panel)[0],
+        ("a".to_owned(), vec![one("see [[b]]", "[[b]]")])
+    );
+}
+
+#[gpui::test]
+fn only_the_first_thousand_sources_are_read(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let source = |n: usize| format!("/vault/s{n:04}.md");
+    for n in 0..=READ_SOURCES {
+        fs.insert_file(source(n), "[[t]]");
+    }
+    fs.insert_file("/vault/t.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    let (last_read, unread) = (source(READ_SOURCES - 1), source(READ_SOURCES));
+    let loads = |fs: &MemFs| [&last_read, &unread].map(|path| fs.loads(Path::new(path)));
+    let before = loads(&fs);
+
+    show(cx, &notes, &panel, "t");
+
+    assert_eq!(
+        panel.read_with(cx, |panel, _| panel.count()),
+        Some(READ_SOURCES + 1)
+    );
+    let after = loads(&fs);
+    assert_eq!([after[0] - before[0], after[1] - before[1]], [1, 0]);
+    let rows = rows(cx, &panel);
+    assert_eq!(rows.last(), Some(&(format!("s{READ_SOURCES:04}"), vec![])));
 }

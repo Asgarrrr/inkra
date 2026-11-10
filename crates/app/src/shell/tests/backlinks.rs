@@ -7,7 +7,6 @@ use inkra_vault::mem_fs::MemFs;
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::test_support::entry_id;
-use crate::theme;
 
 use super::{activate, editor, open_vault, showing, tree_focused};
 
@@ -170,35 +169,6 @@ fn from_the_tree_clicking_the_note_showing_in_its_own_backlinks_focuses_the_edit
         })
         .expect("the shell is open");
     assert!(editor_focused);
-}
-
-/// One source line, wider than the panel: its excerpt wraps onto several lines.
-#[gpui::test]
-fn backlink_excerpts_still_wrap(cx: &mut TestAppContext) {
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file(
-        "/vault/a.md",
-        "a single line of prose that runs well past the panel's width before it links to [[b]] at last",
-    );
-    fs.insert_file("/vault/b.md", "beta");
-    let (window, sidebar, notes) = open_vault(cx, fs as Arc<dyn Fs>);
-    cx.run_until_parked();
-    let b = entry_id(&notes, cx, "b");
-    activate(&sidebar, cx, b);
-    cx.run_until_parked();
-
-    let mut visual = VisualTestContext::from_window(window.into(), cx);
-    visual.run_until_parked();
-    let row = visual
-        .debug_bounds("backlink-0")
-        .expect("the panel shows a's backlink");
-
-    // Unwrapped, the row is the name, one excerpt line and its bottom padding: under three lines.
-    assert!(
-        row.size.height > theme::UI_LINE_HEIGHT * 3.,
-        "{:?}: the excerpt stayed on one line",
-        row.size.height
-    );
 }
 
 #[gpui::test]

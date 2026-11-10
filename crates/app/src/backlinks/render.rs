@@ -35,6 +35,8 @@ impl BacklinksPanel {
                     .child(div().text_color(name).child(row.name.clone()))
                     .children(row.occurrences.iter().map(|occurrence| {
                         div()
+                            .min_h(theme::UI_LINE_HEIGHT)
+                            .truncate()
                             .text_color(context)
                             .child(styled(&occurrence.context, link.into()))
                     })),

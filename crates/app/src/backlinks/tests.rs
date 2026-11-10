@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, New};
 
@@ -16,12 +16,25 @@ pub(super) fn panel(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
 ) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
+    let (notes, panel, _) = drawn(cx, fs);
+    (notes, panel)
+}
+
+/// As `panel`, with the window it is drawn in.
+pub(super) fn drawn(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (Entity<NoteStore>, Entity<BacklinksPanel>, VisualTestContext) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
     let links = index_sync(&notes, cx);
     let vault = vault_of(&notes, cx);
     let window = cx.add_window(move |_, cx| BacklinksPanel::new(links, vault, cx));
     let panel = window.root(cx).expect("root view");
-    (notes, panel)
+    (
+        notes,
+        panel,
+        VisualTestContext::from_window(window.into(), cx),
+    )
 }
 
 pub(super) fn show(

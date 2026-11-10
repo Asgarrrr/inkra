@@ -16,9 +16,11 @@ mod context_tests;
 mod job;
 mod render;
 #[cfg(test)]
+mod render_tests;
+#[cfg(test)]
 mod tests;
 
-use job::Job;
+use job::{Job, READ_SOURCES};
 
 impl EventEmitter<FileActivated> for BacklinksPanel {}
 
@@ -120,17 +122,23 @@ impl BacklinksPanel {
             .unwrap_or_default()
             .into_iter()
             // A load may notify after the vault changed and before its build applies.
-            .filter_map(|backlink| {
-                let name = name(backlink.source())?.into();
-                let slot = slot(&mut self.slots, links, &backlink);
-                if slot.is_none() {
-                    pending.push(backlink.clone());
-                }
-                Some(Row {
-                    name,
-                    occurrences: occurrences(&backlink, slot),
+            .filter_map(|backlink| Some((name(backlink.source())?.into(), backlink)))
+            .enumerate()
+            .map(|(index, (name, backlink))| {
+                let occurrences = if index < READ_SOURCES {
+                    let slot = slot(&mut self.slots, links, &backlink);
+                    if slot.is_none() {
+                        pending.push(backlink.clone());
+                    }
+                    occurrences(&backlink, slot)
+                } else {
+                    Vec::new()
+                };
+                Row {
                     backlink,
-                })
+                    name,
+                    occurrences,
+                }
             })
             .collect();
         if pending.is_empty() {

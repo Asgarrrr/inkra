@@ -216,6 +216,8 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
   an occurrence to another target while the slice is kept, and a rename changes
   the candidate's path.
 - The rebuild's cache fill keeps only a proven `Read`.
+- A context line is one truncated line, because a long context landing would
+  otherwise grow its row and move the rows below.
 
 ## Out of scope, measured next
 

@@ -1,11 +1,11 @@
-//! `⌘⇧F`'s reads: each candidate from the text cache, else from disk now, at most `READERS` at
-//! once, in order.
+//! The reads of `⌘⇧F` and of the backlinks panel: each candidate from the text cache, else from
+//! disk now, at most `READERS` at once. `⌘⇧F` takes them in order, backlinks as each one lands.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use futures::{Stream, StreamExt as _};
-use gpui::{App, BackgroundExecutor};
+use gpui::{App, BackgroundExecutor, Task};
 use inkra_index::{Candidate, Read, TextCache};
 use inkra_vault::Fs;
 
@@ -44,19 +44,44 @@ impl Reader {
         T: Send + 'static,
         F: Fn(I, Read) -> T + Clone + Send + 'static,
     {
+        self.spawned(items, then).buffered(READERS)
+    }
+
+    /// As `stream_with`, each item as its read lands: a held read holds no other.
+    pub(crate) fn stream_unordered_with<I, T, F>(
+        &self,
+        items: Vec<(Candidate, I)>,
+        then: F,
+    ) -> impl Stream<Item = (Candidate, T)> + Send + 'static
+    where
+        I: Send + 'static,
+        T: Send + 'static,
+        F: Fn(I, Read) -> T + Clone + Send + 'static,
+    {
+        self.spawned(items, then).buffer_unordered(READERS)
+    }
+
+    fn spawned<I, T, F>(
+        &self,
+        items: Vec<(Candidate, I)>,
+        then: F,
+    ) -> impl Stream<Item = Task<(Candidate, T)>> + Send + 'static
+    where
+        I: Send + 'static,
+        T: Send + 'static,
+        F: Fn(I, Read) -> T + Clone + Send + 'static,
+    {
         let reader = self.clone();
-        futures::stream::iter(items)
-            .map(move |(candidate, item)| {
-                let fs = Arc::clone(&reader.fs);
-                let texts = Arc::clone(&reader.texts);
-                let path = reader.root.join(&*candidate.path);
-                let then = then.clone();
-                reader.executor.spawn(async move {
-                    let read = read(&*fs, &texts, &candidate, &path).await;
-                    (candidate, then(item, read))
-                })
+        futures::stream::iter(items).map(move |(candidate, item)| {
+            let fs = Arc::clone(&reader.fs);
+            let texts = Arc::clone(&reader.texts);
+            let path = reader.root.join(&*candidate.path);
+            let then = then.clone();
+            reader.executor.spawn(async move {
+                let read = read(&*fs, &texts, &candidate, &path).await;
+                (candidate, then(item, read))
             })
-            .buffered(READERS)
+        })
     }
 }
 
