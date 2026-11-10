@@ -29,7 +29,7 @@ jobs:
       # ast-grep is not in install-action's list; its default cargo-binstall fallback fetches it.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,ast-grep
+          tool: cargo-deny,ast-grep,typos
 
       # Caches the registry, cargo's git checkout of Zed, and their builds.
       - uses: Swatinem/rust-cache@v2
