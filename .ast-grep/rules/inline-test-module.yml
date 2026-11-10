@@ -16,4 +16,11 @@ rule:
   has:
     field: body
     kind: declaration_list
-  matches: cfg-test-item
+  any:
+    - matches: cfg-test-item
+    # A test module without `#[cfg(test)]` is still a test module.
+    - has:
+        field: body
+        has:
+          kind: attribute_item
+          regex: '^#\[(gpui::)?test(\(.*\))?\]$'

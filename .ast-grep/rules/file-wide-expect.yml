@@ -1,0 +1,30 @@
+# CLAUDE.md, Code: "Never disable a lint, test or type check to get green." A file-wide expectation covers every later line.
+id: file-wide-expect
+language: Rust
+severity: error
+message: "a file-wide expectation of a denied lint; put `#[expect]` on the one item that needs it"
+files:
+  - crates/**/*.rs
+ignores:
+  # Harness helpers outside `#[test]`: clippy.toml's test allowances miss them (docs/tooling.md, Lints in tests).
+  - '**/tests/**'
+  - '**/benches/**'
+  - '**/examples/**'
+rule:
+  any:
+    - kind: inner_attribute_item
+      regex: '^#!\[expect\([^\]]*\bclippy::(unwrap_used|expect_used|dbg_macro|todo|unimplemented)\b'
+    # On a `mod`, `impl` or `trait`, an outer expectation covers as much as an inner one.
+    - kind: attribute_item
+      regex: '^#\[expect\([^\]]*\bclippy::(unwrap_used|expect_used|dbg_macro|todo|unimplemented)\b'
+      precedes:
+        stopBy:
+          not:
+            any:
+              - kind: attribute_item
+              - kind: line_comment
+              - kind: block_comment
+        any:
+          - kind: mod_item
+          - kind: impl_item
+          - kind: trait_item

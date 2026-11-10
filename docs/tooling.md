@@ -26,31 +26,56 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   - On a match the script prints `cargo tree -i gpui`, the path that brings
     gpui in.
 
-- **`typos`.** It spell-checks code, comments and docs, and skips gitignored
+- **`typos`.** It spell-checks code, comments and docs, hidden directories included, and skips gitignored
   paths such as `vendor/`. Fix a real misspelling. Allow a deliberate word, such
   as a French test fixture, in `typos.toml` at the root, with the narrowest scope.
 
-- **The colour literal check.** `rgb(`, `rgba(` or `hsla(` with a numeric first argument fails
-  outside `theme/` and `shot/`; `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
+- **The colour and text size rule.** `.ast-grep/rules/no-theme-literal.yml` fails `rgb`, `rgba`,
+  `hsla`, gpui's named colours, an `Hsla` or `Rgba` literal, `.text_sm()` and its siblings, and
+  `.text_size(px(13.))` outside `theme/`, `shot/` and test files, whatever the arguments: a constant is
+  a literal too. A struct update from a token (`Hsla { a: 0.4, ..accent }`) passes. A text size
+  through a `Pixels` constant or a `font_size:` field passes too: review catches those. `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
 - **The crate graph check.** The edges CLAUDE.md's Architecture allows are listed
   in the script, any dependency kind, a crate's dependency on itself excepted
   (the `test-support` pattern below). The `jq` filter keeps dependencies with a
   `path`, so registry and git crates never match. A new crate with no
   workspace dependency passes; its first edge fails until it is listed.
+- **The lint inheritance check.** Every member's manifest needs `[lints] workspace = true`; without it
+  the crate escapes every workspace lint. `rustflags` in a tracked `.cargo/` config or the workflow fail too:
+  `-A` there silences a lint for every crate, locally and in CI.
 - **ast-grep.** The rules live in `.ast-grep/rules/`, one file each, and cite
   the CLAUDE.md rule they enforce. `ast-grep scan` fails `check.sh` on any match.
   Test code is exempt in two ways. Each rule's `ignores` skips `tests.rs`,
-  `*_tests.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
-  `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]` or `#[cfg(test)]`.
-  Macro arguments are unparsed tokens, so the clock and fs rules also match the
-  innermost token tree's text. They stay guards, not proofs: an alias
-  (`use std::time::Instant as Clock`) or `start.elapsed()` passes.
-- **The line ceilings.** `scripts/line-ceilings.tsv` lists every file past 400
-  lines, tests included, with its length as a ceiling. A listed file fails when
+  `*_tests.rs`, `test_support.rs`, `tests/`, `benches/` and `examples/`. The shared utility in
+  `.ast-grep/utils/cfg-test-item.yml` skips items under `#[test]`, `#[cfg(test)]` or
+  `#[cfg(any(test, ...))]`.
+  Macro arguments are unparsed tokens, so the fs rule also matches the innermost token tree's
+  text. ast-grep reads syntax, not names or types: what needs them is clippy's, below.
+  `check.sh` fails any `ast-grep-ignore` comment: a rule that is wrong for a
+  site gets a narrower `ignores`, which review sees.
+- **Clippy's `disallowed-methods`, for what needs a type.** Clippy resolves names, so an alias
+  (`use std::time::Instant as Clock`) cannot hide a call, and `Path::is_dir` is told from
+  `Kind::is_dir`. `crates/app/clippy.toml` bans disk access through `Path` and `image::open`
+  in `app`; it replaces the root `clippy.toml` for that crate, so it repeats its settings. The
+  clock check runs clippy a second time on library code below `app`, with
+  `scripts/clippy/below-app/clippy.toml` as `CLIPPY_CONF_DIR`: `--lib --bins` leaves tests and
+  benches out, so they may time themselves. A disk read through a crate neither config lists still passes.
+  `file-wide-expect` fails a `#![expect]`, or a `#[expect]` on a `mod`, `impl` or `trait`, of a
+  denied lint: either covers every later line. `no-print-below-app` bans `print!`, `eprint!` and their `ln` forms and `process::exit`
+  outside `app` and build scripts; `app` prints on purpose (`timeline`, `vault_search`) and exits at launch.
+  `shortcut-comment` fails the markers `TODO`, `XXX`, `todo:` and `fixme`, not words such as
+  "workaround": banning honest words only teaches rewording.
+- **The hook waits on cargo's lock.** When another cargo process holds it past the hook's
+  30 s timeout, the edit gets no diagnostics; run `./scripts/check.sh`.
+- **The line ceilings.** `scripts/line-ceilings.tsv` lists every source file past 400
+  lines with its length as a ceiling. Test files (`tests.rs`, `*_tests.rs`, `tests/`) are
+  exempt: adding a test must not force a split first. The hook still warns on them past 400. A listed file fails when
   it grows past its ceiling; an unlisted file fails past 400. The ceilings only
   go down, so a split is never undone by later growth. A file that shrinks fails
   too, until `scripts/line-ceilings.sh --lower` locks the gain in. `--lower`
-  never raises a ceiling or adds a file.
+  never raises a ceiling or adds a file. A hand edit that does shows in the diff, where review
+  refuses it: a source file that must grow is split first. Growth from rustfmt
+  (a multi-line `#[expect]`) counts like any other growth.
 - **The ~400-line warning stays in the hook.** The PostToolUse hook warns on the
   file just edited, when the split is cheap; the ceilings only stop growth.
 
@@ -58,6 +83,9 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 
 `rust-toolchain.toml` pins 1.98.1, the version `check.sh` is green on; it
 matches Zed's pin at the gpui rev, which needs it. Bump by re-running `check.sh`.
+
+CI pins `cargo-deny`, `ast-grep` and `typos` in `ci.yml`'s install step. Install the same
+versions locally; bump a pin and the local install together, after `check.sh` is green.
 
 ## Build profiles
 
@@ -130,4 +158,6 @@ member could enable the feature, but `cargo test -p inkra-vault` alone needs it.
 applies them inside `#[test]` functions and `#[cfg(test)]` modules, so test
 code carries no `#[allow]`. The deny on `unwrap_used` and `expect_used` stays
 for every other line. Integration tests and benches are not `#[cfg(test)]`
-modules: a helper there outside a `#[test]` keeps a file-level `#[allow]`.
+modules: a helper there outside a `#[test]` needs a file-level
+`#![expect(clippy::expect_used, reason = "...")]`. Elsewhere ast-grep fails a file-level expectation of
+a denied lint, an empty `reason`, and `cfg(not(clippy))`.

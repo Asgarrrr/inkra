@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The file-length ratchet: a listed file may shrink but never grow, an unlisted one stays within 400 lines (docs/tooling.md).
+# The file-length ratchet: a listed source file may shrink but never grow, an unlisted one stays within 400 lines (docs/tooling.md).
 # usage: scripts/line-ceilings.sh [--lower]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -7,6 +7,11 @@ cd "$(dirname "$0")/.."
 limit=400
 table=scripts/line-ceilings.tsv
 lower_command="./scripts/line-ceilings.sh --lower"
+
+# Test files are exempt: a new test must not force a split; the PostToolUse hook still warns past 400.
+source_files() {
+  find crates -name '*.rs' -type f | grep -vE '(^|/)(tests|[^/]*_tests)\.rs$|/tests/' | sort
+}
 
 lines_of() {
   wc -l < "$1" | tr -d ' '
@@ -45,7 +50,7 @@ check() {
       echo "ERROR: $path has $lines lines, past $limit and not in $table — split it by concern" >&2
       failed=1
     fi
-  done < <(find crates -name '*.rs' -type f | sort)
+  done < <(source_files)
 
   return "$failed"
 }

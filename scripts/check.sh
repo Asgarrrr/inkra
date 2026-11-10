@@ -16,14 +16,6 @@ if ! command -v typos >/dev/null 2>&1; then
 fi
 typos
 
-echo "==> colour literal check"
-# A numeric first argument: `fn rgba(self` and `.rgba(theme)` are not literals.
-if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --include='*.rs' | grep -vE '^crates/app/src/(theme\.rs|theme/|shot/)'); then
-  echo "ERROR: a colour literal outside theme/ and shot/ — add a token in crates/app/src/theme/colors.rs:" >&2
-  echo "$literals" >&2
-  exit 1
-fi
-
 echo "==> crate graph check"
 # The edges CLAUDE.md's Architecture allows, any dependency kind. A new edge fails until listed here.
 allowed_edges="inkra-editor inkra-text
@@ -51,6 +43,22 @@ if forbidden=$(grep -vxF "$allowed_edges" <<< "$edges"); then
   exit 1
 fi
 
+echo "==> lint inheritance check"
+# A member without `[lints] workspace = true` escapes every workspace lint; a tracked rustflag can silence one.
+manifests=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[].manifest_path')
+while IFS= read -r manifest; do
+  if ! awk '/^\[/ { section = $0 } section == "[lints]" && /^workspace *= *true/ { found = 1 } END { exit !found }' "$manifest"; then
+    echo "ERROR: $manifest has no [lints] workspace = true" >&2
+    exit 1
+  fi
+done <<< "$manifests"
+# --untracked: a config not yet added overrides lints locally all the same.
+if flags=$(git grep --untracked -nE 'rustflags|RUSTFLAGS' -- ':(glob)**/.cargo/**' '.github/' ':(exclude).claude/worktrees'); then
+  echo "ERROR: rustflags in a cargo or CI config bypass the workspace lints; set lints in Cargo.toml:" >&2
+  echo "$flags" >&2
+  exit 1
+fi
+
 echo "==> ast-grep"
 # The structural rules in .ast-grep/rules/. Not installed by default, so fail with the install command.
 if ! command -v ast-grep >/dev/null 2>&1; then
@@ -58,12 +66,23 @@ if ! command -v ast-grep >/dev/null 2>&1; then
   exit 1
 fi
 ast-grep scan
+# A suppression comment silences any rule; narrow the rule's `ignores` instead, where review sees it.
+if suppressed=$(grep -rn 'ast-grep-ignore' crates); then
+  echo "ERROR: an ast-grep-ignore comment — fix the code or the rule:" >&2
+  echo "$suppressed" >&2
+  exit 1
+fi
 
 echo "==> line ceilings"
 ./scripts/line-ceilings.sh
 
 echo "==> cargo clippy"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+echo "==> clock check (library code below app)"
+# Clippy resolves names, so an alias or `.elapsed()` cannot hide a clock read. --lib --bins leaves tests and benches out.
+CLIPPY_CONF_DIR="$PWD/scripts/clippy/below-app" \
+  cargo clippy --workspace --exclude inkra-app --lib --bins --all-features -- -D clippy::disallowed_methods
 
 echo "==> gpui isolation check (every crate below app must not depend on gpui, any dependency kind, any target)"
 # Every member but `app`. Each flag and the here-string are load-bearing; see docs/tooling.md.

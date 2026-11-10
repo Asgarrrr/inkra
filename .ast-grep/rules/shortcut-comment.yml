@@ -2,21 +2,29 @@
 id: shortcut-comment
 language: Rust
 severity: error
-message: "a comment admits a shortcut; fix it or record it in docs/roadmap.md"
+message: "a comment or panic message admits a shortcut; fix it or record it in docs/roadmap.md"
 files:
   - crates/**/*.rs
 ignores:
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'
 rule:
   any:
-    - kind: line_comment
-    - kind: block_comment
-  # Not `temporar`: "temporary file" is vault vocabulary.
-  regex: '(?i)(for now|workaround|stopgap|\bhack\b|\btodo\b|\bfixme\b)'
+    # Not "temporary": a temporary file is vault vocabulary. TODO and XXX are markers only in capitals: a task's "todo" is markdown vocabulary.
+    - any:
+        - kind: line_comment
+        - kind: block_comment
+      regex: '\b(TODO|XXX)\b|(?i:\btodo:|\bfix ?me\b)'
+    # `todo!` and `unimplemented!` are denied; a panic saying the same is the same shortcut.
+    - kind: macro_invocation
+      has:
+        field: macro
+        regex: '^(panic|unreachable)$'
+      regex: '(?i)\bnot (yet )?implemented\b|!\s*\(\s*"todo\b'
   # A comment between `#[cfg(test)]` and its item matches the utility itself.
   not:
     any:

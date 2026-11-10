@@ -2,14 +2,15 @@
 id: no-fs-in-app
 language: Rust
 severity: error
-message: "`std::fs` in `app`; read and write through `inkra_vault::Fs`"
+message: "a disk access in `app`; read, write and stat through `inkra_vault::Fs`"
 files:
   - crates/app/src/**/*.rs
 ignores:
-  # shot is the off-screen render dev tool: it writes under target/, never the vault. check.sh's colour literal check exempts it too.
+  # shot is the off-screen render dev tool: it writes under target/, never the vault. no-theme-literal exempts it too.
   - crates/app/src/shot/**
   - '**/tests.rs'
   - '**/*_tests.rs'
+  - '**/test_support.rs'
   - '**/tests/**'
   - '**/benches/**'
   - '**/examples/**'
