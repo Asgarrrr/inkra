@@ -351,7 +351,7 @@ fn a_folder_note_does_not_split_its_folder_from_its_children() {
 }
 
 #[test]
-fn a_directorys_children_follow_it_rather_than_all_other_directories() {
+fn a_directory_children_follow_it_rather_than_all_other_directories() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a/z.md", "z");
     fs.insert_file("/vault/c/y.md", "y");
@@ -365,7 +365,7 @@ fn a_directorys_children_follow_it_rather_than_all_other_directories() {
 
 /// The invariant the sidebar's collapse-skip rests on.
 #[test]
-fn every_directorys_descendants_are_contiguous() {
+fn every_directory_descendants_are_contiguous() {
     let fs = MemFs::new();
     fs.insert_file("/vault/Projects/plan.md", "p");
     fs.insert_file("/vault/Projects/deep/x.md", "x");

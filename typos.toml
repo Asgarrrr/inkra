@@ -1,0 +1,26 @@
+# Each entry is deliberate. Fix a real misspelling instead of listing it here.
+
+[default.extend-identifiers]
+# Commit hash in docs/benchmarks.md.
+"698daa8" = "698daa8"
+# "PNGs" is split into "PN" and "Gs" otherwise.
+PNGs = "PNGs"
+
+[default.extend-words]
+# French fixtures: search, folding and word-start tests.
+projet = "projet"
+projets = "projets"
+avance = "avance"
+sur = "sur"
+ment = "ment"
+# "caf\u{e9}": the escape leaves "caf" as a word.
+caf = "caf"
+# Hyphenated prefix in prose: "mis-colours", "mis-sizes".
+mis = "mis"
+# Local variable for literal link text.
+lits = "lits"
+# Foreign names: Apple's `mach_timebase_info.numer`, the `scap` crate.
+numer = "numer"
+scap = "scap"
+# Verbatim quote of a Zed comment in the conflict-detection spec.
+prooven = "prooven"

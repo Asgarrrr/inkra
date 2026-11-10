@@ -35,7 +35,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
 
 ## Commands
 
-- verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny,
+- verify: `./scripts/check.sh` — build, test, clippy `-D warnings`, fmt, deny, typos,
   the no-gpui-below-app check, the crate graph, the ast-grep rules in `.ast-grep/rules/`,
   the line ceilings. Green is the definition of done.
 - fmt: `cargo fmt`, from the repo root, formats every workspace member.
