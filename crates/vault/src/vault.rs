@@ -25,6 +25,9 @@ const MAX_DEPTH: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntryId(u32);
 
+// One per note in the index, twice; a wider id grows every vault.
+const _: () = assert!(size_of::<EntryId>() == 4);
+
 impl EntryId {
     /// No scan mints this: it names a file opened by path instead.
     pub const DETACHED: Self = Self(0);

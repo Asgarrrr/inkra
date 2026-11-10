@@ -19,6 +19,9 @@ struct Slot {
     read: Option<FileRead>,
 }
 
+// One per note; `Option` costs nothing only while `SystemTime` keeps its niche (unix layout).
+const _: () = assert!(mem::size_of::<Slot>() == 56);
+
 /// `CHUNK` consecutive slots, fewer in the last chunk.
 type Chunk = Arc<[Slot]>;
 

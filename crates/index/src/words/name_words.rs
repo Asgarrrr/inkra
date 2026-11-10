@@ -21,6 +21,9 @@ struct Word {
     in_stem: bool,
 }
 
+// One per word of every name.
+const _: () = assert!(size_of::<Word>() == 16);
+
 /// One word of a note's name, folded as S1 folds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NameWord<'a> {
