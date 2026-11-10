@@ -124,17 +124,31 @@ fn launch() -> Result<Launch, String> {
     let Some(argument) = std::env::args_os().nth(1) else {
         return Ok(Launch::Nothing);
     };
-    let path = PathBuf::from(argument);
-    if path.is_dir() {
-        let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-        // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
-        futures::executor::block_on(RealFs.check_dir(&root)).map_err(|error| format!("{error}"))?;
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        return Ok(vault_launch(&root, home.as_deref()));
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    open_argument(&RealFs, PathBuf::from(argument), home.as_deref())
+}
+
+/// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
+fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Launch, String> {
+    // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
+    match futures::executor::block_on(fs.check_dir(&path)) {
+        Ok(()) => {
+            let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            Ok(vault_launch(&root, home))
+        }
+        // A file, or nothing there: the note's load reports which.
+        Err(error)
+            if matches!(
+                error.io_kind(),
+                Some(io::ErrorKind::NotADirectory | io::ErrorKind::NotFound)
+            ) =>
+        {
+            futures::executor::block_on(fs.load(&path))
+                .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
+                .map_err(|error| format!("{error}"))
+        }
+        Err(error) => Err(format!("{error}")),
     }
-    futures::executor::block_on(RealFs.load(&path))
-        .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
-        .map_err(|error| format!("{error}"))
 }
 
 pub fn run() {
