@@ -212,7 +212,7 @@ impl NoteStore {
                 stamp: saved.stamp,
                 identity: saved.identity,
             });
-            if let Some(preserved) = saved.preserved.clone() {
+            if let Some(preserved) = saved.preserved {
                 cx.emit(ConflictPreserved {
                     id,
                     path: preserved,

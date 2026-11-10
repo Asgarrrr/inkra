@@ -416,6 +416,6 @@ fn an_image_tab_is_saved_without_a_view(cx: &mut TestAppContext) {
         file: Some("photo.png".to_owned()),
         view: None,
     };
-    assert_eq!(active, Some(vec![tab("a.md", 5, 5), image.clone()]));
+    assert_eq!(active, Some(vec![tab("a.md", 5, 5), image]));
     assert_eq!(parked, active);
 }

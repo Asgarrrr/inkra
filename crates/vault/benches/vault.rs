@@ -1,7 +1,10 @@
 //! `walk`, `applied` and a re-key on a shared state at 50,000 files, on `RealFs` (open-first spec, Performance).
 //! `assets` holds one note in ten, the rest images (file kinds spec, Performance gate).
 
-#![allow(clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "a harness setup failure should panic; allow-expect-in-tests skips helpers outside #[test] and #[cfg(test)]"
+)]
 
 use std::hint::black_box;
 use std::path::{Path, PathBuf};

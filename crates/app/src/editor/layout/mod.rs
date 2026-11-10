@@ -200,7 +200,10 @@ impl DocumentLayout {
             return self.height;
         }
         let (line, within) = self.locate(row);
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count far below 2^24 converts to f32 exactly"
+        )]
         let within = within as f32;
         line.top + line.row_height * within
     }
@@ -238,7 +241,11 @@ impl DocumentLayout {
         }
         // `lines[0].top` is zero and `y` is positive, so at least one line qualifies.
         let line = &self.lines[self.lines.partition_point(|line| line.top <= y) - 1];
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "`y >= line.top`, so the row quotient is non-negative and small"
+        )]
         let within = ((y - line.top) / line.row_height) as usize;
         line.first_row + within.min(line.rows.len() - 1)
     }

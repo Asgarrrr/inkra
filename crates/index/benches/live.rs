@@ -1,7 +1,10 @@
 //! `LiveIndex`'s builds at 50,000 entries: the first, a layout, and a rebuild that finds only
 //! stamps. `assets` holds one note in ten, the rest images (file kinds spec, Performance gate).
 
-#![allow(clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "a harness setup failure should panic; allow-expect-in-tests skips helpers outside #[test] and #[cfg(test)]"
+)]
 
 use std::path::Path;
 

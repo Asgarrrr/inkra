@@ -265,7 +265,10 @@ impl AppShell {
         index: usize,
         window: &Window,
     ) -> gpui::Point<Pixels> {
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count far below 2^24 converts to f32 exactly"
+        )]
         let index = index as f32;
         let x = match side {
             Side::Left => theme::TRAFFIC_LIGHT_PADDING + theme::ICON_BUTTON_WIDTH,

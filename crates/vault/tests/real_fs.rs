@@ -1,7 +1,10 @@
 //! `RealFs` against a real temporary directory. Separate from the unit tests
 //! because it touches the disk.
 
-#![allow(clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "a harness setup failure should panic; allow-expect-in-tests skips helpers outside #[test] and #[cfg(test)]"
+)]
 
 use std::fs;
 use std::io::ErrorKind;

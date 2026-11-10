@@ -544,7 +544,10 @@ fn tree() -> impl Strategy<Value = Member> {
         )
             .prop_map(|(axis, children)| {
                 let (children, mut flexes): (Vec<_>, Vec<_>) = children.into_iter().unzip();
-                #[allow(clippy::cast_precision_loss)]
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a count far below 2^24 converts to f32 exactly"
+                )]
                 let scale = children.len() as f32 / flexes.iter().sum::<f32>();
                 for flex in &mut flexes {
                     *flex *= scale;
@@ -581,7 +584,10 @@ fn is_normalised(member: &Member) -> bool {
     else {
         return true;
     };
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count far below 2^24 converts to f32 exactly"
+    )]
     let len = children.len() as f32;
     children.len() > 1
         && flexes.len() == children.len()

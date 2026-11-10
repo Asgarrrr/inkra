@@ -168,7 +168,7 @@ proptest! {
         state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true);
 
         let range = state.selection().range();
-        let mut expected = text.clone();
+        let mut expected = text;
         expected.replace_range(range.start.get()..range.end.get(), &typed);
 
         state.edit(&mut buffer, Instant::now(), range.clone(), &typed);

@@ -1,4 +1,7 @@
-#![allow(clippy::unreadable_literal)]
+#![expect(
+    clippy::unreadable_literal,
+    reason = "colours read as 0xrrggbb, not as grouped digits"
+)]
 
 use std::sync::{Arc, LazyLock};
 

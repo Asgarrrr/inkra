@@ -135,9 +135,12 @@ pub(crate) mod geometry {
     }
 
     pub(crate) fn line_at(y: gpui::Pixels, offset: gpui::Pixels) -> usize {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let line = f32::from(y - offset - gpui::px(TEXT_TOP)) / LINE_HEIGHT;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a test point inside the text gives a non-negative line quotient"
+        )]
         let line = line as usize;
         line
     }
