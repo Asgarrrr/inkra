@@ -11,7 +11,7 @@ use super::AppShell;
 use super::dock_chrome::{name, width};
 use super::group::selector;
 use crate::theme;
-use crate::ui::{h_flex, identified, keep_focus, strip_rule};
+use crate::ui::{h_flex, identified, keep_focus, strip_rule, strip_slot};
 
 impl AppShell {
     /// Toggles and tabs keep their own presses: only a leaf region moves the window (S3-D3).
@@ -24,6 +24,10 @@ impl AppShell {
         let drawn = |side| self.panes.is_some() && self.layout.is_drawn(side);
         let (left_drawn, right_drawn) = (drawn(Side::Left), drawn(Side::Right));
         let (left_toggle, right_toggle) = self.render_dock_toggles(cx);
+        let (left_toggle, right_toggle) = (
+            left_toggle.map(|toggle| strip_slot().child(toggle)),
+            right_toggle.map(|toggle| strip_slot().child(toggle)),
+        );
         // Full screen hides the native buttons.
         let lights = if window.is_fullscreen() {
             theme::ROW_INSET
@@ -74,8 +78,7 @@ impl AppShell {
                             )
                             .children(toggle)
                     })
-                    // Centred on the row, level with the dock toggles, not on the tabs' centreline.
-                    .child(self.render_nav(k, group, h_flex().flex_none().h_full(), cx))
+                    .child(self.render_nav(k, group, strip_slot(), cx))
                     .child(self.render_tab_bar(k, group, cx))
                     .child(Self::render_new_tab(k, cx))
                     .child(
@@ -145,7 +148,10 @@ impl AppShell {
             .min_w_0()
             .h_full()
             .children(lead)
-            .children(self.render_dock_strip(side, group, k, cx))
+            .children(
+                self.render_dock_strip(side, group, k, cx)
+                    .map(|strip| strip_slot().child(strip)),
+            )
             .child(Self::render_drag_region(ElementId::Name(selector(drag, k).into()), cx).flex_1())
     }
 

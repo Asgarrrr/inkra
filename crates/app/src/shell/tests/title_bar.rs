@@ -118,6 +118,28 @@ fn every_title_button_has_the_reference_hit_area(cx: &mut TestAppContext) {
     }
 }
 
+/// Optical, not geometric: a button centred on the 40 px row reads below-left of the tab titles.
+#[gpui::test]
+fn every_title_button_sits_on_the_tab_titles_line(cx: &mut TestAppContext) {
+    let (_fs, window, mut cx, a, _b) = ab_focused(cx);
+    open(&window, &mut cx, a);
+
+    let tab = cx.debug_bounds("tab-0").unwrap();
+    let line = (tab.top() + theme::RULE_WIDTH + tab.bottom() - theme::TAB_HOVER_INSET) / 2.;
+    for button in [
+        "dock-icon-files",
+        "dock-icon-backlinks",
+        "dock-toggle-left",
+        "dock-toggle-right",
+        "nav-back-disabled",
+        "nav-forward-disabled",
+        "tab-new",
+    ] {
+        let bounds = cx.debug_bounds(button).unwrap();
+        assert_eq!(bounds.center().y, line, "{button}");
+    }
+}
+
 #[gpui::test]
 fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
@@ -129,12 +151,13 @@ fn the_sidebar_toggle_point_lands_on_the_toggle(cx: &mut TestAppContext) {
     );
 }
 
-#[test]
-fn the_traffic_lights_sit_mid_row() {
-    assert_eq!(
-        theme::TRAFFIC_LIGHT_POSITION.y,
-        (theme::TITLE_BAR_HEIGHT - px(16.)) / 2.
-    );
+/// gpui centres the 16 px lights in a `16 + 2y` container at the window's top.
+#[gpui::test]
+fn the_traffic_lights_sit_on_the_tab_titles_line(cx: &mut TestAppContext) {
+    let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
+
+    let line = cx.debug_bounds("tab-new").unwrap().center().y;
+    assert_eq!(theme::TRAFFIC_LIGHT_POSITION.y + px(8.), line);
 }
 
 /// The bar is as wide as its tabs and `+` follows it, so the row's empty space after `+` is the region's.

@@ -233,8 +233,8 @@ pub(crate) const TITLE_BAR_HEIGHT: Pixels = px(40.);
 /// The reference's inset before the sidebar's first button: the lights and their margins.
 pub(crate) const TRAFFIC_LIGHT_PADDING: Pixels = px(88.);
 
-/// `(TITLE_BAR_HEIGHT - 16) / 2`: gpui centres the 16 px buttons in a `16 + 2y` container.
-pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(14.), px(12.));
+/// gpui centres the 16 px buttons in a `16 + 2y` container: `y + 8` is the tab titles' line, as `strip_slot`'s.
+pub(crate) const TRAFFIC_LIGHT_POSITION: Point<Pixels> = point(px(14.), px(13.5));
 
 /// An icon button's hit area, the reference's 28 x 26 (Polish rules: hit areas).
 pub(crate) const ICON_BUTTON_WIDTH: Pixels = px(28.);
