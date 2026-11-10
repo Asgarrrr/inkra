@@ -74,7 +74,7 @@ comparator did not support the walk built on it.
 | Diff-based reload, never `set_text` | `crates/language/src/buffer.rs:2484` | Take, at the watcher slice |
 | `has_conflict` derived from mtime | `crates/language/src/buffer.rs:2556` | Take, at the watcher slice |
 | `SumTree<Entry>` | `crates/worktree/src/worktree.rs:192` | **Refuse.** Pays off over 100k files |
-| `BackgroundScanner` | `crates/worktree/src/worktree.rs:4376-6345`, ~1970 lines | **Refuse.** Restatting 200 files takes milliseconds |
+| `BackgroundScanner` | `crates/worktree/src/worktree.rs:4376-6345`, ~1970 lines | **Refuse.** Re-statting 200 files takes milliseconds |
 | `FakeFs` | `crates/fs/src/fs.rs:1448-3594`, 2147 lines | **Refuse.** Inodes and a fake kernel watcher amortize over hundreds of scanner tests, not ours |
 | Git, ignore rules, trash-by-id, legacy encodings, remote/collab | — | **Refuse.** Orthogonal |
 

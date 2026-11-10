@@ -8,6 +8,14 @@ echo "==> cargo fmt --check"
 # Every workspace member.
 cargo fmt -- --check
 
+echo "==> typos"
+# Not installed by default, so fail with the install command.
+if ! command -v typos >/dev/null 2>&1; then
+  echo "ERROR: typos is not installed — run: cargo install --locked typos-cli" >&2
+  exit 1
+fi
+typos
+
 echo "==> colour literal check"
 # A numeric first argument: `fn rgba(self` and `.rgba(theme)` are not literals.
 if literals=$(grep -rnE '(^|[^A-Za-z0-9_.])(rgba?|hsla)\((0x|[0-9])' crates --include='*.rs' | grep -vE '^crates/app/src/(theme\.rs|theme/|shot/)'); then

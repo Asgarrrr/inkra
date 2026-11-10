@@ -26,6 +26,10 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   - On a match the script prints `cargo tree -i gpui`, the path that brings
     gpui in.
 
+- **`typos`.** It spell-checks code, comments and docs, and skips gitignored
+  paths such as `vendor/`. Fix a real misspelling. Allow a deliberate word, such
+  as a French test fixture, in `typos.toml` at the root, with the narrowest scope.
+
 - **The colour literal check.** `rgb(`, `rgba(` or `hsla(` with a numeric first argument fails
   outside `theme/` and `shot/`; `scripts/shot-diff.sh` renders every scene and diffs two renders byte for byte.
 - **The crate graph check.** The edges CLAUDE.md's Architecture allows are listed
