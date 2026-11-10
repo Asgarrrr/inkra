@@ -9,6 +9,7 @@ use inkra_index::{Backlink, Read, Slot};
 use inkra_vault::EntryId;
 
 use super::{BacklinksPanel, occurrences};
+use crate::index::READERS;
 
 /// Sources read per note; the rows past them show their name only.
 pub(super) const READ_SOURCES: usize = 1_000;
@@ -52,12 +53,15 @@ impl BacklinksPanel {
             .map(|backlink| (backlink.candidate().clone(), backlink.clone()))
             .collect();
         let reader = self.links.read(cx).reader(cx);
-        let reads = reader.stream_unordered_with(items, |backlink, read| (backlink, read));
+        let reads = reader
+            .stream_unordered_with(items, |backlink, read| (backlink, read))
+            .map(|(_, item)| item)
+            .ready_chunks(READERS);
         job.task = Some(cx.spawn(async move |this, cx| {
             let mut reads = pin!(reads);
-            while let Some((_, (backlink, read))) = reads.next().await {
+            while let Some(batch) = reads.next().await {
                 if this
-                    .update(cx, |panel, cx| panel.land(&backlink, &read, cx))
+                    .update(cx, |panel, cx| panel.land_batch(batch, cx))
                     .is_err()
                 {
                     return;
@@ -66,18 +70,34 @@ impl BacklinksPanel {
         }));
     }
 
-    /// Ignored unless its row's backlink still reads as `backlink`: a rebuild may have replaced it.
-    fn land(&mut self, backlink: &Backlink, read: &Read, cx: &mut Context<Self>) {
-        let Some(row) = self
-            .rows
-            .iter_mut()
-            .find(|row| row.backlink.reads_as(backlink))
-        else {
-            return;
-        };
-        let slot = Slot::land(backlink, read);
-        row.occurrences = occurrences(backlink, Some(&slot));
-        self.slots.insert(backlink.source(), slot);
-        cx.notify();
+    /// The reads ready now, landed as one update; an item whose row's backlink no longer
+    /// reads as its own is dropped, as a rebuild replaced it.
+    fn land_batch(&mut self, batch: Vec<(Backlink, Read)>, cx: &mut Context<Self>) {
+        let mut stale = Vec::new();
+        let mut changed = false;
+        for (backlink, read) in batch {
+            let Some(row) = self
+                .rows
+                .iter_mut()
+                .find(|row| row.backlink.reads_as(&backlink))
+            else {
+                continue;
+            };
+            let id = backlink.source();
+            let landed = Slot::land(self.slots.get(&id), &backlink, &read);
+            let occurrences = occurrences(&backlink, Some(&landed.slot));
+            changed |= row.occurrences != occurrences;
+            row.occurrences = occurrences;
+            self.slots.insert(id, landed.slot);
+            if landed.stale {
+                stale.push(id);
+            }
+        }
+        if !stale.is_empty() {
+            self.links.update(cx, |links, cx| links.stale(&stale, cx));
+        }
+        if changed {
+            cx.notify();
+        }
     }
 }

@@ -18,6 +18,8 @@ mod render;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]
+mod stale_tests;
+#[cfg(test)]
 mod tests;
 
 use job::{Job, READ_SOURCES};
@@ -167,7 +169,7 @@ fn slot<'a>(
     let id = backlink.source();
     if !slots.get(&id).is_some_and(|slot| slot.is_valid(backlink)) {
         let read = links.cached(backlink.candidate())?;
-        let slot = Slot::land(backlink, &read);
+        let slot = Slot::land(None, backlink, &read).slot;
         if !matches!(slot, Slot::Read { .. }) {
             return None;
         }

@@ -17,10 +17,27 @@ pub enum Slot {
     },
 }
 
+/// A read landed in a slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Landed {
+    pub slot: Slot,
+    /// Whether the source reloads: once per stamp, so `NoContext` at a stamp asks only once.
+    pub stale: bool,
+}
+
 impl Slot {
-    /// `Read` only for a text at the source's stamp that holds every occurrence's range.
+    /// `previous` is the source's slot, valid or not: its stamp outlives a reload's new slice.
     #[must_use]
-    pub fn land(backlink: &Backlink, read: &Read) -> Self {
+    pub fn land(previous: Option<&Self>, backlink: &Backlink, read: &Read) -> Landed {
+        let slot = Self::of_read(backlink, read);
+        let stamp = backlink.candidate().stamp;
+        let stale = matches!(slot, Self::NoContext { .. })
+            && !matches!(previous, Some(Self::NoContext { of }) if of.candidate().stamp == stamp);
+        Landed { slot, stale }
+    }
+
+    /// `Read` only for a text at the source's stamp that holds every occurrence's range.
+    fn of_read(backlink: &Backlink, read: &Read) -> Self {
         let of = backlink.clone();
         let Read::Text { text, stamp } = read else {
             return Self::NoContext { of };
