@@ -2,3 +2,5 @@
 /vendor
 /.superpowers
 mutants.out*/
+.DS_Store
+/.claude/worktrees/
