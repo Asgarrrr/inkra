@@ -25,7 +25,7 @@ pub(super) fn backlinks(
         .map(|backlink| {
             let source = vault
                 .entries()
-                .find(|entry| entry.id == backlink.source)
+                .find(|entry| entry.id == backlink.source())
                 .map(|entry| entry.path.as_path().to_string_lossy().into_owned())
                 .unwrap_or_default();
             let lits = backlink

@@ -11,15 +11,20 @@ use crate::index::IndexSync;
 use crate::test_support::{entry_id, index_sync, scan_notes, unscanned_notes, vault_of};
 use crate::vault::NoteStore;
 
-fn panel(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
+/// A panel drawn in a window, so it reads its sources.
+pub(super) fn panel(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
     let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
     let links = index_sync(&notes, cx);
     let vault = vault_of(&notes, cx);
-    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
+    let window = cx.add_window(move |_, cx| BacklinksPanel::new(links, vault, cx));
+    let panel = window.root(cx).expect("root view");
     (notes, panel)
 }
 
-fn show(
+pub(super) fn show(
     cx: &mut TestAppContext,
     notes: &Entity<NoteStore>,
     panel: &Entity<BacklinksPanel>,
@@ -27,10 +32,11 @@ fn show(
 ) {
     let id = entry_id(notes, cx, name);
     panel.update(cx, |panel, cx| panel.set_file(Some(id), cx));
+    cx.run_until_parked();
 }
 
 /// Each row as its source's name and every occurrence's (context, linked text).
-fn rows(
+pub(super) fn rows(
     cx: &mut TestAppContext,
     panel: &Entity<BacklinksPanel>,
 ) -> Vec<(String, Vec<(String, String)>)> {
@@ -47,10 +53,12 @@ fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
                 .iter()
                 .map(|o| {
                     let text = o.context.text();
-                    (
-                        text.to_string(),
-                        text[o.context.ranges()[0].clone()].to_owned(),
-                    )
+                    let lit = o
+                        .context
+                        .ranges()
+                        .first()
+                        .map_or("", |lit| &text[lit.clone()]);
+                    (text.to_string(), lit.to_owned())
                 })
                 .collect();
             (row.name.to_string(), occurrences)
@@ -58,7 +66,7 @@ fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
         .collect()
 }
 
-fn one(context: &str, lit: &str) -> (String, String) {
+pub(super) fn one(context: &str, lit: &str) -> (String, String) {
     (context.to_owned(), lit.to_owned())
 }
 

@@ -1,0 +1,54 @@
+use std::sync::Arc;
+
+use inkra_vault::Stamp;
+
+use crate::test_support::{indexed, mtime};
+use crate::{Backlink, LinkContext, Read, Slot};
+
+const SOURCE: &str = "[[n001]] and [[n001|x]]";
+
+/// `SOURCE`'s one backlink to an empty note, loaded at `mtime(0)`.
+fn backlink() -> Backlink {
+    let (ids, index) = indexed(&[Some(SOURCE), Some("")]);
+    let mut backlinks = index.backlinks(ids[1]);
+    assert_eq!(backlinks.len(), 1, "one source links to n001");
+    backlinks.remove(0)
+}
+
+fn text(text: &str, size: usize) -> Read {
+    Read::Text {
+        text: Arc::from(text),
+        stamp: Stamp {
+            mtime: mtime(0),
+            size: size as u64,
+        },
+    }
+}
+
+#[test]
+fn a_text_at_the_stamp_gives_each_occurrence_its_context_in_order() {
+    let context = |link| LinkContext {
+        text: SOURCE.into(),
+        link,
+    };
+    assert_eq!(
+        Slot::land(&backlink(), &text(SOURCE, SOURCE.len())),
+        Slot::Read {
+            contexts: vec![context(0..8), context(13..23)]
+        }
+    );
+}
+
+#[test]
+fn a_read_that_does_not_prove_the_ranges_has_no_context() {
+    let reads = [
+        text(SOURCE, SOURCE.len() + 1),
+        Read::Gone,
+        Read::NotUtf8,
+        Read::Failed,
+        text("[[n001]]", SOURCE.len()),
+    ];
+    for read in reads {
+        assert_eq!(Slot::land(&backlink(), &read), Slot::NoContext, "{read:?}");
+    }
+}

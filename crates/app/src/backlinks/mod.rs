@@ -1,6 +1,9 @@
 //! The notes linking to the one showing, beside the editor.
 
+use std::collections::HashMap;
+
 use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
+use inkra_index::{Backlink, Slot};
 use inkra_vault::{EntryId, Vault};
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
@@ -8,9 +11,14 @@ use crate::one_line::one_line;
 use crate::open::FileActivated;
 use crate::row_text::LitText;
 
+#[cfg(test)]
+mod context_tests;
+mod job;
 mod render;
 #[cfg(test)]
 mod tests;
+
+use job::Job;
 
 impl EventEmitter<FileActivated> for BacklinksPanel {}
 
@@ -21,6 +29,10 @@ pub(crate) struct BacklinksPanel {
     /// Rebuilt when the index or the file changes, never in a draw: `backlinks` walks every
     /// link sharing the file's name.
     rows: Vec<Row>,
+    /// Each source read since the file was set.
+    slots: HashMap<EntryId, Slot>,
+    /// Reads the sources with no slot, while the panel is drawn.
+    job: Option<Job>,
     building: bool,
     /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
     watch: IndexWatch,
@@ -31,7 +43,7 @@ pub(crate) struct BacklinksPanel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Row {
-    source: EntryId,
+    backlink: Backlink,
     name: SharedString,
     occurrences: Vec<Occurrence>,
 }
@@ -58,6 +70,8 @@ impl BacklinksPanel {
             vault,
             file: None,
             rows: Vec::new(),
+            slots: HashMap::new(),
+            job: None,
             building: false,
             watch: IndexWatch::default(),
             #[cfg(test)]
@@ -77,6 +91,10 @@ impl BacklinksPanel {
     }
 
     pub(crate) fn set_file(&mut self, file: Option<EntryId>, cx: &mut Context<Self>) {
+        if file != self.file {
+            self.slots.clear();
+            self.job = None;
+        }
         self.file = file;
         self.rebuild(cx);
     }
@@ -103,17 +121,22 @@ impl BacklinksPanel {
             // A load may notify after the vault changed and before its build applies.
             .filter_map(|backlink| {
                 Some(Row {
-                    source: backlink.source(),
                     name: name(backlink.source())?.into(),
-                    occurrences: backlink
-                        .occurrences()
-                        .map(|link| Occurrence {
-                            context: LitText::context(&link.context, [link.context_link.clone()]),
-                        })
-                        .collect(),
+                    occurrences: occurrences(&backlink, self.slots.get(&backlink.source())),
+                    backlink,
                 })
             })
             .collect();
+        let pending: Vec<Backlink> = rows
+            .iter()
+            .filter(|row| !self.slots.contains_key(&row.backlink.source()))
+            .map(|row| row.backlink.clone())
+            .collect();
+        if pending.is_empty() {
+            self.job = None;
+        } else if !self.job.as_ref().is_some_and(|job| job.covers(&pending)) {
+            self.job = Some(Job::new(pending));
+        }
         // A redraw reshapes the whole editor; most index changes leave this panel as it was.
         let shown = |rows: &[Row], building: bool| rows.is_empty() && building;
         let changed =
@@ -124,4 +147,19 @@ impl BacklinksPanel {
             cx.notify();
         }
     }
+}
+
+/// One per occurrence: its context from `slot`, else an empty line until a read lands.
+fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
+    let contexts = match slot {
+        Some(Slot::Read { contexts }) => contexts.as_slice(),
+        Some(Slot::NoContext) | None => &[],
+    };
+    (0..backlink.occurrences().count())
+        .map(|at| Occurrence {
+            context: contexts.get(at).map_or_else(LitText::default, |context| {
+                LitText::context(&context.text, [context.link.clone()])
+            }),
+        })
+        .collect()
 }

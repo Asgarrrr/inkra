@@ -203,6 +203,15 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
 - Obsidian's `LinkCache` keeps a link and its positions, no surrounding text.
   Foam keeps a URI and a range and serves context lines from an LRU. Both
   match B1. Whether Obsidian's pane reads the source files is not verified.
+- `LinkContext` owns its window (`Box<str>`, at most 160 bytes). The slot outlives
+  the read, and B8 bounds slots by windows.
+- There is no `Pending` variant: a source with no valid slot is pending.
+- `set_file` clears the slots only on a file change, because activation calls it
+  on every switch.
+- A dropped job cancels its reads in flight (a gpui `Task` drop), so a restart
+  may read up to `READERS` sources again.
+- A `Read` slot holds `Vec<LinkContext>`: under B7 any `None` makes the slot
+  `NoContext`.
 
 ## Out of scope, measured next
 

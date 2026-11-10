@@ -11,7 +11,7 @@ use crate::ui::{Color, Label, ListItem, UiText, v_flex};
 
 impl BacklinksPanel {
     fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
-        let source = row.source;
+        let source = row.backlink.source();
         let theme = theme::current(cx);
         let (name, context, link) = (
             Color::Default.rgba(theme),
@@ -44,6 +44,7 @@ impl BacklinksPanel {
 
 impl Render for BacklinksPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.start_reads(cx);
         let message = match (self.rows.is_empty(), self.building) {
             (true, true) => Some("Indexing…"),
             (true, false) => Some("No backlinks"),
