@@ -212,6 +212,10 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
   may read up to `READERS` sources again.
 - A `Read` slot holds `Vec<LinkContext>`: under B7 any `None` makes the slot
   `NoContext`.
+- Validity is `Backlink::reads_as`, not `Arc::ptr_eq` alone. A new note can move
+  an occurrence to another target while the slice is kept, and a rename changes
+  the candidate's path.
+- The rebuild's cache fill keeps only a proven `Read`.
 
 ## Out of scope, measured next
 

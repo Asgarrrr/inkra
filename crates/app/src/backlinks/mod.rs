@@ -113,6 +113,7 @@ impl BacklinksPanel {
                 .entry(id)
                 .map(|entry| one_line(&entry.display_name()).into_owned())
         };
+        let mut pending = Vec::new();
         let rows: Vec<Row> = self
             .file
             .map(|file| links.index().backlinks(file))
@@ -120,17 +121,17 @@ impl BacklinksPanel {
             .into_iter()
             // A load may notify after the vault changed and before its build applies.
             .filter_map(|backlink| {
+                let name = name(backlink.source())?.into();
+                let slot = slot(&mut self.slots, links, &backlink);
+                if slot.is_none() {
+                    pending.push(backlink.clone());
+                }
                 Some(Row {
-                    name: name(backlink.source())?.into(),
-                    occurrences: occurrences(&backlink, self.slots.get(&backlink.source())),
+                    name,
+                    occurrences: occurrences(&backlink, slot),
                     backlink,
                 })
             })
-            .collect();
-        let pending: Vec<Backlink> = rows
-            .iter()
-            .filter(|row| !self.slots.contains_key(&row.backlink.source()))
-            .map(|row| row.backlink.clone())
             .collect();
         if pending.is_empty() {
             self.job = None;
@@ -149,17 +150,38 @@ impl BacklinksPanel {
     }
 }
 
+/// `backlink`'s valid slot, else a `Read` landed from the text cache; `None` leaves it to the job.
+fn slot<'a>(
+    slots: &'a mut HashMap<EntryId, Slot>,
+    links: &IndexSync,
+    backlink: &Backlink,
+) -> Option<&'a Slot> {
+    let id = backlink.source();
+    if !slots.get(&id).is_some_and(|slot| slot.is_valid(backlink)) {
+        let read = links.cached(backlink.candidate())?;
+        let slot = Slot::land(backlink, &read);
+        if !matches!(slot, Slot::Read { .. }) {
+            return None;
+        }
+        slots.insert(id, slot);
+    }
+    slots.get(&id)
+}
+
 /// One per occurrence: its context from `slot`, else an empty line until a read lands.
 fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
-    let contexts = match slot {
-        Some(Slot::Read { contexts }) => contexts.as_slice(),
-        Some(Slot::NoContext) | None => &[],
-    };
-    (0..backlink.occurrences().count())
-        .map(|at| Occurrence {
-            context: contexts.get(at).map_or_else(LitText::default, |context| {
-                LitText::context(&context.text, [context.link.clone()])
-            }),
-        })
-        .collect()
+    match slot {
+        Some(Slot::Read { contexts, .. }) => contexts
+            .iter()
+            .map(|context| Occurrence {
+                context: LitText::context(&context.text, [context.link.clone()]),
+            })
+            .collect(),
+        Some(Slot::NoContext { .. }) | None => backlink
+            .occurrences()
+            .map(|_| Occurrence {
+                context: LitText::default(),
+            })
+            .collect(),
+    }
 }

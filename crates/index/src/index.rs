@@ -65,6 +65,15 @@ impl Backlink {
     pub fn occurrences(&self) -> impl Iterator<Item = &SourceLink> {
         self.at.iter().map(|&at| &self.links[at as usize])
     }
+
+    /// Whether a read for `other` holds for `self`: the same file at the same stamp, and the
+    /// same occurrences of the same parse.
+    #[must_use]
+    pub fn reads_as(&self, other: &Backlink) -> bool {
+        self.candidate == other.candidate
+            && Arc::ptr_eq(&self.links, &other.links)
+            && self.at == other.at
+    }
 }
 
 impl NoteIndex {

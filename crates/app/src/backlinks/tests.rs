@@ -177,7 +177,7 @@ fn rows_appear_while_the_index_is_still_building(cx: &mut TestAppContext) {
 }
 
 /// Notifies of the panel: each one redraws the window, which reshapes the whole editor.
-fn redraws(
+pub(super) fn redraws(
     cx: &mut TestAppContext,
     panel: &Entity<BacklinksPanel>,
 ) -> (Rc<Cell<usize>>, gpui::Subscription) {

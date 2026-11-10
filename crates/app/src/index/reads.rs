@@ -67,12 +67,8 @@ pub(super) fn lock(texts: &Mutex<TextCache>) -> MutexGuard<'_, TextCache> {
 
 /// Through `Fs::load`, so the text's line endings fold as the load the words came from did.
 async fn read(fs: &dyn Fs, texts: &Mutex<TextCache>, candidate: &Candidate, path: &Path) -> Read {
-    let cached = lock(texts).get(candidate.id, candidate.stamp);
-    if let Some(text) = cached {
-        return Read::Text {
-            text,
-            stamp: candidate.stamp,
-        };
+    if let Some(read) = cached(texts, candidate) {
+        return read;
     }
     let read = Read::from(fs.load(path).await);
     if let Read::Text { text, stamp } = &read
@@ -83,7 +79,20 @@ async fn read(fs: &dyn Fs, texts: &Mutex<TextCache>, candidate: &Candidate, path
     read
 }
 
+fn cached(texts: &Mutex<TextCache>, candidate: &Candidate) -> Option<Read> {
+    let text = lock(texts).get(candidate.id, candidate.stamp)?;
+    Some(Read::Text {
+        text,
+        stamp: candidate.stamp,
+    })
+}
+
 impl IndexSync {
+    /// `candidate`'s text if the cache holds it at its stamp; never reads the disk.
+    pub(crate) fn cached(&self, candidate: &Candidate) -> Option<Read> {
+        cached(&self.texts, candidate)
+    }
+
     /// A reader of the vault this index follows; the open notes' texts stay cached.
     pub(crate) fn reader(&self, cx: &App) -> Reader {
         if let Some(store) = self.notes.upgrade() {

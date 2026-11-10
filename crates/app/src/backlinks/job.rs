@@ -1,11 +1,12 @@
 //! The one read task of the sources with no slot.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::pin::pin;
 
 use futures::StreamExt as _;
 use gpui::{Context, Task};
 use inkra_index::{Backlink, Read, Slot};
+use inkra_vault::EntryId;
 
 use super::{BacklinksPanel, occurrences};
 
@@ -21,12 +22,18 @@ impl Job {
         Self { wanted, task: None }
     }
 
-    /// Whether this job reads every source of `pending`.
+    /// Whether this job reads every backlink of `pending` as it is now.
     pub(super) fn covers(&self, pending: &[Backlink]) -> bool {
-        let wanted: HashSet<_> = self.wanted.iter().map(Backlink::source).collect();
-        pending
+        let wanted: HashMap<EntryId, &Backlink> = self
+            .wanted
             .iter()
-            .all(|backlink| wanted.contains(&backlink.source()))
+            .map(|backlink| (backlink.source(), backlink))
+            .collect();
+        pending.iter().all(|backlink| {
+            wanted
+                .get(&backlink.source())
+                .is_some_and(|wanted| wanted.reads_as(backlink))
+        })
     }
 }
 
@@ -56,9 +63,13 @@ impl BacklinksPanel {
         }));
     }
 
-    /// Ignored unless `backlink` is still its row's: a rebuild may have replaced it.
+    /// Ignored unless its row's backlink still reads as `backlink`: a rebuild may have replaced it.
     fn land(&mut self, backlink: &Backlink, read: &Read, cx: &mut Context<Self>) {
-        let Some(row) = self.rows.iter_mut().find(|row| row.backlink == *backlink) else {
+        let Some(row) = self
+            .rows
+            .iter_mut()
+            .find(|row| row.backlink.reads_as(backlink))
+        else {
             return;
         };
         let slot = Slot::land(backlink, read);

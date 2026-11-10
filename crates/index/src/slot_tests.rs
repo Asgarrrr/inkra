@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use inkra_vault::Stamp;
 
-use crate::test_support::{indexed, mtime};
+use crate::test_support::{indexed, load, mtime};
 use crate::{Backlink, LinkContext, Read, Slot};
 
 const SOURCE: &str = "[[n001]] and [[n001|x]]";
@@ -34,6 +34,7 @@ fn a_text_at_the_stamp_gives_each_occurrence_its_context_in_order() {
     assert_eq!(
         Slot::land(&backlink(), &text(SOURCE, SOURCE.len())),
         Slot::Read {
+            of: backlink(),
             contexts: vec![context(0..8), context(13..23)]
         }
     );
@@ -49,6 +50,23 @@ fn a_read_that_does_not_prove_the_ranges_has_no_context() {
         text("[[n001]]", SOURCE.len()),
     ];
     for read in reads {
-        assert_eq!(Slot::land(&backlink(), &read), Slot::NoContext, "{read:?}");
+        assert_eq!(
+            Slot::land(&backlink(), &read),
+            Slot::NoContext { of: backlink() },
+            "{read:?}"
+        );
+    }
+}
+
+#[test]
+fn a_slot_is_valid_only_for_the_backlink_it_was_read_for() {
+    let (ids, mut index) = indexed(&[Some(SOURCE), Some("")]);
+    let of = index.backlinks(ids[1]).remove(0);
+    load(&mut index, ids[0], SOURCE);
+    let reloaded = index.backlinks(ids[1]).remove(0);
+    for read in [text(SOURCE, SOURCE.len()), Read::Gone] {
+        let slot = Slot::land(&of, &read);
+        assert!(slot.is_valid(&of), "{slot:?}");
+        assert!(!slot.is_valid(&reloaded), "{slot:?}");
     }
 }
