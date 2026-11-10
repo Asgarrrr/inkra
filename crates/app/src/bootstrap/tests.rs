@@ -33,6 +33,7 @@ fn an_argument_opens_a_folder_as_a_vault_and_a_file_as_a_note() {
     ));
 }
 
+/// An unreadable folder fails the launch itself; loading it as a note would hide why.
 #[test]
 fn a_missing_argument_or_an_unreadable_folder_is_an_error_naming_it() {
     let fs = MemFs::new();
@@ -45,6 +46,7 @@ fn a_missing_argument_or_an_unreadable_folder_is_an_error_naming_it() {
     assert!(
         open_argument(&fs, "/locked".into(), None).is_err_and(|error| error.contains("/locked"))
     );
+    assert_eq!(fs.loads(Path::new("/locked")), 0);
 }
 
 #[gpui::test]
