@@ -64,6 +64,37 @@ fn inline_code_marks_its_backtick_runs() {
 }
 
 #[test]
+fn a_code_span_across_lines_keeps_code_off_the_next_line_s_prefix() {
+    const Q: Styles = Styles::QUOTE;
+    assert_eq!(
+        styled("- `a\n  b`"),
+        vec![
+            ("- ", M),
+            ("`", C | M),
+            ("a", C),
+            ("  ", M),
+            ("b", C),
+            ("`", C | M),
+        ]
+    );
+    assert_eq!(
+        styled("> `a\n> b`"),
+        vec![
+            ("> ", Q | M),
+            ("`", Q | C | M),
+            ("a", Q | C),
+            ("> ", Q | M),
+            ("b", Q | C),
+            ("`", Q | C | M),
+        ]
+    );
+    assert_eq!(
+        styled("`a\n  b`"),
+        vec![("`", C | M), ("a", C), ("  ", M), ("b", C), ("`", C | M)]
+    );
+}
+
+#[test]
 fn nesting_flattens_into_unions() {
     assert_eq!(
         styled("**b *i***"),
