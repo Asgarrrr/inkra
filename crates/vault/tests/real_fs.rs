@@ -384,6 +384,23 @@ fn save_to_a_path_whose_folders_are_missing_fails_until_create_parents() {
     assert_eq!(names(&dir.0.join("f").join("g")), ["note.md"]);
 }
 
+/// The oracle for `MemFs`: neither a create nor a rename makes the folder it lands in.
+#[test]
+fn create_and_rename_under_a_missing_folder_are_not_found() {
+    let dir = TempDir::new("missing-parent");
+    let note = dir.0.join("a.md");
+    fs::write(&note, "a").expect("write");
+    let missing = dir.0.join("gone");
+
+    for new in [New::Note, New::Dir] {
+        let error = block_on(RealFs.create(&missing.join("x"), new)).expect_err("create");
+        assert_eq!(error.io_kind(), Some(ErrorKind::NotFound));
+    }
+    let error = block_on(RealFs.rename(&note, &missing.join("a.md"))).expect_err("rename");
+    assert_eq!(error.io_kind(), Some(ErrorKind::NotFound));
+    assert_eq!(names(&dir.0), ["a.md"]);
+}
+
 /// On a local disk the write fails too; the guard's mark is that the error names the note, not a temp file.
 #[test]
 fn save_whose_stat_fails_reports_the_note_and_writes_nothing() {

@@ -460,6 +460,54 @@ fn save_under_a_missing_folder_fails_until_create_parents() {
     );
 }
 
+/// As `RealFs` (`create_and_rename_under_a_missing_folder_are_not_found`).
+#[test]
+fn create_under_a_missing_folder_is_not_found_and_makes_nothing() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+
+    for new in [New::Note, New::Dir] {
+        let error = block_on(fs.create(Path::new("/vault/gone/x"), new)).err();
+        assert_eq!(
+            error.and_then(|error| error.io_kind()),
+            Some(std::io::ErrorKind::NotFound)
+        );
+    }
+    assert!(block_on(fs.check_dir(Path::new("/vault/gone"))).is_err());
+    assert!(
+        block_on(fs.read_dir(Path::new("/vault")))
+            .expect("read_dir")
+            .is_empty()
+    );
+}
+
+/// As `RealFs`: a note and a folder alike stay where they were.
+#[test]
+fn rename_into_a_missing_folder_is_not_found_and_moves_nothing() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/projects/plan.md", "p");
+
+    for from in ["/vault/a.md", "/vault/projects"] {
+        let to = Path::new("/vault/gone").join(Path::new(from).file_name().expect("name"));
+        let error = block_on(fs.rename(Path::new(from), &to)).err();
+        assert_eq!(
+            error.and_then(|error| error.io_kind()),
+            Some(std::io::ErrorKind::NotFound)
+        );
+    }
+    assert!(block_on(fs.check_dir(Path::new("/vault/gone"))).is_err());
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("alpha")
+    );
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/projects/plan.md"))
+            .as_deref(),
+        Some("p")
+    );
+}
+
 #[test]
 fn read_dir_of_a_missing_folder_is_not_found() {
     let fs = MemFs::new();

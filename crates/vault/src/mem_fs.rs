@@ -84,6 +84,12 @@ impl State {
         self.files.contains_key(path) || self.dirs.contains_key(path)
     }
 
+    /// As `RealFs`: a create, a rename or a save's temp file cannot land in a missing folder.
+    fn missing_parent(&self, path: &Path) -> bool {
+        path.parent()
+            .is_some_and(|parent| !self.dirs.contains_key(parent))
+    }
+
     /// As `RealFs`: an unreadable, missing or over-`max_len` file is refused before a byte is handed out.
     fn readable_file(&self, path: &Path, max_len: u64) -> Result<&(Vec<u8>, Mtime, FileIdentity)> {
         self.refused_load(path)?;
@@ -312,6 +318,9 @@ impl Fs for MemFs {
         }
         if state.exists(path) {
             return Err(io(path, ErrorKind::AlreadyExists));
+        }
+        if state.missing_parent(path) {
+            return Err(io(path, ErrorKind::NotFound));
         }
 
         let identity = Self::fresh_identity(&mut state);

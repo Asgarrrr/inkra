@@ -25,11 +25,7 @@ impl MemFs {
             if state.unwritable.contains(path) {
                 return Err(io(path, ErrorKind::PermissionDenied));
             }
-            // As `RealFs`: the temporary file cannot be created in a missing folder.
-            if path
-                .parent()
-                .is_some_and(|parent| !state.dirs.contains_key(parent))
-            {
+            if state.missing_parent(path) {
                 return Err(io(path, ErrorKind::NotFound));
             }
         }
