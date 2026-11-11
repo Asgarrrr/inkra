@@ -118,7 +118,8 @@ tables: [docs/benchmarks.md](docs/benchmarks.md). Reproduce with
 
 ## Build and run
 
-Requires macOS and Rust 1.96 or later.
+Requires macOS and Rust 1.98; rustup installs the pinned toolchain from
+rust-toolchain.toml.
 
 ```sh
 cargo run --release -p inkra-app -- ~/path/to/vault
