@@ -167,8 +167,11 @@ six suites run instead and miss every mutant. Do not set `CARGO_TARGET_DIR`.
 First full run, 2026-11-11, cargo-mutants 27.1.0 at `-j 2`: 528 mutants in 17 minutes.
 The baseline took 7 s to build and 2 s to test. 413 were caught, 88 unviable,
 8 timed out, and 19 missed. Six of the missed are equivalent or unobservable and
-now sit in `exclude_re`; the other 13 are test gaps in `crates/vault`. The eight
+now sit in `exclude_re`; the other 13 were test gaps, since closed by tests. The eight
 timeouts are infinite loops in `conflict_path`, `MemFs::read_dir` and the walk's queue.
+
+Second full run, 2026-11-11, same settings: 521 mutants in 16 minutes. 425 were
+caught, 88 unviable, 8 timed out, and none missed.
 
 ## Lints in tests
 
