@@ -226,6 +226,32 @@ fn a_file_older_than_the_expectation_still_conflicts() {
 }
 
 #[test]
+fn a_conflict_copy_steps_past_a_folder_at_its_name() {
+    let fs = MemFs::new();
+    let when = Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125));
+    fs.insert_with_mtime("/vault/Note.md", "theirs", when);
+    fs.insert_dir("/vault/Note (conflict 2026-09-21 14-32-05Z).md");
+    let stale = Stamp {
+        mtime: Mtime(when.0 + Duration::from_mins(1)),
+        size: 6,
+    };
+
+    let saved = block_on(fs.save(Path::new("/vault/Note.md"), "ours", stale)).ok();
+
+    assert_eq!(
+        saved.and_then(|saved| saved.preserved),
+        Some(PathBuf::from(
+            "/vault/Note (conflict 2026-09-21 14-32-05Z) 2.md"
+        ))
+    );
+    let folder = Path::new("/vault/Note (conflict 2026-09-21 14-32-05Z).md");
+    assert!(
+        block_on(fs.read_dir(folder)).is_ok(),
+        "the folder is still a folder"
+    );
+}
+
+#[test]
 fn the_stamp_a_save_returns_is_accepted_by_the_next_save() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "before");

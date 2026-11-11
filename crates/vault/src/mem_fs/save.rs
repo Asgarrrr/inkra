@@ -40,7 +40,7 @@ impl MemFs {
             match state.files.get(path) {
                 Some((existing, mtime, _)) if stamp_of(existing, *mtime) != expected => {
                     let destination = crate::conflict::conflict_path(path, *mtime, |candidate| {
-                        state.files.contains_key(candidate)
+                        state.exists(candidate)
                     });
                     Some((destination, existing.clone(), stamp_of(existing, *mtime)))
                 }

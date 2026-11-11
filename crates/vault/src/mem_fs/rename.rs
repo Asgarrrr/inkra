@@ -18,6 +18,9 @@ impl State {
         if from == to {
             return Ok(());
         }
+        if self.exists(to) {
+            return Err(io(to, ErrorKind::AlreadyExists));
+        }
         // As `rename(2)`: nothing moves into its own subtree.
         if to.starts_with(from) {
             if self.files.contains_key(from) {
@@ -26,9 +29,6 @@ impl State {
             if self.dirs.contains_key(from) {
                 return Err(io(to, ErrorKind::InvalidInput));
             }
-        }
-        if self.files.contains_key(to) || self.dirs.contains_key(to) {
-            return Err(io(to, ErrorKind::AlreadyExists));
         }
 
         if let Some(entry) = self.files.remove(from) {

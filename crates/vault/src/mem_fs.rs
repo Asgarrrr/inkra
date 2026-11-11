@@ -78,6 +78,23 @@ impl State {
         }
         Ok(())
     }
+
+    /// A file or a folder: what `RealFs` asks `symlink_metadata`.
+    fn exists(&self, path: &Path) -> bool {
+        self.files.contains_key(path) || self.dirs.contains_key(path)
+    }
+
+    /// As `RealFs`: an unreadable, missing or over-`max_len` file is refused before a byte is handed out.
+    fn readable_file(&self, path: &Path, max_len: u64) -> Result<&(Vec<u8>, Mtime, FileIdentity)> {
+        self.refused_load(path)?;
+        let Some(file) = self.files.get(path) else {
+            return Err(io(path, ErrorKind::NotFound));
+        };
+        if file.0.len() as u64 > max_len {
+            return Err(io(path, ErrorKind::FileTooLarge));
+        }
+        Ok(file)
+    }
 }
 
 pub struct MemFs {
@@ -219,13 +236,7 @@ impl Fs for MemFs {
         }
 
         let state = self.state();
-        state.refused_load(path)?;
-        let Some((bytes, mtime, identity)) = state.files.get(path) else {
-            return Err(io(path, ErrorKind::NotFound));
-        };
-        if bytes.len() as u64 > MAX_TEXT_BYTES {
-            return Err(io(path, ErrorKind::FileTooLarge));
-        }
+        let (bytes, mtime, identity) = state.readable_file(path, MAX_TEXT_BYTES)?;
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Err(VaultError::NotUtf8 {
                 path: path.to_path_buf(),
@@ -249,13 +260,7 @@ impl Fs for MemFs {
             let _ = wait.await;
         }
         let state = self.state();
-        state.refused_load(path)?;
-        let Some((bytes, _, _)) = state.files.get(path) else {
-            return Err(io(path, ErrorKind::NotFound));
-        };
-        if bytes.len() as u64 > max_len {
-            return Err(io(path, ErrorKind::FileTooLarge));
-        }
+        let (bytes, _, _) = state.readable_file(path, max_len)?;
         Ok(bytes.clone())
     }
 
@@ -305,7 +310,7 @@ impl Fs for MemFs {
         if state.uncreatable.contains(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
         }
-        if state.files.contains_key(path) || state.dirs.contains_key(path) {
+        if state.exists(path) {
             return Err(io(path, ErrorKind::AlreadyExists));
         }
 

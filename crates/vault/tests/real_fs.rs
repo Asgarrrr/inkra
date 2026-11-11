@@ -233,6 +233,29 @@ fn a_conflict_copy_is_never_written_through_a_symlink_at_its_name() {
 }
 
 #[test]
+fn a_conflict_copy_steps_past_a_folder_at_its_name() {
+    let dir = TempDir::new("conflict-folder");
+    let note = dir.0.join("Note.md");
+    fs::write(&note, "theirs").expect("write");
+    fs::File::options()
+        .write(true)
+        .open(&note)
+        .expect("open")
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125))
+        .expect("set the mtime");
+    let planted = dir.0.join("Note (conflict 2026-09-21 14-32-05Z).md");
+    fs::create_dir(&planted).expect("create_dir");
+
+    let saved = block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert_eq!(
+        saved.preserved,
+        Some(dir.0.join("Note (conflict 2026-09-21 14-32-05Z) 2.md"))
+    );
+    assert!(fs::symlink_metadata(&planted).expect("stat").is_dir());
+}
+
+#[test]
 fn a_note_with_the_longest_name_saves_and_keeps_a_conflict_copy() {
     let dir = TempDir::new("longest-name");
     // 252 units plus `.md`: the longest name `check_name` accepts.
@@ -890,6 +913,7 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
     block_on(fs.create(&a, New::Note)).expect("create a");
     block_on(fs.create(&b, New::Note)).expect("create b");
     block_on(fs.create(&folder, New::Dir)).expect("create f");
+    block_on(fs.create(&folder.join("child.md"), New::Note)).expect("create f/child.md");
     vec![
         (
             "create onto a note",
@@ -929,6 +953,10 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
             "rename a note under itself",
             kind_of(block_on(fs.rename(&a, &a.join("inner.md")))),
         ),
+        (
+            "rename a folder onto its own child",
+            kind_of(block_on(fs.rename(&folder, &folder.join("child.md")))),
+        ),
     ]
 }
 
@@ -950,6 +978,10 @@ fn mem_fs_reports_the_io_kinds_real_fs_does() {
             Some(ErrorKind::InvalidInput),
         ),
         ("rename a note under itself", Some(ErrorKind::NotADirectory)),
+        (
+            "rename a folder onto its own child",
+            Some(ErrorKind::AlreadyExists),
+        ),
     ];
     let dir = TempDir::new("io-kinds");
     let mem = MemFs::new();

@@ -178,8 +178,8 @@ timeouts are infinite loops in `conflict_path`, `MemFs::read_dir` and the walk's
 Second full run, 2026-11-11, same settings: 521 mutants in 16 minutes. 425 were
 caught, 88 unviable, 8 timed out, and none missed.
 
-Third full run, 2026-11-11, `-j 4`: 554 mutants in 9 minutes. 451 were caught, 93
-unviable, 10 timed out, and none missed. The count rose because the exclusive creates,
+Third full run, 2026-11-11, `-j 4`: 555 mutants in 10 minutes. 447 were caught, 95
+unviable, 13 timed out, and none missed. The count rose because the exclusive creates,
 the fitted names, the load cap and the create gate landed after the second run. The
 two new timeouts are the retry loops of `preserve` and `replace`.
 
