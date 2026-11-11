@@ -227,6 +227,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-11-11-open-a-vault-design.md` — `OpenVault`, `⌘O`, the empty
   state's button, a fresh `AppShell` by `replace_root`, the leave path, the last vault
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
+- `docs/superpowers/specs/2026-11-11-tree-organizer-design.md` — moving files: `Move to…`, drag,
+  which links break, the rewrite plan per source note, the written form, folder trash deferred
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
 - `docs/superpowers/specs/2026-09-20-modular-architecture-design.md` — crates
 - `docs/startup-floor.md` — the launch's floor, the WindowServer oracle,
