@@ -48,6 +48,19 @@ fn a_long_link_is_clamped_to_the_window() {
     assert_eq!((found.text.len(), found.link), (160, 60..160));
 }
 
+/// The two inputs proptest once shrank to; kept as plain tests so no file lookup decides whether they run.
+#[test]
+fn a_wikilink_opened_inside_another_proves_on_its_text() {
+    for text in ["[[![[|]](a)]]", "[[![[]](|)]]"] {
+        for link in Source::parse(text).links.iter() {
+            assert!(
+                link_context(text, link.range.clone()).is_some(),
+                "{text}: {link:?}"
+            );
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn every_parsed_link_proves_on_its_text(

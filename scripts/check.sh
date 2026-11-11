@@ -33,6 +33,14 @@ fi
 pinned typos typos-cli "$(typos --version | awk '{ print $2 }')"
 typos
 
+echo "==> proptest regression files"
+# Under src/, proptest reads <crate>/proptest-regressions/<path>.txt; a sibling file is never replayed.
+if dead=$(find crates/*/src -name '*.proptest-regressions' | grep .); then
+  echo "ERROR: move to <crate>/proptest-regressions/<path under src>.txt:" >&2
+  echo "$dead" >&2
+  exit 1
+fi
+
 echo "==> crate graph check"
 # The edges CLAUDE.md's Architecture allows, any dependency kind. A new edge fails until listed here.
 allowed_edges="inkra-editor inkra-text
