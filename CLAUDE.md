@@ -172,6 +172,7 @@ Read the spec before changing its area:
   match: BM25, per-ordinal note lengths
 - `docs/superpowers/specs/2026-11-11-vault-search-ranking-design.md` — `⌘⇧F` groups
   ranked by BM25: the score, where the order is made, the limit
+- `docs/superpowers/specs/2026-11-11-search-underscore-words-design.md` — part starts after `_`, `is_whole`, the joined scan
 - `docs/superpowers/specs/2026-09-29-text-input-design.md` — `TextInput`, the
   core `EditorView` and `NameField` share: gates, protocol, one binding set
 - `docs/superpowers/specs/2026-11-11-word-wise-editing-design.md` — `⌥←`/`⌥→`
