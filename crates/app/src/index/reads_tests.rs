@@ -88,6 +88,34 @@ fn reads_keep_the_candidates_order(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_unordered_stream_yields_past_a_held_read(cx: &mut TestAppContext) {
+    let (fs, links, paths) = alphas(cx, 3);
+    let candidates = candidates(cx, &links, "alpha");
+    let gate = fs.block_load(paths[0].as_str());
+    let reader = links.read_with(cx, IndexSync::reader);
+    let items = candidates
+        .into_iter()
+        .map(|candidate| (candidate, ()))
+        .collect();
+
+    let reads = cx.background_executor.spawn(async move {
+        let reads = reader.stream_unordered_with(items, |(), read| read);
+        reads.take(2).collect::<Vec<_>>().await
+    });
+    cx.run_until_parked();
+
+    let mut landed: Vec<Arc<str>> = reads
+        .now_or_never()
+        .expect("the reads behind the held one landed")
+        .into_iter()
+        .map(|(candidate, _)| candidate.path)
+        .collect();
+    landed.sort();
+    assert_eq!(landed, [Arc::from("n1.md"), Arc::from("n2.md")]);
+    drop(gate);
+}
+
+#[gpui::test]
 fn at_most_four_reads_run_at_once(cx: &mut TestAppContext) {
     let (fs, links, paths) = alphas(cx, READERS + 2);
     let candidates = candidates(cx, &links, "alpha");

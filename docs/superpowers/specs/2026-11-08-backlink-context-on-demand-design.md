@@ -203,6 +203,33 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
 - Obsidian's `LinkCache` keeps a link and its positions, no surrounding text.
   Foam keeps a URI and a range and serves context lines from an LRU. Both
   match B1. Whether Obsidian's pane reads the source files is not verified.
+- `LinkContext` owns its window (`Box<str>`, at most 160 bytes). The slot outlives
+  the read, and B8 bounds slots by windows.
+- There is no `Pending` variant: a source with no valid slot is pending.
+- `set_file` clears the slots only on a file change, because activation calls it
+  on every switch.
+- A dropped job cancels its reads in flight (a gpui `Task` drop), so a restart
+  may read up to `READERS` sources again.
+- A `Read` slot holds `Vec<LinkContext>`: under B7 any `None` makes the slot
+  `NoContext`.
+- Validity is `Backlink::reads_as`, not `Arc::ptr_eq` alone. A new note can move
+  an occurrence to another target while the slice is kept, and a rename changes
+  the candidate's path.
+- The rebuild's cache fill keeps only a proven `Read`.
+- A context line is one line, because a long context landing would otherwise
+  grow its row and move the rows below. It is split at its link: only the text
+  before the link shrinks, cut from its start, so a narrow panel still shows
+  the link.
+- A range disproved at a matching stamp also drops that text from the text
+  cache (`TextCache::forget`), so the reload's new try reads the disk, not the
+  same text.
+- The 8-failure stop counts in a pure `Failures` in `index`. The panel holds it
+  and resets it when its note changes, so a restarted job does not try 8 more.
+- A rebuild that replaces the job notifies, even when its rows draw as before.
+  Only a draw starts a job (B6), and the reload after a `forget` changes no row.
+- A rebuild that keeps the job narrows it to the rebuild's pending set, and a
+  landing takes its source out. The job then holds only what it will still read,
+  with each source's row index, so a landing finds its row without a scan.
 
 ## Out of scope, measured next
 

@@ -81,7 +81,7 @@ fn name() -> impl Strategy<Value = &'static str> {
     ])
 }
 
-/// Link forms of every style, with and without a fragment, and text that clamps a context.
+/// Link forms of every style, with and without a fragment, and multi-byte text.
 fn piece() -> impl Strategy<Value = &'static str> {
     prop::sample::select(vec![
         "[[a]]",
@@ -200,8 +200,6 @@ fn an_offset_past_u32_writes_no_stamp() {
         md: false,
         style: Style::Name,
         range: ByteOffset::new(0)..ByteOffset::new(1 << 32),
-        context: "[[b]]".into(),
-        context_link: 0..5,
     };
     let content = NoteContent {
         source: Source {
@@ -270,20 +268,13 @@ impl Raw {
     }
 
     /// One link to `b` with no fragment.
-    fn link(self, style: u8, range: (u32, u32), context: &[u8], within: (u32, u32)) -> Self {
-        self.str(b"b")
-            .byte(0)
-            .byte(style)
-            .var(range.0)
-            .var(range.1)
-            .str(context)
-            .var(within.0)
-            .var(within.1)
+    fn link(self, style: u8, range: (u32, u32)) -> Self {
+        self.str(b"b").byte(0).byte(style).var(range.0).var(range.1)
     }
 
     /// One record of `a.md`, unstamped, holding one valid link.
     fn record(self) -> Self {
-        self.head(b"a.md", 0, 0).var(1).link(2, (0, 0), b"", (0, 0))
+        self.head(b"a.md", 0, 0).var(1).link(2, (0, 0))
     }
 }
 
@@ -304,8 +295,6 @@ fn hand_built_records_decode() {
         md: false,
         style: Style::Relative,
         range: ByteOffset::new(0)..ByteOffset::new(0),
-        context: String::new(),
-        context_link: 0..0,
     };
     let identity = FileIdentity {
         device: 7,
@@ -326,9 +315,6 @@ fn hand_built_records_decode() {
         .str(b"h")
         .byte(0)
         .var(0)
-        .var(0)
-        .str(b"")
-        .var(0)
         .var(0);
     let stamped = Raw::default().var(1).head(b"a.md", 1, 999_999_999).var(0);
     let empty = Raw::default().var(1).head(b"", 0, 0).var(0);
@@ -341,7 +327,7 @@ fn hand_built_records_decode() {
                 identity,
                 ordinal: None,
                 source: Source {
-                    links: vec![link].into(),
+                    links: vec![link.clone()].into(),
                 },
             },
         ),
@@ -386,24 +372,48 @@ fn hand_built_records_decode() {
     }
 }
 
+/// The smallest link record, last in the section: it pins `MIN_LINK_RECORD`.
+#[test]
+fn the_smallest_link_record_decodes() {
+    let smallest = Raw::default()
+        .var(1)
+        .head(b"a.md", 0, 0)
+        .var(1)
+        .str(b"")
+        .byte(0)
+        .byte(2)
+        .var(0)
+        .var(0);
+
+    let note = CachedNote {
+        path: "a.md".into(),
+        stamp: None,
+        identity: FileIdentity {
+            device: 7,
+            inode: 3,
+        },
+        ordinal: None,
+        source: Source {
+            links: vec![SourceLink {
+                path: "".into(),
+                fragment: None,
+                md: false,
+                style: Style::Relative,
+                range: ByteOffset::new(0)..ByteOffset::new(0),
+            }]
+            .into(),
+        },
+    };
+    assert_eq!(decoded(&sealed(&smallest)), [note]);
+}
+
 #[test]
 fn each_field_rejects() {
     let raw = Raw::default;
-    let link = |style, range, context: &[u8], within| {
-        raw()
-            .var(1)
-            .head(b"a.md", 0, 0)
-            .var(1)
-            .link(style, range, context, within)
-    };
+    let link = |style, range| raw().var(1).head(b"a.md", 0, 0).var(1).link(style, range);
     let cases = [
-        (link(3, (0, 0), b"", (0, 0)), "style"),
-        (link(2, (5, 4), b"", (0, 0)), "range"),
-        (link(2, (0, 0), b"abc", (2, 1)), "range"),
-        (link(2, (0, 0), b"abc", (0, 4)), "context"),
-        (link(2, (0, 0), "é".as_bytes(), (1, 2)), "context"),
-        (link(2, (0, 0), "é".as_bytes(), (0, 1)), "context"),
-        (link(2, (0, 0), b"\xff", (0, 0)), "utf8"),
+        (link(3, (0, 0)), "style"),
+        (link(2, (5, 4)), "range"),
         (raw().var(2).record().record(), "duplicate"),
         (raw().var(1).head(b"a.md", 1, 1_000_000_000).var(0), "nanos"),
         (

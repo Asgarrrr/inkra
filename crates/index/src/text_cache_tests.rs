@@ -167,3 +167,30 @@ fn pin_only_unpins_the_rest() {
     assert!(!cached(&mut cache, a));
     assert!(cached(&mut cache, b));
 }
+
+#[test]
+fn forget_drops_the_text_at_its_stamp_only() {
+    let [a, b, _] = ids();
+    let mut cache = TextCache::new(10);
+    cache.insert(a, text(5), stamp(0));
+    cache.insert(b, text(5), stamp(0));
+
+    cache.forget(a, stamp(0));
+    cache.forget(b, stamp(1));
+    assert!(!cached(&mut cache, a));
+    assert!(cached(&mut cache, b), "a text at another stamp stays");
+}
+
+#[test]
+fn a_forgotten_pinned_text_is_pinned_again_once_read() {
+    let [a, b, _] = ids();
+    let mut cache = TextCache::new(5);
+    cache.pin_only(&pins(&[a]));
+    cache.insert(a, text(5), stamp(0));
+    cache.forget(a, stamp(0));
+    cache.insert(a, text(5), stamp(0));
+    cache.insert(b, text(5), stamp(0));
+
+    assert!(cached(&mut cache, a));
+    assert!(!cached(&mut cache, b));
+}

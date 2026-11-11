@@ -212,6 +212,11 @@ here, so the two cannot drift.
   draw a link as its label, and move the lit ranges with the dropped bytes.
   **Trigger:** met 2026-11-08, on a vault converted from Wikipedia for the
   README demo.
+- The backlinks panel draws every row and reads only the first 1,000 sources
+  (`superpowers/specs/2026-11-08-backlink-context-on-demand-design.md`, B8):
+  the rows past them show their name only. Fix with a virtual list that reads
+  the sources of the rows it draws. **Trigger:** a note with more than 1,000
+  backlinks.
 
 ### File kinds
 

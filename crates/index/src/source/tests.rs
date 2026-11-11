@@ -1,17 +1,7 @@
 use std::sync::Arc;
 
-use super::{BEFORE, CONTEXT, Source};
-
-fn contexts(text: &str) -> Vec<(String, String)> {
-    Source::parse(text)
-        .links
-        .iter()
-        .map(|link| {
-            let lit = link.context[link.context_link.clone()].to_owned();
-            (link.context.clone(), lit)
-        })
-        .collect()
-}
+use super::Source;
+use crate::Style;
 
 #[test]
 fn only_note_links_are_kept() {
@@ -37,59 +27,27 @@ fn one_parse_shares_a_path() {
 }
 
 #[test]
-fn a_short_line_is_the_whole_context() {
+fn a_link_keeps_its_written_target_and_its_range() {
+    let source = Source::parse("see [[a/b#h]]\n[x](./c.md) é[[d]]");
+    let links: Vec<_> = source
+        .links
+        .iter()
+        .map(|link| {
+            (
+                &*link.path,
+                link.fragment.as_deref(),
+                link.md,
+                link.style,
+                link.range.start.get()..link.range.end.get(),
+            )
+        })
+        .collect();
     assert_eq!(
-        contexts("first\nsee [[a]] here\nlast"),
-        [("see [[a]] here".to_owned(), "[[a]]".to_owned())]
-    );
-}
-
-#[test]
-fn a_long_line_is_cut_around_the_link() {
-    let text = format!("{}[[a]]{}", "x".repeat(100), "y".repeat(300));
-    let found = contexts(&text);
-    let (context, lit) = &found[0];
-    assert_eq!(context.len(), CONTEXT);
-    assert!(context.starts_with(&"x".repeat(BEFORE)));
-    assert_eq!(&context[BEFORE..BEFORE + 5], "[[a]]");
-    assert_eq!(lit, "[[a]]");
-}
-
-#[test]
-fn a_cut_lands_on_char_boundaries() {
-    let text = format!("{}[[a]]{}", "é".repeat(50), "ü".repeat(200));
-    for (context, lit) in contexts(&text) {
-        assert!(context.len() <= CONTEXT);
-        assert_eq!(lit, "[[a]]");
-    }
-}
-
-#[test]
-fn a_cut_inside_a_char_moves_toward_the_link() {
-    let text = format!("{}é[[a]]{}", "😀".repeat(20), "ü".repeat(200));
-    let link = &Source::parse(&text).links[0];
-    assert!(
-        link.context_link.start <= BEFORE,
-        "{} bytes before",
-        link.context_link.start
-    );
-    assert!(link.context.len() <= CONTEXT);
-    assert_eq!(&link.context[link.context_link.clone()], "[[a]]");
-}
-
-#[test]
-fn a_link_longer_than_the_window_is_clamped() {
-    let text = format!("[[{}]]", "a".repeat(300));
-    let found = contexts(&text);
-    let (context, lit) = &found[0];
-    assert_eq!(context.len(), CONTEXT);
-    assert_eq!(lit.len(), CONTEXT);
-}
-
-#[test]
-fn a_link_across_lines_keeps_its_first_line() {
-    assert_eq!(
-        contexts("go [a\nb](c.md) on"),
-        [("go [a".to_owned(), "[a".to_owned())]
+        links,
+        [
+            ("a/b", Some("h"), false, Style::Suffix, 4..13),
+            ("./c", None, true, Style::Relative, 14..25),
+            ("d", None, false, Style::Name, 28..33),
+        ]
     );
 }

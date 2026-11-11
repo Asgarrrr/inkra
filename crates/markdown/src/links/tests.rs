@@ -120,6 +120,17 @@ fn code_html_and_frontmatter_hold_no_links() {
 }
 
 #[test]
+fn a_link_nested_in_a_wikilink_is_no_link() {
+    assert_eq!(
+        linked("[[![[|]](a)]] [[![[]](|)]]"),
+        vec![
+            one("[[![[|]](a)]]", W, false, "![["),
+            one("[[![[]](|)]]", W, false, "![[]]("),
+        ]
+    );
+}
+
+#[test]
 fn an_email_autolink_gets_its_scheme() {
     assert_eq!(
         linked("<a@b.com>"),

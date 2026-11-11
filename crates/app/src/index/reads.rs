@@ -1,13 +1,13 @@
-//! `⌘⇧F`'s reads: each candidate from the text cache, else from disk now, at most `READERS` at
-//! once, in order.
+//! The reads of `⌘⇧F` and of the backlinks panel: each candidate from the text cache, else from
+//! disk now, at most `READERS` at once. `⌘⇧F` takes them in order, backlinks as each one lands.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use futures::{Stream, StreamExt as _};
-use gpui::{App, BackgroundExecutor};
+use gpui::{App, BackgroundExecutor, Task};
 use inkra_index::{Candidate, Read, TextCache};
-use inkra_vault::Fs;
+use inkra_vault::{EntryId, Fs, Stamp};
 
 use super::IndexSync;
 
@@ -44,19 +44,44 @@ impl Reader {
         T: Send + 'static,
         F: Fn(I, Read) -> T + Clone + Send + 'static,
     {
+        self.spawned(items, then).buffered(READERS)
+    }
+
+    /// As `stream_with`, each item as its read lands: a held read holds no other.
+    pub(crate) fn stream_unordered_with<I, T, F>(
+        &self,
+        items: Vec<(Candidate, I)>,
+        then: F,
+    ) -> impl Stream<Item = (Candidate, T)> + Send + 'static
+    where
+        I: Send + 'static,
+        T: Send + 'static,
+        F: Fn(I, Read) -> T + Clone + Send + 'static,
+    {
+        self.spawned(items, then).buffer_unordered(READERS)
+    }
+
+    fn spawned<I, T, F>(
+        &self,
+        items: Vec<(Candidate, I)>,
+        then: F,
+    ) -> impl Stream<Item = Task<(Candidate, T)>> + Send + 'static
+    where
+        I: Send + 'static,
+        T: Send + 'static,
+        F: Fn(I, Read) -> T + Clone + Send + 'static,
+    {
         let reader = self.clone();
-        futures::stream::iter(items)
-            .map(move |(candidate, item)| {
-                let fs = Arc::clone(&reader.fs);
-                let texts = Arc::clone(&reader.texts);
-                let path = reader.root.join(&*candidate.path);
-                let then = then.clone();
-                reader.executor.spawn(async move {
-                    let read = read(&*fs, &texts, &candidate, &path).await;
-                    (candidate, then(item, read))
-                })
+        futures::stream::iter(items).map(move |(candidate, item)| {
+            let fs = Arc::clone(&reader.fs);
+            let texts = Arc::clone(&reader.texts);
+            let path = reader.root.join(&*candidate.path);
+            let then = then.clone();
+            reader.executor.spawn(async move {
+                let read = read(&*fs, &texts, &candidate, &path).await;
+                (candidate, then(item, read))
             })
-            .buffered(READERS)
+        })
     }
 }
 
@@ -67,12 +92,8 @@ pub(super) fn lock(texts: &Mutex<TextCache>) -> MutexGuard<'_, TextCache> {
 
 /// Through `Fs::load`, so the text's line endings fold as the load the words came from did.
 async fn read(fs: &dyn Fs, texts: &Mutex<TextCache>, candidate: &Candidate, path: &Path) -> Read {
-    let cached = lock(texts).get(candidate.id, candidate.stamp);
-    if let Some(text) = cached {
-        return Read::Text {
-            text,
-            stamp: candidate.stamp,
-        };
+    if let Some(read) = cached(texts, candidate) {
+        return read;
     }
     let read = Read::from(fs.load(path).await);
     if let Read::Text { text, stamp } = &read
@@ -83,7 +104,25 @@ async fn read(fs: &dyn Fs, texts: &Mutex<TextCache>, candidate: &Candidate, path
     read
 }
 
+fn cached(texts: &Mutex<TextCache>, candidate: &Candidate) -> Option<Read> {
+    let text = lock(texts).get(candidate.id, candidate.stamp)?;
+    Some(Read::Text {
+        text,
+        stamp: candidate.stamp,
+    })
+}
+
 impl IndexSync {
+    /// `candidate`'s text if the cache holds it at its stamp; never reads the disk.
+    pub(crate) fn cached(&self, candidate: &Candidate) -> Option<Read> {
+        cached(&self.texts, candidate)
+    }
+
+    /// Drops `id`'s cached text at `stamp`, so its next read is from disk.
+    pub(crate) fn forget(&self, id: EntryId, stamp: Stamp) {
+        lock(&self.texts).forget(id, stamp);
+    }
+
     /// A reader of the vault this index follows; the open notes' texts stay cached.
     pub(crate) fn reader(&self, cx: &App) -> Reader {
         if let Some(store) = self.notes.upgrade() {

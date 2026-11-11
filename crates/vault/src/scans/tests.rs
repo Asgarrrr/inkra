@@ -206,7 +206,7 @@ fn a_batch_after_a_failed_initial_scan_reads_the_whole_vault() {
     assert!(next.is_none());
     assert!(paths(&live).is_empty());
 
-    fs.make_unreadable("/nowhere");
+    fs.make_readable(ROOT);
     fs.insert_file("/vault/f/d.md", "");
     let scan = scans
         .batch(folders(&["f"]), &live)

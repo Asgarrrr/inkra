@@ -1,5 +1,8 @@
 mod chunks;
 mod content;
+mod context;
+#[cfg(test)]
+mod context_tests;
 mod corpus;
 mod find;
 mod index;
@@ -14,6 +17,9 @@ mod search;
 mod seed;
 #[cfg(test)]
 mod seed_tests;
+mod slot;
+#[cfg(test)]
+mod slot_tests;
 mod source;
 mod stems;
 mod target;
@@ -29,6 +35,7 @@ mod window;
 mod words;
 
 pub use content::{FileRead, NoteContent};
+pub use context::{LinkContext, link_context};
 pub use corpus::CorpusSnapshot;
 pub use find::{Excerpt, Group, NoteMatch, excerpt, word_starts};
 pub use index::{Backlink, IndexSnapshot, NoteIndex};
@@ -39,6 +46,7 @@ pub use notes::Resolution;
 pub use search::{
     Candidate, HITS_PER_NOTE, Hit, NoteHits, READ_FAILURES, Read, Searched, TextFound, TextSearch,
 };
+pub use slot::{Failures, Landed, Slot};
 pub use source::{Source, SourceLink};
 pub use target::{NoteRef, Style, Target};
 pub use text_cache::{TEXT_CACHE_BYTES, TextCache};

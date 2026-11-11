@@ -84,6 +84,21 @@ proptest! {
     }
 
     #[test]
+    fn a_split_keeps_the_text_and_starts_the_rest_at_its_first_range(
+        (text, ranges) in text_and_ranges()
+    ) {
+        let lit = LitText::line(&text, ranges);
+        let (before, rest) = lit.split_at_first();
+        holds_invariants(&rest)?;
+        prop_assert_eq!(format!("{before}{}", rest.text()), lit.text().to_string());
+        prop_assert_eq!(rest.ranges().len(), lit.ranges().len());
+        for (range, shifted) in lit.ranges().iter().zip(rest.ranges()) {
+            prop_assert_eq!(&lit.text()[range.clone()], &rest.text()[shifted.clone()]);
+        }
+        prop_assert!(rest.ranges().first().is_none_or(|first| first.start == 0));
+    }
+
+    #[test]
     fn valid_input_keeps_its_ranges((text, ranges) in valid()) {
         let line = LitText::line(&text, ranges.clone());
         prop_assert_eq!(line.text().len(), text.len());

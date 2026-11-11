@@ -419,11 +419,11 @@ fn check(index: &NoteIndex, model: &Model, vault: &Vault, sources: &[(EntryId, S
                 let order = model
                     .notes
                     .iter()
-                    .position(|(id, _)| *id == backlink.source)
+                    .position(|(id, _)| *id == backlink.source())
                     .unwrap_or(usize::MAX);
                 backlink
                     .occurrences()
-                    .map(|link| (order, backlink.source, link.range.start.get()))
+                    .map(|link| (order, backlink.source(), link.range.start.get()))
                     .collect::<Vec<_>>()
             })
             .collect();

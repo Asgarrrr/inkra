@@ -348,8 +348,7 @@ fn a_root_walk_that_failed_a_folder_drops_the_identity_that_moved_into_it() {
     block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/f/a.md"))).expect("move");
     fs.make_unreadable("/vault/f");
     block_on(vault.rescan(&fs)).expect("the root reads");
-    // `make_unreadable` holds one path: `f` reads again.
-    fs.make_unreadable("/nowhere");
+    fs.make_readable("/vault/f");
     block_on(vault.rescan(&fs)).expect("rescan");
 
     let moved = id_of(&vault, "f/a.md").expect("found once `f` reads");

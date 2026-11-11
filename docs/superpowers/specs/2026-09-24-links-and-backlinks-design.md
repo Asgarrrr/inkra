@@ -302,11 +302,9 @@ filtered to the links that resolve to `T`. Its cost is the number of links
 sharing `T`'s name, not the vault. The property is a proptest (slice 3), not a
 belief.
 
-`Source` keeps, per note link, its `Target`, its byte range, and up to 160
-bytes of the line it sits on, at most 60 of them before the link, cut at char
-boundaries, with the link's range inside it for the panel's link colour. That line is display
-data for the panel, derived and never authoritative: nothing resolves or
-navigates by it.
+`Source` keeps, per note link, its `Target` and its byte range, and no text of its line. The
+panel reads that line from the note on demand
+(`2026-11-08-backlink-context-on-demand-design.md`).
 
 The API, synchronous and pure:
 
@@ -505,6 +503,9 @@ the link colour. Clicking a row opens the source note. "No backlinks" when the
 list is empty; "Indexing…" while `is_building`. With no current note the pane
 is not rendered.
 
+A link holds no text of its line. The panel reads each source's text on demand
+and cuts each context from it (`2026-11-08-backlink-context-on-demand-design.md`).
+
 The panel holds `Entity<LinkSync>`, a model, as the sidebar holds
 `Entity<Vault>`; `AppShell` sets its current note. It never holds the editor.
 
@@ -568,8 +569,9 @@ The costs that grow with the vault:
   resolution depends on its source.
 - **A follow:** one `links` over the current note, on a click or `⌘↵`, never
   per keystroke.
-- **Memory:** per link, a `Target` and at most 160 bytes of context. No note
-  text is kept.
+- **Memory:** per link, its written path, fragment, style and range. A link
+  holds no text of its line: the panel reads contexts on demand. The index
+  keeps no note text.
 
 `inkra-index` has a criterion bench (`cargo bench -p inkra-index`): 10,000
 notes in 100 folders, 500 of them named `index`, 20 links each, one in five to

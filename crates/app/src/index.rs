@@ -24,7 +24,7 @@ mod watch;
 
 use cache_writer::CacheWriter;
 use loading::Landed;
-pub(crate) use reads::Reader;
+pub(crate) use reads::{READERS, Reader};
 #[cfg(test)]
 pub(crate) use watch::BUILDING_REFRESH;
 pub(crate) use watch::IndexWatch;

@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+mod backlink;
+
+use std::collections::HashSet;
 use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
@@ -12,10 +14,11 @@ use crate::corpus::{Corpus, CorpusSnapshot};
 use crate::names::NamesSnapshot;
 use crate::note_set::NoteSet;
 use crate::notes::{NoteTable, Query, Resolution};
+use crate::search::Candidate;
 use crate::seed::Seed;
 use crate::source::{Source, SourceLink};
 use crate::stems::Stems;
-use crate::target::{NoteRef, Style, Target};
+use crate::target::{NoteRef, Target};
 use crate::words::{
     Lookup, MergeWhen, MergedWords, NoteQuery, RetiredWords, Shards, Words, WordsMerge,
     WordsSnapshot,
@@ -37,10 +40,10 @@ pub struct NoteIndex {
     words: Words,
 }
 
-/// One source's links that resolve to a file: its whole slice, and the occurrences' indices.
+/// One source's links that resolve to a file: the source as a read, its slice, the occurrences.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Backlink {
-    source: EntryId,
+    candidate: Candidate,
     links: Arc<[SourceLink]>,
     /// Ascending, never empty, each below `links.len()`.
     at: Vec<u32>,
@@ -49,12 +52,27 @@ pub struct Backlink {
 impl Backlink {
     #[must_use]
     pub fn source(&self) -> EntryId {
-        self.source
+        self.candidate.id
+    }
+
+    /// The source as a read: its file as scanned and the stamp its links came from.
+    #[must_use]
+    pub fn candidate(&self) -> &Candidate {
+        &self.candidate
     }
 
     /// The links that resolve to the file, in document order.
     pub fn occurrences(&self) -> impl Iterator<Item = &SourceLink> {
         self.at.iter().map(|&at| &self.links[at as usize])
+    }
+
+    /// Whether a read for `other` holds for `self`: the same file at the same stamp, and the
+    /// same occurrences of the same parse.
+    #[must_use]
+    pub fn reads_as(&self, other: &Backlink) -> bool {
+        self.candidate == other.candidate
+            && Arc::ptr_eq(&self.links, &other.links)
+            && self.at == other.at
     }
 }
 
@@ -260,64 +278,6 @@ impl NoteIndex {
     pub fn resolve_link(&self, source: Option<EntryId>, link: &Link) -> Resolution {
         self.resolve(source, &Target::parse(link))
     }
-
-    /// Grouped by source in vault order; a note linking to itself is included.
-    #[must_use]
-    pub fn backlinks(&self, file: EntryId) -> Vec<Backlink> {
-        let Some(rows) = self
-            .notes
-            .stem(file)
-            .or_else(|| self.assets.stem(file))
-            .and_then(|stem| self.by_stem.get(stem))
-        else {
-            return Vec::new();
-        };
-        let mut grouped: BTreeMap<(usize, EntryId), Vec<u32>> = BTreeMap::new();
-        // A shared name such as `index` is written the same way by thousands of links, and
-        // only a relative link's resolution depends on its source.
-        let mut by_text: HashMap<NoteRef<'_>, Resolution> = HashMap::new();
-        let mut by_query: HashMap<Query, Resolution> = HashMap::new();
-        for &(source, at) in rows {
-            let note = self.source(source).links[at as usize].note();
-            let resolution = match note {
-                NoteRef { style, .. } if style != Style::Relative => by_text
-                    .entry(note)
-                    .or_insert_with(|| self.resolve_note(Some(source), note))
-                    .clone(),
-                _ => match self.notes.query(Some(source), note) {
-                    Some(query) => by_query
-                        .entry(query)
-                        .or_insert_with_key(|query| self.search(query))
-                        .clone(),
-                    None => Resolution::Unresolved,
-                },
-            };
-            if resolution == Resolution::File(file) {
-                grouped
-                    .entry((self.notes.order(source), source))
-                    .or_default()
-                    .push(at);
-            }
-        }
-        grouped
-            .into_iter()
-            .map(|((_, source), mut at)| {
-                at.sort_unstable();
-                Backlink {
-                    source,
-                    links: Arc::clone(&self.source(source).links),
-                    at,
-                }
-            })
-            .collect()
-    }
-
-    fn source(&self, id: EntryId) -> &Source {
-        let Some(source) = self.sources.get(id) else {
-            panic!("note {id:?} has a backlink row but holds no source");
-        };
-        source
-    }
 }
 
 /// Taken at one moment for `find_notes`, `search`, `excerpt` and the cache file; a clone bumps
@@ -374,6 +334,8 @@ impl IndexSnapshot {
 
 #[cfg(test)]
 mod asset_tests;
+#[cfg(test)]
+mod backlink_tests;
 #[cfg(test)]
 mod corpus_tests;
 #[cfg(test)]

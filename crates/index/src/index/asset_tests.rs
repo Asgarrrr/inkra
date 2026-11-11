@@ -66,8 +66,8 @@ fn backlinks_of_an_asset_list_the_notes_that_embed_it() {
     assert_eq!(
         backlinks(&index, &vault, "pics/photo.png"),
         [
-            pair("a.md", &["![a](pics/photo.png)"]),
-            pair("b.md", &["![[photo.png]]"])
+            pair("a.md", &["pics/photo.png"]),
+            pair("b.md", &["photo.png"])
         ]
     );
 }
@@ -86,7 +86,7 @@ fn a_link_to_photo_png_md_is_not_a_backlink_of_photo_png() {
     assert_eq!(backlinks(&index, &vault, "photo.png"), []);
     assert_eq!(
         backlinks(&index, &vault, "photo.png.md"),
-        [pair("a.md", &["![[photo.png]]", "[[photo.png.md]]"])]
+        [pair("a.md", &["photo.png", "photo.png (md)"])]
     );
 }
 

@@ -91,6 +91,11 @@ impl Corpus {
         mem::replace(&mut self.ids, ids)
     }
 
+    /// The file the words at `order` came from; `None` past the end or while it is not loaded.
+    pub(crate) fn read(&self, at: usize) -> Option<FileRead> {
+        slot(&self.slots, at)?.read
+    }
+
     pub(crate) fn snapshot(&self) -> CorpusSnapshot {
         CorpusSnapshot {
             ids: Arc::clone(&self.ids),
