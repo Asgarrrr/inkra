@@ -18,8 +18,9 @@ one 17 MB binary, one process.
   or the selection touches it. Quotes, lists and code blocks.
 - **Links**: `[[wikilinks]]` to notes and files, a backlinks panel, `⌘Enter`
   to follow a link.
-- **Search**: `⌘P` quick open by word start on names and text, `⌘⇧F` vault
-  search ranked by BM25, `⌘⇧P` command palette.
+- **Search**: `⌘P` quick open by word start on names and text, text matches
+  ranked by BM25; `⌘⇧F` vault search, hits grouped by note; `⌘⇧P` command
+  palette.
 - **Tabs and splits**: tabs with per-tab back and forward, `⌘⇧T` to reopen a
   closed tab, split groups in any direction, tabs dragged between them.
 - **Docks**: the file tree and the backlinks panel move between the left and
