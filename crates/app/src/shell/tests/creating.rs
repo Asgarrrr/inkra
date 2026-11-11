@@ -178,6 +178,46 @@ fn a_second_enter_while_creating_starts_no_second_create(cx: &mut TestAppContext
     assert_eq!(vault_names(&notes, cx), ["a.md", "b.md", "c.md"]);
 }
 
+#[gpui::test]
+fn a_slow_create_does_not_close_a_later_create_s_field(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    let (window, sidebar, notes, _a, _b) = two_notes(cx, &fs);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    let first = fs.block_read_dir("/vault");
+    visual.simulate_keystrokes("cmd-n x enter"); // create 1: file made, its rescan parked
+    visual.run_until_parked();
+    visual.simulate_keystrokes("escape"); // its field closes
+    visual.run_until_parked();
+    // Escape left the focus on nothing the tree's bindings reach.
+    window
+        .update(cx, |shell, window, cx| {
+            window.focus(&shell.tree_focus_handle(cx), cx);
+        })
+        .expect("the shell is open");
+    let hold = fs.block_create("/vault/y.md");
+    visual.simulate_keystrokes("cmd-n y enter"); // create 2: parked before it makes y.md
+    visual.run_until_parked();
+
+    first.release(); // create 1 resolves
+    visual.run_until_parked();
+
+    assert_eq!(
+        vault_names(&notes, cx),
+        ["a.md", "b.md", "x.md"],
+        "create 1 landed; create 2 is still in flight"
+    );
+    assert!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
+        "create 1 resolved; create 2's field is still open"
+    );
+
+    hold.release();
+    visual.run_until_parked();
+    assert!(!sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    assert_eq!(vault_names(&notes, cx), ["a.md", "b.md", "x.md", "y.md"]);
+}
+
 /// The check compares the file name the note would get, not the text typed.
 #[gpui::test]
 fn a_duplicate_is_caught_through_the_extension(cx: &mut TestAppContext) {
