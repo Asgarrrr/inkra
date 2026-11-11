@@ -58,6 +58,22 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # `thumbnail` keeps its size and its pixels: `>=` and `>` decode the same bytes.
 #
 # Equivalent. `MD` and `FRAGMENT` are disjoint bits, so `^` and `|` build the same byte.
+#
+# The vault runs with `cargo mutants -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
+# `-f` is needed because `examine_globs` leaves the vault out. Its suite (~3 s) uses a
+# real disk and a watcher, too slow to run against every other crate's mutants.
+#
+# Equivalent. A collision `hard_link` refuses also reaches `guarded_rename`, which renames
+# the same file and refuses a different one with `AlreadyExists` at `to`.
+#
+# Unobservable. Both delete methods trash the file; they differ in a permission
+# prompt and Finder's "Put Back" metadata, which no test sees.
+#
+# Unobservable. `MemFs` mtimes only need to differ per tick; every variant keeps
+# them distinct, and no test reads their value.
+#
+# Equivalent. `release` consumes the gate, and dropping it closes the channel,
+# which the parked operation reads as a release.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/cmark\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -76,4 +92,8 @@ exclude_re = [
     "^crates/app/src/editor/element\\.rs:[0-9]+:26: replace == with != in <impl Element for TextElement>::paint$",
     "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
+    "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in <impl Fs for RealFs>::rename$",
+    "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace trash_method with \\(\\)$",
+    "^crates/vault/src/mem_fs\\.rs:[0-9]+:[0-9]+: replace \\+ with (-|\\*) in MemFs::tick$",
+    "^crates/vault/src/mem_fs/faults\\.rs:[0-9]+:[0-9]+: replace Gate::release with \\(\\)$",
 ]

@@ -49,6 +49,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   A whole crate is ~1000 mutants run one by one, near two hours; the diff is a few
   dozen. Run plain `cargo mutants` once, before the PR.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
+  After changing `vault` logic, run the diff command with
+  `-p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.

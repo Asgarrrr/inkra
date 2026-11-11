@@ -152,6 +152,24 @@ itself through a self dev-dependency. `app` uses the same pattern for gpui.
 The self dev-dependency is not redundant: in `cargo test --workspace` another
 member could enable the feature, but `cargo test -p inkra-vault` alone needs it.
 
+## Mutants on `inkra-vault`
+
+The default run leaves the vault out: `examine_globs` filters its files, and its
+suite uses a real disk and a watcher. Run it on its own:
+
+```sh
+cargo mutants -j 4 -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'
+```
+
+A plain `-p inkra-vault` lists no mutant. Without `--test-package`, the config's
+six suites run instead and miss every mutant. Do not set `CARGO_TARGET_DIR`.
+
+First full run, 2026-11-11, cargo-mutants 27.1.0 at `-j 2`: 528 mutants in 17 minutes.
+The baseline took 7 s to build and 2 s to test. 413 were caught, 88 unviable,
+8 timed out, and 19 missed. Six of the missed are equivalent or unobservable and
+now sit in `exclude_re`; the other 13 are test gaps in `crates/vault`. The eight
+timeouts are infinite loops in `conflict_path`, `MemFs::read_dir` and the walk's queue.
+
 ## Lints in tests
 
 `clippy.toml` sets `allow-unwrap-in-tests` and `allow-expect-in-tests`. Clippy
