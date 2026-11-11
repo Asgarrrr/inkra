@@ -1,4 +1,3 @@
-crates/app/src/editor/layout/mod.rs	412
 crates/app/src/editor/layout/shape.rs	464
 crates/app/src/editor/mod.rs	494
 crates/app/src/shell.rs	416
