@@ -422,6 +422,35 @@ fn line_for_offset_past_the_end_answers_for_the_last_line() {
 }
 
 #[test]
+fn line_at_answers_at_both_edges_of_a_line() {
+    let buf = Buffer::new("ab\ncd");
+    for offset in 0..=2 {
+        assert_eq!(buf.line_at(at(offset)), at(0)..at(2));
+    }
+    for offset in 3..=5 {
+        assert_eq!(buf.line_at(at(offset)), at(3)..at(5));
+    }
+}
+
+#[test]
+fn line_at_on_an_empty_line_is_empty() {
+    let buf = Buffer::new("a\n\nb");
+    assert_eq!(buf.line_at(at(2)), at(2)..at(2));
+}
+
+#[test]
+fn line_at_past_the_end_answers_for_the_last_line() {
+    let buf = Buffer::new("ab\ncd");
+    assert_eq!(buf.line_at(at(999)), at(3)..at(5));
+}
+
+#[test]
+fn line_at_inside_a_multi_byte_char_does_not_panic() {
+    let buf = Buffer::new("é\nb");
+    assert_eq!(buf.line_at(at(1)), at(0)..at(2));
+}
+
+#[test]
 fn a_multi_byte_char_does_not_split_a_line() {
     let buf = Buffer::new("é\né");
     assert_eq!(buf.line_count(), 2);

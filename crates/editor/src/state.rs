@@ -242,7 +242,7 @@ impl EditorState {
     }
 
     fn line(&self, buffer: &Buffer) -> Range<ByteOffset> {
-        buffer.line_range(buffer.line_for_offset(self.cursor()))
+        buffer.line_at(self.cursor())
     }
 
     /// Clears the goal column; a vertical move that must keep one uses `move_vertically` instead.

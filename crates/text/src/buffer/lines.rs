@@ -16,6 +16,23 @@ impl Buffer {
         self.newlines_before(offset.get().min(self.text.len()))
     }
 
+    /// The line holding `offset`, found from `offset` outward: its cost is the line's length.
+    /// Past the end, answers for the last line, as `line_for_offset` does.
+    #[must_use]
+    pub fn line_at(&self, offset: ByteOffset) -> Range<ByteOffset> {
+        let bytes = self.text.as_bytes();
+        let at = offset.get().min(bytes.len());
+        let start = bytes[..at]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |index| index + 1);
+        let end = bytes[at..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |index| at + index);
+        ByteOffset::new(start)..ByteOffset::new(end)
+    }
+
     /// Excludes the terminating newline: `line_range(0).end` and `line_range(1).start` differ,
     /// which is what makes `End` then `Right` cross to the next line.
     ///

@@ -196,6 +196,20 @@ fn bench_line_range(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_line_at(c: &mut Criterion) {
+    let mut group = c.benchmark_group("buffer_line_at");
+    for lines in SIZES {
+        let document = build_document(lines);
+        let buffer = Buffer::new(document.clone());
+        let middle = middle_offset(&document);
+        group.throughput(Throughput::Bytes(document.len() as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(lines), &buffer, |b, buffer| {
+            b.iter(|| buffer.line_at(black_box(middle)));
+        });
+    }
+    group.finish();
+}
+
 fn bench_to_utf16(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_to_utf16");
     for lines in SIZES {
@@ -329,6 +343,7 @@ criterion_group!(
     bench_undo,
     bench_line_for_offset,
     bench_line_range,
+    bench_line_at,
     bench_to_utf16,
     bench_from_utf16,
     bench_utf16_range,

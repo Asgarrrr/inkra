@@ -110,6 +110,12 @@ fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
         );
         prop_assert_eq!(buf.line_for_offset(range.start), line);
         prop_assert_eq!(buf.line_for_offset(range.end), line);
+        prop_assert_eq!(buf.line_at(range.start), range.clone());
+        prop_assert_eq!(buf.line_at(range.end), range.clone());
+        if range.start < range.end {
+            let inside = ByteOffset::new(usize::midpoint(range.start.get(), range.end.get()));
+            prop_assert_eq!(buf.line_at(inside), range.clone());
+        }
 
         expected_start = range.end + 1;
     }
