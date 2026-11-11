@@ -216,6 +216,7 @@ impl Element for TextElement {
         let Some((layout, quads)) = prepaint.painted.take() else {
             return;
         };
+        EditorView::track_drag(&self.editor, window);
         let blocks = Rc::new(std::mem::take(&mut prepaint.blocks));
         let text_hitbox = prepaint.text_hitbox.clone();
         let line_height = window.line_height();

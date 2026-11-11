@@ -18,6 +18,7 @@ mod code_block_wrap;
 mod code_blocks;
 mod conceal;
 mod dispatch;
+mod drag;
 mod follow;
 mod gutter;
 mod hanging;
