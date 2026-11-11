@@ -198,6 +198,7 @@ fn a_slow_create_does_not_close_a_later_create_s_field(cx: &mut TestAppContext) 
     let hold = fs.block_create("/vault/y.md");
     visual.simulate_keystrokes("cmd-n y enter"); // create 2: parked before it makes y.md
     visual.run_until_parked();
+    let anchored = sidebar.read_with(cx, |sidebar, _| sidebar.selected());
 
     first.release(); // create 1 resolves
     visual.run_until_parked();
@@ -210,6 +211,11 @@ fn a_slow_create_does_not_close_a_later_create_s_field(cx: &mut TestAppContext) 
     assert!(
         sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()),
         "create 1 resolved; create 2's field is still open"
+    );
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.selected()),
+        anchored,
+        "create 1 landed under create 2's open field"
     );
 
     hold.release();

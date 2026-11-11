@@ -1,5 +1,5 @@
-//! A drag selection follows the pointer after it leaves the editor; a move with no button
-//! selects nothing.
+//! A drag selection follows the pointer after it leaves the editor; a hover after a lost
+//! release, or a drag begun outside, selects nothing.
 
 use gpui::{
     Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, WindowHandle,
@@ -55,20 +55,45 @@ fn a_drag_above_the_editor_selects_to_the_start(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_move_with_no_button_selects_nothing(cx: &mut TestAppContext) {
+fn a_hover_after_a_lost_release_selects_nothing(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, NOTE);
     cx.run_until_parked();
     let from = on_row_1(window, &mut cx, 9);
     let elsewhere = on_row_1(window, &mut cx, 7);
 
     cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
-    cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
+    let before = window
+        .update(&mut cx, |view, _, _| view.selected())
+        .unwrap();
     cx.simulate_mouse_move(elsewhere, None, Modifiers::none());
+    cx.run_until_parked();
+
+    let after = window
+        .update(&mut cx, |view, _, _| view.selected())
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "a hover after a lost release moved the selection"
+    );
+    cx.simulate_mouse_up(elsewhere, MouseButton::Left, Modifiers::none());
+    close(&mut cx);
+}
+
+#[gpui::test]
+fn a_drag_begun_outside_the_editor_selects_nothing(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, NOTE);
+    cx.run_until_parked();
+    let elsewhere = on_row_1(window, &mut cx, 7);
+
+    cx.simulate_mouse_move(elsewhere, MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
 
     let selected = window
         .update(&mut cx, |view, _, _| view.selected())
         .unwrap();
-    assert!(selected.is_empty(), "a hover selected {selected:?}");
+    assert!(
+        selected.is_empty(),
+        "a drag begun outside selected {selected:?}"
+    );
     close(&mut cx);
 }

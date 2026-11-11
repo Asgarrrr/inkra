@@ -280,33 +280,35 @@ impl Sidebar {
         created: inkra_vault::Result<Created>,
         cx: &mut Context<Self>,
     ) {
-        match created {
-            Ok(Created::Listed(id)) => {
-                if self.creating_field(field).is_some() {
-                    self.rows.close();
-                }
-                self.select(Some(id));
-            }
-            Ok(Created::Unlisted) => {
-                if self.creating_field(field).is_some() {
-                    self.rows.close();
-                }
-            }
-            Ok(Created::Refused) => {
-                if let Some(edit) = self.creating_field(field) {
-                    edit.creating = false;
-                    edit.rejected = Some(Rejection::Refused);
-                }
-            }
+        let made = match created {
+            Ok(Created::Listed(id)) => Ok(Some(id)),
+            Ok(Created::Unlisted) => Ok(None),
+            Ok(Created::Refused) => Err(Rejection::Refused),
             Err(error) => {
                 log::warn!("create: {error}");
+                Err(if error.io_kind() == Some(ErrorKind::AlreadyExists) {
+                    Rejection::Duplicate
+                } else {
+                    Rejection::Refused
+                })
+            }
+        };
+        match made {
+            Ok(listed) => {
+                if self.creating_field(field).is_some() {
+                    self.rows.close();
+                }
+                // As `step`: a name being typed keeps its row.
+                if let Some(id) = listed
+                    && self.rows.edit().is_none()
+                {
+                    self.select(Some(id));
+                }
+            }
+            Err(rejection) => {
                 if let Some(edit) = self.creating_field(field) {
                     edit.creating = false;
-                    edit.rejected = Some(if error.io_kind() == Some(ErrorKind::AlreadyExists) {
-                        Rejection::Duplicate
-                    } else {
-                        Rejection::Refused
-                    });
+                    edit.rejected = Some(rejection);
                 }
             }
         }

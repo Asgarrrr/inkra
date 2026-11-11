@@ -234,8 +234,7 @@ impl DocumentLayout {
         (line, row - line.first_row)
     }
 
-    /// Clamped: mouse listeners sit on the view's full-size `div`, so a click
-    /// below a short document arrives with `y` past the last row.
+    /// Clamped: a click below a short document, a drag past the view and a visible span's ends all pass a `y` outside the rows.
     fn row_for_y(&self, y: Pixels) -> usize {
         if y <= px(0.) {
             return 0;
