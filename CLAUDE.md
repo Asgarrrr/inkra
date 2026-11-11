@@ -131,6 +131,8 @@ Read the spec before changing its area:
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
 - `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's
   horizontal scroll; replaces decision 5 of the code-blocks spec
+- `docs/superpowers/specs/2026-11-11-code-highlighting-design.md` — highlighting
+  in code blocks: the library choice, token classes, the per-block cache
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
