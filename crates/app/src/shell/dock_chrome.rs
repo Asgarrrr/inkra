@@ -56,14 +56,23 @@ fn side_column(selector: &'static str, width: Pixels) -> Div {
 }
 
 impl AppShell {
+    /// With no vault nothing draws a dock, whatever the layout holds.
+    pub(super) fn is_dock_drawn(&self, side: Side) -> bool {
+        self.panes.is_some() && self.layout.is_drawn(side)
+    }
+
+    /// No vault or an empty dock: there is no dock to toggle (rule 3).
+    pub(super) fn has_dock_toggle(&self, side: Side) -> bool {
+        self.panes.is_some() && self.layout.dock(side).is_some()
+    }
+
     /// `None` with no vault or an undrawn dock. A hidden view keeps its entity, so it comes back as it was left.
     pub(super) fn render_dock(
         &self,
         side: Side,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
-        self.panes.as_ref()?;
-        if !self.layout.is_drawn(side) {
+        if !self.is_dock_drawn(side) {
             return None;
         }
         let root = self.layout.dock(side)?;
@@ -177,7 +186,7 @@ impl AppShell {
         k: usize,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
-        if self.panes.is_none() || !self.layout.is_drawn(side) {
+        if !self.is_dock_drawn(side) {
             return None;
         }
         let active = self.group(group).shown.view();
@@ -244,33 +253,25 @@ impl AppShell {
         })
     }
 
-    /// `None` with no vault or an empty dock: there is no dock to toggle (rule 3).
-    pub(super) fn render_dock_toggles(
+    /// Drawn only for a `Toggle` end piece, which exists only where there is a dock to toggle.
+    pub(super) fn render_dock_toggle(
         &self,
+        side: Side,
         cx: &mut Context<Self>,
-    ) -> (
-        Option<impl IntoElement + use<>>,
-        Option<impl IntoElement + use<>>,
-    ) {
-        let has_views = |side| self.panes.is_some() && self.layout.dock(side).is_some();
-        let left = has_views(Side::Left).then(|| {
-            IconButton::new("dock-toggle-left", IconName::PanelLeft, "Toggle left dock")
-                .toggled(self.layout.is_shown(Side::Left))
-                .on_click(cx.listener(|shell, _, window, cx| {
-                    shell.toggle_left_dock(&ToggleLeftDock, window, cx);
-                }))
-        });
-        let right = has_views(Side::Right).then(|| {
-            IconButton::new(
+    ) -> impl IntoElement + use<> {
+        let (id, icon, label) = match side {
+            Side::Left => ("dock-toggle-left", IconName::PanelLeft, "Toggle left dock"),
+            Side::Right => (
                 "dock-toggle-right",
                 IconName::PanelRight,
                 "Toggle right dock",
-            )
-            .toggled(self.layout.is_shown(Side::Right))
-            .on_click(cx.listener(|shell, _, window, cx| {
-                shell.toggle_right_dock(&ToggleRightDock, window, cx);
+            ),
+        };
+        IconButton::new(id, icon, label)
+            .toggled(self.layout.is_shown(side))
+            .on_click(cx.listener(move |shell, _, window, cx| match side {
+                Side::Left => shell.toggle_left_dock(&ToggleLeftDock, window, cx),
+                Side::Right => shell.toggle_right_dock(&ToggleRightDock, window, cx),
             }))
-        });
-        (left, right)
     }
 }

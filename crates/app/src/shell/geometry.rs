@@ -13,11 +13,45 @@ use crate::theme;
 const HORIZONTAL_MIN: f32 = 80.;
 const VERTICAL_MIN: f32 = 100.;
 
+/// One fixed piece of chrome at an end of the title row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EndPiece {
+    Lights,
+    Toggle(Side),
+    Inset,
+}
+
+impl EndPiece {
+    pub(super) fn width(self, lights: Pixels) -> Pixels {
+        match self {
+            Self::Lights => lights,
+            Self::Toggle(_) => theme::ICON_BUTTON_WIDTH,
+            Self::Inset => theme::ROW_INSET,
+        }
+    }
+}
+
+/// The pieces a top group's title segment draws before and after its own content, in order.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Ends {
+    pub(super) lead: [Option<EndPiece>; 2],
+    pub(super) trail: [Option<EndPiece>; 2],
+}
+
+/// The traffic lights' room; full screen hides the native buttons.
+pub(super) fn lights_width(window: &Window) -> Pixels {
+    if window.is_fullscreen() {
+        theme::ROW_INSET
+    } else {
+        theme::TRAFFIC_LIGHT_PADDING
+    }
+}
+
 impl AppShell {
     /// The main row's ends taken by the drawn docks.
     pub(super) fn dock_ends(&self) -> (Pixels, Pixels) {
         let drawn = |side, width| {
-            if self.layout.is_drawn(side) {
+            if self.is_dock_drawn(side) {
                 width
             } else {
                 px(0.)
@@ -29,15 +63,33 @@ impl AppShell {
         )
     }
 
+    /// The end chrome of top group `ix` of `count` on `surface`: each window end goes to its dock when drawn, else to the centre.
+    pub(super) fn title_ends(&self, surface: Surface, ix: usize, count: usize) -> Ends {
+        let (first, last) = (ix == 0, ix + 1 == count);
+        let toggle = |side| self.has_dock_toggle(side).then_some(EndPiece::Toggle(side));
+        let window_start = [Some(EndPiece::Lights), toggle(Side::Left)];
+        let window_end = [toggle(Side::Right), Some(EndPiece::Inset)];
+        let (lead, trail) = match surface {
+            Surface::Center => (
+                (first && !self.is_dock_drawn(Side::Left)).then_some(window_start),
+                (last && !self.is_dock_drawn(Side::Right)).then_some(window_end),
+            ),
+            Surface::Dock(side) if !self.is_dock_drawn(side) => (None, None),
+            Surface::Dock(Side::Left) => (first.then_some(window_start), None),
+            Surface::Dock(Side::Right) => (
+                first.then_some([Some(EndPiece::Inset), None]),
+                last.then_some(window_end),
+            ),
+        };
+        Ends {
+            lead: lead.unwrap_or_default(),
+            trail: trail.unwrap_or_default(),
+        }
+    }
+
     /// Each group's least room along each axis: the floor, or the title-row chrome it draws if wider.
     pub(super) fn min_sizes(&self, window: &Window) -> HashMap<(GroupId, Axis), f32> {
-        let lights = if window.is_fullscreen() {
-            theme::ROW_INSET
-        } else {
-            theme::TRAFFIC_LIGHT_PADDING
-        };
-        let leading = lights + theme::ICON_BUTTON_WIDTH;
-        let trailing = theme::ICON_BUTTON_WIDTH + theme::ROW_INSET;
+        let lights = lights_width(window);
         let mut chrome: HashMap<GroupId, Pixels> = HashMap::new();
         let center = theme::TAB_CURVE * 2.
             + nav_width()
@@ -60,27 +112,24 @@ impl AppShell {
                 );
             }
         }
-        let mut add = |group: Option<&GroupId>, room: Pixels| {
-            if let Some(width) = group.and_then(|group| chrome.get_mut(group)) {
-                *width += room;
+        for surface in [
+            Surface::Center,
+            Surface::Dock(Side::Left),
+            Surface::Dock(Side::Right),
+        ] {
+            let top = self.layout.top_groups(surface);
+            for (ix, group) in top.iter().enumerate() {
+                let Ends { lead, trail } = self.title_ends(surface, ix, top.len());
+                let ends: Pixels = lead
+                    .into_iter()
+                    .chain(trail)
+                    .flatten()
+                    .map(|piece| piece.width(lights))
+                    .sum();
+                if let Some(width) = chrome.get_mut(group) {
+                    *width += ends;
+                }
             }
-        };
-        let center_top = self.layout.top_groups(Surface::Center);
-        if self.layout.is_drawn(Side::Left) {
-            add(
-                self.layout.top_groups(Surface::Dock(Side::Left)).first(),
-                leading,
-            );
-        } else {
-            add(center_top.first(), leading);
-        }
-        if self.layout.is_drawn(Side::Right) {
-            add(
-                self.layout.top_groups(Surface::Dock(Side::Right)).last(),
-                trailing,
-            );
-        } else {
-            add(center_top.last(), trailing);
         }
         chrome
             .into_iter()

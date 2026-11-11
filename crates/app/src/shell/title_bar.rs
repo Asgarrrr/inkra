@@ -3,12 +3,13 @@
 use gpui::{
     AnyElement, ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement, MouseButton,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Stateful, StatefulInteractiveElement,
-    Styled, Window, div, prelude::FluentBuilder, px,
+    Styled, Window, div, px,
 };
 use inkra_layout::{GroupId, Side, Surface};
 
 use super::AppShell;
 use super::dock_chrome::{name, width};
+use super::geometry::{EndPiece, Ends, lights_width};
 use super::group::selector;
 use crate::theme;
 use crate::ui::{h_flex, identified, keep_focus, strip_rule, strip_slot};
@@ -21,42 +22,21 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::current(cx).colors;
-        let drawn = |side| self.panes.is_some() && self.layout.is_drawn(side);
-        let (left_drawn, right_drawn) = (drawn(Side::Left), drawn(Side::Right));
-        let (left_toggle, right_toggle) = self.render_dock_toggles(cx);
-        let (left_toggle, right_toggle) = (
-            left_toggle.map(|toggle| strip_slot().child(toggle)),
-            right_toggle.map(|toggle| strip_slot().child(toggle)),
-        );
-        // Full screen hides the native buttons.
-        let lights = if window.is_fullscreen() {
-            theme::ROW_INSET
-        } else {
-            theme::TRAFFIC_LIGHT_PADDING
-        };
-        let (left_title, leading_toggle) = if left_drawn {
-            (
-                Some(self.render_title_dock(Side::Left, lights, left_toggle, cx)),
-                None,
-            )
-        } else {
-            (None, Some(left_toggle))
-        };
-        let (right_title, trailing_toggle) = if right_drawn {
-            (
-                Some(self.render_title_dock(Side::Right, lights, right_toggle, cx)),
-                None,
-            )
-        } else {
-            (None, right_toggle)
-        };
-        let mut leading_toggle = leading_toggle;
-        let mut trailing_toggle = trailing_toggle;
+        let lights = lights_width(window);
+        let left_title = self
+            .is_dock_drawn(Side::Left)
+            .then(|| self.render_title_dock(Side::Left, lights, cx));
+        let right_title = self
+            .is_dock_drawn(Side::Right)
+            .then(|| self.render_title_dock(Side::Right, lights, cx));
         let top = self.top_rects(Surface::Center);
+        let count = top.len();
         let segments: Vec<_> = top
-            .iter()
-            .map(|&(k, group, width)| {
-                let last = top.last().is_some_and(|&(_, end, _)| end == group);
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (k, group, width))| {
+                let Ends { lead, trail } = self.title_ends(Surface::Center, ix, count);
+                let lead = self.render_ends(lead, lights, cx);
                 h_flex()
                     .id(("group-strip", group.raw()))
                     .debug_selector(move || selector("group-strip", k))
@@ -69,15 +49,7 @@ impl AppShell {
                         shell.activate_group(group, window, cx);
                     }))
                     .on_drop(Self::view_drop(group, cx))
-                    .when_some(leading_toggle.take(), |segment, toggle| {
-                        segment
-                            .child(
-                                Self::render_drag_region("title-drag-start", cx)
-                                    .flex_none()
-                                    .w(lights),
-                            )
-                            .children(toggle)
-                    })
+                    .children(lead)
                     .child(self.render_nav(k, group, strip_slot(), cx))
                     .child(self.render_tab_bar(k, group, cx))
                     .child(Self::render_new_tab(k, cx))
@@ -89,13 +61,7 @@ impl AppShell {
                         .flex_1()
                         .min_w(theme::TITLE_DRAG_MIN_WIDTH),
                     )
-                    .when(last, |segment| {
-                        segment
-                            .children(trailing_toggle.take())
-                            .when(!right_drawn, |segment| {
-                                segment.child(div().flex_none().w(theme::ROW_INSET))
-                            })
-                    })
+                    .children(self.render_ends(trail, lights, cx))
             })
             .collect();
         let title_tabs = h_flex()
@@ -130,12 +96,35 @@ impl AppShell {
             .collect()
     }
 
-    /// A dock's top group `k`'s share of the row over it: `lead`, its view icons, then a drag region.
+    /// Each end piece's element; spacers, not padding, so each segment's width is its group's share.
+    fn render_ends(
+        &self,
+        pieces: [Option<EndPiece>; 2],
+        lights: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        pieces
+            .into_iter()
+            .flatten()
+            .map(|piece| match piece {
+                EndPiece::Lights => Self::render_drag_region("title-drag-start", cx)
+                    .flex_none()
+                    .w(lights)
+                    .into_any_element(),
+                EndPiece::Toggle(side) => strip_slot()
+                    .child(self.render_dock_toggle(side, cx))
+                    .into_any_element(),
+                EndPiece::Inset => div().flex_none().w(theme::ROW_INSET).into_any_element(),
+            })
+            .collect()
+    }
+
+    /// A dock's top group `k`'s share of the row over it: `lead`, its view icons, a drag region, then `trail`.
     fn render_dock_segment(
         &self,
         side: Side,
         (k, group, width): (usize, GroupId, f32),
-        lead: Vec<AnyElement>,
+        (lead, trail): (Vec<AnyElement>, Vec<AnyElement>),
         cx: &mut Context<Self>,
     ) -> Div {
         let drag = match side {
@@ -153,42 +142,29 @@ impl AppShell {
                     .map(|strip| strip_slot().child(strip)),
             )
             .child(Self::render_drag_region(ElementId::Name(selector(drag, k).into()), cx).flex_1())
+            .children(trail)
     }
 
-    /// Over `side`'s dock: each top group's icons. The left lead is the lights and the toggle (D2);
-    /// the right end is the toggle at the window's right edge.
-    fn render_title_dock<Toggle: IntoElement>(
+    /// Over `side`'s dock: each top group's icons between its end pieces (D2).
+    fn render_title_dock(
         &self,
         side: Side,
         lights: Pixels,
-        toggle: Option<Toggle>,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<Toggle> {
-        let top = self.top_rects(Surface::Dock(side));
-        let end = top.len().saturating_sub(1);
-        let mut toggle = toggle.map(IntoElement::into_any_element);
-        // Spacers, not padding: each segment's width is its group's share.
-        let inset = || div().flex_none().w(theme::ROW_INSET).into_any_element();
+    ) -> impl IntoElement + use<> {
+        let surface = Surface::Dock(side);
+        let top = self.top_rects(surface);
+        let count = top.len();
         let segments: Vec<_> = top
             .into_iter()
             .enumerate()
             .map(|(ix, rect)| {
-                let lead = match (side, ix) {
-                    (Side::Left, 0) => {
-                        let start = Self::render_drag_region("title-drag-start", cx)
-                            .flex_none()
-                            .w(lights);
-                        std::iter::once(start.into_any_element())
-                            .chain(toggle.take())
-                            .collect()
-                    }
-                    (Side::Right, 0) => vec![inset()],
-                    _ => Vec::new(),
-                };
-                self.render_dock_segment(side, rect, lead, cx)
-                    .when(side == Side::Right && ix == end, |segment| {
-                        segment.children(toggle.take()).child(inset())
-                    })
+                let Ends { lead, trail } = self.title_ends(surface, ix, count);
+                let ends = (
+                    self.render_ends(lead, lights, cx),
+                    self.render_ends(trail, lights, cx),
+                );
+                self.render_dock_segment(side, rect, ends, cx)
             })
             .collect();
         let colors = theme::current(cx).colors;
