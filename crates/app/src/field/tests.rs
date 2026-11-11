@@ -1,13 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{Entity, Focusable, Subscription, TestAppContext, VisualTestContext, point, px};
+use gpui::{Entity, Focusable, Subscription, TestAppContext, VisualTestContext, point, px, size};
 use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
 use super::{BlockScrolls, Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
+use crate::text_input::painted_caret;
 use crate::theme::builtin;
 
 fn field(cx: &mut TestAppContext, initial: &str) -> (Entity<NameField>, VisualTestContext) {
@@ -238,4 +239,54 @@ fn shift_right_extends_the_selection_rightward(cx: &mut TestAppContext) {
     visual.simulate_keystrokes("left shift-right shift-right X");
 
     assert_eq!(text(&view, cx), "Xan");
+}
+
+/// 400 glyphs in a 200 px window: wider than the field at any headless glyph width.
+fn narrow_field(cx: &mut TestAppContext) -> (Entity<NameField>, VisualTestContext) {
+    let (view, visual) = field(cx, &"n".repeat(400));
+    visual.simulate_resize(size(px(200.), px(100.)));
+    visual.run_until_parked();
+    (view, visual)
+}
+
+#[gpui::test]
+fn a_caret_past_the_field_is_scrolled_into_it(cx: &mut TestAppContext) {
+    let (_view, mut visual) = narrow_field(cx);
+
+    visual.simulate_keystrokes("right");
+
+    let caret = painted_caret().expect("a focused field with no selection paints a caret");
+    assert!(
+        caret.left() >= px(0.) && caret.right() <= px(200.),
+        "the caret {caret:?} is inside the 200 px field"
+    );
+}
+
+#[gpui::test]
+fn home_scrolls_a_scrolled_field_back_to_its_start(cx: &mut TestAppContext) {
+    let (_view, mut visual) = narrow_field(cx);
+
+    visual.simulate_keystrokes("right home");
+
+    let caret = painted_caret().expect("a focused field with no selection paints a caret");
+    assert!(
+        caret.left() >= px(0.) && caret.right() <= px(200.),
+        "the caret {caret:?} is inside the 200 px field"
+    );
+}
+
+/// The stored bounds are the scrolled ones, so a point hits the text drawn under it.
+#[gpui::test]
+fn a_point_in_a_scrolled_field_hits_the_text_drawn_there(cx: &mut TestAppContext) {
+    let (view, mut visual) = narrow_field(cx);
+
+    visual.simulate_keystrokes("right");
+
+    let hit = view.read_with(&visual, |view, _| {
+        view.input().offset_at(point(px(1.), px(1.)))
+    });
+    assert!(
+        hit.is_some_and(|offset| offset > ByteOffset::new(100)),
+        "the left edge of a field scrolled to its end shows a late glyph, not {hit:?}"
+    );
 }
