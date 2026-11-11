@@ -15,8 +15,9 @@ and fixes the cost rule. Highlighting colours a block on top of
 ## The choice
 
 **Recommendation: tree-sitter, with one grammar crate per language.** Its full
-pass is 3 to 12 times faster than syntect's on the same text, and its
-incremental path re-highlights a 5,000-line block in under 1 ms. It passes
+pass is 3 to 12 times faster than syntect's on the same text. Its
+incremental path re-highlights a 5,000-line block in at most 0.82 ms, measured
+end to end (The incremental path, below). It passes
 `cargo deny check` as the repo's `deny.toml` stands, and syntect fails it in
 every feature set tried. Zed uses it, so its queries and its capture mapping
 are a reference we can read.
@@ -140,10 +141,10 @@ Paths:
 |---|---|---|
 | 1. Cold start | 18 µs (JSON) to 11.8 ms (TypeScript), table above | 0.3 to 7.1 ms, table above |
 | 2. Full pass | table above; 500 lines ≤ 2.2 ms, 5,000 lines 6 to 18 ms | table above; 500 lines ≤ 15 ms, 5,000 lines 21 to 161 ms |
-| 3. After one edit | incremental parse; ≤ 0.8 ms with the local query | per-line state checkpoints; ≤ 32 µs |
+| 3. After one edit | incremental parse; ≤ 0.82 ms end to end at 5,000 lines (The incremental path) | per-line state checkpoints; ≤ 32 µs |
 | 4. Classes | Zed-style capture names (D3) | TextMate scopes: `keyword.control`, `storage.type`, `string.quoted`, `comment.line`, `constant.numeric`, `entity.name`, `meta.*`, `punctuation.*`, `support.*`, `variable.other` |
 | 5. Binary size | 24,254,848 B, +5,215,184 B (+27 %) against 19,039,664 B | 21,098,640 B, +2,058,976 B (+11 %) |
-| 6. Build time | 8 s and 9 s against 8 s and 8 s | 8 s and 8 s against 8 s and 8 s |
+| 6. Build time | clean tree-sitter crates: 11 s release, 4 s debug (Clean build, below) | `inkra-app` only: 8 s and 8 s against 8 s and 8 s |
 | 7. `cargo deny check` | exit 0; warning kinds identical to `main` | exit 1 in every feature set, below |
 | 8. Lints | no `unsafe`, no `unwrap`: `Query::new` and `set_language` return `Result`, `parse` an `Option` | no `unsafe`, no `unwrap`: `parse_line` returns `Result`, `find_syntax_by_token` an `Option` |
 
@@ -152,11 +153,10 @@ Row 5: `stat -f %z target/wt-advisor-014/release/inkra-app` after
 `main.rs` behind a throwaway `INKRA_SPIKE_HL` branch. `nm` shows all eight
 `tree_sitter_*` symbols and `ts_query_new` in the tree-sitter binary.
 
-Row 6: `cargo clean -p inkra-app --release && cargo build --release -p inkra-app`,
+Row 6, syntect: `cargo clean -p inkra-app --release && cargo build --release -p inkra-app`,
 wall time, twice per branch, at a load average of 7.5 to 11. This rebuilds
-only `inkra-app` and the link, not the grammars, so it shows no difference.
-The full clean build was skipped: the shared disk and the parallel builds
-did not allow it. The build's PR measures it.
+only `inkra-app` and the link, not the grammars. The tree-sitter figure
+rebuilds every tree-sitter crate from clean (Clean build, below).
 
 Row 7, syntect, `cargo deny check` with syntect and two-face in `inkra-app` and
 `inkra-markdown`:
@@ -171,6 +171,129 @@ Row 7, syntect, `cargo deny check` with syntect and two-face in `inkra-app` and
 bincode cannot leave: syntect's `parsing` feature needs `dump-load`, which
 needs bincode. Only a `deny.toml` ignore would pass it, and that is the
 maintainer's decision.
+
+### The incremental path
+
+A second spike measures the path that D4 to D6 design, on the chosen library
+only. It ran on 2026-11-11 at a load average of 2.1 to 4.3. Each cell is the
+median of three runs; each run is itself a median.
+
+Command, on `spike/highlight-tree-sitter` (`04244054`), with
+`HL_DIR=$TMPDIR/hl`:
+`CARGO_TARGET_DIR=… cargo test --release -p inkra-markdown --test spike_incremental <test> -- --nocapture --test-threads=1`.
+The texts are the ones above.
+
+The path per edit: fold the splices into one hull, widen it to whole lines,
+`Tree::edit`, reparse with the old tree, then paint a window. The window is
+the edited lines joined with `changed_ranges`. Captures run only over the
+window, with `QueryCursor::set_byte_range`. The new tokens replace the old
+ones inside the window; tokens after it shift by the edit's length.
+
+**Correctness** (`spike_incremental_matches_full`): 300 random steps per text,
+one splice per step and three splices every tenth step. Each step compares the
+path's tokens with a full pass. A cell counts mismatching steps at 20 and at
+500 lines.
+
+| Language | Hull, one step | Hull, chained | Zed-style exact edits | Hull vs exact | Mismatch on an error-free tree |
+|---|---|---|---|---|---|
+| rust | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| python | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| javascript | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| bash | 0, 37 | 0, 37 | 0, 41 | 0, 4 | 0, 0 |
+
+Every Bash mismatch has an error in the full pass's tree. Zed's exact
+per-splice edits diverge there too, so the hull does not cause it.
+tree-sitter-bash's incremental reparse of broken text can differ from a fresh
+parse. The spike did not check whether a repairing keystroke converges again.
+
+**Cost** (`spike_incremental_cost`): one character inserted, one deleted, and
+one newline, mid-block, median of 20. Time in µs; the window is the insert's.
+
+| Language | Lines | Bytes | First pass | Insert | Delete | Newline | Window bytes |
+|---|---|---|---|---|---|---|---|
+| rust | 20 | 923 | 83 | 21 | 21 | 21 | 91 |
+| rust | 500 | 16,501 | 1,689 | 71 | 69 | 68 | 19 |
+| rust | 5,000 | 173,348 | 15,264 | 477 | 447 | 448 | 44 |
+| python | 20 | 387 | 31 | 13 | 42 | 13 | 39 |
+| python | 500 | 18,586 | 942 | 193 | 261 | 256 | 600 |
+| python | 5,000 | 180,278 | 13,403 | 791 | 790 | 818 | 48 |
+| javascript | 20 | 359 | 25 | 11 | 10 | 10 | 47 |
+| javascript | 500 | 11,448 | 1,092 | 101 | 100 | 101 | 48 |
+| javascript | 5,000 | 124,228 | 11,334 | 325 | 310 | 309 | 31 |
+| bash | 20 | 991 | 60 | 32 | 32 | 32 | 87 |
+| bash | 500 | 21,519 | 1,522 | 207 | 214 | 205 | 124 |
+| bash | 5,000 | 158,642 | 7,912 | 779 | 775 | 749 | 42 |
+
+Python and Bash are the worst on this path: at most 0.82 ms per median, and
+no single run over 0.87 ms. The reparse dominates; the window stays under
+600 bytes. The path is not measured above 180 KB.
+
+### First pass by size
+
+Command: the one above, test `spike_first_pass_sizes`. Rust and JavaScript are
+the two slowest languages per byte in the full-pass table. Each text is the
+5,000-line text cut at a line boundary. Median of 10 per run; three runs. Time
+in µs, parse plus query.
+
+| KiB | Rust | JavaScript |
+|---|---|---|
+| 2 | 244 / 237 / 234 | 185 / 183 / 191 |
+| 8 | 804 / 797 / 793 | 749 / 737 / 723 |
+| 16 | 1,556 / 1,502 / 1,588 | 1,515 / 1,543 / 1,515 |
+| 32 | 3,155 / 3,169 / 3,082 | 2,974 / 2,957 / 2,969 |
+| 64 | 6,023 / 5,934 / 5,978 | 5,819 / 5,746 / 5,771 |
+| 128 | 11,006 / 10,661 / 10,829 | 11,589 / 11,370 / 11,548 |
+| 256 | 21,814 / 21,782 / 22,024 | 23,345 / 23,248 / 23,333 |
+
+The cost is linear, about 91 µs per KiB. The parse takes about 53 % and the
+query about 47 %. The largest size whose first pass stays under 2 ms is
+16 KiB (D6).
+
+### Recognising an unchanged block
+
+Command: the one above, test `spike_recognise_unchanged`. The note holds 50
+blocks of about 2 KB from the 500-line Rust text, plus the 173 KB Rust block
+after block 24. One keystroke lands in the prose after block 10. Median of
+2,000; three runs gave the same figures.
+
+| Figure | Value |
+|---|---|
+| Blocks, block bytes, note bytes | 51, 274,660, 277,531 |
+| First pass of every block | 30,239 µs |
+| Edit-range intersection over 51 blocks (D4) | 83 ns |
+| Byte compare against a stored copy of every block | 5,250 ns |
+| `DefaultHasher` over every block | 46,833 ns |
+
+### Tree memory
+
+Command: the one above, test `spike_tree_memory`, with `HL_MEM_CASE=<case>`,
+one case per process. It keeps 50 trees and reads the RSS growth with `ps`.
+Three runs per case gave the same figures within 2 KiB.
+
+| Case | Text bytes | Tree | Nodes | Tokens | Token vector |
+|---|---|---|---|---|---|
+| rust 500 | 16,501 | 670 to 672 KiB | 5,789 | 2,621 | 96 KiB |
+| rust 5,000 | 173,348 | 5,445 KiB | 52,969 | 24,703 | 768 KiB |
+| javascript 5,000 | 124,228 | 3,969 KiB | 37,990 | 18,018 | 768 KiB |
+| python 5,000 | 180,278 | 4,727 KiB | 41,224 | 9,862 | 384 KiB |
+
+A tree costs about 105 to 118 B per node, 26 to 41 times its text. The token
+vector is capacity, at 24 B per `(Range<usize>, u8)`; block-relative `u32`
+ranges take 12 B.
+
+### Clean build
+
+Command, on `spike/highlight-tree-sitter` (`0a751aab`):
+`cargo clean [--release] -p tree-sitter -p tree-sitter-language -p streaming-iterator -p tree-sitter-{rust,python,javascript,typescript,json,bash,html,css}`,
+then `cargo build [--release] -p inkra-app --timings`. Free disk was 33 GiB.
+
+| Profile | Cleaned | Wall | Load | Slowest units |
+|---|---|---|---|---|
+| release | 274 files, 64.9 MiB | 11 s | 3.07 to 2.91 | `inkra-app` 5.66 s; tree-sitter build script 4.00 s; `tree-sitter-rust` 2.70 s; `tree-sitter-typescript` 2.60 s; `tree-sitter-bash` 2.59 s |
+| debug | 266 files, 66.0 MiB | 4 s | 2.91 to 3.56 | `tree-sitter-rust` 1.64 s; `tree-sitter-typescript` 1.45 s; `tree-sitter-bash` 1.41 s; `tree-sitter-json` 1.29 s |
+
+The grammars compile in parallel, so the slowest grammar bounds their share.
+`inkra-app` rebuilds after them in any case.
 
 ## Design
 
@@ -216,48 +339,120 @@ maintainer's decision.
 
    The tokens join `tokens!` in `colors.rs` after `md_code_block_background`.
    Each gets a dark and a light value in `builtin.rs`, from the Flexoki
-   palette both built-ins already use. S1 picks the values against the
+   palette both built-ins already use (Palette). S1 checks them against the
    `code-highlighting` scene. A vault theme starts from the built-in of its
    appearance (`theme/file.rs`), so a theme without these keys shows the
    built-in colours. The token count test moves from 30 to 41.
 
 4. **An edit outside a block highlights nothing again; an edit inside a block
-   highlights that block only.** A per-buffer `Highlights` global sits beside
-   `Parses` in `editor/highlights.rs`, dropped with the buffer as `parsed`
-   drops released parses. Its entries are keyed by `(language, block text)`,
-   as Zed keys its cache by content (`language.rs:1162-1180`). A version key
-   would miss every block on every keystroke. A text key survives an edit
-   above a block, which shifts its range but not its bytes; the tokens are
-   stored block-relative and shifted on read. The lookup compares bytes, one
-   pass over the block text; S1 measures it against the keystroke median.
-   Memory is bounded as Zed bounds it (`highlight_cache.rs:14-16`): 4 MiB of
-   block text in total, and no entry over 512 KiB. A block over the entry cap
-   keeps `md_code_block`.
+   updates that block incrementally.** A per-buffer `Highlights` global sits
+   beside `Parses` in `editor/highlights.rs`. It drops with the buffer, as
+   `parsed` drops released parses. It holds one entry per block: the
+   language, the content range at a splice mark, the `Tree` and the tokens.
+   Tokens are stored block-relative, as `u32` ranges, and shifted on read.
 
-5. **Highlighting runs on the main thread up to 32 KiB of block text, and in
-   the background above it.** The 500-line full pass is at most 2.2 ms, within
-   the 8 ms frame. The 5,000-line pass is 6 to 18 ms, over it. Rust measured
-   2.2 ms at 16.5 KB and 18 ms at 173 KB, so 32 KiB is about 4 ms. Above the
-   threshold, a background task parses and queries the block, as Zed's markdown
-   does (`markdown.rs:1286`). Until it lands, the block shows its previous
-   tokens, clamped by `line_runs`, or `md_code_block` on the first pass. An edit
-   inside a large block keeps the old `Tree` and finds the edit by common
-   prefix and suffix. The incremental parse plus the local query then took
-   ≤ 0.8 ms. That path is S3.
+   After each parse, `Highlights` reads the splices since its mark (D5). It
+   walks them against the entries' ranges in one merge, both sorted by
+   offset. An entry that no splice touches keeps its tree and tokens; only
+   its offset shifts. This costs 83 ns for 51 blocks (Recognising an
+   unchanged block). A byte compare needs a stored copy of every block and
+   takes 5.3 µs. `DefaultHasher` takes 47 µs, and a hash cannot find the edit.
 
-6. **No info word, an indented block, or an unknown word keeps
+   An entry matches a block of the new parse only if three things hold. The
+   language is the same. The mapped content range equals the block's new
+   content range. No splice crosses the content's start or end. So a fence
+   typed, deleted or moved, or a changed info word, gives the block a first
+   pass. Every splice inside the content updates the entry incrementally.
+
+   The incremental path folds the block's splices into one hull. It widens
+   the hull to whole lines and derives rows from newline counts. It calls
+   `Tree::edit`, reparses with the old tree, and paints only the edited
+   lines plus `changed_ranges`. It runs on the main thread at every size:
+   at most 0.82 ms at 5,000 lines (The incremental path). It equals a full
+   pass whenever the full pass's tree has no error.
+
+   Memory has two bounds. Block text counts toward 4 MiB in total, with no
+   entry over 512 KiB, as Zed bounds its cache (`highlight_cache.rs:14-16`).
+   These bound the tokens: about 1.7 times the text at 12 B per token. Trees
+   get their own LRU budget of 16 MiB, estimated as `descendant_count` ×
+   120 B (Tree memory). The tree of the last edited block is never evicted,
+   even alone over the budget. An entry whose tree is evicted keeps its
+   tokens; its next edit is a first pass. A block over 512 KiB keeps
+   `md_code_block`: its tree would cost 13 to 21 MiB.
+
+5. **`inkra-text` keeps a splice log with a monotonic mark.** `Buffer::splice`
+   is the one text mutation; `edit`, `undo`, `redo` and `apply_diff` all go
+   through it. It appends `Splice { at, removed_len, inserted_len }` to a ring
+   of 256 entries and increments a `u64` mark. Two read-only methods expose
+   it: `edit_mark()` and `edits_since(mark)`. The second returns `None` once
+   the ring has dropped splices past that mark. `None` gives the note's blocks
+   a first pass.
+
+   The log adds no mutation path, so `transact_at` stays the only way to edit.
+   Undo and redo reach `splice` like any edit, so the log records them as
+   forward splices. The mark is not a `Version`: `Version` has no order, and
+   undo returns an older one. A multi-range edit logs one splice per range;
+   the path folds them into one hull per block. The spike measured the
+   folded hull equal to a full pass (The incremental path). `inkra-editor`
+   gains nothing. The ring costs 6 KiB per buffer.
+
+   Comparing the old and new text by common prefix and suffix needs no new
+   API. It needs a stored copy of every block and a second scan of the block
+   text on each keystroke. CLAUDE.md allows one whole-document scan per
+   keystroke, and the markdown parse already spends it.
+
+6. **A first pass runs on the main thread only for a block of at most 16 KiB,
+   within 2 ms per frame.** The frame is 8.33 ms at 120 Hz. The draw takes
+   about 4.5 ms (`docs/startup-floor.md`, lines 60-75). The markdown parse and
+   the layout need the rest of the margin, so first passes get 2 ms. The
+   largest size under 2 ms is 16 KiB: Rust 1.50 to 1.59 ms, JavaScript 1.52
+   to 1.54 ms; 32 KiB costs about 3.1 ms (First pass by size). First passes
+   run in document order until the 2 ms is spent. A larger block, or one past
+   the budget, goes to a background task, as Zed's markdown does
+   (`markdown.rs:1286`). Until the task lands, the block shows its shifted old
+   tokens, or `md_code_block` if it has none. The limit is for first passes
+   only; every edit inside a block takes D4's incremental path.
+
+7. **No info word, an indented block, or an unknown word keeps
    `md_code_block`, as today.** The info word resolves case-insensitively
    against each language's name and aliases (Languages). Zed matches the same
    way (`available_languages.rs:218`). An unknown word costs one table lookup.
 
-7. **No highlighter work runs before the first frame.** A language's `Query`
-   is built on its first block, in the background: `Query::new` costs up to
-   11.8 ms (TypeScript), over a frame. Until it is ready, that language's
-   blocks keep `md_code_block`. Launch is 1 to 11 ms above the AppKit floor
-   (`docs/startup-floor.md`, lines 26-29); nothing here adds to it. A query is
-   built once per language and kept for the process.
+8. **A note lands with its colours; the main thread does no highlighter work
+   before the first frame, by construction.** The first frame holds no note
+   text. `NoteStore::open_note` loads the file in `background_spawn` and
+   builds the `Buffer` when the task lands (`vault/store.rs`, 174-217). A
+   restore waits for the vault walk and lands every open in one update
+   (`shell/session.rs`, 217-294). The goal is therefore colours in the same
+   frame as the text, not in the first frame.
 
-8. **The label is unchanged.** It shows the info word's source bytes
+   The open's background task gains one step. It runs `inkra_markdown::parse`
+   on the loaded text to find the blocks. It builds any missing `Query`, at
+   most 11.8 ms (TypeScript), once per language for the process. It then
+   first-passes the blocks in document order. The task returns the trees and
+   tokens with the text. `Highlights` takes them as entries at mark 0, so the
+   first frame with the text has its colours. Past 256 KiB of block text, the
+   task lands the text and colours the remaining blocks in a second task.
+
+   The landing comes later by the time of these passes. A note with 8 KiB of
+   code waits about 0.8 ms (First pass by size). The 51-block note waits
+   30 ms (Recognising an unchanged block). The cap bounds the wait near 23 ms
+   for one note's blocks, plus a query build the first time.
+
+   Three cases follow:
+   - **A note open at launch** lands coloured, in the restore's one update.
+   - **A note opened later, in a language not seen yet,** lands coloured, up
+     to 11.8 ms later than today. Later notes in that language skip the cost.
+   - **A block over 16 KiB** matters only while editing: a new or pasted
+     block, a changed info word, or an evicted tree. It goes to the
+     background (D6), and shows its shifted old tokens or `md_code_block`
+     for one to three frames. A pasted 256 KiB block takes about 23 ms.
+
+   A `Query` is built only in the background and kept for the process. A
+   language seen first in an edit shows `md_code_block` until its query
+   lands.
+
+9. **The label is unchanged.** It shows the info word's source bytes
    (code-blocks spec, D1). Highlighting reads the same range to pick the
    language and never rewrites the label.
 
@@ -291,18 +486,47 @@ grammar crates export `HIGHLIGHTS_QUERY`; Bash and JavaScript export
 new grammar degrades to grey, never to a wrong colour. CI needs a C compiler
 for each grammar; macOS runners have one.
 
+## Palette
+
+Every colour is a Flexoki name: a base shade, or the 400 shade on dark and the
+600 shade on light. A hex value is given only where `builtin.rs` already uses
+it. S1 copies the other values from the Flexoki palette and checks the scene.
+
+| Class | Dark | Light |
+|---|---|---|
+| `Comment` | base-500, `#878580` | base-500, `#878580` |
+| `Keyword` | green-400 | green-600 |
+| `String` | cyan-400 | cyan-600 |
+| `Constant` | purple-400 | purple-600 |
+| `Function` | orange-400 | orange-600, `#BC5215` |
+| `Type` | yellow-400 | yellow-600, `#AD8301` |
+| `Property` | blue-400 | blue-600, `#205EA6` |
+| `Tag` | red-400 | red-600, `#AF3029` |
+| `Attribute` | magenta-400 | magenta-600 |
+| `Punctuation` | base-300, `#B7B5AC` | base-600, `#6F6E69` |
+| `Operator` | base-300, `#B7B5AC` | base-600, `#6F6E69` |
+
+Text without a token keeps `md_code_block`: `#CECDC3` on dark, `#403E3C` on
+light. Comments and punctuation sit between it and the background, so the
+coloured classes carry the reading. The dark built-in's accents are not
+Flexoki today; the syntax tokens do not depend on them.
+
 ## Cost
 
 | Figure | Value | Command |
 |---|---|---|
 | Binary size | +5,215,184 B (+27 %) for eight grammars | `stat -f %z target/…/release/inkra-app` on `spike/highlight-tree-sitter` and on `main` |
 | Rebuild of `inkra-app` | no change, 8 s | `cargo clean -p inkra-app --release && cargo build --release -p inkra-app` |
-| Full clean build | not measured | the build's PR runs it |
-| Keystroke outside a block | one byte compare per block, no parse | S1 measures it in the keystroke median |
-| Keystroke inside a ≤ 32 KiB block | ≤ 2.2 ms at 500 lines | `spike_highlight`, full pass |
-| Keystroke inside a larger block | ≤ 0.8 ms on the main thread with S3 | `spike_highlight`, local path |
+| Clean build of the tree-sitter crates | 11 s release, 4 s debug; slowest grammar 2.70 s in release | Clean build, above |
+| Keystroke outside a block | 83 ns for 51 blocks, no parse | `spike_incremental`, `spike_recognise_unchanged` |
+| Keystroke inside a block, any size | ≤ 0.82 ms median at 5,000 lines; 71 µs for Rust at 500 lines | `spike_incremental`, `spike_incremental_cost` |
+| First pass at the 16 KiB limit | 1.50 to 1.59 ms on the main thread | `spike_incremental`, `spike_first_pass_sizes` |
+| First pass above the limit | background; about 23 ms at 256 KiB | `spike_incremental`, `spike_first_pass_sizes` |
 | First block of a language | up to 11.8 ms, in the background | `spike_highlight`, cold |
-| Launch | 0 ms | nothing runs before the first frame (D7) |
+| Opening a note | the landing waits for its first passes: about 0.8 ms per 8 KiB of code, 30 ms for 270 KB | `spike_incremental`, `spike_first_pass_sizes` and `spike_recognise_unchanged` |
+| Tree memory | about 110 B per node, 26 to 41 times the text; 16 MiB budget | `spike_incremental`, `spike_tree_memory` |
+| Launch | no main-thread work before the first frame, by construction (D8) | reading `open_note` and the restore; no run |
+| Launch, with the larger binary | not measured | the window oracle was not run; the build's PR runs it |
 
 `markdown_parse` stays within noise: highlighting never runs inside
 `inkra_markdown::parse`.
@@ -316,15 +540,23 @@ for each grammar; macOS runners have one.
   resolves, in any case; an unknown word resolves to nothing; the class table
   maps each capture of every bundled query, or leaves it out on purpose.
 - `inkra-highlight`, `proptest`: on any text, in any language, ranges are
-  sorted, disjoint, inside the block and on char boundaries. After a random
-  edit, the incremental path gives the same tokens as a full pass.
+  sorted, disjoint, inside the block and on char boundaries. After random
+  edits, one or several splices per step, the incremental path gives the
+  same tokens as a full pass whenever the full pass's tree has no error.
+  The spike's Bash divergence shows why the condition is needed.
+- `inkra-text`, `proptest`: replaying `edits_since(mark)` on the old text
+  gives the new text, across `edit`, `undo`, `redo` and `apply_diff`. The
+  mark grows on undo. A mark older than the ring gives `None`.
 - `app`, `#[gpui::test]`:
   - a block's runs carry the token colours, and a revealed fence stays
     `md_marker`;
   - an edit outside every block highlights nothing again, counted by a
     test-only counter on the highlighter;
-  - an edit inside one block highlights that block only;
-  - a block over 32 KiB shows its old tokens until the background pass lands;
+  - an edit inside one block updates that block only, incrementally;
+  - a typed fence, a deleted fence or a changed info word gives a first pass;
+  - a block over 16 KiB shows its old tokens until the background pass lands;
+  - an opened note's first frame with text already has its colours;
+  - an evicted tree keeps its tokens and gets a first pass on the next edit;
   - a vault theme without `syntax_*` keys shows the built-in colours.
 - Scene `code-highlighting`, dark and light: one block per language, an
   unknown word, no info word, an indented block. Look at it after each slice.
@@ -334,15 +566,17 @@ for each grammar; macOS runners have one.
 
 Each slice is vertical: crate, type, cache, theme, test, scene.
 
-1. **S1, Rust end to end.** `inkra-highlight` with one grammar, `TokenClass`,
-   the class table, `Highlights` beside `Parses`, the eleven theme tokens,
-   `line_runs` reading tokens, the scene. Main thread only; a block over
-   32 KiB stays grey.
-2. **S2, the first set.** The seven other grammars, the info-word table, the
+1. **S1, Rust end to end.** The splice log in `inkra-text`, `inkra-highlight`
+   with one grammar, `TokenClass`, the class table, `Highlights` beside
+   `Parses` with the incremental path, the eleven theme tokens, `line_runs`
+   reading tokens, the scene. First passes run on the main thread within D6's
+   budget. A block over 16 KiB stays grey. The Rust query builds in the
+   background, so S1 still shows grey before colour on open.
+2. **S2, colour on open and large blocks.** D8's step in the open's task, the
+   background first pass over 16 KiB, the tree budget. The tests that an
+   opened note lands coloured and that a large block keeps its old tokens.
+3. **S3, the first set.** The seven other grammars, the info-word table, the
    per-language tests, the scene's other blocks.
-3. **S3, large blocks.** The background pass over 32 KiB and the incremental
-   path with the local query. Only if S1's keystroke median shows the need;
-   the measurements above say it does for 5,000-line blocks.
 
 ## Deferred
 
@@ -352,7 +586,9 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
 | Injections (CSS in HTML, a language inside Markdown) | Asked for. The direct `Query` path has none |
 | Highlighting inline code and front matter | Asked for. Out of this spec's scope |
 | A per-language colour override in vault themes | Asked for after the eleven tokens ship |
-| Persisting tokens across launches | The background pass shows on a cold open as visible flicker |
+| Persisting tokens across launches | Opening a note with much code measures over one frame later than today |
+| Keeping a removed block's entry, so a redo skips its first pass | A redo of a large block shows grey long enough to notice |
+| Measuring the incremental path above 180 KB | A block that large is common in a vault |
 | Removing grammars at build time behind features | The binary size becomes a complaint |
 
 ## Open questions
@@ -398,6 +634,14 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
   `regex-fancy`; neither outweighs the deny failure.
 - **`tree-sitter-highlight`.** It adds HTML rendering and injection handling.
   Zed's markdown path uses `Query` directly; so do we (D2).
+- **Finding the edit by common prefix and suffix.** It adds nothing to
+  `inkra-text`, but stores every block twice and scans their text again on
+  each keystroke (D5).
+- **Recording the session's languages to build queries before the first
+  frame.** It adds a session field to save at most 11.8 ms once, which the
+  open's background task already hides (D8).
+- **Persisting tokens across launches.** The open's background task colours a
+  note before it lands, so a cache file would save nothing visible (D8).
 - **`tree-sitter-md` for the whole note.** Already rejected for parsing:
   measured 20 times slower than pulldown-cmark (live-preview spec, X1).
 - **Highlighting inside `inkra_markdown::parse`.** It would make every
@@ -410,10 +654,33 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
 - **Eleven classes, not a theme of free capture names.** Zed's syntax theme
   keys colours by any capture name. A note app needs a short, fixed token
   list that a vault theme can set in full.
-- **A 32 KiB synchronous threshold.** Zed's markdown always highlights in a
-  background task. Most note blocks are short, and the main thread gives them
-  colour in the same frame, with no grey flash.
+- **One hull edit per block, not one `InputEdit` per buffer edit.** Zed's
+  `SyntaxSnapshot::interpolate` takes exact edits from
+  `anchored_edits_since`, with bytes and points (`syntax_map.rs:422-424`).
+  Inkra folds a block's splices into one hull, widened to whole lines, with
+  rows from newline counts. The spike measured it equal to Zed-style exact
+  edits on every error-free tree.
+- **A splice log with a monotonic mark, not a version.** Zed's buffer versions
+  are ordered; Inkra's `Version` is not, and undo returns an older one.
+- **One tree per block, no layers.** Zed's `SyntaxMap` keeps layers for
+  injections over the whole buffer. A note's blocks are separate texts, and
+  this spec has no injections.
+- **A 2 ms first-pass budget and a 16 KiB block limit.** Zed's buffer reparses
+  on the main thread with a 1 ms timeout, then in the background
+  (`buffer.rs:1177-1181`). Zed's markdown always highlights in a background
+  task. Most note blocks are short, and the main thread colours them in the
+  same frame.
+- **Colour computed in the open's background task.** Zed opens a buffer and
+  parses it afterwards. Inkra already loads off the main thread, so the note
+  can land coloured.
+- **A tree budget beside the text bounds.** Zed's markdown cache keeps tokens,
+  not trees. Inkra keeps trees for the incremental path, and a tree costs 26
+  to 41 times its text.
 - **The cache is per buffer, not one process-wide store.** It follows
-  `Parses`, so a closed note frees its entries. The bounds are Zed's.
+  `Parses`, so a closed note frees its entries. The text bounds are Zed's.
+- **Entries found by splice ranges, not by a text hash.** Zed keys its cache
+  by an `FxHasher` hash of the text (`highlight_cache.rs:20-36`). A hash reads
+  every block on each keystroke; `DefaultHasher` took 47 µs where the splice
+  walk took 83 ns. `FxHasher` is faster but was not measured.
 - **No HTML exclusion.** Zed lists no HTML grammar; Inkra ships one (Open
   questions, 1).
