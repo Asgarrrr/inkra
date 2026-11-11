@@ -17,8 +17,8 @@ use crate::{IndexSnapshot, Source, SourceLink, Style};
 
 /// A record's path length, flags, device, inode, ordinal and link count, at their smallest.
 const MIN_RECORD: usize = 1 + 1 + 8 + 8 + 1 + 1;
-/// A link's path length, flags, style, 2 range ends, context length, 2 context ends: a byte each.
-const MIN_LINK_RECORD: usize = 8;
+/// A link's path length, flags, style and 2 range ends: a byte each.
+const MIN_LINK_RECORD: usize = 5;
 /// The flags bit of a record holding a stamp.
 const STAMPED: u8 = 1;
 /// The flag bits of a link holding a fragment, and of one written with `.md`; then every bit known.
@@ -85,8 +85,6 @@ pub(super) fn put_links(out: &mut Vec<u8>, links: &[SourceLink]) -> Option<()> {
         }
         out.push(style_code(link.style));
         put_range(out, link.range.start.get()..link.range.end.get())?;
-        put_blob(out, link.context.as_bytes())?;
-        put_range(out, link.context_link.clone())?;
     }
     Some(())
 }
@@ -223,20 +221,12 @@ fn link<'a>(
     };
     let style = style_from_code(byte(bytes)?).ok_or(Rejected::Corrupt("style"))?;
     let within_note = range(bytes)?;
-    let context = string(bytes)?.to_owned();
-    let context_link = range(bytes)?;
-    if !context.is_char_boundary(context_link.start) || !context.is_char_boundary(context_link.end)
-    {
-        return Err(Rejected::Corrupt("context"));
-    }
     Ok(SourceLink {
         path,
         fragment,
         md: flags & MD != 0,
         style,
         range: ByteOffset::new(within_note.start)..ByteOffset::new(within_note.end),
-        context,
-        context_link,
     })
 }
 

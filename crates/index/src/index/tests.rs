@@ -13,7 +13,7 @@ use crate::test_support::{
 use crate::words::SHARDS;
 use crate::{Group, NoteQuery, Resolution, Source};
 
-/// Each backlink as (source path, the linked text of each occurrence).
+/// Each backlink as (source path, each occurrence's written link: path, `#fragment`, ` (md)`).
 pub(super) fn backlinks(
     index: &NoteIndex,
     vault: &inkra_vault::Vault,
@@ -28,19 +28,26 @@ pub(super) fn backlinks(
                 .find(|entry| entry.id == backlink.source())
                 .map(|entry| entry.path.as_path().to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let lits = backlink
+            let links = backlink
                 .occurrences()
-                .map(|link| link.context[link.context_link.clone()].to_owned())
+                .map(|link| {
+                    let fragment = link
+                        .fragment
+                        .as_deref()
+                        .map_or(String::new(), |fragment| format!("#{fragment}"));
+                    let md = if link.md { " (md)" } else { "" };
+                    format!("{}{fragment}{md}", link.path)
+                })
                 .collect();
-            (source, lits)
+            (source, links)
         })
         .collect()
 }
 
-pub(super) fn pair(source: &str, lits: &[&str]) -> (String, Vec<String>) {
+pub(super) fn pair(source: &str, links: &[&str]) -> (String, Vec<String>) {
     (
         source.to_owned(),
-        lits.iter().map(|lit| (*lit).to_owned()).collect(),
+        links.iter().map(|link| (*link).to_owned()).collect(),
     )
 }
 
@@ -59,8 +66,8 @@ fn backlinks_group_occurrences_by_source_in_vault_order() {
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
         [
-            pair("a.md", &["[x](Plan.md)"]),
-            pair("b.md", &["[[Plan]]", "[[plan|again]]"])
+            pair("a.md", &["Plan (md)"]),
+            pair("b.md", &["Plan", "plan"])
         ]
     );
 }
@@ -74,7 +81,7 @@ fn a_note_linking_to_itself_is_its_own_backlink() {
 
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
-        [pair("Plan.md", &["[[Plan]]"])]
+        [pair("Plan.md", &["Plan"])]
     );
 }
 
@@ -88,7 +95,7 @@ fn a_link_resolving_elsewhere_is_not_a_backlink() {
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
     assert_eq!(
         backlinks(&index, &vault, "work/Plan.md"),
-        [pair("src.md", &["[[work/Plan]]"])]
+        [pair("src.md", &["work/Plan"])]
     );
 }
 
@@ -104,7 +111,7 @@ fn replacing_a_source_with_fewer_links_leaves_no_stale_row() {
 
     assert_eq!(
         backlinks(&index, &vault, "Plan.md"),
-        [pair("src.md", &["[[Plan]]"])]
+        [pair("src.md", &["Plan"])]
     );
     load(&mut index, src, "nothing");
     assert_eq!(backlinks(&index, &vault, "Plan.md"), []);
@@ -161,7 +168,7 @@ fn a_rename_moves_backlinks_without_reinserting() {
     assert_eq!(id(&vault, "Final.md"), draft);
     assert_eq!(
         backlinks(&index, &vault, "Final.md"),
-        [pair("src.md", &["[[Final]]"])]
+        [pair("src.md", &["Final"])]
     );
 }
 
@@ -228,22 +235,22 @@ fn pruning_many_notes_keeps_the_rest() {
     assert_eq!(
         backlinks(&index, &vault, "index.md"),
         [
-            pair("keep/a.md", &["[[index]]"]),
-            pair("keep/b.md", &["[[index]]"]),
-            pair("keep/c.md", &["[[index]]"]),
+            pair("keep/a.md", &["index"]),
+            pair("keep/b.md", &["index"]),
+            pair("keep/c.md", &["index"]),
         ]
     );
     assert_eq!(
         backlinks(&index, &vault, "keep/a.md"),
-        [pair("keep/c.md", &["[[keep/a]]"])]
+        [pair("keep/c.md", &["keep/a"])]
     );
     assert_eq!(
         backlinks(&index, &vault, "keep/b.md"),
-        [pair("keep/a.md", &["[[keep/b]]"])]
+        [pair("keep/a.md", &["keep/b"])]
     );
     assert_eq!(
         backlinks(&index, &vault, "keep/c.md"),
-        [pair("keep/b.md", &["[[keep/c]]"])]
+        [pair("keep/b.md", &["keep/c"])]
     );
     for &gone in &gone {
         assert!(!index.is_indexed(gone));
@@ -352,11 +359,11 @@ fn the_same_relative_link_from_two_folders_names_two_notes() {
 
     assert_eq!(
         backlinks(&index, &vault, "a/Plan.md"),
-        [pair("a/src.md", &["[x](Plan.md)"])]
+        [pair("a/src.md", &["Plan (md)"])]
     );
     assert_eq!(
         backlinks(&index, &vault, "b/Plan.md"),
-        [pair("b/src.md", &["[x](Plan.md)"])]
+        [pair("b/src.md", &["Plan (md)"])]
     );
 }
 

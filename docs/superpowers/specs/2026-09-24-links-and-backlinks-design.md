@@ -502,6 +502,9 @@ the link colour. Clicking a row opens the source note. "No backlinks" when the
 list is empty; "Indexing…" while `is_building`. With no current note the pane
 is not rendered.
 
+A link holds no text of its line. The panel reads each source's text on demand
+and cuts each context from it (`2026-11-08-backlink-context-on-demand-design.md`).
+
 The panel holds `Entity<LinkSync>`, a model, as the sidebar holds
 `Entity<Vault>`; `AppShell` sets its current note. It never holds the editor.
 
@@ -565,8 +568,9 @@ The costs that grow with the vault:
   resolution depends on its source.
 - **A follow:** one `links` over the current note, on a click or `⌘↵`, never
   per keystroke.
-- **Memory:** per link, a `Target` and at most 160 bytes of context. No note
-  text is kept.
+- **Memory:** per link, its written path, fragment, style and range. A link
+  holds no text of its line: the panel reads contexts on demand. The index
+  keeps no note text.
 
 `inkra-index` has a criterion bench (`cargo bench -p inkra-index`): 10,000
 notes in 100 folders, 500 of them named `index`, 20 links each, one in five to

@@ -443,3 +443,27 @@ after launch: first frame 551.3ms, session read 866.04µs, root 653.8ms, scanned
 before launch: first frame 580.3ms, session read 1.05ms, root 683.9ms, scanned 745.0ms, names ready 774.2ms, cache decoded 682.9ms, seed turn 1.70ms, indexed 774.23ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.7ms) | rss 159696 kB | phys_footprint 211993416 B
 after launch: first frame 510.4ms, session read 920.42µs, root 605.3ms, scanned 666.7ms, names ready 689.5ms, cache decoded 603.3ms, seed turn 1.76ms, indexed 689.54ms (50000 notes, corpus 3000000 bytes, words 4604398 bytes, names 2233894 bytes, longest turn 1.8ms) | rss 156656 kB | phys_footprint 210633544 B
 ```
+
+## Backlink context on demand, slice 2b (2026-11-11)
+
+Slice 2b of `docs/superpowers/specs/2026-11-08-backlink-context-on-demand-design.md` drops the
+context from each link and moves the cache file to version 3. The A/B compares `8ee6b500`, the
+end of slice 2a, with slice 2b. Apple M5 Pro, 48 GB, macOS 26.5, on the 50,000-note `bench_vault`
+vault, warm, release builds, one primed `HOME` per build. Obsidian was open, idle, during the runs.
+
+| | before | after | gate |
+|---|---:|---:|---:|
+| links, live heap under `persist::notes::decode` | 78.7 MiB | 21.2 MiB | ≤ 30 MiB |
+| links, live heap allocated by `Seed::build` | 0.0 MiB | 0.0 MiB | |
+| `phys_footprint` at idle, median of 3 | 252.7 MiB | 189.3 MiB | ≤ 200 MiB |
+| longest turn, 5 runs | 1.7 to 2.1 ms | 1.6 to 1.8 ms | ≤ 8 ms |
+| cache file | 86,886,659 B | 45,774,080 B | smaller |
+
+- The heap rows come from `MallocStackLogging=lite` and `malloc_history -allBySize`, 10 s after
+  the launch line, as `scripts/heap-links.sh` takes them. The release symbols are v0-mangled
+  (`7persist5notes6decode`), so the script's demangled patterns match nothing and print 0.0 MiB.
+  The figures above match the mangled names instead.
+- The footprint is `scripts/bench/measure.swift`'s `footprint_bytes`, the `bench-compare.sh`
+  warm row. Before: 242.0, 252.7 and 254.6 MiB. After: 188.0, 200.4 and 189.3 MiB. One after run
+  is 0.4 MiB over the gate; the median is under it.
+- The longest turn is read from the launch lines of `scripts/launch-figure.sh`, 5 runs per build.

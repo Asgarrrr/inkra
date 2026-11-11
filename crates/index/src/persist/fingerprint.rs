@@ -55,15 +55,10 @@ pub(crate) fn fold_fingerprint() -> u32 {
     hasher.finalize()
 }
 
-/// The probe notes, plus a word past `WORD_MAX_CHARS` and a link deep inside a long line.
+/// The probe notes, plus a word past `WORD_MAX_CHARS`.
 fn probe_notes() -> Vec<String> {
     let mut notes: Vec<String> = PROBE_NOTES.iter().map(|note| (*note).to_owned()).collect();
     notes.push(format!("{} short", "w".repeat(WORD_MAX_CHARS + 5)));
-    notes.push(format!(
-        "{} [[far/target#Part]] {}",
-        "x ".repeat(90),
-        "y ".repeat(90)
-    ));
     notes
 }
 
