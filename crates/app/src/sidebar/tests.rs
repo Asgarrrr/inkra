@@ -16,6 +16,7 @@ use inkra_vault::{EntryId, Fs, New};
 use super::edit::Rejection;
 use super::rows::Item;
 use super::{Kind, Row, Sidebar};
+use crate::keymap::key_bindings;
 use crate::open::{FileActivated, Open};
 use crate::test_support::{edit, opened, vault_of};
 use crate::ui::Indicator;
@@ -434,6 +435,67 @@ fn a_click_on_a_scrolled_tree_lands_on_the_row_it_names(cx: &mut TestAppContext)
 
     let selected = sidebar.read_with(&visual, |sidebar, _| sidebar.selected());
     assert_eq!(selected, Some(target.id));
+}
+
+/// 60 rows in a 300 px window: row 29 is drawn only if each `down` scrolls to the selection.
+#[gpui::test]
+fn stepping_down_past_the_drawn_rows_scrolls_the_selection_into_view(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    for ix in 0..60 {
+        fs.insert_file(format!("/vault/note-{ix:02}.md"), "text");
+    }
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    visual.simulate_resize(size(px(400.), px(300.)));
+    click_row(&sidebar, &mut visual, 0., Modifiers::none());
+    assert!(
+        visual.debug_bounds("tree-name-29").is_none(),
+        "row 29 starts below the window"
+    );
+    let target = row(&sidebar, cx, "note-29");
+
+    visual.simulate_keystrokes("down ".repeat(29).trim_end());
+
+    let selected = sidebar.read_with(&visual, |sidebar, _| sidebar.selected());
+    assert_eq!(selected, Some(target.id));
+    let drawn = visual.debug_bounds("tree-name-29");
+    assert!(
+        drawn.is_some_and(|bounds| bounds.bottom() <= px(300.)),
+        "row 29 {drawn:?} is drawn and ends within the window"
+    );
+}
+
+/// 60 rows in a 300 px window: row 30 is drawn only if each `up` scrolls to the selection.
+#[gpui::test]
+fn stepping_up_past_the_drawn_rows_scrolls_the_selection_into_view(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    for ix in 0..60 {
+        fs.insert_file(format!("/vault/note-{ix:02}.md"), "text");
+    }
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let (sidebar, mut visual) = drawn(cx, fs as Arc<dyn Fs>);
+    visual.simulate_resize(size(px(400.), px(300.)));
+    sidebar.update(&mut visual, |sidebar, cx| {
+        sidebar.scroll.scroll_to_item(59, ScrollStrategy::Center);
+        cx.notify();
+    });
+    visual.run_until_parked();
+    click_row(&sidebar, &mut visual, 59., Modifiers::none());
+    assert!(
+        visual.debug_bounds("tree-name-30").is_none(),
+        "row 30 starts above the window"
+    );
+    let target = row(&sidebar, cx, "note-30");
+
+    visual.simulate_keystrokes("up ".repeat(29).trim_end());
+
+    let selected = sidebar.read_with(&visual, |sidebar, _| sidebar.selected());
+    assert_eq!(selected, Some(target.id));
+    let drawn = visual.debug_bounds("tree-name-30");
+    assert!(
+        drawn.is_some_and(|bounds| bounds.top() >= px(0.)),
+        "row 30 {drawn:?} is drawn and starts within the window"
+    );
 }
 
 /// Reads the predicate the render draws the dot from; `render_tests` sees the dot drawn and cleared.

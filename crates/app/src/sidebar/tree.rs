@@ -68,6 +68,10 @@ impl Sidebar {
             return;
         };
         self.select(Some(next));
+        // No field is open here, so the row's index is its item's.
+        if let Some(row) = self.rows.visible().index_of(next) {
+            self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        }
         cx.notify();
     }
 
