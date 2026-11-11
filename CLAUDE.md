@@ -222,6 +222,8 @@ Read the spec before changing its area:
 - Dropped candidates, not to be proposed again unchanged:
   `2026-09-30-note-index-read-interface-design.md`, `2026-09-30-own-save-echo-design.md`
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
+- `docs/superpowers/specs/2026-11-11-open-a-vault-design.md` — `OpenVault`, `⌘O`, the empty
+  state's button, a fresh `AppShell` by `replace_root`, the leave path, the last vault
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
 - `docs/superpowers/specs/2026-09-20-modular-architecture-design.md` — crates
