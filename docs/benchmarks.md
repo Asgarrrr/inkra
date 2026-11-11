@@ -447,27 +447,27 @@ after launch: first frame 510.4ms, session read 920.42µs, root 605.3ms, scanned
 ## Backlink context on demand, slice 2b (2026-11-11)
 
 Slice 2b of `docs/superpowers/specs/2026-11-08-backlink-context-on-demand-design.md` drops the
-context from each link and moves the cache file to version 3. The A/B compares `8ee6b500` with
-slice 2b on top of it. Both builds predate `30bb1051`, the nested-wikilink fix, and `f49fcefe`,
-the panel's review fixes: the first changes no link a bench note holds, the second only the
-hidden panel. Apple M5 Pro, 48 GB, macOS 26.5, on the 50,000-note `bench_vault` vault,
-warm, release builds, one primed `HOME` per build. Obsidian was open, idle, during the runs, so
-the footprint rows are not the clean protocol of `bench-compare.sh`.
+context from each link and moves the cache file to version 3. The heap, turn and cache rows
+compare `8ee6b500` with slice 2b on top of it; the footprint row compares the current tips,
+`f49fcefe` (slice 2a) with `00102742` (slice 2b), re-run with Obsidian quit. Apple M5 Pro, 48 GB,
+macOS 26.5, on the 50,000-note `bench_vault` vault, warm, release builds, one primed `HOME` per
+build.
 
 | | before | after | gate |
 |---|---:|---:|---:|
 | links, live heap under `persist::notes::decode` | 78.7 MiB | 21.2 MiB | ≤ 30 MiB |
 | links, live heap allocated by `Seed::build` | 0.0 MiB | 0.0 MiB | |
-| `phys_footprint` at idle, median of 3 | 252.7 MiB | 189.3 MiB | ≤ 200 MiB |
+| `phys_footprint` at idle, median of 3 | 252.1 MiB | 188.9 MiB | ≤ 200 MiB |
 | longest turn, 5 runs | 1.7 to 2.1 ms | 1.6 to 1.8 ms | ≤ 8 ms |
 | cache file | 86,886,659 B | 45,774,080 B | smaller |
 
 - The heap rows come from `MallocStackLogging=lite` and `malloc_history -allBySize`, 10 s after
   the launch line, as `scripts/heap-links.sh` takes them. The release symbols are v0-mangled
   (`7persist5notes6decode`); the script matches both the mangled and the demangled names.
-- The footprint is `scripts/bench/measure.swift`'s `footprint_bytes`, the `bench-compare.sh`
-  warm row. Before: 242.0, 252.7 and 254.6 MiB. After: 188.0, 200.4 and 189.3 MiB. One after run
-  is 0.4 MiB over the gate, so the gate holds on the median only, with no margin. The next lead,
+- The footprint is `scripts/bench/measure.swift`'s `footprint_bytes`, the warm row of
+  `bench-compare.sh --apps inkra --sizes 50000 --runs 3`, nothing else running. Before: 252.2,
+  242.9 and 252.1 MiB. After: 199.0, 188.9 and 186.5 MiB. Every after run is under the gate, the
+  highest by 1.0 MiB. The cache decodes in 127 to 154 ms instead of 172 to 184 ms. The next lead,
   from the spec's "Out of scope": one `NoteTable` in vault order, indexed by a
-  `hashbrown::HashTable<u32>`, estimated at 11 to 20 MiB. A re-run with Obsidian quit is pending.
+  `hashbrown::HashTable<u32>`, estimated at 11 to 20 MiB.
 - The longest turn is read from the launch lines of `scripts/launch-figure.sh`, 5 runs per build.
