@@ -770,6 +770,21 @@ fn a_blocked_read_bytes_waits_for_its_gate_and_counts_no_load() {
 }
 
 #[test]
+fn reads_are_counted_per_path() {
+    let fs = MemFs::new();
+    let (file, other) = (Path::new("/cache/a.idx"), Path::new("/cache/b.idx"));
+    fs.insert_bytes(file, b"a".to_vec());
+    fs.insert_bytes(other, b"b".to_vec());
+
+    assert_eq!(fs.reads(file), 0);
+    let _ = block_on(fs.read_bytes(file, 64));
+    assert_eq!(fs.reads(file), 1);
+    let _ = block_on(fs.read_bytes(file, 64));
+    assert_eq!(fs.reads(file), 2);
+    assert_eq!(fs.reads(other), 0);
+}
+
+#[test]
 fn remove_file_removes_the_file_and_a_missing_file_is_ok() {
     let fs = MemFs::new();
     let file = Path::new("/cache/index.idx");

@@ -335,6 +335,22 @@ fn save_to_a_path_whose_folders_are_missing_fails_until_create_parents() {
     assert_eq!(names(&dir.0.join("f").join("g")), ["note.md"]);
 }
 
+/// On a local disk the write fails too; the guard's mark is that the error names the note, not a temp file.
+#[test]
+fn save_whose_stat_fails_reports_the_note_and_writes_nothing() {
+    let dir = TempDir::new("stat-fails");
+    let plain = dir.0.join("plain.txt");
+    fs::write(&plain, "plain").expect("write");
+    let note = plain.join("note.md");
+
+    let Err(VaultError::Io { path, .. }) = block_on(RealFs.save(&note, "ours", absent())) else {
+        panic!("a stat under a plain file must fail the save");
+    };
+
+    assert_eq!(path, note);
+    assert_eq!(names(&dir.0), ["plain.txt"]);
+}
+
 #[test]
 fn a_failed_preserve_leaves_the_file_untouched() {
     let dir = TempDir::new("preserve-fails");
@@ -638,6 +654,34 @@ fn rename_of_a_symlink_moves_the_link_not_its_target() {
 }
 
 #[test]
+fn rename_of_a_symlink_refuses_to_destroy_a_different_note() {
+    let dir = TempDir::new("rename-symlink-collision");
+    let target = dir.0.join("target.md");
+    let link = dir.0.join("link.md");
+    let other = dir.0.join("other.md");
+    fs::write(&target, "text").expect("write");
+    std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+    fs::write(&other, "theirs").expect("write");
+
+    let result = block_on(RealFs.rename(&link, &other));
+
+    assert_eq!(kind_of(result), Some(ErrorKind::AlreadyExists));
+    assert_eq!(fs::read_to_string(&other).expect("read"), "theirs");
+    assert!(
+        fs::symlink_metadata(&link).expect("stat").is_symlink(),
+        "the link stays where it was"
+    );
+}
+
+/// Only a missing path: a test that trashes a file would fill the user's Trash on every run.
+#[test]
+fn trash_of_a_missing_path_fails() {
+    let dir = TempDir::new("trash-missing");
+
+    assert!(block_on(RealFs.trash(&dir.0.join("gone.md"))).is_err());
+}
+
+#[test]
 fn create_makes_an_empty_note_and_refuses_an_occupied_name() {
     let dir = TempDir::new("create");
     let path = dir.0.join("new.md");
@@ -783,6 +827,17 @@ fn replace_bytes_sweeps_the_orphan_temps_of_its_file_that_no_process_holds() {
             "other.idx.inkra-1-0.tmp"
         ]
     );
+}
+
+#[test]
+fn a_failed_replace_leaves_no_temp_file() {
+    let dir = TempDir::new("replace-fails");
+    let folder = dir.0.join("index.idx");
+    fs::create_dir(&folder).expect("mkdir");
+
+    assert!(block_on(RealFs.replace_bytes(&folder, b"new")).is_err());
+
+    assert_eq!(names(&dir.0), ["index.idx"]);
 }
 
 #[test]

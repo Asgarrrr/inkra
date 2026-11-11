@@ -1,4 +1,4 @@
-use super::format_utc;
+use super::{civil_from_days, format_utc};
 use std::time::{Duration, SystemTime};
 
 fn at(seconds: u64) -> SystemTime {
@@ -32,4 +32,17 @@ fn a_time_before_the_epoch_clamps() {
 #[test]
 fn a_recent_timestamp() {
     assert_eq!(format_utc(at(1_790_001_125)), "2026-09-21 14-32-05");
+}
+
+#[test]
+fn a_century_boundary_that_is_not_a_leap_year() {
+    assert_eq!(format_utc(at(4_107_542_399)), "2100-02-28 23-59-59");
+    assert_eq!(format_utc(at(4_107_542_400)), "2100-03-01 00-00-00");
+}
+
+/// `format_utc` clamps before the epoch, so 1900 is reached through the day count alone.
+#[test]
+fn nineteen_hundred_is_not_a_leap_year() {
+    assert_eq!(civil_from_days(-25_509), (1900, 2, 28));
+    assert_eq!(civil_from_days(-25_508), (1900, 3, 1));
 }

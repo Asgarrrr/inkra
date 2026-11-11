@@ -62,3 +62,10 @@ fn a_note_keeps_an_extension_other_than_md() {
 fn a_folder_name_is_trimmed_and_gets_no_extension() {
     assert_eq!(Kind::Dir.file_name(" d "), "d");
 }
+
+#[test]
+fn a_note_and_an_asset_are_files_and_a_folder_is_not() {
+    assert!(Kind::Note.is_file());
+    assert!(Kind::Asset.is_file());
+    assert!(!Kind::Dir.is_file());
+}

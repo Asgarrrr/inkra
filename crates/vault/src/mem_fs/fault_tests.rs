@@ -4,7 +4,7 @@ use std::path::Path;
 use futures::executor::block_on;
 
 use super::MemFs;
-use crate::fs::{Fs, VaultError};
+use crate::fs::{Fs, New, VaultError};
 
 #[test]
 fn block_after_rename_parks_after_the_file_moved() {
@@ -153,4 +153,49 @@ fn make_unwatchable_refuses_the_watch() {
         fs.watch(Path::new("/other")).is_ok(),
         "only the listed root"
     );
+}
+
+#[test]
+fn make_untrashable_refuses_the_trash_of_that_file() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+
+    fs.make_untrashable("/vault/a.md");
+
+    let error = block_on(fs.trash(Path::new("/vault/a.md"))).expect_err("a is untrashable");
+    assert!(
+        matches!(&error, VaultError::Io { source, .. } if source.kind() == ErrorKind::PermissionDenied),
+        "{error}"
+    );
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("alpha")
+    );
+    block_on(fs.trash(Path::new("/vault/b.md"))).expect("b still trashes");
+    assert_eq!(fs.read_to_string(Path::new("/vault/b.md")), None);
+}
+
+#[test]
+fn make_uncreatable_refuses_a_create_and_a_rename_onto_that_path() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "alpha");
+
+    fs.make_uncreatable("/vault/new.md");
+
+    let created = block_on(fs.create(Path::new("/vault/new.md"), New::Note));
+    assert_eq!(
+        created.err().and_then(|error| error.io_kind()),
+        Some(ErrorKind::PermissionDenied)
+    );
+    let renamed = block_on(fs.rename(Path::new("/vault/a.md"), Path::new("/vault/new.md")));
+    assert_eq!(
+        renamed.err().and_then(|error| error.io_kind()),
+        Some(ErrorKind::PermissionDenied)
+    );
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/a.md")).as_deref(),
+        Some("alpha")
+    );
+    block_on(fs.create(Path::new("/vault/other.md"), New::Note)).expect("another path creates");
 }
