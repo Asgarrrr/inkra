@@ -8,7 +8,7 @@ use gpui::TestAppContext;
 use inkra_vault::Mtime;
 use inkra_vault::mem_fs::MemFs;
 
-use super::tests::{one, panel, rows, show};
+use super::tests::{one, panel, redraws, rows, show};
 use crate::test_support::entry_id;
 
 const A: &str = "/vault/a.md";
@@ -124,5 +124,32 @@ fn an_unreadable_source_is_not_stale(cx: &mut TestAppContext) {
         fs.loads(Path::new(A)) - loads,
         1,
         "not read again at its stamp"
+    );
+}
+
+/// A stale of an unrelated `c` keeps `a`'s job: its held read lands and redraws once.
+#[gpui::test]
+fn an_unrelated_stale_keeps_a_held_read(cx: &mut TestAppContext) {
+    let fs = unwatched();
+    fs.insert_file("/vault/c.md", "unrelated");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    let loads = fs.loads(Path::new(A));
+    let gate = fs.block_load(A);
+    show(cx, &notes, &panel, "b");
+    let c = entry_id(&notes, cx, "c");
+    let links = panel.read_with(cx, |panel, _| panel.links.clone());
+
+    links.update(cx, |links, cx| links.stale(&[c], cx));
+    cx.run_until_parked();
+
+    assert_eq!(fs.loads(Path::new(A)) - loads, 1, "the held read is kept");
+    let (count, _guard) = redraws(cx, &panel);
+    gate.release();
+    cx.run_until_parked();
+    assert_eq!(count.get(), 1);
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("see [[b]]", "[[b]]")])]
     );
 }
