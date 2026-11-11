@@ -323,6 +323,34 @@ fn renaming_a_folder_moves_its_subtree() {
 }
 
 #[test]
+fn renaming_a_folder_into_itself_is_refused_and_moves_nothing() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/projects/plan.md", "p");
+    let listed = || block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+    let folder = listed()[0].identity;
+    let note = block_on(fs.load(Path::new("/vault/projects/plan.md")))
+        .expect("load")
+        .identity;
+
+    let refused = block_on(fs.rename(
+        Path::new("/vault/projects"),
+        Path::new("/vault/projects/inner"),
+    ));
+
+    assert_eq!(
+        refused.err().and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::InvalidInput)
+    );
+    let after = listed();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].path, Path::new("/vault/projects"));
+    assert_eq!(after[0].identity, folder);
+    let kept = block_on(fs.load(Path::new("/vault/projects/plan.md"))).expect("load");
+    assert_eq!((kept.text.as_str(), kept.identity), ("p", note));
+    assert!(block_on(fs.check_dir(Path::new("/vault/projects/inner"))).is_err());
+}
+
+#[test]
 fn trash_takes_the_note_out_of_the_vault_and_keeps_its_bytes() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "alpha");

@@ -892,6 +892,14 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
             "remove_file a folder",
             kind_of(block_on(fs.remove_file(&folder))),
         ),
+        (
+            "rename a folder under itself",
+            kind_of(block_on(fs.rename(&folder, &folder.join("inner")))),
+        ),
+        (
+            "rename a note under itself",
+            kind_of(block_on(fs.rename(&a, &a.join("inner.md")))),
+        ),
     ]
 }
 
@@ -908,6 +916,11 @@ fn mem_fs_reports_the_io_kinds_real_fs_does() {
         ("read_dir a missing folder", Some(ErrorKind::NotFound)),
         ("read_dir a note", Some(ErrorKind::NotADirectory)),
         ("remove_file a folder", Some(ErrorKind::PermissionDenied)),
+        (
+            "rename a folder under itself",
+            Some(ErrorKind::InvalidInput),
+        ),
+        ("rename a note under itself", Some(ErrorKind::NotADirectory)),
     ];
     let dir = TempDir::new("io-kinds");
     let mem = MemFs::new();

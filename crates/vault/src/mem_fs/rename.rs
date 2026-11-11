@@ -18,6 +18,15 @@ impl State {
         if from == to {
             return Ok(());
         }
+        // As `rename(2)`: nothing moves into its own subtree.
+        if to.starts_with(from) {
+            if self.files.contains_key(from) {
+                return Err(io(to, ErrorKind::NotADirectory));
+            }
+            if self.dirs.contains_key(from) {
+                return Err(io(to, ErrorKind::InvalidInput));
+            }
+        }
         if self.files.contains_key(to) || self.dirs.contains_key(to) {
             return Err(io(to, ErrorKind::AlreadyExists));
         }
@@ -51,7 +60,7 @@ impl State {
         let moved: Vec<_> = self
             .dirs
             .keys()
-            .filter(|path| path.as_path() != to && path.starts_with(from))
+            .filter(|path| path.starts_with(from))
             .cloned()
             .collect();
         for path in moved {
