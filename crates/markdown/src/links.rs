@@ -28,6 +28,7 @@ pub enum LinkKind {
 #[must_use]
 pub fn links(text: &str) -> Vec<Link> {
     let mut found = Vec::new();
+    let mut wiki_end = 0;
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let (link_type, dest_url, embed) = match event {
             Event::Start(Tag::Link {
@@ -42,6 +43,14 @@ pub fn links(text: &str) -> Vec<Link> {
             }) => (link_type, dest_url, true),
             _ => continue,
         };
+        // A wikilink holds a target and an alias, never a link; pulldown-cmark nests one anyway,
+        // at a range that does not open it (`[[![[|]](a)]]` gives `]](a)`).
+        if range.start < wiki_end {
+            continue;
+        }
+        if matches!(link_type, LinkType::WikiLink { .. }) {
+            wiki_end = range.end;
+        }
         let Some(target) = target(link_type, &dest_url) else {
             continue;
         };
