@@ -77,19 +77,19 @@ fn an_edit_to_the_active_theme_reloads_it(cx: &mut TestAppContext) {
 fn an_identical_echo_keeps_the_theme(cx: &mut TestAppContext) {
     let (fs, _window) = open_solar(cx);
     let before = current(cx);
-    let loads = fs.loads(Path::new(SOLAR));
+    let loads = fs.reads(Path::new(SOLAR));
 
     fs.insert_file(SOLAR, solar("#111111"));
     cx.run_until_parked();
 
-    assert_eq!(fs.loads(Path::new(SOLAR)), loads + 1, "the echo reloads");
+    assert_eq!(fs.reads(Path::new(SOLAR)), loads + 1, "the echo reloads");
     assert!(Arc::ptr_eq(&current(cx), &before));
 }
 
 #[gpui::test]
 fn an_edit_to_another_theme_loads_nothing(cx: &mut TestAppContext) {
     let (fs, _window) = open_solar(cx);
-    let loads = || (fs.loads(Path::new(SOLAR)), fs.loads(Path::new(SETTINGS)));
+    let loads = || (fs.reads(Path::new(SOLAR)), fs.reads(Path::new(SETTINGS)));
     let before = loads();
 
     fs.insert_file("/vault/.inkra/themes/other.json", solar("#333333"));
@@ -123,12 +123,12 @@ fn a_config_change_scans_nothing(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_lost_events_rescan_reloads_the_theme(cx: &mut TestAppContext) {
     let (fs, _window) = open_solar(cx);
-    let loads = fs.loads(Path::new(SETTINGS));
+    let loads = fs.reads(Path::new(SETTINGS));
 
     fs.send_rescan("/vault");
     cx.run_until_parked();
 
-    assert_eq!(fs.loads(Path::new(SETTINGS)), loads + 1);
+    assert_eq!(fs.reads(Path::new(SETTINGS)), loads + 1);
 }
 
 /// The open theme picker's row labels and selected row; `None` when it is not open.
@@ -310,10 +310,10 @@ fn pick(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) 
 #[gpui::test]
 fn a_pick_beats_a_reload_in_flight(cx: &mut TestAppContext) {
     let (fs, window, mut visual) = solar_vault(cx, "{}");
-    let reload = fs.block_load(SETTINGS);
+    let reload = fs.block_read_bytes(SETTINGS);
     fs.insert_file(SETTINGS, r#"{"theme":"Flexoki Dark"}"#);
     visual.run_until_parked();
-    let _write = fs.block_load(SETTINGS);
+    let _write = fs.block_read_bytes(SETTINGS);
 
     pick("solar", window, &mut visual);
     reload.release();
@@ -325,7 +325,7 @@ fn a_pick_beats_a_reload_in_flight(cx: &mut TestAppContext) {
 #[gpui::test]
 fn two_quick_picks_write_the_last(cx: &mut TestAppContext) {
     let (fs, window, mut visual) = solar_vault(cx, "{}");
-    let first = fs.block_load(SETTINGS);
+    let first = fs.block_read_bytes(SETTINGS);
 
     pick("flexoki dark", window, &mut visual);
     pick("solar", window, &mut visual);

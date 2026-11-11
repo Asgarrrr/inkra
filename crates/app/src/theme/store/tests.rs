@@ -6,7 +6,7 @@ use inkra_vault::RelPath;
 use inkra_vault::mem_fs::MemFs;
 use serde_json::{Value, json};
 
-use super::{Choice, Resolved, ThemeStore, list, load, write_choice};
+use super::{Choice, MAX_CONFIG_BYTES, Resolved, ThemeStore, list, load, write_choice};
 use crate::theme::{Appearance, builtin};
 
 const SOLAR: &str = r##"{"appearance":"light","colors":{"accent":"#ff0000"}}"##;
@@ -86,8 +86,8 @@ fn a_name_is_never_a_path() {
     let resolved = resolve(&fs);
     assert!(resolved.theme.is_none());
     assert_eq!(resolved.notices, [r#"theme "../x" not found"#]);
-    assert_eq!(fs.loads(Path::new("/v/.inkra/x.json")), 0);
-    assert_eq!(fs.loads(Path::new("/v/.inkra/themes/../x.json")), 0);
+    assert_eq!(fs.reads(Path::new("/v/.inkra/x.json")), 0);
+    assert_eq!(fs.reads(Path::new("/v/.inkra/themes/../x.json")), 0);
 }
 
 #[test]
@@ -227,4 +227,58 @@ fn listing_keeps_parsable_json_themes_by_stem_but_not_system_or_other_cases() {
         .collect();
     assert_eq!(names, ["solar"]);
     assert!(block_on(list(&vault(None), Path::new("/v"))).is_empty());
+}
+
+/// `json` with spaces before its closing brace, `over` bytes past the cap.
+fn padded(json: &str, over: usize) -> String {
+    let cap = usize::try_from(MAX_CONFIG_BYTES).expect("the cap fits in memory");
+    let body = json.strip_suffix('}').expect("an object");
+    let pad = (cap + over).saturating_sub(json.len());
+    format!("{body}{}}}", " ".repeat(pad))
+}
+
+#[test]
+fn settings_at_the_cap_load_and_one_byte_over_fall_back_with_a_notice() {
+    let dark = r#"{"theme":"Flexoki Dark"}"#;
+
+    let at = resolve(&vault(Some(&padded(dark, 0))));
+    assert!(at.theme.is_some(), "a file of exactly the cap loads");
+    assert!(at.notices.is_empty());
+
+    let over = resolve(&vault(Some(&padded(dark, 1))));
+    assert!(over.theme.is_none());
+    assert_eq!(over.choice, Choice::System);
+    assert_eq!(over.notices.len(), 1);
+    assert!(
+        over.notices[0].contains("settings.json"),
+        "{:?}",
+        over.notices
+    );
+}
+
+#[test]
+fn a_theme_file_over_the_cap_is_neither_applied_nor_listed() {
+    let fs = vault(Some(r#"{"theme":"solar"}"#));
+    fs.insert_file("/v/.inkra/themes/solar.json", padded(SOLAR, 1));
+
+    let resolved = resolve(&fs);
+    assert!(resolved.theme.is_none());
+    assert_eq!(resolved.notices.len(), 1);
+    assert!(
+        resolved.notices[0].contains("solar.json"),
+        "{:?}",
+        resolved.notices
+    );
+    assert!(block_on(list(&fs, Path::new("/v"))).is_empty());
+}
+
+#[test]
+fn a_choice_is_not_written_into_settings_over_the_cap() {
+    let big = padded(r#"{"theme":"Flexoki Dark"}"#, 1);
+    let fs = vault(Some(&big));
+
+    let written = write(&fs, &Choice::System);
+
+    assert!(written.is_err());
+    assert_eq!(settings(&fs), Some(big));
 }
