@@ -461,8 +461,7 @@ vault, warm, release builds, one primed `HOME` per build. Obsidian was open, idl
 
 - The heap rows come from `MallocStackLogging=lite` and `malloc_history -allBySize`, 10 s after
   the launch line, as `scripts/heap-links.sh` takes them. The release symbols are v0-mangled
-  (`7persist5notes6decode`), so the script's demangled patterns match nothing and print 0.0 MiB.
-  The figures above match the mangled names instead.
+  (`7persist5notes6decode`); the script matches both the mangled and the demangled names.
 - The footprint is `scripts/bench/measure.swift`'s `footprint_bytes`, the `bench-compare.sh`
   warm row. Before: 242.0, 252.7 and 254.6 MiB. After: 188.0, 200.4 and 189.3 MiB. One after run
   is 0.4 MiB over the gate; the median is under it.
