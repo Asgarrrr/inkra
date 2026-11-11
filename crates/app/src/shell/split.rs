@@ -175,10 +175,8 @@ impl AppShell {
             shell.switch_group(split, cx);
             fresh = Some(split);
         });
-        if fresh.is_some()
-            && let Some(focus) = self.land_focus(cx)
-        {
-            window.focus(&focus, cx);
+        if fresh.is_some() {
+            self.land_focus(window, cx);
         }
         fresh
     }
@@ -196,17 +194,19 @@ impl AppShell {
         let Some(to) = self.layout.neighbour(from, direction, probe) else {
             return;
         };
-        let focus = match self.layout.surface_of(to) {
+        match self.layout.surface_of(to) {
             Surface::Center => {
                 self.activate_group(to, window, cx);
-                self.land_focus(cx)
+                self.land_focus(window, cx);
             }
-            Surface::Dock(_) => (self.group(to).shown.view() == Some(View::Files))
-                .then(|| self.tree_focus(cx))
-                .flatten(),
-        };
-        if let Some(focus) = focus {
-            window.focus(&focus, cx);
+            Surface::Dock(_) => {
+                let tree = (self.group(to).shown.view() == Some(View::Files))
+                    .then(|| self.tree_focus(cx))
+                    .flatten();
+                if let Some(tree) = tree {
+                    window.focus(&tree, cx);
+                }
+            }
         }
     }
 
