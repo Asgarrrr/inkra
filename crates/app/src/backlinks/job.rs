@@ -94,7 +94,9 @@ impl BacklinksPanel {
             let occurrences = occurrences(&backlink, Some(&landed.slot));
             changed |= row.occurrences != occurrences;
             row.occurrences = occurrences;
-            stop |= failures.count(&landed.slot);
+            if failures.count(&landed.slot) {
+                stop = true;
+            }
             self.slots.insert(id, landed.slot);
             if landed.stale {
                 stale.push(id);

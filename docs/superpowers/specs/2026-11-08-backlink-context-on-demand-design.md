@@ -223,6 +223,8 @@ rejected and is rebuilt. No migration: Inkra has no users yet.
   same text.
 - The 8-failure stop counts in a pure `Failures` in `index`, as `MemFs` cannot
   fail 8 distinct loads.
+- A rebuild that replaces the job notifies, even when its rows draw as before.
+  Only a draw starts a job (B6), and the reload after a `forget` changes no row.
 
 ## Out of scope, measured next
 
