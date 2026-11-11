@@ -11,8 +11,8 @@ use inkra_vault::{EntryId, Fs, New};
 
 use crate::test_support::{edit, entry_id, index_sync, named, opened, scan_notes, unscanned_notes};
 use crate::timeline::Timeline;
-use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
+use crate::vault::{Created, NoteStore};
 
 fn ids(notes: &Entity<NoteStore>, cx: &mut TestAppContext) -> Vec<(String, EntryId)> {
     notes.read_with(cx, |notes, cx| {
@@ -42,12 +42,9 @@ fn a_create_during_a_held_scan_keeps_its_id_and_every_file_keeps_one(cx: &mut Te
     gate.release();
     cx.run_until_parked();
 
-    let c = created
-        .now_or_never()
-        .expect("landed by the last run_until_parked")
-        .ok()
-        .flatten()
-        .expect("the create lands");
+    let Some(Ok(Created::Listed(c))) = created.now_or_never() else {
+        panic!("the create lands");
+    };
     assert_eq!(first.now_or_never(), Some(Ok(())));
     let after = ids(&notes, cx);
     assert!(after.contains(&("c.md".to_owned(), c)));
@@ -78,12 +75,9 @@ fn a_create_during_the_initial_scan_keeps_its_id(cx: &mut TestAppContext) {
     next.release();
     cx.run_until_parked();
 
-    let c = created
-        .now_or_never()
-        .expect("landed by the last run_until_parked")
-        .ok()
-        .flatten()
-        .expect("the create lands");
+    let Some(Ok(Created::Listed(c))) = created.now_or_never() else {
+        panic!("the create lands");
+    };
     let after = ids(&notes, cx);
     assert!(after.contains(&("c.md".to_owned(), c)));
     for kept in &after_root {

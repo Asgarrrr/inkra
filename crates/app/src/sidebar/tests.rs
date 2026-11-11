@@ -19,7 +19,7 @@ use super::{Kind, Row, Sidebar};
 use crate::open::{FileActivated, Open};
 use crate::test_support::{edit, opened, vault_of};
 use crate::ui::Indicator;
-use crate::vault::{AUTOSAVE_DELAY, NoteStore};
+use crate::vault::{AUTOSAVE_DELAY, Created, NoteStore};
 
 impl Sidebar {
     #[cfg(test)]
@@ -179,7 +179,7 @@ fn a_rename_field_follows_its_row_across_a_scans_swap(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert!(
-        matches!(created.now_or_never(), Some(Ok(Some(_)))),
+        matches!(created.now_or_never(), Some(Ok(Created::Listed(_)))),
         "the scan swapped in"
     );
     assert_eq!(labels(&sidebar, cx), ["0", "a", "b"]);

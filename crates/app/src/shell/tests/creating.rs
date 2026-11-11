@@ -1,10 +1,11 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{Focusable, Modifiers, TestAppContext};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use crate::test_support::entry_id;
+use crate::test_support::{entry_id, vault_of};
 
 use super::{activate, click_row, no_vault, open_vault, tree_focused, two_notes, vault_names};
 
@@ -269,6 +270,34 @@ fn a_note_created_under_a_selected_folder_lands_inside_it(cx: &mut TestAppContex
         vault_names(&notes, cx).contains(&"projects/plan.md".to_owned()),
         "got {:?}",
         vault_names(&notes, cx)
+    );
+}
+
+#[gpui::test]
+fn a_create_whose_folder_is_gone_keeps_its_field_and_says_so(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/projects/existing.md", "e");
+    fs.insert_file("/vault/a.md", "alpha");
+    let (window, sidebar, notes) = open_vault(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let mut visual = tree_focused(cx, window, &sidebar);
+
+    click_row(&mut visual, 0., Modifiers::none());
+    visual.simulate_keystrokes("cmd-n");
+    visual.run_until_parked();
+    fs.remove(Path::new("/vault/projects"));
+    let vault = vault_of(&notes, cx);
+    vault.update(cx, |vault, cx| {
+        futures::executor::block_on(vault.rescan(&*fs)).expect("rescan");
+        cx.notify();
+    });
+    visual.run_until_parked();
+    visual.simulate_keystrokes("p l a n enter");
+    visual.run_until_parked();
+
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.is_editing()));
+    assert_eq!(
+        sidebar.read_with(cx, |sidebar, _| sidebar.rejection_message()),
+        Some("The file could not be created.")
     );
 }
 

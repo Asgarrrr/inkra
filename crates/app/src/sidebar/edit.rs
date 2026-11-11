@@ -8,6 +8,7 @@ use std::path::Path;
 use inkra_vault::{EntryId, Kind, NameProblem, New};
 
 use crate::field::{Cancelled, Confirmed, NameField};
+use crate::vault::Created;
 
 use super::{Rename, Sidebar, Trash};
 
@@ -271,15 +272,24 @@ impl Sidebar {
     }
 
     /// Escape during a create closed the field already: `creating` tells the field of this create from a later one.
-    fn created(&mut self, created: inkra_vault::Result<Option<EntryId>>, cx: &mut Context<Self>) {
+    fn created(&mut self, created: inkra_vault::Result<Created>, cx: &mut Context<Self>) {
         let creating = self.rows.edit().is_some_and(|edit| edit.creating);
         match created {
-            Ok(id) => {
+            Ok(Created::Listed(id)) => {
                 if creating {
                     self.rows.close();
                 }
-                if id.is_some() {
-                    self.select(id);
+                self.select(Some(id));
+            }
+            Ok(Created::Unlisted) => {
+                if creating {
+                    self.rows.close();
+                }
+            }
+            Ok(Created::Refused) => {
+                if let Some(edit) = self.rows.edit_mut().filter(|edit| edit.creating) {
+                    edit.creating = false;
+                    edit.rejected = Some(Rejection::Refused);
                 }
             }
             Err(error) => {
