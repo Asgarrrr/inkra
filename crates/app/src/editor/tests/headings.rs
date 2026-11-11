@@ -146,7 +146,7 @@ fn a_selection_quad_is_as_tall_as_its_own_row(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            let quads = layout.selection_quads(&(at(0)..at(8)));
+            let quads = layout.selection_quads(&(at(0)..at(8)), &(px(0.)..layout.height()));
             let heights: Vec<_> = quads.iter().map(|quad| quad.bounds.size.height).collect();
             assert_eq!(heights, [px(H1), px(LINE_HEIGHT)]);
             assert_eq!(quads[1].bounds.origin.y, px(H1));

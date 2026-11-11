@@ -312,7 +312,7 @@ fn a_selection_paints_one_quad_per_row(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            let quads = layout.selection_quads(&(at(0)..at(103)));
+            let quads = layout.selection_quads(&(at(0)..at(103)), &(px(0.)..layout.height()));
             assert_eq!(quads.len(), 3);
 
             let width = |quad: &gpui::PaintQuad| quad.bounds.size.width;

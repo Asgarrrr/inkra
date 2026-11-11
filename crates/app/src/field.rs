@@ -180,7 +180,12 @@ impl Element for FieldElement {
             field.scroll = reveal(field.scroll, &caret, bounds.size.width, end);
             field.scroll
         });
-        let quads = Quads::new(&layout, &range, scrolled(bounds, scroll).origin);
+        let quads = Quads::new(
+            &layout,
+            &range,
+            scrolled(bounds, scroll).origin,
+            &(px(0.)..bounds.size.height),
+        );
         Some((Rc::new(layout), quads))
     }
 

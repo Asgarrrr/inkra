@@ -78,7 +78,8 @@ fn a_selection_across_a_quote_covers_its_gutter(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            let quads = layout.selection_quads(&(at(0)..at(text.len())));
+            let quads =
+                layout.selection_quads(&(at(0)..at(text.len())), &(px(0.)..layout.height()));
             let lefts: Vec<_> = quads.iter().map(|quad| quad.bounds.origin.x).collect();
             assert_eq!(lefts[0], px(0.));
             assert_x(lefts[1], 2. * GLYPH);

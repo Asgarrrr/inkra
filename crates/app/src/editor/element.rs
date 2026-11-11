@@ -189,7 +189,12 @@ impl Element for TextElement {
             .collect();
 
         let selection = self.editor.read(cx).input.state().selection().range();
-        let quads = Quads::new(&layout, &selection, text.origin);
+        let quads = Quads::new(
+            &layout,
+            &selection,
+            text.origin,
+            &(top..top + mask.size.height),
+        );
         EditorPrepaint {
             painted: Some((layout, quads)),
             text,

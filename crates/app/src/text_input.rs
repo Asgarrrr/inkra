@@ -26,9 +26,9 @@ use crate::one_line::one_line;
 
 pub(crate) use actions::on_actions;
 pub(crate) use adapter::InputAdapter;
-#[cfg(test)]
-pub(crate) use paint::painted_caret;
 pub(crate) use paint::{Prepainted, Quads, paint};
+#[cfg(test)]
+pub(crate) use paint::{painted_caret, painted_selection};
 
 /// The key context every host adds: the shared bindings name it, so they match in each host.
 pub(crate) const CONTEXT: &str = "TextInput";

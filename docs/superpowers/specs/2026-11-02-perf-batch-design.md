@@ -422,6 +422,23 @@ The saving (about 150 us, not the 0.269 ms estimate) comes from the lookup
 only: a 20-entry map hashed with SipHash 1-3 once per candidate note.
 FxHash was not measured, since the dependency is not present.
 
+## Item 11: selection quads for off-screen rows
+
+`selection_quads` built one quad per selected row on every frame, in view or not. Measured
+(release, headless, mean of 20 calls on a whole-note selection, median of 3 runs, Apple M5 Pro):
+0.675 ms at 10,000 lines, 17.7 ms at 100,000 lines.
+
+Guard: drop the item if the call at 100,000 lines is under 0.1 ms. It is 17.7 ms. Kept.
+
+### As built
+
+`selection_quads` takes the span of layout `y` in view and walks only the rows it reaches,
+found with `row_for_y`. `Quads::new` passes the span: the editor's is the content mask in
+layout space, the name field's is its own height. Tests:
+`a_frame_builds_selection_quads_only_for_the_rows_in_view` and
+`selection_quads_cover_exactly_the_rows_a_span_reaches`.
+After: 3.1 us and 2.9 us.
+
 ## Deviations from Zed
 
 - Item 1: Zed shapes the visible rows every frame, which keeps gpui's cache
