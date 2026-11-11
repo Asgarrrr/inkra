@@ -1,19 +1,20 @@
 # GPUI notes
 
-Living reference for what GPUI 0.2.2 actually provides. Rules live in
-`CLAUDE.md`. Every claim here was checked against the vendored source at the
-line cited — if you change the pinned version, re-check them.
+Living reference for what GPUI actually provides. Rules live in `CLAUDE.md`.
+Every claim here was checked against the vendored source at the line cited — if
+you change the pinned version, re-check them. `docs/tooling.md`, "Vendored
+gpui", gives the bump procedure.
 
-Paths below are relative to the **checkout we actually compile**,
-`vendor/zed-reference/crates/`, and are prefixed with the crate
-(`gpui/src/...`, `gpui_macos/src/...`). It is a path dependency, so that
-directory is the build input, not a copy of it.
+gpui is a git dependency, pinned by `rev` in `crates/app/Cargo.toml`.
+`scripts/vendor-gpui.sh` checks out the same rev into `vendor/zed-reference/`.
+That checkout is for reading only; cargo does not build from it.
 
-Two other copies of gpui exist on a typical machine: `gpui-0.2.2` in the cargo
-*registry*, and whatever `~/.cargo/git/checkouts/zed-*/` still holds from the
-earlier git dependency. Reading the registry one is how a batch of line numbers
-in this file and in the code comments came to be wrong; they were corrected on
-2026-09-20. Do not go back to either — see `CLAUDE.md`.
+Paths below are relative to `vendor/zed-reference/crates/`, and are prefixed
+with the crate (`gpui/src/...`, `gpui_macos/src/...`).
+
+Two stale copies of gpui exist on a typical machine: one in the cargo
+*registry*, one under `~/.cargo/git/checkouts/zed-*/`. Their line numbers
+disagree with what we build. Never read either — see `.claude/rules/gpui.md`.
 
 ## Where to look
 
@@ -26,7 +27,7 @@ in this file and in the code comments came to be wrong; they were corrected on
 - `cargo doc -p gpui --no-deps`, then `target/doc/gpui/index.html`.
 
 `vendor/zed-reference/` holds a sparse shallow clone of Zed —
-`crates/{gpui,editor,text,language}` only, gitignored, not in this repo's
+`crates`, `tooling` and `extensions` only, gitignored, not in this repo's
 history. It is production-hardened but inseparable from the multibuffer and
 multi-cursor machinery, so read it for the awkward platform cases (how macOS
 reports a replacement range mid-composition, `editor/src/input.rs:2858-2946`),

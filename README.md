@@ -136,8 +136,10 @@ no text properties. This is a known gap, tracked in
 
 ## Development
 
-`./scripts/check.sh` runs the build, tests, clippy, fmt and `cargo deny`; green
-is the definition of done. The workspace is split into crates with one role
+`./scripts/check.sh` checks formatting, spelling (`typos`), the crate graph, the
+ast-grep rules, line ceilings, clippy, `cargo deny`, the tests and a release
+build; green is the definition of done. It needs `typos`, `ast-grep`,
+`cargo-deny` and `jq` installed, and prints the install command for a missing one. The workspace is split into crates with one role
 each (`text`, `editor`, `markdown`, `index`, `vault`, `tabs`, `layout`, `app`);
 only `app` depends on GPUI. Architecture and conventions are in
 [CLAUDE.md](CLAUDE.md), design specs in `docs/superpowers/specs/`, deferred
