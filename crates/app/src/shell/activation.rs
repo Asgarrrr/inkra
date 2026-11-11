@@ -254,7 +254,14 @@ impl AppShell {
         };
         match resolution {
             Resolution::File(id) => self.open(id, None, open, cx),
-            Resolution::External(url) => cx.open_url(&url),
+            Resolution::External(url) if may_open(&url) => cx.open_url(&url),
+            Resolution::External(url) => self.show_notice(
+                format!(
+                    "Didn't open \u{201c}{url}\u{201d}: only http, https and mailto links open"
+                ),
+                None,
+                cx,
+            ),
             Resolution::Unresolved | Resolution::SelfLink => {}
         }
     }
@@ -310,4 +317,15 @@ impl AppShell {
             window.focus(&self.focus_handle, cx);
         }
     }
+}
+
+/// The only schemes a followed link hands to the system: a note is untrusted text.
+const OPENED_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+
+fn may_open(url: &str) -> bool {
+    url.split_once(':').is_some_and(|(scheme, _)| {
+        OPENED_SCHEMES
+            .iter()
+            .any(|opened| scheme.eq_ignore_ascii_case(opened))
+    })
 }
