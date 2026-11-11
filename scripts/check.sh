@@ -4,6 +4,22 @@ set -euo pipefail
 # cargo fmt covers every member only from the workspace root.
 cd "$(dirname "$0")/.."
 
+# CI's pins are the versions this gate is green on; another version can pass here and fail there.
+pins=$(sed -n 's/^ *tool: *//p' .github/workflows/ci.yml | tr ',' '\n')
+# usage: pinned <tool in ci.yml> <crate to install> <version the tool printed>
+pinned() {
+  local want
+  want=$(awk -F@ -v tool="$1" '$1 == tool { print $2 }' <<< "$pins")
+  if [ -z "$want" ]; then
+    echo "ERROR: ci.yml pins no version of $1" >&2
+    exit 1
+  fi
+  if [ "$3" != "$want" ]; then
+    echo "ERROR: $1 is $3, CI pins $want — run: cargo install --locked $2@$want" >&2
+    exit 1
+  fi
+}
+
 echo "==> cargo fmt --check"
 # Every workspace member.
 cargo fmt -- --check
@@ -14,6 +30,7 @@ if ! command -v typos >/dev/null 2>&1; then
   echo "ERROR: typos is not installed — run: cargo install --locked typos-cli" >&2
   exit 1
 fi
+pinned typos typos-cli "$(typos --version | awk '{ print $2 }')"
 typos
 
 echo "==> crate graph check"
@@ -65,6 +82,7 @@ if ! command -v ast-grep >/dev/null 2>&1; then
   echo "ERROR: ast-grep is not installed — run: cargo install --locked ast-grep" >&2
   exit 1
 fi
+pinned ast-grep ast-grep "$(ast-grep --version | awk '{ print $2 }')"
 ast-grep scan
 # A suppression comment silences any rule; narrow the rule's `ignores` instead, where review sees it.
 if suppressed=$(grep -rn 'ast-grep-ignore' crates); then
@@ -100,6 +118,7 @@ if ! command -v cargo-deny >/dev/null 2>&1; then
   echo "ERROR: cargo-deny is not installed — run: cargo install --locked cargo-deny" >&2
   exit 1
 fi
+pinned cargo-deny cargo-deny "$(cargo deny --version | awk '{ print $2 }')"
 cargo deny check
 
 echo "==> cargo test"

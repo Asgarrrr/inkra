@@ -84,8 +84,9 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
 `rust-toolchain.toml` pins 1.98.1, the version `check.sh` is green on; it
 matches Zed's pin at the gpui rev, which needs it. Bump by re-running `check.sh`.
 
-CI pins `cargo-deny`, `ast-grep` and `typos` in `ci.yml`'s install step. Install the same
-versions locally; bump a pin and the local install together, after `check.sh` is green.
+CI pins `cargo-deny`, `ast-grep` and `typos` in `ci.yml`'s install step. `check.sh` reads
+those pins and fails on another local version, with the install command. Bump a pin and
+the local install together, after `check.sh` is green.
 
 ## Build profiles
 
