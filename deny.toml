@@ -7,7 +7,6 @@ all-features = true
 [advisories]
 # Unmaintained notices, reached only through gpui's pinned graph.
 ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste, via metal/pulp in gpui's macOS backend" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz, via usvg/resvg in gpui's font stack" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser, via usvg/fontdb in gpui's font stack" },
 ]

@@ -100,15 +100,15 @@ impl Visible {
         Some(self.entry(neighbour).id)
     }
 
-    /// One step from `from`; no selection enters at the first or last row.
-    pub(super) fn step(&self, from: Option<EntryId>, delta: isize) -> Option<EntryId> {
+    /// The row index one step from `from`; no selection enters at the first or last row.
+    pub(super) fn step(&self, from: Option<EntryId>, delta: isize) -> Option<usize> {
         let last = self.len().checked_sub(1)?;
         let next = match from.and_then(|id| self.index_of(id)) {
             Some(ix) => ix.saturating_add_signed(delta).min(last),
             None if delta > 0 => 0,
             None => last,
         };
-        Some(self.entry(next).id)
+        Some(next)
     }
 
     /// The folder holding the row at `ix`: a folder's subtree follows it, so it is above.

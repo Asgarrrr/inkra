@@ -2,7 +2,7 @@ use futures::FutureExt;
 use futures::executor::block_on;
 
 use super::MemFs;
-use crate::fs::{Fs, Kind, Mtime, New, Stamp, VaultError};
+use crate::fs::{Fs, Kind, MAX_TEXT_BYTES, Mtime, New, Stamp, VaultError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -226,6 +226,32 @@ fn a_file_older_than_the_expectation_still_conflicts() {
 }
 
 #[test]
+fn a_conflict_copy_steps_past_a_folder_at_its_name() {
+    let fs = MemFs::new();
+    let when = Mtime(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125));
+    fs.insert_with_mtime("/vault/Note.md", "theirs", when);
+    fs.insert_dir("/vault/Note (conflict 2026-09-21 14-32-05Z).md");
+    let stale = Stamp {
+        mtime: Mtime(when.0 + Duration::from_mins(1)),
+        size: 6,
+    };
+
+    let saved = block_on(fs.save(Path::new("/vault/Note.md"), "ours", stale)).ok();
+
+    assert_eq!(
+        saved.and_then(|saved| saved.preserved),
+        Some(PathBuf::from(
+            "/vault/Note (conflict 2026-09-21 14-32-05Z) 2.md"
+        ))
+    );
+    let folder = Path::new("/vault/Note (conflict 2026-09-21 14-32-05Z).md");
+    assert!(
+        block_on(fs.read_dir(folder)).is_ok(),
+        "the folder is still a folder"
+    );
+}
+
+#[test]
 fn the_stamp_a_save_returns_is_accepted_by_the_next_save() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "before");
@@ -320,6 +346,34 @@ fn renaming_a_folder_moves_its_subtree() {
         fs.read_to_string(Path::new("/vault/projects/plan.md")),
         None
     );
+}
+
+#[test]
+fn renaming_a_folder_into_itself_is_refused_and_moves_nothing() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/projects/plan.md", "p");
+    let listed = || block_on(fs.read_dir(Path::new("/vault"))).expect("read_dir");
+    let folder = listed()[0].identity;
+    let note = block_on(fs.load(Path::new("/vault/projects/plan.md")))
+        .expect("load")
+        .identity;
+
+    let refused = block_on(fs.rename(
+        Path::new("/vault/projects"),
+        Path::new("/vault/projects/inner"),
+    ));
+
+    assert_eq!(
+        refused.err().and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::InvalidInput)
+    );
+    let after = listed();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].path, Path::new("/vault/projects"));
+    assert_eq!(after[0].identity, folder);
+    let kept = block_on(fs.load(Path::new("/vault/projects/plan.md"))).expect("load");
+    assert_eq!((kept.text.as_str(), kept.identity), ("p", note));
+    assert!(block_on(fs.check_dir(Path::new("/vault/projects/inner"))).is_err());
 }
 
 #[test]
@@ -466,6 +520,25 @@ fn a_read_dir_gate_parks_until_released() {
         2,
         "the listing ran after the gate, and sees b.md"
     );
+}
+
+#[test]
+fn a_create_gate_parks_until_released() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+
+    let gate = fs.block_create("/vault/b.md");
+    let (created, ()) = block_on(async {
+        let create = fs.create(Path::new("/vault/b.md"), New::Note);
+        let release = async {
+            assert_eq!(fs.read_to_string(Path::new("/vault/b.md")), None);
+            gate.release();
+        };
+        futures::join!(create, release)
+    });
+
+    assert!(created.is_ok(), "{created:?}");
+    assert!(fs.read_to_string(Path::new("/vault/b.md")).is_some());
 }
 
 #[test]
@@ -699,6 +772,34 @@ fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
 }
 
 #[test]
+fn load_refuses_a_file_over_the_cap() {
+    let fs = MemFs::new();
+    let over = usize::try_from(MAX_TEXT_BYTES + 1).unwrap_or(usize::MAX);
+    fs.insert_bytes("/vault/huge.md", vec![b'a'; over]);
+    fs.insert_file("/vault/small.md", "four");
+
+    let error = block_on(fs.load(Path::new("/vault/huge.md"))).err();
+    let loaded = block_on(fs.load(Path::new("/vault/small.md"))).ok();
+
+    assert_eq!(
+        error.and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::FileTooLarge)
+    );
+    assert_eq!(loaded.map(|loaded| loaded.text).as_deref(), Some("four"));
+}
+
+#[test]
+fn load_accepts_a_file_at_the_cap() {
+    let fs = MemFs::new();
+    let cap = usize::try_from(MAX_TEXT_BYTES).unwrap_or(usize::MAX);
+    fs.insert_bytes("/vault/full.md", vec![b'a'; cap]);
+
+    let loaded = block_on(fs.load(Path::new("/vault/full.md"))).ok();
+
+    assert_eq!(loaded.map(|loaded| loaded.text.len()), Some(cap));
+}
+
+#[test]
 fn read_bytes_of_a_missing_or_unreadable_file_fails() {
     let fs = MemFs::new();
     fs.insert_bytes("/cache/locked.idx", b"x".to_vec());
@@ -731,6 +832,21 @@ fn a_blocked_read_bytes_waits_for_its_gate_and_counts_no_load() {
     assert_eq!(block_on(read).ok().as_deref(), Some(&b"cache"[..]));
     assert_eq!(fs.loads(file), 0, "`loads` counts the notes' loads only");
     assert_eq!(fs.reads(file), 1);
+}
+
+#[test]
+fn reads_are_counted_per_path() {
+    let fs = MemFs::new();
+    let (file, other) = (Path::new("/cache/a.idx"), Path::new("/cache/b.idx"));
+    fs.insert_bytes(file, b"a".to_vec());
+    fs.insert_bytes(other, b"b".to_vec());
+
+    assert_eq!(fs.reads(file), 0);
+    let _ = block_on(fs.read_bytes(file, 64));
+    assert_eq!(fs.reads(file), 1);
+    let _ = block_on(fs.read_bytes(file, 64));
+    assert_eq!(fs.reads(file), 2);
+    assert_eq!(fs.reads(other), 0);
 }
 
 #[test]

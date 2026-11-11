@@ -1,8 +1,3 @@
-# `vendor/` is gitignored, but `inkra-app` resolves gpui through it, so the
-# scratch copy must keep it. It is a symlink with an absolute target, so only
-# the link is copied.
-gitignore = false
-
 # The config has no equivalent of `--package`; these globs mutate the same
 # six crates.
 examine_globs = ["crates/text/src/**/*.rs", "crates/editor/src/**/*.rs", "crates/markdown/src/**/*.rs", "crates/index/src/**/*.rs", "crates/tabs/src/**/*.rs", "crates/layout/src/**/*.rs"]
@@ -38,10 +33,6 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
 # which keeps this config, so the entries below apply.
 #
-# Unobservable headlessly. These offsets place the caret and selection quads,
-# which reach only the scene; a `#[gpui::test]` window has no renderer and
-# exposes no scene (gpui platform/test/window.rs `draw`), so only a shot shows them.
-#
 # Unobservable. The apply budget is wall time: a turn whose elapsed time equals
 # the budget exactly cannot be staged in a test.
 #
@@ -50,9 +41,6 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 #
 # Equivalent. `Visible::step` takes only 1 or -1 (`select_next`, `select_prev`), so
 # `delta >= 0` and `delta > 0` agree on every call.
-#
-# Equivalent while `View` has two variants: a dock that loses a view holds at most one, so
-# the clamp after the adjust sets `active` to 0 whatever the adjust did.
 #
 # Unobservable. A failed cache read is `Missing` either way: the not-found guard
 # only decides whether a line is logged, and no test reads the log.
@@ -70,6 +58,25 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # `thumbnail` keeps its size and its pixels: `>=` and `>` decode the same bytes.
 #
 # Equivalent. `MD` and `FRAGMENT` are disjoint bits, so `^` and `|` build the same byte.
+#
+# The vault runs with `cargo mutants -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
+# `-f` is needed because `examine_globs` leaves the vault out. Its suite (~3 s) uses a
+# real disk and a watcher, too slow to run against every other crate's mutants.
+#
+# Equivalent. A collision `hard_link` refuses also reaches `guarded_rename`, which renames
+# the same file and refuses a different one with `AlreadyExists` at `to`.
+#
+# Unobservable. Both delete methods trash the file; they differ in a permission
+# prompt and Finder's "Put Back" metadata, which no test sees.
+#
+# Unobservable. `MemFs` mtimes only need to differ per tick; every variant keeps
+# them distinct, and no test reads their value.
+#
+# Equivalent. `release` consumes the gate, and dropping it closes the channel,
+# which the parked operation reads as a release.
+#
+# Unobservable. `preserve` retries only when another process takes the candidate
+# between `conflict_path`'s look and the exclusive create; no test can stage that.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/cmark\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -77,17 +84,20 @@ exclude_re = [
     "^crates/index/src/words/fold\\.rs:[0-9]+:21: replace \\|\\| with && in representative$",
     "^crates/index/src/words/segment\\.rs:[0-9]+:[0-9]+: replace < with <= in merged$",
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
-    "^crates/app/src/field\\.rs:[0-9]+:[0-9]+: replace \\+ with - in <impl Element for FieldElement>::prepaint$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
     "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",
-    "^crates/layout/src/lib\\.rs:[0-9]+:[0-9]+: replace -= with [+/]= in Docks::move_view$",
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace match guard error\\.io_kind\\(\\) == Some\\(ErrorKind::NotFound\\) with (true|false) in read$",
     "^crates/app/src/index/cache_file\\.rs:[0-9]+:[0-9]+: replace == with != in read$",
-    "^crates/vault/src/vault/walk\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
+    "^crates/vault/src/jobs\\.rs:[0-9]+:[0-9]+: replace <impl Jobs for Serial>::parallelism -> usize with 0$",
     "^crates/app/src/editor/block_scroll\\.rs:[0-9]+:[0-9]+: replace (< with <=|> with >=) in EditorView::reveal_block$",
     "^crates/app/src/editor/element\\.rs:[0-9]+:22: replace != with == in <impl Element for TextElement>::paint$",
     "^crates/app/src/editor/element\\.rs:[0-9]+:26: replace == with != in <impl Element for TextElement>::paint$",
     "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
+    "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in <impl Fs for RealFs>::rename$",
+    "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace trash_method with \\(\\)$",
+    "^crates/vault/src/mem_fs\\.rs:[0-9]+:[0-9]+: replace \\+ with (-|\\*) in MemFs::tick$",
+    "^crates/vault/src/mem_fs/faults\\.rs:[0-9]+:[0-9]+: replace Gate::release with \\(\\)$",
+    "^crates/vault/src/real_fs/save\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in preserve$",
 ]

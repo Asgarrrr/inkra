@@ -87,6 +87,59 @@ fn a_url_opens_outside_the_app(cx: &mut TestAppContext) {
     assert_eq!(shown_text(&window, cx), "[x](https://x.org/p)");
 }
 
+fn notice(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Option<String> {
+    window
+        .update(cx, |shell, _, _| {
+            shell.notice.as_ref().map(|notice| notice.text.to_string())
+        })
+        .unwrap()
+}
+
+#[gpui::test]
+fn a_link_with_an_unlisted_scheme_opens_nothing(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[x](file:///tmp/a.txt)")]);
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(cx.opened_url(), None);
+    assert!(notice(&window, &mut visual).is_some_and(|text| text.contains("file:///tmp/a.txt")));
+    assert_eq!(shown_text(&window, cx), "[x](file:///tmp/a.txt)");
+}
+
+#[gpui::test]
+fn a_link_with_an_unknown_scheme_opens_nothing(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[x](zzz-app:anything)")]);
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(cx.opened_url(), None);
+    assert!(notice(&window, &mut visual).is_some_and(|text| text.contains("zzz-app:anything")));
+    assert_eq!(shown_text(&window, cx), "[x](zzz-app:anything)");
+}
+
+#[gpui::test]
+fn a_mail_address_opens_outside_the_app(cx: &mut TestAppContext) {
+    let (window, mut visual) = showing_a(cx, &[("a.md", "[x](mailto:a@b.org)")]);
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(cx.opened_url().as_deref(), Some("mailto:a@b.org"));
+    assert_eq!(notice(&window, &mut visual), None);
+}
+
+#[gpui::test]
+fn a_scheme_is_matched_without_regard_to_case(cx: &mut TestAppContext) {
+    let (_window, mut visual) = showing_a(cx, &[("a.md", "[x](HTTPS://x.org/p)")]);
+
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+
+    assert_eq!(cx.opened_url().as_deref(), Some("HTTPS://x.org/p"));
+}
+
 #[gpui::test]
 fn an_unresolved_link_changes_nothing(cx: &mut TestAppContext) {
     let (window, mut visual) = showing_a(cx, &[("a.md", "[[missing]]")]);

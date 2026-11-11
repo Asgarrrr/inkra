@@ -81,6 +81,39 @@ fn a_file_without_an_appearance_is_rejected() {
 }
 
 #[test]
+fn colors_that_are_not_an_object_are_skipped_and_the_base_applies() {
+    for text in [
+        r#"{"appearance":"light","colors":[]}"#,
+        r#"{"appearance":"light","colors":"x"}"#,
+        r#"{"appearance":"light","colors":3}"#,
+    ] {
+        let parsed = parse(text).unwrap();
+        assert_eq!(parsed.skipped, ["colors"], "{text}");
+        assert_eq!(
+            parsed.theme.colors,
+            builtin::of(Appearance::Light).colors,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn null_colors_read_as_none() {
+    let parsed = parse(r#"{"appearance":"dark","colors":null}"#).unwrap();
+    assert!(parsed.skipped.is_empty());
+    assert_eq!(parsed.theme.colors, builtin::of(Appearance::Dark).colors);
+}
+
+#[test]
+fn an_unknown_appearance_is_rejected_and_names_its_line() {
+    let Err(error) = parse("{\n  \"appearance\": \"Dark\"\n}") else {
+        panic!("an unknown appearance parses");
+    };
+    let text = describe("theme \"x.json\"", &error);
+    assert!(text.starts_with("theme \"x.json\": line 2: "), "{text}");
+}
+
+#[test]
 fn short_and_upper_case_colours_read_as_their_long_form() {
     assert_eq!(parse_color("#abc"), parse_color("#aabbcc"));
     assert_eq!(parse_color("#AABBCC"), parse_color("#aabbcc"));

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::StreamExt;
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind, Mtime, New, RealFs, Stamp, VaultError, Watch};
+use inkra_vault::{Fs, Kind, MAX_TEXT_BYTES, Mtime, New, RealFs, Stamp, VaultError, Watch};
 
 /// A temp directory that removes itself.
 struct TempDir(PathBuf);
@@ -39,6 +39,18 @@ impl Drop for TempDir {
 
 fn stamp_of(path: &Path) -> Stamp {
     block_on(RealFs.load(path)).expect("load").stamp
+}
+
+/// An external edit: new bytes, and a modification time two seconds after the one it had.
+fn rewrite(path: &Path, text: &str) {
+    let before = fs::metadata(path).expect("stat").modified().expect("mtime");
+    fs::write(path, text).expect("write");
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("open")
+        .set_modified(before + Duration::from_secs(2))
+        .expect("set mtime");
 }
 
 /// For a save of a path that does not exist yet. Never compared: no file
@@ -175,10 +187,7 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
     fs::write(&note, "before").expect("write");
     let stamp = stamp_of(&note);
 
-    // Sleep so the mtime differs too: some filesystems share a timestamp
-    // across writes within one second.
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "someone else's much longer text").expect("write");
+    rewrite(&note, "someone else's much longer text");
 
     let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
 
@@ -193,6 +202,137 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
         Some("md"),
         "an extension read_dir filters out would hide the only signal there is"
     );
+}
+
+#[test]
+fn a_conflict_copy_is_never_written_through_a_symlink_at_its_name() {
+    let dir = TempDir::new("conflict-symlink");
+    let note = dir.0.join("Note.md");
+    fs::write(&note, "theirs").expect("write");
+    fs::File::options()
+        .write(true)
+        .open(&note)
+        .expect("open")
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125))
+        .expect("set the mtime");
+    let outside = dir.0.join("outside.txt");
+    let planted = dir.0.join("Note (conflict 2026-09-21 14-32-05Z).md");
+    std::os::unix::fs::symlink(&outside, &planted).expect("symlink");
+
+    let saved = block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert_eq!(
+        saved.preserved,
+        Some(dir.0.join("Note (conflict 2026-09-21 14-32-05Z) 2.md"))
+    );
+    assert!(
+        fs::symlink_metadata(&outside).is_err(),
+        "the link's target must not be created"
+    );
+    assert!(fs::symlink_metadata(&planted).expect("stat").is_symlink());
+}
+
+#[test]
+fn a_conflict_copy_steps_past_a_folder_at_its_name() {
+    let dir = TempDir::new("conflict-folder");
+    let note = dir.0.join("Note.md");
+    fs::write(&note, "theirs").expect("write");
+    fs::File::options()
+        .write(true)
+        .open(&note)
+        .expect("open")
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125))
+        .expect("set the mtime");
+    let planted = dir.0.join("Note (conflict 2026-09-21 14-32-05Z).md");
+    fs::create_dir(&planted).expect("create_dir");
+
+    let saved = block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert_eq!(
+        saved.preserved,
+        Some(dir.0.join("Note (conflict 2026-09-21 14-32-05Z) 2.md"))
+    );
+    assert!(fs::symlink_metadata(&planted).expect("stat").is_dir());
+}
+
+#[test]
+fn a_note_with_the_longest_name_saves_and_keeps_a_conflict_copy() {
+    let dir = TempDir::new("longest-name");
+    // 252 units plus `.md`: the longest name `check_name` accepts.
+    let note = dir.0.join(format!("{}.md", "a".repeat(252)));
+
+    block_on(RealFs.save(&note, "one", absent())).expect("save a new note");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "one");
+
+    let stale = block_on(RealFs.save(&note, "two", absent())).expect("save over a conflict");
+    let preserved = stale.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "one");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "two");
+    assert_eq!(names(&dir.0).len(), 2, "no temp left behind");
+}
+
+/// The counter `temp_path` hands out next, read from the temp a failed save names.
+fn next_temp_counter(dir: &Path) -> u64 {
+    let missing = dir.join("missing").join("a.md");
+    let error = block_on(RealFs.save(&missing, "", absent())).expect_err("no folder");
+    let VaultError::Io { path, .. } = error else {
+        panic!("an io error names the temp");
+    };
+    let name = path
+        .file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .into_owned();
+    let counter = name
+        .strip_suffix(".tmp")
+        .and_then(|name| name.rsplit('-').next())
+        .expect("a counter");
+    counter.parse::<u64>().expect("digits") + 1
+}
+
+#[test]
+fn a_save_temp_is_never_written_through_a_symlink_at_its_name() {
+    let dir = TempDir::new("temp-symlink");
+    let note = dir.0.join("note.md");
+    let outside = dir.0.join("outside.txt");
+    let first = next_temp_counter(&dir.0);
+    // Other tests share the counter, so a window, not one name.
+    for counter in first..first + 64 {
+        let temp = dir.0.join(format!(
+            "note.md.inkra-{}-{counter}.tmp",
+            std::process::id()
+        ));
+        std::os::unix::fs::symlink(&outside, &temp).expect("symlink");
+    }
+
+    block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert!(
+        fs::symlink_metadata(&note).expect("stat").is_file(),
+        "the note must be a plain file, not a renamed link"
+    );
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+    assert!(
+        fs::symlink_metadata(&outside).is_err(),
+        "the link's target must not be created"
+    );
+}
+
+#[test]
+fn save_preserves_an_external_edit_that_kept_the_size() {
+    let dir = TempDir::new("same-size");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    let stamp = stamp_of(&note);
+
+    rewrite(&note, "theirs");
+    assert_eq!(stamp_of(&note).size, stamp.size, "only the time tells");
+
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+
+    let preserved = saved.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "theirs");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
 }
 
 #[test]
@@ -244,6 +384,22 @@ fn save_to_a_path_whose_folders_are_missing_fails_until_create_parents() {
     assert_eq!(names(&dir.0.join("f").join("g")), ["note.md"]);
 }
 
+/// On a local disk the write fails too; the guard's mark is that the error names the note, not a temp file.
+#[test]
+fn save_whose_stat_fails_reports_the_note_and_writes_nothing() {
+    let dir = TempDir::new("stat-fails");
+    let plain = dir.0.join("plain.txt");
+    fs::write(&plain, "plain").expect("write");
+    let note = plain.join("note.md");
+
+    let Err(VaultError::Io { path, .. }) = block_on(RealFs.save(&note, "ours", absent())) else {
+        panic!("a stat under a plain file must fail the save");
+    };
+
+    assert_eq!(path, note);
+    assert_eq!(names(&dir.0), ["plain.txt"]);
+}
+
 #[test]
 fn a_failed_preserve_leaves_the_file_untouched() {
     let dir = TempDir::new("preserve-fails");
@@ -251,8 +407,7 @@ fn a_failed_preserve_leaves_the_file_untouched() {
     fs::write(&note, "before").expect("write");
     let stamp = stamp_of(&note);
 
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "theirs").expect("write");
+    rewrite(&note, "theirs");
     fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o500)).expect("chmod");
 
     let result = block_on(RealFs.save(&note, "ours", stamp));
@@ -264,6 +419,11 @@ fn a_failed_preserve_leaves_the_file_untouched() {
         "theirs",
         "the bytes the save could not preserve are still there"
     );
+
+    // Control: the same stale stamp reaches the preserve once the folder is writable.
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+    let preserved = saved.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "theirs");
 }
 
 #[test]
@@ -274,8 +434,7 @@ fn a_preserved_file_keeps_the_note_mode() {
     fs::set_permissions(&note, fs::Permissions::from_mode(0o600)).expect("chmod");
     let stamp = stamp_of(&note);
 
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "theirs and longer").expect("write");
+    rewrite(&note, "theirs and longer");
 
     let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
 
@@ -547,6 +706,34 @@ fn rename_of_a_symlink_moves_the_link_not_its_target() {
 }
 
 #[test]
+fn rename_of_a_symlink_refuses_to_destroy_a_different_note() {
+    let dir = TempDir::new("rename-symlink-collision");
+    let target = dir.0.join("target.md");
+    let link = dir.0.join("link.md");
+    let other = dir.0.join("other.md");
+    fs::write(&target, "text").expect("write");
+    std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+    fs::write(&other, "theirs").expect("write");
+
+    let result = block_on(RealFs.rename(&link, &other));
+
+    assert_eq!(kind_of(result), Some(ErrorKind::AlreadyExists));
+    assert_eq!(fs::read_to_string(&other).expect("read"), "theirs");
+    assert!(
+        fs::symlink_metadata(&link).expect("stat").is_symlink(),
+        "the link stays where it was"
+    );
+}
+
+/// Only a missing path: a test that trashes a file would fill the user's Trash on every run.
+#[test]
+fn trash_of_a_missing_path_fails() {
+    let dir = TempDir::new("trash-missing");
+
+    assert!(block_on(RealFs.trash(&dir.0.join("gone.md"))).is_err());
+}
+
+#[test]
 fn create_makes_an_empty_note_and_refuses_an_occupied_name() {
     let dir = TempDir::new("create");
     let path = dir.0.join("new.md");
@@ -695,6 +882,17 @@ fn replace_bytes_sweeps_the_orphan_temps_of_its_file_that_no_process_holds() {
 }
 
 #[test]
+fn a_failed_replace_leaves_no_temp_file() {
+    let dir = TempDir::new("replace-fails");
+    let folder = dir.0.join("index.idx");
+    fs::create_dir(&folder).expect("mkdir");
+
+    assert!(block_on(RealFs.replace_bytes(&folder, b"new")).is_err());
+
+    assert_eq!(names(&dir.0), ["index.idx"]);
+}
+
+#[test]
 fn remove_file_removes_the_file_and_a_missing_file_is_ok() {
     let dir = TempDir::new("remove-file");
     let file = dir.0.join("index.idx");
@@ -715,6 +913,7 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
     block_on(fs.create(&a, New::Note)).expect("create a");
     block_on(fs.create(&b, New::Note)).expect("create b");
     block_on(fs.create(&folder, New::Dir)).expect("create f");
+    block_on(fs.create(&folder.join("child.md"), New::Note)).expect("create f/child.md");
     vec![
         (
             "create onto a note",
@@ -742,6 +941,22 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
             kind_of(block_on(fs.read_dir(&root.join("gone")))),
         ),
         ("read_dir a note", kind_of(block_on(fs.read_dir(&a)))),
+        (
+            "remove_file a folder",
+            kind_of(block_on(fs.remove_file(&folder))),
+        ),
+        (
+            "rename a folder under itself",
+            kind_of(block_on(fs.rename(&folder, &folder.join("inner")))),
+        ),
+        (
+            "rename a note under itself",
+            kind_of(block_on(fs.rename(&a, &a.join("inner.md")))),
+        ),
+        (
+            "rename a folder onto its own child",
+            kind_of(block_on(fs.rename(&folder, &folder.join("child.md")))),
+        ),
     ]
 }
 
@@ -757,6 +972,16 @@ fn mem_fs_reports_the_io_kinds_real_fs_does() {
         ("load under a missing folder", Some(ErrorKind::NotFound)),
         ("read_dir a missing folder", Some(ErrorKind::NotFound)),
         ("read_dir a note", Some(ErrorKind::NotADirectory)),
+        ("remove_file a folder", Some(ErrorKind::PermissionDenied)),
+        (
+            "rename a folder under itself",
+            Some(ErrorKind::InvalidInput),
+        ),
+        ("rename a note under itself", Some(ErrorKind::NotADirectory)),
+        (
+            "rename a folder onto its own child",
+            Some(ErrorKind::AlreadyExists),
+        ),
     ];
     let dir = TempDir::new("io-kinds");
     let mem = MemFs::new();
@@ -792,6 +1017,23 @@ fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
 
     assert_eq!(bytes, b"\x00\xffcache");
     assert_eq!(error.io_kind(), Some(ErrorKind::FileTooLarge));
+}
+
+#[test]
+fn load_refuses_a_file_over_the_cap() {
+    let dir = TempDir::new("load-cap");
+    let huge = dir.0.join("huge.md");
+    let small = dir.0.join("small.md");
+    fs::File::create(&huge)
+        .and_then(|file| file.set_len(MAX_TEXT_BYTES + 1))
+        .expect("sparse file");
+    fs::write(&small, "four").expect("write");
+
+    let error = block_on(RealFs.load(&huge)).expect_err("one byte over the cap");
+    let loaded = block_on(RealFs.load(&small)).expect("under the cap");
+
+    assert_eq!(error.io_kind(), Some(ErrorKind::FileTooLarge));
+    assert_eq!(loaded.text, "four");
 }
 
 #[test]

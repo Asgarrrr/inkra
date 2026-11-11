@@ -1,6 +1,6 @@
 use gpui::{
-    App, AppContext as _, Context, Entity, Focusable, PromptLevel, ScrollStrategy, Subscription,
-    Window,
+    App, AppContext as _, Context, Entity, EntityId, Focusable, PromptLevel, ScrollStrategy,
+    Subscription, Window,
 };
 use std::io::ErrorKind;
 use std::path::Path;
@@ -8,6 +8,7 @@ use std::path::Path;
 use inkra_vault::{EntryId, Kind, NameProblem, New};
 
 use crate::field::{Cancelled, Confirmed, NameField};
+use crate::vault::Created;
 
 use super::{Rename, Sidebar, Trash};
 
@@ -247,17 +248,19 @@ impl Sidebar {
 
         let name = name.to_owned();
         if let Editing::Create(new) = editing {
-            if let Some(edit) = self.rows.edit_mut() {
-                edit.creating = true;
-                edit.rejected = None;
-            }
+            let Some(edit) = self.rows.edit_mut() else {
+                return;
+            };
+            edit.creating = true;
+            edit.rejected = None;
+            let field = edit.field.entity_id();
             let created = self
                 .notes
                 .update(cx, |notes, cx| notes.create(parent, new, &name, cx));
             cx.spawn(async move |sidebar, cx| {
                 let created = created.await;
                 let _ = sidebar.update(cx, |sidebar, cx| {
-                    sidebar.created(created, cx);
+                    sidebar.created(field, created, cx);
                 });
             })
             .detach();
@@ -270,31 +273,52 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// Escape during a create closed the field already: `creating` tells the field of this create from a later one.
-    fn created(&mut self, created: inkra_vault::Result<Option<EntryId>>, cx: &mut Context<Self>) {
-        let creating = self.rows.edit().is_some_and(|edit| edit.creating);
-        match created {
-            Ok(id) => {
-                if creating {
-                    self.rows.close();
-                }
-                if id.is_some() {
-                    self.select(id);
-                }
-            }
+    /// A result reaches only the field that asked for it: escape may have closed it, and a later create opened another.
+    fn created(
+        &mut self,
+        field: EntityId,
+        created: inkra_vault::Result<Created>,
+        cx: &mut Context<Self>,
+    ) {
+        let made = match created {
+            Ok(Created::Listed(id)) => Ok(Some(id)),
+            Ok(Created::Unlisted) => Ok(None),
+            Ok(Created::Refused) => Err(Rejection::Refused),
             Err(error) => {
                 log::warn!("create: {error}");
-                if let Some(edit) = self.rows.edit_mut().filter(|edit| edit.creating) {
+                Err(if error.io_kind() == Some(ErrorKind::AlreadyExists) {
+                    Rejection::Duplicate
+                } else {
+                    Rejection::Refused
+                })
+            }
+        };
+        match made {
+            Ok(listed) => {
+                if self.creating_field(field).is_some() {
+                    self.rows.close();
+                }
+                // As `step`: a name being typed keeps its row.
+                if let Some(id) = listed
+                    && self.rows.edit().is_none()
+                {
+                    self.select(Some(id));
+                }
+            }
+            Err(rejection) => {
+                if let Some(edit) = self.creating_field(field) {
                     edit.creating = false;
-                    edit.rejected = Some(if error.io_kind() == Some(ErrorKind::AlreadyExists) {
-                        Rejection::Duplicate
-                    } else {
-                        Rejection::Refused
-                    });
+                    edit.rejected = Some(rejection);
                 }
             }
         }
         cx.notify();
+    }
+
+    fn creating_field(&mut self, field: EntityId) -> Option<&mut EditState> {
+        self.rows
+            .edit_mut()
+            .filter(|edit| edit.creating && edit.field.entity_id() == field)
     }
 
     fn is_current_name(&self, target: Option<EntryId>, name: &str, cx: &App) -> bool {

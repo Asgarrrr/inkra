@@ -4,6 +4,8 @@
 mod errors;
 mod faults;
 mod fixture;
+mod rename;
+mod save;
 mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,10 +18,9 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
-    listable,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, MAX_TEXT_BYTES, Mtime, New, Result, Saved, Stamp,
+    VaultError, listable,
 };
-use crate::temp::temp_path;
 use crate::watch::Watch;
 
 use errors::{io, stamp_of};
@@ -40,6 +41,7 @@ struct State {
     blocked_read_bytes: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_replaces: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_creates: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Separate from `unwritable`: a note can be writable and still not
     /// removable (no trash on the volume, say).
     untrashable: BTreeSet<PathBuf>,
@@ -75,6 +77,23 @@ impl State {
             return Err(io(path, ErrorKind::NotFound));
         }
         Ok(())
+    }
+
+    /// A file or a folder: what `RealFs` asks `symlink_metadata`.
+    fn exists(&self, path: &Path) -> bool {
+        self.files.contains_key(path) || self.dirs.contains_key(path)
+    }
+
+    /// As `RealFs`: an unreadable, missing or over-`max_len` file is refused before a byte is handed out.
+    fn readable_file(&self, path: &Path, max_len: u64) -> Result<&(Vec<u8>, Mtime, FileIdentity)> {
+        self.refused_load(path)?;
+        let Some(file) = self.files.get(path) else {
+            return Err(io(path, ErrorKind::NotFound));
+        };
+        if file.0.len() as u64 > max_len {
+            return Err(io(path, ErrorKind::FileTooLarge));
+        }
+        Ok(file)
     }
 }
 
@@ -217,10 +236,7 @@ impl Fs for MemFs {
         }
 
         let state = self.state();
-        state.refused_load(path)?;
-        let Some((bytes, mtime, identity)) = state.files.get(path) else {
-            return Err(io(path, ErrorKind::NotFound));
-        };
+        let (bytes, mtime, identity) = state.readable_file(path, MAX_TEXT_BYTES)?;
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Err(VaultError::NotUtf8 {
                 path: path.to_path_buf(),
@@ -244,81 +260,12 @@ impl Fs for MemFs {
             let _ = wait.await;
         }
         let state = self.state();
-        state.refused_load(path)?;
-        let Some((bytes, _, _)) = state.files.get(path) else {
-            return Err(io(path, ErrorKind::NotFound));
-        };
-        if bytes.len() as u64 > max_len {
-            return Err(io(path, ErrorKind::FileTooLarge));
-        }
+        let (bytes, _, _) = state.readable_file(path, max_len)?;
         Ok(bytes.clone())
     }
 
-    /// Mints a fresh identity, unlike `insert_file`: `RealFs::save` renames a
-    /// temp file over the destination, so the inode changes too.
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {
-        let blocked = self.state().blocked_saves.remove(path);
-        if let Some(wait) = blocked {
-            let _ = wait.await;
-        }
-        {
-            let mut state = self.state();
-            state.injected_save_failure(path)?;
-            if state.unwritable.contains(path) {
-                return Err(io(path, ErrorKind::PermissionDenied));
-            }
-            // As `RealFs`: the temporary file cannot be created in a missing folder.
-            if path
-                .parent()
-                .is_some_and(|parent| !state.dirs.contains_key(parent))
-            {
-                return Err(io(path, ErrorKind::NotFound));
-            }
-        }
-
-        // Guard scoped to this block: `state()`'s mutex is not reentrant.
-        let preserved = {
-            let state = self.state();
-            match state.files.get(path) {
-                Some((existing, mtime, _)) if stamp_of(existing, *mtime) != expected => {
-                    let destination = crate::conflict::conflict_path(path, *mtime, |candidate| {
-                        state.files.contains_key(candidate)
-                    });
-                    Some((destination, existing.clone(), stamp_of(existing, *mtime)))
-                }
-                _ => None,
-            }
-        };
-        if let Some((destination, bytes, stamp)) = preserved.clone() {
-            self.insert_bytes(destination.clone(), bytes);
-            if let Err(source) = self.state().injected_failure_after_preserve(path) {
-                return Err(VaultError::Unwritten {
-                    preserved: destination,
-                    stamp,
-                    source: Box::new(source),
-                });
-            }
-        }
-
-        let (stamp, identity, blocked) = {
-            let mut state = self.state();
-            let identity = Self::fresh_identity(&mut state);
-            let bytes = text.as_bytes().to_vec();
-            let mtime = Self::put_file(&mut state, path.to_path_buf(), bytes, Some(identity));
-            let stamp = stamp_of(text.as_bytes(), mtime);
-            // As `RealFs::save`: a temporary file, renamed onto the note.
-            state.changed(&temp_path(path));
-            state.changed(path);
-            (stamp, identity, state.blocked_after_saves.remove(path))
-        };
-        if let Some(wait) = blocked {
-            let _ = wait.await;
-        }
-        Ok(Saved {
-            stamp,
-            identity,
-            preserved: preserved.map(|(destination, _, _)| destination),
-        })
+        self.save_text(path, text, expected).await
     }
 
     async fn create_parents(&self, path: &Path) -> Result<()> {
@@ -345,6 +292,9 @@ impl Fs for MemFs {
     async fn remove_file(&self, path: &Path) -> Result<()> {
         let mut state = self.state();
         state.injected_remove_failure(path)?;
+        if state.dirs.contains_key(path) {
+            return Err(io(path, ErrorKind::PermissionDenied));
+        }
         if state.files.remove(path).is_some() {
             state.changed(path);
         }
@@ -352,11 +302,15 @@ impl Fs for MemFs {
     }
 
     async fn create(&self, path: &Path, new: New) -> Result<FileIdentity> {
+        let blocked = self.state().blocked_creates.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
         let mut state = self.state();
         if state.uncreatable.contains(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
         }
-        if state.files.contains_key(path) || state.dirs.contains_key(path) {
+        if state.exists(path) {
             return Err(io(path, ErrorKind::AlreadyExists));
         }
 
@@ -376,70 +330,8 @@ impl Fs for MemFs {
         Ok(identity)
     }
 
-    /// Moves the stored entry rather than rebuilding it, so the identity
-    /// travels with the file as an inode does under `rename(2)`. The subtree
-    /// moves with a directory for the same reason.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        let result = 'moved: {
-            let mut state = self.state();
-            if state.uncreatable.contains(to) {
-                break 'moved Err(io(to, ErrorKind::PermissionDenied));
-            }
-            // Byte equality only: unlike a real volume, this fake does not fold
-            // case or Unicode normalization.
-            if from == to {
-                break 'moved Ok(());
-            }
-            if state.files.contains_key(to) || state.dirs.contains_key(to) {
-                break 'moved Err(io(to, ErrorKind::AlreadyExists));
-            }
-
-            if let Some(entry) = state.files.remove(from) {
-                state.files.insert(to.to_path_buf(), entry);
-                state.changed(from);
-                state.changed(to);
-                break 'moved Ok(());
-            }
-            let Some(entry) = state.dirs.remove(from) else {
-                break 'moved Err(io(from, ErrorKind::NotFound));
-            };
-            state.dirs.insert(to.to_path_buf(), entry);
-
-            let moved: Vec<_> = state
-                .files
-                .keys()
-                .filter(|path| path.starts_with(from))
-                .cloned()
-                .collect();
-            for path in moved {
-                let Ok(relative) = path.strip_prefix(from) else {
-                    continue;
-                };
-                let destination = to.join(relative);
-                if let Some(entry) = state.files.remove(&path) {
-                    state.files.insert(destination, entry);
-                }
-            }
-            let moved: Vec<_> = state
-                .dirs
-                .keys()
-                .filter(|path| path.as_path() != to && path.starts_with(from))
-                .cloned()
-                .collect();
-            for path in moved {
-                let Ok(relative) = path.strip_prefix(from) else {
-                    continue;
-                };
-                let destination = to.join(relative);
-                if let Some(entry) = state.dirs.remove(&path) {
-                    state.dirs.insert(destination, entry);
-                }
-            }
-            // As FSEvents: the two names, not the subtree that moved with them.
-            state.changed(from);
-            state.changed(to);
-            Ok(())
-        };
+        let result = self.state().rename(from, to);
         let blocked = result
             .is_ok()
             .then(|| self.state().blocked_after_renames.remove(from))

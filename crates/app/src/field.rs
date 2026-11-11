@@ -4,9 +4,9 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, CursorStyle, Element, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, GlobalElementId, InteractiveElement, IntoElement, LayoutId, Pixels, Render, Style,
-    Styled, Window, actions, prelude::*, px, relative,
+    App, Bounds, ContentMask, Context, CursorStyle, Element, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, GlobalElementId, InteractiveElement, IntoElement, LayoutId, Pixels,
+    Render, Style, Styled, Window, actions, point, prelude::*, px, relative,
 };
 use inkra_editor::Selection;
 use inkra_markdown::Markdown;
@@ -35,6 +35,8 @@ impl EventEmitter<Edited> for NameField {}
 
 pub(crate) struct NameField {
     input: TextInput,
+    /// How far the text is scrolled left; prepaint keeps the caret inside the field.
+    scroll: Pixels,
 }
 
 impl NameField {
@@ -45,6 +47,7 @@ impl NameField {
         selection.set_head(end, inkra_editor::Goal::None);
         Self {
             input: TextInput::new(buffer, selection, Mode::SingleLine, cx),
+            scroll: px(0.),
         }
     }
 
@@ -55,6 +58,23 @@ impl NameField {
     fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(Confirmed(self.text(cx)));
     }
+}
+
+/// The scroll nearest `scroll` that shows `caret`, in a field `width` wide over text `end` wide.
+fn reveal(scroll: Pixels, caret: &Bounds<Pixels>, width: Pixels, end: Pixels) -> Pixels {
+    let shown = if caret.left() < scroll {
+        caret.left()
+    } else if caret.right() > scroll + width {
+        caret.right() - width
+    } else {
+        scroll
+    };
+    shown.clamp(px(0.), (end - width).max(px(0.)))
+}
+
+/// The text's bounds: the field's, moved left by the scroll.
+fn scrolled(bounds: Bounds<Pixels>, scroll: Pixels) -> Bounds<Pixels> {
+    Bounds::new(bounds.origin - point(scroll, px(0.)), bounds.size)
 }
 
 impl InputHost for NameField {
@@ -136,7 +156,9 @@ impl Element for FieldElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let input = self.field.read(cx).input();
-        let range = input.state().selection().range();
+        let selection = input.state().selection();
+        let (range, head) = (selection.range(), selection.head());
+        let len = input.buffer().read(cx).len();
         let marked = input.state().marked_range();
         let style = window.text_style();
         let inputs = LayoutInputs {
@@ -152,7 +174,18 @@ impl Element for FieldElement {
             scrolls: &BlockScrolls::default(),
         };
         let layout = shape_document(&inputs, None, window);
-        let quads = Quads::new(&layout, &range, bounds.origin);
+        let (caret, end) = (layout.caret_bounds(head), layout.caret_bounds(len).right());
+        // No notify: this runs inside the frame that draws the result.
+        let scroll = self.field.update(cx, |field, _| {
+            field.scroll = reveal(field.scroll, &caret, bounds.size.width, end);
+            field.scroll
+        });
+        let quads = Quads::new(
+            &layout,
+            &range,
+            scrolled(bounds, scroll).origin,
+            &(px(0.)..bounds.size.height),
+        );
         Some((Rc::new(layout), quads))
     }
 
@@ -167,7 +200,11 @@ impl Element for FieldElement {
         cx: &mut App,
     ) {
         if let Some((layout, quads)) = prepaint.take() {
-            text_input::paint(&self.field, layout, quads, bounds, window, cx);
+            let text = scrolled(bounds, self.field.read(cx).scroll);
+            // Scrolled text is wider than the field.
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                text_input::paint(&self.field, layout, quads, text, window, cx);
+            });
         }
     }
 }

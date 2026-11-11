@@ -135,14 +135,14 @@ editing is ever built — without touching a call site. It is deliberately not
 `Ord`: the handle is creation order, not document order, and comparing two
 anchors means resolving both first. It also carries no buffer identity, so
 resolving one against a *different* `Buffer` is silently wrong rather than a
-panic. Accepted while there is exactly one `Buffer` in the tree; revisit when
-`inkra-vault` introduces a second.
+panic. Every open note has its own `Buffer`, so ownership holds the risk: a
+`ParkedView` owns its buffer, and its anchors resolve only there.
 
 Slots are never reused. `forget` tombstones one, and resolving a tombstoned
 handle panics — the caller-bug contract. Reuse without a generation counter
 turns that panic into a confident answer about somebody else's anchor. The
 price is that each edit walks every slot ever created rather than every live
-one: the same "fine for a note" trade as the grapheme scans above.
+one: the same "fine for a note" trade as the O(n) offset conversion below.
 
 ### What an anchor does not survive
 
@@ -172,14 +172,11 @@ emoji sequence. Stepping by char splits both.
 
 ## Cost
 
-`previous_grapheme` and `next_grapheme` are O(length of the document), not
-O(one step). Both build a `grapheme_indices` iterator over the whole text;
-`previous_grapheme` then walks it backwards from the end until it passes the
-offset. Every arrow key, backspace and delete pays one such scan.
+`previous_grapheme` and `next_grapheme` cost one step, not one document. Each
+starts a `GraphemeCursor` at the offset and reads only the text around it.
 
-Fine for a note. It stops being fine at the scale where one keypress scans tens
-of kilobytes — the same trigger as the rope below, and they are fixed together:
-a rope replaces the scan with a chunk-local `GraphemeCursor`.
+One case is not local. A long run of regional indicators or emoji modifiers
+makes the cursor look back through the whole run.
 
 ## Deferred
 
@@ -189,9 +186,9 @@ Decisions made with reasons, so they are not relitigated from scratch:
   problem at the sizes handled so far — a note, not a repository. The trigger
   is a measured one: a real vault, a real file. When it fires: `ropey` is the
   leading candidate,
-  but it ships no grapheme segmentation, so `previous_grapheme`/`next_grapheme`
-  become a manual chunk-walking `GraphemeCursor` (~40-60 lines) — not a
-  dependency swap. Both `ropey` and `crop` were outside our 12-month freshness
+  but it ships no grapheme segmentation. `previous_grapheme`/`next_grapheme`
+  already use a `GraphemeCursor`; under a rope, they must feed it chunks
+  (~40-60 lines) — not a dependency swap. Both `ropey` and `crop` were outside our 12-month freshness
   rule as of 2026-09-20; adopting either is a deliberate exception.
 - **Caching offset conversion** short of a rope. Rejected. A cached last
   `(byte, utf16)` pair only helps sequential typing, already the cheap case,

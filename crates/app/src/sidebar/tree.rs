@@ -64,10 +64,14 @@ impl Sidebar {
         if self.rows.edit().is_some() {
             return;
         }
-        let Some(next) = self.rows.visible().step(self.selected, delta) else {
+        let visible = self.rows.visible();
+        let Some(row) = visible.step(self.selected, delta) else {
             return;
         };
+        let next = visible.entry(row).id;
         self.select(Some(next));
+        // No field is open here, so the row's index is its item's.
+        self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
         cx.notify();
     }
 

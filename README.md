@@ -18,8 +18,9 @@ one 17 MB binary, one process.
   or the selection touches it. Quotes, lists and code blocks.
 - **Links**: `[[wikilinks]]` to notes and files, a backlinks panel, `⌘Enter`
   to follow a link.
-- **Search**: `⌘P` quick open by word start on names and text, `⌘⇧F` vault
-  search ranked by BM25, `⌘⇧P` command palette.
+- **Search**: `⌘P` quick open by word start on names and text, text matches
+  ranked by BM25; `⌘⇧F` vault search, hits grouped by note; `⌘⇧P` command
+  palette.
 - **Tabs and splits**: tabs with per-tab back and forward, `⌘⇧T` to reopen a
   closed tab, split groups in any direction, tabs dragged between them.
 - **Docks**: the file tree and the backlinks panel move between the left and
@@ -118,7 +119,8 @@ tables: [docs/benchmarks.md](docs/benchmarks.md). Reproduce with
 
 ## Build and run
 
-Requires macOS and Rust 1.96 or later.
+Requires macOS and Rust 1.98; rustup installs the pinned toolchain from
+rust-toolchain.toml.
 
 ```sh
 cargo run --release -p inkra-app -- ~/path/to/vault
@@ -134,8 +136,10 @@ no text properties. This is a known gap, tracked in
 
 ## Development
 
-`./scripts/check.sh` runs the build, tests, clippy, fmt and `cargo deny`; green
-is the definition of done. The workspace is split into crates with one role
+`./scripts/check.sh` checks formatting, spelling (`typos`), the crate graph, the
+ast-grep rules, line ceilings, clippy, `cargo deny`, the tests and a release
+build; green is the definition of done. It needs `typos`, `ast-grep`,
+`cargo-deny` and `jq` installed, and prints the install command for a missing one. The workspace is split into crates with one role
 each (`text`, `editor`, `markdown`, `index`, `vault`, `tabs`, `layout`, `app`);
 only `app` depends on GPUI. Architecture and conventions are in
 [CLAUDE.md](CLAUDE.md), design specs in `docs/superpowers/specs/`, deferred

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::civil::format_utc;
 use crate::fs::Mtime;
+use crate::path::{MAX_NAME_UNITS, fit};
 
 /// `Note.md` becomes `Note (conflict 2026-09-21 14-32-05Z).md`, beside the
 /// note. Named for the preserved file's mtime, not the current time, so the
@@ -27,7 +28,9 @@ pub(crate) fn conflict_path(
         } else {
             format!(" {counter}")
         };
-        let candidate = note.with_file_name(format!("{stem} (conflict {when}Z){suffix}.md"));
+        let tail = format!(" (conflict {when}Z){suffix}.md");
+        let room = MAX_NAME_UNITS.saturating_sub(tail.encode_utf16().count());
+        let candidate = note.with_file_name(format!("{}{tail}", fit(&stem, room)));
         if !taken(&candidate) {
             return candidate;
         }

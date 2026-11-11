@@ -189,7 +189,12 @@ impl Element for TextElement {
             .collect();
 
         let selection = self.editor.read(cx).input.state().selection().range();
-        let quads = Quads::new(&layout, &selection, text.origin);
+        let quads = Quads::new(
+            &layout,
+            &selection,
+            text.origin,
+            &(top..top + mask.size.height),
+        );
         EditorPrepaint {
             painted: Some((layout, quads)),
             text,
@@ -211,6 +216,7 @@ impl Element for TextElement {
         let Some((layout, quads)) = prepaint.painted.take() else {
             return;
         };
+        EditorView::track_drag(&self.editor, window);
         let blocks = Rc::new(std::mem::take(&mut prepaint.blocks));
         let text_hitbox = prepaint.text_hitbox.clone();
         let line_height = window.line_height();

@@ -17,8 +17,8 @@ mod watch;
 pub mod mem_fs;
 
 pub use fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
-    Watcher, normalize_line_endings,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, MAX_TEXT_BYTES, Mtime, New, Result, Saved, Stamp,
+    VaultError, Watcher, normalize_line_endings,
 };
 pub use jobs::{Job, Jobs, Serial};
 pub use path::{NameProblem, RelPath, check_name, note_file_name};

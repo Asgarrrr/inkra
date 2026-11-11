@@ -4,13 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly: an advisory lands against the lock file with no push to carry it.
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run; every commit on main is checked to the end.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
@@ -18,7 +22,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Toolchain comes from rust-toolchain.toml; rustup resolves and installs
       # the pinned channel on the first cargo/rustup call below. No separate
@@ -28,12 +32,12 @@ jobs:
 
       # ast-grep is not in install-action's list; its default cargo-binstall fallback fetches it.
       # Pinned to the versions check.sh is green on: a new typos dictionary must not fail an unrelated PR.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
           tool: cargo-deny@0.20.2,ast-grep@0.51.1,typos@1.52.1
 
       # Caches the registry, cargo's git checkout of Zed, and their builds.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # check.sh is the definition of done; run it, not a reimplementation of
       # its steps, so CI and the local gate cannot drift apart.

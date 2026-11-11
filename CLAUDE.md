@@ -49,6 +49,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   A whole crate is ~1000 mutants run one by one, near two hours; the diff is a few
   dozen. Run plain `cargo mutants` once, before the PR.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
+  After changing `vault` logic, run the diff command with
+  `-p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
@@ -127,11 +129,17 @@ Read the spec before changing its area:
   gutters and bars, code backgrounds, task boxes
 - `docs/superpowers/specs/2026-11-07-code-blocks-design.md` — fenced and
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
+- `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's
+  horizontal scroll; replaces decision 5 of the code-blocks spec
+- `docs/superpowers/specs/2026-11-11-code-highlighting-design.md` — highlighting
+  in code blocks: the library choice, token classes, the per-block cache
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
 - `docs/superpowers/specs/2026-11-08-backlink-context-on-demand-design.md` — links
   as `NoteRef`s, one shared slice per note, contexts read on demand by the panel, cache format 3
+- `docs/superpowers/specs/2026-11-11-link-landing-design.md` — following `[[Note#Heading]]`
+  and a backlink row to their place: the heading fold, `Spot`, `Reveal::Top`, `LinkActivated`
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
   search, `NoteIndex`/`IndexSync`, the picker and modal layer
 - `docs/superpowers/specs/2026-09-28-vault-search-integration-design.md` — `⌘⇧F`
@@ -148,6 +156,8 @@ Read the spec before changing its area:
   loads, supersede, own-save echo, the startup settle; `IndexSync` spawns
 - `docs/superpowers/specs/2026-09-30-index-turn-effects-design.md` —
   `LiveIndex::turn`: `Turn`, `Effects`, the turn's end, `revision`, when `IndexSync` notifies
+- `docs/superpowers/specs/2026-09-30-index-status-once-design.md` — the index status
+  (scanning, indexing, ready), answered once for quick open, vault search and backlinks
 - `docs/superpowers/specs/2026-11-06-persisted-index-design.md` — the cache
   file, the seed, text read on demand, the writer, Rebuild, the scrub
 - `docs/superpowers/specs/2026-11-06-file-kinds-design.md` — assets in the vault
@@ -160,11 +170,18 @@ Read the spec before changing its area:
   word start, the word-index prefilter, `word_prefix`
 - `docs/superpowers/specs/2026-09-28-ranking-idf-design.md` — key 2 of a text
   match: BM25, per-ordinal note lengths
+- `docs/superpowers/specs/2026-11-11-vault-search-ranking-design.md` — `⌘⇧F` groups
+  ranked by BM25: the score, where the order is made, the limit
+- `docs/superpowers/specs/2026-11-11-search-underscore-words-design.md` — part starts after `_`, trimmed parts, the joined scan, the 64-part bound
 - `docs/superpowers/specs/2026-09-29-text-input-design.md` — `TextInput`, the
   core `EditorView` and `NameField` share: gates, protocol, one binding set
+- `docs/superpowers/specs/2026-11-11-word-wise-editing-design.md` — `⌥←`/`⌥→`
+  by UAX #29 word, `⌥⌫`/`⌥⌦`, double and triple click, the word drag
 - `docs/superpowers/specs/2026-09-29-query-run-design.md` — one query entry
   in `inkra-index` (`find_notes`/`search` with `Jobs`), `IndexDelegate`, `Runs`
   owning the run, `IndexWatch::observe`
+- `docs/superpowers/specs/2026-09-30-jobs-module-design.md` — `Job`, `Jobs`, `Serial`: their
+  own module in `inkra-vault`
 - `docs/superpowers/specs/2026-09-30-runs-testable-design.md` — `Ledger`: which
   run is current, D7's deferred re-run, the wait; `Runs` drives it, `begun` in tests
 - `docs/superpowers/specs/2026-09-30-picker-owns-landing-design.md` — `Picker`
@@ -185,6 +202,10 @@ Read the spec before changing its area:
   lifecycle in `NoteStore`: `Sessions`, `Lifecycle`, `Queue`, the live set
 - `docs/superpowers/specs/2026-09-29-tabs-design.md` — tabs: `inkra-tabs`,
   `Place`, per-tab history, parked anchors, one rebound `EditorView`
+- `docs/superpowers/specs/2026-09-30-tab-views-one-owner-design.md` — `Parked`: an inactive
+  tab holds its own parked view
+- `docs/superpowers/specs/2026-09-30-no-vault-mode-design.md` — no vault open: `VaultPanes`,
+  what `⌘N` does then
 - `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
   its one writer and throttle, `Restore`'s states, the landing predicate, the window frame
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
@@ -197,13 +218,22 @@ Read the spec before changing its area:
   and docks, L1–L7, the title row from the top groups, the gestures, session v2
 - `docs/superpowers/specs/2026-11-04-themes-components-design.md` — semantic tokens, `GlobalTheme`, `ui::Color` and `Label`,
   vault themes in `.inkra/`, `settings.json`, hot reload, the theme picker
+- `docs/superpowers/specs/2026-09-21-clipboard-design.md` — copy, cut, paste
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-11-02-quit-and-failures-design.md` — close is quit, the chained pre-quit flush, the unsaved prompt, `moves`, save retries, the notice
 - `docs/superpowers/specs/2026-11-02-type-safety-hygiene-design.md` — the audit's type and hygiene
   batches: opaque offsets, positions vs lengths, typed UTF-16 ranges at the protocol boundary
+- `docs/superpowers/specs/2026-11-02-perf-batch-design.md` — performance batch 2: the
+  baseline, carried shaped lines, painting inside the content mask
+- Dropped candidates, not to be proposed again unchanged:
+  `2026-09-30-note-index-read-interface-design.md`, `2026-09-30-own-save-echo-design.md`
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
+- `docs/superpowers/specs/2026-11-11-open-a-vault-design.md` — `OpenVault`, `⌘O`, the empty
+  state's button, a fresh `AppShell` by `replace_root`, the leave path, the last vault
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
+- `docs/superpowers/specs/2026-11-11-tree-organizer-design.md` — moving files: `Move to…`, drag,
+  which links break, the rewrite plan per source note, the written form, folder trash deferred
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
 - `docs/superpowers/specs/2026-09-20-modular-architecture-design.md` — crates
 - `docs/startup-floor.md` — the launch's floor, the WindowServer oracle,

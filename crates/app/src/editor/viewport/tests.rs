@@ -231,6 +231,31 @@ fn revealing_near_the_start_stops_at_the_top() {
     assert_eq!(revealed, px(0.));
 }
 
+/// The two cases proptest shrank to before the strategy changed; the second lands an ulp apart.
+#[test]
+fn revealing_settles_on_the_two_recorded_cases() {
+    for (line_top, line_height, viewport_top, viewport_height) in [
+        (6806.963, 101.4898, 0., 0.),
+        (6479.671, 72.42129, 809.26965, 417.5722),
+    ] {
+        let line = px(line_top)..px(line_top + line_height);
+        let viewport = px(viewport_top)..px(viewport_top + viewport_height);
+        let margin = px(line_height);
+
+        let revealed = minimal(line.clone(), viewport.clone(), px(0.), margin).unwrap();
+
+        assert!(
+            revealed <= px(0.),
+            "scrolled above the document start: {revealed:?}"
+        );
+        assert_eq!(
+            minimal(line, viewport, revealed, margin),
+            None,
+            "did not settle"
+        );
+    }
+}
+
 proptest! {
     #[test]
     fn revealing_settles_and_never_scrolls_past_the_start(

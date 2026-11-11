@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{AppContext as _, Context, SharedString, Task};
-use inkra_vault::{CONFIG_DIR, Fs, RelPath};
+use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
 use super::{Theme, builtin, file};
@@ -121,6 +121,16 @@ impl ThemeStore {
     }
 }
 
+/// A vault can come from anywhere, and the first read runs before the window.
+const MAX_CONFIG_BYTES: u64 = 1 << 20;
+
+async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
+    let bytes = fs.read_bytes(path, MAX_CONFIG_BYTES).await?;
+    String::from_utf8(bytes).map_err(|_| VaultError::NotUtf8 {
+        path: path.to_path_buf(),
+    })
+}
+
 /// Never fails: a missing or broken file falls back to the system theme and says why.
 pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
     let config = root.join(CONFIG_DIR);
@@ -140,8 +150,8 @@ pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
 
 /// The theme choice and `code_block_wrap`, from the one parse of `settings.json`.
 async fn settings(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> (Choice, bool) {
-    let text = match fs.load(&config.join("settings.json")).await {
-        Ok(loaded) => loaded.text,
+    let text = match read_text(fs, &config.join("settings.json")).await {
+        Ok(text) => text,
         Err(error) => {
             if error.io_kind() != Some(ErrorKind::NotFound) {
                 notices.push(error.to_string());
@@ -183,8 +193,8 @@ async fn named(
         return None;
     }
     let path = config.join("themes").join(format!("{name}.json"));
-    let text = match fs.load(&path).await {
-        Ok(loaded) => loaded.text,
+    let text = match read_text(fs, &path).await {
+        Ok(text) => text,
         Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => {
             notices.push(not_found());
             return None;
@@ -225,10 +235,10 @@ pub(crate) async fn list(fs: &dyn Fs, root: &Path) -> Vec<(SharedString, Arc<The
         if !json || stem == Choice::SYSTEM || builtin::named(stem).is_some() {
             continue;
         }
-        let Ok(loaded) = fs.load(&path).await else {
+        let Ok(text) = read_text(fs, &path).await else {
             continue;
         };
-        if let Ok(parsed) = file::parse(&loaded.text) {
+        if let Ok(parsed) = file::parse(&text) {
             themes.push((SharedString::from(stem.to_owned()), Arc::new(parsed.theme)));
         }
     }
@@ -242,8 +252,8 @@ pub(crate) async fn write_choice(fs: &dyn Fs, root: &Path, choice: &Choice) -> R
         |reason: &dyn std::fmt::Display| format!("Couldn't save the theme choice: {reason}");
     let path = root.join(CONFIG_DIR).join("settings.json");
     let not_an_object = format!("{CONFIG_DIR}/settings.json is not a JSON object");
-    let mut settings = match fs.load(&path).await {
-        Ok(loaded) => serde_json::from_str::<Value>(&loaded.text)
+    let mut settings = match read_text(fs, &path).await {
+        Ok(text) => serde_json::from_str::<Value>(&text)
             .ok()
             .filter(Value::is_object)
             .ok_or_else(|| failed(&not_an_object))?,

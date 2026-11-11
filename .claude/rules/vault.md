@@ -42,4 +42,5 @@ paths:
   must fail, not recreate the folder beside a moved copy.
 - `vault` takes every `Mtime` from the filesystem, never `SystemTime::now`.
 - `read_dir` lists every file, a note (`.md`) or an asset; it hides dotfiles, temp files and
-  symlinks. `vault/tests/real_fs.rs` is the one test on a real disk.
+  symlinks. Two tests touch a real disk: `vault/tests/real_fs.rs` tests `RealFs`, and
+  `app/tests/cli.rs` runs the binary against temporary paths. Every other test uses `MemFs`.

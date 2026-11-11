@@ -102,7 +102,7 @@ pub fn parse(text: &str) -> Markdown {
                 let (content_start, content_end) = backtick_runs(text, &range);
                 out.markers_until(range.start, current.as_ref());
                 out.markers_until(content_start, Some(&code));
-                out.leaf(content_start..content_end, code.styles);
+                out.code_content(content_start..content_end, &code);
                 out.markers_until(range.end, Some(&code));
             }
             // At top level no element encloses it, so the gap rule alone would leave it unstyled.
@@ -224,8 +224,8 @@ fn opening_sequence(heading: &str) -> Option<usize> {
 #[derive(Clone)]
 struct Open {
     styles: Styles,
-    /// What a line-start prefix in this element's gaps carries: the parent's styles in a code
-    /// block, so its indents match the opening line's.
+    /// What a line-start prefix in this element carries: the parent's styles in a code block or a
+    /// code span, so its indents match the opening line's.
     indent: Styles,
     end: usize,
     element: Option<Range<usize>>,
@@ -254,10 +254,10 @@ impl Open {
 
     /// A code span, backticks included: no tag opens it, and its backticks always hide.
     fn code_span(range: &Range<usize>, parent: Option<&Open>) -> Self {
-        let styles = parent.map_or(Styles::NONE, |open| open.styles) | Styles::CODE;
+        let inherited = parent.map_or(Styles::NONE, |open| open.styles);
         Self {
-            styles,
-            indent: styles,
+            styles: inherited | Styles::CODE,
+            indent: inherited,
             end: range.end,
             element: Some(range.clone()),
             leading: false,
@@ -335,6 +335,16 @@ impl Out<'_> {
     fn leaf(&mut self, range: Range<usize>, styles: Styles) {
         let start = range.start.max(self.cursor).min(range.end);
         self.emit(start..range.end, styles);
+        self.cursor = self.cursor.max(range.end);
+    }
+
+    /// One event spans every line, so each continuation line's prefix is marked here, not in a gap.
+    fn code_content(&mut self, range: Range<usize>, code: &Open) {
+        for piece in lines(self.text, range.clone()) {
+            let split = piece.start + line_start_prefix(self.text, &piece);
+            self.push(piece.start..split, code.indent | Styles::MARKER);
+            self.push(split..piece.end, code.styles);
+        }
         self.cursor = self.cursor.max(range.end);
     }
 

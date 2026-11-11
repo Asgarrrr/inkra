@@ -174,17 +174,17 @@ fn a_step_enters_at_an_end_and_clamps_at_both() {
     let [a, b, c] = ["a.md", "b.md", "c.md"].map(|name| id(&vault, name));
     assert_eq!(
         visible.step(None, 1),
-        Some(a),
+        Some(0),
         "down enters at the first row"
     );
-    assert_eq!(visible.step(None, -1), Some(c), "up enters at the last row");
-    assert_eq!(visible.step(Some(a), 1), Some(b));
-    assert_eq!(visible.step(Some(b), -1), Some(a));
-    assert_eq!(visible.step(Some(a), -1), Some(a));
-    assert_eq!(visible.step(Some(c), 1), Some(c));
+    assert_eq!(visible.step(None, -1), Some(2), "up enters at the last row");
+    assert_eq!(visible.step(Some(a), 1), Some(1));
+    assert_eq!(visible.step(Some(b), -1), Some(0));
+    assert_eq!(visible.step(Some(a), -1), Some(0));
+    assert_eq!(visible.step(Some(c), 1), Some(2));
     assert_eq!(
         visible.step(Some(EntryId::DETACHED), 1),
-        Some(a),
+        Some(0),
         "no row enters too"
     );
 

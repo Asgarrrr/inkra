@@ -10,12 +10,19 @@ while case $1 in
   --*) echo "$usage" >&2; exit 2 ;;
   *) false ;;
 esac; do :; done
+[ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }
 bin=$1; vault=$2; runs=${3:-3}
+[ -x "$bin" ] || { echo "ERROR: $bin is not an executable file" >&2; exit 2; }
+case $runs in ''|*[!0-9]*) echo "$usage" >&2; exit 2 ;; esac
 if [ -n "$cold" ] && ! sudo -n purge 2>/dev/null; then
   echo "ERROR: --cold needs passwordless sudo purge; run it yourself" >&2
   exit 2
 fi
 [ -n "$home" ] && mkdir -p "$home"
+# An interrupt must not leave the app running or the log behind.
+pid=; log=
+trap '[ -n "$pid" ] && kill "$pid" 2>/dev/null; [ -n "$log" ] && rm -f "$log"' EXIT
+trap 'exit 130' INT TERM
 for i in $(seq 1 "$runs"); do
   [ -n "$cold" ] && sudo -n purge
   log=$(mktemp)
@@ -27,7 +34,7 @@ for i in $(seq 1 "$runs"); do
   rss=$(ps -o rss= -p "$pid")
   footprint=$(footprint -p "$pid" --noCategories -f bytes | awk '/phys_footprint:/ {print $2; exit}')
   [ -n "$footprint" ] || footprint='?'
-  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-  echo "$(grep '^launch:' "$log" || echo 'no launch line') | rss ${rss} kB | phys_footprint ${footprint} B"; rm -f "$log"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
+  echo "$(grep '^launch:' "$log" || echo 'no launch line') | rss ${rss} kB | phys_footprint ${footprint} B"; rm -f "$log"; log=
   sleep 1
 done

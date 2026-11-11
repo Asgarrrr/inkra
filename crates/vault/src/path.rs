@@ -5,7 +5,20 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 /// UTF-16 code units, the unit APFS and HFS+ count — not bytes, not `char`s.
-const MAX_NAME_UNITS: usize = 255;
+pub(crate) const MAX_NAME_UNITS: usize = 255;
+
+/// The longest prefix of `name` within `units` UTF-16 code units, cut between chars.
+pub(crate) fn fit(name: &str, units: usize) -> &str {
+    let mut used = 0;
+    let end = name
+        .char_indices()
+        .find(|(_, c)| {
+            used += c.len_utf16();
+            used > units
+        })
+        .map_or(name.len(), |(at, _)| at);
+    &name[..end]
+}
 
 /// Why a typed name cannot become a note. Reported, never a `VaultError`:
 /// nothing here touches the filesystem.

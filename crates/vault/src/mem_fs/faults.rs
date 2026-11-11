@@ -94,6 +94,13 @@ impl MemFs {
         Gate(release)
     }
 
+    /// Parks the next `create` of `path`, before it makes anything.
+    pub fn block_create(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().blocked_creates.insert(path.into(), wait);
+        Gate(release)
+    }
+
     /// Parks the next `read_dir` of `path`, before it reads anything.
     pub fn block_read_dir(&self, path: impl Into<PathBuf>) -> Gate {
         let (release, wait) = oneshot::channel();

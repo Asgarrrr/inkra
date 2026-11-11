@@ -301,9 +301,10 @@ Each goes to `docs/roadmap.md` with its trigger.
   The persisted index reads its cache file through the same method; an image needs the same
   cap (`MAX_IMAGE_BYTES`, 64 MiB), refused from the opened file's size before any read.
 - `load` does not decode from `read_bytes`, so a note's load and a byte read are two
-  paths. `load` has no size cap, and it stats the path before reading, so a race errs toward
-  "changed on disk". `MemFs` counts a byte read in `reads`, never in `loads`, so a test
-  tells an image's read from a note's load.
+  paths. `load` refuses a file over `MAX_TEXT_BYTES` (64 MiB), as `read_bytes` does over
+  its `max_len`. It stats the path before reading, so a race errs toward "changed on
+  disk". `MemFs` counts a byte read in `reads`, never in `loads`, so a test tells an
+  image's read from a note's load.
 - No tab draws a `FileKind` icon, against the drafted "a tab's title and icon read the
   file": a tab draws its title and indicator only. Deferred to `docs/roadmap.md`; trigger: a second
   viewable kind lands, or users mix note and image tabs.

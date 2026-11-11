@@ -464,8 +464,11 @@ index. `AppShell` subscribes, as it does to `NoteActivated`, parses the
 target, asks `LinkSync` to resolve it against the current note, and opens the
 result through the same path as `NoteActivated`.
 
-`External` opens with `cx.open_url`. `Unresolved` and `SelfLink` do nothing
-in this spec, and neither does a link to the note already showing:
+`External` opens with `cx.open_url` when its scheme is `http`, `https` or
+`mailto`, compared without regard to case. Any other scheme opens nothing and
+shows a notice: a note is untrusted text, and the system would start whatever
+application registered the scheme. The list is `OPENED_SCHEMES` in
+`shell/activation.rs`. `Unresolved` and `SelfLink` do nothing in this spec, and neither does a link to the note already showing:
 `open_note` would rebind it through `open_buffer`, which resets its caret and
 scroll.
 

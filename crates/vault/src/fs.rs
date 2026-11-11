@@ -13,6 +13,9 @@ use crate::note_file_name;
 use crate::temp::is_temp;
 use crate::watch::Watch;
 
+/// The largest text file `load` reads: a vault is foreign data, and a load holds the whole file.
+pub const MAX_TEXT_BYTES: u64 = 64 << 20;
+
 /// Paired, not inode alone: an inode is unique only within one filesystem, and
 /// a vault root can span a mount point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -171,7 +174,8 @@ pub trait Fs: Send + Sync {
     /// Fails unless `path` is a folder this process may list; lists nothing.
     async fn check_dir(&self, path: &Path) -> Result<()>;
 
-    /// Normalizes line endings: `Buffer` assumes no `\r` anywhere.
+    /// Normalizes line endings: `Buffer` assumes no `\r` anywhere. A file over `MAX_TEXT_BYTES` is
+    /// refused, as `read_bytes` refuses one over its `max_len`.
     async fn load(&self, path: &Path) -> Result<Loaded>;
 
     /// The bytes as stored. A file over `max_len` is refused from its size before any read.
@@ -190,7 +194,7 @@ pub trait Fs: Send + Sync {
     /// Atomic, creating missing folders; no conflict check, so for the app's own state, never a note.
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()>;
 
-    /// Removes a file; one already missing is `Ok`.
+    /// Removes a file; one already missing is `Ok`, a folder is an error.
     async fn remove_file(&self, path: &Path) -> Result<()>;
 
     /// Creates an empty note or directory; fails if `path` already exists.

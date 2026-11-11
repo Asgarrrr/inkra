@@ -2,7 +2,7 @@
 
 use gpui::Rgba;
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::{Appearance, Theme, builtin};
 
@@ -11,7 +11,7 @@ use super::{Appearance, Theme, builtin};
 struct File {
     appearance: FileAppearance,
     #[serde(default)]
-    colors: Map<String, Value>,
+    colors: Value,
 }
 
 #[derive(Deserialize)]
@@ -23,11 +23,11 @@ enum FileAppearance {
 
 pub(crate) struct Parsed {
     pub(crate) theme: Theme,
-    /// Sorted: unknown names and values that are not a colour.
+    /// Sorted: unknown names, values that are not a colour, and `colors` if it is not an object.
     pub(crate) skipped: Vec<String>,
 }
 
-/// Only a JSON error or a missing `appearance` rejects the file; a bad key keeps the base value.
+/// A JSON error or an `appearance` missing or not `light`/`dark` rejects; a bad key keeps the base.
 pub(crate) fn parse(text: &str) -> Result<Parsed, serde_json::Error> {
     let file: File = serde_json::from_str(text)?;
     let appearance = match file.appearance {
@@ -35,17 +35,20 @@ pub(crate) fn parse(text: &str) -> Result<Parsed, serde_json::Error> {
         FileAppearance::Dark => Appearance::Dark,
     };
     let mut colors = builtin::of(appearance).colors;
-    let mut skipped: Vec<String> = file
-        .colors
-        .into_iter()
-        .filter(|(name, value)| {
-            !value
-                .as_str()
-                .and_then(parse_color)
-                .is_some_and(|color| colors.set(name, color))
-        })
-        .map(|(name, _)| name)
-        .collect();
+    let mut skipped: Vec<String> = match file.colors {
+        Value::Object(map) => map
+            .into_iter()
+            .filter(|(name, value)| {
+                !value
+                    .as_str()
+                    .and_then(parse_color)
+                    .is_some_and(|color| colors.set(name, color))
+            })
+            .map(|(name, _)| name)
+            .collect(),
+        Value::Null => Vec::new(),
+        _ => vec!["colors".to_owned()],
+    };
     skipped.sort();
     Ok(Parsed {
         theme: Theme { appearance, colors },

@@ -104,7 +104,7 @@ fn a_selection_across_a_heading_covers_its_marker(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            let quads = layout.selection_quads(&(at(0)..at(10)));
+            let quads = layout.selection_quads(&(at(0)..at(10)), &(px(0.)..layout.height()));
             let lefts: Vec<_> = quads.iter().map(|quad| quad.bounds.origin.x).collect();
             assert_eq!(lefts[0], px(0.));
             assert_x(lefts[1], -2. * H1_GLYPH);
@@ -121,7 +121,7 @@ fn a_selection_from_a_heading_start_begins_in_the_margin(cx: &mut TestAppContext
     window
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
-            let quads = layout.selection_quads(&(at(0)..at(8)));
+            let quads = layout.selection_quads(&(at(0)..at(8)), &(px(0.)..layout.height()));
             assert_x(quads[0].bounds.origin.x, -2. * H1_GLYPH);
         })
         .unwrap();

@@ -366,11 +366,8 @@ fn a_selection_stops_at_the_background(cx: &mut TestAppContext) {
     cx.run_until_parked();
     window
         .update(&mut cx, |view, _, _| {
-            let quads = view
-                .input
-                .last_layout()
-                .unwrap()
-                .selection_quads(&(at(4)..at(125)));
+            let layout = view.input.last_layout().unwrap();
+            let quads = layout.selection_quads(&(at(4)..at(125)), &(px(0.)..layout.height()));
             let right = quads
                 .iter()
                 .map(|quad| quad.bounds.right())
@@ -392,7 +389,7 @@ fn a_selected_blank_line_keeps_its_stub(cx: &mut TestAppContext) {
         .update(&mut cx, |view, _, _| {
             let layout = view.input.last_layout().unwrap();
             let blank = layout.top_for_row(2);
-            let quads = layout.selection_quads(&(at(4)..at(200)));
+            let quads = layout.selection_quads(&(at(4)..at(200)), &(px(0.)..layout.height()));
             let stub = quads
                 .iter()
                 .find(|quad| quad.bounds.top() == blank)

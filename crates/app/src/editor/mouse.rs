@@ -1,4 +1,7 @@
-use gpui::{App, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, px};
+use gpui::{
+    App, Context, DispatchPhase, Entity, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, Window, px,
+};
 use inkra_markdown::{Link, links};
 
 use super::{EditorView, LinkFollowed};
@@ -61,7 +64,17 @@ impl EditorView {
         });
     }
 
-    pub(super) fn on_mouse_move(
+    // On the window, not the div: a div's move listener stops when the pointer leaves it (div.rs:303).
+    pub(super) fn track_drag(editor: &Entity<Self>, window: &mut Window) {
+        let editor = editor.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) {
+                editor.update(cx, |view, cx| view.on_mouse_move(event, window, cx));
+            }
+        });
+    }
+
+    fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,

@@ -21,6 +21,17 @@ pub(crate) fn painted_caret() -> Option<Bounds<Pixels>> {
     PAINTED_CARET.with(std::cell::Cell::get)
 }
 
+#[cfg(test)]
+thread_local! {
+    static PAINTED_SELECTION: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many selection quads the last paint on this thread drew.
+#[cfg(test)]
+pub(crate) fn painted_selection() -> usize {
+    PAINTED_SELECTION.with(std::cell::Cell::get)
+}
+
 /// What a host's prepaint hands to `paint`.
 pub(crate) type Prepainted = Option<(Rc<DocumentLayout>, Quads)>;
 
@@ -31,12 +42,13 @@ pub(crate) struct Quads {
 }
 
 impl Quads {
-    /// A caret for an empty selection, unless its block scrolled it out, else one quad per row;
-    /// `origin` is the text's.
+    /// A caret for an empty selection, unless its block scrolled it out, else one quad per row
+    /// reaching `visible`; `origin` is the text's, `visible` a span of layout `y`.
     pub(crate) fn new(
         layout: &DocumentLayout,
         selection: &Range<ByteOffset>,
         origin: Point<Pixels>,
+        visible: &Range<Pixels>,
     ) -> Self {
         if selection.is_empty() {
             let caret = layout.caret_bounds(selection.start);
@@ -52,7 +64,7 @@ impl Quads {
             };
         }
         let selection = layout
-            .selection_quads(selection)
+            .selection_quads(selection, visible)
             .into_iter()
             .map(|mut quad| {
                 quad.bounds.origin += origin;
@@ -86,6 +98,8 @@ pub(crate) fn paint<V: InputHost>(
     window.handle_input(&focus_handle, InputAdapter::new(bounds, view.clone()), cx);
 
     layout.paint_backgrounds(bounds.origin, window);
+    #[cfg(test)]
+    PAINTED_SELECTION.with(|painted| painted.set(quads.selection.len()));
     for quad in quads.selection {
         window.paint_quad(quad);
     }

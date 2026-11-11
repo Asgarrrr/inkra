@@ -42,8 +42,11 @@ write, one per vault.
   bumps `revision` and calls `cx.refresh_windows()`, as Zed's `reload_theme`
   does. A change is rare and deliberate.
 - **D9. Parsing is tolerant per key.** An unknown key or an invalid colour is
-  skipped and reported; the base value stays. Only a JSON syntax error rejects
-  the file. No error ever blocks the app.
+  skipped and reported; the base value stays. A JSON syntax error rejects the
+  file. So does an `appearance` that is missing or is not `light` or `dark`: it
+  selects the base (D1), and no base means no theme. A `colors` value that is
+  not an object is skipped and reported as `colors`. No error ever blocks the
+  app.
 
 ## Tokens
 
@@ -183,7 +186,8 @@ back with `Fs::replace`, so keys this version does not know survive.
 | Case | Effect |
 |---|---|
 | JSON syntax error | file skipped; notice `theme "x.json": line 4: …` |
-| unknown key, invalid colour | key skipped, base value kept; notice lists the keys |
+| `appearance` missing or not `light`/`dark` | file skipped; notice names the line |
+| unknown key, invalid colour, `colors` not an object | key skipped, base value kept; notice lists the keys |
 | named theme not found | system theme; notice |
 | `settings.json` write fails | theme applied for the session; notice, via the save path's retry |
 

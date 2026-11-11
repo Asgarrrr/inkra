@@ -1,7 +1,8 @@
 # Markdown blocks: quote bars, code backgrounds, task boxes
 
 Status: **S1 merged** (#56). S2 is superseded by
-`2026-11-07-code-blocks-design.md`. S3 pending.
+`2026-11-07-code-blocks-design.md`. S3 refreshed 2026-11-11, see "S3 as
+planned"; not built.
 
 ## Why
 
@@ -394,6 +395,308 @@ shape would remove the last part; the measurement does not call for it.
 equivalent: `<` to `<=` in `cut`'s `next_if` takes a gutter that starts where
 the span ends one span earlier, which pushes the same span then the same
 gutter.
+
+## S3 as planned (2026-11-11)
+
+D1 to D7 were written on 2026-09-30. The code moved since: semantic theme
+tokens, the code blocks spec, the centred column, a scroll per code block, and
+line ceilings. Each item below corrects the text above against `main` on
+2026-11-11, or fills a gap in it. A spike on branch `spike/task-boxes` printed
+pulldown-cmark's events and today's conceals for 30 task cases. It never
+merges.
+
+### Parser facts
+
+`Cargo.lock` holds pulldown-cmark 0.13.6 (`Cargo.lock:4042-4043`). Results of
+the spike:
+
+| Text | `TaskListMarker` range | Before it, after `Start(Item)` | Task? |
+|---|---|---|---|
+| `- [ ] a`, `- [x] a`, `- [X] a` | 2..5 | nothing | yes; `[x]` and `[X]` are checked |
+| `* [ ] a`, `-\t[ ] a` | 2..5 | nothing | yes |
+| `-  [ ] a` | 3..6 | nothing | yes |
+| `-    [ ] a` | 5..8 | nothing | yes |
+| `  - [ ] a` | 4..7 | nothing | yes |
+| `1. [ ] a` | 3..6 | nothing | yes |
+| `> - [ ] a` | 4..7 | nothing | yes |
+| `> > - [ ] a` | 6..9 | nothing | yes |
+| `- [ ] a\n\n- [x] b` (loose) | 2..5 | `Start(Paragraph)` 6..8 | yes |
+| `- [ ] a\n\n  b` (loose) | 2..5 | `Start(Paragraph)` | yes |
+| `- [ ]\n`, `- [x]\n` | 2..5 | nothing; `End(Item)` follows | yes, with no text |
+| `- [ ]`, `- [x]` at the end of the text | none | `Text` | no |
+| `- [ ]a` | none | `Text` | no |
+| `- > [ ] a` | none | `Start(BlockQuote)` | no |
+| `- [ ] [ ] a` | 2..5 | nothing | the first only |
+| `- - [ ] a` | 4..7, on the inner item | the outer item sees `Start(List)` | the inner item only |
+| `- a\n  - [ ] b` | 8..11, on the inner item | nothing | the inner item only |
+| `-\n`, `- ` | none | `End(Item)` comes first | no |
+
+In every case the range is exactly the three checkbox bytes. The source does
+not rule out a leading space: the event starts at `after_marker_index`
+(`pulldown-cmark-0.13.6/src/firstpass.rs:148`), and the scanner skips up to
+three spaces before `[` (`scanners.rs:378-380`). Keep the rule of D2, "the
+last three bytes of the range": it is right in both cases.
+
+Today `- [ ] a` gets one conceal, the `•` at 0..1. The gap rule styles
+`- [ ] ` as one `MARKER` span and conceals nothing else. In `> - [ ] a` the
+span `> - [ ] ` is `QUOTE | MARKER`, and the gutter covers `> ` only.
+
+### Corrections
+
+1. **The edit uses `Buffer::transact`, not "finalize, replace, finalize"**
+   (D6). The repo rule says a one-step gesture uses `Buffer::transact`
+   (`CLAUDE.md`, "Code"). `edit_ungrouped` does it
+   (`crates/editor/src/state.rs:77-82`). See "The edit" below.
+2. **`state.rs:137-169` moved.** `edit_ungrouped` is at
+   `crates/editor/src/state.rs:78`, `cut` at 147, `paste` at 153.
+3. **`after_edit` moved** from `editor/mod.rs:288-291` to
+   `crates/app/src/editor/mod.rs:424-427`. It still reshapes and reveals the
+   cursor (`Reveal::Minimal`), so D6's reason for moving the caret holds.
+4. **The paint order lives elsewhere.** `text_input/paint.rs:66-69` is stale:
+   `fn paint` starts at `crates/app/src/text_input/paint.rs:77`, and
+   `layout.paint_backgrounds` runs at line 88, before the selection (89-91).
+   S3 changes no paint order: the box paints with the gutter, after the
+   selection.
+5. **Colours are semantic tokens** (D7). The list is the `tokens!` macro in
+   `crates/app/src/theme/colors.rs` (`md_quote_bar` at line 62), with one
+   value per built-in in `crates/app/src/theme/builtin.rs` (lines 42 and 85).
+   Sizes stay in `crates/app/src/theme.rs` (`QUOTE_BAR_WIDTH` at line 289).
+   See "Theme" below.
+6. **pulldown-cmark is 0.13.6**, not 0.13.4. The range was exactly three bytes
+   in every case of the spike (Parser facts). `scanners.rs:380` is now inside
+   `scan_task_list_marker` (`scanners.rs:378`).
+7. **D2's "first inner event" picks the bullet in a loose list.** There
+   `Start(Paragraph)` comes before `TaskListMarker` (Parser facts). The rule
+   becomes: the item's marker is decided at the first event after
+   `Start(Item)` that is not one `Start(Paragraph)`. Zed uses the same rule
+   (`vendor/zed-reference/crates/markdown/src/markdown.rs:3820-3836`). `parse`
+   holds one pending item start; the next event that is not a
+   `Start(Paragraph)` emits the task conceal or the `•`, then clears it. The
+   paragraph's own handling is unchanged. Conceals are sorted by
+   `marker.start` after the loop (`crates/markdown/src/parse.rs:122`), so a
+   late conceal lands in order. Rejected: lookahead over the event stream. The
+   loop reads `into_offset_iter` once (`parse.rs:63`), and one pending slot
+   decides the same thing.
+8. **No pointer-cursor precedent exists.** The plan named the link hover as
+   the pattern. `on_mouse_move` only extends a drag selection
+   (`crates/app/src/editor/mouse.rs:64-79`), and `crates/app/src` sets no
+   `cursor_style` and no `PointingHand`. See open question 4.
+9. **"Box bounds are built in shape, beside `bars`"** meets the line
+   ceilings. `crates/app/src/editor/layout/shape.rs` (464 lines) and
+   `layout/mod.rs` (412) are listed in `scripts/line-ceilings.tsv`; a listed
+   file must stay exactly at its ceiling (`scripts/line-ceilings.sh:36-41`).
+   See "The module" below.
+10. **S2 is superseded** by `2026-11-07-code-blocks-design.md`, built
+    2026-11-07. A box's bounds depend on none of the geometry that came later:
+    - *The centred column.* `DocumentLayout::margin()`
+      (`layout/mod.rs:117-119`) feeds only a heading's `Prefix::Margin`
+      (`shape.rs:142`). Bars are built in layout coordinates and painted at
+      `origin + bar` with no margin term (`layout/paint.rs:65-67`). Box bounds
+      do the same.
+    - *A code block's scroll* (`layout/scrolls.rs`). `x_on_row` subtracts the
+      block's scroll only off the prefix (`layout/mod.rs:278-286`), and paint
+      draws the prefix unscrolled (`layout/paint.rs:74-86,109-120`). A task's
+      line is never in a code block anyway: after a `TaskListMarker`,
+      pulldown-cmark parses the rest of the line as a paragraph
+      (`firstpass.rs:159-161`).
+    - *A task inside a quote inside a list.* `- > [ ] a` is no task (Parser
+      facts), and a quote inside a list item gets no gutter (As built,
+      item 1). See item 13.
+11. **The task part of a gutter keeps its gap style.** `gutters::cut` gives a
+    whole gutter one `QUOTE | MARKER` span
+    (`crates/markdown/src/gutters.rs:95`; As built, "A gutter's bytes"). A
+    task's gutter outside a quote must not read as a quote. `cut` covers the
+    quote part only, through the last `>` and its space. The task part keeps
+    the span the gap rule gives it today: `MARKER`, or `QUOTE | MARKER` inside
+    a quote. No inline element crosses an item's start, so the task part has
+    nothing to cut.
+12. **Two checks that hold "own conceals are the quotes" change.** The
+    `debug_assert!` in `line_prefix` (`shape.rs:398-405`) becomes
+    `own.len() == gutter.quotes.len() + usize::from(gutter.task.is_some())`.
+    The G-property in `crates/markdown/src/parse/tests/gutters.rs:238-247`
+    (every conceal in a gutter is one byte, and they are the quotes) admits
+    one more conceal: the task marker, last, from the bullet through the
+    checkbox.
+13. **A task gets a gutter only when its marker leads its line.** Before the
+    bullet or number, the line may hold only leading quotes and spaces.
+    `  - [ ] a` and `> - [ ] a` qualify. In `- - [ ] a` the inner task follows
+    the outer item's `- `; it gets the `•` conceal, and its checkbox stays
+    dimmed text. Rejected: a gutter from the line's start, which would swallow
+    the outer bullet, as As built item 1 rejected for `- > a`.
+
+### The data and the conceal
+
+`Gutter` gains `task: Option<Task>` with D1's `Task`. This is the reader that
+As built item 7 waited for. A line gets a `Gutter` when it is quoted or
+starts a task item (item 13). A task gutter's range ends after the checkbox
+and the one space or tab after it; with no text (`- [ ]\n`), it ends at the
+checkbox.
+
+The task conceal follows D2's row. Its element is the checkbox. Its marker
+runs from the bullet or number through the checkbox. Its replacement is `""`.
+An ordered task hides its number with the rest of the marker. A caret at the
+item's text start does not touch the checkbox, so the box stays painted.
+
+### The prefix in pieces
+
+Today a gutter has one state. `line_prefix` splits the line's conceals once,
+at the prefix's end (`shape.rs:381-427`). Any inactive own conceal reveals
+the whole prefix. `GutterCarry::layout` keeps a `ShapedLine` only for a
+revealed gutter (`layout/prefix.rs:129-174`). `Prefix::shown` returns it at
+`x = 0` (`prefix.rs:63-71`), and paint draws it at the line's origin
+(`paint.rs:109-120`).
+
+S3 splits the own conceals a second time, at the task conceal. Conceals sort
+by `marker.start` and every `>` precedes the bullet, so the task conceal is
+the last own conceal. The quote part and the task part each get a revealed
+flag. A revealed part shapes the whole gutter text once, through the existing
+`show`, and splits it with `ShapedLine::split_at`
+(`vendor/zed-reference/crates/gpui/src/text_system/line.rs:196-259`). The
+piece before the split keeps its positions. The piece after starts at `x = 0`
+and paints at the split's `x`. A part that is concealed keeps no shape, as
+today.
+
+`Geometry` (`prefix.rs:120-125`) gains the checkbox's `x` span, measured with
+the bars from the same shape (`Geometry::measure`, `prefix.rs:176-188`). It
+also keeps the quote part's width apart. A lazy line under a quoted task
+carries the quote part's width only, per S1's review. `GutterCarry` measures
+each distinct gutter text once, so `- [ ] ` and `- [x] ` cost one measure
+each per `shape_document`.
+
+### The module
+
+A new `crates/app/src/editor/layout/marks.rs` holds what paints in a gutter
+beyond its text: the bars, which move out of `shape.rs`, and the boxes. It
+follows `layout/blocks.rs`, a builder that `shape_document` feeds line by
+line. It holds the box's bounds, its checkbox range and its `checked` flag,
+`DocumentLayout::task_at`, and the builder. A separate `tasks.rs` would leave
+`line_bars` in `shape.rs` and leave nothing to pay for the new calls.
+
+Line budget, counted on today's code:
+
+- `shape.rs` loses `let mut bars` (line 112), `bars.extend(...)` (172),
+  `bars,` (182) and `line_bars` with its doc (358-367) and one blank line: 14
+  lines. It gains three: the builder's `new`, its `line` call, and its
+  `finish` into the layout. Net −11. The split of the own conceals goes into
+  `GutterCarry::layout` in `prefix.rs` (188 lines, unlisted, limit 400), so
+  `line_prefix` keeps its length.
+- `layout/mod.rs` swaps the `bars` field and its two doc lines (89-91) for one
+  field holding both vectors, and `quote_bars` (158-161) reads through it.
+  Net 0 or less.
+- A listed file that shrinks must have its ceiling lowered in the same change:
+  `./scripts/line-ceilings.sh --lower` (`scripts/line-ceilings.sh:58-87`).
+  No ceiling rises.
+
+### The hit test and the click
+
+`task_at(local: Point<Pixels>) -> Option<(Range<ByteOffset>, bool)>` scans the
+boxes, which sit only on lines whose task part is concealed. A revealed
+checkbox is text, as D6 says. `on_mouse_down` gets `(layout, local)` from
+`self.input.hit_test(position)` (`crates/app/src/text_input.rs:143-149`), as
+`link_under` does (`mouse.rs:12-29`). It calls `task_at` after focusing and
+before the `⌘`-click link branch (`mouse.rs:42-56`). A plain click on a box
+toggles and returns before `self.is_selecting = true` (`mouse.rs:57`), so it
+starts no drag selection. A modified click skips the box and keeps its
+meaning (open question 1).
+
+### The edit
+
+The editor state gains a one-step replace beside `cut`
+(`crates/editor/src/state.rs:147`): it calls `edit_ungrouped`
+(`state.rs:78`), then collapses the selection to a given caret.
+`edit_ungrouped` runs `Buffer::transact`, so the edit merges with the typing
+on neither side, and is one undo step. Its `edited` collapses the caret to
+`start + text.len()`, inside the checkbox. The method then sets the caret, as
+a whole-line `paste` does (`state.rs:159-165`). `app` passes the middle byte's
+range, the new byte (`x` for a space, a space for `x` or `X`), and the item's
+text start. The edit keeps the byte count, so the text start does not shift.
+
+### Theme
+
+`colors.rs` gains `md_task_box` and `md_task_check` beside `md_quote_bar`.
+Both take `md_quote_bar`'s values: `rgb(0x4a4a4a)` dark and `rgb(0xcecdc3)`
+light (`builtin.rs:42,85`). The box then reads as the same quiet chrome as
+the bar; a distinct colour waits for the scene. A vault theme file without
+the keys keeps the built-in value: a file starts from its appearance's
+built-in and overrides only the keys it holds (`crates/app/src/theme/file.rs:37`;
+themes spec, "Errors"). The token count test
+(`crates/app/src/theme/file/tests.rs:9`) goes from 30 to 32. `theme.rs` gains
+`TASK_BOX_SIZE` beside `QUOTE_BAR_WIDTH` (`theme.rs:289`).
+
+### Slices
+
+Each slice is vertical and ends green on `./scripts/check.sh`, with the
+`markdown-blocks` and `markdown-blocks-revealed` scenes rendered and looked
+at. The scene already holds a task line (`crates/app/src/shot/scenes.rs:52`).
+After each slice, run `cargo mutants` on the diff for `markdown` and
+`editor`.
+
+1. **S3a, the box shows** (~1 d). `Task`, `Gutter.task`, the marker decided
+   at the pending slot (item 7), the task conceal, the task gutter
+   (items 11, 13), the prefix in pieces, `marks.rs` with the box painted,
+   both tokens and `TASK_BOX_SIZE`. No click.
+   - `inkra-markdown`, by example: `- [ ] a`, `- [x] a`, `- [X] a`,
+     `1. [ ] a`, `> - [ ] a`, a loose list `- [ ] a\n\n- [x] b`, `-    [ ] a`,
+     a plain bullet next to a task keeps `•`; added: `- [ ]` at the end of
+     the text is no task while `- [ ]\n` is one, an empty item `-\n` keeps
+     its `•`, `- [ ]a` is no task, `- - [ ] a` keeps two `•` (item 13),
+     `- a\n  - [ ] b` gives the inner line a gutter.
+   - `inkra-markdown`, proptest: the conceal properties and the G-properties
+     with item 12's change.
+   - `app`: revealing a task marker moves no text; in `> - [ ] a` a caret on
+     the `>` reveals the quote part only; a lazy line under `> - [ ] a`
+     takes the quote part's width; a box paints while the caret is elsewhere.
+2. **S3b, the click toggles** (~0.5 d). `task_at`, the one-step replace with
+   its own `inkra-editor` tests (one undo step, merges with no neighbour, the
+   caret set), the click in `mouse.rs`.
+   - `app`: a click on a box toggles `[ ]` to `[x]` and back and moves the
+     caret to the item's text start; `⌘Z` after a toggle restores the text;
+     a click on a revealed checkbox places the caret and edits nothing; a
+     toggle with the view scrolled away from the old caret does not scroll;
+     added: a press on a box then a drag selects nothing; a `⌘`- or
+     `⇧`-click on a box does not toggle; `[X]` toggles to `[ ]`.
+
+The cut is not "data first". A `Gutter.task` with no reader is what As built
+item 7 refused, and S3a reads it to paint. S3a also changes what `parse`
+emits for every list item, so it ships with its scene, before any click
+depends on it.
+
+### Open questions
+
+1. **Does a click with `⌘` or `⇧` held toggle?** Recommended: no, a plain
+   click only. `⌘`-click keeps following links and `⇧`-click keeps extending
+   the selection.
+2. **Does `[X]` toggle to a space, and a space to lower-case `x`?**
+   Recommended: yes, as D6 says.
+3. **After `⌘Z` the caret sits inside the checkbox, so the box shows as text
+   until the caret leaves.** Recommended: still accept it; the reveal rule
+   says so. Not re-checked in the build: where `⌘Z` puts the caret.
+4. **Does the box need a pointer cursor on hover?** No precedent exists in
+   `app` (item 8). Recommended: defer it to the Deferred table, trigger "The
+   user asks". A hover cursor is a new pattern that a link should get first.
+5. **A task with no text (`- [ ]\n`).** Its text start is the line's end,
+   which touches the checkbox, so a click reveals the marker as text.
+   Recommended: accept; typing after it hides it again.
+6. **`- [ ]` with no newline at the end of the note is no task** (Parser
+   facts). Recommended: accept it as pulldown-cmark's behaviour; the box
+   appears once a newline follows.
+7. **A double click on a box.** Each press toggles, so a double click toggles
+   twice. Recommended: accept; decision 1 says one click is one undo step.
+
+### Deviations from Zed
+
+- Zed's markdown preview is a separate pane. It renders a task as a
+  `Checkbox` element in a slot one line tall
+  (`vendor/zed-reference/crates/markdown/src/markdown.rs:2999-3032`). Inkra
+  paints a quad over the checkbox's shaped width, in the gutter (Deviations
+  from Zed, first item).
+- Zed finds a task the same way: the item's next event, or the one after one
+  `Start(Paragraph)` (`markdown.rs:3820-3836`). Inkra follows it (item 7).
+- Zed's toggle writes all three bytes, `[x]` or `[ ]`, through `editor.edit`
+  (`vendor/zed-reference/crates/markdown_preview/src/markdown_preview_view.rs:1201-1229`).
+  Its `debug_assert_eq!` expects lower-case `[x]` only. Inkra writes the
+  middle byte, so `[X]` toggles too, and it moves the caret: the preview has
+  no caret in the rendered text, the live editor has one.
 
 ## Deferred
 

@@ -9,6 +9,15 @@ use super::NoteStore;
 use super::session::{Lifecycle, PendingSave, Writer};
 use super::{NoteClosed, RenameFailed, TrashFailed};
 
+/// What a create did. `Refused` made nothing on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Created {
+    Listed(EntryId),
+    /// The file exists; the vault does not list it yet.
+    Unlisted,
+    Refused,
+}
+
 impl NoteStore {
     /// Ordered on the note's chain: a write landing after the delete would
     /// recreate the file. A gone note closes, trashing only a file its own write put back (watcher spec, F9).
@@ -92,12 +101,12 @@ impl NoteStore {
         new: New,
         name: &str,
         cx: &mut Context<Self>,
-    ) -> Task<inkra_vault::Result<Option<EntryId>>> {
+    ) -> Task<inkra_vault::Result<Created>> {
         let Some(vault) = self.vault.clone() else {
-            return Task::ready(Ok(None));
+            return Task::ready(Ok(Created::Refused));
         };
         if inkra_vault::check_name(name).is_some() {
-            return Task::ready(Ok(None));
+            return Task::ready(Ok(Created::Refused));
         }
         let file_name = Kind::from(new).file_name(name);
 
@@ -109,7 +118,7 @@ impl NoteStore {
                     Some(entry) if entry.kind == Kind::Dir => {
                         vault.absolute(parent).unwrap_or_default()
                     }
-                    _ => return Task::ready(Ok(None)),
+                    _ => return Task::ready(Ok(Created::Refused)),
                 },
             }
         };
@@ -122,10 +131,10 @@ impl NoteStore {
                 .await?;
 
             let Ok(applied) = this.update(cx, Self::rescan) else {
-                return Ok(None);
+                return Ok(Created::Unlisted);
             };
             if applied.await.is_err() {
-                return Ok(None);
+                return Ok(Created::Unlisted);
             }
 
             Ok(this
@@ -135,7 +144,8 @@ impl NoteStore {
                     id
                 })
                 .ok()
-                .flatten())
+                .flatten()
+                .map_or(Created::Unlisted, Created::Listed))
         })
     }
 

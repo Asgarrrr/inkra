@@ -1,4 +1,4 @@
-use super::{NameProblem, RelPath, check_name, note_file_name};
+use super::{NameProblem, RelPath, check_name, fit, note_file_name};
 use std::path::Path;
 
 #[test]
@@ -117,4 +117,25 @@ fn every_accepted_name_is_one_relpath_accepts() {
             "{name} passed check_name but RelPath refused it"
         );
     }
+}
+
+#[test]
+fn fit_returns_a_name_that_fits_whole() {
+    assert_eq!(fit("abc", 5), "abc");
+}
+
+#[test]
+fn fit_cuts_a_longer_name_to_the_budget() {
+    assert_eq!(fit("abcdef", 4), "abcd");
+}
+
+#[test]
+fn fit_never_splits_a_surrogate_pair() {
+    assert_eq!(fit("a😀b", 2), "a");
+    assert_eq!(fit("a😀b", 3), "a😀");
+}
+
+#[test]
+fn fit_to_zero_units_is_empty() {
+    assert_eq!(fit("abc", 0), "");
 }
