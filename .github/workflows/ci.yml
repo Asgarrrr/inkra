@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly: an advisory lands against the lock file with no push to carry it.
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read

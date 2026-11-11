@@ -143,6 +143,9 @@ drops a whole file's tests and still compiles green.
 - **`wildcards = "warn"`.** `allow-wildcard-paths` exempts path dependencies of
   private crates only. gpui's manifest is not `publish = false`, so its
   `workspace = true` dependencies would fail `deny` from a file we cannot edit.
+- **Weekly run.** CI runs the gate every Monday on `main`, so an advisory
+  published against `Cargo.lock` fails a run within a week. The fix is a bump,
+  or an `ignore` entry with its reason.
 
 ## `inkra-vault`'s `test-support`
 
