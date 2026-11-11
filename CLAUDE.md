@@ -176,6 +176,8 @@ Read the spec before changing its area:
   the text top, the scroll request, a reload's top line; `vertical`, `hit_test`
 - `docs/superpowers/specs/2026-09-29-row-text-design.md` — `row_text`: lit
   one-line row text, the path split, `name_row`
+- `docs/superpowers/specs/2026-11-11-plain-row-text-design.md` — search and
+  backlink rows as prose: `Plain` shared, what stays raw, the window
 - `docs/superpowers/specs/2026-09-29-names-delete-design.md` — the name table
   `find` reads, why the fuzzy matcher is gone
 - `docs/superpowers/specs/2026-09-29-scan-session-design.md` — `Scans` in
