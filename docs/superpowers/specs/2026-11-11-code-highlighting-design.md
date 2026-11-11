@@ -204,7 +204,7 @@ path's tokens with a full pass. A cell counts mismatching steps at 20 and at
 Every Bash mismatch has an error in the full pass's tree. Zed's exact
 per-splice edits diverge there too, so the hull does not cause it.
 tree-sitter-bash's incremental reparse of broken text can differ from a fresh
-parse. The spike did not check whether a repairing keystroke converges again.
+parse. Repairs, below, show that the path converges again.
 
 **Cost** (`spike_incremental_cost`): one character inserted, one deleted, and
 one newline, mid-block, median of 20. Time in µs; the window is the insert's.
@@ -226,7 +226,175 @@ one newline, mid-block, median of 20. Time in µs; the window is the insert's.
 
 Python and Bash are the worst on this path: at most 0.82 ms per median, and
 no single run over 0.87 ms. The reparse dominates; the window stays under
-600 bytes. The path is not measured above 180 KB.
+600 bytes. Large blocks, below, measures the path up to the 512 KiB entry
+limit.
+
+### Large blocks
+
+Command: the one above, at `b4c4622`, test `spike_large_steps`, with
+`HL_VARIANT=scan|tree` and `HL_SIZES=16,32,64,128` for the small sizes. Each
+text repeats the language's 5,000-line text and is cut at a line. Each case is
+one keystroke: an insert, a delete or a newline, at the block's start, middle
+or end. A case is the median of 15 keystrokes per run, three runs. Every case
+equalled a full pass, and both row methods gave the same `InputEdit`.
+
+Two variants of the path ran:
+
+- **scan** is round 2's path. It counts newlines before and after the hull for
+  the rows, rebuilds the token vector, and recounts the block's newlines.
+- **tree** is D4's path. It reads the rows from the old tree's top-level
+  nodes, splices the token vector in place, and reads the counts from the
+  root's end position.
+
+Steps at 512 KiB, median over the nine cases, in µs. Load average 9.3 to 11.2
+for scan, 7.3 to 10.7 for tree.
+
+| Language | Variant | Rows | `Tree::edit` | Reparse | `changed_ranges` | Captures | Token splice | Recount | Total |
+|---|---|---|---|---|---|---|---|---|---|
+| rust | scan | 59 | 0 | 672 | 385 | 4 | 141 | 61 | 1,328 |
+| rust | tree | 1 | 0 | 750 | 420 | 5 | 13 | 0 | 1,206 |
+| python | scan | 59 | 1 | 10,246 | 293 | 5 | 33 | 61 | 10,703 |
+| python | tree | 1 | 1 | 10,323 | 300 | 6 | 3 | 1 | 10,636 |
+| javascript | scan | 59 | 0 | 1,060 | 80 | 2 | 123 | 60 | 1,389 |
+| javascript | tree | 5 | 0 | 1,154 | 84 | 6 | 17 | 0 | 1,327 |
+| bash | scan | 59 | 0 | 2,384 | 794 | 3 | 53 | 61 | 3,381 |
+| bash | tree | 1 | 1 | 2,869 | 989 | 6 | 7 | 0 | 3,937 |
+
+Total per keystroke, tree variant, in µs: the median over the nine cases,
+then the largest single case in brackets. Load average 13.9 to 15.0 for 16 to
+128 KiB, 7.3 to 10.7 for 256 and 512 KiB.
+
+| KiB | Rust | Python | JavaScript | Bash |
+|---|---|---|---|---|
+| 16 | 55 (86) | 67 (95) | 107 (212) | 127 (188) |
+| 32 | 106 (185) | 80 (131) | 130 (296) | 257 (409) |
+| 64 | 190 (245) | 245 (284) | 213 (302) | 467 (659) |
+| 128 | 274 (459) | 647 (787) | 188 (397) | 872 (1,061) |
+| 256 | 581 (877) | 3,774 (4,716) | 521 (686) | 2,160 (2,482) |
+| 512 | 1,206 (1,644) | 10,636 (13,401) | 1,327 (1,915) | 3,937 (5,114) |
+
+**Why the cost grows.** Scan has three O(block) steps: the two newline counts
+for the rows, the token vector's rebuild, and the recount. Tree removes all
+three; they cost at most 17 µs together at 512 KiB. Two steps remain, and
+both grow with the block at every position, even at its end: the reparse and
+`changed_ranges`. tree-sitter probably visits every top-level node of the old
+tree to reuse it, and walks both trees' top-level siblings to compare them.
+These two steps are O(block) inside tree-sitter, and the design cannot remove
+them without splitting a block into several trees. Python's slope steepens
+past 180 KB, and the spike did not find why.
+
+**The bound.** The keystroke budget is 1 ms, Zed's synchronous parse timeout
+(`buffer.rs:1177-1181`). 64 KiB is the largest size under it in every case:
+at most 659 µs. At 128 KiB one Bash case reaches 1,061 µs. D4 therefore
+reparses on the main thread only up to 64 KiB.
+
+**Copying a block.** Above 64 KiB, D4 hands the reparse a copy of the block's
+text. A standalone `rustc -O` program timed `String::clone` 201 times per size,
+three runs, at a load average of 13.2. The copy takes a median of 0.6 µs at
+64 KiB and 5.9 µs at 512 KiB; the largest single copy took 34 µs.
+
+### Repairs
+
+Command: the one above, at `b4c4622`, test `spike_repair_converges`, one run;
+the figures count steps, not time. Load average 8.4 to 11.5. Each language
+gets 200 break-then-repair sequences, chained on one entry, of three kinds:
+
+- a random splice, then its inverse;
+- a deleted delimiter (`()[]{}"'`), two letters typed and deleted, then the
+  delimiter retyped;
+- an opening quote, three letters, the closing quote, then all five deleted.
+
+A sequence the text cannot host is skipped. Each base text is error-free: the
+text cut before its first top-level error. JavaScript at 500 lines uses the
+5,000-line text's clean prefix instead, because the 500-line cut splits one
+top-level call. Each step compares the path's tokens with a full pass. A step
+is "clean" when the full pass's tree has no error.
+
+| Language | Lines | Base bytes | Sequences | Steps | Error steps | Mismatches, error | Clean steps | Mismatches, clean | Mismatches, last step |
+|---|---|---|---|---|---|---|---|---|---|
+| rust | 20 | 702 | 200 | 928 | 547 | 0 | 381 | 0 | 0 |
+| rust | 500 | 16,501 | 200 | 908 | 625 | 0 | 283 | 0 | 0 |
+| python | 20 | 387 | 196 | 860 | 597 | 0 | 263 | 0 | 0 |
+| python | 500 | 18,586 | 200 | 940 | 545 | 0 | 395 | 0 | 0 |
+| javascript | 20 | 219 | 190 | 860 | 2 | 0 | 858 | 0 | 0 |
+| javascript | 500 | 123,467 | 200 | 920 | 650 | 1 | 270 | 0 | 0 |
+| bash | 20 | 627 | 199 | 922 | 287 | 0 | 635 | 0 | 0 |
+| bash | 500 | 21,374 | 200 | 908 | 424 | 1 | 484 | 0 | 0 |
+
+Over 1,585 sequences, 2 of 3,677 error steps differed from a full pass, and
+none of 3,569 clean steps did. Every repair that left the tree error-free
+restored the full pass's tokens, so no repair rule is needed. JavaScript at 20
+lines is mostly a comment and saw only 2 error steps.
+
+### Query builds and parallel first passes
+
+Command: the one above, at `b4c4622`, tests `spike_query_builds`,
+`spike_query_memory` and `spike_parallel_first_pass`, three runs each. The
+load average stayed at 13.2 to 15.4; it did not fall during the session.
+
+**Query builds.** `Query::new` per language, median of 7 per run, then the
+median of three runs, in µs. "All eight" builds them in eight threads at once.
+Live memory is the default malloc zone's `bytes_used` (`mstats`) after each
+build, with every query kept; the three runs agreed to the KiB.
+
+| Language | Build | Live memory |
+|---|---|---|
+| rust | 7,866 | 76 KiB |
+| python | 2,076 | 110 KiB |
+| javascript | 3,542 | 66 KiB |
+| typescript (with JavaScript's query) | 8,944 | 75 KiB |
+| json | 4 | 2 KiB |
+| bash | 1,276 | 12 KiB |
+| html | 5 | 2 KiB |
+| css | 124 | 26 KiB |
+| sum, one by one | 24,287 | 373 KiB |
+| all eight, in parallel | 10,952 wall | 373 KiB |
+
+The process RSS grows by 15,424 KiB across the eight builds (median of 15,344,
+16,928 and 15,424). Most of it is probably freed build memory the allocator
+keeps resident; the live queries hold 373 KiB.
+
+**Parallel first passes.** One `Parser` per thread; the threads take blocks
+from a shared queue, largest first. Median of 7 per run, then the median of
+three runs, in µs. The 51-block note is the one from Recognising an unchanged
+block; the 50-block note drops its 173 KB block.
+
+| Note | Bytes | Serial | Largest block alone | 2 threads | 4 threads | 8 threads |
+|---|---|---|---|---|---|---|
+| 51 blocks | 274,660 | 35,063 | 18,511 | 23,327 | 19,784 | 19,774 |
+| 50 blocks of about 2 KB | 101,312 | 15,106 | 2 KB block, not timed | 8,614 | 5,621 | 3,386 |
+
+The 173 KB block bounds the 51-block note: four threads cannot beat it. On
+small blocks four threads cut the wall time by 63 %. At this load the serial
+rate is about 149 µs per KiB, 1.6 times round 1's 91 µs at a load of 2 to 4.
+
+### Binary size by grammar
+
+Command, on `spike/highlight-tree-sitter` at `b4c4622`:
+`CARGO_TARGET_DIR=… cargo rustc --release -p inkra-app --bin inkra-app -- -C link-arg=-Wl,-map,$TMPDIR/inkra-map.txt`,
+then the size of every symbol in the map's `# Symbols:` section, summed per
+`.rlib`. One run: a link map is deterministic. The binary is 24,254,848 B, as
+in row 5. A second link references `LANGUAGE_TSX` as well; without that
+reference the linker loads no TSX object.
+
+| Object | Linked bytes |
+|---|---|
+| `tree_sitter_typescript`, TypeScript only | 1,413,593 |
+| `tree_sitter_bash` | 1,365,332 |
+| `tree_sitter_rust` | 1,118,273 |
+| `tree_sitter_python` | 453,347 |
+| `tree_sitter_javascript` | 410,597 |
+| `tree_sitter` (the core) | 170,954 |
+| `tree_sitter_css` | 129,577 |
+| `tree_sitter_html` | 18,174 |
+| `tree_sitter_json` | 5,583 |
+| all of the above | 5,085,430 |
+| TSX, the second link's binary minus the first | 1,454,448 |
+
+The 129,754 B left of row 5's delta is the spike's own code and padding.
+TypeScript, Bash and Rust carry 77 % of the grammars. In the second link's map
+the TypeScript crate is 2,853,242 B, the largest by far; Open questions 1
+drops TSX.
 
 ### First pass by size
 
@@ -365,11 +533,38 @@ The grammars compile in parallel, so the slowest grammar bounds their share.
    pass. Every splice inside the content updates the entry incrementally.
 
    The incremental path folds the block's splices into one hull. It widens
-   the hull to whole lines and derives rows from newline counts. It calls
-   `Tree::edit`, reparses with the old tree, and paints only the edited
-   lines plus `changed_ranges`. It runs on the main thread at every size:
-   at most 0.82 ms at 5,000 lines (The incremental path). It equals a full
-   pass whenever the full pass's tree has no error.
+   the hull to whole lines and reads the rows from the old tree's top-level
+   nodes, not from newline counts. It calls `Tree::edit`, reparses with the
+   old tree, and paints only the edited lines plus `changed_ranges`. The new
+   tokens replace the old ones in place; the tail shifts by the edit's
+   length. It equals a full pass whenever the full pass's tree has no error,
+   and it returns to the full pass's tokens as soon as a repair clears the
+   error (Repairs).
+
+   No step of the path scans the block's text. The reparse and
+   `changed_ranges` still grow with the block, inside tree-sitter (Large
+   blocks). The path therefore runs whole on the main thread only for a
+   block of at most 64 KiB: at most 0.66 ms in every measured case, under
+   the 1 ms keystroke budget.
+
+   Above 64 KiB, the main thread runs `Tree::edit` and the token shift only,
+   at most 17 µs at 512 KiB. A background task gets a clone of the edited
+   tree and a copy of the block's text, at most 34 µs at 512 KiB. It
+   reparses, reads `changed_ranges`, captures, and returns the new tree and
+   tokens. Until it lands, the edited lines show their shifted old tokens,
+   and typed bytes keep `md_code_block`. The lag is the reparse: a median of
+   0.5 to 3.8 ms at 256 KiB, and up to 13.4 ms for Python at 512 KiB.
+
+   One task runs per block at a time. Edits made while it runs go through
+   `Tree::edit` and the token shift on the main thread and wait. When the
+   task lands, `Highlights` applies those edits to the returned tree and
+   tokens, then starts one task for all of them. Fast typing therefore
+   costs at most one reparse in flight per block, never one per keystroke.
+
+   While the full pass's tree has an error, the edited lines can show other
+   colours than a fresh parse would. This is bounded: 2 of 3,677 such steps
+   differed, and the first error-free step restored the full pass's tokens
+   in every sequence measured (Repairs).
 
    Memory has two bounds. Block text counts toward 4 MiB in total, with no
    entry over 512 KiB, as Zed bounds its cache (`highlight_cache.rs:14-16`).
@@ -411,7 +606,8 @@ The grammars compile in parallel, so the slowest grammar bounds their share.
    the budget, goes to a background task, as Zed's markdown does
    (`markdown.rs:1286`). Until the task lands, the block shows its shifted old
    tokens, or `md_code_block` if it has none. The limit is for first passes
-   only; every edit inside a block takes D4's incremental path.
+   only; every edit inside a block takes D4's incremental path, with D4's
+   own 64 KiB limit.
 
 7. **No info word, an indented block, or an unknown word keeps
    `md_code_block`, as today.** The info word resolves case-insensitively
@@ -426,31 +622,53 @@ The grammars compile in parallel, so the slowest grammar bounds their share.
    (`shell/session.rs`, 217-294). The goal is therefore colours in the same
    frame as the text, not in the first frame.
 
-   The open's background task gains one step. It runs `inkra_markdown::parse`
-   on the loaded text to find the blocks. It builds any missing `Query`, at
-   most 11.8 ms (TypeScript), once per language for the process. It then
-   first-passes the blocks in document order. The task returns the trees and
-   tokens with the text. `Highlights` takes them as entries at mark 0, so the
-   first frame with the text has its colours. Past 256 KiB of block text, the
-   task lands the text and colours the remaining blocks in a second task.
+   **The queries build at process start.** `run()` spawns one background
+   task per language before the window opens; each builds that language's
+   `Query` into a process-wide cell. All eight take 11 ms of wall time in
+   parallel and 24 ms of CPU, and hold 373 KiB (Query builds). The first
+   frame comes 100 to 140 ms after `run()` starts (`docs/startup-floor.md`),
+   and the restore lands after it. So every query is ready before any open
+   needs it. An open that comes earlier waits on the cell, never builds twice.
 
-   The landing comes later by the time of these passes. A note with 8 KiB of
-   code waits about 0.8 ms (First pass by size). The 51-block note waits
-   30 ms (Recognising an unchanged block). The cap bounds the wait near 23 ms
-   for one note's blocks, plus a query build the first time.
+   **The open's background task gains one step.** It runs
+   `inkra_markdown::parse` on the loaded text to find the blocks. It then
+   first-passes them in up to four parallel tasks, one `Parser` each,
+   largest block first. It returns the trees and tokens with the text.
+   `Highlights` takes them as entries at mark 0, so the first frame with the
+   text has its colours.
 
-   Three cases follow:
-   - **A note open at launch** lands coloured, in the restore's one update.
-   - **A note opened later, in a language not seen yet,** lands coloured, up
-     to 11.8 ms later than today. Later notes in that language skip the cost.
-   - **A block over 16 KiB** matters only while editing: a new or pasted
-     block, a changed info word, or an evicted tree. It goes to the
-     background (D6), and shows its shifted old tokens or `md_code_block`
-     for one to three frames. A pasted 256 KiB block takes about 23 ms.
+   **The landing-delay budget is 8 ms, one frame at 120 Hz.** An open
+   already waits for the file read. Holding the text one frame more, so it
+   lands coloured, does not show; grey text that turns coloured a frame
+   later does. The budget gives two caps:
+   - a block over 32 KiB is not coloured before the landing: its first pass
+     takes 3.1 ms at a load of 2 to 4, and about 5 ms at a load of 15;
+   - at most 128 KiB of block text is coloured before the landing. Four
+     tasks colour 99 KiB of small blocks in 5.6 ms at a load of 15 (Parallel
+     first passes).
 
-   A `Query` is built only in the background and kept for the process. A
-   language seen first in an edit shows `md_code_block` until its query
-   lands.
+   Blocks past either cap get a second task after the landing, and show
+   `md_code_block` until it lands. This is D6's background pass.
+
+   Four cases follow. The first-pass rate is round 1's 91 µs per KiB, at a
+   load of 2 to 4; at a load of 15 every figure is about 1.6 times as long.
+   - **A note with 8 KiB of Rust, at launch:** its query is ready. The
+     landing waits about 0.8 ms for the first pass.
+   - **The same note, opened later:** the same 0.8 ms.
+   - **The 51-block note:** its 50 small blocks, 99 KiB, colour in four
+     tasks before the landing: 5.6 ms at a load of 15, against 15.1 ms one
+     by one. Its 173 KB block exceeds the 32 KiB cap. It lands 18.5 ms after
+     the text, at a load of 15, and shows `md_code_block` until then.
+   - **A note with five languages at launch, 8 KiB each:** every query is
+     ready. Four tasks take five blocks, so one task takes two: about 1.5 ms,
+     derived from the rate and not measured as a whole. Without the builds
+     at process start, the task would first build five queries: 23.7 ms one
+     by one, or about 11 ms in parallel.
+
+   A block over 16 KiB that appears while editing goes to D6's background
+   pass: a new or pasted block, a changed info word, or an evicted tree. It
+   shows its shifted old tokens or `md_code_block` for one to three frames.
+   A pasted 256 KiB block takes about 23 ms.
 
 9. **The label is unchanged.** It shows the info word's source bytes
    (code-blocks spec, D1). Highlighting reads the same range to pick the
@@ -469,15 +687,19 @@ is not in the set; Open questions asks.
 | Rust | `tree-sitter-rust` | `rust`, `rs` |
 | Python | `tree-sitter-python` | `python`, `py` |
 | JavaScript | `tree-sitter-javascript` | `javascript`, `js`, `mjs`, `cjs`, `jsx` |
-| TypeScript | `tree-sitter-typescript` | `typescript`, `ts`, `tsx` |
+| TypeScript | `tree-sitter-typescript` | `typescript`, `ts` |
 | JSON | `tree-sitter-json` | `json`, `jsonc` |
 | Bash | `tree-sitter-bash` | `bash`, `sh`, `shell`, `zsh` |
 | HTML | `tree-sitter-html` | `html`, `htm` |
 | CSS | `tree-sitter-css` | `css` |
 
-`tsx` and `jsx` use `LANGUAGE_TSX`, as Zed parses JavaScript with the tsx
-grammar (`grammars/src/javascript/config.toml:2`). TypeScript's query extends
-JavaScript's; the spike concatenated both, and the build does the same.
+`jsx` uses `tree-sitter-javascript`, whose grammar parses JSX, with
+`HIGHLIGHT_QUERY` and `JSX_HIGHLIGHT_QUERY` joined. `tsx` keeps
+`md_code_block`: `LANGUAGE_TSX` adds 1,454,448 B (Binary size by grammar).
+Zed parses JavaScript with the tsx grammar
+(`grammars/src/javascript/config.toml:2`); Deviations records why Inkra does
+not. TypeScript's query extends JavaScript's; the spike concatenated both, and
+the build does the same.
 
 **Adding a language** is one dependency in `inkra-highlight`'s manifest and
 one table row: the `LanguageFn`, the highlights query and the info words. Most
@@ -515,18 +737,19 @@ Flexoki today; the syntax tokens do not depend on them.
 
 | Figure | Value | Command |
 |---|---|---|
-| Binary size | +5,215,184 B (+27 %) for eight grammars | `stat -f %z target/…/release/inkra-app` on `spike/highlight-tree-sitter` and on `main` |
+| Binary size | +5,215,184 B (+27 %) for eight grammars without TSX; TypeScript 1.41 MB, Bash 1.37 MB, Rust 1.12 MB | `stat -f %z target/…/release/inkra-app` on `spike/highlight-tree-sitter` and on `main`; Binary size by grammar |
 | Rebuild of `inkra-app` | no change, 8 s | `cargo clean -p inkra-app --release && cargo build --release -p inkra-app` |
 | Clean build of the tree-sitter crates | 11 s release, 4 s debug; slowest grammar 2.70 s in release | Clean build, above |
 | Keystroke outside a block | 83 ns for 51 blocks, no parse | `spike_incremental`, `spike_recognise_unchanged` |
-| Keystroke inside a block, any size | ≤ 0.82 ms median at 5,000 lines; 71 µs for Rust at 500 lines | `spike_incremental`, `spike_incremental_cost` |
+| Keystroke inside a block of at most 64 KiB | ≤ 0.66 ms in every case, on the main thread; 71 µs for Rust at 500 lines | `spike_incremental`, `spike_large_steps` and `spike_incremental_cost` |
+| Keystroke inside a block over 64 KiB | ≤ 17 µs plus a ≤ 34 µs copy on the main thread; the reparse in the background, 0.5 to 13.4 ms up to 512 KiB | `spike_incremental`, `spike_large_steps`; Copying a block |
 | First pass at the 16 KiB limit | 1.50 to 1.59 ms on the main thread | `spike_incremental`, `spike_first_pass_sizes` |
 | First pass above the limit | background; about 23 ms at 256 KiB | `spike_incremental`, `spike_first_pass_sizes` |
-| First block of a language | up to 11.8 ms, in the background | `spike_highlight`, cold |
-| Opening a note | the landing waits for its first passes: about 0.8 ms per 8 KiB of code, 30 ms for 270 KB | `spike_incremental`, `spike_first_pass_sizes` and `spike_recognise_unchanged` |
+| Queries, at process start | 11 ms wall and 24 ms CPU in the background; 373 KiB live; RSS +15 MiB, probably freed build memory | `spike_incremental`, `spike_query_builds` and `spike_query_memory` |
+| Opening a note | the landing waits at most 8 ms by D8's caps: 0.8 ms for 8 KiB of code; 5.6 ms for the 51-block note's small blocks | `spike_incremental`, `spike_first_pass_sizes` and `spike_parallel_first_pass` |
 | Tree memory | about 110 B per node, 26 to 41 times the text; 16 MiB budget | `spike_incremental`, `spike_tree_memory` |
 | Launch | no main-thread work before the first frame, by construction (D8) | reading `open_note` and the restore; no run |
-| Launch, with the larger binary | not measured | the window oracle was not run; the build's PR runs it |
+| Launch to text, and the larger binary at launch | not measured here; S1, S2 and S3 each block on the maintainer's figure | Slices |
 
 `markdown_parse` stays within noise: highlighting never runs inside
 `inkra_markdown::parse`.
@@ -544,6 +767,10 @@ Flexoki today; the syntax tokens do not depend on them.
   edits, one or several splices per step, the incremental path gives the
   same tokens as a full pass whenever the full pass's tree has no error.
   The spike's Bash divergence shows why the condition is needed.
+- `inkra-highlight`, `proptest`, repairs: the generator breaks then repairs.
+  It splices then reverts, deletes a delimiter then retypes it, and opens a
+  quote then closes it. Every clean step must equal a full pass, and so must
+  the final step.
 - `inkra-text`, `proptest`: replaying `edits_since(mark)` on the old text
   gives the new text, across `edit`, `undo`, `redo` and `apply_diff`. The
   mark grows on undo. A mark older than the ring gives `None`.
@@ -555,6 +782,10 @@ Flexoki today; the syntax tokens do not depend on them.
   - an edit inside one block updates that block only, incrementally;
   - a typed fence, a deleted fence or a changed info word gives a first pass;
   - a block over 16 KiB shows its old tokens until the background pass lands;
+  - an edit in a block over 64 KiB shifts its tokens on the main thread, and
+    the background reparse lands with the edits typed meanwhile reapplied;
+  - an open waits on the queries that the process start builds, and builds
+    none itself;
   - an opened note's first frame with text already has its colours;
   - an evicted tree keeps its tokens and gets a first pass on the next edit;
   - a vault theme without `syntax_*` keys shows the built-in colours.
@@ -570,13 +801,43 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
    with one grammar, `TokenClass`, the class table, `Highlights` beside
    `Parses` with the incremental path, the eleven theme tokens, `line_runs`
    reading tokens, the scene. First passes run on the main thread within D6's
-   budget. A block over 16 KiB stays grey. The Rust query builds in the
-   background, so S1 still shows grey before colour on open.
+   budget. A block over 16 KiB stays grey. The Rust query builds at process
+   start (D8), but the open does not wait yet, so S1 can show grey before
+   colour.
+   - Blocking criterion: the release binary grows by at most 1.5 MB against
+     `main`, by `stat -f %z`. The spike predicts about 1.29 MB, the core plus
+     Rust. The window oracle's median stays within base + 5 ms over 10
+     interleaved rounds (`docs/startup-floor.md`).
+   - STOP rule: if either figure fails in two separate batches, stop the
+     slice and report the figures before S2.
 2. **S2, colour on open and large blocks.** D8's step in the open's task, the
-   background first pass over 16 KiB, the tree budget. The tests that an
+   wait on the process-start queries, the background first pass over 16 KiB,
+   the background reparse over 64 KiB, the tree budget. The tests that an
    opened note lands coloured and that a large block keeps its old tokens.
+   - The slice adds a `text` mark to the `launch:` line
+     (`crates/app/src/timeline.rs`): the moment the restored note's text
+     lands. No mark records it today.
+   - Fixture: a scratch HOME and a vault whose session holds two open notes.
+     One is an 8 KiB Rust note in 4 blocks; the other has one block in each
+     of five languages.
+   - Method: `scripts/launch-figure.sh`, base `main` against S2, 10
+     interleaved rounds.
+   - Blocking criterion: the `text` median stays within base + 8 ms, the
+     `first frame` median within base + 5 ms, and the phys_footprint median
+     within base + 4 MiB.
+   - STOP rule: if a threshold fails in two batches, try fallback 1: build
+     the queries in the open's task instead of at process start. If it still
+     fails, try fallback 2: land the text first and colour it after.
+   - The maintainer runs this measure. This spec's author could not open a
+     window.
 3. **S3, the first set.** The seven other grammars, the info-word table, the
    per-language tests, the scene's other blocks.
+   - Blocking criterion: the release binary grows by at most 5.5 MB against
+     `main`; the spike measured 5,215,184 B. The window oracle's median stays
+     within base + 5 ms over 10 interleaved rounds.
+   - STOP rule: if either figure fails in two batches, ship the S1 set and
+     reopen Open question 1. TypeScript (1.41 MB) and Bash (1.37 MB) are the
+     largest grammars, so the question starts with them.
 
 ## Deferred
 
@@ -588,14 +849,17 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
 | A per-language colour override in vault themes | Asked for after the eleven tokens ship |
 | Persisting tokens across launches | Opening a note with much code measures over one frame later than today |
 | Keeping a removed block's entry, so a redo skips its first pass | A redo of a large block shows grey long enough to notice |
-| Measuring the incremental path above 180 KB | A block that large is common in a vault |
+| `tsx` blocks, with the TSX grammar (+1,454,448 B) | Asked for |
 | Removing grammars at build time behind features | The binary size becomes a complaint |
 
 ## Open questions
 
-1. **The language set.** Recommendation: ship the eight above. Add TOML in S2
-   only if the maintainer waives the rule for `tree-sitter-toml-ng`, last
-   released 2024-12-03. Zed's `native_grammars()` lists no HTML
+1. **The language set.** Recommendation: ship the eight above, without the TSX
+   grammar; `jsx` uses the JavaScript grammar. The per-grammar sizes do not
+   change this answer: the eight cost 5.2 MB, and TSX would add 1.45 MB for
+   one info word. S3's STOP rule reopens the question if the size fails.
+   Add TOML in S2 only if the maintainer waives the rule for
+   `tree-sitter-toml-ng`, last released 2024-12-03. Zed's `native_grammars()` lists no HTML
    (`grammars.rs:20-45`); keep HTML anyway, because notes quote markup more
    often than Zed's users edit it.
 2. **crates.io releases or Zed's git pins.** Zed pins `tree-sitter` by git rev
@@ -638,8 +902,14 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
   `inkra-text`, but stores every block twice and scans their text again on
   each keystroke (D5).
 - **Recording the session's languages to build queries before the first
-  frame.** It adds a session field to save at most 11.8 ms once, which the
-  open's background task already hides (D8).
+  frame.** Building every query at process start (D8) takes 11 ms of wall
+  time in the background. The first frame comes about 100 ms after `run()`,
+  so every query is ready before it. That needs no session field, and it
+  also covers a language the user opens later. A session field would save
+  13 ms of CPU and 0.4 MiB at most, for one more format to keep.
+- **The TSX grammar for `jsx` and `tsx`.** It adds 1,454,448 B. The
+  JavaScript grammar parses JSX and ships a JSX query, so only `tsx` loses
+  colour (Deferred).
 - **Persisting tokens across launches.** The open's background task colours a
   note before it lands, so a cache file would save nothing visible (D8).
 - **`tree-sitter-md` for the whole note.** Already rejected for parsing:
@@ -658,8 +928,20 @@ Each slice is vertical: crate, type, cache, theme, test, scene.
   `SyntaxSnapshot::interpolate` takes exact edits from
   `anchored_edits_since`, with bytes and points (`syntax_map.rs:422-424`).
   Inkra folds a block's splices into one hull, widened to whole lines, with
-  rows from newline counts. The spike measured it equal to Zed-style exact
-  edits on every error-free tree.
+  rows from the old tree's nodes. The spike measured it equal to Zed-style
+  exact edits on every error-free tree.
+- **Rows from the tree, not from newline counts.** Counting newlines reads
+  the whole block on each keystroke. The old tree already holds the rows, so
+  the path keeps no O(block) step of its own (Large blocks).
+- **A 64 KiB size limit, not a 1 ms timeout.** Zed reparses on the main
+  thread for at most 1 ms, then in the background (`buffer.rs:1177-1181`).
+  The spike measured the cost as linear in block size. A size test picks the
+  same blocks before any work, so no cancelled reparse is wasted.
+- **`jsx` through the JavaScript grammar, no TSX grammar.** It saves
+  1,454,448 B (Languages).
+- **Queries built at process start.** Zed builds a language's queries when it
+  loads that language. Inkra's eight build in 11 ms in the background, before
+  the first frame, so an open never waits for one (D8).
 - **A splice log with a monotonic mark, not a version.** Zed's buffer versions
   are ordered; Inkra's `Version` is not, and undo returns an older one.
 - **One tree per block, no layers.** Zed's `SyntaxMap` keeps layers for
