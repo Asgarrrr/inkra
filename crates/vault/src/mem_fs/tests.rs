@@ -469,6 +469,25 @@ fn a_read_dir_gate_parks_until_released() {
 }
 
 #[test]
+fn a_create_gate_parks_until_released() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+
+    let gate = fs.block_create("/vault/b.md");
+    let (created, ()) = block_on(async {
+        let create = fs.create(Path::new("/vault/b.md"), New::Note);
+        let release = async {
+            assert_eq!(fs.read_to_string(Path::new("/vault/b.md")), None);
+            gate.release();
+        };
+        futures::join!(create, release)
+    });
+
+    assert!(created.is_ok(), "{created:?}");
+    assert!(fs.read_to_string(Path::new("/vault/b.md")).is_some());
+}
+
+#[test]
 fn a_save_parked_after_the_write_already_moved_the_inode() {
     let fs = MemFs::new();
     fs.insert_file("/vault/a.md", "before");

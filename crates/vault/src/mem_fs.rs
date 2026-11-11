@@ -41,6 +41,7 @@ struct State {
     blocked_read_bytes: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_replaces: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    blocked_creates: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     /// Separate from `unwritable`: a note can be writable and still not
     /// removable (no trash on the volume, say).
     untrashable: BTreeSet<PathBuf>,
@@ -296,6 +297,10 @@ impl Fs for MemFs {
     }
 
     async fn create(&self, path: &Path, new: New) -> Result<FileIdentity> {
+        let blocked = self.state().blocked_creates.remove(path);
+        if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
         let mut state = self.state();
         if state.uncreatable.contains(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
