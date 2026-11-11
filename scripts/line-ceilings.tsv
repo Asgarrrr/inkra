@@ -4,5 +4,3 @@ crates/app/src/editor/mod.rs	494
 crates/app/src/shell.rs	416
 crates/app/src/shot/scenes.rs	641
 crates/app/src/shot/stage.rs	418
-crates/vault/src/mem_fs.rs	479
-crates/vault/src/real_fs.rs	421
