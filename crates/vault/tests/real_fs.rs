@@ -223,6 +223,22 @@ fn a_conflict_copy_is_never_written_through_a_symlink_at_its_name() {
     assert!(fs::symlink_metadata(&planted).expect("stat").is_symlink());
 }
 
+#[test]
+fn a_note_with_the_longest_name_saves_and_keeps_a_conflict_copy() {
+    let dir = TempDir::new("longest-name");
+    // 252 units plus `.md`: the longest name `check_name` accepts.
+    let note = dir.0.join(format!("{}.md", "a".repeat(252)));
+
+    block_on(RealFs.save(&note, "one", absent())).expect("save a new note");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "one");
+
+    let stale = block_on(RealFs.save(&note, "two", absent())).expect("save over a conflict");
+    let preserved = stale.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "one");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "two");
+    assert_eq!(names(&dir.0).len(), 2, "no temp left behind");
+}
+
 /// The counter `temp_path` hands out next, read from the temp a failed save names.
 fn next_temp_counter(dir: &Path) -> u64 {
     let missing = dir.join("missing").join("a.md");

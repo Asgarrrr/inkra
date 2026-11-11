@@ -5,9 +5,19 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::path::{MAX_NAME_UNITS, fit};
+
 const TEMP_MARK: &str = ".inkra-";
 /// `is_temp` matches it with `TEMP_MARK`, so `listable` hides a file a crash left.
 const TEMP_EXTENSION: &str = ".tmp";
+
+/// Room kept for the suffix at its longest: the mark, a `u32` pid, `-`, a `u64` counter, the extension.
+const SUFFIX_UNITS: usize = TEMP_MARK.len() + 10 + 1 + 20 + TEMP_EXTENSION.len();
+
+/// The part of a file name its temps start with: the whole name, unless the suffix would not fit.
+fn head(name: &OsStr) -> String {
+    fit(&name.to_string_lossy(), MAX_NAME_UNITS - SUFFIX_UNITS).to_owned()
+}
 
 /// Unique per process and per call, so two concurrent saves can't collide.
 pub(crate) fn temp_path(path: &Path) -> PathBuf {
@@ -15,9 +25,8 @@ pub(crate) fn temp_path(path: &Path) -> PathBuf {
 
     let counter = NEXT.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!("{TEMP_MARK}{pid}-{counter}{TEMP_EXTENSION}"));
-    path.with_file_name(name)
+    let head = head(path.file_name().unwrap_or_default());
+    path.with_file_name(format!("{head}{TEMP_MARK}{pid}-{counter}{TEMP_EXTENSION}"))
 }
 
 /// Whether `temp_path` could have made this name.
@@ -35,7 +44,7 @@ pub(crate) fn sweep(path: &Path) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };
-    let prefix = format!("{}{TEMP_MARK}", name.to_string_lossy());
+    let prefix = format!("{}{TEMP_MARK}", head(name));
     for entry in entries.flatten() {
         let name = entry.file_name();
         if !(is_temp(&name) && name.to_string_lossy().starts_with(&prefix)) {
@@ -50,3 +59,6 @@ pub(crate) fn sweep(path: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

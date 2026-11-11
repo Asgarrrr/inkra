@@ -36,3 +36,35 @@ fn a_note_without_an_extension_still_gets_one() {
         PathBuf::from("/tmp/notes (conflict 1970-01-01 00-00-10Z).md")
     );
 }
+
+fn units(path: &Path) -> usize {
+    path.file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .encode_utf16()
+        .count()
+}
+
+#[test]
+fn a_long_stem_is_cut_so_the_name_fits() {
+    let note = PathBuf::from(format!("/vault/{}.md", "a".repeat(252)));
+    let path = conflict_path(&note, at(10), |_| false);
+    assert_eq!(units(&path), 255);
+    assert!(
+        path.to_string_lossy()
+            .ends_with(" (conflict 1970-01-01 00-00-10Z).md")
+    );
+}
+
+#[test]
+fn a_long_stem_pays_for_the_counter_too() {
+    let note = PathBuf::from(format!("/vault/{}.md", "a".repeat(252)));
+    let first = conflict_path(&note, at(10), |_| false);
+    let second = conflict_path(&note, at(10), |candidate| candidate == first);
+    assert!(units(&second) <= 255);
+    assert!(
+        second
+            .to_string_lossy()
+            .ends_with(" (conflict 1970-01-01 00-00-10Z) 2.md")
+    );
+}
