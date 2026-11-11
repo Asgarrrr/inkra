@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
-    listable,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, MAX_TEXT_BYTES, Mtime, New, Result, Saved, Stamp,
+    VaultError, listable,
 };
 use crate::watch::Watch;
 
@@ -222,6 +222,9 @@ impl Fs for MemFs {
         let Some((bytes, mtime, identity)) = state.files.get(path) else {
             return Err(io(path, ErrorKind::NotFound));
         };
+        if bytes.len() as u64 > MAX_TEXT_BYTES {
+            return Err(io(path, ErrorKind::FileTooLarge));
+        }
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Err(VaultError::NotUtf8 {
                 path: path.to_path_buf(),

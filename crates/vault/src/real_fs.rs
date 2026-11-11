@@ -15,14 +15,31 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 
 use crate::fs::{
-    DirEntry, FileIdentity, Fs, Kind, Loaded, Mtime, New, Result, Saved, Stamp, VaultError,
-    listable, normalize_line_endings,
+    DirEntry, FileIdentity, Fs, Kind, Loaded, MAX_TEXT_BYTES, Mtime, New, Result, Saved, Stamp,
+    VaultError, listable, normalize_line_endings,
 };
 use crate::temp::sweep;
 use crate::watch::Watch;
 use save::{overwrite, preserve, replace};
 
 pub struct RealFs;
+
+/// `len` is the stat taken before the read; a file over `max_len` is refused, never cut.
+fn read_capped(path: &Path, file: fs::File, len: u64, max_len: u64) -> Result<Vec<u8>> {
+    let too_large = || io_error(path, io::Error::from(io::ErrorKind::FileTooLarge));
+    if len > max_len {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(len).map_err(|_| too_large())?);
+    // One byte past the cap: a file that grew since the stat is refused, not cut.
+    file.take(max_len.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| io_error(path, source))?;
+    if bytes.len() as u64 > max_len {
+        return Err(too_large());
+    }
+    Ok(bytes)
+}
 
 fn io_error(path: &Path, source: std::io::Error) -> VaultError {
     VaultError::Io {
@@ -124,7 +141,8 @@ impl Fs for RealFs {
         // Stat before reading: on the racing case, this errs toward "changed
         // on disk" rather than silently overwriting on the next save.
         let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
-        let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
+        let file = fs::File::open(path).map_err(|source| io_error(path, source))?;
+        let bytes = read_capped(path, file, metadata.len(), MAX_TEXT_BYTES)?;
         let text = String::from_utf8(bytes).map_err(|_| VaultError::NotUtf8 {
             path: path.to_path_buf(),
         })?;
@@ -137,25 +155,13 @@ impl Fs for RealFs {
     }
 
     async fn read_bytes(&self, path: &Path, max_len: u64) -> Result<Vec<u8>> {
-        let too_large = || io_error(path, io::Error::from(io::ErrorKind::FileTooLarge));
         let file = fs::File::open(path).map_err(|source| io_error(path, source))?;
         // The handle's stat, so the size checked is the opened file's.
         let len = file
             .metadata()
             .map_err(|source| io_error(path, source))?
             .len();
-        if len > max_len {
-            return Err(too_large());
-        }
-        let mut bytes = Vec::with_capacity(usize::try_from(len).map_err(|_| too_large())?);
-        // One byte past the cap: a file that grew since the stat is refused, not cut.
-        file.take(max_len.saturating_add(1))
-            .read_to_end(&mut bytes)
-            .map_err(|source| io_error(path, source))?;
-        if bytes.len() as u64 > max_len {
-            return Err(too_large());
-        }
-        Ok(bytes)
+        read_capped(path, file, len, max_len)
     }
 
     async fn save(&self, path: &Path, text: &str, expected: Stamp) -> Result<Saved> {

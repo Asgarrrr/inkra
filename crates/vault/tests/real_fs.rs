@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::StreamExt;
 use futures::executor::block_on;
 use inkra_vault::mem_fs::MemFs;
-use inkra_vault::{Fs, Kind, Mtime, New, RealFs, Stamp, VaultError, Watch};
+use inkra_vault::{Fs, Kind, MAX_TEXT_BYTES, Mtime, New, RealFs, Stamp, VaultError, Watch};
 
 /// A temp directory that removes itself.
 struct TempDir(PathBuf);
@@ -883,6 +883,23 @@ fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
 
     assert_eq!(bytes, b"\x00\xffcache");
     assert_eq!(error.io_kind(), Some(ErrorKind::FileTooLarge));
+}
+
+#[test]
+fn load_refuses_a_file_over_the_cap() {
+    let dir = TempDir::new("load-cap");
+    let huge = dir.0.join("huge.md");
+    let small = dir.0.join("small.md");
+    fs::File::create(&huge)
+        .and_then(|file| file.set_len(MAX_TEXT_BYTES + 1))
+        .expect("sparse file");
+    fs::write(&small, "four").expect("write");
+
+    let error = block_on(RealFs.load(&huge)).expect_err("one byte over the cap");
+    let loaded = block_on(RealFs.load(&small)).expect("under the cap");
+
+    assert_eq!(error.io_kind(), Some(ErrorKind::FileTooLarge));
+    assert_eq!(loaded.text, "four");
 }
 
 #[test]

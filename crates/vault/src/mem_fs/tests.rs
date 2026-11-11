@@ -2,7 +2,7 @@ use futures::FutureExt;
 use futures::executor::block_on;
 
 use super::MemFs;
-use crate::fs::{Fs, Kind, Mtime, New, Stamp, VaultError};
+use crate::fs::{Fs, Kind, MAX_TEXT_BYTES, Mtime, New, Stamp, VaultError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -696,6 +696,23 @@ fn read_bytes_reads_a_file_of_max_len_and_refuses_one_byte_more() {
         over.and_then(|error| error.io_kind()),
         Some(std::io::ErrorKind::FileTooLarge)
     );
+}
+
+#[test]
+fn load_refuses_a_file_over_the_cap() {
+    let fs = MemFs::new();
+    let over = usize::try_from(MAX_TEXT_BYTES + 1).unwrap_or(usize::MAX);
+    fs.insert_bytes("/vault/huge.md", vec![b'a'; over]);
+    fs.insert_file("/vault/small.md", "four");
+
+    let error = block_on(fs.load(Path::new("/vault/huge.md"))).err();
+    let loaded = block_on(fs.load(Path::new("/vault/small.md"))).ok();
+
+    assert_eq!(
+        error.and_then(|error| error.io_kind()),
+        Some(std::io::ErrorKind::FileTooLarge)
+    );
+    assert_eq!(loaded.map(|loaded| loaded.text).as_deref(), Some("four"));
 }
 
 #[test]
