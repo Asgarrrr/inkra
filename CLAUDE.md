@@ -168,6 +168,8 @@ Read the spec before changing its area:
   match: BM25, per-ordinal note lengths
 - `docs/superpowers/specs/2026-09-29-text-input-design.md` — `TextInput`, the
   core `EditorView` and `NameField` share: gates, protocol, one binding set
+- `docs/superpowers/specs/2026-11-11-word-wise-editing-design.md` — `⌥←`/`⌥→`
+  by UAX #29 word, `⌥⌫`/`⌥⌦`, double and triple click, the word drag
 - `docs/superpowers/specs/2026-09-29-query-run-design.md` — one query entry
   in `inkra-index` (`find_notes`/`search` with `Jobs`), `IndexDelegate`, `Runs`
   owning the run, `IndexWatch::observe`
