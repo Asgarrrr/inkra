@@ -136,6 +136,8 @@ Read the spec before changing its area:
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
 - `docs/superpowers/specs/2026-11-08-backlink-context-on-demand-design.md` — links
   as `NoteRef`s, one shared slice per note, contexts read on demand by the panel, cache format 3
+- `docs/superpowers/specs/2026-11-11-link-landing-design.md` — following `[[Note#Heading]]`
+  and a backlink row to their place: the heading fold, `Spot`, `Reveal::Top`, `LinkActivated`
 - `docs/superpowers/specs/2026-09-24-search-design.md` — quick open, vault
   search, `NoteIndex`/`IndexSync`, the picker and modal layer
 - `docs/superpowers/specs/2026-09-28-vault-search-integration-design.md` — `⌘⇧F`
