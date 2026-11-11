@@ -1,9 +1,11 @@
 # Vault search ranked by the BM25 score
 
-Status: **proposed 2026-11-11, revised once the same day.** Measured on the
-throwaway branch `spike/ranked-vault-search`, which never merges. The
-revision measures V3's keys and two lazy orders, and makes the cold measure a
-blocking criterion of S2.
+Status: **proposed 2026-11-11, revised twice the same day.** Measured on the
+throwaway branch `spike/ranked-vault-search`, which never merges. The first
+revision measured V3's keys and two lazy orders, and made the cold measure a
+blocking criterion of S2. The second revision measures reads past the first
+block, picks doubling blocks by those figures, builds the owning `Ranked`,
+and gives the cold threshold an exact rule.
 
 It answers the first half of roadmap item 9 of "Index and search: the
 2026-09-27 audit" (`docs/roadmap.md:306`): "List groups by the BM25 score
@@ -101,37 +103,60 @@ This corrects the plan's proposal: a stable `sort_by` over
 key is 16 bytes. A `Candidate` holds an `Arc<str>` path and a stamp
 (`crates/index/src/search/text.rs:19-25`).
 
-### V4. The lazy order: one sorted block of 64 at a time
+### V4. The lazy order: sorted blocks that double, from 64
 
 `candidates` sorts no more keys than the reads consume. It holds the keys in
-one vector and orders them in blocks of `BLOCK = 64`:
+one vector and orders them in blocks. The first block holds 64 keys, and each
+next block holds twice the one before: 64, 128, 256, 512, and so on.
 
 1. When the next key is past the sorted part, it calls
-   `select_nth_unstable(BLOCK - 1)` on the rest. That moves the 64 best keys
-   of the rest to its front, in O(rest).
-2. It sorts those 64 keys with `sort_unstable`.
+   `select_nth_unstable(block - 1)` on the rest. That moves the `block` best
+   keys of the rest to its front, in O(rest).
+2. It sorts those keys with `sort_unstable`, and doubles `block`.
 3. It yields them one by one, and builds each `Candidate` from its `order`
    only when yielded.
 
-A rest of 64 keys or fewer is sorted whole. The total order of V3 makes the
-sequence equal to a full sort's, ties included. The proptest of Tests proves
-it.
+A rest of `block` keys or fewer is sorted whole. The total order of V3 makes
+the sequence equal to a full sort's, ties included, whatever the block sizes.
+The proptest of Tests proves it for fixed and doubling blocks. The spike
+holds it as `Blocks` and `Order` (`crates/index/src/query.rs:220`, `:228` on
+the spike).
+
+**The bound by construction.** Let n be the candidates, and r the notes the
+reads consume.
+
+- A selection visits at most the rest, so at most n keys.
+- Doubling from 64 makes k = ceil(log2(r/64 + 1)) selections. The sorted keys
+  sum to 64 · (2^k − 1), which is less than 2r + 64.
+- So the order work is at most k · n key visits plus sorts of fewer than
+  2r + 64 keys in all. Per note read, the selection work is at most k · n / r visits,
+  and k grows with log r, not with r.
+- For r = 1,000: 5 selections, 1,984 keys sorted. At n = r = 50,000 the bound
+  is 10 selections.
+- A fixed block of 64 makes ceil(r/64) selections: 16 for r = 1,000, 782 for
+  r = 50,000. Its selection work grows linearly with r, about n/64 visits
+  per note read.
+
+How far r goes. The search stops at 1,000 hits, and each read whose text
+still holds the terms gives at least one hit. So r exceeds 1,000 only
+when reads give no hits: a text rewritten or gone since its load (below). In a search that never reaches the
+limit, every candidate is read, so r = n and every design orders all n keys.
 
 Why the order stops early. `Reader::stream` feeds `buffered(READERS)`, which
 pulls the next candidate only while fewer than 4 reads are in flight
 (`crates/app/src/index/reads.rs:59`). The search loop breaks once
 `TextSearch::read` returns false (`crates/app/src/vault_search/mod.rs:161-169`).
 So the iterator stops being pulled at the limit, and the unread keys are
-never sorted. On the bench's 50,000-note corpus, the ranked search reads at
-most 38 notes before the limit (Cost, R1 counts). One selection and one sort
-of 64 keys serve the whole search.
+never sorted. On the bench's corpus, the nine word cases read at most 38
+notes before the limit (Cost, R1 counts): one selection and one sort of 64
+keys serve them. The `kumquat` case reads 1,000 notes: 5 selections.
 
 Why no fixed top-k. A candidate can give zero hits: a text rewritten since
 its load may no longer hold the terms (`crates/index/src/search/text.rs:104-108`),
 and a gone note gives none (`:110`). So no fixed number of notes is sure to
-reach 1,000 hits. The block order has no fixed count: past the first block,
-the next `select_nth_unstable` orders the next 64. It stays exact whatever
-the reads consume.
+reach 1,000 hits. The block order has no fixed count: past each block, the
+next `select_nth_unstable` orders a block twice as large. It stays exact
+whatever the reads consume.
 
 The weight cannot be computed for the notes read only. A best-first order
 must compare every candidate's score, so each kept note is scored once. Only
@@ -140,18 +165,56 @@ per-term upper bound in the word index (Deferred). The lazy order skips
 what it can skip exactly: the 64-byte `Candidate` of every note not read.
 
 **What `candidates` returns.** An owning iterator, `Ranked`, that is
-`Send + 'static`. It holds the key vector, the block cursor, and Arc clones
-of the names and the corpus that build each `Candidate`. It replaces
+`Send + 'static`. It holds the key vector, the block cursor, and clones of
+the names and the corpus that build each `Candidate`. It replaces
 `Option<Vec<Candidate>>` by `Option<Ranked>`: `None` still means cancelled.
+The spike builds it in `inkra-index` (`crates/index/src/query.rs:288`, on
+the spike). A `const` item asserts `Send + 'static` at compile time (`:294`),
+and the test `a_ranked_order_outlives_its_snapshot` drops the index before
+it drains a `Ranked`.
+
+What its clones cost, on `main`:
+
+- `NamesSnapshot` holds an `Arc<[Name]>` and an `Arc<NameWords>`. Its doc:
+  "Cloning is an `Arc` bump" (`crates/index/src/names.rs:20-25`).
+- `CorpusSnapshot` holds an `Arc<[EntryId]>`, an `Arc<[Chunk]>` and a
+  `usize`. Its doc: "Cloning is an `Arc` bump"
+  (`crates/index/src/corpus.rs:113-119`).
+- `IndexSnapshot` holds both, and its accessors return references
+  (`crates/index/src/index.rs:323-331`, `:346-352`).
+
+So a `Ranked` costs four `Arc` increments once per query, and no copy of a
+name or a text. The bench measured the owning form against the borrowing one
+(Cost): equal within the spread of runs.
+
+**Does `Reader::stream` need `'static`?** Its signature returns
+`impl Stream<Item = (Candidate, Read)> + Send + 'static`
+(`crates/app/src/index/reads.rs:27-34`), and `stream_with` does the same
+(`:37-60`). Each read task owns its `Candidate` (`:54-57`); the iterator
+itself is pulled on the consumer's side.
+
+- Vault search would do with a borrow. `search` drains the stream inside its
+  own future (`crates/app/src/vault_search/mod.rs:157-169`), and it already
+  borrows `&IndexSnapshot` (`crates/app/src/picker/runs.rs:57-62`). The
+  spawned task owns that snapshot (`runs.rs:160-174`).
+- Quick open needs `'static`. It moves its stream into `cx.spawn(...)` and
+  detaches it (`crates/app/src/quick_open/list.rs:146-176`). The reads test
+  moves it into a background task too (`crates/app/src/index/reads_tests.rs:27`).
+
+Decision: the owning `Ranked`. One `'static` signature keeps serving every
+caller, and the bench shows no cost for owning. Rejected: a borrowing
+`impl Iterator + '_` from `candidates`, with `stream` generic over the
+iterator's lifetime. It saves four `Arc` increments per query, and it makes
+`stream`'s bound depend on its caller.
 
 What changes for its callers:
 
 - `Reader::stream` (`crates/app/src/index/reads.rs:27-34`) takes
   `impl IntoIterator<Item = Candidate>` whose iterator is `Send + 'static`,
-  in place of a `Vec`. `stream_with` (`:37-60`) takes the same bound over its
-  items. `futures::stream::iter` already accepts any `IntoIterator`. A `Vec`
-  still satisfies the bound, so `quick_open/list.rs:146` and
-  `index/reads_tests.rs:27` do not change.
+  in place of a `Vec`, and stops collecting it (`:32`). `stream_with`
+  (`:37-60`) takes the same bound over its items. `futures::stream::iter`
+  already accepts any `IntoIterator`. A `Vec` still satisfies the bound, so
+  `quick_open/list.rs:146` and `index/reads_tests.rs:27` do not change.
 - `vault_search/mod.rs:157-160` passes the iterator on. No other line moves.
 - The app test helper `candidates` (`crates/app/src/index/tests.rs:138-150`)
   collects into a `Vec`, so its seven call sites do not change.
@@ -218,65 +281,132 @@ These become false and change in the build:
 ## Cost
 
 Machine: Apple M5 Pro, 18 cores, 48 GiB (`sysctl machdep.cpu.brand_string
-hw.ncpu hw.memsize`). Run 2026-11-11 with no other heavy command running.
+hw.ncpu hw.memsize`). Run 2026-11-11. Other processes loaded the machine:
+`uptime` gave a load average of 13.53 before run 1, 10.67 after run 1, 6.88
+after run 2, and 7.02 after run 3. No other heavy command of this work ran
+meanwhile.
 
 The `search` bench is 50,000 synthetic notes in memory, on one core
-(`crates/index/benches/search.rs:132-159` on `main`). The spike adds three
-groups to it (commit `27b2f9b1`). All four designs run in one binary, so they
-interleave within each run:
+(`crates/index/benches/search.rs:132-159` on `main`). The spike adds groups
+and two cases to it (commit `148ddc83`). Every design runs in one binary, so
+they interleave within each run:
 
 - `main`: today's `candidates`, vault order.
-- full sort: V3's keys `(Reverse<Weight>, order)`, `sort_unstable`, then
-  every `Candidate` built.
-- heap: `BinaryHeap` built from the keys in O(n), popped on demand.
-- blocks: V4, blocks of 64.
+- full: V3's keys `(Reverse<Weight>, order)`, `sort_unstable`, then every
+  `Candidate` built.
+- b64: fixed blocks of 64, the first revision's V4, owning `Ranked`.
+- b256: fixed blocks of 256, owning `Ranked`.
+- dbl: doubling blocks from 64, this revision's V4, owning `Ranked`.
+- b64 borrowed: fixed blocks of 64, a borrowing iterator over the snapshot.
+
+The heap of the first revision is dropped from the bench table: it lost to
+b64 in 8 of 9 keystroke cases there (Rejected alternatives). The proptest
+keeps it as a reference.
+
+The two new cases cross many blocks. Each note's text gets one word that
+draws nothing from the generator, so the nine first cases keep their texts:
+
+- `kumquat`: every note holds it once. 50,000 candidates, and the limit
+  takes 1,000 reads, 16 blocks of 64. This is the most reads one search
+  makes when every read gives a hit (V4, the bound).
+- `quince`: one note in 60 holds it once. 834 candidates, 834 reads, 834
+  hits, so the limit is never reached and every candidate is read. N must
+  stay under 1,000: with one hit per note, the 1,000th read would reach the
+  limit. One note in 60 gives 834 at 50,000 notes, close to that ceiling.
+  It makes 14 blocks of 64, and 4 blocks when doubling.
 
 Command, run 3 times back to back:
 
 ```
-cargo bench -p inkra-index --bench search -- --quick "designs/|first read/|profile/"
+cargo bench -p inkra-index --bench search -- --quick "designs/|first read/"
 ```
 
-Each figure is the median of the 3 runs' criterion estimates, in ms.
+**The cost table.** Each figure is the median of the 3 runs' criterion
+estimates, in ms. "Keystroke" is `designs/50k notes`: the candidates, then
+each text searched until the limit, as `search.rs:132-159` does. "First
+read" is `first read/50k notes`: `candidates`, then the first candidate
+yielded, R1 (a). The bench asserts that every ranked design yields the full
+sort's order on all eleven cases.
 
-**The design table.** Two groups per case, each the median of 3 runs in
-ms. "Keystroke" is `designs/50k notes`: the candidates, then each text
-searched until the limit, as `search.rs:132-159` does. "First read" is
-`first read/50k notes`: `candidates`, then the first candidate yielded, R1
-(a).
+| case | candidates | reads, ranked | keystroke: main | full | b64 | b256 | dbl | b64 borrowed | first read: main | full | b64 | b256 | dbl | b64 borrowed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `zanzibar` | 50 | 50 | 1.004 | 0.957 | 0.955 | 0.959 | 0.953 | 0.990 | 0.428 | 0.439 | 0.429 | 0.469 | 0.447 | 0.453 |
+| `projet` | 50,000 | 19 | 1.291 | 2.286 | 1.060 | 1.057 | 1.048 | 1.041 | 0.907 | 1.748 | 0.705 | 0.719 | 0.724 | 0.737 |
+| `e` | 50,000 | 12 | 1.189 | 2.176 | 1.044 | 1.034 | 1.023 | 1.029 | 0.933 | 2.761 | 0.800 | 0.802 | 0.794 | 0.796 |
+| `projetzz` | 0 | 0 | 0.375 | 0.378 | 0.379 | 0.378 | 0.379 | 0.379 | 0.397 | 0.394 | 0.388 | 0.399 | 0.415 | 0.380 |
+| `ete` | 49,963 | 38 | 1.712 | 2.457 | 1.214 | 1.236 | 1.238 | 1.237 | 0.749 | 1.760 | 0.649 | 0.647 | 0.645 | 0.645 |
+| `é` | 50,000 | 12 | 1.170 | 2.250 | 1.028 | 1.027 | 1.020 | 1.062 | 0.892 | 1.857 | 0.784 | 0.787 | 0.825 | 0.848 |
+| `réunion` | 49,969 | 38 | 2.178 | 2.916 | 1.553 | 1.658 | 1.843 | 1.690 | 0.743 | 1.756 | 0.647 | 0.660 | 0.653 | 0.655 |
+| `projet réunion` | 49,969 | 19 | 1.558 | 2.538 | 1.461 | 1.437 | 1.359 | 1.361 | 0.912 | 1.771 | 0.862 | 0.848 | 0.841 | 0.848 |
+| `e e` | 50,000 | 12 | 1.203 | 2.217 | 1.035 | 1.026 | 1.025 | 1.025 | 0.891 | 1.846 | 0.787 | 0.786 | 0.785 | 0.785 |
+| `kumquat` | 50,000 | 1,000 | 11.112 | 5.575 | 5.294 | 4.618 | 4.707 | 5.362 | 0.747 | 1.529 | 0.668 | 0.712 | 0.645 | 0.646 |
+| `quince` | 834 | 834 | 9.070 | 8.999 | 9.005 | 9.075 | 9.201 | 9.184 | 0.444 | 0.444 | 0.435 | 0.434 | 0.433 | 0.434 |
 
-| `search` case | candidates | keystroke: main | full sort | heap | blocks | first read: main | full sort | heap | blocks |
-|---|---|---|---|---|---|---|---|---|---|
-| rare word, `zanzibar` | 50 | 1.006 | 0.993 | 1.023 | 0.926 | 0.414 | 0.416 | 0.406 | 0.419 |
-| common word, `projet` | 50,000 | 1.196 | 2.113 | 1.108 | 1.017 | 0.806 | 1.598 | 0.737 | 0.634 |
-| 1 char, `e` | 50,000 | 1.057 | 2.016 | 1.083 | 0.998 | 0.730 | 1.603 | 0.843 | 0.755 |
-| no match, `projetzz` | 0 | 0.289 | 0.351 | 0.334 | 0.335 | 0.281 | 0.343 | 0.359 | 0.362 |
-| folded word, `ete` | 49,963 | 1.591 | 2.216 | 1.234 | 1.176 | 0.611 | 1.535 | 0.663 | 0.586 |
-| 1 accented char, `é` | 50,000 | 1.007 | 2.047 | 1.037 | 0.992 | 0.840 | 1.873 | 0.884 | 0.802 |
-| accented word, `réunion` | 49,969 | 1.919 | 2.575 | 1.662 | 1.520 | 0.630 | 2.700 | 0.665 | 0.576 |
-| two words, `projet réunion` | 49,969 | 1.367 | 2.542 | 1.484 | 1.360 | 0.745 | 1.845 | 0.942 | 0.781 |
-| 1 char twice, `e e` | 50,000 | 1.139 | 2.184 | 1.159 | 1.101 | 0.758 | 1.723 | 0.804 | 0.722 |
+The nine first cases read at most 38 notes, so every lazy design runs one
+selection and one sort of 64, or more for b256. Their differences there are
+the spread of runs. On `réunion`, dbl's three runs gave 1.968, 1.603 and
+1.843 ms for the same code path as b64.
 
-- Blocks have the lowest median in 8 of 9 cases. They are at or below `main`
-  in 8 of 9 cases. `projetzz` is the exception: +0.046 ms with 0 candidates,
-  inside the loop variance explained below.
-- The full sort costs up to 1.18 ms more than `main` (`projet réunion`).
-  It orders 50,000 keys and builds 50,000 `Candidate`s, and the search reads
-  at most 38.
-- Blocks beat `main` on the cases that reach the limit: ranked reads
-  need fewer notes to reach 1,000 hits (R1 counts), and build no `Candidate`
-  for the notes not read.
-- The heap is second: each pop costs O(log n) and the build touches every
-  key once more than the selection.
-- The spread between runs: run 2 was the noisiest, for example the full sort
-  on `é` gave 4.29 ms in it. The medians drop it.
+- Every lazy design is at or below `main` on every keystroke case but
+  `projetzz` and `quince`, and on every first read but `zanzibar` and
+  `projetzz`. Those cases hold 0, 50 or 834 keys; dbl's are covered below.
+- The full sort costs up to 1.08 ms more than `main` on the nine first cases
+  (`é`, keystroke), and delays the first read by up to 1.83 ms (`e`).
+- The owning form against the borrowing one, b64 against b64 borrowed: the
+  owning form is 0.179 ms faster at most (`quince`, keystroke) and 0.100 ms
+  slower at most (`projet réunion`, keystroke). Neither form is faster in a
+  consistent way. So owning costs nothing measurable (V4, the decision).
+
+**The case past the first block, `kumquat`.** It separates the designs by
+their number of selections over 50,000 keys: b64 makes 16, dbl 5, b256 4.
+
+- b64: 5.294 ms. dbl: 4.707 ms. b256: 4.618 ms. The 11 selections that b64
+  makes beyond dbl cost about 0.59 ms, so about 0.05 ms per selection over
+  50,000 keys.
+- dbl and b256 differ by 0.09 ms, inside the spread: b256's first run gave
+  8.034 ms.
+- Every ranked design runs about twice as fast as `main` here, with the same
+  1,000 reads. The order work cannot explain it: the full sort is also
+  faster. Probable cause: with one occurrence per note, BM25's length term
+  puts the short notes first, so the ranked reads scan less text. This is a
+  hypothesis. The bench did not count the bytes scanned.
+
+**The choice: doubling from 64.** On the nine first cases it ties with b64
+and b256. On `kumquat` it beats b64 by 0.59 ms and ties with b256. Its bound
+grows with log r (V4), and a fixed block's grows with r. So dbl is the one
+design that is cheapest on both measured shapes and bounded on the shapes
+not measured. Rejected: b64, 16 selections at 1,000 reads; b256, 782 / 4 =
+196 selections at r = 50,000, and a first block four times larger for
+searches that read 12 to 38 notes.
+
+**Where dbl costs more than `main`.**
+
+- `quince`, keystroke: 9.201 against 9.070 ms, +0.131 ms, +1.4 %. Every
+  candidate is read, so every ranked design orders all 834 keys; `main`
+  orders none. No ranked design avoids that work: a best-first order of the
+  notes read must compare every one of them. It is bounded: 3 selections
+  and 4 sorts over at most 834 keys. The selections visit at most 2,502
+  keys, 20 times fewer than the one selection over 50,000 that the nine
+  first cases pay. Full, b64 and b256
+  order the same 834 keys and measure 8.999 to 9.075 ms, within
+  0.005 ms of `main` or below it. `main`'s own three runs spread from 9.040 to 10.939 ms, dbl's from
+  9.116 to 10.033 ms. So the +0.131 ms is probably the spread, not the
+  order. In a search that never reaches the limit, the keys to order are at
+  most 999 plus the reads that give no hit (V4, how far r goes).
+- `projetzz`, keystroke: 0.379 against 0.375 ms, +0.004 ms. It keeps 0
+  candidates, so no design orders anything.
+- First read, `zanzibar` +0.019 ms and `projetzz` +0.018 ms. They hold 50
+  and 0 keys, one sort of at most 64 keys or none. Both sit inside the loop
+  variance that "Where the time goes" names.
 
 The `long lines` and `scripts` groups hold one to ten notes, so the order
 does nothing there. The first revision measured them as noise, −12 % to
 +3 %. This revision did not rerun them.
 
-**Where the time goes** (`profile/50k notes`). Each step adds work to the
-step before, over all 50,000 notes. Median of 3 runs, in ms:
+**Where the time goes** (`profile/50k notes`). These are the first
+revision's figures, from its 3 runs; this revision did not rerun the group.
+Each step adds work to the step before, over all 50,000 notes. Median of 3
+runs, in ms:
 
 | step | `e` | `projet` | `zanzibar` | `projetzz` |
 |---|---|---|---|---|
@@ -305,13 +435,13 @@ step before, over all 50,000 notes. Median of 3 runs, in ms:
   probable, not proven: no disassembly was read.
 
 **Before the first read.** `main` builds its whole `Vec<Candidate>` before
-the first read, so its first read waits for every candidate too. Blocks issue the first read within
-+0.09 ms of `main` in every case, and before it in five. The full sort
-delays it by up to 2.07 ms (`réunion`).
+the first read, so its first read waits for every candidate too. dbl issues
+the first read within +0.019 ms of `main` in every case, and before it in
+nine of eleven. The full sort delays it by up to 1.83 ms (`e`).
 
 **R1 counts.** These are deterministic: the bench prints them, and they are
 the same in every run and in every ranked design. The bench asserts that
-heap and blocks yield the full sort's order on all nine cases.
+every ranked design yields the full sort's order on all eleven cases.
 
 | case | candidates | reads to the first hit, main / ranked | reads to the limit, main | reads to the limit, ranked |
 |---|---|---|---|---|
@@ -324,13 +454,17 @@ heap and blocks yield the full sort's order on all nine cases.
 | `réunion` | 49,969 | 1 / 1 | 71 | 38 |
 | `projet réunion` | 49,969 | 1 / 1 | 25 | 19 |
 | `e e` | 50,000 | 1 / 1 | 18 | 12 |
+| `kumquat` | 50,000 | 1 / 1 | 1,000 | 1,000 |
+| `quince` | 834 | 1 / 1 | 834, no limit | 834, no limit |
 
 - R1 (b), the reads issued before the first hits land: one in both orders.
   Every candidate holds every term at its load, so the first read gives hits
   unless its text changed since. In the app, `buffered(READERS)` issues up
   to 4 reads at once, in both orders, so up to 4 reads are in flight when
   the first hits land.
-- Ranked reads 24 % to 50 % fewer notes to reach the limit.
+- Ranked reads 24 % to 50 % fewer notes to reach the limit on the seven
+  word cases that reach it. On `kumquat` every read gives one hit, so both
+  orders read 1,000 notes.
 
 **The warm read.** The `read_search` bench reads a `bench_vault` vault of
 50,000 notes on disk, warm. It searches for a term whole in 1,000 notes and
@@ -361,8 +495,8 @@ requirement stands as written. This spec adds no tolerance on top of it.
 land on a cold cache: when the first read is issued, and how many reads it
 takes.
 
-- The first read is issued after `candidates` returns its first key. Blocks
-  match `main` within 0.09 ms on every case (the table above), against a
+- The first read is issued after `candidates` returns its first key. dbl
+  matches `main` within 0.019 ms on every case (the cost table), against a
   100 ms requirement.
 - The first hits need one read in both orders (R1 counts). Both orders issue
   4 reads at once.
@@ -384,22 +518,51 @@ not done until it passes.
    the 50,000-note `bench_vault` of `docs/benchmarks.md:34-38`.
 3. Queries: the nine `search` bench cases, plus `speed of light` and
    `black hole` on the Wikipedia vault.
-4. For each build, each query, 5 runs: quit the app, `sudo -n purge`
-   (`docs/benchmarks.md:106`), launch the build on the vault, wait for the
-   index to settle, open `⌘⇧F`, paste the query.
+4. One run: quit the app, `sudo -n purge` (`docs/benchmarks.md:106`),
+   launch the build on the vault, wait for the index to settle, open `⌘⇧F`,
+   paste the query. Alternate the builds run by run, `main` then S2, so a
+   drift of the machine reaches both.
 5. Read the release log line `search: first hits …, landed …, read N`
    (`crates/app/src/vault_search/mod.rs:49-52`, printed at `:188-190`). Keep
    the line of the answer to the full query.
 
-**The pass threshold**, per query, on the 5 cold runs:
+**The absolute rule.** Every S2 run's `first hits` is at most 100 ms. One
+run above it fails the query. More runs do not undo it.
 
-- the median of S2's `first hits` is at or below the median of `main`'s;
-- the median of S2's `landed` is at or below the median of `main`'s;
-- no S2 run's `first hits` or `landed` exceeds `main`'s slowest run;
-- every S2 `first hits` stays within the 100 ms requirement.
+**The relative rule**, per query, for `first hits` and for `landed` apart.
+"The k-th of `main`" is the k-th smallest of `main`'s runs. The median of
+an even count is the mean of its two middle values.
+
+1. Take 10 runs per build. The metric passes if S2's median is at or below
+   the 9th of `main`'s 10, its second slowest run.
+2. Otherwise the result is borderline. Take 20 more runs per build, 30 in
+   all, and keep the first 10. The metric passes if S2's median of 30 is at
+   or below the 25th of `main`'s 30. Otherwise it fails.
+
+A borderline result never triggers the fallback: only a fail at step 2 does.
 
 `read N` must also be at or below `main`'s on each query that reaches the
 limit. It is a count, so it checks the run, not the disk.
+
+Why these counts. The rule compares S2 with `main`'s own spread, so it
+assumes no shape of that spread. A simulation drew both builds' runs from one
+log-normal spread, at a spread of 10 % and of 30 %, 40,000 trials each
+(`rule_sim2.py`, run once, not kept in the repo):
+
+- With no change, a metric fails 0.17 % of the time and needs step 2 4.5 %
+  of the time. Over 11 queries and 2 metrics, a build with no change fails
+  the measure about 4 % of the time: 1 − 0.9983^22.
+- A 20 % slower S2 fails 91 % of the time at a 10 % spread, and 11 % at a
+  30 % spread. A 50 % slower S2 fails 100 % and 69 % of the time.
+- A first draft passed at the 8th of 10, then at the 15th of 20. It failed
+  about 4 % of no-change metrics, so about 60 % of no-change measures. The
+  first revision's rule, S2's median at or below `main`'s, fails a
+  no-change metric about half the time. Both fail on noise, so the rule
+  above replaces them.
+
+These rates hold only if cold runs are independent and drawn from one
+spread per build. That was not checked on real cold runs. So a wide spread
+can hide a slowdown, and the absolute rule is the backstop.
 
 **The fallback.** If a query fails, S2 raises `READERS` from 4 to 8 for the
 ranked stream, and the measure runs again. Cost: up to 4 more reads in
@@ -430,12 +593,20 @@ model tests pass against it.
 - `query::tests::lazy_orders_equal_the_full_sort`, a proptest. It draws 0 to
   300 keys whose weights come from {0, 0.5, 1, 1.5}, so ties are frequent,
   with shuffled unique orders, and a block size from 1 to 79. It asserts that
-  the heap order and the block order both equal `sort_unstable`. The spike
-  holds it, with the heap kept as a test reference until S1 drops it.
-- `query::tests::the_lazy_candidates_equal_the_sorted_ones_ties_included`. It
-  indexes six notes, one not loaded, with equal and unequal scores. It
-  asserts that `candidates` yields the same ids as the full sort, five of
+  the heap order, fixed blocks of that size and doubling blocks from that
+  size all equal `sort_unstable`. A size of 1 makes doubling start a block
+  at keys 2, 4, 8, 16 and so on, so short draws reach many blocks. The spike
+  holds it (`crates/index/src/query/tests.rs:236`), with the heap kept as a
+  test reference until S1 drops it. S1 keeps doubling only, so the fixed
+  case goes with `Blocks`.
+- `query::tests::the_lazy_candidates_equal_the_sorted_ones_ties_included`
+  (`:249`). It indexes six notes, one not loaded, with equal and unequal
+  scores. It asserts that `candidates` and `ranked` with fixed blocks of 1,
+  2 and 64 and doubling from 1 yield the same ids as the full sort, five of
   them.
+- `query::tests::a_ranked_order_outlives_its_snapshot` (`:290`). It drops
+  the index, then drains a `Ranked`: two candidates. With the `const`
+  assertion of V4, it pins the owning form.
 
 **Tests that failed under the spike's first commit.** Each one asserts vault
 order. Every other test passed: `cargo test --workspace --no-fail-fast`.
@@ -459,7 +630,8 @@ order. Every other test passed: `cargo test --workspace --no-fail-fast`.
   b's second hit; only its row index changes.
 
 With the ranked oracle and the renamed test, the spike's `cargo test -p
-inkra-index` passes: 565 tests. The three app failures are reorderings of
+inkra-index` passes: 565 tests in the first revision, 566 with this
+revision's test. The three app failures are reorderings of
 the same rows; the spike did not rerun the app tests.
 
 **New tests.**
@@ -470,9 +642,11 @@ the same rows; the spike did not rerun the app tests.
   vault order.
 - Index: the limit keeps the best notes. With a limit of one note's hits, the
   best note is kept, not the first one.
-- Index: a candidate past the first block. With more than 64 candidates and
-  a limit that needs more than 64 notes, the 65th note read is the 65th
-  best. This covers the second `select_nth_unstable`.
+- Index: candidates past the first blocks. With more than 448 candidates
+  and a limit that needs every one of them, the notes read are the full
+  sort's, in order. Doubling from 64 starts blocks at the 65th, 193rd and
+  449th key, so this covers the second and third selection and the final
+  sort of the rest.
 - `cargo mutants` on the build's diff, from the repo's command
   (`CLAUDE.md`, "mutants"): zero missed.
 
@@ -481,7 +655,8 @@ the same rows; the spike did not rerun the app tests.
 Each slice holds data, behavior and a test.
 
 - **S1, `inkra-index`.** `Weight` moves to `words/score.rs` (V6).
-  `candidates` returns `Ranked`, best first by blocks (V1, V3, V4). The
+  `candidates` returns `Ranked`, best first by doubling blocks (V1, V3,
+  V4). The
   oracle ranks, and the lazy-order tests land (Tests). The index tests
   change, and the new index tests land. The docs of V7 in `inkra-index`
   change. The benches collect or iterate. `cargo mutants` on the diff.
@@ -535,24 +710,39 @@ A second scorer would be a second formula that the oracle must check, and
 the two searches could disagree on one note.
 
 **A full sort of V3's keys.** It gives the same order as V4, and costs up to
-1.18 ms more than `main` per keystroke (`projet réunion`, Cost). It delays
-the first read by up to 2.07 ms (`réunion`).
+1.08 ms more than `main` per keystroke (`é`, Cost). It delays the first read
+by up to 1.83 ms (`e`).
 
 **A stable sort over `(f64, Candidate)`.** The plan's proposal. It gives the
 same order, and cost 2.47 ms on `candidates` alone for `e` in the first
 revision, against 0.73 ms for `main`. It moves 64-byte elements and builds
 every `Candidate`.
 
-**A heap built in O(n), popped on demand.** It gives the same order. It is
-slower than blocks in 8 of 9 keystroke cases, by up to 0.12 ms
-(`projet réunion`), and slower to the first read in 7 of 9.
+**A heap built in O(n), popped on demand.** It gives the same order. In the
+first revision it was slower than blocks of 64 in 8 of 9 keystroke cases, by
+up to 0.12 ms (`projet réunion`), and slower to the first read in 7 of 9.
+
+**Fixed blocks of 64.** The first revision's V4. It ties with doubling on
+the nine first cases, and costs 0.59 ms more on `kumquat`: 16 selections
+over 50,000 keys against 5 (Cost). Its selections grow linearly with the
+notes read.
+
+**Fixed blocks of 256.** It ties with doubling on every measured case. Its
+selections still grow linearly with the notes read: 196 at 50,000 reads
+against 10 (V4, the bound).
+
+**A borrowing iterator over the snapshot.** It saves four `Arc` increments
+per query, and measured no faster than the owning `Ranked` (Cost). It would
+make `Reader::stream`'s bound depend on its caller, and quick open needs a
+`'static` stream (V4).
 
 **A top-k of a fixed number of notes.** A note can give zero hits (V4), so a
 fixed top-k could stop short of the limit while better notes exist. Blocks
 keep the speed of a top-k without its fixed count.
 
 **Rank inside `fan_out` over parallel ranges, as `find_notes` does.** The
-lazy order already brings the keystroke to or below `main`. Parallel ranges
+lazy order already brings the keystroke to or below `main`, within the
+spread of runs on `quince` (Cost). Parallel ranges
 add a merge for a cost that fits the budget. Deferred, with a trigger.
 
 ## Deviations from Zed
