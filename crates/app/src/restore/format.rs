@@ -160,23 +160,20 @@ impl From<SavedAxis> for Axis {
 }
 
 impl SavedGroup {
-    /// The views its tabs name, its active index following them: a file tab drops (L2).
+    /// One entry per tab: a view tab's name, `None` for a file tab, which `restore_views` drops (L2).
     fn stored(&self) -> StoredDock {
-        let (views, saved_ixs): (Vec<_>, Vec<_>) = self
+        let views = self
             .tabs
             .iter()
-            .enumerate()
-            .filter_map(|(saved_ix, tab)| match tab {
-                SavedTab::View { view } => Some((view.clone(), saved_ix)),
+            .map(|tab| match tab {
+                SavedTab::View { view } => Some(view.clone()),
                 SavedTab::File(_) => None,
             })
-            .unzip();
-        // The saved active tab, else its nearest kept tab to the left, else the first.
-        let active = saved_ixs
-            .iter()
-            .rposition(|&saved_ix| saved_ix <= self.active)
-            .unwrap_or(0);
-        StoredDock { views, active }
+            .collect();
+        StoredDock {
+            views,
+            active: self.active,
+        }
     }
 }
 

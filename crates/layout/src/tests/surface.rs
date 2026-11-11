@@ -1,7 +1,7 @@
 use super::no_min;
 use crate::{
     Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, StoredDock, Surface, View,
-    restore_views,
+    kept_active, restore_views,
 };
 
 fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
@@ -15,7 +15,7 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 
 fn stored(names: &[&str], active: usize) -> StoredDock {
     StoredDock {
-        views: names.iter().map(|&name| name.to_owned()).collect(),
+        views: names.iter().map(|&name| Some(name.to_owned())).collect(),
         active,
     }
 }
@@ -185,6 +185,35 @@ fn an_active_out_of_range_falls_back_to_the_first_centre_group() {
         Layout::restored(&Shape::Group, [Some(&Shape::Group); 2], [true, true], 0),
         Layout::default()
     );
+}
+
+#[test]
+fn kept_active_is_the_active_entry_else_its_nearest_left_survivor() {
+    let cases: [(&[usize], usize, usize); 6] = [
+        (&[0, 2, 3], 2, 1),
+        (&[0, 2, 5], 4, 1),
+        (&[3, 4], 1, 0),
+        (&[], 3, 0),
+        (&[0, 1, 2], 9, 2),
+        (&[0, 1], 0, 0),
+    ];
+    for (kept, active, expected) in cases {
+        assert_eq!(kept_active(kept, active), expected, "{kept:?} {active}");
+    }
+}
+
+#[test]
+fn a_tab_naming_no_view_before_the_active_shifts_it() {
+    let dock = |active| StoredDock {
+        views: vec![None, Some("files".to_owned()), Some("backlinks".to_owned())],
+        active,
+    };
+    for (active, kept) in [(2, 1), (0, 0)] {
+        assert_eq!(
+            restore_views([&[dock(active)], &[]]),
+            [vec![(vec![View::Files, View::Backlinks], kept)], Vec::new()]
+        );
+    }
 }
 
 #[test]
