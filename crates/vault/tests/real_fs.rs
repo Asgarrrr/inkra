@@ -196,6 +196,81 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
 }
 
 #[test]
+fn a_conflict_copy_is_never_written_through_a_symlink_at_its_name() {
+    let dir = TempDir::new("conflict-symlink");
+    let note = dir.0.join("Note.md");
+    fs::write(&note, "theirs").expect("write");
+    fs::File::options()
+        .write(true)
+        .open(&note)
+        .expect("open")
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_001_125))
+        .expect("set the mtime");
+    let outside = dir.0.join("outside.txt");
+    let planted = dir.0.join("Note (conflict 2026-09-21 14-32-05Z).md");
+    std::os::unix::fs::symlink(&outside, &planted).expect("symlink");
+
+    let saved = block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert_eq!(
+        saved.preserved,
+        Some(dir.0.join("Note (conflict 2026-09-21 14-32-05Z) 2.md"))
+    );
+    assert!(
+        fs::symlink_metadata(&outside).is_err(),
+        "the link's target must not be created"
+    );
+    assert!(fs::symlink_metadata(&planted).expect("stat").is_symlink());
+}
+
+/// The counter `temp_path` hands out next, read from the temp a failed save names.
+fn next_temp_counter(dir: &Path) -> u64 {
+    let missing = dir.join("missing").join("a.md");
+    let error = block_on(RealFs.save(&missing, "", absent())).expect_err("no folder");
+    let VaultError::Io { path, .. } = error else {
+        panic!("an io error names the temp");
+    };
+    let name = path
+        .file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .into_owned();
+    let counter = name
+        .strip_suffix(".tmp")
+        .and_then(|name| name.rsplit('-').next())
+        .expect("a counter");
+    counter.parse::<u64>().expect("digits") + 1
+}
+
+#[test]
+fn a_save_temp_is_never_written_through_a_symlink_at_its_name() {
+    let dir = TempDir::new("temp-symlink");
+    let note = dir.0.join("note.md");
+    let outside = dir.0.join("outside.txt");
+    let first = next_temp_counter(&dir.0);
+    // Other tests share the counter, so a window, not one name.
+    for counter in first..first + 64 {
+        let temp = dir.0.join(format!(
+            "note.md.inkra-{}-{counter}.tmp",
+            std::process::id()
+        ));
+        std::os::unix::fs::symlink(&outside, &temp).expect("symlink");
+    }
+
+    block_on(RealFs.save(&note, "ours", absent())).expect("save");
+
+    assert!(
+        fs::symlink_metadata(&note).expect("stat").is_file(),
+        "the note must be a plain file, not a renamed link"
+    );
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+    assert!(
+        fs::symlink_metadata(&outside).is_err(),
+        "the link's target must not be created"
+    );
+}
+
+#[test]
 fn save_reports_a_stamp_the_next_save_accepts() {
     let dir = TempDir::new("chain");
     let note = dir.0.join("note.md");

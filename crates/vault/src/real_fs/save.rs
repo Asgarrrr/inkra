@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -36,17 +37,22 @@ pub(super) fn overwrite(
 /// must survive a crash during the replace that follows. Copied raw, never
 /// through `normalize_line_endings` — a conflict file is an exact record.
 pub(super) fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> {
-    let destination = conflict_path(path, mtime_of(path, metadata)?, |candidate| {
-        candidate.exists()
-    });
-
+    let mtime = mtime_of(path, metadata)?;
     let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
-    // `?` unlinks nothing: without this guard, a failure mid-`write_all`
-    // leaves a truncated file whose name still says "preserved".
+    let (destination, mut file) = loop {
+        // `symlink_metadata`, so a dangling link reads as taken.
+        let candidate = conflict_path(path, mtime, |candidate| {
+            fs::symlink_metadata(candidate).is_ok()
+        });
+        match create_exclusive(&candidate) {
+            Ok(file) => break (candidate, file),
+            // Taken since `conflict_path` looked; the next call skips it.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => return Err(io_error(&candidate, source)),
+        }
+    };
+    // Armed only once the file is ours: armed earlier, a refused create would unlink another's.
     let mut guard = TempFile(Some(destination.clone()));
-
-    let mut file =
-        fs::File::create(&destination).map_err(|source| io_error(&destination, source))?;
     file.write_all(&bytes)
         .map_err(|source| io_error(&destination, source))?;
     file.sync_all()
@@ -65,11 +71,18 @@ pub(super) fn preserve(path: &Path, metadata: &fs::Metadata) -> Result<PathBuf> 
 /// rename is what makes the write atomic. A sibling, not the system temp
 /// dir, since a cross-device rename fails with `EXDEV`.
 pub(super) fn replace(path: &Path, bytes: &[u8], existing: Option<&fs::Metadata>) -> Result<()> {
-    let temp = temp_path(path);
+    let (temp, mut file) = loop {
+        let temp = temp_path(path);
+        match create_exclusive(&temp) {
+            Ok(file) => break (temp, file),
+            // A leftover under this pid; `temp_path` counts on to the next name.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => return Err(io_error(&temp, source)),
+        }
+    };
     // `?` unlinks nothing; disarmed only once the rename succeeds.
     let mut guard = TempFile(Some(temp.clone()));
 
-    let mut file = fs::File::create(&temp).map_err(|source| io_error(&temp, source))?;
     // Held through the rename, so `sweep` never takes a live temp for an orphan.
     let _ = file.try_lock();
     file.write_all(bytes)
@@ -87,6 +100,14 @@ pub(super) fn replace(path: &Path, bytes: &[u8], existing: Option<&fs::Metadata>
     drop(file);
     guard.disarm();
     Ok(())
+}
+
+/// A new file at `path`. `O_EXCL` refuses anything already there, a dangling symlink included.
+fn create_exclusive(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 /// Removes the temp file unless the rename claimed it.
