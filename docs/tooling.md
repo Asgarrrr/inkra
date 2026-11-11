@@ -181,7 +181,10 @@ caught, 88 unviable, 8 timed out, and none missed.
 Third full run, 2026-11-11, `-j 4`: 555 mutants in 10 minutes. 447 were caught, 95
 unviable, 13 timed out, and none missed. The count rose because the exclusive creates,
 the fitted names, the load cap and the create gate landed after the second run. The
-two new timeouts are the retry loops of `preserve` and `replace`.
+five new timeouts are infinite loops too: `preserve` and `replace` retrying forever, two
+mutants each, and `State::exists` answering `true`, which leaves `conflict_path` no free
+name. The `!=` mutants of the two retry guards read as caught in some runs and as timed
+out in others; both count.
 
 ## Lints in tests
 
