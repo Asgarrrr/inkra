@@ -74,6 +74,9 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 #
 # Equivalent. `release` consumes the gate, and dropping it closes the channel,
 # which the parked operation reads as a release.
+#
+# Unobservable. `preserve` retries only when another process takes the candidate
+# between `conflict_path`'s look and the exclusive create; no test can stage that.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/cmark\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -96,4 +99,5 @@ exclude_re = [
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace trash_method with \\(\\)$",
     "^crates/vault/src/mem_fs\\.rs:[0-9]+:[0-9]+: replace \\+ with (-|\\*) in MemFs::tick$",
     "^crates/vault/src/mem_fs/faults\\.rs:[0-9]+:[0-9]+: replace Gate::release with \\(\\)$",
+    "^crates/vault/src/real_fs/save\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in preserve$",
 ]

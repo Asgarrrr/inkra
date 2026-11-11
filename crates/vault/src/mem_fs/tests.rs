@@ -763,6 +763,17 @@ fn load_refuses_a_file_over_the_cap() {
 }
 
 #[test]
+fn load_accepts_a_file_at_the_cap() {
+    let fs = MemFs::new();
+    let cap = usize::try_from(MAX_TEXT_BYTES).unwrap_or(usize::MAX);
+    fs.insert_bytes("/vault/full.md", vec![b'a'; cap]);
+
+    let loaded = block_on(fs.load(Path::new("/vault/full.md"))).ok();
+
+    assert_eq!(loaded.map(|loaded| loaded.text.len()), Some(cap));
+}
+
+#[test]
 fn read_bytes_of_a_missing_or_unreadable_file_fails() {
     let fs = MemFs::new();
     fs.insert_bytes("/cache/locked.idx", b"x".to_vec());
