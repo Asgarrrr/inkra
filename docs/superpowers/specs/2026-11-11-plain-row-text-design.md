@@ -3,12 +3,16 @@
 Date: 2026-11-11. Status: **proposed**.
 
 Written on the branch `backlinks-context-2b` (`e18da99a`). A throwaway spike,
-branch `spike/plain-row-text` (commits `6b6bb977`, `ac170709`, `ef02c02a`),
-measured every figure below. The spike never merges.
+branch `spike/plain-row-text` (commits `6b6bb977`, `ac170709`, `ef02c02a`,
+`4e6ee97e`, `e80fa7f2`), measured every figure below. The spike never merges.
 
 Revision 1 (same day) bounds the parse cost by construction (P10) and keeps
 the bytes of a code-block line (P11, P12). It replaces the first "Cost"
 section, which deferred both.
+
+Revision 2 (same day) makes the stored code ranges safe on any text (P11,
+"The read"), moves the backlinks panel's context build off the foreground
+(P13), states where `⌘P`'s excerpt runs, and gives S1 a blocking memory bound.
 
 ## Why
 
@@ -187,7 +191,8 @@ The bound on one parse:
 - The backlinks panel calls `link_contexts(text, occurrences)`, built on
   `shown_all`, in place of one `link_context` per occurrence (`slot.rs:62-65`).
   Occurrences are in document order (`slot.rs:12`), so two links on one line
-  share one parse there too.
+  share one parse there too. It runs in the reader task, never on the
+  foreground (P13).
 
 `LINE_BYTES` goes from 1 KiB to 256 bytes, for all three lists: one rule, one
 `Plain`. It also caps the first line of `⌘P`'s preview (`preview.rs:89`). That
@@ -255,15 +260,62 @@ the read together (`index/backlink.rs:16`). One function,
 
 The second case is the text read differing from the text indexed. Search
 still searches such a text and marks it stale (`search/text.rs:96-101`).
-The stored ranges then point into another text. `Plain::raw` slices at them,
-and an offset off a char boundary would panic, so they are never used on it.
+`code_of` gives that text its own ranges, so its code lines show as written.
+This is for a correct row, not for safety.
+
+**Safe on any text, by construction.** A `Stamp` is `{ mtime, size }`
+(`crates/vault/src/fs.rs:30-33`): two texts can share one, so a matching stamp
+does not prove the ranges came from the text read. `⌘P`'s reader closure does
+not compare stamps at all (`Read::Text { text, .. }`,
+`crates/app/src/quick_open/list.rs:148`). So no path slices a text at a stored
+offset without a check:
+
+- `code_at(text, code, at)` returns the range that holds `at` only if
+  `text.get(start..end)` is `Some`. `get` checks the order, the bounds and
+  both char boundaries. This is the check `link_context` already makes on a
+  stored link range (`crates/index/src/context.rs:19-22`).
+- The piece starts at the later of `shown_from(..)` and the checked range's
+  start. Both are char boundaries, and the start is at most the window's last
+  byte, so `&text[from..window.end]` cannot panic.
+- A range that does not fit is ignored: the window takes the plain path, as a
+  window outside any code block does. The row shows the line through `markup`,
+  never an error and never a missing row.
+- A range that fits but came from another text with the same stamp can show
+  one line raw, or one code line through `markup`. That is a wrong row until
+  the reload, as a stale context is today; it is never a panic.
+
+Cost: a `partition_point` over the note's ranges (at most 8 per note on the
+bench vault) and one `get` per window. No parse on the common path. The spike
+commit `4e6ee97e` holds the check, and the proptest
+`shown_all_never_panics_on_any_code_ranges` (`crates/index/src/plain_tests.rs`)
+proves it on arbitrary text with multi-byte chars, valid windows, and
+arbitrary ranges: any offsets, in or out of bounds, on or off char boundaries,
+in any order. On `ef02c02a` it failed with:
+
+```
+panicked at crates/index/src/plain.rs:131:39:
+start byte index 36 is not a char boundary; it is inside '🦀' (bytes 35..39 of string)
+minimal failing input: text = "    日日🦀🦀   🦀a` ` a a  🦀aaaaaaaaaaa", starts = [
+    0,
+], code = [
+    (
+        36,
+        50,
+    ),
+]
+```
+
+Under `4e6ee97e` it passes at the default 256 cases and at
+`PROPTEST_CASES=20000`.
 
 **The callers.**
 
 - `⌘⇧F`: `TextSearch::read` passes `candidate.code_of(&text, stamp)` to
   `note_hits` (`text.rs:96-101`).
 - `⌘P`: `excerpt` gains a `code` argument. Its caller holds the candidate and
-  the read (`crates/app/src/quick_open/list.rs:133-148`).
+  the read (`crates/app/src/quick_open/list.rs:133-148`). The closure runs in
+  the reader task ("Cost", "On which thread"), so `code_of`'s fallback parse
+  never runs on the foreground.
 - Backlinks: none. A link is never in a code block (`links` drops them;
   `crates/markdown/src/links/tests.rs:115-120`), so a link's line is never a
   code line.
@@ -289,7 +341,13 @@ Rejected:
   brief excludes it. Reusing `parse`'s `code_blocks` needs the full styling
   parse at index time, a heavier pass than `links`, and its ranges include
   fences and prefixes.
-- **Reuse the stored ranges on a stale read.** See the panic hazard above.
+- **Reuse the stored ranges on a stale read.** The rows of a changed note
+  would show the wrong lines raw. `code_of` parses that one note instead.
+- **Trust a matching stamp, and slice unchecked.** A stamp is mtime and size;
+  two texts can share it, and an offset off a char boundary panics. The check
+  is one `get` per window.
+- **Parse `code_text` on every read to be safe.** It is (a): +5.8 ms on the
+  bench vault's search. The check gives the same safety for free.
 
 ### P12. A code span shows its content
 
@@ -297,6 +355,115 @@ An inline code span shows its content without the backticks: `markup` drops a
 code span's delimiters (`markup.rs:13-16`), as `⌘P` does today. The spike test
 `a_code_span_shows_its_content_without_backticks` pins it: ``see `code hit` now``
 shows `see code hit now` and lights `hit`.
+
+### P13. Backlink contexts are built in the reader task
+
+Today the panel builds its contexts on the foreground, in two places:
+
+- `land_batch` (`crates/app/src/backlinks/job.rs:90-130`) calls `Slot::land`
+  per read (`:100`). The job's reads arrive through `ready_chunks(READERS)`
+  (`:75`), so one `this.update` (`:79`) lands at most `READERS` = 4 sources
+  (`crates/app/src/index/reads.rs:15`).
+- `slot()` (`crates/app/src/backlinks/mod.rs:181-196`) lands a source from the
+  text cache during `rebuild`, for each of the first `READ_SOURCES` = 1,000
+  backlinks (`job.rs:15`, `mod.rs:136`). One rebuild can land every source
+  the text cache holds.
+
+`Slot::of_read` calls `link_context` once per occurrence
+(`crates/index/src/slot.rs:62-65`), and nothing caps the occurrences of one
+source. The text cache holds `TEXT_CACHE_BYTES` = 8 MiB
+(`crates/index/src/text_cache.rs:8`), and pinned texts count but are never
+evicted (`text_cache.rs:16`), so a burst can parse more than 8 MiB. The
+worst burst is therefore every cached byte under its links: about 8 MiB of
+source lines. "Cost" measures it at 116-121 ms plain, and 3.5 ms even raw.
+That is over the `APPLY_BUDGET` of 4 ms (`crates/app/src/index/loading.rs:19`)
+and over the 8 ms turn of the on-demand spec. No arithmetic keeps it under
+4 ms on the foreground, so the build moves.
+
+**The move.** `⌘P` already does this: its `excerpt` runs in the reader's
+`then` closure, inside `executor.spawn` (`reads.rs:80-82`). The panel does the
+same:
+
+- The job's items carry the wanted `Backlink` (an `Arc` slice and a `Vec<u32>`;
+  `crates/index/src/index.rs:45-50`). Its `then` closure calls a new pure
+  function, `Slot::build(&backlink, &read) -> Built`, in the reader task.
+  `Built` holds the slot (`Read`, `NoContext` or `Failed`, from `of_read` with
+  `link_contexts`), whether the read was text at the candidate's stamp, and the
+  row's occurrences already shaped for drawing (`LitText::context` and
+  `split_at_first`, `mod.rs:199-216`), as an `Arc<[Occurrence]>`.
+- `slot()` keeps only an already valid slot, with no parse and no text-cache
+  read. A source whose text is cached is pending like any other. The job's
+  read then hits the cache first (`reads.rs:94-96`), in the reader task.
+
+**What stays on the foreground.** `land_batch`, per source of a batch of at
+most 4:
+
+- one `job.wanted` lookup by id, and one refusal check;
+- `Built::land(previous) -> Landed`: the `stale` and `forget` flags, from the
+  previous slot and `Built`'s flag. This is today's `Slot::land` minus
+  `of_read` (`slot.rs:39-51`); it reads no text;
+- one slot insert, one `Arc<[Occurrence]>` move into the row, the failure
+  count, and the `forget` and `stale` lists, as today.
+
+The row no longer compares its occurrences (`job.rs:102`): a landed `Built`
+sets `changed`. A rebuild clones one `Arc<[Occurrence]>` per source with a
+valid slot, and a pending row holds its occurrence count, drawn as empty
+lines, so it allocates nothing per occurrence. The foreground is then
+O(sources) per rebuild, at most `READ_SOURCES`, and O(1) per landed source,
+plus `reads_as`'s compare of two `Vec<u32>` (`index.rs:72-76`). That compare
+is a `memcmp` of 4 bytes per occurrence. These per-operation costs are an
+estimate, not a measurement: 1,000 hash lookups and `Arc` clones are tens of
+microseconds. S3 measures the rebuild and the batch (see "Slices").
+
+**A landing against a changed backlink is refused.** The build ran against
+the backlink the job held when it spawned the read. `land_batch` lands
+`Built` only when `built.slot.is_valid(&wanted.backlink)` holds for the
+backlink the job wants now (`slot.rs:73-79`): the same candidate, the same
+`links` slice by `Arc::ptr_eq`, the same occurrences. Otherwise it drops
+`Built` and lands nothing. Today this refusal never fires, and that is the
+invariant it guards: a job is kept only when it `covers` the new pending set,
+which requires `reads_as` for every source (`job.rs:37-43`); any changed
+backlink restarts the job (`mod.rs:160-168`), and dropping the old job drops
+its task, so its batches never land. The check makes a stale `Built` harmless
+if a later change breaks that invariant. `Failed` stays valid while the stamp
+holds, as today.
+
+**What it amends** in
+[`2026-11-08-backlink-context-on-demand-design.md`](2026-11-08-backlink-context-on-demand-design.md):
+
+- Lines 44-46: "A panel switch to a note whose sources are in the text cache
+  lands its rows and contexts in one notify". New: the rows land in one
+  notify; the contexts of cached sources land in job batches of at most
+  `READERS` sources, each a notify that gpui draws once per frame. The test
+  counts no notifies; it asserts that the contexts land with no `link_context`
+  call on the foreground (a held reader stream, as `hold_excerpts` holds
+  `⌘P`'s, `quick_open/list.rs:155-160`).
+- Lines 143-144: "A rebuild fills `Pending` slots from the text cache on the
+  foreground, a hash lookup and a window each." New: a rebuild keeps valid
+  slots only; a cached source is read through the job, and its window is cut
+  in the reader task.
+- Line 156: "Each read fills its slot and notifies". New: each read builds its
+  slot in the reader task; the foreground checks it against the wanted
+  backlink, fills the slot and notifies.
+- Line 162, B7: "`Read::Text` at the candidate's stamp: each occurrence gets
+  `link_context`." It stays true, in the reader task, through
+  `link_contexts`.
+
+The cost: a panel switch to a fully cached note shows its rows first and its
+contexts one frame or more later, where today both come in one notify. The
+reads hit the cache, so the delay is the reader tasks' scheduling, not a
+disk read.
+
+Rejected:
+
+- **Keep the build on the foreground with a per-turn budget.** It needs a
+  yield point inside one source, because one source with 1,000 dense
+  occurrences costs 7.5 ms alone ("Cost"). It splits a slot across turns for
+  a case the reader task already handles.
+- **Cap occurrences per source.** It hides links that exist, and the full
+  cache burst stays at 3.5 ms raw even at 115 occurrences per source.
+- **Keep `slot()`'s cached landing, raw only.** Plain is the point of this
+  spec, and raw alone reaches 3.5 ms on the full cache burst.
 
 ## What the spike showed
 
@@ -435,17 +602,70 @@ calls `TextSearch::read` (`:162`), which calls `note_hits`
 (`crates/index/src/search/text.rs:101`), where the hits are built. The (ii)
 cost therefore delays the answer by about 6 ms; it never holds a frame.
 
-The backlinks panel builds its contexts on the foreground: its read job is a
-`cx.spawn` (`crates/app/src/backlinks/job.rs:76`) whose batches land in
+`⌘P` builds its excerpts off the foreground. `ask_excerpts` passes its
+closure to `reader.stream_with` (`crates/app/src/quick_open/list.rs:146-150`),
+whose closure calls `excerpt` (`:148`). `stream_with` is
+`self.spawned(items, then).buffered(READERS)`
+(`crates/app/src/index/reads.rs:47`). `spawned` runs
+`then(item, read)` inside `reader.executor.spawn(async move { .. })`
+(`reads.rs:80-82`), and `executor` is a `BackgroundExecutor` (`reads.rs:22`),
+set from `cx.background_executor()` (`reads.rs:134`). Each excerpt parses at
+most one 672-byte context, on a background thread.
+
+The backlinks panel builds its contexts on the foreground today: its read job
+is a `cx.spawn` (`crates/app/src/backlinks/job.rs:76`) whose batches land in
 `this.update` (`:79`), through `land_batch` and `Slot::land` (`:100`) to
 `link_context` (`crates/index/src/slot.rs:62-65`). `slot()`
-(`crates/app/src/backlinks/mod.rs:189`) does the same from the text cache. At
-the (ii) rate, a dense source line costs about 6 µs per occurrence there, and
-P10 parses each line of a source once.
+(`crates/app/src/backlinks/mod.rs:181-196`) does the same from the text cache
+during a rebuild. P13 moves both into the reader task. The figures below are
+why.
 
-Where `⌘P`'s `excerpt` runs (the `stream_with` closure,
-`crates/app/src/quick_open/list.rs:146-150`) was not checked in this
-revision. It parses at most one 672-byte context per row.
+**Backlinks bursts.** `spike_backlinks`
+(`crates/index/src/spike_backlinks.rs`, commit `e80fa7f2`) times the work
+`Slot::of_read` does for one burst, 21 rounds, median, in release. Command:
+`cargo test --release -p inkra-index --lib spike_backlinks -- --ignored --nocapture`.
+Variants: **raw**, the base's `link_context` (`around`, a copy into a
+`Box<str>`); **plain**, the spike's `link_context` per occurrence; **plain,
+one parse per line**, `shown_all` over a source's windows (P10). It times the
+`link_context` loop only, not the `Backlink` walk or the slot insert. Cases:
+
+- realistic: 8 KiB prose sources with some markup, 3 occurrences each, one
+  per `"See [[Target]] for **details** …"` line;
+- extreme 1: one source, each occurrence on its own 4.4 KB dense line
+  (`"word *em* "` around the link);
+- extreme 2: 8 KiB dense sources, an occurrence on every 71-byte line.
+
+"Full cache" is `min(TEXT_CACHE_BYTES / 8 KiB, READ_SOURCES)` = 1,000
+sources, about 8 MB: the most one rebuild's `slot()` can land.
+
+| Case | Sources | Occurrences | Raw | Plain | Plain, one parse per line |
+|------|--------:|------------:|----:|------:|--------------------------:|
+| realistic, one source | 1 | 3 | 125 ns | 2.2 µs | 2.0 µs |
+| realistic, one job batch | 4 | 12 | 0.5 µs | 8.3 µs | 7.7 µs |
+| realistic, full cache | 1,000 | 3,000 | 128 µs | 3.41 ms | 3.09 ms |
+| extreme 1, 100 dense lines | 1 | 100 | 4.2 µs | 724 µs | 694 µs |
+| extreme 1, 1,000 dense lines | 1 | 1,000 | 44 µs | 7.45 ms | 7.49 ms |
+| extreme 2, one source | 1 | 115 | 3.2 µs | 109 µs | 105 µs |
+| extreme 2, full cache | 1,000 | 115,000 | 3.45 ms | 121 ms | 116 ms |
+
+An earlier run of the same test, with 1,024 sources in "full cache", gave
+1.62 ms plain for the realistic full cache and 6.0 ms plain for extreme 1 at
+1,000 lines: the machine moves these figures by up to 2×.
+
+What the figures say, against `APPLY_BUDGET` = 4 ms
+(`crates/app/src/index/loading.rs:19`):
+
+- Plain fails on the foreground in both places. `land_batch` can hold one
+  source with 1,000 dense occurrences: 7.5 ms in one turn. `slot()` can land
+  a full cache: 3.1-3.4 ms for realistic sources, close to the budget, and
+  116-121 ms for extreme 2.
+- Raw fails too on the extreme full cache: 3.45 ms for the window copies
+  alone, before the walk and the inserts, and more with pinned texts over
+  8 MiB. Today's design is not bounded either.
+- The parse costs 27 to 170 times raw per occurrence on these lines
+  (3.41 ms against 128 µs; 7.45 ms against 44 µs). Occurrences have no cap,
+  so no constant fits it under 4 ms on the foreground. P13 moves it to the reader
+  task, where `⌘P`'s excerpt and `⌘⇧F`'s hits already run.
 
 **Code ranges (P11).** The same test times the index pass and (a):
 
@@ -465,10 +685,28 @@ Over the whole bench vault, `spike_code_counts`, 7 rounds, median:
   one note.
 - `links`: 264.0 ms. `links_and_code`: 267.3 ms, +1.3 %.
 
-The memory of the field is an estimate from these counts, not a measurement:
-16 bytes per `Source` for the slice pointer (0.8 MB), 16 bytes per range
-(0.44 MB), and one `Arc` header per note with code (0.32 MB), about 1.6 MB in
-all. The cache file grows by the encoded ranges. S1 measures both.
+**Memory of `Source.code`.** The spike did not add the field to `Source`: it
+would change the cache encoding, the fingerprint and every `Source`
+constructor, which is S1's work. It computed the field's footprint instead,
+over the bench vault's real code counts, with `size_of` read in the same test
+(`spike_code_counts`, commit `e80fa7f2`):
+
+- The field: `size_of::<Arc<[Range<ByteOffset>]>>()` = 16 bytes per `Source`,
+  a fat pointer. 50,000 × 16 = 800,000 bytes.
+- A note with code allocates one `Arc` block: a 16-byte header (the strong
+  and the weak count) and 16 bytes per range (`size_of::<Range<ByteOffset>>()`
+  = 16). 19,995 headers = 319,920 bytes; 27,317 ranges = 437,072 bytes;
+  756,992 bytes in all. Each block is a multiple of 16 bytes, so it probably
+  fills macOS malloc's small-block quantum with no rounding.
+- A note with no code allocates nothing, if it holds `Arc::default()`. The
+  test shows `Arc::<[Range<ByteOffset>]>::default()` returns one shared empty
+  slice (`Arc::ptr_eq` is `true` for two calls), while `Vec::new().into()`
+  allocates a new header each time (`ptr_eq` is `false`). Without that rule,
+  30,005 notes with no code would add 30,005 × 16 = 480,080 bytes.
+- Total: 1,556,992 bytes, about 1.49 MiB, at 50,000 notes.
+
+This is the requested size, not a measured resident size. The cache file
+grows by the encoded ranges; S1 records it.
 
 ## Tests
 
@@ -514,6 +752,15 @@ S1, in `crates/index`:
 - `a_code_line_excerpt_keeps_its_bytes`: `⌘P`'s `around_match` on a fenced
   `let v = a*b*c;` shows it as written.
 - `a_delimiter_past_the_radius_stays` (spike): P10's two lines.
+- `shown_all_never_panics_on_any_code_ranges` (spike, `4e6ee97e`): the
+  proptest of P11, "Safe on any text". Its regression file
+  `crates/index/proptest-regressions/plain_tests.txt` keeps `ef02c02a`'s
+  failing case.
+- `a_range_off_the_text_leaves_the_window_plain`: a fenced line whose stored
+  range starts inside a `é`, and one past the text's end; both rows show the
+  line through `markup`, literal strings.
+- `a_note_without_code_shares_the_empty_slice`: `Source::parse` on a note
+  with no code gives `code` that is `Arc::ptr_eq` to `Arc::default()`.
 
 S2, in `crates/index/src/search/tests.rs`, through `context_of`:
 
@@ -546,10 +793,21 @@ S3, in `crates/index/src/context_tests.rs`:
   P7, each with its literal shown text and literal lit link.
 - `markup_open_before_a_link_drops`: the twelfth case of P7.
 - `two_links_on_one_line_each_get_their_context`: `link_contexts` on one line.
+- `a_build_lands_only_for_the_backlink_it_read`: `Slot::build` against one
+  backlink, then `is_valid` against a backlink with another slice or stamp
+  is `false`; `Built::land` gives today's `stale` and `forget` flags for each
+  case of `slot_tests.rs`.
 
-S3, in `crates/app/src/backlinks/tests.rs`: a source line
-`> Back to *[[index]]* after lunch.`; the row reads `Back to ` before the link
-and `[[index]] after lunch.` from it.
+S3, in `crates/app/src/backlinks/tests.rs`:
+
+- A source line `> Back to *[[index]]* after lunch.`; the row reads
+  `Back to ` before the link and `[[index]] after lunch.` from it.
+- `a_cached_source_lands_through_the_reader`: a source whose text is in the
+  cache; with the reader stream held, `set_file` shows the row with empty
+  context lines; released, the context lands. It replaces the on-demand
+  spec's one-notify test (P13).
+- `a_rebuild_reuses_landed_occurrences`: a rebuild with the slot still valid
+  keeps the row's `Arc<[Occurrence]>` (`Arc::ptr_eq`).
 
 ## Slices
 
@@ -562,21 +820,40 @@ command on its diff:
   and `line_around` (P3), add `shown` and `shown_all` with the code lookup and
   `LINE_BYTES` 256 (P10). `Candidate.code` and `code_of`; `excerpt` takes the
   code ranges. The S1 tests. A quick-open scene row on a code line, rendered
-  and looked at. The footprint and the cache size before and after.
+  and looked at. The cache size before and after.
+  **Memory criterion, blocking.** A test-only sum over the index of the bench
+  vault (`$TMPDIR/inkra-bench-50000`, 50,000 notes): `size_of_val` of every
+  `Source.code` field, plus 16 bytes per non-empty slice and
+  `size_of_val` of every range. Expected 1,556,992 bytes ("Cost"). Bound:
+  2 MiB (2,097,152 bytes). STOP: above 2 MiB, S1 does not merge; report the
+  figure and choose between `u32` offsets (8 bytes per range) and a side table
+  keyed by note, before any more code. Also record the resident size after
+  indexing (`docs/benchmarks.md`'s method) before and after; that figure is
+  noisy and informs, it does not block.
 - **S2. `⌘⇧F` rows.** `note_hits` builds its hits through `shown_all` with
   `code_of` (P2, P10, P11). Fix the doc comments of `hit.rs` (P8). The S2
   tests. A `vault-search-results` scene line with markup and one in a code
   block, rendered and looked at. A `search` bench case of one dense line with
   100 hits, and one of 1,000 dense lines.
-- **S3. Backlink rows.** `link_contexts` over `shown_all` (P10). Fix the doc
-  comments of `context.rs` (P8). The S3 tests. A `backlinks` scene line with
-  markup, rendered and looked at.
+- **S3. Backlink rows.** `link_contexts` over `shown_all` (P10), built in the
+  reader task (P13): `Slot::build`, `Built::land`, `slot()` without the
+  cached landing, rows holding `Arc<[Occurrence]>`. Fix the doc comments of
+  `context.rs` (P8). The S3 tests. A `backlinks` scene line with markup,
+  rendered and looked at.
+  **Foreground criterion, blocking.** In release, time `rebuild` with 1,000
+  sources whose slots are valid (extreme 2's 115,000 occurrences) and
+  `land_batch` with one source of 1,000 occurrences. Each stays under
+  `APPLY_BUDGET` = 4 ms. STOP above it: report the figure before any more
+  code.
 
 Why code comes first: `⌘⇧F` shows a code line correctly today, as raw bytes.
 A plain `⌘⇧F` without P11 would show `let v = abc;` there, a wrong text in a
 list that has none now. S1 fixes the one list that is wrong today, `⌘P`, and
 lays the data S2 needs. S3 needs no code ranges (P11), only S1's move. Each
-slice is one PR; S2 and S3 depend on S1, not on each other.
+slice is one PR; S2 and S3 depend on S1, not on each other. S3 also moves
+work that is raw today off the foreground; that part would hold without the
+plain form, and S3 keeps it in the same PR because the parse is what makes
+it necessary.
 
 ## Deferred
 
@@ -632,7 +909,10 @@ so drawing-time parsing would move it onto the frame.
 **One parse per hit, a line-keyed map, a window-only parse, 1 KiB.** See P10.
 
 **Code ranges at search time (a), a hand-written prefilter (c), stored ranges
-on a stale read.** See P11.
+on a stale read, unchecked slicing at a matching stamp.** See P11.
+
+**Backlink contexts on the foreground, with a budget or an occurrence cap.**
+See P13.
 
 ## Deviations from Zed
 
