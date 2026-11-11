@@ -129,6 +129,8 @@ Read the spec before changing its area:
   gutters and bars, code backgrounds, task boxes
 - `docs/superpowers/specs/2026-11-07-code-blocks-design.md` — fenced and
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
+- `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's
+  horizontal scroll; replaces decision 5 of the code-blocks spec
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
@@ -150,6 +152,8 @@ Read the spec before changing its area:
   loads, supersede, own-save echo, the startup settle; `IndexSync` spawns
 - `docs/superpowers/specs/2026-09-30-index-turn-effects-design.md` —
   `LiveIndex::turn`: `Turn`, `Effects`, the turn's end, `revision`, when `IndexSync` notifies
+- `docs/superpowers/specs/2026-09-30-index-status-once-design.md` — the index status
+  (scanning, indexing, ready), answered once for quick open, vault search and backlinks
 - `docs/superpowers/specs/2026-11-06-persisted-index-design.md` — the cache
   file, the seed, text read on demand, the writer, Rebuild, the scrub
 - `docs/superpowers/specs/2026-11-06-file-kinds-design.md` — assets in the vault
@@ -167,6 +171,8 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-29-query-run-design.md` — one query entry
   in `inkra-index` (`find_notes`/`search` with `Jobs`), `IndexDelegate`, `Runs`
   owning the run, `IndexWatch::observe`
+- `docs/superpowers/specs/2026-09-30-jobs-module-design.md` — `Job`, `Jobs`, `Serial`: their
+  own module in `inkra-vault`
 - `docs/superpowers/specs/2026-09-30-runs-testable-design.md` — `Ledger`: which
   run is current, D7's deferred re-run, the wait; `Runs` drives it, `begun` in tests
 - `docs/superpowers/specs/2026-09-30-picker-owns-landing-design.md` — `Picker`
@@ -187,6 +193,10 @@ Read the spec before changing its area:
   lifecycle in `NoteStore`: `Sessions`, `Lifecycle`, `Queue`, the live set
 - `docs/superpowers/specs/2026-09-29-tabs-design.md` — tabs: `inkra-tabs`,
   `Place`, per-tab history, parked anchors, one rebound `EditorView`
+- `docs/superpowers/specs/2026-09-30-tab-views-one-owner-design.md` — `Parked`: an inactive
+  tab holds its own parked view
+- `docs/superpowers/specs/2026-09-30-no-vault-mode-design.md` — no vault open: `VaultPanes`,
+  what `⌘N` does then
 - `docs/superpowers/specs/2026-09-30-restore-tabs-design.md` — the session file,
   its one writer and throttle, `Restore`'s states, the landing predicate, the window frame
 - `docs/superpowers/specs/2026-10-01-shell-chrome-design.md` — the `ui` components (`ListItem`,
@@ -199,11 +209,16 @@ Read the spec before changing its area:
   and docks, L1–L7, the title row from the top groups, the gestures, session v2
 - `docs/superpowers/specs/2026-11-04-themes-components-design.md` — semantic tokens, `GlobalTheme`, `ui::Color` and `Label`,
   vault themes in `.inkra/`, `settings.json`, hot reload, the theme picker
+- `docs/superpowers/specs/2026-09-21-clipboard-design.md` — copy, cut, paste
 - `docs/superpowers/specs/2026-09-21-autosave-design.md` and
   `2026-09-21-conflict-detection-design.md` — the save path
 - `docs/superpowers/specs/2026-11-02-quit-and-failures-design.md` — close is quit, the chained pre-quit flush, the unsaved prompt, `moves`, save retries, the notice
 - `docs/superpowers/specs/2026-11-02-type-safety-hygiene-design.md` — the audit's type and hygiene
   batches: opaque offsets, positions vs lengths, typed UTF-16 ranges at the protocol boundary
+- `docs/superpowers/specs/2026-11-02-perf-batch-design.md` — performance batch 2: the
+  baseline, carried shaped lines, painting inside the content mask
+- Dropped candidates, not to be proposed again unchanged:
+  `2026-09-30-note-index-read-interface-design.md`, `2026-09-30-own-save-echo-design.md`
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
 - `docs/superpowers/specs/2026-09-22-create-rename-delete-design.md` — tree ops
 - `docs/superpowers/specs/2026-09-21-offscreen-shots-design.md` — `shot/`
