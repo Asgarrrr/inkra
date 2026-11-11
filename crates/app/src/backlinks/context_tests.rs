@@ -15,6 +15,7 @@ use super::job::READ_SOURCES;
 use super::tests::{one, panel, redraws, rows, show};
 use crate::index::{IndexSync, READERS};
 use crate::test_support::{entry_id, index_sync, scan_notes, vault_of};
+use crate::vault::NoteStore;
 
 const A: &str = "/vault/a.md";
 
@@ -254,16 +255,17 @@ impl Render for Host {
     }
 }
 
-/// Finding the text cache full, a rebuild keeps the hidden job for the slots it did not fill.
-#[gpui::test]
-fn a_kept_job_reads_no_slot_a_rebuild_filled(cx: &mut TestAppContext) {
-    const C: &str = "/vault/c.md";
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file(A, "see [[b]]");
-    fs.insert_file("/vault/b.md", "");
-    fs.insert_file(C, "[[b]] too");
-    fs.insert_file("/vault/d.md", "");
-    let notes = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+/// A hidden panel showing `b`, whose job holds every source as the text cache is empty.
+fn hidden_on_b(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (
+    Entity<NoteStore>,
+    Entity<IndexSync>,
+    Entity<Host>,
+    Entity<BacklinksPanel>,
+) {
+    let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
     let links = index_sync(&notes, cx);
     let vault = vault_of(&notes, cx);
     let window = cx.add_window(|_, cx| Host {
@@ -275,6 +277,17 @@ fn a_kept_job_reads_no_slot_a_rebuild_filled(cx: &mut TestAppContext) {
     links.update(cx, |links, _| links.set_text_budget(0));
     cx.run_until_parked();
     show(cx, &notes, &panel, "b");
+    (notes, links, host, panel)
+}
+
+/// Caches the first row's text, then rebuilds the panel on an edit of `d`.
+fn cache_first_row_then_rebuild(
+    cx: &mut TestAppContext,
+    notes: &Entity<NoteStore>,
+    links: &Entity<IndexSync>,
+    panel: &Entity<BacklinksPanel>,
+    fs: &Arc<MemFs>,
+) {
     links.update(cx, |links, _| links.set_text_budget(1 << 20));
     let a = panel.read_with(cx, |panel, _| panel.rows[0].backlink.candidate().clone());
     let reader = links.read_with(cx, IndexSync::reader);
@@ -285,9 +298,22 @@ fn a_kept_job_reads_no_slot_a_rebuild_filled(cx: &mut TestAppContext) {
     drop(cached);
 
     fs.insert_file("/vault/d.md", "changed");
-    let d = entry_id(&notes, cx, "d");
+    let d = entry_id(notes, cx, "d");
     links.update(cx, |links, cx| links.stale(&[d], cx));
     cx.run_until_parked();
+}
+
+/// Finding the text cache full, a rebuild keeps the hidden job for the slots it did not fill.
+#[gpui::test]
+fn a_kept_job_reads_no_slot_a_rebuild_filled(cx: &mut TestAppContext) {
+    const C: &str = "/vault/c.md";
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file(A, "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file(C, "[[b]] too");
+    fs.insert_file("/vault/d.md", "");
+    let (notes, links, host, panel) = hidden_on_b(cx, &fs);
+    cache_first_row_then_rebuild(cx, &notes, &links, &panel, &fs);
     links.update(cx, |links, _| links.set_text_budget(0));
     let loads = [A, C].map(|path| fs.loads(Path::new(path)));
 
@@ -305,5 +331,24 @@ fn a_kept_job_reads_no_slot_a_rebuild_filled(cx: &mut TestAppContext) {
             ("a".to_owned(), vec![one("see [[b]]", "[[b]]")]),
             ("c".to_owned(), vec![one("[[b]] too", "[[b]]")]),
         ]
+    );
+}
+
+/// A rebuild that fills every slot ends the job: nothing is left for its reads.
+#[gpui::test]
+fn a_rebuild_that_fills_every_slot_ends_the_job(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file(A, "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/d.md", "");
+    let (notes, links, _host, panel) = hidden_on_b(cx, &fs);
+    assert!(panel.read_with(cx, |panel, _| panel.job.is_some()));
+
+    cache_first_row_then_rebuild(cx, &notes, &links, &panel, &fs);
+
+    assert!(panel.read_with(cx, |panel, _| panel.job.is_none()));
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("see [[b]]", "[[b]]")])]
     );
 }
