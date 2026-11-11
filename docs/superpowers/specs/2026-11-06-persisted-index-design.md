@@ -471,6 +471,8 @@ Each slice appends what it did differently from this spec, and why.
   stay user-run (slice 0); the write cost is measured by a probe outside the app, as no log line
   times it.
 - File kinds slice 3: a link record carries `md`; `FORMAT_VERSION` 2.
+- Backlink context slice 2b: a link record drops its context blob, its range in the blob and their
+  boundary check; `FORMAT_VERSION` 3; the long-line fingerprint probe is gone.
 - Launch facts (arch/indexed-payload): `Seed::build` returns the seed and `LaunchFacts { pruned,
   scrub }`. `LiveIndex` keeps them as `launch` until the turn that emits `indexed`, which hands
   out `Indexed { held, scrub }` once. `held` is the seed's revision, `None` when the seed pruned

@@ -447,9 +447,12 @@ after launch: first frame 510.4ms, session read 920.42µs, root 605.3ms, scanned
 ## Backlink context on demand, slice 2b (2026-11-11)
 
 Slice 2b of `docs/superpowers/specs/2026-11-08-backlink-context-on-demand-design.md` drops the
-context from each link and moves the cache file to version 3. The A/B compares `8ee6b500`, the
-end of slice 2a, with slice 2b. Apple M5 Pro, 48 GB, macOS 26.5, on the 50,000-note `bench_vault`
-vault, warm, release builds, one primed `HOME` per build. Obsidian was open, idle, during the runs.
+context from each link and moves the cache file to version 3. The A/B compares `8ee6b500` with
+slice 2b on top of it. Both builds predate `30bb1051`, the nested-wikilink fix, and `f49fcefe`,
+the panel's review fixes: the first changes no link a bench note holds, the second only the
+hidden panel. Apple M5 Pro, 48 GB, macOS 26.5, on the 50,000-note `bench_vault` vault,
+warm, release builds, one primed `HOME` per build. Obsidian was open, idle, during the runs, so
+the footprint rows are not the clean protocol of `bench-compare.sh`.
 
 | | before | after | gate |
 |---|---:|---:|---:|
@@ -464,5 +467,7 @@ vault, warm, release builds, one primed `HOME` per build. Obsidian was open, idl
   (`7persist5notes6decode`); the script matches both the mangled and the demangled names.
 - The footprint is `scripts/bench/measure.swift`'s `footprint_bytes`, the `bench-compare.sh`
   warm row. Before: 242.0, 252.7 and 254.6 MiB. After: 188.0, 200.4 and 189.3 MiB. One after run
-  is 0.4 MiB over the gate; the median is under it.
+  is 0.4 MiB over the gate, so the gate holds on the median only, with no margin. The next lead,
+  from the spec's "Out of scope": one `NoteTable` in vault order, indexed by a
+  `hashbrown::HashTable<u32>`, estimated at 11 to 20 MiB. A re-run with Obsidian quit is pending.
 - The longest turn is read from the launch lines of `scripts/launch-figure.sh`, 5 runs per build.

@@ -327,7 +327,7 @@ fn hand_built_records_decode() {
                 identity,
                 ordinal: None,
                 source: Source {
-                    links: vec![link].into(),
+                    links: vec![link.clone()].into(),
                 },
             },
         ),
@@ -370,6 +370,41 @@ fn hand_built_records_decode() {
     for (section, note) in cases {
         assert_eq!(decoded(&sealed(&section)), [note]);
     }
+}
+
+/// The smallest link record, last in the section: it pins `MIN_LINK_RECORD`.
+#[test]
+fn the_smallest_link_record_decodes() {
+    let smallest = Raw::default()
+        .var(1)
+        .head(b"a.md", 0, 0)
+        .var(1)
+        .str(b"")
+        .byte(0)
+        .byte(2)
+        .var(0)
+        .var(0);
+
+    let note = CachedNote {
+        path: "a.md".into(),
+        stamp: None,
+        identity: FileIdentity {
+            device: 7,
+            inode: 3,
+        },
+        ordinal: None,
+        source: Source {
+            links: vec![SourceLink {
+                path: "".into(),
+                fragment: None,
+                md: false,
+                style: Style::Relative,
+                range: ByteOffset::new(0)..ByteOffset::new(0),
+            }]
+            .into(),
+        },
+    };
+    assert_eq!(decoded(&sealed(&smallest)), [note]);
 }
 
 #[test]

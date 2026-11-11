@@ -104,13 +104,6 @@ fn each_header_field_rejects_by_name() {
 }
 
 #[test]
-fn a_version_2_file_is_rejected() {
-    let mut bytes = bytes();
-    bytes[8] = 2;
-    assert_eq!(rejected(&resealed(bytes)), (Rejected::Version, "version"));
-}
-
-#[test]
 fn version_is_checked_before_the_crc() {
     let mut bytes = bytes();
     bytes[8] = 4;

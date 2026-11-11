@@ -302,11 +302,9 @@ filtered to the links that resolve to `T`. Its cost is the number of links
 sharing `T`'s name, not the vault. The property is a proptest (slice 3), not a
 belief.
 
-`Source` keeps, per note link, its `Target`, its byte range, and up to 160
-bytes of the line it sits on, at most 60 of them before the link, cut at char
-boundaries, with the link's range inside it for the panel's link colour. That line is display
-data for the panel, derived and never authoritative: nothing resolves or
-navigates by it.
+`Source` keeps, per note link, its `Target` and its byte range, and no text of its line. The
+panel reads that line from the note on demand
+(`2026-11-08-backlink-context-on-demand-design.md`).
 
 The API, synchronous and pure:
 
