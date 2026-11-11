@@ -1,10 +1,11 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{Bounds, TestAppContext, point, px, size};
 use inkra_vault::mem_fs::MemFs;
 
-use super::{Launch, WINDOW_SIZE, open_argument, placement, vault_root};
-use crate::restore::SavedWindow;
+use super::{Launch, WINDOW_SIZE, open_argument, placement, seed_session_in, vault_root};
+use crate::restore::{self, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow};
 
 /// One vault, one session file: the key hashes these bytes, so compare bytes, not `Path`'s components.
 #[test]
@@ -47,6 +48,34 @@ fn a_missing_argument_or_an_unreadable_folder_is_an_error_naming_it() {
         open_argument(&fs, "/locked".into(), None).is_err_and(|error| error.contains("/locked"))
     );
     assert_eq!(fs.loads(Path::new("/locked")), 0);
+}
+
+/// The seed is read back by the launch itself: its file name, root and format are the app's.
+#[test]
+fn a_seeded_session_is_the_one_the_launch_reads() {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_dir("/vault");
+    fs.insert_file("/vault/a.md", "alpha");
+    seed_session_in(&*fs, Path::new("/vault/"), "a.md", Path::new("/home")).unwrap();
+
+    let Ok(Launch::Vault(vault, Some(file), _)) =
+        open_argument(&*fs, "/vault".into(), Some(Path::new("/home")))
+    else {
+        panic!("the folder opens as a vault with a session file");
+    };
+    let session = futures::executor::block_on(restore::read(fs, file, vault.root().to_path_buf()))
+        .expect("the launch reads the seed");
+    assert_eq!(
+        session.center,
+        Some(SavedMember::Group(SavedGroup {
+            tabs: vec![SavedTab::File(SavedFileTab {
+                file: Some("a.md".to_owned()),
+                view: None,
+            })],
+            active: 0,
+        }))
+    );
+    assert_eq!((session.left, session.right), (None, None));
 }
 
 #[gpui::test]

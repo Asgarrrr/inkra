@@ -14,7 +14,9 @@ use crate::Quit;
 use crate::app_files::{cache_file, session_file};
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
-use crate::restore::{self, Opened, SavedWindow};
+use crate::restore::{
+    self, Opened, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow, Session,
+};
 use crate::shell::AppShell;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
@@ -149,6 +151,33 @@ fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Lau
         }
         Err(error) => Err(format!("{error}")),
     }
+}
+
+/// Writes the session that opens `note`, vault-relative, on the next launch of `vault` under `home`.
+///
+/// # Errors
+///
+/// A message naming the path, when the vault's root, the session's place or the write fails.
+pub fn seed_session(vault: &Path, note: &str, home: &Path) -> Result<(), String> {
+    seed_session_in(&RealFs, vault, note, home)
+}
+
+fn seed_session_in(fs: &impl Fs, vault: &Path, note: &str, home: &Path) -> Result<(), String> {
+    let root = vault_root(vault).map_err(|error| format!("{}: {error}", vault.display()))?;
+    let file = session_file(home, &root)
+        .ok_or_else(|| format!("{}: the vault holds the app's folder", root.display()))?;
+    let center = SavedMember::Group(SavedGroup {
+        tabs: vec![SavedTab::File(SavedFileTab {
+            file: Some(note.to_owned()),
+            view: None,
+        })],
+        active: 0,
+    });
+    let text = Session::new(root, 0, center, None, None, [true, true])
+        .encode()
+        .map_err(|error| format!("{}: {error}", file.display()))?;
+    futures::executor::block_on(fs.replace_bytes(&file, text.as_bytes()))
+        .map_err(|error| format!("{}: {error}", file.display()))
 }
 
 pub fn run() {
