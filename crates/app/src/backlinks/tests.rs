@@ -65,13 +65,9 @@ fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
                 .occurrences
                 .iter()
                 .map(|o| {
-                    let text = o.context.text();
-                    let lit = o
-                        .context
-                        .ranges()
-                        .first()
-                        .map_or("", |lit| &text[lit.clone()]);
-                    (text.to_string(), lit.to_owned())
+                    let text = o.link.text();
+                    let lit = o.link.ranges().first().map_or("", |lit| &text[lit.clone()]);
+                    (format!("{}{text}", o.before), lit.to_owned())
                 })
                 .collect();
             (row.name.to_string(), occurrences)

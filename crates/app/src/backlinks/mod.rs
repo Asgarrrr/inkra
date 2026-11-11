@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
-use inkra_index::{Backlink, Slot};
+use inkra_index::{Backlink, Failures, Slot};
 use inkra_vault::{EntryId, Vault};
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
@@ -22,7 +22,7 @@ mod stale_tests;
 #[cfg(test)]
 mod tests;
 
-use job::{Job, READ_SOURCES};
+use job::{Job, READ_SOURCES, Wanted};
 
 impl EventEmitter<FileActivated> for BacklinksPanel {}
 
@@ -37,6 +37,8 @@ pub(crate) struct BacklinksPanel {
     slots: HashMap<EntryId, Slot>,
     /// Reads the sources with no slot, while the panel is drawn.
     job: Option<Job>,
+    /// Since the file was set: one stop per note, not per job.
+    failures: Failures,
     building: bool,
     /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
     watch: IndexWatch,
@@ -52,10 +54,12 @@ struct Row {
     occurrences: Vec<Occurrence>,
 }
 
+/// One context line, split at its link so a narrow panel cuts the text before it, not the link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Occurrence {
-    /// The link lit inside it.
-    context: LitText,
+    before: SharedString,
+    /// The link, lit, and the text after it.
+    link: LitText,
 }
 
 impl BacklinksPanel {
@@ -76,6 +80,7 @@ impl BacklinksPanel {
             rows: Vec::new(),
             slots: HashMap::new(),
             job: None,
+            failures: Failures::default(),
             building: false,
             watch: IndexWatch::default(),
             #[cfg(test)]
@@ -98,6 +103,7 @@ impl BacklinksPanel {
         if file != self.file {
             self.slots.clear();
             self.job = None;
+            self.failures = Failures::default();
         }
         self.file = file;
         self.rebuild(cx);
@@ -117,7 +123,7 @@ impl BacklinksPanel {
                 .entry(id)
                 .map(|entry| one_line(&entry.display_name()).into_owned())
         };
-        let mut pending = Vec::new();
+        let mut pending = HashMap::new();
         let rows: Vec<Row> = self
             .file
             .map(|file| links.index().backlinks(file))
@@ -130,7 +136,14 @@ impl BacklinksPanel {
                 let occurrences = if index < READ_SOURCES {
                     let slot = slot(&mut self.slots, links, &backlink);
                     if slot.is_none() {
-                        pending.push(backlink.clone());
+                        let backlink = backlink.clone();
+                        pending.insert(
+                            backlink.source(),
+                            Wanted {
+                                row: index,
+                                backlink,
+                            },
+                        );
                     }
                     occurrences(&backlink, slot)
                 } else {
@@ -143,12 +156,14 @@ impl BacklinksPanel {
                 }
             })
             .collect();
-        if pending.is_empty() {
-            self.job = None;
-        } else if !self.job.as_ref().is_some_and(|job| job.covers(&pending)) {
-            self.job = Some(Job::new(pending));
-            // Only a draw starts a job, and these rows may draw as they did.
-            cx.notify();
+        match &mut self.job {
+            _ if pending.is_empty() => self.job = None,
+            Some(job) if job.covers(&pending) => job.narrow(pending),
+            _ => {
+                self.job = Some(Job::new(pending));
+                // Only a draw starts a job, and these rows may draw as they did.
+                cx.notify();
+            }
         }
         // A redraw reshapes the whole editor; most index changes leave this panel as it was.
         let shown = |rows: &[Row], building: bool| rows.is_empty() && building;
@@ -185,14 +200,17 @@ fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
     match slot {
         Some(Slot::Read { contexts, .. }) => contexts
             .iter()
-            .map(|context| Occurrence {
-                context: LitText::context(&context.text, [context.link.clone()]),
+            .map(|context| {
+                let (before, link) =
+                    LitText::context(&context.text, [context.link.clone()]).split_at_first();
+                Occurrence { before, link }
             })
             .collect(),
         Some(Slot::NoContext { .. } | Slot::Failed { .. }) | None => backlink
             .occurrences()
             .map(|_| Occurrence {
-                context: LitText::default(),
+                before: SharedString::default(),
+                link: LitText::default(),
             })
             .collect(),
     }

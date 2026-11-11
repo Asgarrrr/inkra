@@ -30,7 +30,7 @@ struct State {
     files: BTreeMap<PathBuf, (Vec<u8>, Mtime, FileIdentity)>,
     dirs: BTreeMap<PathBuf, (Mtime, FileIdentity)>,
     next_inode: u64,
-    unreadable: Option<PathBuf>,
+    unreadable: BTreeSet<PathBuf>,
     unwritable: BTreeSet<PathBuf>,
     clock: u64,
     /// Separate from `unwritable`: that fails a write to a file that already
@@ -65,7 +65,7 @@ struct State {
 impl State {
     /// As `RealFs`: a folder renamed or removed under a walk fails, it does not read as empty.
     fn readable_dir(&self, path: &Path) -> Result<()> {
-        if self.unreadable.as_deref() == Some(path) {
+        if self.unreadable.contains(path) {
             return Err(io(path, ErrorKind::PermissionDenied));
         }
         if self.files.contains_key(path) {

@@ -55,6 +55,19 @@ impl LitText {
         Self::line(&text[cut..], shifted(&ranges, cut))
     }
 
+    /// The text before the first range, and the rest with its ranges.
+    pub(crate) fn split_at_first(&self) -> (SharedString, Self) {
+        let at = self
+            .ranges
+            .first()
+            .map_or(self.text.len(), |range| range.start);
+        let rest = Self {
+            text: self.text[at..].to_owned().into(),
+            ranges: shifted(&self.ranges, at).collect(),
+        };
+        (self.text[..at].to_owned().into(), rest)
+    }
+
     pub(crate) fn text(&self) -> &SharedString {
         &self.text
     }

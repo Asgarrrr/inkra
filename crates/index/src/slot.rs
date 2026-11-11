@@ -79,17 +79,20 @@ impl Slot {
     }
 }
 
-/// The failed reads of one panel's job; it stops at `READ_FAILURES`.
+/// The failed reads of one panel's note; its reads stop at `READ_FAILURES`.
 #[derive(Debug, Default)]
 pub struct Failures(usize);
 
 impl Failures {
-    /// Counts `slot` if it failed; whether the job has failed enough to stop.
-    #[must_use = "the job stops on true"]
-    pub fn count(&mut self, slot: &Slot) -> bool {
+    /// Counts `slot` if it failed.
+    pub fn count(&mut self, slot: &Slot) {
         if matches!(slot, Slot::Failed { .. }) {
             self.0 += 1;
         }
+    }
+
+    #[must_use]
+    pub fn stopped(&self) -> bool {
         self.0 >= READ_FAILURES
     }
 }

@@ -140,6 +140,24 @@ fn make_unreadable_refuses_a_load_of_that_file() {
 }
 
 #[test]
+fn make_unreadable_adds_to_the_files_already_refused() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+
+    fs.make_unreadable("/vault/a.md");
+    fs.make_unreadable("/vault/b.md");
+
+    block_on(fs.load(Path::new("/vault/a.md"))).expect_err("a is unreadable");
+    block_on(fs.load(Path::new("/vault/b.md"))).expect_err("b is unreadable");
+
+    fs.make_readable("/vault/a.md");
+
+    block_on(fs.load(Path::new("/vault/a.md"))).expect("a reads again");
+    block_on(fs.load(Path::new("/vault/b.md"))).expect_err("b is still unreadable");
+}
+
+#[test]
 fn make_unwatchable_refuses_the_watch() {
     let fs = MemFs::new();
     fs.make_unwatchable("/vault");

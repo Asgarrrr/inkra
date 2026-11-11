@@ -141,10 +141,12 @@ fn the_failures_stop_at_the_eighth_failed_slot() {
     let no_context = Slot::NoContext { of: backlink() };
     let failed = Slot::land(None, &backlink(), &Read::Failed).slot;
     for slot in [&read, &no_context].repeat(READ_FAILURES) {
-        assert!(!failures.count(slot), "{slot:?}");
+        failures.count(slot);
     }
     for _ in 1..READ_FAILURES {
-        assert!(!failures.count(&failed));
+        failures.count(&failed);
     }
-    assert!(failures.count(&failed));
+    assert!(!failures.stopped());
+    failures.count(&failed);
+    assert!(failures.stopped());
 }

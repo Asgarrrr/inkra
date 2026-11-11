@@ -7,7 +7,7 @@ use super::{BacklinksPanel, Row};
 use crate::open::{FileActivated, Open};
 use crate::row_text::styled;
 use crate::theme;
-use crate::ui::{Color, Label, ListItem, UiText, v_flex};
+use crate::ui::{Color, Label, ListItem, UiText, h_flex, v_flex};
 
 impl BacklinksPanel {
     fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
@@ -34,11 +34,29 @@ impl BacklinksPanel {
                     .pb_2()
                     .child(div().text_color(name).child(row.name.clone()))
                     .children(row.occurrences.iter().map(|occurrence| {
-                        div()
+                        h_flex()
                             .min_h(theme::UI_LINE_HEIGHT)
-                            .truncate()
+                            .overflow_hidden()
                             .text_color(context)
-                            .child(styled(&occurrence.context, link.into()))
+                            .child(
+                                // Only the text before the link shrinks, cut from its start;
+                                // flush right, so the cut leaves no gap before the link.
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis_start()
+                                    .text_right()
+                                    .child(occurrence.before.clone()),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| "backlink-link".into())
+                                    .flex_shrink_0()
+                                    .max_w_full()
+                                    .truncate()
+                                    .child(styled(&occurrence.link, link.into())),
+                            )
                     })),
             )
     }
