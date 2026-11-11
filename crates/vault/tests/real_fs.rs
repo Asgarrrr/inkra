@@ -833,6 +833,10 @@ fn failure_kinds(fs: &dyn Fs, root: &Path) -> Vec<(&'static str, Option<ErrorKin
             kind_of(block_on(fs.read_dir(&root.join("gone")))),
         ),
         ("read_dir a note", kind_of(block_on(fs.read_dir(&a)))),
+        (
+            "remove_file a folder",
+            kind_of(block_on(fs.remove_file(&folder))),
+        ),
     ]
 }
 
@@ -848,6 +852,7 @@ fn mem_fs_reports_the_io_kinds_real_fs_does() {
         ("load under a missing folder", Some(ErrorKind::NotFound)),
         ("read_dir a missing folder", Some(ErrorKind::NotFound)),
         ("read_dir a note", Some(ErrorKind::NotADirectory)),
+        ("remove_file a folder", Some(ErrorKind::PermissionDenied)),
     ];
     let dir = TempDir::new("io-kinds");
     let mem = MemFs::new();

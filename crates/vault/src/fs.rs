@@ -194,7 +194,7 @@ pub trait Fs: Send + Sync {
     /// Atomic, creating missing folders; no conflict check, so for the app's own state, never a note.
     async fn replace_bytes(&self, path: &Path, bytes: &[u8]) -> Result<()>;
 
-    /// Removes a file; one already missing is `Ok`.
+    /// Removes a file; one already missing is `Ok`, a folder is an error.
     async fn remove_file(&self, path: &Path) -> Result<()>;
 
     /// Creates an empty note or directory; fails if `path` already exists.

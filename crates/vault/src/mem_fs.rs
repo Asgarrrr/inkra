@@ -286,6 +286,9 @@ impl Fs for MemFs {
     async fn remove_file(&self, path: &Path) -> Result<()> {
         let mut state = self.state();
         state.injected_remove_failure(path)?;
+        if state.dirs.contains_key(path) {
+            return Err(io(path, ErrorKind::PermissionDenied));
+        }
         if state.files.remove(path).is_some() {
             state.changed(path);
         }
