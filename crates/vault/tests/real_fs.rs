@@ -41,6 +41,18 @@ fn stamp_of(path: &Path) -> Stamp {
     block_on(RealFs.load(path)).expect("load").stamp
 }
 
+/// An external edit: new bytes, and a modification time two seconds after the one it had.
+fn rewrite(path: &Path, text: &str) {
+    let before = fs::metadata(path).expect("stat").modified().expect("mtime");
+    fs::write(path, text).expect("write");
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("open")
+        .set_modified(before + Duration::from_secs(2))
+        .expect("set mtime");
+}
+
 /// For a save of a path that does not exist yet. Never compared: no file
 /// means nothing to stat.
 fn absent() -> Stamp {
@@ -175,10 +187,7 @@ fn save_with_a_stale_stamp_preserves_the_bytes_it_would_have_destroyed() {
     fs::write(&note, "before").expect("write");
     let stamp = stamp_of(&note);
 
-    // Sleep so the mtime differs too: some filesystems share a timestamp
-    // across writes within one second.
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "someone else's much longer text").expect("write");
+    rewrite(&note, "someone else's much longer text");
 
     let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
 
@@ -287,6 +296,23 @@ fn a_save_temp_is_never_written_through_a_symlink_at_its_name() {
 }
 
 #[test]
+fn save_preserves_an_external_edit_that_kept_the_size() {
+    let dir = TempDir::new("same-size");
+    let note = dir.0.join("note.md");
+    fs::write(&note, "before").expect("write");
+    let stamp = stamp_of(&note);
+
+    rewrite(&note, "theirs");
+    assert_eq!(stamp_of(&note).size, stamp.size, "only the time tells");
+
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+
+    let preserved = saved.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "theirs");
+    assert_eq!(fs::read_to_string(&note).expect("read"), "ours");
+}
+
+#[test]
 fn save_reports_a_stamp_the_next_save_accepts() {
     let dir = TempDir::new("chain");
     let note = dir.0.join("note.md");
@@ -358,8 +384,7 @@ fn a_failed_preserve_leaves_the_file_untouched() {
     fs::write(&note, "before").expect("write");
     let stamp = stamp_of(&note);
 
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "theirs").expect("write");
+    rewrite(&note, "theirs");
     fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o500)).expect("chmod");
 
     let result = block_on(RealFs.save(&note, "ours", stamp));
@@ -371,6 +396,11 @@ fn a_failed_preserve_leaves_the_file_untouched() {
         "theirs",
         "the bytes the save could not preserve are still there"
     );
+
+    // Control: the same stale stamp reaches the preserve once the folder is writable.
+    let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
+    let preserved = saved.preserved.expect("a conflict file");
+    assert_eq!(fs::read_to_string(&preserved).expect("read"), "theirs");
 }
 
 #[test]
@@ -381,8 +411,7 @@ fn a_preserved_file_keeps_the_note_mode() {
     fs::set_permissions(&note, fs::Permissions::from_mode(0o600)).expect("chmod");
     let stamp = stamp_of(&note);
 
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    fs::write(&note, "theirs and longer").expect("write");
+    rewrite(&note, "theirs and longer");
 
     let saved = block_on(RealFs.save(&note, "ours", stamp)).expect("save");
 
