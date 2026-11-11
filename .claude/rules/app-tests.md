@@ -2,6 +2,7 @@
 paths:
   - "crates/app/src/**/tests/**"
   - "crates/app/src/**/tests.rs"
+  - "crates/app/src/**/*_tests.rs"
   - "crates/app/tests/**"
   - "crates/app/src/test_support.rs"
 ---
