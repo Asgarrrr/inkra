@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, TouchPhase,
+    App, Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, TouchPhase,
     VisualTestAppContext, WindowHandle, point, px,
 };
 use image::RgbaImage;
@@ -286,18 +286,27 @@ impl Stage {
         self.settle();
     }
 
+    /// A probe's answer, or a panic naming what is missing.
+    fn drawn(
+        &mut self,
+        window: WindowHandle<AppShell>,
+        what: impl std::fmt::Display,
+        read: impl FnOnce(&AppShell, &App) -> Option<Point<Pixels>>,
+    ) -> Point<Pixels> {
+        window
+            .update(&mut self.cx, |shell, _, cx| read(shell, cx))
+            .unwrap_or_else(|error| panic!("read {what}: {error}"))
+            .unwrap_or_else(|| panic!("{what} is not drawn"))
+    }
+
     pub(crate) fn block_center(
         &mut self,
         window: WindowHandle<AppShell>,
         ix: usize,
     ) -> Point<Pixels> {
-        let Some(center) = window
-            .update(&mut self.cx, |shell, _, cx| shell.block_center(ix, cx))
-            .unwrap_or_else(|error| panic!("read code block {ix}: {error}"))
-        else {
-            panic!("code block {ix} is not drawn");
-        };
-        center
+        self.drawn(window, format_args!("code block {ix}"), |shell, cx| {
+            shell.block_center(ix, cx)
+        })
     }
 
     pub(crate) fn right_click(&mut self, window: WindowHandle<AppShell>, at: Point<Pixels>) {
@@ -314,23 +323,13 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: usize,
     ) -> Point<Pixels> {
-        let Some(center) = window
-            .update(&mut self.cx, |shell, _, _| shell.tab_center(ix))
-            .unwrap_or_else(|error| panic!("read tab {ix}: {error}"))
-        else {
-            panic!("tab {ix} is drawn");
-        };
-        center
+        self.drawn(window, format_args!("tab {ix}"), |shell, _| {
+            shell.tab_center(ix)
+        })
     }
 
     pub(crate) fn nav_back_center(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
-        let Some(center) = window
-            .update(&mut self.cx, |shell, _, _| shell.nav_back_center())
-            .unwrap_or_else(|error| panic!("read the back arrow: {error}"))
-        else {
-            panic!("nav is drawn");
-        };
-        center
+        self.drawn(window, "the back arrow", |shell, _| shell.nav_back_center())
     }
 
     pub(crate) fn dock_icon_point(
@@ -357,13 +356,9 @@ impl Stage {
     }
 
     fn tree_row_center(&mut self, window: WindowHandle<AppShell>, ix: f32) -> Point<Pixels> {
-        let Some(center) = window
-            .update(&mut self.cx, |shell, _, cx| shell.tree_row_center(ix, cx))
-            .unwrap_or_else(|error| panic!("read the tree's row {ix}: {error}"))
-        else {
-            panic!("the tree's row {ix} is drawn");
-        };
-        center
+        self.drawn(window, format_args!("the tree's row {ix}"), |shell, cx| {
+            shell.tree_row_center(ix, cx)
+        })
     }
 
     pub(crate) fn quick_open_row_center(
@@ -371,15 +366,11 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: f32,
     ) -> Point<Pixels> {
-        let Some(center) = window
-            .update(&mut self.cx, |shell, _, cx| {
-                shell.quick_open_row_center(ix, cx)
-            })
-            .unwrap_or_else(|error| panic!("read quick open's row {ix}: {error}"))
-        else {
-            panic!("quick open's row {ix} is drawn");
-        };
-        center
+        self.drawn(
+            window,
+            format_args!("quick open's row {ix}"),
+            |shell, cx| shell.quick_open_row_center(ix, cx),
+        )
     }
 
     /// Pixels are device pixels: a 1000x640 window yields 2000x1280 on a 2x display.
