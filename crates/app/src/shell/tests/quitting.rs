@@ -8,7 +8,7 @@ use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use super::session_writes::{saved_tabs, saving, tab, wait};
 use super::{ab_focused, open};
 use crate::shell::AppShell;
-use crate::shell::quit::QUIT_WAIT;
+use crate::shell::leave::{Leave, QUIT_WAIT};
 
 fn on_disk(fs: &inkra_vault::mem_fs::MemFs, path: &str) -> Option<String> {
     fs.read_to_string(Path::new(path))
@@ -175,7 +175,9 @@ fn a_hung_save_asks_only_after_the_quit_wait(cx: &mut TestAppContext) {
 }
 
 fn quitting(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
-    window.update(cx, |shell, _, _| shell.quitting).unwrap()
+    window
+        .update(cx, |shell, _, _| shell.leaving == Some(Leave::Quit))
+        .unwrap()
 }
 
 fn unsaved_a() -> (String, String) {

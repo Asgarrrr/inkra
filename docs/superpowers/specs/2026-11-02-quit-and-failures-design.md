@@ -51,7 +51,7 @@ close button all reach `AppShell::quit`:
 
 `quit` does four things:
 
-1. It sets `AppShell.quitting`. A second quit while one is under way does
+1. It sets `AppShell.leaving` to `Leave::Quit`. A second quit while one is under way does
    nothing, so a second `⌘Q` or close starts no second flush.
 2. It writes the session through the one writer, `write_session`.
 3. It starts `NoteStore::flush` (Q2).
@@ -111,11 +111,11 @@ lists exactly the notes whose text is not on disk:
 - A native warning alert, "Some changes are not saved.", with the detail
   "Not on disk: “a”, “b”." The titles are `NoteStore::title`, sorted;
   "Untitled" when a note has none.
-- **Quit Anyway** quits, and leaves `quitting` set: the app is going away.
-- **Cancel**, or a prompt dismissed without an answer, clears `quitting`, so
+- **Quit Anyway** quits, and leaves `leaving` set: the app is going away.
+- **Cancel**, or a prompt dismissed without an answer, clears `leaving`, so
   the next quit flushes and asks again.
 
-`quitting` also keeps one prompt at a time: a second `⌘Q` while the first
+`leaving` also keeps one prompt at a time: a second `⌘Q` while the first
 prompt is open does nothing.
 
 ### Q6. The logger: the `log` facade, filtered by target, stderr

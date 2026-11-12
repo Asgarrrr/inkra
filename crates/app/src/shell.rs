@@ -22,6 +22,7 @@ mod docks;
 mod drop_marker;
 mod geometry;
 mod group;
+mod leave;
 mod members;
 mod modal;
 mod nav;
@@ -45,6 +46,7 @@ mod workspace;
 
 use group::Group;
 use inkra_layout::{GroupId, Layout, View};
+use leave::Leave;
 use modal::Modal;
 use notice::Notice;
 use panes::VaultPanes;
@@ -96,8 +98,8 @@ pub(crate) struct AppShell {
     title_drag_armed: bool,
     /// A left press on a history arrow, held or having opened the menu.
     press: Option<nav::Press>,
-    /// A quit is under way: a second one does nothing.
-    quitting: bool,
+    /// The leave under way: `start_leaving` and `stop_leaving` are its only writers.
+    leaving: Option<Leave>,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
     notice: Option<Notice>,
     /// Painted under everything where the window has no blur: an off-screen shot.
@@ -197,7 +199,7 @@ impl AppShell {
             restore,
             title_drag_armed: false,
             press: None,
-            quitting: false,
+            leaving: None,
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),
