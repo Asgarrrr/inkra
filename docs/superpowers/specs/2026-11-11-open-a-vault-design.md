@@ -80,6 +80,9 @@ That is the property D2 keeps.
 - **The macOS picker is not modal.** gpui opens `NSOpenPanel` with
   `beginWithCompletionHandler` (gpui_macos `platform.rs:914`). The window keeps
   taking keys, `⌘O` and `⌘Q` while the panel is up. D3's `Leave` covers that.
+  Checked by hand on 2026-11-12: while the panel is key, `⌘Q` goes to the panel and
+  does not quit, as no menu bar holds the key (D1); once the window is clicked, `⌘Q`
+  quits with the panel still up.
 
 ## Decisions
 
