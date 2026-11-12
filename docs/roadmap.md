@@ -116,7 +116,7 @@ the disk, a clean open note reloads, and a note deleted on disk stays open. See
 `superpowers/specs/2026-09-27-file-watcher-design.md`.
 
 What the vault still leaves out — serializing writes *across* notes, buffer
-eviction, reporting a failed open, and the native folder picker — is recorded
+eviction, and reporting a failed open — is recorded
 with a trigger each in the Deferred table of
 `superpowers/specs/2026-09-20-inkra-vault-design.md`.
 
@@ -125,7 +125,7 @@ than by saving: a launch with no note builds no editor at all, and `AppShell`
 renders an empty state, so there is no untracked buffer left to lose. See
 `superpowers/plans/2026-09-21-empty-state.md`. Half of what that empty state
 could not name is now real — `⌘N` makes a note from anywhere in the window —
-and the other half, the folder picker, is still deferred.
+and so is the other half: `⌘O` opens a folder as the vault.
 
 What conflict detection did **not** close is the clean note. A buffer with no
 unsaved edits never reaches a write, so it never reaches the check, and a note

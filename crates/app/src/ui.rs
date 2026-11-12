@@ -1,6 +1,7 @@
 //! The chrome's components: the look lives here, the views keep their handlers.
 
 mod assets;
+mod button;
 mod color;
 mod context_menu;
 mod icon;
@@ -16,10 +17,12 @@ mod tests;
 mod tooltip;
 
 use gpui::{
-    App, Div, ElementId, InteractiveElement, MouseDownEvent, Rgba, Stateful, Styled, Window, div,
+    App, ClickEvent, Div, ElementId, InteractiveElement, MouseDownEvent, Rgba, Stateful, Styled,
+    Window, div,
 };
 
 pub(crate) use assets::{Assets, IconName};
+pub(crate) use button::Button;
 pub(crate) use color::Color;
 pub(crate) use context_menu::{ContextMenu, MenuClosed, MenuEntry};
 pub(crate) use icon::Icon;
@@ -33,6 +36,8 @@ pub(crate) use tab::Tab;
 pub(crate) use tooltip::Tooltip;
 
 use crate::theme;
+
+type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 pub(crate) fn h_flex() -> Div {
     div().flex().flex_row().items_center()

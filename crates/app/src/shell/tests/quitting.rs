@@ -8,7 +8,7 @@ use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 use super::session_writes::{saved_tabs, saving, tab, wait};
 use super::{ab_focused, open};
 use crate::shell::AppShell;
-use crate::shell::quit::QUIT_WAIT;
+use crate::shell::leave::{Leave, QUIT_WAIT};
 
 fn on_disk(fs: &inkra_vault::mem_fs::MemFs, path: &str) -> Option<String> {
     fs.read_to_string(Path::new(path))
@@ -112,6 +112,47 @@ fn a_quit_during_a_rename_rescan_saves_the_new_name_in_the_session(cx: &mut Test
     );
 }
 
+/// The settle joins a clean note's busy chain: the quit asks only once the rename lands.
+#[gpui::test]
+fn a_rename_queued_before_quit_lands(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, b) = ab_focused(cx);
+    fs.make_unwritable("/vault/a.md");
+    open(&window, &mut visual, a);
+    visual.simulate_input("x");
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let gate = fs.block_after_rename("/vault/b.md");
+
+    let _renamed = notes.update(&mut visual, |notes, cx| notes.rename(b, "z", cx));
+    visual.simulate_keystrokes("cmd-q");
+    assert!(!visual.has_pending_prompt(), "the quit waits on the rename");
+
+    gate.release();
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved_a()));
+}
+
+/// A trashing note is not unsaved but busy: the settle keeps the trash's preempting write.
+#[gpui::test]
+fn a_trash_queued_before_quit_trashes_the_last_text(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = ab_focused(cx);
+    open(&window, &mut visual, a);
+    visual.simulate_input("x");
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+
+    let _trashed = notes.update(&mut visual, |notes, cx| notes.trash(a, cx));
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+
+    assert_eq!(
+        fs.trashed(Path::new("/vault/a.md")).as_deref(),
+        Some("alphax")
+    );
+}
+
 /// The second `⌘Q` would preempt the "y" autosave, still on its timer, and write it.
 #[gpui::test]
 fn a_second_cmd_q_while_quitting_starts_no_second_flush(cx: &mut TestAppContext) {
@@ -174,8 +215,10 @@ fn a_hung_save_asks_only_after_the_quit_wait(cx: &mut TestAppContext) {
     assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alphax"));
 }
 
-fn quitting(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
-    window.update(cx, |shell, _, _| shell.quitting).unwrap()
+pub(super) fn quitting(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+    window
+        .update(cx, |shell, _, _| shell.leaving == Some(Leave::Quit))
+        .unwrap()
 }
 
 fn unsaved_a() -> (String, String) {

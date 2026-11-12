@@ -1,11 +1,14 @@
 //! The one line reporting a failure: a save, a rename or an open that failed, or a conflict copy kept (quit-and-failures spec, Q9).
 
+use std::path::Path;
+
 use gpui::{
     App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString, Styled, div,
 };
 use inkra_vault::{EntryId, VaultError};
 
 use super::AppShell;
+use crate::sidebar::title_of;
 use crate::theme;
 use crate::ui::{Color, IconButton, IconName};
 use crate::vault::{ConflictPreserved, NoteSaved, NoteStore, OpenFailed, RenameFailed, SaveFailed};
@@ -90,6 +93,22 @@ impl AppShell {
         cx.notify();
     }
 
+    /// Tells the first failed write of the shell this one replaced, by file name: that note left with it.
+    pub(super) fn left_unsaved(&mut self, errors: &[VaultError], cx: &mut Context<Self>) {
+        for error in errors {
+            log::error!("save left behind: {error}");
+        }
+        if let Some(first) = errors.first() {
+            let stem = failed_path(first).file_stem().unwrap_or_default();
+            let text = format!(
+                "Couldn't save “{}”: {}",
+                stem.to_string_lossy(),
+                reason(first)
+            );
+            self.show_notice(text, None, cx);
+        }
+    }
+
     fn title(&self, id: EntryId, cx: &App) -> String {
         self.notes
             .read(cx)
@@ -128,6 +147,19 @@ impl AppShell {
                         })),
                 ),
         )
+    }
+}
+
+/// The folder a vault open could not reach, named as the tree's header names it.
+pub(super) fn couldnt_open(root: &Path, error: &VaultError) -> String {
+    format!("Couldn't open “{}”: {}", title_of(root), reason(error))
+}
+
+/// The note a failed write was for, under an `Unwritten`'s preserving save.
+fn failed_path(error: &VaultError) -> &Path {
+    match error {
+        VaultError::Io { path, .. } | VaultError::NotUtf8 { path } => path,
+        VaultError::Unwritten { source, .. } => failed_path(source),
     }
 }
 

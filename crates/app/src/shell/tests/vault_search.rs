@@ -100,7 +100,7 @@ fn cmd_shift_f_replaces_quick_open(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn cmd_shift_f_does_nothing_without_a_vault(cx: &mut TestAppContext) {
-    let (window, mut visual) = no_vault(cx);
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
 
     visual.simulate_keystrokes("cmd-shift-f");
 

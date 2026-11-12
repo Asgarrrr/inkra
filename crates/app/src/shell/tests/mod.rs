@@ -1,21 +1,23 @@
 use std::collections::HashSet;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
-    Entity, Modifiers, Pixels, Point, Task, TestAppContext, VisualTestContext, WindowHandle,
+    Bounds, Entity, Modifiers, Pixels, Point, Task, TestAppContext, VisualTestContext,
+    WindowBounds, WindowHandle, WindowOptions,
 };
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{EntryId, Fs};
 
+use crate::bootstrap::{Launch, root};
 use crate::keymap::key_bindings;
 use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
-use super::{AppShell, EditorView, NoteStore, Shown};
+use super::{AppShell, EditorView, Left, NoteStore, Shown};
 use crate::file_kind::FileKind;
 use crate::open::{FileActivated, Open};
 use crate::sidebar::Sidebar;
@@ -49,6 +51,7 @@ mod nav;
 mod notices;
 mod open;
 mod open_first;
+mod open_vault;
 mod pane_keys;
 mod parked;
 mod quick_open;
@@ -119,7 +122,7 @@ pub(super) fn open_vault(
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, None, None, window, cx)
+        move |window, cx| AppShell::new(None, notes, None, None, Left::default(), window, cx)
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.panes().sidebar.clone())
@@ -203,14 +206,20 @@ pub(super) fn tree_focused(
     visual
 }
 
-/// No vault, keys bound, the shell's root focused and drawn.
-pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, VisualTestContext) {
+/// No vault on `fs`, keys bound, the shell's root focused and drawn.
+pub(super) fn no_vault(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (WindowHandle<AppShell>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let notes = cx.update(|cx| {
-        gpui::AppContext::new(cx, |cx| NoteStore::new(Arc::new(MemFs::new()), None, cx))
+        gpui::AppContext::new(cx, |cx| {
+            NoteStore::new(Arc::clone(fs) as Arc<dyn Fs>, None, cx)
+        })
     });
-    let window =
-        cx.add_window(move |window, cx| AppShell::new(None, notes, None, None, window, cx));
+    let window = cx.add_window(move |window, cx| {
+        AppShell::new(None, notes, None, None, Left::default(), window, cx)
+    });
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window
@@ -219,6 +228,38 @@ pub(super) fn no_vault(cx: &mut TestAppContext) -> (WindowHandle<AppShell>, Visu
         })
         .expect("the shell is open");
     visual.run_until_parked();
+    (window, visual)
+}
+
+/// `/notes/a.md` on `fs` launched by path, keys bound, its editor focused and its caret at 0.
+pub(super) fn detached(
+    cx: &mut TestAppContext,
+    fs: &Arc<MemFs>,
+) -> (WindowHandle<AppShell>, VisualTestContext) {
+    cx.update(|cx| cx.bind_keys(key_bindings()));
+    let loaded = futures::executor::block_on(fs.load(Path::new("/notes/a.md"))).unwrap();
+    let launch = Launch::Note(PathBuf::from("/notes/a.md"), loaded.text, loaded.stamp);
+    let fs = Arc::clone(fs) as Arc<dyn Fs>;
+    let window = cx
+        .update(|cx| {
+            let bounds = Bounds::maximized(None, cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| root(fs, launch, None, window, cx),
+            )
+        })
+        .unwrap();
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    window
+        .update(&mut visual, |shell, window, cx| {
+            window.focus(&gpui::Focusable::focus_handle(shell, cx), cx);
+        })
+        .unwrap();
+    visual.simulate_keystrokes("cmd-up");
     (window, visual)
 }
 

@@ -27,9 +27,10 @@ paths:
   A gone note is the exception: it has no file, and its preempted write would
   recreate one, so `Lifecycle::begin_trash` answers `PendingSave::Drop`.
 - Only `Sessions::update` changes whether a lifecycle binds a note, which keeps
-  the live set; `Sessions::swapped` moves a bound note's `Location`. The swap,
-  the claims and the quit flush walk that set, never every session. The quit flush cannot chain; a `Lifecycle::Trashing` note is what it
-  skips.
+  the live set; `Sessions::swapped` moves a bound note's `Location`. The swap
+  and the claims walk that set, never every session. The leave's flush writes the live set's
+  unsaved notes and joins every busy chain (`Sessions::busy`); `flush_all` cannot chain, and
+  skips a `Lifecycle::Trashing` note.
 - `saved_version` moves only in `OpenNote::landed` and `did_reload`, whose
   `Adopt` is the one caller of `Writer::adopt` (note-session spec).
 - Compare `Stamp` with `!=`, never an ordering; it never includes the identity,

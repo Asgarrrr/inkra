@@ -1,7 +1,10 @@
 //! A group's pixel rect: each surface gives its own origin and room (splits spec, P3).
 
+use std::sync::Arc;
+
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_layout::{Axis, GroupId, Side, View};
+use inkra_vault::mem_fs::MemFs;
 
 use super::splits::{close, last};
 use super::{ab_focused, no_vault, open};
@@ -92,7 +95,7 @@ fn the_right_dock_counts_both_insets(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn no_vault_counts_the_lights_and_no_toggle(cx: &mut TestAppContext) {
-    let (window, mut cx) = no_vault(cx);
+    let (window, mut cx) = no_vault(cx, &Arc::new(MemFs::new()));
     let min = window
         .update(&mut cx, |shell, window, _| {
             let centre = shell.layout.center_groups()[0];
@@ -114,7 +117,7 @@ fn no_vault_counts_the_lights_and_no_toggle(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn no_vault_gives_the_centre_the_whole_row(cx: &mut TestAppContext) {
-    let (window, mut cx) = no_vault(cx);
+    let (window, mut cx) = no_vault(cx, &Arc::new(MemFs::new()));
     let centre = window
         .update(&mut cx, |shell, _, _| shell.layout.center_groups()[0])
         .unwrap();

@@ -4,9 +4,10 @@ use gpui::{TestAppContext, VisualTestContext, px, size};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::{ab_focused, activate, editor, open_vault};
+use super::{ab_focused, activate, editor, no_vault, open_vault};
 use crate::editor::layout::shape_count;
 use crate::keymap::key_bindings;
+use crate::shell::column::Empty;
 use crate::test_support;
 use crate::theme;
 
@@ -66,4 +67,30 @@ fn the_chrome_columns_are_ruled_against_the_note(cx: &mut TestAppContext) {
     let backlinks = cx.debug_bounds("dock-right").unwrap();
     let header = cx.debug_bounds("panel-header-backlinks").unwrap();
     assert_eq!(header.left(), backlinks.left() + theme::RULE_WIDTH);
+}
+
+#[gpui::test]
+fn the_empty_state_offers_to_open_a_vault(cx: &mut TestAppContext) {
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
+
+    assert!(visual.debug_bounds("open-vault").is_some());
+    let empty = window
+        .update(&mut visual, |shell, _, _| shell.empty())
+        .unwrap();
+    assert_eq!(empty, Empty::NoVault);
+}
+
+#[gpui::test]
+fn a_vault_shell_offers_no_open_button(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    let (window, _sidebar, _notes) = open_vault(cx, fs as Arc<dyn Fs>);
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+
+    let empty = window
+        .update(&mut visual, |shell, _, _| shell.empty())
+        .unwrap();
+    assert_eq!(empty, Empty::SelectNote);
+    assert!(visual.debug_bounds("open-vault").is_none());
 }

@@ -106,7 +106,7 @@ pub(super) fn key_label(keystroke: &KeybindingKeystroke) -> String {
 }
 
 /// A chord's keystrokes, each drawn by `key_label`, joined with a space.
-pub(super) fn keys_label(keystrokes: &[KeybindingKeystroke]) -> SharedString {
+pub(crate) fn keys_label(keystrokes: &[KeybindingKeystroke]) -> SharedString {
     keystrokes
         .iter()
         .map(key_label)

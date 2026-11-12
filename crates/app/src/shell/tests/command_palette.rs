@@ -295,11 +295,20 @@ fn opens_with_no_vault(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.on_action(|_: &Quit, _| {});
     });
-    let (window, mut visual) = no_vault(cx);
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
     visual.simulate_keystrokes("cmd-shift-p");
     visual.run_until_parked();
     let names = listed(window, &mut visual);
     assert!(has(&names, "Quit"), "{names:?}");
+}
+
+#[gpui::test]
+fn the_palette_lists_open_vault(cx: &mut TestAppContext) {
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
+    visual.simulate_keystrokes("cmd-shift-p");
+    visual.run_until_parked();
+    let names = listed(window, &mut visual);
+    assert!(has(&names, "Open vault"), "{names:?}");
 }
 
 #[gpui::test]

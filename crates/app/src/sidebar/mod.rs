@@ -93,7 +93,7 @@ impl Sidebar {
 }
 
 /// The root's folder name; the whole path for a root that has none, such as `/`.
-fn title_of(root: &Path) -> SharedString {
+pub(crate) fn title_of(root: &Path) -> SharedString {
     root.file_name()
         .unwrap_or(root.as_os_str())
         .to_string_lossy()

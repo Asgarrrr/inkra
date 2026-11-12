@@ -110,7 +110,7 @@ impl AppShell {
             });
     }
 
-    fn vault_root(&self, cx: &App) -> Option<(Arc<dyn Fs>, PathBuf)> {
+    pub(super) fn vault_root(&self, cx: &App) -> Option<(Arc<dyn Fs>, PathBuf)> {
         let notes = self.notes.read(cx);
         let root = notes.vault()?.read(cx).root().to_path_buf();
         Some((notes.fs(), root))

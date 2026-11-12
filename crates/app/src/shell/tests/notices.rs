@@ -13,7 +13,10 @@ use crate::shell::AppShell;
 use crate::test_support::conflicts;
 use crate::vault::AUTOSAVE_DELAY;
 
-fn notice(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn notice(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+) -> Option<String> {
     window
         .update(cx, |shell, _, _| {
             shell.notice.as_ref().map(|notice| notice.text.to_string())

@@ -1,8 +1,11 @@
 //! The tab row as the window's title bar: its layout and the window drag (shell chrome spec, S3).
 
+use std::sync::Arc;
+
 use gpui::{
     Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle, point, px, size,
 };
+use inkra_vault::mem_fs::MemFs;
 
 use super::{
     AppShell, ab_focused, click_row, editor_focused, four_notes, keys, no_vault, open, selected,
@@ -389,7 +392,7 @@ fn a_tab_drag_never_arms_a_window_move(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn no_vault_draws_no_sidebar_column(cx: &mut TestAppContext) {
-    let (_window, mut cx) = no_vault(cx);
+    let (_window, mut cx) = no_vault(cx, &Arc::new(MemFs::new()));
 
     let row = cx.debug_bounds("tab-row").expect("the row is drawn");
     assert!(cx.debug_bounds("dock-left").is_none());

@@ -22,10 +22,12 @@ mod docks;
 mod drop_marker;
 mod geometry;
 mod group;
+mod leave;
 mod members;
 mod modal;
 mod nav;
 mod notice;
+mod open_vault;
 mod palette;
 mod panes;
 mod parked;
@@ -33,6 +35,7 @@ mod quit;
 mod render;
 mod separator;
 mod session;
+mod shown;
 mod split;
 mod surface;
 mod tab_bar;
@@ -44,12 +47,16 @@ mod workspace;
 
 use group::Group;
 use inkra_layout::{GroupId, Layout, View};
+use leave::Leave;
 use modal::Modal;
 use notice::Notice;
 use panes::VaultPanes;
 use session::{Restore, SessionFile};
+use shown::{Bound, Shown};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use leave::Left;
+pub(crate) use open_vault::OpenVault;
 pub(crate) use split::{
     ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,
     SplitRight, SplitUp,
@@ -69,49 +76,6 @@ fn remember<T: PartialEq>(recent: &mut Vec<T>, item: T) {
     recent.retain(|seen| *seen != item);
     recent.insert(0, item);
     recent.truncate(RECENT);
-}
-
-/// The editor and the note it shows, in one field: an editor never shows no note (T2).
-struct Bound {
-    note: EntryId,
-    editor: Entity<EditorView>,
-}
-
-/// What the active tab shows; only `Bound` has an editor (T2).
-enum Shown {
-    Empty,
-    Bound(Bound),
-    Image(EntryId),
-    /// The note's trash is pending: no editor until `NoteClosed` or `TrashFailed`.
-    /// Entered only from a bound note, so a failed trash always finds its buffer again.
-    Trashing(EntryId),
-    View(View),
-}
-
-impl Shown {
-    fn bound(&self) -> Option<&Bound> {
-        match self {
-            Self::Bound(bound) => Some(bound),
-            Self::Empty | Self::Image(_) | Self::Trashing(_) | Self::View(_) => None,
-        }
-    }
-
-    /// The file the tab is on: a note bound or being trashed, or an image.
-    fn file(&self) -> Option<EntryId> {
-        match self {
-            Self::Empty | Self::View(_) => None,
-            Self::Bound(Bound { note: file, .. }) | Self::Image(file) | Self::Trashing(file) => {
-                Some(*file)
-            }
-        }
-    }
-
-    fn view(&self) -> Option<View> {
-        match self {
-            Self::View(view) => Some(*view),
-            Self::Empty | Self::Bound(_) | Self::Image(_) | Self::Trashing(_) => None,
-        }
-    }
 }
 
 pub(crate) struct AppShell {
@@ -137,8 +101,10 @@ pub(crate) struct AppShell {
     title_drag_armed: bool,
     /// A left press on a history arrow, held or having opened the menu.
     press: Option<nav::Press>,
-    /// A quit is under way: a second one does nothing.
-    quitting: bool,
+    /// The leave under way: `start_leaving` and `stop_leaving` are its only writers.
+    leaving: Option<Leave>,
+    /// The writes of the shell this one replaced; `settle` joins them.
+    left: Left,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
     notice: Option<Notice>,
     /// Painted under everything where the window has no blur: an off-screen shot.
@@ -152,6 +118,7 @@ impl AppShell {
         notes: Entity<NoteStore>,
         session: Option<Opened>,
         cache: Option<PathBuf>,
+        left: Left,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -238,7 +205,8 @@ impl AppShell {
             restore,
             title_drag_armed: false,
             press: None,
-            quitting: false,
+            leaving: None,
+            left,
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),

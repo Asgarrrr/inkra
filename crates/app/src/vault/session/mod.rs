@@ -223,6 +223,14 @@ impl Sessions {
         result
     }
 
+    /// Every note with an operation on its chain, open or not.
+    pub(super) fn busy(&self) -> impl Iterator<Item = EntryId> + '_ {
+        self.all
+            .iter()
+            .filter(|(_, session)| !session.queue.is_idle())
+            .map(|(id, _)| *id)
+    }
+
     pub(super) fn live(&self) -> impl Iterator<Item = (EntryId, &NoteSession)> {
         // Indexed: every live id has a session, or `update` is wrong.
         self.live.iter().map(|id| (*id, &self.all[id]))

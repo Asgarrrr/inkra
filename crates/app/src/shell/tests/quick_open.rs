@@ -61,7 +61,7 @@ fn cmd_p_opens_quick_open_and_cmd_p_again_closes_it(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn cmd_p_does_nothing_without_a_vault(cx: &mut TestAppContext) {
-    let (window, mut visual) = no_vault(cx);
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
 
     visual.simulate_keystrokes("cmd-p");
 

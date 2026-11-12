@@ -74,6 +74,7 @@ impl Render for AppShell {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::new_note))
+            .on_action(cx.listener(Self::open_vault))
             .on_action(cx.listener(Self::new_folder))
             .on_action(cx.listener(Self::quick_open))
             .on_action(cx.listener(Self::search_vault))
