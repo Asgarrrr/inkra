@@ -1,20 +1,14 @@
-//! A saved session the restore refuses: the user already holds a working set, the walk failed, the file is bad, or it lies in the vault (restore-tabs spec, R1, R6).
+//! A saved session the restore refuses: the user already holds a working set, the walk failed, or the file is bad (restore-tabs spec, R6).
 
 use std::path::Path;
-use std::sync::Arc;
 
 use gpui::TestAppContext;
-use inkra_vault::mem_fs::MemFs;
 
-use super::restore_lands::{
-    empty, files, id, launch, launch_as, notes_group, row, save, save_tree, vault,
-};
+use super::restore_lands::{empty, files, id, launch, notes_group, row, save, save_tree, vault};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::centre;
-use crate::bootstrap::vault_launch;
 use crate::file_kind::FileKind;
 use crate::open::{FileActivated, Open};
-use crate::restore::Session;
 use crate::shell::session::THROTTLE;
 
 #[gpui::test]
@@ -268,30 +262,4 @@ fn a_refused_restore_leaves_no_empty_group(cx: &mut TestAppContext) {
         .map(|tab| tab.file)
         .collect();
     assert_eq!(saved, [Some("a.md".to_owned())]);
-}
-
-/// The vault is the home folder: its session's place lies inside it, so that file is neither read nor written.
-#[gpui::test]
-fn a_vault_holding_the_sessions_folder_restores_nothing_and_writes_nothing(
-    cx: &mut TestAppContext,
-) {
-    const IN_VAULT: &str =
-        "/Users/me/Library/Application Support/Inkra/sessions/6cd8101022855775.json";
-    let fs = Arc::new(MemFs::new());
-    fs.insert_file("/Users/me/a.md", "alpha");
-    let center = notes_group(vec![tab("a.md", 0, 0)], 0);
-    let session = Session::new("/Users/me".into(), 0, center, None, None, [true, true]);
-    let text = session.encode().unwrap();
-    fs.insert_file(IN_VAULT, text.clone());
-    let launched = vault_launch(Path::new("/Users/me"), Some(Path::new("/Users/me")));
-    let (window, mut cx) = launch_as(cx, &fs, launched);
-    cx.run_until_parked();
-    assert_eq!(files(&window, &mut cx), (vec![None], 0));
-    cx.simulate_keystrokes("cmd-t");
-    wait(&mut cx, THROTTLE);
-
-    cx.quit();
-
-    assert_eq!(fs.loads(Path::new(IN_VAULT)), 0);
-    assert_eq!(fs.read_to_string(Path::new(IN_VAULT)), Some(text));
 }

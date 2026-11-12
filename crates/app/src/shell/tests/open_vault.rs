@@ -3,10 +3,9 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
-use gpui::{
-    EntityId, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size,
-};
+use gpui::{EntityId, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 
 use super::notices::notice;
@@ -20,6 +19,7 @@ use crate::shell::AppShell;
 use crate::shell::leave::{Leave, QUIT_WAIT};
 use crate::test_support;
 use crate::theme::{self, Appearance, builtin};
+use crate::timeline::Timeline;
 
 fn root_id(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> EntityId {
     window.entity(cx).unwrap().entity_id()
@@ -178,6 +178,25 @@ fn a_missing_folder_shows_a_notice(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_folder_holding_the_app_files_is_refused(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home/me".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_dir("/home/me");
+    let (window, mut visual) = no_vault(cx, &fs);
+    let before = root_id(&window, &mut visual);
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/home/me");
+
+    assert_eq!(
+        notice(&window, &mut visual).as_deref(),
+        Some("“me” holds Inkra's own files. Choose a folder inside it.")
+    );
+    assert_eq!(root_id(&window, &mut visual), before);
+    assert!(prompts_again(&mut visual));
+}
+
+#[gpui::test]
 fn opening_the_open_vault_does_nothing(cx: &mut TestAppContext) {
     let (fs, window, mut visual, a, _b) = saving(cx);
     open(&window, &mut visual, a);
@@ -317,6 +336,50 @@ fn a_quit_right_after_a_switch_waits_for_the_left_writes(cx: &mut TestAppContext
     gate.release();
     visual.run_until_parked();
     assert_eq!(visual.pending_prompt(), Some(unsaved("b")));
+    assert_eq!(on_disk(&fs, "/notes/a.md").as_deref(), Some("xalpha"));
+}
+
+/// A second switch past `QUIT_WAIT` hands on the first shell's pending writes, not only its own.
+#[gpui::test]
+fn a_quit_after_two_switches_waits_for_the_first_left_writes(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/notes/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    fs.insert_file("/other/c.md", "gamma");
+    fs.fail_next_saves("/notes/a.md", 1, io::ErrorKind::PermissionDenied);
+    let (window, mut visual) = detached(cx, &fs);
+    visual.simulate_input("x");
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+    let gate = fs.block_save("/notes/a.md");
+    visual.simulate_prompt_answer("Open Anyway");
+    visual.run_until_parked();
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    visual.executor().advance_clock(QUIT_WAIT);
+    visual.run_until_parked();
+    assert_eq!(
+        vault_root(&window, &mut visual).as_deref(),
+        Some(Path::new("/other"))
+    );
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let c = test_support::entry_id(&notes, &mut visual, "c");
+    open(&window, &mut visual, c);
+    fs.make_unwritable("/other/c.md");
+    visual.simulate_input("y");
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+    assert!(
+        !visual.has_pending_prompt(),
+        "the quit waits on the first shell's writes"
+    );
+
+    gate.release();
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("c")));
     assert_eq!(on_disk(&fs, "/notes/a.md").as_deref(), Some("xalpha"));
 }
 
@@ -500,8 +563,9 @@ fn the_old_vault_is_released(cx: &mut TestAppContext) {
     assert!(vault.upgrade().is_none(), "the old vault is dropped");
 }
 
+/// Released, its detached subscriptions go inert: gpui holds each subscriber weakly.
 #[gpui::test]
-fn the_old_shell_hears_nothing(cx: &mut TestAppContext) {
+fn the_old_shell_is_released(cx: &mut TestAppContext) {
     cx.update(|cx| cx.set_global(Home("/home".into())));
     let (fs, window, mut visual, _a, _b) = saving(cx);
     fs.insert_file("/other/c.md", "gamma");
@@ -509,7 +573,6 @@ fn the_old_shell_hears_nothing(cx: &mut TestAppContext) {
 
     cmd_o(&mut visual);
     choose(&mut visual, "/other");
-    visual.simulate_resize(size(px(800.), px(600.)));
     visual.run_until_parked();
 
     assert!(old.upgrade().is_none());
@@ -529,4 +592,89 @@ fn closing_after_a_switch_runs_the_new_quit(cx: &mut TestAppContext) {
         "the new shell's quit closes the window"
     );
     assert!(quitting(&window, &mut visual));
+}
+
+#[gpui::test]
+fn a_taken_over_open_keeps_a_second_open_out_and_commits_nothing(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let (fs, window, mut visual, a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    open(&window, &mut visual, a);
+    let before = root_id(&window, &mut visual);
+    let read = fs.block_load(session_file(Path::new("/home"), Path::new("/other")).unwrap());
+    fs.fail_next_saves("/vault/a.md", 1, io::ErrorKind::PermissionDenied);
+    visual.simulate_input("x");
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("a")));
+    visual.simulate_prompt_answer("Cancel");
+    visual.run_until_parked();
+    cmd_o(&mut visual);
+    assert!(!visual.did_prompt_for_paths(), "one open at a time");
+
+    read.release();
+    visual.run_until_parked();
+
+    assert_eq!(root_id(&window, &mut visual), before);
+    assert!(prompts_again(&mut visual));
+}
+
+#[gpui::test]
+fn a_cancelled_quit_over_an_open_panel_allows_no_second_panel(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = saving(cx);
+    open(&window, &mut visual, a);
+    fs.fail_next_saves("/vault/a.md", 1, io::ErrorKind::PermissionDenied);
+    visual.simulate_input("x");
+    cmd_o(&mut visual);
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("a")));
+    visual.simulate_prompt_answer("Cancel");
+    visual.run_until_parked();
+
+    cmd_o(&mut visual);
+    cancel(&mut visual);
+
+    assert!(!visual.did_prompt_for_paths(), "one panel at a time");
+}
+
+/// The quit's settle already wrote and flushed: an open answered during it writes nothing more.
+#[gpui::test]
+fn choosing_a_folder_during_a_quit_starts_no_second_flush(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    open(&window, &mut visual, a);
+    fs.fail_next_saves("/vault/a.md", 1, io::ErrorKind::PermissionDenied);
+    visual.simulate_input("x");
+    cmd_o(&mut visual);
+    visual.simulate_keystrokes("cmd-q");
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("a")));
+
+    visual.simulate_input("y");
+    choose(&mut visual, "/other");
+
+    assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alpha"));
+}
+
+#[gpui::test]
+fn an_open_ends_the_launch_timeline(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Home("/home".into()));
+        cx.set_global(Timeline::new(Instant::now()));
+    });
+    let (fs, window, mut visual, _a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    assert!(visual.update(|_, cx| cx.has_global::<Timeline>()));
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+
+    assert_ne!(
+        vault_root(&window, &mut visual).as_deref(),
+        Some(Path::new("/vault"))
+    );
+    assert!(!visual.update(|_, cx| cx.has_global::<Timeline>()));
 }

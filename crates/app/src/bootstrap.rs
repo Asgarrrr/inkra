@@ -38,8 +38,7 @@ pub(crate) fn home(cx: &App) -> Option<PathBuf> {
 }
 
 pub(crate) enum Launch {
-    /// `AppShell` renders its empty state, and `notice` if the remembered vault failed; there is
-    /// no editor in this state.
+    /// `AppShell` renders its empty state, with `notice` if the remembered vault failed; no editor.
     Nothing { notice: Option<String> },
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
@@ -144,16 +143,30 @@ pub(crate) fn build_shell(
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
-pub(crate) fn vault_root(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn vault_root(path: &Path) -> Result<PathBuf, VaultError> {
     // `absolute` keeps a trailing slash; rebuilding from components drops it.
-    Ok(std::path::absolute(path)?.components().collect())
+    std::path::absolute(path)
+        .map(|absolute| absolute.components().collect())
+        .map_err(|source| VaultError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
-/// No `HOME`, or a vault holding the app's folder: no session and no cache, so none read or written.
-pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
-    let session = home.and_then(|home| session_file(home, root));
-    let cache = home.and_then(|home| cache_file(home, root));
-    Launch::Vault(Vault::new(root), session, cache)
+/// Refuses a root holding the app's folders when `HOME` is known; with no `HOME`, a vault without session or cache.
+pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Result<Launch, String> {
+    let Some(home) = home else {
+        return Ok(Launch::Vault(Vault::new(root), None, None));
+    };
+    match (session_file(home, root), cache_file(home, root)) {
+        (Some(session), Some(cache)) => {
+            Ok(Launch::Vault(Vault::new(root), Some(session), Some(cache)))
+        }
+        _ => Err(format!(
+            "“{}” holds Inkra's own files. Choose a folder inside it.",
+            title_of(root)
+        )),
+    }
 }
 
 /// Deliberately blocking: a failed argument should exit rather than flash an empty window.
@@ -167,36 +180,26 @@ fn launch(home: Option<&Path>) -> Result<Launch, String> {
     open_argument(&RealFs, PathBuf::from(argument), home)
 }
 
-/// Never through `open_argument`: a remembered folder that became a file opens no note, and a failure
-/// never exits, or every later launch would (open-a-vault spec, D5).
+/// Never through `open_argument`: a remembered path opens no note and its failure never exits (D5).
 fn remembered(fs: &impl Fs, home: &Path) -> Launch {
     let Some(path) = futures::executor::block_on(last_vault::read(fs, home)) else {
         return Launch::Nothing { notice: None };
     };
-    let notice = match futures::executor::block_on(fs.check_dir(&path)) {
-        Ok(()) => match vault_root(&path) {
-            Ok(root) => return vault_launch(&root, Some(home)),
-            Err(source) => couldnt_open(
-                &path,
-                &VaultError::Io {
-                    path: path.clone(),
-                    source,
-                },
-            ),
-        },
-        Err(error)
-            if matches!(
-                error.io_kind(),
-                Some(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
-            ) =>
-        {
-            format!("The last vault, “{}”, is no longer there.", title_of(&path))
-        }
-        Err(error) => couldnt_open(&path, &error),
-    };
-    Launch::Nothing {
+    remembered_vault(fs, &path, home).unwrap_or_else(|notice| Launch::Nothing {
         notice: Some(notice),
-    }
+    })
+}
+
+/// The remembered folder as a vault, or the notice saying why not.
+fn remembered_vault(fs: &impl Fs, path: &Path, home: &Path) -> Result<Launch, String> {
+    futures::executor::block_on(fs.check_dir(path)).map_err(|error| match error.io_kind() {
+        Some(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+            format!("The last vault, “{}”, is no longer there.", title_of(path))
+        }
+        _ => couldnt_open(path, &error),
+    })?;
+    let root = vault_root(path).map_err(|error| couldnt_open(path, &error))?;
+    vault_launch(&root, Some(home))
 }
 
 /// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
@@ -204,8 +207,8 @@ fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Lau
     // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
     match futures::executor::block_on(fs.check_dir(&path)) {
         Ok(()) => {
-            let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-            Ok(vault_launch(&root, home))
+            let root = vault_root(&path).map_err(|error| error.to_string())?;
+            vault_launch(&root, home)
         }
         // A file, or nothing there: the note's load reports which.
         Err(error)
@@ -237,7 +240,7 @@ pub(crate) fn seed_session_in(
     note: &str,
     home: &Path,
 ) -> Result<(), String> {
-    let root = vault_root(vault).map_err(|error| format!("{}: {error}", vault.display()))?;
+    let root = vault_root(vault).map_err(|error| error.to_string())?;
     let file = session_file(home, &root)
         .ok_or_else(|| format!("{}: the vault holds the app's folder", root.display()))?;
     let center = SavedMember::Group(SavedGroup {

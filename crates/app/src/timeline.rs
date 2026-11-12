@@ -85,6 +85,13 @@ impl Timeline {
         }
     }
 
+    /// Ends the launch's log: a later vault's marks would read as this launch's.
+    pub(crate) fn end(cx: &mut App) {
+        if cx.has_global::<Self>() {
+            cx.remove_global::<Self>();
+        }
+    }
+
     /// A foreground turn of the launch's work; the longest one before the line is due is logged.
     pub(crate) fn turn(turn: Duration, cx: &mut App) {
         if cx.has_global::<Self>() {

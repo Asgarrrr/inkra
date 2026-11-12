@@ -1,6 +1,6 @@
 # Open a vault from the app
 
-Status: **slice 2 implemented (branch open-a-vault-remember)**. Revised 2026-11-12 after a red/blue review (see Review),
+Status: **implemented**. Revised 2026-11-12 after a red/blue review (see Review),
 against `main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`.
 Read D2 and D3 first: D2 is the hard-to-reverse choice, D3 is where data can be lost.
 
@@ -80,6 +80,9 @@ That is the property D2 keeps.
 - **The macOS picker is not modal.** gpui opens `NSOpenPanel` with
   `beginWithCompletionHandler` (gpui_macos `platform.rs:914`). The window keeps
   taking keys, `⌘O` and `⌘Q` while the panel is up. D3's `Leave` covers that.
+  Checked by hand on 2026-11-12: while the panel is key, `⌘Q` goes to the panel and
+  does not quit, as no menu bar holds the key (D1); once the window is clicked, `⌘Q`
+  quits with the panel still up.
 
 ## Decisions
 
@@ -286,7 +289,8 @@ pins it (Tests, `the_old_vault_is_released`).
 #### Timeline
 
 `run` sets the `Timeline` global (`bootstrap.rs:188`) only for a
-`Launch::Vault`. A no-vault launch that later opens a vault would otherwise
+`Launch::Vault`. The open's commit point ends it (`Timeline::end`), so a
+second vault's marks never complete the first launch's line. A no-vault launch that later opens a vault would otherwise
 print marks measured from process start, picker time included
 (`crates/app/src/timeline.rs:78-85`). `Timeline::mark` already does nothing
 without the global.
@@ -526,8 +530,8 @@ because no button exists.
 - `the_old_vault_is_released`: keep a `WeakEntity` of the old `NoteStore` and
   of the old `Vault`, open `/b`, run until parked plus one frame. Both fail to
   upgrade.
-- `the_old_shell_hears_nothing`: after the replace, emit one event the old
-  shell subscribed to; the old shell sees nothing (Risks).
+- `the_old_shell_is_released`: after the replace, the old shell fails to
+  upgrade, so its detached subscriptions are inert (Risks).
 - `closing_after_a_switch_runs_the_new_quit`: close the window after a
   replace; the new shell's quit runs (Risks).
 - `the_palette_lists_open_vault`: the palette's entries include "Open vault".
@@ -584,7 +588,7 @@ Written first. Each fails before the change, because today such a root opens.
 - **Detached subscriptions of the old shell.** `AppShell::new` detaches
   several subscriptions. gpui holds a weak subscriber
   (`vendor/zed-reference/crates/gpui/src/app/context.rs:93-108`), so they go
-  inert once the old shell is released. `the_old_shell_hears_nothing` pins it.
+  inert once the old shell is released. `the_old_shell_is_released` pins it.
 - **The old shell's quit handler.** `quit_on_close` registers a should-close
   callback on the platform window (`quit.rs:79-86`). gpui keeps one such
   callback per window (`window.rs:7164-7173`), and the new shell registers in
@@ -668,17 +672,20 @@ verified each finding against `cee05c8b`. What changed:
   rebound key shows as bound.
 - `Home` holds a `PathBuf`, not D4's `home: Option<PathBuf>`: `run` sets it only when `HOME`
   is known, so "no home" has one representation, the absent global, not two.
-- `the_old_vault_is_released`, `the_old_shell_hears_nothing` and
+- `the_old_vault_is_released`, `the_old_shell_is_released` and
   `closing_after_a_switch_runs_the_new_quit` pin behaviour gpui already gives, so they pass
   when written. Each was shown to fail under a temporary mutation: a strong holder of the old
   store, a strong holder of the old shell, and the new shell not registering its close
-  handler. `the_old_shell_hears_nothing` resizes the window: the window's appearance cannot be
-  changed from outside gpui, and the old store, which emits the theme reload, is released.
+  handler. The Tests section's `the_old_shell_hears_nothing` became `the_old_shell_is_released`:
+  no event reaches the old shell's subscriptions from outside gpui once its store is released,
+  and a released subscriber is what makes them inert.
 - Step 5's `flush_all` is not only detached: it is kept as `Left`, handed to the new shell, and
   joined by that shell's settle. A quit right after a switch then waits on the writes the old
   shell left (`a_quit_right_after_a_switch_waits_for_the_left_writes`). A failed left write
   reaches the new shell's notice through `left_unsaved`, named by file stem: its note left with
-  the old store.
+  the old store. `Left::then` chains the old shell's own `Left`, so it holds every replaced
+  shell's pending writes: a second switch past `QUIT_WAIT` drops none
+  (`a_quit_after_two_switches_waits_for_the_first_left_writes`).
 - That test uses `detached` on `/notes/a.md`, not a vault at `/a`.
 - `a_trash_queued_before_quit_trashes_the_last_text` is added to `quitting.rs`: a trashing note
   is busy but not unsaved, so its join must be `PendingSave::Keep`. It is the test that fails
@@ -691,6 +698,16 @@ verified each finding against `cee05c8b`. What changed:
   wording otherwise", and `root_shows_the_notice_a_launch_carries`, for `build_shell` showing
   `Launch::Nothing`'s notice. The last-vault format's corrupt and other-version cases are one
   table, beside a version-1 file read from its text.
+- Slice 3 deletes `a_vault_holding_the_sessions_folder_restores_nothing_and_writes_nothing`: its
+  launch, a vault at `/Users/me` with that `HOME`, is now refused, so a vault holding the
+  sessions folder never reaches the restore. `a_root_holding_the_app_files_is_refused` and the
+  tests beside it replace it.
+- One open task is alive per shell (`AppShell.opening_vault`), from `⌘O` to the task's end, so
+  `Leave::Open` under way is always that task's own and carries no id. Only `start_open` sets
+  `Leave::Open`. A quit can take `leaving` from the open and be cancelled while the open still
+  waits; a `⌘O` then does nothing until that wait ends, `QUIT_WAIT` at most
+  (`a_taken_over_open_keeps_a_second_open_out_and_commits_nothing`). If the open's alert was
+  already up when the quit came, the task ends only when that alert is answered.
 
 ## Out of scope
 

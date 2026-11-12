@@ -102,8 +102,10 @@ pub(crate) struct AppShell {
     title_drag_armed: bool,
     /// A left press on a history arrow, held or having opened the menu.
     press: Option<nav::Press>,
-    /// The leave under way: `start_leaving` and `stop_leaving` are its only writers.
+    /// The leave under way: written only by `leave.rs`'s start and stop methods.
     leaving: Option<Leave>,
+    /// An open's task is alive, panel included; a quit can take `leaving` from it, so `leaving` cannot say so.
+    opening_vault: bool,
     /// The writes of the shell this one replaced; `settle` joins them.
     left: Left,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
@@ -207,6 +209,7 @@ impl AppShell {
             title_drag_armed: false,
             press: None,
             leaving: None,
+            opening_vault: false,
             left,
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
