@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, DisplayId, Entity, Focusable, Pixels, Size, TitlebarOptions,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px, size,
+    App, AppContext as _, Bounds, Context, DisplayId, Entity, Focusable, Pixels, Size,
+    TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px,
+    size,
 };
 use inkra_text::Buffer;
 use inkra_vault::{Fs, RealFs, Stamp, Vault};
@@ -78,8 +79,6 @@ pub(crate) fn placement(
     on_display.unwrap_or_else(|| (None, Bounds::centered(None, WINDOW_SIZE, cx)))
 }
 
-/// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
-/// runner gets the same composition the real window gets.
 pub(crate) fn root(
     fs: Arc<dyn Fs>,
     launched: Launch,
@@ -87,6 +86,18 @@ pub(crate) fn root(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
+    cx.new(|cx| build_shell(fs, launched, opened, window, cx))
+}
+
+/// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
+/// runner gets the same composition the real window gets.
+pub(crate) fn build_shell(
+    fs: Arc<dyn Fs>,
+    launched: Launch,
+    opened: Option<Opened>,
+    window: &mut Window,
+    cx: &mut Context<AppShell>,
+) -> AppShell {
     let (editor, notes, cache) = match launched {
         Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
         Launch::Note(path, text, stamp) => {
@@ -104,11 +115,11 @@ pub(crate) fn root(
             )
         }
     };
-    cx.new(|cx| AppShell::new(editor, notes, opened, cache, window, cx))
+    AppShell::new(editor, notes, opened, cache, window, cx)
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
-fn vault_root(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn vault_root(path: &Path) -> io::Result<PathBuf> {
     // `absolute` keeps a trailing slash; rebuilding from components drops it.
     Ok(std::path::absolute(path)?.components().collect())
 }
