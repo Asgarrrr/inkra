@@ -595,7 +595,7 @@ fn closing_after_a_switch_runs_the_new_quit(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_stale_open_does_not_commit_over_a_later_one(cx: &mut TestAppContext) {
+fn a_taken_over_open_keeps_a_second_open_out_and_commits_nothing(cx: &mut TestAppContext) {
     cx.update(|cx| cx.set_global(Home("/home".into())));
     let (fs, window, mut visual, a, _b) = saving(cx);
     fs.insert_file("/other/c.md", "gamma");
@@ -612,12 +612,13 @@ fn a_stale_open_does_not_commit_over_a_later_one(cx: &mut TestAppContext) {
     visual.simulate_prompt_answer("Cancel");
     visual.run_until_parked();
     cmd_o(&mut visual);
-    assert!(visual.did_prompt_for_paths());
+    assert!(!visual.did_prompt_for_paths(), "one open at a time");
 
     read.release();
     visual.run_until_parked();
 
     assert_eq!(root_id(&window, &mut visual), before);
+    assert!(prompts_again(&mut visual));
 }
 
 #[gpui::test]

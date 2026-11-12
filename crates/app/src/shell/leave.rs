@@ -51,8 +51,7 @@ impl Left {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Leave {
     Quit,
-    /// Carries the id its `start_open` took, so a stale open is not taken for a later one.
-    Open(u64),
+    Open,
 }
 
 impl Leave {
@@ -60,7 +59,7 @@ impl Leave {
     fn anyway(self) -> &'static str {
         match self {
             Self::Quit => "Quit Anyway",
-            Self::Open(_) => "Open Anyway",
+            Self::Open => "Open Anyway",
         }
     }
 }
@@ -69,7 +68,7 @@ impl AppShell {
     /// False while another leave is under way: a second one does nothing, except a quit over an open.
     pub(super) fn start_leaving(&mut self, leave: Leave) -> bool {
         match (self.leaving, leave) {
-            (None, _) | (Some(Leave::Open(_)), Leave::Quit) => {
+            (None, _) | (Some(Leave::Open), Leave::Quit) => {
                 self.leaving = Some(leave);
                 true
             }
@@ -77,15 +76,13 @@ impl AppShell {
         }
     }
 
-    /// Starts an open on its own id; `None` while a leave is under way or a folder panel is still up.
-    pub(super) fn start_open(&mut self) -> Option<Leave> {
-        let leave = Leave::Open(self.opens);
-        if self.panel || !self.start_leaving(leave) {
-            return None;
+    /// Starts an open; false while a leave is under way or an earlier open's task is still alive.
+    pub(super) fn start_open(&mut self) -> bool {
+        if self.opening || !self.start_leaving(Leave::Open) {
+            return false;
         }
-        self.opens += 1;
-        self.panel = true;
-        Some(leave)
+        self.opening = true;
+        true
     }
 
     /// Ends `leave`; false once another leave has taken over.
