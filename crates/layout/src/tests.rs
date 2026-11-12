@@ -299,7 +299,10 @@ fn a_second_group_in_one_dock_panics() {
 
 fn state(views: &[View], active: usize) -> StoredDock {
     StoredDock {
-        views: views.iter().map(|view| view.name().to_owned()).collect(),
+        views: views
+            .iter()
+            .map(|view| Some(view.name().to_owned()))
+            .collect(),
         active,
     }
 }
@@ -371,7 +374,7 @@ fn both_docks_empty_restore_the_default_views_with_their_flags() {
 
 fn stored(names: &[&str], active: usize) -> StoredDock {
     StoredDock {
-        views: names.iter().map(|&name| name.to_owned()).collect(),
+        views: names.iter().map(|&name| Some(name.to_owned())).collect(),
         active,
     }
 }
@@ -413,7 +416,10 @@ fn name() -> impl Strategy<Value = String> {
 }
 
 fn stored_dock() -> impl Strategy<Value = StoredDock> {
-    (proptest::collection::vec(name(), 0..6), 0..8usize)
+    (
+        proptest::collection::vec(proptest::option::weighted(0.8, name()), 0..6),
+        0..8usize,
+    )
         .prop_map(|(views, active)| StoredDock { views, active })
 }
 
@@ -506,7 +512,7 @@ proptest! {
                 prop_assert!(*active < views.len());
             }
             let Some(name) = stored.views.get(stored.active) else { continue };
-            let Some(view) = View::named(name) else { continue };
+            let Some(view) = name.as_deref().and_then(View::named) else { continue };
             let first = entries.iter().find(|(_, _, held)| *held == name);
             if first == Some(&(side, stored.active, name)) {
                 prop_assert_eq!(views[*active], view);

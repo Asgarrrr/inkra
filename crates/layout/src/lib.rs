@@ -198,10 +198,11 @@ impl Layout {
     }
 }
 
-/// A dock as stored: any view names, any index; `restore_views` makes it valid.
+/// A dock as stored: one entry per stored tab, `None` for a tab that names no view;
+/// any name, any index; `restore_views` makes it valid.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StoredDock {
-    pub views: Vec<String>,
+    pub views: Vec<Option<String>>,
     pub active: usize,
 }
 
@@ -231,6 +232,13 @@ pub fn restore_views(docks: [&[StoredDock]; 2]) -> [Vec<(Vec<View>, usize)>; 2] 
     docks
 }
 
+/// The stored active entry, else its nearest kept entry to the left, else the first.
+/// `kept` holds the surviving stored indices, ascending.
+#[must_use]
+pub fn kept_active(kept: &[usize], active: usize) -> usize {
+    kept.iter().rposition(|&ix| ix <= active).unwrap_or(0)
+}
+
 /// `stored`'s known views not in `held`, which takes them.
 fn restore_group(stored: &StoredDock, held: &mut Vec<View>) -> (Vec<View>, usize) {
     let (views, stored_ixs): (Vec<_>, Vec<_>) = stored
@@ -238,16 +246,12 @@ fn restore_group(stored: &StoredDock, held: &mut Vec<View>) -> (Vec<View>, usize
         .iter()
         .enumerate()
         .filter_map(|(stored_ix, name)| {
-            let view = View::named(name).filter(|view| !held.contains(view))?;
+            let view = View::named(name.as_deref()?).filter(|view| !held.contains(view))?;
             held.push(view);
             Some((view, stored_ix))
         })
         .unzip();
-    // The stored active view, else its nearest kept entry to the left, else the first.
-    let active = stored_ixs
-        .iter()
-        .rposition(|&stored_ix| stored_ix <= stored.active)
-        .unwrap_or(0);
+    let active = kept_active(&stored_ixs, stored.active);
     (views, active)
 }
 

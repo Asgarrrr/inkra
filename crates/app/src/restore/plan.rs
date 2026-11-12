@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 
-use inkra_layout::{GroupId, Layout, Shape, Side, View};
+use inkra_layout::{GroupId, Layout, Shape, Side, View, kept_active};
 use inkra_vault::{EntryId, Vault};
 
 use super::format::dock_views;
@@ -253,11 +253,7 @@ fn restored<L>(
             Some((arrival, survivor.saved_ix))
         })
         .unzip();
-    // The saved active tab, else its nearest survivor to the left, else the first.
-    let active = saved_ixs
-        .iter()
-        .rposition(|&saved_ix| saved_ix <= saved_active)
-        .unwrap_or(0);
+    let active = kept_active(&saved_ixs, saved_active);
     (!arrivals.is_empty()).then(|| Restored {
         shown: arrivals.remove(active),
         parked: arrivals,
