@@ -103,6 +103,7 @@ fn reclaimed() -> (MemFs, Vault, EntryId, FileIdentity) {
     let fs = MemFs::new();
     fs.insert_file("/vault/f/a.md", "a");
     fs.insert_file("/vault/g/b.md", "b");
+    fs.insert_dir("/outside");
     let vault = scan(&fs);
     let a = id_of(&vault, "f/a.md").expect("a");
     let gone = identity(&fs, "/vault/f/a.md");

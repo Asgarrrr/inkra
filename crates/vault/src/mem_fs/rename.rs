@@ -30,6 +30,9 @@ impl State {
                 return Err(io(to, ErrorKind::InvalidInput));
             }
         }
+        if self.missing_parent(to) {
+            return Err(io(to, ErrorKind::NotFound));
+        }
 
         if let Some(entry) = self.files.remove(from) {
             self.files.insert(to.to_path_buf(), entry);
