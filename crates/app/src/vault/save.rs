@@ -87,8 +87,7 @@ impl NoteStore {
             .collect()
     }
 
-    /// The leave's flush: writes every unsaved note and joins every busy chain, each on its chain,
-    /// so a rename queued before the leave lands before the store drops.
+    /// The leave's flush: writes every unsaved note and joins every busy chain, so a queued rename lands.
     pub(crate) fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
         let unsaved = self.unsaved(cx);
         let busy: Vec<EntryId> = self

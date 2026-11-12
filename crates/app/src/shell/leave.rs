@@ -10,7 +10,7 @@ use inkra_vault::VaultError;
 use super::AppShell;
 use crate::vault::NoteStore;
 
-/// A leave waits this long for its writes and reads; past it, a quit proceeds and an open stops.
+/// A leave's settle waits this long for its writes, then asks; an open's read stops past it.
 pub(super) const QUIT_WAIT: Duration = Duration::from_secs(3);
 
 /// The writes every replaced shell left behind and that may still be pending: the next settle joins them.
@@ -24,8 +24,7 @@ impl Default for Left {
 }
 
 impl Left {
-    /// These writes and `writes`, so two quick switches never drop the first shell's pending writes.
-    /// Detached as well as held, so a later replace that drops this `Left` cancels no write.
+    /// These writes, then `writes`; detached as well as held, so a dropped `Left` cancels no write.
     pub(super) fn then(
         self,
         writes: impl Future<Output = Vec<VaultError>> + 'static,
@@ -90,8 +89,7 @@ impl AppShell {
         self.leaving.take_if(|l| *l == leave).is_some()
     }
 
-    /// Writes the session and every note, then asks about what is still unsaved; true to go on.
-    /// It stops once `leave` is no longer the leave under way, and never writes `leaving`.
+    /// Writes the session and every note, then asks about the unsaved; false once `leave` is not under way.
     pub(super) fn settle(
         &mut self,
         leave: Leave,

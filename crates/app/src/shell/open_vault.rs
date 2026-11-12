@@ -70,8 +70,7 @@ impl AppShell {
         .detach();
     }
 
-    /// Records this shell's vault for the next launch with no argument; called once the shell is in
-    /// place, so a cancelled or failed open records nothing (D4).
+    /// Records this shell's vault for the next launch; called only once the shell is in place (D4).
     pub(crate) fn remember_vault(&self, cx: &App) {
         let (Some(home), Some((fs, root))) = (bootstrap::home(cx), self.vault_root(cx)) else {
             return;

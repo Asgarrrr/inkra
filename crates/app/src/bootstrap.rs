@@ -38,8 +38,7 @@ pub(crate) fn home(cx: &App) -> Option<PathBuf> {
 }
 
 pub(crate) enum Launch {
-    /// `AppShell` renders its empty state, and `notice` if the remembered vault failed; there is
-    /// no editor in this state.
+    /// `AppShell` renders its empty state, with `notice` if the remembered vault failed; no editor.
     Nothing { notice: Option<String> },
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
@@ -181,8 +180,7 @@ fn launch(home: Option<&Path>) -> Result<Launch, String> {
     open_argument(&RealFs, PathBuf::from(argument), home)
 }
 
-/// Never through `open_argument`: a remembered folder that became a file opens no note, and a failure
-/// never exits, or every later launch would (open-a-vault spec, D5).
+/// Never through `open_argument`: a remembered path opens no note and its failure never exits (D5).
 fn remembered(fs: &impl Fs, home: &Path) -> Launch {
     let Some(path) = futures::executor::block_on(last_vault::read(fs, home)) else {
         return Launch::Nothing { notice: None };
