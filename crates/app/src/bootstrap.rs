@@ -149,11 +149,20 @@ pub(crate) fn vault_root(path: &Path) -> io::Result<PathBuf> {
     Ok(std::path::absolute(path)?.components().collect())
 }
 
-/// No `HOME`, or a vault holding the app's folder: no session and no cache, so none read or written.
-pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
-    let session = home.and_then(|home| session_file(home, root));
-    let cache = home.and_then(|home| cache_file(home, root));
-    Launch::Vault(Vault::new(root), session, cache)
+/// Refuses a root holding the app's folders when `HOME` is known; with no `HOME`, a vault without session or cache.
+pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Result<Launch, String> {
+    let Some(home) = home else {
+        return Ok(Launch::Vault(Vault::new(root), None, None));
+    };
+    match (session_file(home, root), cache_file(home, root)) {
+        (Some(session), Some(cache)) => {
+            Ok(Launch::Vault(Vault::new(root), Some(session), Some(cache)))
+        }
+        _ => Err(format!(
+            "“{}” holds Inkra's own files. Choose a folder inside it.",
+            title_of(root)
+        )),
+    }
 }
 
 /// Deliberately blocking: a failed argument should exit rather than flash an empty window.
@@ -175,7 +184,11 @@ fn remembered(fs: &impl Fs, home: &Path) -> Launch {
     };
     let notice = match futures::executor::block_on(fs.check_dir(&path)) {
         Ok(()) => match vault_root(&path) {
-            Ok(root) => return vault_launch(&root, Some(home)),
+            Ok(root) => {
+                return vault_launch(&root, Some(home)).unwrap_or_else(|notice| Launch::Nothing {
+                    notice: Some(notice),
+                });
+            }
             Err(source) => couldnt_open(
                 &path,
                 &VaultError::Io {
@@ -205,7 +218,7 @@ fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Lau
     match futures::executor::block_on(fs.check_dir(&path)) {
         Ok(()) => {
             let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-            Ok(vault_launch(&root, home))
+            vault_launch(&root, home)
         }
         // A file, or nothing there: the note's load reports which.
         Err(error)

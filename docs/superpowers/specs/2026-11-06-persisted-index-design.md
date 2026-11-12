@@ -75,7 +75,7 @@ stamp with old words, and the old words would survive every later launch.
 In `~/Library/Caches/Inkra/index/`, named from the vault path by
 `session_file`'s key function. Caches, not Application Support: the file is
 re-creatable, and Time Machine skips Caches. An evicted file is "missing". It is never in the vault: sync clients would copy it, and the
-watcher would see it. It is per machine. Two instances: the last rename wins,
+watcher would see it. A vault holding that place is refused (open-a-vault spec, D5). It is per machine. Two instances: the last rename wins,
 and the stamps validate everything at the next launch. No `HOME`: outcome
 "missing", and no writer.
 

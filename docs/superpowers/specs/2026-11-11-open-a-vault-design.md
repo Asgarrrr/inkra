@@ -1,6 +1,6 @@
 # Open a vault from the app
 
-Status: **slice 2 implemented (branch open-a-vault-remember)**. Revised 2026-11-12 after a red/blue review (see Review),
+Status: **implemented**. Revised 2026-11-12 after a red/blue review (see Review),
 against `main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`.
 Read D2 and D3 first: D2 is the hard-to-reverse choice, D3 is where data can be lost.
 
@@ -691,6 +691,10 @@ verified each finding against `cee05c8b`. What changed:
   wording otherwise", and `root_shows_the_notice_a_launch_carries`, for `build_shell` showing
   `Launch::Nothing`'s notice. The last-vault format's corrupt and other-version cases are one
   table, beside a version-1 file read from its text.
+- Slice 3 deletes `a_vault_holding_the_sessions_folder_restores_nothing_and_writes_nothing`: its
+  launch, a vault at `/Users/me` with that `HOME`, is now refused, so a vault holding the
+  sessions folder never reaches the restore. `a_root_holding_the_app_files_is_refused` and the
+  tests beside it replace it.
 
 ## Out of scope
 

@@ -178,6 +178,25 @@ fn a_missing_folder_shows_a_notice(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_folder_holding_the_app_files_is_refused(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home/me".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_dir("/home/me");
+    let (window, mut visual) = no_vault(cx, &fs);
+    let before = root_id(&window, &mut visual);
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/home/me");
+
+    assert_eq!(
+        notice(&window, &mut visual).as_deref(),
+        Some("“me” holds Inkra's own files. Choose a folder inside it.")
+    );
+    assert_eq!(root_id(&window, &mut visual), before);
+    assert!(prompts_again(&mut visual));
+}
+
+#[gpui::test]
 fn opening_the_open_vault_does_nothing(cx: &mut TestAppContext) {
     let (fs, window, mut visual, a, _b) = saving(cx);
     open(&window, &mut visual, a);

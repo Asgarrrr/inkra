@@ -98,7 +98,7 @@ impl AppShell {
         if open.as_ref() == Some(&root) {
             return Ok(());
         }
-        let launched = vault_launch(&root, home.as_deref());
+        let launched = vault_launch(&root, home.as_deref())?;
         let read = cx
             .background_executor()
             .spawn(read(Arc::clone(&fs), root.clone(), launched));

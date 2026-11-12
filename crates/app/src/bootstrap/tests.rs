@@ -6,7 +6,8 @@ use gpui::{Bounds, TestAppContext, point, px, size};
 use inkra_vault::mem_fs::MemFs;
 
 use super::{
-    Launch, WINDOW_SIZE, open_argument, placement, remembered, seed_session_in, vault_root,
+    Launch, WINDOW_SIZE, open_argument, placement, remembered, seed_session_in, vault_launch,
+    vault_root,
 };
 use crate::app_files::{cache_file, last_vault_file, session_file};
 use crate::last_vault;
@@ -154,6 +155,68 @@ fn a_corrupt_last_vault_file_opens_nothing_silently() {
     fs.insert_file(last_vault_file(home), "garbage");
 
     assert_eq!(notice(remembered(&fs, home)), None);
+}
+
+const HOLDS_HOME: &str = "“me” holds Inkra's own files. Choose a folder inside it.";
+
+/// `/home/me/Library/Caches` holds the cache alone: checking only the session accepts it.
+#[test]
+fn a_root_holding_the_app_files_is_refused() {
+    let home = Some(Path::new("/home/me"));
+    for root in [
+        "/home/me",
+        "/home/me/Library",
+        "/home/me/Library/Caches",
+        "/home",
+        "/",
+    ] {
+        assert!(
+            vault_launch(Path::new(root), home).is_err(),
+            "{root} was accepted"
+        );
+    }
+    assert_eq!(
+        vault_launch(Path::new("/home/me"), home).err().as_deref(),
+        Some(HOLDS_HOME)
+    );
+}
+
+#[test]
+fn a_root_inside_home_is_accepted() {
+    assert!(matches!(
+        vault_launch(Path::new("/home/me/Notes"), Some(Path::new("/home/me"))),
+        Ok(Launch::Vault(_, Some(_), Some(_)))
+    ));
+}
+
+#[test]
+fn without_home_any_root_opens_without_session_or_cache() {
+    assert!(matches!(
+        vault_launch(Path::new("/home/me"), None),
+        Ok(Launch::Vault(_, None, None))
+    ));
+}
+
+#[test]
+fn the_home_folder_as_the_argument_is_refused_by_name() {
+    let fs = MemFs::new();
+    fs.insert_dir("/home/me");
+
+    assert!(
+        open_argument(&fs, "/home/me".into(), Some(Path::new("/home/me")))
+            .err()
+            .is_some_and(|error| error.contains("“me”"))
+    );
+}
+
+#[test]
+fn a_last_vault_naming_the_home_folder_opens_nothing_and_says_so() {
+    let fs = MemFs::new();
+    let home = Path::new("/home/me");
+    fs.insert_dir(home);
+    futures::executor::block_on(last_vault::write(&fs, home, home));
+
+    assert_eq!(notice(remembered(&fs, home)).as_deref(), Some(HOLDS_HOME));
 }
 
 #[gpui::test]
