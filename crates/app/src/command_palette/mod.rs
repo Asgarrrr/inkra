@@ -16,7 +16,7 @@ use crate::row_text::{LitText, styled};
 use crate::theme;
 use crate::ui::Color;
 
-pub(crate) use commands::{Command, commands};
+pub(crate) use commands::{Command, commands, keys_label};
 
 actions!(command_palette, [Toggle]);
 

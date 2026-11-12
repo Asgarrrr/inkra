@@ -10,40 +10,66 @@ use super::dock_drag::DraggedView;
 use super::group::selector;
 use super::members::Slot;
 use super::tab_bar::DraggedTab;
-use super::{AppShell, Shown};
+use super::{AppShell, OpenVault, Shown};
+use crate::command_palette::keys_label;
 use crate::theme;
-use crate::ui::{Color, lower_header, strip_slot};
+use crate::ui::{Button, Color, lower_header, strip_slot};
+
+/// What an empty group's slot says.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Empty {
+    /// No vault is open: offer to open one.
+    NoVault,
+    /// A vault's restore has not landed: draw nothing yet.
+    Pending,
+    /// A vault is open and the group shows nothing.
+    SelectNote,
+}
 
 impl AppShell {
-    /// None while the restore is pending, so the launch does not flash the empty state before the note.
-    pub(super) fn empty_lines(&self) -> &'static [&'static str] {
+    /// `Pending` while the restore runs, so the launch does not flash the empty state before the note.
+    pub(super) fn empty(&self) -> Empty {
         if self.panes.is_none() {
-            &[
-                "No vault is open.",
-                "Restart with a folder path to open one.",
-            ]
+            Empty::NoVault
         } else if self.restore_pending() {
-            &[]
+            Empty::Pending
         } else {
-            &["Select a note."]
+            Empty::SelectNote
         }
     }
 
     fn render_empty(&self, cx: &App) -> impl IntoElement {
-        let colors = theme::current(cx).colors;
-        let lines = self.empty_lines();
-        div()
+        let theme = theme::current(cx);
+        let placeholder = Color::Placeholder.rgba(theme);
+        let column = div()
             .flex()
             .flex_col()
             .size_full()
             .items_center()
             .justify_center()
             // Without this the window default shows through.
-            .bg(colors.editor_background)
+            .bg(theme.colors.editor_background)
             .text_size(theme::UI_TEXT_SIZE)
             .line_height(theme::UI_LINE_HEIGHT)
-            .text_color(Color::Placeholder.rgba(theme::current(cx)))
-            .children(lines.iter().map(|line| div().child(*line)))
+            .text_color(placeholder);
+        match self.empty() {
+            Empty::NoVault => {
+                // The last binding wins, as in gpui's precedence.
+                let hint = cx
+                    .key_bindings()
+                    .borrow()
+                    .bindings_for_action(&OpenVault)
+                    .next_back()
+                    .map(|binding| keys_label(binding.keystrokes()));
+                column.gap_3().child("No vault is open.").child(
+                    Button::new("open-vault", "Open Vault…")
+                        .when_some(hint, Button::hint)
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenVault), cx)),
+                )
+            }
+            Empty::Pending => column,
+            Empty::SelectNote => column.child("Select a note."),
+        }
     }
 
     /// Over the note `group` shows while it is gone from disk (watcher spec, F9).

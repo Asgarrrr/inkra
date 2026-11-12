@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{EntityId, Focusable, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{EntityId, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::mem_fs::MemFs;
 
 use super::notices::notice;
@@ -104,6 +104,27 @@ fn cmd_o_opens_the_chosen_folder(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert!(focused, "the new shell takes the focus");
+}
+
+#[gpui::test]
+fn the_open_button_opens_a_vault(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    let (window, mut visual) = no_vault(cx, &fs);
+
+    let button = visual.debug_bounds("open-vault").unwrap();
+    visual.simulate_click(button.center(), Modifiers::none());
+    choose(&mut visual, "/vault");
+
+    assert_eq!(
+        vault_root(&window, &mut visual).as_deref(),
+        Some(Path::new("/vault"))
+    );
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    assert_eq!(vault_names(&notes, &mut visual), ["a.md", "b.md"]);
 }
 
 #[gpui::test]

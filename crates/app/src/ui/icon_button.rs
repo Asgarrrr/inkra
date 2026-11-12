@@ -4,10 +4,8 @@ use gpui::{
     Styled, Window, div, prelude::FluentBuilder,
 };
 
-use super::{Color, Icon, IconName, identified, keep_focus};
+use super::{ClickHandler, Color, Icon, IconName, identified, keep_focus};
 use crate::theme;
-
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// A button that is only an icon. It owns the look, the role and the click; a caller attaches the rest.
 #[derive(IntoElement)]

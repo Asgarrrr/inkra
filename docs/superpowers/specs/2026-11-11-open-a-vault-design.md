@@ -664,6 +664,8 @@ verified each finding against `cee05c8b`. What changed:
   open's tests and the link tests share it.
 - `a_quit_over_a_pending_open_asks_once` is added: both waits run out on a hung save, and only
   the quit asks. It is the test that fails when the settle's check after the wait is removed.
+- The button's key hint comes from the keymap through `keys_label`, never a literal "⌘O": a
+  rebound key shows as bound.
 
 ## Out of scope
 

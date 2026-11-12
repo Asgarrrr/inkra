@@ -21,6 +21,7 @@ use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
+use crate::shell::column::Empty;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
 
@@ -326,17 +327,15 @@ fn the_empty_line_is_hidden_until_the_restore_ends(cx: &mut TestAppContext) {
     let gate = fs.block_read_dir("/vault/f");
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
-    let lines = |window: &WindowHandle<AppShell>, cx: &mut VisualTestContext| {
-        window
-            .update(cx, |shell, _, _| shell.empty_lines().to_vec())
-            .unwrap()
+    let empty = |window: &WindowHandle<AppShell>, cx: &mut VisualTestContext| {
+        window.update(cx, |shell, _, _| shell.empty()).unwrap()
     };
-    assert_eq!(lines(&window, &mut cx), Vec::<&str>::new());
+    assert_eq!(empty(&window, &mut cx), Empty::Pending);
 
     gate.release();
     cx.run_until_parked();
 
-    assert_eq!(lines(&window, &mut cx), ["Select a note."]);
+    assert_eq!(empty(&window, &mut cx), Empty::SelectNote);
 }
 
 /// Each tab parks its own anchors, even on one note.
