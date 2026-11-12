@@ -26,6 +26,11 @@ pub(crate) fn cache_file(home: &Path, root: &Path) -> Option<PathBuf> {
     app_file(home, root, "Library/Caches/Inkra/index", "idx")
 }
 
+/// Where the last vault opened is remembered (open-a-vault spec, D4).
+pub(crate) fn last_vault_file(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/Inkra/last-vault.json")
+}
+
 /// `None` when the file would lie inside the vault: sync clients would copy it and the watcher would see it.
 fn app_file(home: &Path, root: &Path, folder: &str, extension: &str) -> Option<PathBuf> {
     let key = fnv1a(root.as_os_str().as_encoded_bytes());

@@ -51,7 +51,7 @@ impl Stage {
     }
 
     pub(crate) fn open_nothing(&mut self) -> WindowHandle<AppShell> {
-        self.open(Arc::new(MemFs::new()), Launch::Nothing)
+        self.open(Arc::new(MemFs::new()), Launch::Nothing { notice: None })
     }
 
     pub(crate) fn open_note(&mut self, text: &str) -> WindowHandle<AppShell> {

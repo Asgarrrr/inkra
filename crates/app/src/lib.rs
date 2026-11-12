@@ -14,6 +14,7 @@ mod file_kind;
 mod images;
 mod index;
 mod keymap;
+mod last_vault;
 mod logger;
 mod one_line;
 mod open;

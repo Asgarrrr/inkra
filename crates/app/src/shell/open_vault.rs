@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use gpui::{
-    AsyncWindowContext, Context, Focusable, PathPromptOptions, WeakEntity, Window, actions,
+    App, AppContext as _, AsyncWindowContext, Context, Focusable, PathPromptOptions, WeakEntity,
+    Window, actions,
 };
 use inkra_vault::{Fs, VaultError};
 
@@ -14,6 +15,7 @@ use super::AppShell;
 use super::leave::{Leave, Left, QUIT_WAIT};
 use super::notice::couldnt_open;
 use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
+use crate::last_vault;
 use crate::restore::Opened;
 use crate::theme::store::{self, Resolved};
 use crate::vault::NoteStore;
@@ -63,6 +65,16 @@ impl AppShell {
             });
         })
         .detach();
+    }
+
+    /// Records this shell's vault for the next launch with no argument; called once the shell is in
+    /// place, so a cancelled or failed open records nothing (D4).
+    pub(crate) fn remember_vault(&self, cx: &App) {
+        let (Some(home), Some((fs, root))) = (bootstrap::home(cx), self.vault_root(cx)) else {
+            return;
+        };
+        cx.background_spawn(async move { last_vault::write(&*fs, &home, &root).await })
+            .detach();
     }
 
     /// Settles this shell, then replaces it with one on `path`; `Ok` when nothing needs telling.
@@ -120,6 +132,7 @@ impl AppShell {
             });
             window.focus(&shell.focus_handle(cx), cx);
             shell.update(cx, |shell, cx| shell.adopt_theme(ready.resolved, cx));
+            shell.read(cx).remember_vault(cx);
         });
         Ok(())
     }
