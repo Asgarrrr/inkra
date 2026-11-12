@@ -47,7 +47,7 @@ impl RenderOnce for Button {
             .flex()
             .flex_row()
             .items_center()
-            .h(theme::ICON_BUTTON_HEIGHT)
+            .h(theme::BUTTON_HEIGHT)
             .px_3()
             .gap_2()
             .rounded(theme::BUTTON_RADIUS)

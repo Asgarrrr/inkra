@@ -12,7 +12,7 @@ use gpui::{
 use inkra_vault::{Fs, VaultError};
 
 use super::AppShell;
-use super::leave::{Leave, Left, QUIT_WAIT};
+use super::leave::{Leave, QUIT_WAIT};
 use super::notice::couldnt_open;
 use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
 use crate::last_vault;
@@ -90,15 +90,7 @@ impl AppShell {
         home: Option<PathBuf>,
         cx: &mut AsyncWindowContext,
     ) -> Result<(), String> {
-        let root = vault_root(&path).map_err(|source| {
-            couldnt_open(
-                &path,
-                &VaultError::Io {
-                    path: path.clone(),
-                    source,
-                },
-            )
-        })?;
+        let root = vault_root(&path).map_err(|error| couldnt_open(&path, &error))?;
         if open.as_ref() == Some(&root) {
             return Ok(());
         }
@@ -123,14 +115,14 @@ impl AppShell {
         }
         // One update with no await: a quit pressed after this check cannot interleave with the swap.
         let _ = cx.update(|window, cx| {
-            let Ok(Some(notes)) = this.read_with(cx, |shell, _| {
-                (shell.leaving == Some(leave)).then(|| shell.notes.clone())
+            let Ok(Some((notes, left))) = this.read_with(cx, |shell, _| {
+                (shell.leaving == Some(leave)).then(|| (shell.notes.clone(), shell.left.clone()))
             }) else {
                 return;
             };
             Timeline::end(cx);
             // Before the replace, while the old store lives: it copies out text typed during the leave.
-            let left = Left::new(notes.update(cx, NoteStore::flush_all), window, cx);
+            let left = left.then(notes.update(cx, NoteStore::flush_all), window, cx);
             let shell = window.replace_root(cx, |window, cx| {
                 build_shell(fs, ready.launched, ready.opened, left, window, cx)
             });

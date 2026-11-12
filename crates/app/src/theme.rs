@@ -241,6 +241,9 @@ pub(crate) const ICON_BUTTON_WIDTH: Pixels = px(28.);
 
 pub(crate) const ICON_BUTTON_HEIGHT: Pixels = px(26.);
 
+/// A text button stands as tall as an icon button, so the two line up in a row.
+pub(crate) const BUTTON_HEIGHT: Pixels = ICON_BUTTON_HEIGHT;
+
 pub(crate) const BUTTON_RADIUS: Pixels = px(8.);
 
 /// A dimmed, inert button (the mock's `.off`).

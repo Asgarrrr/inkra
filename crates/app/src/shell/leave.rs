@@ -13,7 +13,7 @@ use crate::vault::NoteStore;
 /// A leave waits this long for its writes and reads; past it, a quit proceeds and an open stops.
 pub(super) const QUIT_WAIT: Duration = Duration::from_secs(3);
 
-/// The writes a replaced shell left behind: the next settle joins them.
+/// The writes every replaced shell left behind and that may still be pending: the next settle joins them.
 #[derive(Clone)]
 pub(crate) struct Left(Shared<Task<()>>);
 
@@ -24,8 +24,10 @@ impl Default for Left {
 }
 
 impl Left {
+    /// These writes and `writes`, so two quick switches never drop the first shell's pending writes.
     /// Detached as well as held, so a later replace that drops this `Left` cancels no write.
-    pub(super) fn new(
+    pub(super) fn then(
+        self,
         writes: impl Future<Output = Vec<VaultError>> + 'static,
         window: &Window,
         cx: &mut App,
@@ -38,6 +40,7 @@ impl Left {
                         shell.update(cx, |shell, cx| shell.left_unsaved(&errors, cx));
                     }
                 });
+                self.0.await;
             })
             .shared();
         cx.foreground_executor().spawn(task.clone()).detach();

@@ -144,9 +144,14 @@ pub(crate) fn build_shell(
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
-pub(crate) fn vault_root(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn vault_root(path: &Path) -> Result<PathBuf, VaultError> {
     // `absolute` keeps a trailing slash; rebuilding from components drops it.
-    Ok(std::path::absolute(path)?.components().collect())
+    std::path::absolute(path)
+        .map(|absolute| absolute.components().collect())
+        .map_err(|source| VaultError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 /// Refuses a root holding the app's folders when `HOME` is known; with no `HOME`, a vault without session or cache.
@@ -182,34 +187,21 @@ fn remembered(fs: &impl Fs, home: &Path) -> Launch {
     let Some(path) = futures::executor::block_on(last_vault::read(fs, home)) else {
         return Launch::Nothing { notice: None };
     };
-    let notice = match futures::executor::block_on(fs.check_dir(&path)) {
-        Ok(()) => match vault_root(&path) {
-            Ok(root) => {
-                return vault_launch(&root, Some(home)).unwrap_or_else(|notice| Launch::Nothing {
-                    notice: Some(notice),
-                });
-            }
-            Err(source) => couldnt_open(
-                &path,
-                &VaultError::Io {
-                    path: path.clone(),
-                    source,
-                },
-            ),
-        },
-        Err(error)
-            if matches!(
-                error.io_kind(),
-                Some(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
-            ) =>
-        {
-            format!("The last vault, “{}”, is no longer there.", title_of(&path))
-        }
-        Err(error) => couldnt_open(&path, &error),
-    };
-    Launch::Nothing {
+    remembered_vault(fs, &path, home).unwrap_or_else(|notice| Launch::Nothing {
         notice: Some(notice),
-    }
+    })
+}
+
+/// The remembered folder as a vault, or the notice saying why not.
+fn remembered_vault(fs: &impl Fs, path: &Path, home: &Path) -> Result<Launch, String> {
+    futures::executor::block_on(fs.check_dir(path)).map_err(|error| match error.io_kind() {
+        Some(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+            format!("The last vault, “{}”, is no longer there.", title_of(path))
+        }
+        _ => couldnt_open(path, &error),
+    })?;
+    let root = vault_root(path).map_err(|error| couldnt_open(path, &error))?;
+    vault_launch(&root, Some(home))
 }
 
 /// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
@@ -217,7 +209,7 @@ fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Lau
     // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
     match futures::executor::block_on(fs.check_dir(&path)) {
         Ok(()) => {
-            let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            let root = vault_root(&path).map_err(|error| error.to_string())?;
             vault_launch(&root, home)
         }
         // A file, or nothing there: the note's load reports which.
@@ -250,7 +242,7 @@ pub(crate) fn seed_session_in(
     note: &str,
     home: &Path,
 ) -> Result<(), String> {
-    let root = vault_root(vault).map_err(|error| format!("{}: {error}", vault.display()))?;
+    let root = vault_root(vault).map_err(|error| error.to_string())?;
     let file = session_file(home, &root)
         .ok_or_else(|| format!("{}: the vault holds the app's folder", root.display()))?;
     let center = SavedMember::Group(SavedGroup {
