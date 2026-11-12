@@ -666,6 +666,14 @@ verified each finding against `cee05c8b`. What changed:
   the quit asks. It is the test that fails when the settle's check after the wait is removed.
 - The button's key hint comes from the keymap through `keys_label`, never a literal "⌘O": a
   rebound key shows as bound.
+- `Home` holds a `PathBuf`, not D4's `home: Option<PathBuf>`: `run` sets it only when `HOME`
+  is known, so "no home" has one representation, the absent global, not two.
+- `the_old_vault_is_released`, `the_old_shell_hears_nothing` and
+  `closing_after_a_switch_runs_the_new_quit` pin behaviour gpui already gives, so they pass
+  when written. Each was shown to fail under a temporary mutation: a strong holder of the old
+  store, a strong holder of the old shell, and the new shell not registering its close
+  handler. `the_old_shell_hears_nothing` resizes the window: the window's appearance cannot be
+  changed from outside gpui, and the old store, which emits the theme reload, is released.
 
 ## Out of scope
 

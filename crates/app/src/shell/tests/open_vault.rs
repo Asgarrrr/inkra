@@ -4,14 +4,21 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{EntityId, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{
+    EntityId, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size,
+};
 use inkra_vault::mem_fs::MemFs;
 
 use super::notices::notice;
+use super::quitting::quitting;
 use super::session_writes::{SESSION, saved_tabs, saving, tab, wait};
-use super::{detached, no_vault, open, vault_names};
+use super::{detached, no_vault, open, showing, vault_names};
+use crate::app_files::session_file;
+use crate::bootstrap::{Home, seed_session_in};
 use crate::shell::AppShell;
 use crate::shell::leave::{Leave, QUIT_WAIT};
+use crate::test_support;
+use crate::theme::{self, Appearance, builtin};
 
 fn root_id(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> EntityId {
     window.entity(cx).unwrap().entity_id()
@@ -286,4 +293,116 @@ fn a_quit_over_a_pending_open_asks_once(cx: &mut TestAppContext) {
     visual.simulate_prompt_answer("Quit Anyway");
     visual.run_until_parked();
     assert!(!visual.has_pending_prompt());
+}
+
+#[gpui::test]
+fn the_new_vault_restores_its_tabs(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    seed_session_in(&*fs, Path::new("/vault"), "a.md", Path::new("/home")).unwrap();
+    let file = session_file(Path::new("/home"), Path::new("/vault")).unwrap();
+    let seeded = fs.read_to_string(&file);
+    let (window, mut visual) = no_vault(cx, &fs);
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let a = test_support::entry_id(&notes, &mut visual, "a");
+    assert_eq!(showing(&window, &mut visual), Some(a));
+    assert_eq!(fs.read_to_string(&file), seeded);
+}
+
+#[gpui::test]
+fn the_new_vault_adopts_its_theme(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/.inkra/settings.json", r#"{"theme":"Flexoki Dark"}"#);
+    let (_window, mut visual) = no_vault(cx, &fs);
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+
+    let installed = visual.update(|_, cx| theme::current(cx).clone());
+    assert!(Arc::ptr_eq(&installed, builtin::of(Appearance::Dark)));
+}
+
+#[gpui::test]
+fn a_hung_read_stops_the_open_after_the_wait(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    let (window, mut visual) = no_vault(cx, &fs);
+    let before = root_id(&window, &mut visual);
+    let _gate = fs.block_load(session_file(Path::new("/home"), Path::new("/vault")).unwrap());
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+    wait(&mut visual, QUIT_WAIT);
+
+    assert_eq!(
+        notice(&window, &mut visual),
+        Some(format!(
+            "Couldn't open “vault”: {}",
+            io::Error::from(io::ErrorKind::TimedOut)
+        ))
+    );
+    assert_eq!(root_id(&window, &mut visual), before);
+    assert!(prompts_again(&mut visual));
+}
+
+#[gpui::test]
+fn the_old_vault_is_released(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let (fs, window, mut visual, _a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    let (notes, vault) = window
+        .update(&mut visual, |shell, _, cx| {
+            let vault = shell.notes.read(cx).vault().expect("a vault").downgrade();
+            (shell.notes.downgrade(), vault)
+        })
+        .unwrap();
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    visual.update(|window, _| window.refresh());
+    visual.run_until_parked();
+
+    assert!(notes.upgrade().is_none(), "the old store is dropped");
+    assert!(vault.upgrade().is_none(), "the old vault is dropped");
+}
+
+#[gpui::test]
+fn the_old_shell_hears_nothing(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let (fs, window, mut visual, _a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    let old = window.entity(&visual).unwrap().downgrade();
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    visual.simulate_resize(size(px(800.), px(600.)));
+    visual.run_until_parked();
+
+    assert!(old.upgrade().is_none());
+}
+
+#[gpui::test]
+fn closing_after_a_switch_runs_the_new_quit(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let (fs, window, mut visual, _a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+
+    assert!(
+        !visual.simulate_close(),
+        "the new shell's quit closes the window"
+    );
+    assert!(quitting(&window, &mut visual));
 }

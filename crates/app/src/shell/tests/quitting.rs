@@ -174,7 +174,7 @@ fn a_hung_save_asks_only_after_the_quit_wait(cx: &mut TestAppContext) {
     assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alphax"));
 }
 
-fn quitting(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+pub(super) fn quitting(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
     window
         .update(cx, |shell, _, _| shell.leaving == Some(Leave::Quit))
         .unwrap()

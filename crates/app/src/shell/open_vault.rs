@@ -1,17 +1,21 @@
 //! `⌘O` opens a chosen folder in place of the shell, once the shell left is settled (open-a-vault spec, D3).
 
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::FutureExt as _;
 use gpui::{
     AsyncWindowContext, Context, Focusable, PathPromptOptions, WeakEntity, Window, actions,
 };
 use inkra_vault::{Fs, VaultError};
 
 use super::AppShell;
-use super::leave::Leave;
+use super::leave::{Leave, QUIT_WAIT};
 use super::notice::couldnt_open;
-use crate::bootstrap::{build_shell, vault_launch, vault_root};
+use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
+use crate::restore::Opened;
+use crate::theme::store::{self, Resolved};
 
 actions!(
     vault,
@@ -39,10 +43,11 @@ impl AppShell {
         });
         let fs = self.notes.read(cx).fs();
         let open = self.vault_root(cx).map(|(_, root)| root);
+        let home = bootstrap::home(cx);
         cx.spawn_in(window, async move |this, cx| {
             let result = match chosen.await {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
-                    Some(path) => Self::open_path(&this, path, fs, open, cx).await,
+                    Some(path) => Self::open_path(&this, path, fs, open, home, cx).await,
                     None => Ok(()),
                 },
                 Ok(Ok(None)) | Err(_) => Ok(()),
@@ -65,6 +70,7 @@ impl AppShell {
         path: PathBuf,
         fs: Arc<dyn Fs>,
         open: Option<PathBuf>,
+        home: Option<PathBuf>,
         cx: &mut AsyncWindowContext,
     ) -> Result<(), String> {
         let root = vault_root(&path).map_err(|source| {
@@ -79,15 +85,18 @@ impl AppShell {
         if open.as_ref() == Some(&root) {
             return Ok(());
         }
-        let checked = {
-            let (fs, root) = (Arc::clone(&fs), root.clone());
-            cx.background_executor()
-                .spawn(async move { fs.check_dir(&root).await })
-                .await
-        };
-        if let Err(error) = checked {
-            return Err(couldnt_open(&root, &error));
+        let launched = vault_launch(&root, home.as_deref());
+        let read = cx
+            .background_executor()
+            .spawn(read(Arc::clone(&fs), root.clone(), launched));
+        let ready = futures::select_biased! {
+            ready = read.fuse() => ready,
+            () = cx.background_executor().timer(QUIT_WAIT).fuse() => Err(VaultError::Io {
+                path: root.clone(),
+                source: io::ErrorKind::TimedOut.into(),
+            }),
         }
+        .map_err(|error| couldnt_open(&root, &error))?;
         let Ok(settled) = this.update_in(cx, |shell, window, cx| {
             shell.settle(Leave::Open, window, cx)
         }) else {
@@ -105,10 +114,29 @@ impl AppShell {
                 return;
             }
             let shell = window.replace_root(cx, |window, cx| {
-                build_shell(fs, vault_launch(&root, None), None, window, cx)
+                build_shell(fs, ready.launched, ready.opened, window, cx)
             });
             window.focus(&shell.focus_handle(cx), cx);
+            shell.update(cx, |shell, cx| shell.adopt_theme(ready.resolved, cx));
         });
         Ok(())
     }
+}
+
+/// What the new shell is built from, read before the shell left is touched.
+struct Ready {
+    launched: Launch,
+    opened: Option<Opened>,
+    resolved: Resolved,
+}
+
+async fn read(fs: Arc<dyn Fs>, root: PathBuf, launched: Launch) -> Result<Ready, VaultError> {
+    fs.check_dir(&root).await?;
+    let opened = bootstrap::opened(Arc::clone(&fs), &launched).await;
+    let resolved = store::load(&*fs, &root).await;
+    Ok(Ready {
+        launched,
+        opened,
+        resolved,
+    })
 }

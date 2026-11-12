@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, DisplayId, Entity, Focusable, Pixels, Size,
+    App, AppContext as _, Bounds, Context, DisplayId, Entity, Focusable, Global, Pixels, Size,
     TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px,
     size,
 };
@@ -26,6 +26,15 @@ use crate::vault::NoteStore;
 
 pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
 
+/// The user's home, set by `run` only when `HOME` is known.
+pub(crate) struct Home(pub(crate) PathBuf);
+
+impl Global for Home {}
+
+pub(crate) fn home(cx: &App) -> Option<PathBuf> {
+    cx.try_global::<Home>().map(|home| home.0.clone())
+}
+
 pub(crate) enum Launch {
     /// `AppShell` renders its empty state; there is no editor in this state.
     Nothing,
@@ -40,16 +49,18 @@ pub(crate) enum Launch {
 /// Read once, before the window opens: its frame places the window, the first frame draws the saved layout,
 /// and the tabs' restore reuses it.
 pub(crate) fn read_session(fs: &Arc<dyn Fs>, launched: &Launch, cx: &mut App) -> Option<Opened> {
+    let started = Instant::now();
+    let opened = futures::executor::block_on(opened(Arc::clone(fs), launched))?;
+    Timeline::session_read(started.elapsed(), cx);
+    Some(opened)
+}
+
+/// The session `launched` keeps, read; `None` when it keeps none.
+pub(crate) async fn opened(fs: Arc<dyn Fs>, launched: &Launch) -> Option<Opened> {
     let Launch::Vault(vault, Some(file), _) = launched else {
         return None;
     };
-    let started = Instant::now();
-    let session = futures::executor::block_on(restore::read(
-        Arc::clone(fs),
-        file.clone(),
-        vault.root().to_path_buf(),
-    ));
-    Timeline::session_read(started.elapsed(), cx);
+    let session = restore::read(fs, file.clone(), vault.root().to_path_buf()).await;
     Some(Opened {
         file: file.clone(),
         session,
@@ -132,13 +143,12 @@ pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
 }
 
 /// Deliberately blocking: a failure should exit rather than flash an empty window.
-fn launch() -> Result<Launch, String> {
+fn launch(home: Option<&Path>) -> Result<Launch, String> {
     // `args_os`, not `args`: the latter panics on a non-UTF-8 path.
     let Some(argument) = std::env::args_os().nth(1) else {
         return Ok(Launch::Nothing);
     };
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    open_argument(&RealFs, PathBuf::from(argument), home.as_deref())
+    open_argument(&RealFs, PathBuf::from(argument), home)
 }
 
 /// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
@@ -173,7 +183,12 @@ pub fn seed_session(vault: &Path, note: &str, home: &Path) -> Result<(), String>
     seed_session_in(&RealFs, vault, note, home)
 }
 
-fn seed_session_in(fs: &impl Fs, vault: &Path, note: &str, home: &Path) -> Result<(), String> {
+pub(crate) fn seed_session_in(
+    fs: &impl Fs,
+    vault: &Path,
+    note: &str,
+    home: &Path,
+) -> Result<(), String> {
     let root = vault_root(vault).map_err(|error| format!("{}: {error}", vault.display()))?;
     let file = session_file(home, &root)
         .ok_or_else(|| format!("{}: the vault holds the app's folder", root.display()))?;
@@ -196,17 +211,24 @@ pub fn run() {
     let started = Instant::now();
     let app = gpui_platform::application().with_assets(Assets);
     app.run(move |cx: &mut App| {
-        cx.set_global(Timeline::new(started));
         cx.bind_keys(key_bindings());
         cx.on_action(|_: &Quit, cx| cx.quit());
 
-        let launched = match launch() {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let launched = match launch(home.as_deref()) {
             Ok(launched) => launched,
             Err(message) => {
                 log::error!("{message}");
                 std::process::exit(1);
             }
         };
+        if let Some(home) = home {
+            cx.set_global(Home(home));
+        }
+        // Only a launched vault is timed: an open from no vault would count the picker's time.
+        if matches!(launched, Launch::Vault(..)) {
+            cx.set_global(Timeline::new(started));
+        }
 
         let resolved = match &launched {
             Launch::Vault(vault, ..) => {

@@ -78,9 +78,9 @@ paths:
   loads every restored note first: every tab's note has a buffer until `NoteClosed`.
 - The session has one writer, `write_session` (its `SessionWriter`), gated on
   `Restore::Done`; arm it with `save_session_later`, never write from elsewhere.
-- The session file is read once, in `bootstrap::read_session`, before the window opens: its frame places the window;
-  `AppShell::new` takes the `Opened`. A test never gates the session file's
-  load: `block_on` would hang.
+- The session file is read once per shell, before the shell is built: by `bootstrap::read_session` at launch
+  (its frame places the window; `block_on`, so a launch test never gates it), by the open's step 3 after
+  (awaited and bounded, so an open test may gate it). `AppShell::new` takes the `Opened`.
 - A tree, picker or backlink row is a `ui::ListItem`, a tab is a `ui::Tab`, and an
   icon-only button is a `ui::IconButton`: each owns background, hover and padding; the
   view attaches handlers, role, labels and content. A caller's `.hover()` on any of them
