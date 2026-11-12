@@ -11,11 +11,12 @@ use gpui::{
 use inkra_vault::{Fs, VaultError};
 
 use super::AppShell;
-use super::leave::{Leave, QUIT_WAIT};
+use super::leave::{Leave, Left, QUIT_WAIT};
 use super::notice::couldnt_open;
 use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
 use crate::restore::Opened;
 use crate::theme::store::{self, Resolved};
+use crate::vault::NoteStore;
 
 actions!(
     vault,
@@ -107,14 +108,15 @@ impl AppShell {
         }
         // One update with no await: a quit pressed after this check cannot interleave with the swap.
         let _ = cx.update(|window, cx| {
-            let still = this
-                .read_with(cx, |shell, _| shell.leaving == Some(Leave::Open))
-                .unwrap_or(false);
-            if !still {
+            let Ok(Some(notes)) = this.read_with(cx, |shell, _| {
+                (shell.leaving == Some(Leave::Open)).then(|| shell.notes.clone())
+            }) else {
                 return;
-            }
+            };
+            // Before the replace, while the old store lives: it copies out text typed during the leave.
+            let left = Left::new(notes.update(cx, NoteStore::flush_all), window, cx);
             let shell = window.replace_root(cx, |window, cx| {
-                build_shell(fs, ready.launched, ready.opened, window, cx)
+                build_shell(fs, ready.launched, ready.opened, left, window, cx)
             });
             window.focus(&shell.focus_handle(cx), cx);
             shell.update(cx, |shell, cx| shell.adopt_theme(ready.resolved, cx));

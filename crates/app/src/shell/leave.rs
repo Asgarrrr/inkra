@@ -3,13 +3,47 @@
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use gpui::{AsyncWindowContext, Context, PromptLevel, Task, Window};
+use futures::future::Shared;
+use gpui::{App, AsyncWindowContext, Context, PromptLevel, Task, Window};
+use inkra_vault::VaultError;
 
 use super::AppShell;
 use crate::vault::NoteStore;
 
 /// A leave waits this long for its writes and reads; past it, a quit proceeds and an open stops.
 pub(super) const QUIT_WAIT: Duration = Duration::from_secs(3);
+
+/// The writes a replaced shell left behind: the next settle joins them.
+#[derive(Clone)]
+pub(crate) struct Left(Shared<Task<()>>);
+
+impl Default for Left {
+    fn default() -> Self {
+        Self(Task::ready(()).shared())
+    }
+}
+
+impl Left {
+    /// Detached as well as held, so a later replace that drops this `Left` cancels no write.
+    pub(super) fn new(
+        writes: impl Future<Output = Vec<VaultError>> + 'static,
+        window: &Window,
+        cx: &mut App,
+    ) -> Self {
+        let task = window
+            .spawn(cx, async move |cx| {
+                let errors = writes.await;
+                let _ = cx.update(|window, cx| {
+                    if let Some(Some(shell)) = window.root::<AppShell>() {
+                        shell.update(cx, |shell, cx| shell.left_unsaved(&errors, cx));
+                    }
+                });
+            })
+            .shared();
+        cx.foreground_executor().spawn(task.clone()).detach();
+        Self(task)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Leave {
@@ -54,13 +88,14 @@ impl AppShell {
     ) -> Task<bool> {
         let session = self.write_session(cx);
         let flush = self.notes.update(cx, NoteStore::flush);
-        let saved = futures::future::join(
+        let saved = futures::future::join3(
             async move {
                 if let Some(session) = session {
                     session.await;
                 }
             },
             flush,
+            self.left.0.clone(),
         );
         let notes = self.notes.clone();
         cx.spawn_in(window, async move |this, cx| {

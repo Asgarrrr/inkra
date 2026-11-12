@@ -17,7 +17,7 @@ use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
 use crate::test_support;
 
-use super::{AppShell, EditorView, NoteStore, Shown};
+use super::{AppShell, EditorView, Left, NoteStore, Shown};
 use crate::file_kind::FileKind;
 use crate::open::{FileActivated, Open};
 use crate::sidebar::Sidebar;
@@ -122,7 +122,7 @@ pub(super) fn open_vault(
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, None, None, window, cx)
+        move |window, cx| AppShell::new(None, notes, None, None, Left::default(), window, cx)
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.panes().sidebar.clone())
@@ -217,8 +217,9 @@ pub(super) fn no_vault(
             NoteStore::new(Arc::clone(fs) as Arc<dyn Fs>, None, cx)
         })
     });
-    let window =
-        cx.add_window(move |window, cx| AppShell::new(None, notes, None, None, window, cx));
+    let window = cx.add_window(move |window, cx| {
+        AppShell::new(None, notes, None, None, Left::default(), window, cx)
+    });
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     window

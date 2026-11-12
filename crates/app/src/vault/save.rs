@@ -1,4 +1,4 @@
-//! The write path: autosave, `⌘S` and the quit flush.
+//! The write path: autosave, `⌘S` and the leave's flush.
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -87,21 +87,30 @@ impl NoteStore {
             .collect()
     }
 
-    /// The quit's flush: on each note's chain, so a write behind a rename lands under the new name.
+    /// The leave's flush: writes every unsaved note and joins every busy chain, each on its chain,
+    /// so a rename queued before the leave lands before the store drops.
     pub(crate) fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
-        let writes: Vec<_> = self
-            .unsaved(cx)
+        let unsaved = self.unsaved(cx);
+        let busy: Vec<EntryId> = self
+            .sessions
+            .busy()
+            .filter(|id| !unsaved.contains(id))
+            .collect();
+        let pending = unsaved
             .into_iter()
-            .map(|id| self.queue(id, PendingSave::Write, cx, async |_, _| true))
+            .map(|id| (id, PendingSave::Write))
+            .chain(busy.into_iter().map(|id| (id, PendingSave::Keep)));
+        let joins: Vec<_> = pending
+            .map(|(id, pending)| self.queue(id, pending, cx, async |_, _| true))
             .collect();
         cx.foreground_executor().spawn(async move {
-            futures::future::join_all(writes).await;
+            futures::future::join_all(joins).await;
         })
     }
 
     /// Copies buffers out synchronously: shutdown holds the `AppCell`
     /// borrowed, so a later borrow here would panic.
-    pub(super) fn flush_all(
+    pub(crate) fn flush_all(
         &mut self,
         cx: &mut Context<Self>,
     ) -> impl Future<Output = Vec<VaultError>> + use<> {

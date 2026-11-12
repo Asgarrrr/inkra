@@ -230,6 +230,93 @@ fn an_unwritable_detached_note_asks_first(cx: &mut TestAppContext) {
     visual.simulate_prompt_answer("Open Anyway");
     visual.run_until_parked();
     assert_ne!(root_id(&window, &mut visual), before);
+    assert_eq!(
+        notice(&window, &mut visual),
+        Some(format!(
+            "Couldn't save “a”: {}",
+            io::Error::from(io::ErrorKind::PermissionDenied)
+        ))
+    );
+}
+
+#[gpui::test]
+fn text_typed_during_the_leave_is_written(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    open(&window, &mut visual, a);
+    let gate = fs.block_save("/vault/a.md");
+    visual.simulate_input("x");
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    visual.simulate_input("y");
+    gate.release();
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("a")));
+    visual.simulate_prompt_answer("Open Anyway");
+    visual.run_until_parked();
+
+    assert_eq!(on_disk(&fs, "/vault/a.md").as_deref(), Some("alphaxy"));
+}
+
+#[gpui::test]
+fn a_rename_queued_before_the_open_lands(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, _a, b) = saving(cx);
+    fs.insert_file("/other/c.md", "gamma");
+    let before = root_id(&window, &mut visual);
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let gate = fs.block_after_rename("/vault/b.md");
+
+    let _renamed = notes.update(&mut visual, |notes, cx| notes.rename(b, "z", cx));
+    cmd_o(&mut visual);
+    choose(&mut visual, "/other");
+    assert_eq!(
+        root_id(&window, &mut visual),
+        before,
+        "the open waits on the rename"
+    );
+
+    gate.release();
+    visual.run_until_parked();
+    assert_ne!(root_id(&window, &mut visual), before);
+    assert_eq!(on_disk(&fs, "/vault/z.md").as_deref(), Some("beta"));
+}
+
+/// The new shell's settle joins the writes the shell it replaced left behind.
+#[gpui::test]
+fn a_quit_right_after_a_switch_waits_for_the_left_writes(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/notes/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    fs.fail_next_saves("/notes/a.md", 1, io::ErrorKind::PermissionDenied);
+    let (window, mut visual) = detached(cx, &fs);
+    visual.simulate_input("x");
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+    assert_eq!(visual.pending_prompt(), Some(unsaved("a.md")));
+
+    let gate = fs.block_save("/notes/a.md");
+    visual.simulate_prompt_answer("Open Anyway");
+    visual.run_until_parked();
+    let notes = window
+        .update(&mut visual, |shell, _, _| shell.notes.clone())
+        .unwrap();
+    let b = test_support::entry_id(&notes, &mut visual, "b");
+    open(&window, &mut visual, b);
+    fs.make_unwritable("/vault/b.md");
+    visual.simulate_input("y");
+    visual.simulate_keystrokes("cmd-q");
+    assert!(
+        !visual.has_pending_prompt(),
+        "the quit waits on the left writes"
+    );
+
+    gate.release();
+    visual.run_until_parked();
+    assert_eq!(visual.pending_prompt(), Some(unsaved("b")));
+    assert_eq!(on_disk(&fs, "/notes/a.md").as_deref(), Some("xalpha"));
 }
 
 #[gpui::test]

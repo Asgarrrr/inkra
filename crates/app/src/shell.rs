@@ -55,6 +55,7 @@ use session::{Restore, SessionFile};
 use shown::{Bound, Shown};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use leave::Left;
 pub(crate) use open_vault::OpenVault;
 pub(crate) use split::{
     ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,
@@ -102,6 +103,8 @@ pub(crate) struct AppShell {
     press: Option<nav::Press>,
     /// The leave under way: `start_leaving` and `stop_leaving` are its only writers.
     leaving: Option<Leave>,
+    /// The writes of the shell this one replaced; `settle` joins them.
+    left: Left,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
     notice: Option<Notice>,
     /// Painted under everything where the window has no blur: an off-screen shot.
@@ -115,6 +118,7 @@ impl AppShell {
         notes: Entity<NoteStore>,
         session: Option<Opened>,
         cache: Option<PathBuf>,
+        left: Left,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -202,6 +206,7 @@ impl AppShell {
             title_drag_armed: false,
             press: None,
             leaving: None,
+            left,
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),

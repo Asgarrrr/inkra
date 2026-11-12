@@ -16,9 +16,9 @@ use crate::open::Open;
 use crate::restore::{
     Opened, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, Session,
 };
-use crate::shell::AppShell;
 use crate::shell::session::THROTTLE;
 use crate::shell::split::SplitDown;
+use crate::shell::{AppShell, Left};
 use crate::test_support;
 
 pub(super) const SESSION: &str = "/support/sessions/vault.json";
@@ -45,7 +45,7 @@ pub(super) fn saving(
                 file: PathBuf::from(SESSION),
                 session: None,
             };
-            AppShell::new(None, notes, Some(opened), None, window, cx)
+            AppShell::new(None, notes, Some(opened), None, Left::default(), window, cx)
         }
     });
     let mut visual = VisualTestContext::from_window(window.into(), cx);

@@ -18,7 +18,7 @@ use crate::keymap::key_bindings;
 use crate::restore::{
     self, Opened, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow, Session,
 };
-use crate::shell::AppShell;
+use crate::shell::{AppShell, Left};
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
 use crate::ui::Assets;
@@ -97,7 +97,7 @@ pub(crate) fn root(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    cx.new(|cx| build_shell(fs, launched, opened, window, cx))
+    cx.new(|cx| build_shell(fs, launched, opened, Left::default(), window, cx))
 }
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
@@ -106,6 +106,7 @@ pub(crate) fn build_shell(
     fs: Arc<dyn Fs>,
     launched: Launch,
     opened: Option<Opened>,
+    left: Left,
     window: &mut Window,
     cx: &mut Context<AppShell>,
 ) -> AppShell {
@@ -126,7 +127,7 @@ pub(crate) fn build_shell(
             )
         }
     };
-    AppShell::new(editor, notes, opened, cache, window, cx)
+    AppShell::new(editor, notes, opened, cache, left, window, cx)
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).

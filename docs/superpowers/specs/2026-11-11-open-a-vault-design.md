@@ -1,7 +1,7 @@
 # Open a vault from the app
 
-Status: **revised 2026-11-12** after a red/blue review (see Review), against
-`main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`. Implementing on branch `open-a-vault`.
+Status: **slice 1 implemented (branch open-a-vault)**. Revised 2026-11-12 after a red/blue review (see Review),
+against `main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`.
 Read D2 and D3 first: D2 is the hard-to-reverse choice, D3 is where data can be lost.
 
 ## Context
@@ -674,6 +674,16 @@ verified each finding against `cee05c8b`. What changed:
   store, a strong holder of the old shell, and the new shell not registering its close
   handler. `the_old_shell_hears_nothing` resizes the window: the window's appearance cannot be
   changed from outside gpui, and the old store, which emits the theme reload, is released.
+- Step 5's `flush_all` is not only detached: it is kept as `Left`, handed to the new shell, and
+  joined by that shell's settle. A quit right after a switch then waits on the writes the old
+  shell left (`a_quit_right_after_a_switch_waits_for_the_left_writes`). A failed left write
+  reaches the new shell's notice through `left_unsaved`, named by file stem: its note left with
+  the old store.
+- That test uses `detached` on `/notes/a.md`, not a vault at `/a`.
+- `a_trash_queued_before_quit_trashes_the_last_text` is added to `quitting.rs`: a trashing note
+  is busy but not unsaved, so its join must be `PendingSave::Keep`. It is the test that fails
+  when the busy chains queue `PendingSave::Drop`, which cancels the trash's preempting write;
+  no rename test can, because a renaming clean note has no armed save.
 
 ## Out of scope
 

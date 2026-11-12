@@ -11,7 +11,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::tree_focused;
-use crate::shell::AppShell;
+use crate::shell::{AppShell, Left};
 use crate::test_support;
 
 const CACHE: &str = "/cache/index.idx";
@@ -23,7 +23,15 @@ fn rebuild_index_removes_the_cache_file_and_loads_every_note_again(cx: &mut Test
     fs.insert_file("/vault/b.md", "beta");
     let notes = test_support::scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
     let window = cx.add_window(move |window, cx| {
-        AppShell::new(None, notes, None, Some(CACHE.into()), window, cx)
+        AppShell::new(
+            None,
+            notes,
+            None,
+            Some(CACHE.into()),
+            Left::default(),
+            window,
+            cx,
+        )
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.panes().sidebar.clone())
