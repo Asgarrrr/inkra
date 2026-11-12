@@ -29,14 +29,12 @@ pub(crate) async fn write(fs: &dyn Fs, home: &Path, root: &Path) {
         version: VERSION,
         root: root.to_owned(),
     };
-    let written = match serde_json::to_vec(&last) {
-        Ok(bytes) => fs
-            .replace_bytes(&file, &bytes)
-            .await
-            .map_err(|error| error.to_string()),
-        Err(error) => Err(format!("{}: {error}", file.display())),
+    let Ok(bytes) = serde_json::to_vec(&last)
+        .inspect_err(|error| log::warn!("last vault not saved: {}: {error}", file.display()))
+    else {
+        return;
     };
-    if let Err(error) = written {
+    if let Err(error) = fs.replace_bytes(&file, &bytes).await {
         log::warn!("last vault not saved: {error}");
     }
 }

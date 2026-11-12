@@ -173,14 +173,17 @@ fn remembered(fs: &impl Fs, home: &Path) -> Launch {
     let Some(path) = futures::executor::block_on(last_vault::read(fs, home)) else {
         return Launch::Nothing { notice: None };
     };
-    let root = futures::executor::block_on(fs.check_dir(&path)).and_then(|()| {
-        vault_root(&path).map_err(|source| VaultError::Io {
-            path: path.clone(),
-            source,
-        })
-    });
-    let notice = match root {
-        Ok(root) => return vault_launch(&root, Some(home)),
+    let notice = match futures::executor::block_on(fs.check_dir(&path)) {
+        Ok(()) => match vault_root(&path) {
+            Ok(root) => return vault_launch(&root, Some(home)),
+            Err(source) => couldnt_open(
+                &path,
+                &VaultError::Io {
+                    path: path.clone(),
+                    source,
+                },
+            ),
+        },
         Err(error)
             if matches!(
                 error.io_kind(),
