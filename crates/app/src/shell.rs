@@ -104,6 +104,10 @@ pub(crate) struct AppShell {
     press: Option<nav::Press>,
     /// The leave under way: `start_leaving` and `stop_leaving` are its only writers.
     leaving: Option<Leave>,
+    /// The id of the next open: an open stops once `leaving` holds another one.
+    opens: u64,
+    /// An open's folder panel is up; the platform shows it apart from `leaving`, so a quit's cancel cannot hide it.
+    panel: bool,
     /// The writes of the shell this one replaced; `settle` joins them.
     left: Left,
     /// The latest failure, until dismissed (quit-and-failures spec, Q9).
@@ -207,6 +211,8 @@ impl AppShell {
             title_drag_armed: false,
             press: None,
             leaving: None,
+            opens: 0,
+            panel: false,
             left,
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,

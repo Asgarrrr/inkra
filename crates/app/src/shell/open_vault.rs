@@ -18,6 +18,7 @@ use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
 use crate::last_vault;
 use crate::restore::Opened;
 use crate::theme::store::{self, Resolved};
+use crate::timeline::Timeline;
 use crate::vault::NoteStore;
 
 actions!(
@@ -35,9 +36,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.start_leaving(Leave::Open) {
+        let Some(leave) = self.start_open() else {
             return;
-        }
+        };
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -48,16 +49,18 @@ impl AppShell {
         let open = self.vault_root(cx).map(|(_, root)| root);
         let home = bootstrap::home(cx);
         cx.spawn_in(window, async move |this, cx| {
-            let result = match chosen.await {
+            let chosen = chosen.await;
+            let _ = this.update(cx, |shell, _| shell.panel = false);
+            let result = match chosen {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
-                    Some(path) => Self::open_path(&this, path, fs, open, home, cx).await,
+                    Some(path) => Self::open_path(&this, leave, path, fs, open, home, cx).await,
                     None => Ok(()),
                 },
                 Ok(Ok(None)) | Err(_) => Ok(()),
                 Ok(Err(error)) => Err(format!("Couldn't show the folder picker: {error}")),
             };
             let _ = this.update(cx, |shell, cx| {
-                if shell.stop_leaving(Leave::Open)
+                if shell.stop_leaving(leave)
                     && let Err(text) = result
                 {
                     shell.show_notice(text, None, cx);
@@ -80,6 +83,7 @@ impl AppShell {
     /// Settles this shell, then replaces it with one on `path`; `Ok` when nothing needs telling.
     async fn open_path(
         this: &WeakEntity<Self>,
+        leave: Leave,
         path: PathBuf,
         fs: Arc<dyn Fs>,
         open: Option<PathBuf>,
@@ -110,9 +114,8 @@ impl AppShell {
             }),
         }
         .map_err(|error| couldnt_open(&root, &error))?;
-        let Ok(settled) = this.update_in(cx, |shell, window, cx| {
-            shell.settle(Leave::Open, window, cx)
-        }) else {
+        let Ok(settled) = this.update_in(cx, |shell, window, cx| shell.settle(leave, window, cx))
+        else {
             return Ok(());
         };
         if !settled.await {
@@ -121,10 +124,11 @@ impl AppShell {
         // One update with no await: a quit pressed after this check cannot interleave with the swap.
         let _ = cx.update(|window, cx| {
             let Ok(Some(notes)) = this.read_with(cx, |shell, _| {
-                (shell.leaving == Some(Leave::Open)).then(|| shell.notes.clone())
+                (shell.leaving == Some(leave)).then(|| shell.notes.clone())
             }) else {
                 return;
             };
+            Timeline::end(cx);
             // Before the replace, while the old store lives: it copies out text typed during the leave.
             let left = Left::new(notes.update(cx, NoteStore::flush_all), window, cx);
             let shell = window.replace_root(cx, |window, cx| {

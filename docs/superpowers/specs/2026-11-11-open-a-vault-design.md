@@ -286,7 +286,8 @@ pins it (Tests, `the_old_vault_is_released`).
 #### Timeline
 
 `run` sets the `Timeline` global (`bootstrap.rs:188`) only for a
-`Launch::Vault`. A no-vault launch that later opens a vault would otherwise
+`Launch::Vault`. The open's commit point ends it (`Timeline::end`), so a
+second vault's marks never complete the first launch's line. A no-vault launch that later opens a vault would otherwise
 print marks measured from process start, picker time included
 (`crates/app/src/timeline.rs:78-85`). `Timeline::mark` already does nothing
 without the global.

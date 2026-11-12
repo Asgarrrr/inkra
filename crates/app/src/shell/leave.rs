@@ -48,7 +48,8 @@ impl Left {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Leave {
     Quit,
-    Open,
+    /// Carries the id its `start_open` took, so a stale open is not taken for a later one.
+    Open(u64),
 }
 
 impl Leave {
@@ -56,7 +57,7 @@ impl Leave {
     fn anyway(self) -> &'static str {
         match self {
             Self::Quit => "Quit Anyway",
-            Self::Open => "Open Anyway",
+            Self::Open(_) => "Open Anyway",
         }
     }
 }
@@ -65,12 +66,23 @@ impl AppShell {
     /// False while another leave is under way: a second one does nothing, except a quit over an open.
     pub(super) fn start_leaving(&mut self, leave: Leave) -> bool {
         match (self.leaving, leave) {
-            (None, _) | (Some(Leave::Open), Leave::Quit) => {
+            (None, _) | (Some(Leave::Open(_)), Leave::Quit) => {
                 self.leaving = Some(leave);
                 true
             }
             (Some(_), _) => false,
         }
+    }
+
+    /// Starts an open on its own id; `None` while a leave is under way or a folder panel is still up.
+    pub(super) fn start_open(&mut self) -> Option<Leave> {
+        let leave = Leave::Open(self.opens);
+        if self.panel || !self.start_leaving(leave) {
+            return None;
+        }
+        self.opens += 1;
+        self.panel = true;
+        Some(leave)
     }
 
     /// Ends `leave`; false once another leave has taken over.
@@ -86,6 +98,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
+        if self.leaving != Some(leave) {
+            return Task::ready(false);
+        }
         let session = self.write_session(cx);
         let flush = self.notes.update(cx, NoteStore::flush);
         let saved = futures::future::join3(
