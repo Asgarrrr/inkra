@@ -7,6 +7,7 @@ mod mouse;
 mod parked;
 mod parses;
 mod reload;
+mod swap;
 #[cfg(test)]
 mod tests;
 mod viewport;
@@ -29,7 +30,7 @@ use crate::open::Open;
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
 use element::TextElement;
-use viewport::{Reveal, ScrollTo, Viewport};
+use viewport::{Reveal, Viewport};
 
 pub(crate) use parked::ParkedView;
 pub(crate) use viewport::TopLine;
@@ -131,27 +132,11 @@ impl EditorView {
             (Selection::at(ByteOffset::new(0)), None, Vec::new()),
             |view| (view.selection, Some(view.top), view.scrolls),
         );
-        // Before the rebind: the anchors resolve only in the buffer they were set in.
-        let pinned = self.drop_pin(cx);
-        self.forget_scrolls(cx);
         // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
-        self.input.rebind(buffer, selection);
-        if pinned {
-            self.pinned = Some(self.park_selection(cx));
-        }
-        self.anchor_scrolls(&scrolls, cx);
+        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
         self.refresh(cx);
-
-        self.is_selecting = false;
-        self.viewport = Viewport::default();
-        // Never a reveal: the restored top line is where the reader left it.
-        if let Some(top) = top {
-            self.viewport.request(ScrollTo::Top(top));
-        }
-
-        cx.notify();
     }
 
     fn watch_buffer(buffer: &Entity<Buffer>, cx: &mut Context<Self>) -> [Subscription; 2] {
@@ -306,18 +291,17 @@ impl EditorView {
 
     /// A view back onto the bound buffer: no resubscribe and no reparse, unlike `open_buffer`.
     pub(crate) fn restore(&mut self, view: ViewState, cx: &mut Context<Self>) {
-        let view = view.clipped(self.input.buffer().read(cx));
-        let pinned = self.drop_pin(cx);
-        self.input.reset_state(view.selection);
-        if pinned {
-            self.pinned = Some(self.park_selection(cx));
-        }
-        self.forget_scrolls(cx);
-        self.anchor_scrolls(&view.scrolls, cx);
-        self.is_selecting = false;
-        self.viewport = Viewport::default();
-        self.viewport.request(ScrollTo::Top(view.top));
-        cx.notify();
+        let ViewState {
+            selection,
+            top,
+            scrolls,
+        } = view.clipped(self.input.buffer().read(cx));
+        self.swap_view(
+            Some(top),
+            &scrolls,
+            |input| input.reset_state(selection),
+            cx,
+        );
     }
 
     /// Reads a waiting scroll request before the drawn frame, so two switches in one frame keep it.
