@@ -140,7 +140,7 @@ impl AppShell {
         let (group, _) = self.tab_of(view);
         let drawn = match self.layout.surface_of(group) {
             Surface::Center => true,
-            Surface::Dock(side) => self.layout.is_drawn(side),
+            Surface::Dock(side) => self.is_dock_drawn(side),
         };
         drawn && self.group(group).shown.view() == Some(view)
     }
