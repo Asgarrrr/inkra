@@ -63,8 +63,8 @@ impl AppShell {
             let sidebar = panes.sidebar.clone();
             let focused = sidebar.focus_handle(cx).contains_focused(window, cx);
             sidebar.update(cx, Sidebar::cancel_edit);
-            if focused && let Some(focus) = self.land_focus(cx) {
-                window.focus(&focus, cx);
+            if focused {
+                self.land_focus(window, cx);
             }
         }
         if cfg!(debug_assertions) {

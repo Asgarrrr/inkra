@@ -71,10 +71,8 @@ impl AppShell {
         if let (Some(editor), Some(range)) = (editor, at) {
             editor.update(cx, |editor, cx| editor.select_range(range, window, cx));
         }
-        if origin.group == self.layout.last_center()
-            && let Some(focus) = self.land_focus(cx)
-        {
-            window.focus(&focus, cx);
+        if origin.group == self.layout.last_center() {
+            self.land_focus(window, cx);
         }
     }
 
@@ -143,7 +141,7 @@ impl AppShell {
                 });
             }
             // Focus lands on the note, as `open_note` moves it for another note.
-            if let Some(focus) = self.land_focus(cx) {
+            if let Some(focus) = self.focus_target(cx) {
                 cx.with_window(cx.entity_id(), |window, cx| window.focus(&focus, cx));
             }
         } else {
@@ -153,7 +151,7 @@ impl AppShell {
 
     /// The note's handle to focus now, or the tree's if the active group shows Files; `None` while a
     /// picker keeps the keys typed into it, until its dismissal lands there.
-    pub(super) fn land_focus(&mut self, cx: &App) -> Option<FocusHandle> {
+    fn focus_target(&mut self, cx: &App) -> Option<FocusHandle> {
         let tree = (self.center().shown.view() == Some(View::Files))
             .then(|| self.tree_focus(cx))
             .flatten();
@@ -167,6 +165,13 @@ impl AppShell {
         }
     }
 
+    /// Focuses the active group's content, or leaves an open picker to land there when it closes.
+    pub(super) fn land_focus(&mut self, window: &mut Window, cx: &mut App) {
+        if let Some(focus) = self.focus_target(cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
     /// Moves focus to the note only if the root holds it, or a picker returns to it: it stays where the user put it.
     pub(super) fn focus_note_from_root(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let root = &self.focus_handle;
@@ -175,8 +180,8 @@ impl AppShell {
                 .modal
                 .as_ref()
                 .is_some_and(|modal| modal.restores(root));
-        if took_root && let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
+        if took_root {
+            self.land_focus(window, cx);
         }
     }
 

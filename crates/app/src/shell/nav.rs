@@ -123,9 +123,7 @@ impl AppShell {
         }
         let current = tab_title(showing, self.notes.read(cx), cx);
         self.activate_group(group, window, cx);
-        if let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
-        }
+        self.land_focus(window, cx);
         let notes = self.notes.read(cx);
         let row = |stop: Stop<EntryId>, icon: IconName| {
             MenuEntry::new(

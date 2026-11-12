@@ -93,8 +93,8 @@ impl AppShell {
             gpui::Focusable::focus_handle(editor, cx).contains_focused(window, cx)
         });
         self.change_layout(window, cx, |shell, _, cx| shell.switch_group(group, cx));
-        if refocus && let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
+        if refocus {
+            self.land_focus(window, cx);
         }
     }
 
@@ -114,8 +114,8 @@ impl AppShell {
             tabs.close(id, |_| capture(shown, cx));
             shell.remove_group(group, window, cx);
         });
-        if was_last && let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
+        if was_last {
+            self.land_focus(window, cx);
         }
     }
 

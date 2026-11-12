@@ -305,10 +305,8 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         self.show(group, place, window, cx);
-        if group == self.layout.last_center()
-            && let Some(focus) = self.land_focus(cx)
-        {
-            window.focus(&focus, cx);
+        if group == self.layout.last_center() {
+            self.land_focus(window, cx);
         }
         cx.notify();
     }

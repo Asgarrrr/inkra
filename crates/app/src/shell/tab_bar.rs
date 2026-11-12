@@ -289,9 +289,7 @@ impl AppShell {
         window.prevent_default();
         self.activate_group(group, window, cx);
         self.activate_tab(group, id, window, cx);
-        if let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
-        }
+        self.land_focus(window, cx);
         let entries = vec![
             MenuEntry::new("Split Right", Box::new(SplitRight)),
             MenuEntry::new("Split Down", Box::new(SplitDown)),
@@ -304,8 +302,6 @@ impl AppShell {
     /// Focuses the active tab's content: gpui's root focus-on-press (div.rs:2765-2780) is prevented.
     fn press_tab(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.prevent_default();
-        if let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
-        }
+        self.land_focus(window, cx);
     }
 }

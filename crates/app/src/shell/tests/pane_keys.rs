@@ -49,9 +49,7 @@ fn enter(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, group: Gro
     window
         .update(cx, |shell, window, cx| {
             shell.activate_group(group, window, cx);
-            if let Some(focus) = shell.land_focus(cx) {
-                window.focus(&focus, cx);
-            }
+            shell.land_focus(window, cx);
         })
         .unwrap();
     cx.run_until_parked();

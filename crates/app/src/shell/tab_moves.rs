@@ -48,10 +48,8 @@ impl AppShell {
                 Surface::Dock(side) => shell.layout.show(side),
             }
         });
-        if surface == Surface::Center
-            && let Some(focus) = self.land_focus(cx)
-        {
-            window.focus(&focus, cx);
+        if surface == Surface::Center {
+            self.land_focus(window, cx);
         }
     }
 
@@ -287,8 +285,8 @@ impl AppShell {
                 shell.switch_group(fresh, cx);
             }
         });
-        if centre && let Some(focus) = self.land_focus(cx) {
-            window.focus(&focus, cx);
+        if centre {
+            self.land_focus(window, cx);
         }
     }
 
