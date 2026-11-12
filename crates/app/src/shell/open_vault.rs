@@ -59,8 +59,7 @@ impl AppShell {
                 Ok(Err(error)) => Err(format!("Couldn't show the folder picker: {error}")),
             };
             let _ = this.update(cx, |shell, cx| {
-                shell.opening = false;
-                if shell.stop_leaving(Leave::Open)
+                if shell.stop_open()
                     && let Err(text) = result
                 {
                     shell.show_notice(text, None, cx);

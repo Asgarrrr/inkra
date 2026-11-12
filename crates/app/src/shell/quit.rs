@@ -8,7 +8,7 @@ use crate::Quit;
 
 impl AppShell {
     pub(super) fn quit(&mut self, _: &Quit, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.start_leaving(Leave::Quit) {
+        if !self.start_quit() {
             return;
         }
         let settled = self.settle(Leave::Quit, window, cx);

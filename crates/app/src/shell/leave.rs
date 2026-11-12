@@ -65,7 +65,7 @@ impl Leave {
 
 impl AppShell {
     /// False while another leave is under way: a second one does nothing, except a quit over an open.
-    pub(super) fn start_leaving(&mut self, leave: Leave) -> bool {
+    fn start_leaving(&mut self, leave: Leave) -> bool {
         match (self.leaving, leave) {
             (None, _) | (Some(Leave::Open), Leave::Quit) => {
                 self.leaving = Some(leave);
@@ -75,13 +75,23 @@ impl AppShell {
         }
     }
 
+    pub(super) fn start_quit(&mut self) -> bool {
+        self.start_leaving(Leave::Quit)
+    }
+
     /// Starts an open; false while a leave is under way or an earlier open's task is still alive.
     pub(super) fn start_open(&mut self) -> bool {
-        if self.opening || !self.start_leaving(Leave::Open) {
+        if self.opening_vault || !self.start_leaving(Leave::Open) {
             return false;
         }
-        self.opening = true;
+        self.opening_vault = true;
         true
+    }
+
+    /// Ends the open's task; false once a quit has taken its leave.
+    pub(super) fn stop_open(&mut self) -> bool {
+        self.opening_vault = false;
+        self.stop_leaving(Leave::Open)
     }
 
     /// Ends `leave`; false once another leave has taken over.

@@ -162,7 +162,17 @@ const HOLDS_HOME: &str = "“me” holds Inkra's own files. Choose a folder insi
 /// Each `Library` folder holds one app file alone: a one-sided check accepts it.
 #[test]
 fn a_root_holding_the_app_files_is_refused() {
-    let home = Some(Path::new("/home/me"));
+    let me = Path::new("/home/me");
+    let home = Some(me);
+    let holds = |root: &str| {
+        let root = Path::new(root);
+        (
+            session_file(me, root).is_none(),
+            cache_file(me, root).is_none(),
+        )
+    };
+    assert_eq!(holds("/home/me/Library/Caches"), (false, true));
+    assert_eq!(holds("/home/me/Library/Application Support"), (true, false));
     for root in [
         "/home/me",
         "/home/me/Library",

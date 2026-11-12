@@ -699,11 +699,12 @@ verified each finding against `cee05c8b`. What changed:
   launch, a vault at `/Users/me` with that `HOME`, is now refused, so a vault holding the
   sessions folder never reaches the restore. `a_root_holding_the_app_files_is_refused` and the
   tests beside it replace it.
-- One open task is alive per shell (`AppShell.opening`), from `⌘O` to the task's end, so
-  `Leave::Open` under way is always that task's own and carries no id. A quit can take
-  `leaving` from the open and be cancelled while the open still reads; a `⌘O` then does
-  nothing, for `QUIT_WAIT` at most
-  (`a_taken_over_open_keeps_a_second_open_out_and_commits_nothing`).
+- One open task is alive per shell (`AppShell.opening_vault`), from `⌘O` to the task's end, so
+  `Leave::Open` under way is always that task's own and carries no id. Only `start_open` sets
+  `Leave::Open`. A quit can take `leaving` from the open and be cancelled while the open still
+  waits; a `⌘O` then does nothing until that wait ends, `QUIT_WAIT` at most
+  (`a_taken_over_open_keeps_a_second_open_out_and_commits_nothing`). If the open's alert was
+  already up when the quit came, the task ends only when that alert is answered.
 
 ## Out of scope
 
