@@ -363,16 +363,41 @@ reads stderr.
 The notice reaches the shell as data: `Launch::Nothing` becomes
 `Launch::Nothing { notice: Option<String> }`, and the builder shows it.
 
-**Open question: a folder that holds the app's own folders.** A root at `~`
-or `/` holds `Library/Application Support/Inkra` and `Library/Caches`.
-`app_file` (`app_files.rs:30-34`) then returns `None` for the session, the
-cache, or both, so the vault remembers nothing, and the scan walks the whole
-home folder. Today the command line accepts it silently. Recommendation:
-refuse it from both the prompt and the command line, through one check over
-both paths, with "Choose a folder inside “{name}”: it holds Inkra's own
-files." The `None` branch of `vault_launch` stays either way: it also covers a
-missing `HOME`. This is a product choice; the code cannot settle it. Not in
-any slice until it is decided.
+**A folder that holds the app's own files is refused** (decided 2026-11-12).
+A root at `~`, `~/Library`, `/Users` or `/` holds
+`Library/Application Support/Inkra` or `Library/Caches/Inkra`. `app_file`
+(`app_files.rs:30-34`) then returns `None` for the session, the cache, or
+both: the vault would remember nothing, and the scan would walk the whole
+home folder. Today the command line accepts it silently.
+
+The check is `app_file`'s own answer, so it cannot drift from it:
+`vault_launch` refuses when `HOME` is known and `session_file` or
+`cache_file` returns `None`. The prompt (step 3), the command line and the
+remembered vault all reach `vault_launch`, so one check covers the three
+paths. The wording is "“{name}” holds Inkra's own files. Choose a folder
+inside it."
+
+- **The prompt:** the notice; the old shell is untouched, as for any failed
+  check.
+- **The command line:** the message on stderr and exit 1, as for any failed
+  argument.
+- **The remembered vault:** the notice and no vault, never an exit (see
+  above). The file cannot normally name such a folder, because it is written
+  only after a vault shell is in place; a hand-edited file still reaches it.
+
+With no `HOME`, nothing can be checked: the launch keeps today's vault
+without session or cache. That is the `None` branch `vault_launch` keeps.
+
+What Obsidian does, researched on 2026-11-12: it keeps a vault's settings and
+open tabs in `.obsidian/` inside the vault, and its metadata cache in
+IndexedDB under `~/Library/Application Support/obsidian`. It does not refuse a
+vault at `~`. Its docs warn only against a vault inside its system folder
+(obsidian.md/help/data-storage). A 2020 report of `~` as a vault describes a
+blank window without a message, and was closed unfixed
+(forum.obsidian.md/t/home-user-directory-as-vault/2224). **Deviation:** Inkra
+refuses, because its session and cache live outside the vault (restore-tabs
+spec, decision 3; persisted index spec, P4), and such a vault cannot keep
+them.
 
 ### D6. The seam for tests
 
@@ -530,6 +555,24 @@ Elsewhere:
 - `crates/app/tests/cli.rs` keeps the process-level cases: a folder argument
   that fails still exits non-zero.
 
+### Slice 3: refuse a folder that holds the app's own files
+
+Written first. Each fails before the change, because today such a root opens.
+
+- `bootstrap` tests: `vault_launch` with `HOME` `/home/me` refuses `/home/me`,
+  `/home/me/Library`, `/home/me/Library/Caches`, `/home` and `/`; it accepts
+  `/home/me/Notes`; with no `HOME` it accepts `/home/me` without session or
+  cache. A plausible bug it catches: checking only the session, which accepts
+  `/home/me/Library/Caches`, a root that holds the cache alone.
+- `open_argument` on `MemFs` with the home folder as the argument: the error
+  names the folder.
+- `shell/tests/open_vault.rs`: `a_folder_holding_the_app_files_is_refused`:
+  answer the prompt with the test's `HOME`; the notice text, the same root
+  entity, and a later `cmd-o` prompts again.
+- Slice 2's launch tests: a last-vault file naming the home folder yields no
+  vault and the notice.
+- `crates/app/tests/cli.rs`: the home folder as the argument exits non-zero.
+
 ## Risks
 
 - **Two cache writers on one file.** Switching back to the vault just left,
@@ -574,6 +617,12 @@ Each slice is one PR and is green under `./scripts/check.sh` alone.
    `check_dir`, `Launch::Nothing { notice }`. Doc edits: close the
    restore-tabs Deferred row "Launch with no argument reopens the last vault"
    (`2026-09-30-restore-tabs-design.md:357`). About 150 lines.
+3. **Refuse a folder that holds the app's own files.** `vault_launch`'s
+   refusal (D5), its notice in the prompt and the remembered-vault paths, its
+   exit on the command line. Doc edits: restore-tabs R1
+   (`2026-09-30-restore-tabs-design.md:81`) and the persisted index's P4
+   (`2026-11-06-persisted-index-design.md:77`) say such a vault is refused,
+   not opened without a session. About 60 lines, mostly tests.
 
 Slice 1 is past the ~150-line PR target. It is not split further: an open
 from no vault without the alert and the session read is a build that loses a
@@ -608,8 +657,6 @@ verified each finding against `cee05c8b`. What changed:
 - A menu bar (D1).
 - A recent-vaults list (D4).
 - Several windows and tab tear-off (D2).
-- Refusing a folder that holds the app's own folders, until D5's open
-  question is decided.
 - Opening a vault from Finder through `on_open_urls`
   (`vendor/zed-reference/crates/gpui/src/app.rs:359`). Trigger: the app
   bundle declares a folder type.
