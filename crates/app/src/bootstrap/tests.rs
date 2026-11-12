@@ -159,7 +159,7 @@ fn a_corrupt_last_vault_file_opens_nothing_silently() {
 
 const HOLDS_HOME: &str = "“me” holds Inkra's own files. Choose a folder inside it.";
 
-/// `/home/me/Library/Caches` holds the cache alone: checking only the session accepts it.
+/// Each `Library` folder holds one app file alone: a one-sided check accepts it.
 #[test]
 fn a_root_holding_the_app_files_is_refused() {
     let home = Some(Path::new("/home/me"));
@@ -167,6 +167,7 @@ fn a_root_holding_the_app_files_is_refused() {
         "/home/me",
         "/home/me/Library",
         "/home/me/Library/Caches",
+        "/home/me/Library/Application Support",
         "/home",
         "/",
     ] {
