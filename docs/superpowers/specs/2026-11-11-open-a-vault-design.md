@@ -1,6 +1,6 @@
 # Open a vault from the app
 
-Status: **slice 1 implemented (branch open-a-vault)**. Revised 2026-11-12 after a red/blue review (see Review),
+Status: **slice 2 implemented (branch open-a-vault-remember)**. Revised 2026-11-12 after a red/blue review (see Review),
 against `main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`.
 Read D2 and D3 first: D2 is the hard-to-reverse choice, D3 is where data can be lost.
 
@@ -684,6 +684,13 @@ verified each finding against `cee05c8b`. What changed:
   is busy but not unsaved, so its join must be `PendingSave::Keep`. It is the test that fails
   when the busy chains queue `PendingSave::Drop`, which cancels the trash's preempting write;
   no rename test can, because a renaming clean note has no armed save.
+- Slice 2: every vault shell placed in the window records its root, through one call,
+  `remember_vault`, after `open_window` and after step 5's `replace_root`. A launch with no
+  argument that reopens the last vault rewrites the same root: one rule, no special case.
+- Slice 2 adds `an_unreadable_last_vault_opens_nothing_and_says_why`, for D5's "the `reason`
+  wording otherwise", and `root_shows_the_notice_a_launch_carries`, for `build_shell` showing
+  `Launch::Nothing`'s notice. The last-vault format's corrupt and other-version cases are one
+  table, beside a version-1 file read from its text.
 
 ## Out of scope
 

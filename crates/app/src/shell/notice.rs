@@ -80,7 +80,7 @@ impl AppShell {
         .detach();
     }
 
-    pub(super) fn show_notice(
+    pub(crate) fn show_notice(
         &mut self,
         text: String,
         cleared_by_save: Option<EntryId>,
@@ -151,7 +151,7 @@ impl AppShell {
 }
 
 /// The folder a vault open could not reach, named as the tree's header names it.
-pub(super) fn couldnt_open(root: &Path, error: &VaultError) -> String {
+pub(crate) fn couldnt_open(root: &Path, error: &VaultError) -> String {
     format!("Couldn't open “{}”: {}", title_of(root), reason(error))
 }
 

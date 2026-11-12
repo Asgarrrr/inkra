@@ -1,10 +1,15 @@
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{Bounds, TestAppContext, point, px, size};
 use inkra_vault::mem_fs::MemFs;
 
-use super::{Launch, WINDOW_SIZE, open_argument, placement, seed_session_in, vault_root};
+use super::{
+    Launch, WINDOW_SIZE, open_argument, placement, remembered, seed_session_in, vault_root,
+};
+use crate::app_files::{cache_file, last_vault_file, session_file};
+use crate::last_vault;
 use crate::restore::{self, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow};
 
 /// One vault, one session file: the key hashes these bytes, so compare bytes, not `Path`'s components.
@@ -76,6 +81,79 @@ fn a_seeded_session_is_the_one_the_launch_reads() {
         }))
     );
     assert_eq!((session.left, session.right), (None, None));
+}
+
+/// A launch with no argument after `/vault` was opened, under the home `/home`.
+fn relaunch(fs: &MemFs) -> Launch {
+    let home = Path::new("/home");
+    futures::executor::block_on(last_vault::write(fs, home, Path::new("/vault")));
+    remembered(fs, home)
+}
+
+fn notice(launched: Launch) -> Option<String> {
+    let Launch::Nothing { notice } = launched else {
+        panic!("the launch opens nothing");
+    };
+    notice
+}
+
+#[test]
+fn the_last_vault_opens_at_a_launch_with_no_argument() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    let (home, root) = (Path::new("/home"), Path::new("/vault"));
+
+    assert!(matches!(
+        relaunch(&fs),
+        Launch::Vault(vault, session, cache)
+            if vault.root() == root
+                && session == session_file(home, root)
+                && cache == cache_file(home, root)
+    ));
+}
+
+#[test]
+fn a_gone_last_vault_opens_nothing_and_says_so() {
+    assert_eq!(
+        notice(relaunch(&MemFs::new())).as_deref(),
+        Some("The last vault, “vault”, is no longer there.")
+    );
+}
+
+/// `open_argument` would load the file as a detached note (open-a-vault spec, D5).
+#[test]
+fn a_file_at_the_last_vault_opens_nothing_and_never_a_note() {
+    let fs = MemFs::new();
+    fs.insert_file("/vault", "alpha");
+
+    assert_eq!(
+        notice(relaunch(&fs)).as_deref(),
+        Some("The last vault, “vault”, is no longer there.")
+    );
+}
+
+#[test]
+fn an_unreadable_last_vault_opens_nothing_and_says_why() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    fs.make_unreadable("/vault");
+
+    assert_eq!(
+        notice(relaunch(&fs)),
+        Some(format!(
+            "Couldn't open “vault”: {}",
+            io::Error::from(io::ErrorKind::PermissionDenied)
+        ))
+    );
+}
+
+#[test]
+fn a_corrupt_last_vault_file_opens_nothing_silently() {
+    let fs = MemFs::new();
+    let home = Path::new("/home");
+    fs.insert_file(last_vault_file(home), "garbage");
+
+    assert_eq!(notice(remembered(&fs, home)), None);
 }
 
 #[gpui::test]

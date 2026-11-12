@@ -354,7 +354,7 @@ Deviations from Zed (`Workspace::save_window_bounds`, `workspace.rs`):
 |---|---|
 | Back, forward and closed stacks across a restart | A user misses history after a relaunch |
 | The MRU order across a restart | A close after a relaunch activates the wrong tab for a user |
-| Launch with no argument reopens the last vault | The folder picker lands, or a Dock launch |
+| ~~Launch with no argument reopens the last vault~~ | **Closed 2026-11-12.** Every vault shell placed in the window records its root in `last-vault.json`; a launch with no argument reopens it, or shows why not (`last_vault.rs`, `bootstrap::remembered`). See `2026-11-11-open-a-vault-design.md`, D4 and D5 |
 | Opening the active note before the scan (ids seeded from identities, open-first Deferred "Ids that survive a restart") | The wait after the first frame is noticed on a real vault |
 | Restore on a failed walk | A user's vault walk fails and they lose their tabs for that run |
 | One session file per process on a shared vault | Two windows or processes on one vault |

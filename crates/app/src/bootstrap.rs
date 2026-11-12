@@ -9,16 +9,18 @@ use gpui::{
     size,
 };
 use inkra_text::Buffer;
-use inkra_vault::{Fs, RealFs, Stamp, Vault};
+use inkra_vault::{Fs, RealFs, Stamp, Vault, VaultError};
 
 use crate::Quit;
 use crate::app_files::{cache_file, session_file};
 use crate::editor::EditorView;
 use crate::keymap::key_bindings;
+use crate::last_vault;
 use crate::restore::{
     self, Opened, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow, Session,
 };
-use crate::shell::{AppShell, Left};
+use crate::shell::{AppShell, Left, couldnt_open};
+use crate::sidebar::title_of;
 use crate::theme::{self, store::Resolved};
 use crate::timeline::{Step, Timeline};
 use crate::ui::Assets;
@@ -36,8 +38,9 @@ pub(crate) fn home(cx: &App) -> Option<PathBuf> {
 }
 
 pub(crate) enum Launch {
-    /// `AppShell` renders its empty state; there is no editor in this state.
-    Nothing,
+    /// `AppShell` renders its empty state, and `notice` if the remembered vault failed; there is
+    /// no editor in this state.
+    Nothing { notice: Option<String> },
     /// The path travels for `⌘S` to write back to; the `Stamp` is what the
     /// first write compares against.
     Note(PathBuf, String, Stamp),
@@ -110,13 +113,18 @@ pub(crate) fn build_shell(
     window: &mut Window,
     cx: &mut Context<AppShell>,
 ) -> AppShell {
-    let (editor, notes, cache) = match launched {
-        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
+    let (editor, notes, cache, notice) = match launched {
+        Launch::Nothing { notice } => (
+            None,
+            cx.new(|cx| NoteStore::new(fs, None, cx)),
+            None,
+            notice,
+        ),
         Launch::Note(path, text, stamp) => {
             let buffer = cx.new(|_| Buffer::new(text));
             let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
             let notes = cx.new(|cx| NoteStore::detached(fs, buffer, path, stamp, cx));
-            (Some(editor), notes, None)
+            (Some(editor), notes, None, None)
         }
         Launch::Vault(vault, _, cache) => {
             let vault = cx.new(|_| vault);
@@ -124,10 +132,15 @@ pub(crate) fn build_shell(
                 None,
                 cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
                 cache,
+                None,
             )
         }
     };
-    AppShell::new(editor, notes, opened, cache, left, window, cx)
+    let mut shell = AppShell::new(editor, notes, opened, cache, left, window, cx);
+    if let Some(text) = notice {
+        shell.show_notice(text, None, cx);
+    }
+    shell
 }
 
 /// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
@@ -143,13 +156,44 @@ pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
     Launch::Vault(Vault::new(root), session, cache)
 }
 
-/// Deliberately blocking: a failure should exit rather than flash an empty window.
+/// Deliberately blocking: a failed argument should exit rather than flash an empty window.
 fn launch(home: Option<&Path>) -> Result<Launch, String> {
     // `args_os`, not `args`: the latter panics on a non-UTF-8 path.
     let Some(argument) = std::env::args_os().nth(1) else {
-        return Ok(Launch::Nothing);
+        return Ok(home.map_or(Launch::Nothing { notice: None }, |home| {
+            remembered(&RealFs, home)
+        }));
     };
     open_argument(&RealFs, PathBuf::from(argument), home)
+}
+
+/// Never through `open_argument`: a remembered folder that became a file opens no note, and a failure
+/// never exits, or every later launch would (open-a-vault spec, D5).
+fn remembered(fs: &impl Fs, home: &Path) -> Launch {
+    let Some(path) = futures::executor::block_on(last_vault::read(fs, home)) else {
+        return Launch::Nothing { notice: None };
+    };
+    let root = futures::executor::block_on(fs.check_dir(&path)).and_then(|()| {
+        vault_root(&path).map_err(|source| VaultError::Io {
+            path: path.clone(),
+            source,
+        })
+    });
+    let notice = match root {
+        Ok(root) => return vault_launch(&root, Some(home)),
+        Err(error)
+            if matches!(
+                error.io_kind(),
+                Some(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
+            ) =>
+        {
+            format!("The last vault, “{}”, is no longer there.", title_of(&path))
+        }
+        Err(error) => couldnt_open(&path, &error),
+    };
+    Launch::Nothing {
+        notice: Some(notice),
+    }
 }
 
 /// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
@@ -235,7 +279,7 @@ pub fn run() {
             Launch::Vault(vault, ..) => {
                 futures::executor::block_on(theme::store::load(&RealFs, vault.root()))
             }
-            Launch::Nothing | Launch::Note(..) => Resolved::default(),
+            Launch::Nothing { .. } | Launch::Note(..) => Resolved::default(),
         };
         theme::install(resolved.theme.clone(), cx);
         theme::set_code_block_wrap(resolved.code_block_wrap, cx);
@@ -271,6 +315,7 @@ pub fn run() {
                     // Marks the first draw's start, ~4.5 ms before its present: any later hook waits on AppKit.
                     window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
                     view.adopt_theme(resolved, cx);
+                    view.remember_vault(cx);
                 });
                 if let Err(err) = focused {
                     log::warn!("failed to focus window: {err}");

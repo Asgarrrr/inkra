@@ -56,6 +56,7 @@ use shown::{Bound, Shown};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
 pub(crate) use leave::Left;
+pub(crate) use notice::couldnt_open;
 pub(crate) use open_vault::OpenVault;
 pub(crate) use split::{
     ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,

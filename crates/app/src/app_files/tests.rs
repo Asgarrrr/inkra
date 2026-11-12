@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{cache_file, fnv1a, session_file};
+use super::{cache_file, fnv1a, last_vault_file, session_file};
 
 /// Published FNV-1a 64 vectors: the key must not change between builds.
 #[test]
@@ -45,5 +45,13 @@ fn a_vault_holding_the_sessions_folder_gets_no_session_file() {
     assert_eq!(
         session_file(Path::new("/Users/me"), Path::new("/Users/me/Library")),
         None
+    );
+}
+
+#[test]
+fn the_last_vault_file_lives_in_application_support() {
+    assert_eq!(
+        last_vault_file(Path::new("/Users/me")),
+        Path::new("/Users/me/Library/Application Support/Inkra/last-vault.json")
     );
 }

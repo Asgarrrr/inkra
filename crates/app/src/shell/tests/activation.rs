@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gpui::{
     Bounds, Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, WindowBounds,
-    WindowOptions, prelude::*,
+    WindowHandle, WindowOptions, prelude::*,
 };
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Vault};
@@ -228,6 +228,21 @@ fn activating_a_note_replaces_the_empty_state(cx: &mut TestAppContext) {
     });
 }
 
+/// `open_window`, not `add_window`: `root` hands back an already-built `Entity<AppShell>`.
+fn rooted(cx: &mut TestAppContext, fs: Arc<dyn Fs>, launched: Launch) -> WindowHandle<AppShell> {
+    cx.update(|cx| {
+        let bounds = Bounds::maximized(None, cx);
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |window, cx| root(fs, launched, None, window, cx),
+        )
+    })
+    .expect("open the window")
+}
+
 /// The only test of `root` with every `Launch`, so the only one that would catch a regression to an unconditional editor.
 #[gpui::test]
 fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
@@ -238,7 +253,7 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
     let loaded = futures::executor::block_on(fs.load(Path::new("/vault/a.md"))).expect("load");
 
     for (launched, expected) in [
-        (Launch::Nothing, false),
+        (Launch::Nothing { notice: None }, false),
         (Launch::Vault(scanned, None, None), false),
         (
             Launch::Note(
@@ -249,23 +264,27 @@ fn root_builds_an_editor_only_for_a_named_file(cx: &mut TestAppContext) {
             true,
         ),
     ] {
-        let fs = Arc::clone(&fs) as Arc<dyn Fs>;
-        // `open_window`, not `add_window`: `root` hands back an already-built `Entity<AppShell>`.
-        let window = cx
-            .update(|cx| {
-                let bounds = Bounds::maximized(None, cx);
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(bounds)),
-                        ..Default::default()
-                    },
-                    |window, cx| root(fs, launched, None, window, cx),
-                )
-            })
-            .expect("open the window");
+        let window = rooted(cx, Arc::clone(&fs) as Arc<dyn Fs>, launched);
         let has_editor = window
             .update(cx, |shell, _, _| shell.editor().is_some())
             .unwrap();
         assert_eq!(has_editor, expected);
     }
+}
+
+/// The remembered vault's failure reaches the shell as data (open-a-vault spec, D5).
+#[gpui::test]
+fn root_shows_the_notice_a_launch_carries(cx: &mut TestAppContext) {
+    let gone = "The last vault, “vault”, is no longer there.";
+    let launched = Launch::Nothing {
+        notice: Some(gone.into()),
+    };
+    let window = rooted(cx, Arc::new(MemFs::new()), launched);
+
+    let shown = window
+        .update(cx, |shell, _, _| {
+            shell.notice.as_ref().map(|notice| notice.text.to_string())
+        })
+        .unwrap();
+    assert_eq!(shown.as_deref(), Some(gone));
 }

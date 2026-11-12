@@ -13,8 +13,9 @@ use super::notices::notice;
 use super::quitting::quitting;
 use super::session_writes::{SESSION, saved_tabs, saving, tab, wait};
 use super::{detached, no_vault, open, showing, vault_names};
-use crate::app_files::session_file;
+use crate::app_files::{last_vault_file, session_file};
 use crate::bootstrap::{Home, seed_session_in};
+use crate::last_vault;
 use crate::shell::AppShell;
 use crate::shell::leave::{Leave, QUIT_WAIT};
 use crate::test_support;
@@ -416,6 +417,42 @@ fn the_new_vault_adopts_its_theme(cx: &mut TestAppContext) {
 
     let installed = visual.update(|_, cx| theme::current(cx).clone());
     assert!(Arc::ptr_eq(&installed, builtin::of(Appearance::Dark)));
+}
+
+#[gpui::test]
+fn opening_a_vault_records_it(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    let (_window, mut visual) = no_vault(cx, &fs);
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+
+    let recorded = futures::executor::block_on(last_vault::read(&*fs, Path::new("/home")));
+    assert_eq!(recorded.as_deref(), Some(Path::new("/vault")));
+}
+
+/// Recorded only once the new shell is in place: a cancel at the alert leaves the file as it was.
+#[gpui::test]
+fn a_cancelled_open_records_nothing(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(Home("/home".into())));
+    let home = Path::new("/home");
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/notes/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    fs.make_unwritable("/notes/a.md");
+    futures::executor::block_on(last_vault::write(&*fs, home, Path::new("/old")));
+    let before = fs.read_to_string(&last_vault_file(home));
+    let (_window, mut visual) = detached(cx, &fs);
+    visual.simulate_input("x");
+
+    cmd_o(&mut visual);
+    choose(&mut visual, "/vault");
+    visual.simulate_prompt_answer("Cancel");
+    visual.run_until_parked();
+
+    assert_eq!(fs.read_to_string(&last_vault_file(home)), before);
 }
 
 #[gpui::test]
