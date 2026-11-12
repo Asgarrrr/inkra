@@ -1,7 +1,7 @@
 # Open a vault from the app
 
 Status: **revised 2026-11-12** after a red/blue review (see Review), against
-`main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`. No code yet.
+`main` at `cee05c8b`. First proposed 2026-11-11 against `8ef653b5`. Implementing on branch `open-a-vault`.
 Read D2 and D3 first: D2 is the hard-to-reverse choice, D3 is where data can be lost.
 
 ## Context
@@ -650,6 +650,20 @@ verified each finding against `cee05c8b`. What changed:
 | The picker's `Err` is unhandled | Blue, missed by red | D5 |
 | A rename or trash queued before the leave is cancelled | Partial | The settle joins every busy chain, quit included |
 | The new shell stores the old vault's frame | Refuted: the window is shared | D3, The window frame, states it |
+
+## Deviations during implementation
+
+- `Bound` and `Shown` moved from `shell.rs` to `shell/shown.rs`: `shell.rs` was at its line
+  ceiling, and the open adds two modules to it.
+- The walking skeleton's first red test is `cmd_o_opens_the_chosen_folder`, driven by `⌘O`.
+  The empty state's button and its test come in the next commit.
+- `QUIT_WAIT` lives in `shell/leave.rs` beside the settle that waits on it, not in `quit.rs`.
+- The vault tests open `/vault` and `/other` through the existing `saving` helper, not `/a`
+  and `/b`.
+- `detached` moved from `tests/following.rs` to `tests/mod.rs` and takes the `MemFs`, so the
+  open's tests and the link tests share it.
+- `a_quit_over_a_pending_open_asks_once` is added: both waits run out on a hung save, and only
+  the quit asks. It is the test that fails when the settle's check after the wait is removed.
 
 ## Out of scope
 

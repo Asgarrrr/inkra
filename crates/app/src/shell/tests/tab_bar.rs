@@ -199,7 +199,7 @@ fn the_backlinks_column_shows_for_an_empty_tab_in_a_vault_only(cx: &mut TestAppC
         "a vault, an empty tab"
     );
 
-    let (_window, mut cx) = no_vault(&mut cx);
+    let (_window, mut cx) = no_vault(&mut cx, &Arc::new(MemFs::new()));
     assert!(cx.debug_bounds("dock-right").is_none(), "no vault");
 }
 

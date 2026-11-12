@@ -85,3 +85,4 @@ paths:
   icon-only button is a `ui::IconButton`: each owns background, hover and padding; the
   view attaches handlers, role, labels and content. A caller's `.hover()` on any of them
   trips gpui's "hover style already set" assert.
+- `AppShell.leaving` (`Leave`) changes only through `start_leaving`/`stop_leaving`; a leave's task reads it at each step and stops once it is no longer its own; a quit takes over an open.

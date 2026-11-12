@@ -148,7 +148,7 @@ fn a_click_on_a_toggle_hides_its_panel(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn no_vault_shows_no_toggle(cx: &mut TestAppContext) {
-    let (_window, mut cx) = no_vault(cx);
+    let (_window, mut cx) = no_vault(cx, &Arc::new(MemFs::new()));
     assert!(drawn(&mut cx, "tab-row"));
     assert!(!drawn(&mut cx, "dock-toggle-left"));
     assert!(!drawn(&mut cx, "dock-toggle-right"));

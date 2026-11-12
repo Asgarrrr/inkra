@@ -1,11 +1,14 @@
 //! The one line reporting a failure: a save, a rename or an open that failed, or a conflict copy kept (quit-and-failures spec, Q9).
 
+use std::path::Path;
+
 use gpui::{
     App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString, Styled, div,
 };
 use inkra_vault::{EntryId, VaultError};
 
 use super::AppShell;
+use crate::sidebar::title_of;
 use crate::theme;
 use crate::ui::{Color, IconButton, IconName};
 use crate::vault::{ConflictPreserved, NoteSaved, NoteStore, OpenFailed, RenameFailed, SaveFailed};
@@ -129,6 +132,11 @@ impl AppShell {
                 ),
         )
     }
+}
+
+/// The folder a vault open could not reach, named as the tree's header names it.
+pub(super) fn couldnt_open(root: &Path, error: &VaultError) -> String {
+    format!("Couldn't open “{}”: {}", title_of(root), reason(error))
 }
 
 /// The OS's words, without the path: the notice names the note by its title.

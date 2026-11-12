@@ -14,8 +14,8 @@ use crate::picker;
 use crate::quick_open::QuickOpen;
 use crate::shell::{
     ActivateLastTab, ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp,
-    ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, PreviousTab, ReopenClosedTab,
-    SplitDown, SplitLeft, SplitRight, SplitUp, ToggleLeftDock, ToggleRightDock,
+    ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, OpenVault, PreviousTab,
+    ReopenClosedTab, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleLeftDock, ToggleRightDock,
 };
 use crate::sidebar::{NewFolder, NewNote, Rename, SelectNext, SelectPrev, Trash};
 use crate::text_input;
@@ -83,6 +83,7 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // focused too — making a note is window-wide, like `cmd-s`.
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
+        KeyBinding::new("cmd-o", OpenVault, Some("AppShell")),
         KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
         KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-shift-p", command_palette::Toggle, Some("AppShell")),

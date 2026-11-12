@@ -1,15 +1,12 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowBounds,
-    WindowHandle, WindowOptions, point, px, size,
+    Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle, point, px, size,
 };
 use inkra_index::Resolution;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
-use crate::bootstrap::{Launch, root};
 use crate::editor::LinkFollowed;
 use crate::images::png;
 use crate::keymap::key_bindings;
@@ -307,33 +304,10 @@ fn a_link_split_refused_by_the_minimum_opens_a_new_tab(cx: &mut TestAppContext) 
 
 /// `/notes/a.md` launched by path beside a `b.md`, its editor focused and its caret at 0.
 fn detached(cx: &mut TestAppContext, text: &str) -> (WindowHandle<AppShell>, VisualTestContext) {
-    cx.update(|cx| cx.bind_keys(key_bindings()));
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/notes/a.md", text);
     fs.insert_file("/notes/b.md", "beta");
-    let loaded = futures::executor::block_on(fs.load(Path::new("/notes/a.md"))).unwrap();
-    let launch = Launch::Note(PathBuf::from("/notes/a.md"), loaded.text, loaded.stamp);
-    let window = cx
-        .update(|cx| {
-            let bounds = Bounds::maximized(None, cx);
-            cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |window, cx| root(fs as Arc<dyn Fs>, launch, None, window, cx),
-            )
-        })
-        .unwrap();
-    let mut visual = VisualTestContext::from_window(window.into(), cx);
-    visual.run_until_parked();
-    window
-        .update(&mut visual, |shell, window, cx| {
-            window.focus(&shell.focus_handle(cx), cx);
-        })
-        .unwrap();
-    visual.simulate_keystrokes("cmd-up");
-    (window, visual)
+    super::detached(cx, &fs)
 }
 
 #[gpui::test]

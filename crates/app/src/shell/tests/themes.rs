@@ -184,7 +184,7 @@ fn down_previews_and_escape_restores(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn without_a_vault_the_rows_are_the_builtins(cx: &mut TestAppContext) {
-    let (window, mut visual) = no_vault(cx);
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
 
     open_theme_picker(&mut visual);
 

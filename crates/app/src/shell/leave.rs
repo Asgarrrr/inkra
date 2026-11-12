@@ -14,6 +14,7 @@ pub(super) const QUIT_WAIT: Duration = Duration::from_secs(3);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Leave {
     Quit,
+    Open,
 }
 
 impl Leave {
@@ -21,15 +22,16 @@ impl Leave {
     fn anyway(self) -> &'static str {
         match self {
             Self::Quit => "Quit Anyway",
+            Self::Open => "Open Anyway",
         }
     }
 }
 
 impl AppShell {
-    /// False while another leave is under way: a second one does nothing.
+    /// False while another leave is under way: a second one does nothing, except a quit over an open.
     pub(super) fn start_leaving(&mut self, leave: Leave) -> bool {
         match (self.leaving, leave) {
-            (None, _) => {
+            (None, _) | (Some(Leave::Open), Leave::Quit) => {
                 self.leaving = Some(leave);
                 true
             }

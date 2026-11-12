@@ -27,6 +27,7 @@ mod members;
 mod modal;
 mod nav;
 mod notice;
+mod open_vault;
 mod palette;
 mod panes;
 mod parked;
@@ -54,6 +55,7 @@ use session::{Restore, SessionFile};
 use shown::{Bound, Shown};
 
 pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use open_vault::OpenVault;
 pub(crate) use split::{
     ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp, SplitDown, SplitLeft,
     SplitRight, SplitUp,

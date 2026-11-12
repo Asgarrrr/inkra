@@ -405,7 +405,7 @@ fn cmd_shift_n_does_nothing_without_a_vault(cx: &mut TestAppContext) {
 }
 
 fn assert_no_name_field_after(keys: &str, cx: &mut TestAppContext) {
-    let (window, mut visual) = no_vault(cx);
+    let (window, mut visual) = no_vault(cx, &Arc::new(MemFs::new()));
 
     visual.simulate_keystrokes(keys);
     visual.run_until_parked();
