@@ -28,34 +28,11 @@ root=$(cd "$vault" && pwd)
 [[ -n $wallpaper ]] && wallpaper=$(cd "$(dirname "$wallpaper")" && pwd)/$(basename "$wallpaper")
 width=${size%x*} height=${size#*x}
 
-# The app's session file name: FNV-1a 64 of the root's bytes, as in crates/app/src/app_files.rs.
-fnv1a() {
-  local LC_ALL=C s=$1 h=$((0xcbf29ce484222325)) i c
-  for ((i = 0; i < ${#s}; i++)); do
-    printf -v c '%d' "'${s:i:1}"
-    h=$(((h ^ (c & 255)) * 0x100000001b3))
-  done
-  printf '%016x' "$h"
-}
-
-cargo build --release -q -p inkra-app
+cargo build --release -q -p inkra-app --bin inkra-app --example seed_session
 
 # A throwaway HOME: the note opens from a written session, and the real session stays untouched.
 home=$(mktemp -d)
-sessions="$home/Library/Application Support/Inkra/sessions"
-mkdir -p "$sessions"
-json() { sed 's/\\/\\\\/g; s/"/\\"/g' <<< "$1"; }
-cat > "$sessions/$(fnv1a "$root").json" << EOF
-{
-  "version": 3,
-  "root": "$(json "$root")",
-  "active": 0,
-  "center": { "tabs": [{ "file": "$(json "$note")" }], "active": 0 },
-  "left": { "tabs": [{ "view": "files" }], "active": 0 },
-  "right": { "tabs": [{ "view": "backlinks" }], "active": 0 },
-  "shown": [true, true]
-}
-EOF
+HOME=$home target/release/examples/seed_session "$root" "$note"
 
 applescript() { osascript - "$@" > /dev/null; }
 # No argument: prints each desktop's wallpaper. Arguments: sets them, the last repeated on any desktop left.
