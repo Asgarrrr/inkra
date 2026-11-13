@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::rc::Rc;
 
-use gpui::{Action, AnyEntity};
+use gpui::{Action, AnyEntity, Subscription};
 use inkra_layout::ViewId;
 
 use super::{BUILTIN, FeatureId, Manifest};
@@ -33,6 +33,7 @@ pub(crate) enum Slot {
 pub(crate) struct FeatureHandle {
     handlers: Vec<(TypeId, Rc<Handler>)>,
     entities: Vec<AnyEntity>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl FeatureHandle {
@@ -42,6 +43,10 @@ impl FeatureHandle {
 
     pub(crate) fn hold(&mut self, entity: AnyEntity) {
         self.entities.push(entity);
+    }
+
+    pub(crate) fn keep(&mut self, subscription: Subscription) {
+        self.subscriptions.push(subscription);
     }
 }
 

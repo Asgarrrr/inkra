@@ -3,7 +3,6 @@
 use gpui::{Action, AnyView, App, Context, Entity, FocusHandle, Render};
 use inkra_layout::{Side, ViewId};
 
-use crate::backlinks::BACKLINKS_PANE;
 use crate::shell::FILES_PANE;
 use crate::ui::IconName;
 
@@ -94,7 +93,7 @@ impl PaneEntry {
     }
 }
 
-pub(crate) static CORE_PANES: &[&PaneDecl] = &[&FILES_PANE, &BACKLINKS_PANE];
+pub(crate) static CORE_PANES: &[&PaneDecl] = &[&FILES_PANE];
 
 pub(crate) fn boxed<A: Action + Default>() -> Box<dyn Action> {
     Box::new(A::default())

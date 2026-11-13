@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{Action, AppContext as _, Context, Entity, EventEmitter, KeyContext, Window};
 use inkra_layout::ViewId;
-use inkra_vault::EntryId;
+use inkra_vault::{EntryId, Vault};
 
 use super::AppShell;
 use super::group::Group;
@@ -24,6 +24,11 @@ use crate::vault::{ConfigChanged, NoteStore};
 pub(super) fn over_budget(took: Duration) -> bool {
     took > Duration::from_millis(2)
 }
+
+/// The file `last_center` shows, emitted on each `follow_center`.
+pub(crate) struct NoteShown(pub(crate) Option<EntryId>);
+
+impl EventEmitter<NoteShown> for AppShell {}
 
 /// What a feature reaches while it activates or runs a command.
 pub(crate) struct FeatureCx<'a, 'b> {
@@ -44,13 +49,6 @@ impl FeatureCx<'_, '_> {
     }
 
     /// Held by the feature: switching it off releases the entity.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no built-in feature holds an entity before backlinks"
-        )
-    )]
     #[expect(
         clippy::new_ret_no_self,
         clippy::wrong_self_convention,
@@ -65,13 +63,6 @@ impl FeatureCx<'_, '_> {
         entity
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no built-in feature holds an entity before backlinks"
-        )
-    )]
     pub(crate) fn update<T: 'static, R>(
         &mut self,
         entity: &Entity<T>,
@@ -81,13 +72,6 @@ impl FeatureCx<'_, '_> {
     }
 
     /// `entity` draws `view`, one of this feature's panes, until the feature switches off.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no built-in feature holds an entity before backlinks"
-        )
-    )]
     pub(crate) fn register_pane<T: Pane>(&mut self, view: ViewId, entity: Entity<T>) {
         debug_assert!(
             self.shell
@@ -106,11 +90,17 @@ impl FeatureCx<'_, '_> {
         if let Some(panes) = &mut self.shell.panes {
             panes.entries.insert(view, entry);
         }
+        // Its dock drew an empty body until now, and a settled vault notifies nothing else.
+        self.cx.notify();
     }
 
     /// `None` with no vault: `expect_used` is denied, so the type says it.
     pub(crate) fn index(&self) -> Option<Entity<IndexSync>> {
         self.shell.panes.as_ref().map(|panes| panes.links.clone())
+    }
+
+    pub(crate) fn vault(&self) -> Option<Entity<Vault>> {
+        self.shell.panes.as_ref().map(|panes| panes.vault.clone())
     }
 
     pub(crate) fn shown(&self) -> Option<EntryId> {
@@ -121,8 +111,14 @@ impl FeatureCx<'_, '_> {
         self.shell.recent.clone()
     }
 
+    /// Deferred out of the window's lease, so opening the note showing can focus it (`show_file`).
     pub(crate) fn open(&mut self, file: EntryId, open: Open) {
-        self.shell.open(file, None, open, self.cx);
+        let shell = self.cx.weak_entity();
+        self.cx.defer(move |cx| {
+            shell
+                .update(cx, |shell, cx| shell.open(file, None, open, cx))
+                .ok();
+        });
     }
 
     /// A modal owned by the feature: switching it off closes the modal. Each `E` reaches `on_pick` while it is on.
@@ -149,6 +145,37 @@ impl FeatureCx<'_, '_> {
             modal.hold(subscription);
             modal.owner = Some(id);
         }
+    }
+
+    /// Each `E` from `entity` reaches `f` while the feature is on.
+    pub(crate) fn subscribe<T: 'static + EventEmitter<E>, E: 'static>(
+        &mut self,
+        entity: &Entity<T>,
+        f: impl Fn(&E, &mut FeatureCx) + 'static,
+    ) {
+        let id = self.feature;
+        let subscription = self.cx.subscribe_in(
+            entity,
+            self.window,
+            move |shell, _, event: &E, window, cx| {
+                shell.with_feature(id, window, cx, |fcx| f(event, fcx));
+            },
+        );
+        self.handle().keep(subscription);
+    }
+
+    /// Each change of the file shown reaches `f` while the feature is on; `shown()` reads it now.
+    pub(crate) fn on_note_shown(&mut self, f: impl Fn(Option<EntryId>, &mut FeatureCx) + 'static) {
+        let id = self.feature;
+        let shell = self.cx.entity();
+        let subscription = self.cx.subscribe_in(
+            &shell,
+            self.window,
+            move |shell, _, event: &NoteShown, window, cx| {
+                shell.with_feature(id, window, cx, |fcx| f(event.0, fcx));
+            },
+        );
+        self.handle().keep(subscription);
     }
 
     fn handle(&mut self) -> &mut FeatureHandle {

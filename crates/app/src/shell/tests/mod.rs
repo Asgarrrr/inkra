@@ -11,6 +11,7 @@ use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{EntryId, Fs};
 
+use crate::backlinks::{BACKLINKS, BacklinksPanel};
 use crate::bootstrap::{Launch, root};
 use crate::feature::Registry;
 use crate::keymap::key_bindings;
@@ -25,6 +26,7 @@ use crate::sidebar::Sidebar;
 
 mod activation;
 mod backlinks;
+mod backlinks_feature;
 mod block_scrolls;
 mod code_block_wrap;
 mod column;
@@ -85,6 +87,12 @@ mod vault_search;
 mod window_bounds;
 
 impl AppShell {
+    /// `None` until backlinks activates, and once it is switched off.
+    pub(crate) fn backlinks_panel(&self) -> Option<Entity<BacklinksPanel>> {
+        let entry = self.panes.as_ref()?.entries.get(&BACKLINKS)?;
+        entry.view().downcast().ok()
+    }
+
     pub(crate) fn tree_row_names(&self, cx: &gpui::App) -> Vec<String> {
         self.panes().sidebar.read(cx).row_names()
     }

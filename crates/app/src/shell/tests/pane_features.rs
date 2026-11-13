@@ -18,7 +18,7 @@ use crate::shell::AppShell;
 use crate::shell::docks::SplitView;
 use crate::test_support;
 
-const SETTINGS: &str = "/vault/.inkra/settings.json";
+pub(super) const SETTINGS: &str = "/vault/.inkra/settings.json";
 
 /// `/vault/a.md` behind a shell with the pane fake on, launched, its root focused.
 fn pane_shell(cx: &mut TestAppContext) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
@@ -38,8 +38,8 @@ fn pane_shell(cx: &mut TestAppContext) -> (Arc<MemFs>, WindowHandle<AppShell>, V
     (fs, window, visual)
 }
 
-fn switch(fs: &MemFs, on: bool, cx: &mut VisualTestContext) {
-    fs.insert_file(SETTINGS, format!(r#"{{"features":{{"pane_fake":{on}}}}}"#));
+pub(super) fn switch(fs: &MemFs, feature: &str, on: bool, cx: &mut VisualTestContext) {
+    fs.insert_file(SETTINGS, format!(r#"{{"features":{{"{feature}":{on}}}}}"#));
     cx.run_until_parked();
 }
 
@@ -54,7 +54,7 @@ fn focus_input(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
 }
 
 /// The right dock's first group: its views in tab order and its active one.
-fn right_dock(
+pub(super) fn right_dock(
     window: WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
 ) -> (Vec<ViewId>, Option<ViewId>) {
@@ -140,7 +140,7 @@ fn disabling_a_pane_feature_removes_its_tab_and_group(cx: &mut TestAppContext) {
     let group = group_of(window, &mut cx);
     focus_input(window, &mut cx);
 
-    switch(&fs, false, &mut cx);
+    switch(&fs, "pane_fake", false, &mut cx);
 
     assert_removed(window, &mut cx);
     assert!(!has_group(window, &mut cx, group));
@@ -150,9 +150,9 @@ fn disabling_a_pane_feature_removes_its_tab_and_group(cx: &mut TestAppContext) {
 fn reenabled_pane_returns_last_and_inactive(cx: &mut TestAppContext) {
     let (fs, window, mut cx) = pane_shell(cx);
     click(&mut cx, "dock-icon-pane_fake");
-    switch(&fs, false, &mut cx);
+    switch(&fs, "pane_fake", false, &mut cx);
 
-    switch(&fs, true, &mut cx);
+    switch(&fs, "pane_fake", true, &mut cx);
 
     let (views, active) = right_dock(window, &mut cx);
     assert_eq!(views.last(), Some(&PANE));
@@ -180,7 +180,7 @@ fn disabling_a_pane_feature_shown_in_the_centre_closes_it_without_redocking(
     cx.run_until_parked();
     assert_eq!(fakes::pane_activations(), 1);
 
-    switch(&fs, false, &mut cx);
+    switch(&fs, "pane_fake", false, &mut cx);
 
     assert_removed(window, &mut cx);
     window
@@ -191,7 +191,7 @@ fn disabling_a_pane_feature_shown_in_the_centre_closes_it_without_redocking(
         .unwrap();
 
     // Alone in a second centre group, the pane takes the group with it.
-    switch(&fs, true, &mut cx);
+    switch(&fs, "pane_fake", true, &mut cx);
     window
         .update(&mut cx, |shell, window, cx| {
             let tab = shell.tab_of(PANE).expect("back in its dock");
@@ -208,7 +208,7 @@ fn disabling_a_pane_feature_shown_in_the_centre_closes_it_without_redocking(
     let group = group_of(window, &mut cx);
     assert_eq!(fakes::pane_activations(), 2);
 
-    switch(&fs, false, &mut cx);
+    switch(&fs, "pane_fake", false, &mut cx);
 
     assert!(!has_group(window, &mut cx, group));
     window

@@ -131,7 +131,8 @@ pub(crate) static PANE_FAKE: Manifest = Manifest {
 
 pub(crate) static CATALOG: &[&Manifest] = &[&PING_FAKE];
 pub(crate) static EAGER_CATALOG: &[&Manifest] = &[&EAGER_FAKE];
-pub(crate) static PANE_CATALOG: &[&Manifest] = &[&PANE_FAKE];
+/// Backlinks first, so the fake pane docks right after it, as a second feature pane would.
+pub(crate) static PANE_CATALOG: &[&Manifest] = &[&crate::backlinks::MANIFEST, &PANE_FAKE];
 
 fn activate_ping(fcx: &mut FeatureCx) {
     let ping = fcx.new(|_| Ping { count: 0 });

@@ -45,7 +45,7 @@ pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedFileTab>) -> String
 }
 
 /// One tab on `a.md`, and `left` as the left dock.
-fn save_docks(fs: &MemFs, left: SavedMember) {
+pub(super) fn save_docks(fs: &MemFs, left: SavedMember) {
     let center = notes_group(vec![tab("a.md", 0, 0)], 0);
     let session = Session::new("/vault".into(), 0, center, Some(left), None, [true, true]);
     save_text(fs, session.encode().unwrap());
@@ -90,14 +90,15 @@ pub(super) fn launch(
     fs: &Arc<MemFs>,
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
     let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()), None);
-    launch_as(cx, fs, launched)
+    launch_as(cx, fs, launched, Registry::default())
 }
 
-/// `launched` on `fs`, unscanned; the root focused, nothing run yet.
+/// `launched` on `fs` with `features`, unscanned; the root focused, nothing run yet.
 pub(super) fn launch_as(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
     launched: Launch,
+    features: Registry,
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let fs = Arc::clone(fs) as Arc<dyn Fs>;
@@ -111,7 +112,7 @@ pub(super) fn launch_as(
                 },
                 |window, cx| {
                     let opened = read_session(&fs, &launched, cx);
-                    root(fs, launched, opened, Registry::default(), window, cx)
+                    root(fs, launched, opened, features, window, cx)
                 },
             )
         })
@@ -388,7 +389,7 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     assert!(editor_focused(&window, &mut cx));
 }
 
-fn backlinks_left() -> SavedMember {
+pub(super) fn backlinks_left() -> SavedMember {
     let views = [FILES, BACKLINKS].map(|view| SavedTab::View {
         view: view.name().to_owned(),
     });

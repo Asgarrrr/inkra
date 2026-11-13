@@ -9,6 +9,7 @@ use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
+use super::features::NoteShown;
 use super::group::Group;
 use super::surface::Landing;
 use super::tabs::{Place, capture};
@@ -221,9 +222,7 @@ impl AppShell {
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
             }
-            panes
-                .backlinks
-                .update(cx, |backlinks, cx| backlinks.set_file(file, cx));
+            cx.emit(NoteShown(file));
         }
         match (&self.center().shown, note) {
             (Shown::View(_), _) => {}

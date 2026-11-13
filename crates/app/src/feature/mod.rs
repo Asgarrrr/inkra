@@ -3,8 +3,8 @@
 use gpui::{Action, KeyBinding};
 
 use crate::pane::PaneDecl;
-use crate::quick_open;
 use crate::shell::FeatureCx;
+use crate::{backlinks, quick_open};
 
 #[cfg(test)]
 pub(crate) mod fakes;
@@ -61,7 +61,7 @@ fn bind<A: Action + Default>(keys: &'static str, context: Option<&str>) -> KeyBi
     KeyBinding::new(keys, A::default(), context)
 }
 
-pub(crate) static BUILTIN: &[&Manifest] = &[&quick_open::MANIFEST];
+pub(crate) static BUILTIN: &[&Manifest] = &[&quick_open::MANIFEST, &backlinks::MANIFEST];
 
 /// Each feature's keys, live only while the shell's key context names the feature.
 pub(crate) fn bindings(catalog: &[&Manifest]) -> Vec<KeyBinding> {
