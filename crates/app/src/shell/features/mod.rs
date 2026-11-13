@@ -1,15 +1,16 @@
 //! The shell's side of the feature registry: launching features, running their commands, and switching them.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use gpui::{Action, Context, Entity, EventEmitter, KeyContext, Window};
+use gpui::{Action, App, Context, Entity, EventEmitter, KeyContext, Window};
 use inkra_layout::ViewId;
 use inkra_vault::EntryId;
 
 use super::AppShell;
 use super::group::Group;
 use super::parked::Parked;
-use crate::feature::{FeatureHandle, FeatureId, Registry, Slot};
+use crate::decorations;
+use crate::feature::{FeatureHandle, FeatureId, Registry, Slot, over_budget};
 use crate::pane::PaneDecl;
 use crate::settings::Switches;
 use crate::timeline::{Step, Timeline};
@@ -20,11 +21,6 @@ mod cx;
 
 pub(crate) use activation::Activation;
 pub(crate) use cx::FeatureCx;
-
-/// A feature's activation or call past this logs a line (spec D11).
-pub(super) fn over_budget(took: Duration) -> bool {
-    took > Duration::from_millis(2)
-}
 
 /// The file `last_center` shows, emitted on each `follow_center`.
 pub(crate) struct NoteShown(pub(crate) Option<EntryId>);
@@ -139,6 +135,21 @@ impl AppShell {
         } else {
             Registry::disabled(features.catalog())
         }
+    }
+
+    /// Every feature's layers, in catalog then manifest order (decoration layer spec, D10).
+    pub(super) fn declare_layers(features: &Registry, cx: &mut App) {
+        let catalog = features.catalog();
+        debug_assert!(
+            catalog
+                .iter()
+                .all(|manifest| manifest.layers.is_empty() || manifest.after_first_frame),
+            "a feature with layers activates after the first frame (decoration layer spec, D8)"
+        );
+        decorations::declare(
+            catalog.iter().flat_map(|manifest| manifest.layers.iter()),
+            cx,
+        );
     }
 
     /// `AppShell` and every enabled feature, so a feature's keys are live only while it is on.

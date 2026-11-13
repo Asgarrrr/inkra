@@ -4,11 +4,13 @@ use std::any::TypeId;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
-use gpui::{Action, AppContext as _, Context, Entity, EventEmitter};
+use gpui::{Action, App, AppContext as _, Context, Entity, EventEmitter};
 use inkra_layout::ViewId;
+use inkra_text::Buffer;
 use inkra_vault::EntryId;
 
 use super::{FeatureCx, NoteShown};
+use crate::decorations::{self, LayerId, TextChange};
 use crate::feature::{FeatureHandle, Slot};
 use crate::pane::{Pane, PaneEntry};
 
@@ -106,6 +108,34 @@ impl Activation<'_, '_> {
                 shell.with_feature(id, window, cx, |mut fcx| f(event.0, &mut fcx));
             },
         );
+        self.handle().keep(subscription);
+    }
+
+    /// Each change to a buffer `layer` is drawn over reaches `f` once while the feature is on.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the test feature listens until a feature does"
+        )
+    )]
+    pub(crate) fn on_text_change(
+        &mut self,
+        layer: LayerId,
+        f: impl Fn(&Entity<Buffer>, TextChange, &mut App) + 'static,
+    ) {
+        debug_assert!(
+            self.0
+                .shell
+                .features
+                .manifest(self.0.feature)
+                .layers
+                .iter()
+                .any(|decl| decl.id == layer),
+            "{layer:?} is not a layer of {}",
+            self.0.feature.name()
+        );
+        let subscription = decorations::listen(layer, Rc::new(f), self.0.cx);
         self.handle().keep(subscription);
     }
 

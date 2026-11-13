@@ -4,12 +4,13 @@
     not(test),
     expect(
         dead_code,
-        reason = "only tests declare and publish until a feature does"
+        reason = "only the test feature listens and publishes until a feature does"
     )
 )]
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, WeakEntity};
 use inkra_editor::Layer;
@@ -17,6 +18,11 @@ use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
 use crate::theme::ColorToken;
+
+mod listen;
+
+use listen::{Heard, Listener};
+pub(crate) use listen::{TextChange, listen};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LayerId {
@@ -45,6 +51,8 @@ struct Decorations {
     declared: Vec<&'static LayerDecl>,
     entries: HashMap<EntityId, Entry>,
     revisions: u64,
+    /// One per declared layer, by rank: the listener its `listen` subscription holds.
+    listeners: Vec<Option<Weak<Listener>>>,
 }
 
 impl Global for Decorations {}
@@ -55,6 +63,8 @@ struct Entry {
     revision: u64,
     /// One per declared layer, by rank.
     layers: Vec<Layer<MarkStyle>>,
+    /// One per declared layer, by rank.
+    heard: Vec<Heard>,
 }
 
 /// Replaces the declared layers, dropping every published mark, unless they are unchanged.
@@ -69,8 +79,50 @@ pub(crate) fn declare(layers: impl IntoIterator<Item = &'static LayerDecl>, cx: 
     {
         return;
     }
+    decorations.listeners.resize(layers.len(), None);
     decorations.declared = layers;
     decorations.entries.clear();
+}
+
+/// # Panics
+/// If `layer` is not declared.
+fn rank(layer: LayerId, cx: &App) -> usize {
+    cx.try_global::<Decorations>()
+        .and_then(|decorations| {
+            decorations
+                .declared
+                .iter()
+                .position(|decl| decl.id == layer)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "undeclared layer {} of feature {}",
+                layer.name,
+                layer.feature.name()
+            )
+        })
+}
+
+/// `buffer`'s entry, created with every layer at its edit mark, unheard; creating one drops the
+/// entries of released buffers.
+fn entry<'a>(
+    entries: &'a mut HashMap<EntityId, Entry>,
+    declared: usize,
+    buffer: &Entity<Buffer>,
+    text: &Buffer,
+) -> &'a mut Entry {
+    let id = buffer.entity_id();
+    if !entries.contains_key(&id) {
+        entries.retain(|_, entry| entry.buffer.is_upgradable());
+    }
+    entries.entry(id).or_insert_with(|| Entry {
+        buffer: buffer.downgrade(),
+        revision: 0,
+        layers: (0..declared)
+            .map(|_| Layer::new(text.edit_mark()))
+            .collect(),
+        heard: (0..declared).map(|_| Heard::Unheard).collect(),
+    })
 }
 
 /// As `Layer::publish`, on `layer` over `buffer`; redraws every window when the marks change.
@@ -88,37 +140,11 @@ pub(crate) fn publish(
     let Some(buffer) = buffer.upgrade() else {
         return;
     };
-    let rank = cx
-        .try_global::<Decorations>()
-        .and_then(|decorations| {
-            decorations
-                .declared
-                .iter()
-                .position(|decl| decl.id == layer)
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "undeclared layer {} of feature {}",
-                layer.name,
-                layer.feature.name()
-            )
-        });
+    let rank = rank(layer, cx);
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
         let text = buffer.read(cx);
-        let id = buffer.entity_id();
-        if !decorations.entries.contains_key(&id) {
-            decorations
-                .entries
-                .retain(|_, entry| entry.buffer.is_upgradable());
-        }
         let declared = decorations.declared.len();
-        let entry = decorations.entries.entry(id).or_insert_with(|| Entry {
-            buffer: buffer.downgrade(),
-            revision: 0,
-            layers: (0..declared)
-                .map(|_| Layer::new(text.edit_mark()))
-                .collect(),
-        });
+        let entry = entry(&mut decorations.entries, declared, &buffer, text);
         // A lost layer was cleared: what it drew is gone too.
         let changed = entry.layers[rank].publish(text, chunk, marks, at) != Ok(false);
         if changed {
@@ -134,6 +160,7 @@ pub(crate) fn publish(
 
 /// Brings every layer of `buffer` to its edit mark. A non-empty layer behind it draws something
 /// else after, moved or lost, so the entry's revision moves: undo can bring back a shaped version.
+/// Then each listener hears what it has not, once the global is released.
 pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
     if cx
         .try_global::<Decorations>()
@@ -141,22 +168,46 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
     {
         return;
     }
-    cx.update_global(|decorations: &mut Decorations, cx| {
-        let Some(entry) = decorations.entries.get_mut(&buffer.entity_id()) else {
-            return;
-        };
+    let unheard = cx.update_global(|decorations: &mut Decorations, cx| {
         let text = buffer.read(cx);
+        let entry = entry(
+            &mut decorations.entries,
+            decorations.declared.len(),
+            buffer,
+            text,
+        );
         let mut moved = false;
-        for layer in &mut entry.layers {
+        let mut unheard = Vec::new();
+        let ranks = entry
+            .layers
+            .iter_mut()
+            .zip(&mut entry.heard)
+            .zip(decorations.declared.iter().zip(&decorations.listeners));
+        for ((layer, heard), (decl, listener)) in ranks {
             moved |= !layer.is_empty() && layer.at() != text.edit_mark();
             // `Lost` clears the layer, a change `moved` already counts.
-            let _ = layer.catch_up(text);
+            if layer.catch_up(text).is_err() && matches!(heard, Heard::At(_)) {
+                *heard = Heard::Lost;
+            }
+            if let Some(listener) = listener.as_ref().and_then(Weak::upgrade)
+                && let Some(change) = heard.hear(text)
+            {
+                unheard.push((listener, decl.id, change));
+            }
         }
         if moved {
             decorations.revisions += 1;
             entry.revision = decorations.revisions;
         }
+        unheard
     });
+    listen::tell(buffer, unheard, cx);
+}
+
+#[cfg(test)]
+pub(crate) fn tracked(cx: &App) -> usize {
+    cx.try_global::<Decorations>()
+        .map_or(0, |decorations| decorations.entries.len())
 }
 
 /// What a view draws of a buffer's layers.

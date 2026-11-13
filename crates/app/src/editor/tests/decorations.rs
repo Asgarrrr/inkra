@@ -166,6 +166,20 @@ fn a_keystroke_shifts_the_colours_and_leaves_typed_text_plain(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn a_released_buffer_is_untracked_once_another_is_tracked(cx: &mut TestAppContext) {
+    cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+    let released = cx.update(|cx| cx.new(|_| Buffer::new("TODO")));
+    publish_warning(&released, 0..4, cx);
+    drop(released);
+    cx.run_until_parked();
+
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO")));
+    publish_warning(&buffer, 0..4, cx);
+
+    assert_eq!(cx.update(|cx| decorations::tracked(cx)), 1);
+}
+
+#[gpui::test]
 #[should_panic(expected = "undeclared layer")]
 fn a_publish_to_an_undeclared_layer_panics(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO")));

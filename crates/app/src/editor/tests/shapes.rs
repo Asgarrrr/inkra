@@ -1,17 +1,19 @@
 //! A frame reuses the layout its inputs already produced (roadmap, "One shape per keystroke").
 
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude::*, px};
+use gpui::{Hsla, Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude::*, px};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{at, dispatching, window_on, with_editor};
-use crate::decorations::Drawn;
+use crate::decorations::{self, Drawn, MarkStyle};
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
-use crate::theme::{self, Appearance, Theme, ThemeColors, builtin};
+use crate::feature::fakes::{TODO_DECL, TODO_LAYER};
+use crate::theme::{self, Appearance, ColorToken, Theme, ThemeColors, builtin};
 
 #[gpui::test]
 fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
@@ -22,6 +24,39 @@ fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
     cx.simulate_input("x");
     cx.run_until_parked();
     assert_eq!(shape_count() - before, 1);
+}
+
+/// The listener publishes inside the keystroke's one shape, or the typed byte would draw plain.
+#[gpui::test]
+fn a_keystroke_shapes_the_note_once_with_a_layer(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "TODO\n");
+    let _listening = cx.update(|_, cx| {
+        decorations::declare([&TODO_DECL], cx);
+        // One mark over the whole text, so each keystroke changes the marks.
+        let whole = |buffer: &gpui::Entity<Buffer>, _, cx: &mut gpui::App| {
+            let (len, mark) = (buffer.read(cx).len(), buffer.read(cx).edit_mark());
+            let warning = MarkStyle {
+                color: Some(ColorToken::Warning),
+            };
+            let marks = vec![(at(0)..len, warning)];
+            decorations::publish(TODO_LAYER, &buffer.downgrade(), at(0)..len, marks, mark, cx);
+        };
+        decorations::listen(TODO_LAYER, Rc::new(whole), cx)
+    });
+    cx.simulate_keystrokes("cmd-up");
+    cx.run_until_parked();
+
+    let before = shape_count();
+    cx.simulate_input("x");
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 1);
+    window
+        .update(&mut cx, |view, _, cx| {
+            let warning = Hsla::from(theme::current(cx).colors.warning);
+            let runs = view.input.last_layout().unwrap().run_colors(0);
+            assert_eq!(runs, [(5, warning)]);
+        })
+        .unwrap();
 }
 
 #[gpui::test]

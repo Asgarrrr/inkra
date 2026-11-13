@@ -50,6 +50,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     commands: &[],
     panes: &[&BACKLINKS_PANE],
     buttons: &[],
+    layers: &[],
     activate,
 };
 

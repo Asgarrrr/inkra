@@ -135,6 +135,7 @@ impl AppShell {
                 (Some(file), session)
             });
         let features = Self::vault_features(features, notes.read(cx).vault().is_some());
+        Self::declare_layers(&features, cx);
         let (layout, mut groups, pending) = Self::restored_groups(
             read,
             &sides(CORE_PANES.iter().copied().chain(features.panes())),

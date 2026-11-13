@@ -331,7 +331,7 @@ impl EditorView {
         self.input.last_bounds()
     }
 
-    fn drawn_layout(&self) -> &layout::DocumentLayout {
+    pub(crate) fn drawn_layout(&self) -> &layout::DocumentLayout {
         let Some(layout) = self.input.last_layout() else {
             panic!("the editor has not been drawn");
         };
