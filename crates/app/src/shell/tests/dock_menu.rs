@@ -1,12 +1,14 @@
 //! The dock menu: a right-click on an icon, a choice by mouse (docks spec, Context menu).
 
 use gpui::{Focusable, Modifiers, MouseButton, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Side, View};
+use inkra_layout::{Side, ViewId};
 
 use super::tab_bar::{click, press};
 use super::{ab_focused, editor_focused, focus_tree, keys, open};
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
+use crate::shell::FILES;
 
 pub(super) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
@@ -47,7 +49,7 @@ fn highlighted(cx: &mut VisualTestContext) -> Option<usize> {
 }
 
 /// Each side's views over its groups, depth-first, its first group's active view and its flag; left then right.
-pub(super) type Docks = [(Vec<View>, Option<View>, bool); 2];
+pub(super) type Docks = [(Vec<ViewId>, Option<ViewId>, bool); 2];
 
 pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Docks {
     window
@@ -71,16 +73,16 @@ pub(super) fn docks(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext)
 /// Docks rule 6: Files left, Backlinks right, both shown.
 pub(super) fn default_docks() -> Docks {
     [
-        (vec![View::Files], Some(View::Files), true),
-        (vec![View::Backlinks], Some(View::Backlinks), true),
+        (vec![FILES], Some(FILES), true),
+        (vec![BACKLINKS], Some(BACKLINKS), true),
     ]
 }
 
 pub(super) fn side_of(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
-    view: View,
-) -> Side {
+    view: ViewId,
+) -> Option<Side> {
     window
         .update(cx, |shell, _, _| shell.side_of(view))
         .unwrap()
@@ -89,7 +91,7 @@ pub(super) fn side_of(
 pub(super) fn is_visible(
     window: &WindowHandle<AppShell>,
     cx: &mut VisualTestContext,
-    view: View,
+    view: ViewId,
 ) -> bool {
     window
         .update(cx, |shell, _, _| shell.is_visible(view))
@@ -111,7 +113,7 @@ fn choosing_move_moves_the_view_and_gives_focus_back(cx: &mut TestAppContext) {
 
     click(&mut cx, "context-menu-item-0");
 
-    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, FILES), Some(Side::Right));
     assert!(!drawn(&mut cx, "context-menu"));
     assert!(editor_focused(&window, &mut cx));
 }
@@ -122,7 +124,7 @@ fn choosing_hide_hides_the_dock(cx: &mut TestAppContext) {
 
     click(&mut cx, "context-menu-item-1");
 
-    assert!(!is_visible(&window, &mut cx, View::Files));
+    assert!(!is_visible(&window, &mut cx, FILES));
     assert!(editor_focused(&window, &mut cx));
 }
 
@@ -165,7 +167,7 @@ fn a_right_click_on_an_icon_opens_that_views_menu(cx: &mut TestAppContext) {
     press(&mut cx, "dock-icon-files", MouseButton::Right);
     click(&mut cx, "context-menu-item-0");
 
-    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, FILES), Some(Side::Right));
 }
 
 #[gpui::test]
@@ -184,7 +186,7 @@ fn down_then_enter_moves_the_view(cx: &mut TestAppContext) {
 
     keys(&mut cx, "down enter");
 
-    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, FILES), Some(Side::Right));
     assert!(!drawn(&mut cx, "context-menu"));
     assert!(editor_focused(&window, &mut cx));
 }
@@ -195,7 +197,7 @@ fn up_then_enter_hides_the_dock(cx: &mut TestAppContext) {
 
     keys(&mut cx, "up enter");
 
-    assert!(!is_visible(&window, &mut cx, View::Files));
+    assert!(!is_visible(&window, &mut cx, FILES));
 }
 
 #[gpui::test]
@@ -209,7 +211,7 @@ fn down_wraps_to_the_first_entry(cx: &mut TestAppContext) {
     }
     keys(&mut cx, "enter");
 
-    assert_eq!(side_of(&window, &mut cx, View::Files), Side::Right);
+    assert_eq!(side_of(&window, &mut cx, FILES), Some(Side::Right));
 }
 
 #[gpui::test]
@@ -222,7 +224,7 @@ fn up_wraps_to_the_last_entry(cx: &mut TestAppContext) {
     }
     keys(&mut cx, "enter");
 
-    assert!(!is_visible(&window, &mut cx, View::Files));
+    assert!(!is_visible(&window, &mut cx, FILES));
 }
 
 #[gpui::test]

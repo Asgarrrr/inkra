@@ -15,8 +15,10 @@ use super::AppShell;
 use super::leave::{Leave, QUIT_WAIT};
 use super::notice::couldnt_open;
 use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
+use crate::feature::Registry;
 use crate::last_vault;
 use crate::restore::Opened;
+use crate::settings::Switches;
 use crate::theme::store::{self, Resolved};
 use crate::timeline::Timeline;
 use crate::vault::NoteStore;
@@ -113,17 +115,28 @@ impl AppShell {
         }
         // One update with no await: a quit pressed after this check cannot interleave with the swap.
         let _ = cx.update(|window, cx| {
-            let Ok(Some((notes, left))) = this.read_with(cx, |shell, _| {
-                (shell.leaving == Some(Leave::Open))
-                    .then(|| (shell.notes.clone(), shell.left.clone()))
+            let Ok(Some((notes, left, catalog))) = this.read_with(cx, |shell, _| {
+                (shell.leaving == Some(Leave::Open)).then(|| {
+                    let catalog = shell.features.catalog();
+                    (shell.notes.clone(), shell.left.clone(), catalog)
+                })
             }) else {
                 return;
             };
             Timeline::end(cx);
             // Before the replace, while the old store lives: it copies out text typed during the leave.
             let left = left.then(notes.update(cx, NoteStore::flush_all), window, cx);
+            // The new vault's switches, not the old shell's: a shell never builds a feature its vault disables.
+            let features = Registry::new(
+                catalog,
+                ready
+                    .resolved
+                    .features
+                    .as_ref()
+                    .unwrap_or(&Switches::default()),
+            );
             let shell = window.replace_root(cx, |window, cx| {
-                build_shell(fs, ready.launched, ready.opened, left, window, cx)
+                build_shell(fs, ready.launched, ready.opened, left, features, window, cx)
             });
             window.focus(&shell.focus_handle(cx), cx);
             shell.update(cx, |shell, cx| shell.adopt_theme(ready.resolved, cx));

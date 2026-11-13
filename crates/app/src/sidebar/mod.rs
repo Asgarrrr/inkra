@@ -9,9 +9,11 @@ use gpui::{
 use inkra_vault::{EntryId, Kind, Vault};
 
 use crate::open::FileActivated;
+use crate::pane::{HeaderButton, Pane, PaneHeader, boxed};
 use crate::theme;
-use crate::ui::{Color, UiText};
+use crate::ui::{Color, IconName, UiText};
 use crate::vault::NoteStore;
+use crate::vault_search::SearchVault;
 
 mod edit;
 mod render;
@@ -104,6 +106,42 @@ pub(crate) fn title_of(root: &Path) -> SharedString {
 impl Focusable for Sidebar {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+static FILES_BUTTONS: [HeaderButton; 3] = [
+    HeaderButton {
+        id: "sidebar-new-note",
+        icon: IconName::PenLine,
+        tooltip: "New note",
+        action: boxed::<NewNote>,
+    },
+    HeaderButton {
+        id: "sidebar-new-folder",
+        icon: IconName::FolderPlus,
+        tooltip: "New folder",
+        action: boxed::<NewFolder>,
+    },
+    HeaderButton {
+        id: "sidebar-search",
+        icon: IconName::Search,
+        tooltip: "Search vault",
+        action: boxed::<SearchVault>,
+    },
+];
+
+impl Pane for Sidebar {
+    fn header(&self, _: &App) -> PaneHeader {
+        PaneHeader::Buttons(&FILES_BUTTONS)
+    }
+
+    fn focus(&self, _: &App) -> Option<FocusHandle> {
+        Some(self.focus_handle.clone())
+    }
+
+    /// A hidden tree keeps no open name field: it would take keys out of sight.
+    fn hidden(&mut self, cx: &mut Context<Self>) {
+        self.cancel_edit(cx);
     }
 }
 

@@ -77,6 +77,7 @@ impl Render for BacklinksPanel {
             .overflow_y_scroll()
             .children(message.map(|message| {
                 div()
+                    .debug_selector(|| "backlinks-message".into())
                     .px(theme::ROW_INSET)
                     .child(Label::new(message).color(Color::Placeholder))
             }))

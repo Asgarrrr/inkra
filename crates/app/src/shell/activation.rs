@@ -4,11 +4,12 @@ use std::ops::Range;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Window};
 use inkra_index::{Resolution, Target};
-use inkra_layout::{GroupId, SplitDirection, View};
+use inkra_layout::{GroupId, SplitDirection};
 use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
+use super::features::NoteShown;
 use super::group::Group;
 use super::surface::Landing;
 use super::tabs::{Place, capture};
@@ -149,13 +150,12 @@ impl AppShell {
         }
     }
 
-    /// The note's handle to focus now, or the tree's if the active group shows Files; `None` while a
-    /// picker keeps the keys typed into it, until its dismissal lands there.
+    /// The note's handle to focus now, or the pane's if the active group shows one that focuses; `None`
+    /// while a picker keeps the keys typed into it, until its dismissal lands there.
     fn focus_target(&mut self, cx: &App) -> Option<FocusHandle> {
-        let tree = (self.center().shown.view() == Some(View::Files))
-            .then(|| self.tree_focus(cx))
-            .flatten();
-        let focus = tree.unwrap_or_else(|| self.focus_handle(cx));
+        let pane = self.center().shown.view();
+        let pane = pane.and_then(|view| self.pane_focus(view, cx));
+        let focus = pane.unwrap_or_else(|| self.focus_handle(cx));
         match &mut self.modal {
             Some(modal) => {
                 modal.restore_to(focus);
@@ -222,9 +222,7 @@ impl AppShell {
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
             }
-            panes
-                .backlinks
-                .update(cx, |backlinks, cx| backlinks.set_file(file, cx));
+            cx.emit(NoteShown(file));
         }
         match (&self.center().shown, note) {
             (Shown::View(_), _) => {}

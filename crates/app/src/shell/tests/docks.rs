@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{Modifiers, TestAppContext, VisualTestContext, WindowHandle, px, size};
-use inkra_layout::{Side, View};
+use inkra_layout::{Side, ViewId};
 use inkra_vault::mem_fs::MemFs;
 
 use super::dock_menu::docks;
@@ -14,8 +14,11 @@ use super::{
     ab_focused, editor_focused, focus_tree, keys, no_vault, open, selected, shell_focused,
     tree_focused, two_notes, vault_names,
 };
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
+use crate::shell::FILES;
+use crate::shell::docks::MoveFilesToOtherDock;
 use crate::test_support::entry_id;
 
 fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
@@ -220,15 +223,20 @@ fn a_press_on_a_dock_header_keeps_the_editor_focused(cx: &mut TestAppContext) {
     assert!(editor_focused(&window, &mut cx));
 }
 
-fn move_view(cx: &mut VisualTestContext, view: View) {
+fn move_view(cx: &mut VisualTestContext, view: ViewId) {
     match view {
-        View::Files => cx.dispatch_action(MoveFilesToOtherDock),
-        View::Backlinks => cx.dispatch_action(MoveBacklinksToOtherDock),
+        FILES => cx.dispatch_action(MoveFilesToOtherDock),
+        BACKLINKS => cx.dispatch_action(MoveBacklinksToOtherDock),
+        other => panic!("{other:?} has no move action"),
     }
     cx.run_until_parked();
 }
 
-fn active(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, side: Side) -> Option<View> {
+fn active(
+    window: &WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+    side: Side,
+) -> Option<ViewId> {
     let [left, right] = docks(window, cx);
     match side {
         Side::Left => left.1,
@@ -240,7 +248,7 @@ fn active(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext, side: Sid
 fn moving_backlinks_left_draws_an_icon_bar_and_no_right_dock(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
 
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
 
     for shown in ["dock-bar-left", "dock-icon-files", "dock-icon-backlinks"] {
         assert!(drawn(&mut cx, shown), "{shown}");
@@ -254,19 +262,19 @@ fn moving_backlinks_left_draws_an_icon_bar_and_no_right_dock(cx: &mut TestAppCon
 #[gpui::test]
 fn a_click_on_an_inactive_icon_activates_its_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
-    move_view(&mut cx, View::Backlinks);
-    assert_eq!(active(&window, &mut cx, Side::Left), Some(View::Backlinks));
+    move_view(&mut cx, BACKLINKS);
+    assert_eq!(active(&window, &mut cx, Side::Left), Some(BACKLINKS));
 
     click(&mut cx, "dock-icon-files");
 
-    assert_eq!(active(&window, &mut cx, Side::Left), Some(View::Files));
+    assert_eq!(active(&window, &mut cx, Side::Left), Some(FILES));
     assert!(drawn(&mut cx, "tree-row-0"));
 }
 
 #[gpui::test]
 fn a_click_on_the_active_icon_changes_nothing(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
     let before = docks(&window, &mut cx);
 
     click(&mut cx, "dock-icon-backlinks");
@@ -278,7 +286,7 @@ fn a_click_on_the_active_icon_changes_nothing(cx: &mut TestAppContext) {
 #[gpui::test]
 fn an_icon_shows_its_name_as_a_tooltip(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
     let icon = cx.debug_bounds("dock-icon-backlinks").expect("drawn");
 
     cx.simulate_mouse_move(icon.center(), None, Modifiers::none());
@@ -294,10 +302,10 @@ fn a_focused_tree_keeps_focus_when_it_moves(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     focus_tree(&window, &mut cx);
 
-    move_view(&mut cx, View::Files);
+    move_view(&mut cx, FILES);
 
     assert!(inside(&mut cx, "dock-icon-files", "title-right"));
-    assert_eq!(active(&window, &mut cx, Side::Right), Some(View::Files));
+    assert_eq!(active(&window, &mut cx, Side::Right), Some(FILES));
     let focused = window
         .update(&mut cx, |shell, window, cx| {
             shell.tree_focus_handle(cx).is_focused(window)
@@ -312,7 +320,7 @@ fn covering_the_focused_tree_lands_focus_on_the_note(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     focus_tree(&window, &mut cx);
 
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
 
     assert!(editor_focused(&window, &mut cx));
 }
@@ -321,7 +329,7 @@ fn covering_the_focused_tree_lands_focus_on_the_note(cx: &mut TestAppContext) {
 fn an_empty_left_dock_draws_no_toggle(cx: &mut TestAppContext) {
     let (_fs, _window, mut cx, _a, _b) = ab_focused(cx);
 
-    move_view(&mut cx, View::Files);
+    move_view(&mut cx, FILES);
 
     for hidden in ["dock-left", "title-left", "dock-toggle-left"] {
         assert!(!drawn(&mut cx, hidden), "{hidden}");
@@ -342,12 +350,12 @@ fn the_dock_icon_point_lands_on_the_icon(cx: &mut TestAppContext) {
     };
     lands(&mut cx, "dock-icon-files", Side::Left, 0);
 
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
     lands(&mut cx, "dock-icon-files", Side::Left, 0);
     lands(&mut cx, "dock-icon-backlinks", Side::Left, 1);
 
-    move_view(&mut cx, View::Files);
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, FILES);
+    move_view(&mut cx, BACKLINKS);
     lands(&mut cx, "dock-icon-files", Side::Right, 0);
     lands(&mut cx, "dock-icon-backlinks", Side::Right, 1);
 }
@@ -355,14 +363,14 @@ fn the_dock_icon_point_lands_on_the_icon(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_reorder_inside_a_dock_keeps_the_active_view(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
-    move_view(&mut cx, View::Backlinks);
+    move_view(&mut cx, BACKLINKS);
     click(&mut cx, "dock-icon-files");
 
     drag(&mut cx, "dock-icon-backlinks", "dock-icon-files");
 
     let [(views, active, _), _] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Backlinks, View::Files]);
-    assert_eq!(active, Some(View::Files));
+    assert_eq!(views, [BACKLINKS, FILES]);
+    assert_eq!(active, Some(FILES));
 }
 
 #[gpui::test]
@@ -370,11 +378,8 @@ fn a_view_moved_to_the_other_dock_becomes_active_there(cx: &mut TestAppContext) 
     let (_fs, window, mut cx, _a, _b) = ab_focused(cx);
     keys(&mut cx, "cmd-|");
 
-    move_view(&mut cx, View::Files);
+    move_view(&mut cx, FILES);
 
     let [_, right] = docks(&window, &mut cx);
-    assert_eq!(
-        right,
-        (vec![View::Backlinks, View::Files], Some(View::Files), true)
-    );
+    assert_eq!(right, (vec![BACKLINKS, FILES], Some(FILES), true));
 }

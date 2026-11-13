@@ -1,15 +1,17 @@
 //! The shell's vault-mode half: the panes that have no meaning without a vault.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui::{AppContext as _, Context, Entity, Subscription, Window};
+use inkra_layout::ViewId;
 use inkra_vault::{Departures, Vault};
 
-use super::AppShell;
-use crate::backlinks::BacklinksPanel;
+use super::{AppShell, FILES};
 use crate::images::Images;
 use crate::index::IndexSync;
 use crate::open::FileActivated;
+use crate::pane::PaneEntry;
 use crate::sidebar::Sidebar;
 use crate::vault::NoteStore;
 
@@ -18,13 +20,14 @@ pub(super) struct VaultPanes {
     pub(super) vault: Entity<Vault>,
     pub(super) links: Entity<IndexSync>,
     pub(super) sidebar: Entity<Sidebar>,
-    pub(super) backlinks: Entity<BacklinksPanel>,
     pub(super) images: Entity<Images>,
+    /// Each registered pane: Files from the start, a feature's once it activates.
+    pub(super) entries: HashMap<ViewId, PaneEntry>,
     /// The vault's `departures` at the last walk of the tabs for gone files; `None` before the first.
     pub(super) checked: Option<Departures>,
-    /// The two panes' `FileActivated`, the vault (tab titles, the session file and a waiting
+    /// The tree's `FileActivated`, the vault (tab titles, the session file and a waiting
     /// restore follow it, as the sidebar's rows do), and an image's load landing.
-    _subscriptions: [Subscription; 4],
+    _subscriptions: [Subscription; 3],
 }
 
 impl VaultPanes {
@@ -37,14 +40,9 @@ impl VaultPanes {
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), vault.clone(), cx));
         let links = cx.new(|cx| IndexSync::new(notes, vault.clone(), cache, cx));
-        let backlinks = cx.new(|cx| BacklinksPanel::new(links.clone(), vault.clone(), cx));
         let fs = notes.read(cx).fs();
         let images = cx.new(|_| Images::new(fs));
         let subscriptions = [
-            // A note linking to itself lists itself.
-            cx.subscribe(&backlinks, |shell, _, event: &FileActivated, cx| {
-                shell.open(event.file, None, event.open, cx);
-            }),
             cx.subscribe(&sidebar, |shell, _, event: &FileActivated, cx| {
                 shell.open(event.file, None, event.open, cx);
             }),
@@ -56,12 +54,13 @@ impl VaultPanes {
             }),
             cx.observe(&images, |_, _, cx| cx.notify()),
         ];
+        let entries = HashMap::from([(FILES, PaneEntry::new(sidebar.clone()))]);
         Self {
             vault,
             links,
             sidebar,
-            backlinks,
             images,
+            entries,
             checked: None,
             _subscriptions: subscriptions,
         }

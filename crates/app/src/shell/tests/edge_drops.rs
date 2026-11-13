@@ -4,13 +4,15 @@ use gpui::{
     Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, WindowHandle, point,
     px, size,
 };
-use inkra_layout::{Side, View};
+use inkra_layout::{Side, ViewId};
 
 use super::dragging::drag_to;
 use super::splits::{centre, check_layout, close, editor_in, focused, last, split, tabs_in};
 use super::{ab_focused, keys, open};
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
+use crate::shell::FILES;
 
 /// A point at `x` of `selector`'s width, half-way down.
 fn across(cx: &mut VisualTestContext, selector: &'static str, x: f32) -> Point<Pixels> {
@@ -169,12 +171,12 @@ fn a_view_dropped_near_a_dock_groups_bottom_edge_splits_the_dock(cx: &mut TestAp
                 .collect::<Vec<Vec<_>>>()
         })
         .unwrap();
-    assert_eq!(held, [vec![View::Files], vec![View::Backlinks]]);
+    assert_eq!(held, [vec![FILES], vec![BACKLINKS]]);
     check_layout(&window, &mut cx);
     close(&mut cx);
 }
 
-fn left_views(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<Vec<View>> {
+fn left_views(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<Vec<ViewId>> {
     window
         .update(cx, |shell, _, _| {
             let groups = shell.layout.dock_groups(Side::Left);
@@ -202,10 +204,7 @@ fn a_view_dropped_mid_a_lower_dock_group_joins_it(cx: &mut TestAppContext) {
 
     drag_to(&mut cx, "dock-icon-files", lower.center());
 
-    assert_eq!(
-        left_views(&window, &mut cx),
-        [vec![View::Backlinks, View::Files]]
-    );
+    assert_eq!(left_views(&window, &mut cx), [vec![BACKLINKS, FILES]]);
     check_layout(&window, &mut cx);
     close(&mut cx);
 }
@@ -220,10 +219,7 @@ fn a_view_dropped_mid_its_own_group_stays_in_place(cx: &mut TestAppContext) {
 
     drag_to(&mut cx, "dock-icon-files", group.center());
 
-    assert_eq!(
-        left_views(&window, &mut cx),
-        [vec![View::Files, View::Backlinks]]
-    );
+    assert_eq!(left_views(&window, &mut cx), [vec![FILES, BACKLINKS]]);
     check_layout(&window, &mut cx);
     close(&mut cx);
 }
@@ -247,7 +243,7 @@ fn a_lone_view_held_on_its_own_groups_edge_splits_nothing(cx: &mut TestAppContex
         .update(&mut cx, |shell, _, _| shell.layout.dock_groups(Side::Left))
         .unwrap();
     assert_eq!(after, before);
-    assert_eq!(left_views(&window, &mut cx), [vec![View::Files]]);
+    assert_eq!(left_views(&window, &mut cx), [vec![FILES]]);
     check_layout(&window, &mut cx);
     close(&mut cx);
 }

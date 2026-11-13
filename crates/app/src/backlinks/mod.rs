@@ -2,14 +2,19 @@
 
 use std::collections::HashMap;
 
-use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
+use gpui::{App, Context, Entity, EventEmitter, SharedString, Subscription, actions};
 use inkra_index::{Backlink, Failures, Slot};
+use inkra_layout::{Side, ViewId};
 use inkra_vault::{EntryId, Vault};
 
+use crate::feature::{FeatureId, Manifest};
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
 use crate::open::FileActivated;
+use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::row_text::LitText;
+use crate::shell::FeatureCx;
+use crate::ui::IconName;
 
 #[cfg(test)]
 mod context_tests;
@@ -23,6 +28,48 @@ mod stale_tests;
 mod tests;
 
 use job::{Job, READ_SOURCES, Wanted};
+
+actions!(docks, [MoveBacklinksToOtherDock]);
+
+pub(crate) const BACKLINKS: ViewId = ViewId::new("backlinks");
+
+pub(crate) static BACKLINKS_PANE: PaneDecl = PaneDecl {
+    id: BACKLINKS,
+    title: "Backlinks",
+    icon: IconName::Link,
+    icon_id: "dock-icon-backlinks",
+    header_id: "panel-header-backlinks",
+    side: Side::Right,
+    move_action: boxed::<MoveBacklinksToOtherDock>,
+};
+
+pub(crate) static MANIFEST: Manifest = Manifest {
+    id: FeatureId::new("backlinks"),
+    default_on: true,
+    after_first_frame: false,
+    commands: &[],
+    panes: &[&BACKLINKS_PANE],
+    activate,
+};
+
+/// Activated once its pane shows, so `shown()` is read late and `NoteShown` keeps it current.
+fn activate(fcx: &mut FeatureCx) {
+    let (Some(index), Some(vault)) = (fcx.index(), fcx.vault()) else {
+        return;
+    };
+    let panel = fcx.new(|cx| BacklinksPanel::new(index, vault, cx));
+    // A note linking to itself lists itself.
+    fcx.subscribe(&panel, |event: &FileActivated, fcx| {
+        fcx.open(event.file, event.open);
+    });
+    let shown = fcx.shown();
+    fcx.update(&panel, |panel, cx| panel.set_file(shown, cx));
+    fcx.on_note_shown({
+        let panel = panel.clone();
+        move |file, fcx| fcx.update(&panel, |panel, cx| panel.set_file(file, cx))
+    });
+    fcx.register_pane(BACKLINKS, panel);
+}
 
 impl EventEmitter<FileActivated> for BacklinksPanel {}
 
@@ -42,6 +89,9 @@ pub(crate) struct BacklinksPanel {
     building: bool,
     /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
     watch: IndexWatch,
+    hidden: bool,
+    /// A rebuild was skipped while hidden: showing rebuilds once.
+    stale: bool,
     #[cfg(test)]
     rebuilds: usize,
     _subscriptions: Vec<Subscription>,
@@ -83,6 +133,8 @@ impl BacklinksPanel {
             failures: Failures::default(),
             building: false,
             watch: IndexWatch::default(),
+            hidden: false,
+            stale: false,
             #[cfg(test)]
             rebuilds: 0,
             _subscriptions: subscriptions,
@@ -92,6 +144,11 @@ impl BacklinksPanel {
     #[cfg(test)]
     pub(crate) fn source_names(&self) -> Vec<String> {
         self.rows.iter().map(|row| row.name.to_string()).collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rebuilds(&self) -> usize {
+        self.rebuilds
     }
 
     /// The header's count; `None` with no rows.
@@ -110,12 +167,16 @@ impl BacklinksPanel {
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
+        if self.hidden {
+            self.stale = true;
+            return;
+        }
         #[cfg(test)]
         {
             self.rebuilds += 1;
         }
         let links = self.links.read(cx);
-        let building = !links.status().is_ready();
+        let building = self.file.is_some() && !links.status().is_ready();
         self.watch.seen(links);
         let vault = self.vault.read(cx);
         let name = |id: EntryId| {
@@ -213,5 +274,24 @@ fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
                 link: LitText::default(),
             })
             .collect(),
+    }
+}
+
+impl Pane for BacklinksPanel {
+    fn header(&self, _: &App) -> PaneHeader {
+        PaneHeader::Title {
+            count: self.count(),
+        }
+    }
+
+    fn hidden(&mut self, _: &mut Context<Self>) {
+        self.hidden = true;
+    }
+
+    fn shown(&mut self, cx: &mut Context<Self>) {
+        self.hidden = false;
+        if std::mem::take(&mut self.stale) {
+            self.rebuild(cx);
+        }
     }
 }

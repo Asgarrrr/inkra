@@ -11,36 +11,19 @@ pub use resize::SplitPath;
 pub use surface::Surface;
 pub use tree::{Axis, Member, Rect, Shape};
 
+/// A dock view, by the name the session file stores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum View {
-    Files,
-    Backlinks,
-}
+pub struct ViewId(&'static str);
 
-impl View {
-    pub const ALL: [View; 2] = [View::Files, View::Backlinks];
-
-    /// The name the session file stores.
+impl ViewId {
     #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Files => "files",
-            Self::Backlinks => "backlinks",
-        }
+    pub const fn new(name: &'static str) -> Self {
+        Self(name)
     }
 
     #[must_use]
-    pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|view| view.name() == name)
-    }
-
-    /// Docks rule 6: where the view goes when no dock holds it.
-    #[must_use]
-    pub fn default_side(self) -> Side {
-        match self {
-            Self::Files => Side::Left,
-            Self::Backlinks => Side::Right,
-        }
+    pub const fn name(self) -> &'static str {
+        self.0
     }
 }
 
@@ -207,22 +190,26 @@ pub struct StoredDock {
 }
 
 /// Each dock group's views and active index, left groups then right, each side's depth-first;
-/// each `View` lands in exactly one, and a group emptied of views stays for the caller to remove.
+/// each catalog view lands in exactly one, and a group emptied of views stays for the caller to
+/// remove.
 ///
-/// Keeps each known view's first place; a missing view goes to its default side's first group,
-/// or a fresh one when that side has none.
+/// Keeps each known view's first place; a missing view goes to its catalog side's first group,
+/// or a fresh one when that side has none, in catalog order.
 #[must_use]
-pub fn restore_views(docks: [&[StoredDock]; 2]) -> [Vec<(Vec<View>, usize)>; 2] {
-    let mut held = Vec::with_capacity(View::ALL.len());
+pub fn restore_views(
+    docks: [&[StoredDock]; 2],
+    catalog: &[(ViewId, Side)],
+) -> [Vec<(Vec<ViewId>, usize)>; 2] {
+    let mut held = Vec::with_capacity(catalog.len());
     let mut docks = docks.map(|groups| {
         groups
             .iter()
-            .map(|stored| restore_group(stored, &mut held))
+            .map(|stored| restore_group(stored, catalog, &mut held))
             .collect::<Vec<_>>()
     });
-    for view in View::ALL {
+    for &(view, side) in catalog {
         if !held.contains(&view) {
-            let side = &mut docks[view.default_side().index()];
+            let side = &mut docks[side.index()];
             match side.first_mut() {
                 Some((views, _)) => views.push(view),
                 None => side.push((vec![view], 0)),
@@ -239,14 +226,23 @@ pub fn kept_active(kept: &[usize], active: usize) -> usize {
     kept.iter().rposition(|&ix| ix <= active).unwrap_or(0)
 }
 
-/// `stored`'s known views not in `held`, which takes them.
-fn restore_group(stored: &StoredDock, held: &mut Vec<View>) -> (Vec<View>, usize) {
+/// `stored`'s catalog views not in `held`, which takes them.
+fn restore_group(
+    stored: &StoredDock,
+    catalog: &[(ViewId, Side)],
+    held: &mut Vec<ViewId>,
+) -> (Vec<ViewId>, usize) {
     let (views, stored_ixs): (Vec<_>, Vec<_>) = stored
         .views
         .iter()
         .enumerate()
         .filter_map(|(stored_ix, name)| {
-            let view = View::named(name.as_deref()?).filter(|view| !held.contains(view))?;
+            let name = name.as_deref()?;
+            let view = catalog
+                .iter()
+                .map(|&(view, _)| view)
+                .find(|view| view.name() == name)
+                .filter(|view| !held.contains(view))?;
             held.push(view);
             Some((view, stored_ix))
         })

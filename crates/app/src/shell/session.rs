@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{App, Context, Entity, Subscription, Task, Window};
-use inkra_layout::{GroupId, Layout, Member, Side};
+use inkra_layout::{GroupId, Layout, Member, Side, ViewId};
 use inkra_tabs::Place as _;
 use inkra_tabs::Tabs;
 use inkra_vault::EntryId;
@@ -48,12 +48,13 @@ impl AppShell {
     /// The tree and the dock groups `read` holds, its notes still to load; docks rule 6's with none.
     pub(super) fn restored_groups(
         read: Option<Session>,
+        catalog: &[(ViewId, Side)],
     ) -> (Layout, HashMap<GroupId, Group>, Option<Pending>) {
         let Surfaces {
             layout,
             docks,
             pending,
-        } = Surfaces::resolve(read);
+        } = Surfaces::resolve(read, catalog);
         let groups = layout
             .center_groups()
             .into_iter()

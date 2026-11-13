@@ -104,7 +104,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-            shell.drop_view_at_end(dragged.view, group, window, cx);
+            shell.drop_view_at_end(dragged.decl.id, group, window, cx);
         })
     }
 
@@ -113,14 +113,17 @@ impl AppShell {
     fn render_group_body(&self, k: usize, group: GroupId, cx: &mut Context<Self>) -> Div {
         let view = self.group(group).shown.view();
         let content = match view {
-            Some(view) => vec![
-                self.render_view_header(view, cx),
-                div()
+            Some(view) => {
+                let body = div()
                     .flex_1()
                     .min_h_0()
                     .children(self.render_view_body(view))
-                    .into_any_element(),
-            ],
+                    .into_any_element();
+                self.render_view_header(view, cx)
+                    .into_iter()
+                    .chain([body])
+                    .collect()
+            }
             None => vec![match (&self.group(group).shown, self.editor_of(group)) {
                 (Shown::Image(id), _) => self.render_image(*id, cx),
                 (_, Some(editor)) => editor.clone().into_any_element(),

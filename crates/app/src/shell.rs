@@ -5,12 +5,12 @@ use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, p
 use inkra_vault::{EntryId, New};
 
 use crate::editor::EditorView;
-use crate::open::FileActivated;
-use crate::quick_open::{QuickOpen, QuickOpenDelegate};
+use crate::feature::Registry;
+use crate::pane::{CORE_PANES, sides};
 use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
-use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
+use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
@@ -20,6 +20,7 @@ mod dock_chrome;
 mod dock_drag;
 mod docks;
 mod drop_marker;
+mod features;
 mod geometry;
 mod group;
 mod leave;
@@ -46,7 +47,7 @@ mod title_bar;
 mod workspace;
 
 use group::Group;
-use inkra_layout::{GroupId, Layout, View};
+use inkra_layout::{GroupId, Layout};
 use leave::Leave;
 use modal::Modal;
 use notice::Notice;
@@ -54,7 +55,8 @@ use panes::VaultPanes;
 use session::{Restore, SessionFile};
 use shown::{Bound, Shown};
 
-pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use docks::{FILES, FILES_PANE, ToggleLeftDock, ToggleRightDock};
+pub(crate) use features::FeatureCx;
 pub(crate) use leave::Left;
 pub(crate) use notice::couldnt_open;
 pub(crate) use open_vault::OpenVault;
@@ -113,15 +115,18 @@ pub(crate) struct AppShell {
     /// Painted under everything where the window has no blur: an off-screen shot.
     backdrop: Option<Rgba>,
     themes: ThemeStore,
+    features: Registry,
 }
 
 impl AppShell {
+    #[expect(clippy::too_many_arguments, reason = "one per part of the shell")]
     pub(crate) fn new(
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
         session: Option<Opened>,
         cache: Option<PathBuf>,
         left: Left,
+        features: Registry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -130,7 +135,11 @@ impl AppShell {
             .map_or((None, None), |Opened { file, session }| {
                 (Some(file), session)
             });
-        let (layout, mut groups, pending) = Self::restored_groups(read);
+        let features = Self::vault_features(features, notes.read(cx).vault().is_some());
+        let (layout, mut groups, pending) = Self::restored_groups(
+            read,
+            &sides(CORE_PANES.iter().copied().chain(features.panes())),
+        );
         let panes = notes
             .read(cx)
             .vault()
@@ -172,16 +181,14 @@ impl AppShell {
             },
         )
         .detach();
-        cx.subscribe(&notes, |shell, _notes, event: &ConfigChanged, cx| {
-            shell.config_changed(&event.0, cx);
-        })
-        .detach();
+        Self::watch_config(&notes, window, cx);
         cx.observe_window_appearance(window, |_, window, cx| {
             theme::follow_system(window.appearance(), cx);
         })
         .detach();
         Self::watch_failures(&notes, cx);
         Self::quit_on_close(window, cx);
+        Self::start_launch(window, cx);
         let first = notes.read(cx).current();
         let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
         let (session, restore) = Self::open_session(file, pending, &notes, window, cx);
@@ -214,6 +221,7 @@ impl AppShell {
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),
+            features,
         };
         if cfg!(debug_assertions) {
             shell.check_layout(cx);
@@ -294,19 +302,6 @@ impl AppShell {
         self.create(New::Dir, window, cx);
     }
 
-    fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(panes) = &self.panes else {
-            return;
-        };
-        let (links, showing, recent) = (panes.links.clone(), self.showing(), self.recent.clone());
-        self.toggle_picker_with(
-            window,
-            cx,
-            |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
-            |shell, event: &FileActivated, cx| shell.open(event.file, None, event.open, cx),
-        );
-    }
-
     fn search_vault(&mut self, _: &SearchVault, window: &mut Window, cx: &mut Context<Self>) {
         let Some(panes) = &self.panes else {
             return;
@@ -324,7 +319,7 @@ impl AppShell {
 
     /// Reveals the tree first: the name field it focuses must be drawn.
     fn create(&mut self, new: New, window: &mut Window, cx: &mut Context<Self>) {
-        self.reveal(View::Files, window, cx);
+        self.reveal(FILES, window, cx);
         if let Some(panes) = &self.panes {
             panes.sidebar.update(cx, |sidebar, cx| {
                 sidebar.start_creating(new, window, cx);
@@ -369,7 +364,7 @@ impl AppShell {
 
     /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.
     pub(crate) fn quick_open_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
-        self.modal_picker::<QuickOpenDelegate>()?
+        self.modal_picker::<crate::quick_open::QuickOpenDelegate>()?
             .read(cx)
             .row_center(ix)
     }

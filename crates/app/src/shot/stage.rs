@@ -167,7 +167,7 @@ impl Stage {
             .open_offscreen_window(WINDOW_SIZE, |window, cx| {
                 let fs: Arc<dyn Fs> = fs;
                 let opened = read_session(&fs, &launched, cx);
-                root(fs, launched, opened, window, cx)
+                root(fs, launched, opened, <_>::default(), window, cx)
             })
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         // A new window reports the platform's Dark, so the shell's observer just overrode the theme.

@@ -10,6 +10,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Vault};
 
 use crate::bootstrap::{Launch, root};
+use crate::feature::Registry;
 use crate::keymap::key_bindings;
 use crate::picker::runs::NOTES_CHANGED_REFRESH;
 use crate::shell::AppShell;
@@ -36,6 +37,7 @@ fn unscanned(
                         fs,
                         Launch::Vault(Vault::new(Path::new("/vault")), None, None),
                         None,
+                        Registry::default(),
                         window,
                         cx,
                     )
