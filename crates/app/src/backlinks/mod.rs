@@ -176,7 +176,7 @@ impl BacklinksPanel {
             self.rebuilds += 1;
         }
         let links = self.links.read(cx);
-        let building = !links.status().is_ready();
+        let building = self.file.is_some() && !links.status().is_ready();
         self.watch.seen(links);
         let vault = self.vault.read(cx);
         let name = |id: EntryId| {
