@@ -51,7 +51,13 @@ impl<S: Clone + PartialEq> Layer<S> {
         let first = self
             .chunks
             .partition_point(|chunk| chunk.end() <= range.start);
-        self.chunks[first..]
+        // An empty range intersects nothing, not even a mark around it.
+        let chunks = if range.is_empty() {
+            &[]
+        } else {
+            &self.chunks[first..]
+        };
+        chunks
             .iter()
             .take_while(move |chunk| chunk.start < range.end)
             .flat_map(move |chunk| chunk.marks_in(range.clone()))
@@ -134,12 +140,16 @@ impl<S: Clone> Chunk<S> {
         self.start + self.len
     }
 
+    /// As `Layer::marks_in`, for a non-empty `range`.
     fn marks_in(&self, range: Range<ByteOffset>) -> impl Iterator<Item = (Range<ByteOffset>, &S)> {
-        self.marks.iter().filter_map(move |(mark, style)| {
-            let start = (self.start + mark.start).max(range.start);
-            let end = (self.start + mark.end).min(range.end);
-            (start < end).then_some((start..end, style))
-        })
+        let first = self
+            .marks
+            .partition_point(|(mark, _)| self.start + mark.end <= range.start);
+        self.marks[first..]
+            .iter()
+            .map(|(mark, style)| (self.start + mark.start..self.start + mark.end, style))
+            .take_while(move |(mark, _)| mark.start < range.end)
+            .map(move |(mark, style)| (mark.start.max(range.start)..mark.end.min(range.end), style))
     }
 
     /// The part of the chunk inside `range`, `None` when empty.

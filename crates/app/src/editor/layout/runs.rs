@@ -5,7 +5,7 @@ use gpui::{HighlightStyle, TextRun, TextStyle, UnderlineStyle, px};
 use inkra_markdown::{DisplayLine, Span, Styles};
 use inkra_text::ByteOffset;
 
-use crate::decorations::{Colors, Drawn};
+use crate::decorations::Drawn;
 use crate::theme::{self, ColorToken, Theme};
 
 /// Resolves each `(Styles, composing, colour)` once per `shape_document` call: that
@@ -13,7 +13,7 @@ use crate::theme::{self, ColorToken, Theme};
 pub(super) struct RunStyles<'a> {
     base: &'a TextStyle,
     theme: &'a Theme,
-    colors: Colors<'a>,
+    decorations: Drawn<'a>,
     resolved: HashMap<(Styles, bool, Option<ColorToken>), TextStyle>,
 }
 
@@ -22,7 +22,7 @@ impl<'a> RunStyles<'a> {
         Self {
             base,
             theme,
-            colors: decorations.colors(),
+            decorations: *decorations,
             resolved: HashMap::new(),
         }
     }
@@ -81,7 +81,7 @@ pub(super) fn line_runs(
     for hidden in display.hidden() {
         cuts.extend([hidden.start, hidden.end]);
     }
-    let decorations = styles.colors.colors_in(line);
+    let decorations = styles.decorations.colors_in(line.clone());
     for (range, _) in &decorations {
         cuts.extend([range.start, range.end]);
     }

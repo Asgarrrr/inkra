@@ -9,7 +9,6 @@
 )]
 
 use std::collections::HashMap;
-use std::iter::Peekable;
 use std::ops::Range;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, WeakEntity};
@@ -157,56 +156,17 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
     }
 }
 
-impl<'a> Drawn<'a> {
-    /// A cursor over the fresh layers' colours, for one pass over the document's lines.
-    pub(crate) fn colors(&self) -> Colors<'a> {
-        let everything = ByteOffset::default()..ByteOffset::new(usize::MAX);
-        let layers = self.layers.iter().filter(|layer| layer.at() == self.at);
-        Colors {
-            layers: layers
-                .map(|layer| {
-                    let marks = layer
-                        .marks_in(everything.clone())
-                        .filter_map(|(mark, style)| Some((mark, style.color?)));
-                    Cursor {
-                        marks: (Box::new(marks) as Box<dyn Iterator<Item = _>>).peekable(),
-                        open: Vec::new(),
-                    }
-                })
-                .collect(),
-        }
-    }
-}
-
-pub(crate) struct Colors<'a> {
-    /// By rank.
-    layers: Vec<Cursor<'a>>,
-}
-
-struct Cursor<'a> {
-    marks: Peekable<Box<dyn Iterator<Item = (Range<ByteOffset>, ColorToken)> + 'a>>,
-    /// The marks taken that may reach past the last range asked for.
-    open: Vec<(Range<ByteOffset>, ColorToken)>,
-}
-
-impl Colors<'_> {
-    /// The colours inside `range`, clipped to it, by rank then position. Each call's `range`
-    /// starts at or after the previous one's start: the cursor never walks back.
+impl Drawn<'_> {
+    /// The fresh layers' colours over `line`, clipped to it, by rank: a later one paints over.
     pub(crate) fn colors_in(
-        &mut self,
-        range: &Range<ByteOffset>,
+        &self,
+        line: Range<ByteOffset>,
     ) -> Vec<(Range<ByteOffset>, ColorToken)> {
-        let mut colors = Vec::new();
-        for layer in &mut self.layers {
-            layer.open.retain(|(mark, _)| mark.end > range.start);
-            while let Some(mark) = layer.marks.next_if(|(mark, _)| mark.start < range.end) {
-                layer.open.push(mark);
-            }
-            colors.extend(layer.open.iter().filter_map(|(mark, token)| {
-                let clipped = mark.start.max(range.start)..mark.end.min(range.end);
-                (clipped.start < clipped.end).then_some((clipped, *token))
-            }));
-        }
-        colors
+        self.layers
+            .iter()
+            .filter(|layer| layer.at() == self.at)
+            .flat_map(|layer| layer.marks_in(line.clone()))
+            .filter_map(|(mark, style)| Some((mark, style.color?)))
+            .collect()
     }
 }

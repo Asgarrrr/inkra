@@ -82,12 +82,14 @@ fn a_mark_outside_its_chunk_panics() {
 }
 
 #[test]
-fn marks_in_skips_a_mark_that_only_touches_the_range() {
+fn marks_in_skips_a_mark_that_only_touches_the_range_or_holds_an_empty_one() {
     let buffer = twenty();
     let mut layer = Layer::new(buffer.edit_mark());
     publish(&mut layer, &buffer, 0..20, &[(2..4, 'a'), (6..9, 'b')]).unwrap();
 
-    assert_eq!(marks(&layer, 4..6), []);
+    for range in [4..6, 7..7] {
+        assert_eq!(marks(&layer, range.clone()), [], "{range:?}");
+    }
 }
 
 #[test]
