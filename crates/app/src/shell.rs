@@ -11,7 +11,6 @@ use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
 use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
-use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
 mod closing;
@@ -300,21 +299,6 @@ impl AppShell {
 
     fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
         self.create(New::Dir, window, cx);
-    }
-
-    fn search_vault(&mut self, _: &SearchVault, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(panes) = &self.panes else {
-            return;
-        };
-        let (links, vault) = (panes.links.clone(), panes.vault.clone());
-        self.toggle_picker_with(
-            window,
-            cx,
-            |cx| VaultSearchDelegate::new(&links, vault, cx),
-            |shell, event: &HitActivated, cx| {
-                shell.open(event.note, Some(event.range.clone()), event.open, cx);
-            },
-        );
     }
 
     /// Reveals the tree first: the name field it focuses must be drawn.

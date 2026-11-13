@@ -2,6 +2,7 @@
 
 Status: **implemented**, slices 0 to 2 merged 2026-11-13 as PR #41 (`6a932d54`).
 Revision 4 closes O1 and O5 and aligns D3 and D6 with the code.
+Revision 5: slice 3 moves vault search onto the registry.
 Revision 1 was attacked by three reviews, revision 2 by a second red team (see
 Review). Revision 3 applied their fixes and four owner verdicts: decorations
 leave this spec, the host surface is built now, switches are per vault, and
@@ -100,7 +101,7 @@ else depends on it. Otherwise it is core.
 |---|---|
 | editor, live preview, code blocks | backlinks |
 | vault, `Fs`, watcher | quick open (`⌘P`) |
-| file tree | vault search (`⌘⇧F`), after this spec |
+| file tree | vault search (`⌘⇧F`) |
 | tabs, splits, docks | code highlighting, when it lands |
 | index and link resolution | |
 | following a link | |
@@ -181,7 +182,7 @@ real guard. Dropping the `FeatureHandle` drops every subscription and entity, an
 with them the tasks those entities hold, since a dropped gpui `Task` is cancelled.
 
 An ast-grep rule in `.ast-grep/rules/`, scoped by path to the feature modules
-(`backlinks/`, `quick_open/`, `feature/`), bans the registrations that outlive
+(`backlinks/`, `quick_open/`, `vault_search/`, `feature/`), bans the registrations that outlive
 every entity: `cx.on_action(`, `set_global(`, `bind_keys(`, `observe_global(`,
 `observe_new(`, `observe_keystrokes(`. `App::on_action` returns no `Subscription`
 (gpui `app.rs:2750-2763`), so a feature that called it could never be switched off.
@@ -242,6 +243,10 @@ Deviation (slice 1b): `index()` and `vault()` return an `Option`, `None` with no
 open, so a feature's `activate` returns early instead of the host checking first. Quick
 open's most-recent order is the shell's `recent`, read through `recent()`; the feature
 keeps no list of its own.
+
+Deviation (slice 3): `open` takes the range to select, `open(file, at, Open)` with
+`at: Option<Range<ByteOffset>>`. A vault-search hit lands selected; quick open and
+backlinks pass `None`. The range is a plain value, so floor 1 can still mirror it.
 
 `FeatureCx` is a concrete struct with one implementation. Tests drive it through a
 real `AppShell` on `MemFs`, as every app test does, so it needs no trait.
@@ -582,6 +587,11 @@ and count tests.
    case (hide the right dock, open a note, show the dock, the rows are right); zero
    rebuilds while hidden; the fake pane's input loses focus when hidden; the shots
    unchanged. `inkra-tabs` changes, so `cargo mutants --in-diff` runs on it.
+3. **Vault search on the registry.** Its manifest, `⌘⇧F` gated by its switch, the
+   picker owned by the feature through `open_picker`, a hit opened selected through
+   `open(file, at, Open)`; the core action and binding go. Tests: `⌘⇧F` on, off, on
+   again; disable with the picker open and a query outstanding. The shots unchanged;
+   `./scripts/test-names.sh` before and after shows only the added tests.
 
 ## Open questions
 

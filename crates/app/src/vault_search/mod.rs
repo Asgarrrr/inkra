@@ -16,10 +16,12 @@ use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Jobs, Vault};
 
 use crate::count::thousands;
+use crate::feature::{CommandDecl, FeatureId, Manifest};
 use crate::index::{IndexSync, Reader};
 use crate::open::Open;
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
+use crate::shell::FeatureCx;
 use crate::theme;
 use rows::{HitKey, Results, Row};
 
@@ -31,6 +33,30 @@ mod rows;
 mod tests;
 
 actions!(vault_search, [SearchVault]);
+
+const VAULT_SEARCH: FeatureId = FeatureId::new("vault_search");
+
+pub(crate) static MANIFEST: Manifest = Manifest {
+    id: VAULT_SEARCH,
+    default_on: true,
+    after_first_frame: false,
+    commands: &[CommandDecl::new::<SearchVault>(&["cmd-shift-f"])],
+    panes: &[],
+    activate,
+};
+
+/// No state of its own: each search builds its delegate on the index and the vault.
+fn activate(fcx: &mut FeatureCx) {
+    fcx.on_command::<SearchVault>(|_, fcx| {
+        let (Some(links), Some(vault)) = (fcx.index(), fcx.vault()) else {
+            return;
+        };
+        fcx.open_picker(
+            |cx| VaultSearchDelegate::new(&links, vault, cx),
+            |event: &HitActivated, fcx| fcx.open(event.note, Some(event.range.clone()), event.open),
+        );
+    });
+}
 
 /// Search spec D9: past it the footer asks for a narrower query.
 const LIMIT: usize = 1_000;
@@ -51,7 +77,7 @@ pub(crate) fn search_line(first_hits: Duration, landed: Duration, read: usize) -
     format!("search: first hits {first_hits:?}, landed {landed:?}, read {read}")
 }
 
-/// A hit was confirmed; the shell opens its note with `range` selected.
+/// A hit was confirmed; vault search opens its note with `range` selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HitActivated {
     pub(crate) note: EntryId,
