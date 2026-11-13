@@ -49,6 +49,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     after_first_frame: false,
     commands: &[],
     panes: &[&BACKLINKS_PANE],
+    buttons: &[],
     activate,
 };
 
@@ -60,7 +61,7 @@ fn activate(fcx: &mut FeatureCx) {
     let panel = fcx.new(|cx| BacklinksPanel::new(index, vault, cx));
     // A note linking to itself lists itself.
     fcx.subscribe(&panel, |event: &FileActivated, fcx| {
-        fcx.open(event.file, event.open);
+        fcx.open(event.file, None, event.open);
     });
     let shown = fcx.shown();
     fcx.update(&panel, |panel, cx| panel.set_file(shown, cx));

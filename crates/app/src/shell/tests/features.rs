@@ -99,7 +99,11 @@ fn palette_lists_ping(window: WindowHandle<AppShell>, cx: &mut VisualTestContext
     palette_lists("Ping fake", window, cx)
 }
 
-fn palette_lists(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+pub(super) fn palette_lists(
+    name: &str,
+    window: WindowHandle<AppShell>,
+    cx: &mut VisualTestContext,
+) -> bool {
     cx.simulate_keystrokes("cmd-shift-p");
     cx.run_until_parked();
     let names = window

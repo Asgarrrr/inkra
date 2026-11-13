@@ -1,11 +1,13 @@
 //! The shell's side of the feature registry: launching features, running their commands, and switching them.
 
 use std::any::TypeId;
+use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{Action, AppContext as _, Context, Entity, EventEmitter, KeyContext, Window};
 use inkra_layout::ViewId;
+use inkra_text::ByteOffset;
 use inkra_vault::{EntryId, Vault};
 
 use super::AppShell;
@@ -111,12 +113,12 @@ impl FeatureCx<'_, '_> {
         self.shell.recent.clone()
     }
 
-    /// Deferred out of the window's lease, so opening the note showing can focus it (`show_file`).
-    pub(crate) fn open(&mut self, file: EntryId, open: Open) {
+    /// Deferred out of the window's lease, so opening the note showing can select `at` and focus it (`show_file`).
+    pub(crate) fn open(&mut self, file: EntryId, at: Option<Range<ByteOffset>>, open: Open) {
         let shell = self.cx.weak_entity();
         self.cx.defer(move |cx| {
             shell
-                .update(cx, |shell, cx| shell.open(file, None, open, cx))
+                .update(cx, |shell, cx| shell.open(file, at, open, cx))
                 .ok();
         });
     }

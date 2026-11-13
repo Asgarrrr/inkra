@@ -2,6 +2,7 @@
 
 Status: **implemented**, slices 0 to 2 merged 2026-11-13 as PR #41 (`6a932d54`).
 Revision 4 closes O1 and O5 and aligns D3 and D6 with the code.
+Revision 5: slice 3 moves vault search onto the registry.
 Revision 1 was attacked by three reviews, revision 2 by a second red team (see
 Review). Revision 3 applied their fixes and four owner verdicts: decorations
 leave this spec, the host surface is built now, switches are per vault, and
@@ -100,7 +101,7 @@ else depends on it. Otherwise it is core.
 |---|---|
 | editor, live preview, code blocks | backlinks |
 | vault, `Fs`, watcher | quick open (`⌘P`) |
-| file tree | vault search (`⌘⇧F`), after this spec |
+| file tree | vault search (`⌘⇧F`) |
 | tabs, splits, docks | code highlighting, when it lands |
 | index and link resolution | |
 | following a link | |
@@ -130,6 +131,7 @@ pub(crate) struct Manifest {
     default_on: bool,
     commands: &'static [CommandDecl], // action name, label, default keys, hidden
     panes: &'static [PaneDecl],       // ViewId, title, icon, default dock
+    buttons: &'static [PaneButton],   // buttons added to other panes' headers
     triggers: &'static [Trigger],     // PaneShown, CommandRun, AfterFirstFrame
     activate: fn(&mut FeatureCx) -> FeatureHandle,
 }
@@ -161,7 +163,8 @@ event subscription does not.
 As built (`feature/mod.rs`, `feature/registry.rs`, `shell/features.rs`): `activate`
 is `fn(&mut FeatureCx)` and returns nothing; the registry creates the handle and
 `FeatureCx` fills it. The manifest has no `name`, and `after_first_frame: bool`
-replaces `triggers` (D6). Handlers are `Rc<dyn Fn(&dyn Action, &mut FeatureCx)>`.
+replaces `triggers` (D6). The manifest also lists `buttons`, header buttons it adds
+to other panes (D5). Handlers are `Rc<dyn Fn(&dyn Action, &mut FeatureCx)>`.
 The handle holds handlers, entities and subscriptions, and no tasks: a feature's
 tasks live in its own entity and end with it. `FeatureCx` holds a `&mut Window`,
 not an `Option`, since every activation and handler runs with a window.
@@ -181,7 +184,7 @@ real guard. Dropping the `FeatureHandle` drops every subscription and entity, an
 with them the tasks those entities hold, since a dropped gpui `Task` is cancelled.
 
 An ast-grep rule in `.ast-grep/rules/`, scoped by path to the feature modules
-(`backlinks/`, `quick_open/`, `feature/`), bans the registrations that outlive
+(`backlinks/`, `quick_open/`, `vault_search/`, `feature/`), bans the registrations that outlive
 every entity: `cx.on_action(`, `set_global(`, `bind_keys(`, `observe_global(`,
 `observe_new(`, `observe_keystrokes(`. `App::on_action` returns no `Subscription`
 (gpui `app.rs:2750-2763`), so a feature that called it could never be switched off.
@@ -243,6 +246,10 @@ open, so a feature's `activate` returns early instead of the host checking first
 open's most-recent order is the shell's `recent`, read through `recent()`; the feature
 keeps no list of its own.
 
+Deviation (slice 3): `open` takes the range to select, `open(file, at, Open)` with
+`at: Option<Range<ByteOffset>>`. A vault-search hit lands selected; quick open and
+backlinks pass `None`. The range is a plain value, so floor 1 can still mirror it.
+
 `FeatureCx` is a concrete struct with one implementation. Tests drive it through a
 real `AppShell` on `MemFs`, as every app test does, so it needs no trait.
 
@@ -286,14 +293,19 @@ navigation's special case for Files (`shell/split.rs:113`) moves behind `focus`.
 
 Header buttons dispatch actions; they no longer call shell methods through
 `cx.listener` (`dock_chrome.rs:144-179`). `NewNote` and `NewFolder` are core
-actions. `SearchVault` becomes a feature action, so its button renders only while
-`window.is_action_available` says so.
+actions. `SearchVault` becomes a feature action, so vault search adds its button
+to the Files header through its manifest, and core names no feature action.
 
 As built, `PaneHeader` is an enum: `Title { count }` for a titled header, or
-`Buttons(&'static [HeaderButton])` for a bar of buttons, as Files draws today. The
-`SearchVault` gate is deferred. `SearchVault` is still a core action, so the button
-always renders; the gate comes with the slice that moves vault search onto the
-registry. `Pane` also has `shown`, the pair of `hidden`, which the shell calls
+`Buttons(&'static [HeaderButton])` for a bar of buttons, as Files draws today. A
+feature adds header buttons to any pane through `Manifest.buttons` (`PaneButton`);
+the shell draws a pane's own buttons, then those of every enabled feature, in
+catalog order. Each runs a command of its own feature. Deviation: not
+`window.is_action_available`. A core header that names a feature action is a
+core-to-feature dependency, and the call reads the previous frame's dispatch tree,
+so the button would lag a switch by one frame and the first frame would hit the
+dispatch tree's empty-root `debug_assert`. Prior art: VS Code's `view/title` menu
+contributions. `Pane` also has `shown`, the pair of `hidden`, which the shell calls
 when a registered pane starts showing.
 
 `PaneDecl` also carries the pane's move action, which `open_dock_menu` builds by
@@ -519,7 +531,8 @@ From the engine demos. Listed so D3 and D4 leave room; none is built here.
 
 ### D13. Constraints that keep the WASM tier possible
 
-- Manifests are plain data with no gpui type.
+- Manifests are plain data with no gpui type. Contributed header buttons
+  (`PaneButton`) are data too.
 - Shell calls (D4) take and return values; events carry ids and values.
 - A feature never holds a host borrow across a call.
 - Floor-2 calls (`index()`, `vault()`, `open_picker`, `Pane`) are the ones the WIT
@@ -582,6 +595,14 @@ and count tests.
    case (hide the right dock, open a note, show the dock, the rows are right); zero
    rebuilds while hidden; the fake pane's input loses focus when hidden; the shots
    unchanged. `inkra-tabs` changes, so `cargo mutants --in-diff` runs on it.
+3. **Vault search on the registry.** Its manifest, `⌘⇧F` gated by its switch, the
+   picker owned by the feature through `open_picker`, a hit opened selected through
+   `open(file, at, Open)`; the core action and binding go. Tests: `⌘⇧F` on, off, on
+   again; disable with the picker open and a query outstanding. The shots unchanged;
+   `./scripts/test-names.sh` before and after shows only the added tests. Vault
+   search adds its Files header button through `Manifest.buttons`; tests: the
+   button follows the switch, every contributed button runs a command of its
+   feature.
 
 ## Open questions
 

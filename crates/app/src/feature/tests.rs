@@ -38,3 +38,21 @@ fn every_feature_command_is_a_unit_action() {
         }
     }
 }
+
+#[test]
+fn every_contributed_button_runs_a_command_of_its_feature() {
+    for manifest in BUILTIN {
+        for contributed in manifest.buttons {
+            let action = (contributed.button.action)().as_any().type_id();
+            assert!(
+                manifest
+                    .commands
+                    .iter()
+                    .any(|decl| (decl.action)().as_any().type_id() == action),
+                "{}: {}",
+                manifest.id.name(),
+                contributed.button.id
+            );
+        }
+    }
+}

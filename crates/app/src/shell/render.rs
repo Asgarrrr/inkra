@@ -76,7 +76,6 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::new_note))
             .on_action(cx.listener(Self::open_vault))
             .on_action(cx.listener(Self::new_folder))
-            .on_action(cx.listener(Self::search_vault))
             .on_action(cx.listener(Self::command_palette))
             .on_action(cx.listener(Self::new_tab))
             .on_action(cx.listener(Self::close_active_tab))

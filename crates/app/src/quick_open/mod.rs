@@ -40,6 +40,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<QuickOpen>(&["cmd-p"])],
     panes: &[],
+    buttons: &[],
     activate,
 };
 
@@ -52,7 +53,7 @@ fn activate(fcx: &mut FeatureCx) {
         let (shown, recent) = (fcx.shown(), fcx.recent());
         fcx.open_picker(
             |cx| QuickOpenDelegate::new(&links, shown, recent, cx),
-            |event: &FileActivated, fcx| fcx.open(event.file, event.open),
+            |event: &FileActivated, fcx| fcx.open(event.file, None, event.open),
         );
     });
 }
