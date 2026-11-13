@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use gpui::{
     Context, InteractiveElement, IntoElement, Pixels, Point, Render, Styled, Window, div, px,
 };
-use inkra_layout::{GroupId, Side, ViewId};
+use inkra_layout::{GroupId, Side};
 
 use super::AppShell;
 use super::drop_marker;
@@ -22,7 +22,6 @@ const DROP_STRIP_WIDTH: Pixels = px(40.);
 /// drag began.
 #[derive(Clone)]
 pub(super) struct DraggedView {
-    pub(super) view: ViewId,
     pub(super) decl: &'static PaneDecl,
     pub(super) index: usize,
     pub(super) group: GroupId,
@@ -90,7 +89,7 @@ impl AppShell {
                 })
                 .on_drop(
                     cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                        shell.append(dragged.view, side, window, cx);
+                        shell.append(dragged.decl.id, side, window, cx);
                     }),
                 ),
         )

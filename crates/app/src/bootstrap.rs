@@ -20,6 +20,7 @@ use crate::last_vault;
 use crate::restore::{
     self, Opened, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow, Session,
 };
+use crate::settings::Switches;
 use crate::shell::{AppShell, Left, couldnt_open};
 use crate::sidebar::title_of;
 use crate::theme::{self, store::Resolved};
@@ -292,7 +293,10 @@ pub fn run() {
         };
         theme::install(resolved.theme.clone(), cx);
         theme::set_code_block_wrap(resolved.code_block_wrap, cx);
-        let features = Registry::new(BUILTIN, &resolved.features);
+        let features = Registry::new(
+            BUILTIN,
+            resolved.features.as_ref().unwrap_or(&Switches::default()),
+        );
         let fs: Arc<dyn Fs> = Arc::new(RealFs);
         let opened = read_session(&fs, &launched, cx);
         let saved = opened

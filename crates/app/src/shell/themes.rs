@@ -41,6 +41,7 @@ impl AppShell {
         let Some((fs, root)) = self.vault_root(cx) else {
             return;
         };
+        let picks = self.themes.picks();
         self.themes
             .reload(cx.spawn_in(window, async move |shell, cx| {
                 let resolved = cx
@@ -48,8 +49,12 @@ impl AppShell {
                     .await;
                 shell
                     .update_in(cx, |shell, window, cx| {
-                        shell.apply_switches(&resolved.features, window, cx);
-                        shell.adopt_theme(resolved, cx);
+                        if let Some(switches) = &resolved.features {
+                            shell.apply_switches(switches, window, cx);
+                        }
+                        if shell.themes.picks() == picks {
+                            shell.adopt_theme(resolved, cx);
+                        }
                     })
                     .ok();
             }));

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use gpui::{Action, AppContext as _, Context, Entity, KeyContext, Window};
 
 use super::AppShell;
-use crate::feature::{FeatureHandle, FeatureId, Slot};
+use crate::feature::{FeatureHandle, FeatureId, Registry, Slot};
 use crate::settings::Switches;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{ConfigChanged, NoteStore};
@@ -37,9 +37,7 @@ impl FeatureCx<'_, '_> {
                 f(action, fcx);
             }
         };
-        self.handle()
-            .handlers
-            .push((TypeId::of::<A>(), Rc::new(handler)));
+        self.handle().on(TypeId::of::<A>(), Rc::new(handler));
     }
 
     /// Held by the feature: switching it off releases the entity.
@@ -53,7 +51,7 @@ impl FeatureCx<'_, '_> {
         build: impl FnOnce(&mut Context<T>) -> T,
     ) -> Entity<T> {
         let entity = self.cx.new(build);
-        self.handle().entities.push(entity.clone().into_any());
+        self.handle().hold(entity.clone().into_any());
         entity
     }
 
@@ -66,9 +64,11 @@ impl FeatureCx<'_, '_> {
     }
 
     fn handle(&mut self) -> &mut FeatureHandle {
-        match self.shell.features.get_mut(self.feature) {
-            Some((_, Slot::Active(handle))) => handle,
-            _ => unreachable!("a FeatureCx exists only while its feature is active"),
+        match self.shell.features.slot_mut(self.feature) {
+            Slot::Active(handle) => handle,
+            Slot::Off | Slot::Dormant => {
+                unreachable!("a FeatureCx exists only while its feature is active")
+            }
         }
     }
 }
@@ -116,22 +116,13 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.features.get_mut(id) {
-            // A palette opened before the switch went off dispatches into nothing.
-            None | Some((_, Slot::Off)) => return,
-            Some((_, Slot::Dormant)) => self.activate(id, window, cx),
-            Some((_, Slot::Active(_))) => {}
+        match self.features.slot(id) {
+            // A palette opened before the switch went off.
+            Slot::Off => return,
+            Slot::Dormant => self.activate(id, window, cx),
+            Slot::Active(_) => {}
         }
-        let type_id = action.as_any().type_id();
-        let handler = match self.features.get_mut(id) {
-            Some((_, Slot::Active(handle))) => handle
-                .handlers
-                .iter()
-                .find(|(handled, _)| *handled == type_id)
-                .map(|(_, handler)| Rc::clone(handler)),
-            _ => None,
-        };
-        let Some(handler) = handler else {
+        let Some(handler) = self.features.handler(id, action.as_any().type_id()) else {
             log::warn!("feature {} has no handler for {}", id.name(), action.name());
             return;
         };
@@ -139,12 +130,11 @@ impl AppShell {
     }
 
     fn activate(&mut self, id: FeatureId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((manifest, slot)) = self.features.get_mut(id) {
-            // Active before `activate` runs, so `FeatureCx` has a handle to write into.
-            *slot = Slot::Active(FeatureHandle::default());
-            self.with_feature(id, window, cx, manifest.activate);
-            Timeline::mark(Step::Activated(id.name()), cx);
-        }
+        // Active before `activate` runs, so `FeatureCx` has a handle to write into.
+        *self.features.slot_mut(id) = Slot::Active(FeatureHandle::default());
+        let activate = self.features.manifest(id).activate;
+        self.with_feature(id, window, cx, activate);
+        Timeline::mark(Step::Activated(id.name()), cx);
     }
 
     fn with_feature<R>(
@@ -154,7 +144,7 @@ impl AppShell {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut FeatureCx) -> R,
     ) -> Option<R> {
-        if !matches!(self.features.get_mut(id), Some((_, Slot::Active(_)))) {
+        if !matches!(self.features.slot(id), Slot::Active(_)) {
             return None;
         }
         let started = Instant::now();
@@ -172,6 +162,15 @@ impl AppShell {
             );
         }
         Some(result)
+    }
+
+    /// With no vault, no feature activates and no adapter renders.
+    pub(super) fn vault_features(features: Registry, vault: bool) -> Registry {
+        if vault {
+            features
+        } else {
+            Registry::disabled(features.catalog())
+        }
     }
 
     /// `AppShell` and every enabled feature, so a feature's keys are live only while it is on.

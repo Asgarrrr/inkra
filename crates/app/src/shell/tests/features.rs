@@ -10,6 +10,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::open_vault_with;
+use super::themes::pick;
 use crate::feature::{self, Registry, fakes};
 use crate::keymap::key_bindings;
 use crate::settings::{self, Switches};
@@ -212,7 +213,8 @@ fn eager_shell(
         Path::new("/vault/.inkra"),
         &mut Vec::new(),
     ))
-    .features;
+    .features
+    .unwrap_or_default();
     cx.update(bind);
     let (window, _sidebar, _notes) = open_vault_with(
         cx,
@@ -274,4 +276,31 @@ fn over_budget_is_strictly_above_two_ms() {
     assert!(over_budget(
         Duration::from_millis(2) + Duration::from_micros(1)
     ));
+}
+
+#[gpui::test]
+fn a_theme_pick_keeps_a_switch_reload_in_flight(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = ping_shell(cx);
+    fs.make_unwritable(SETTINGS);
+    let reload = fs.block_read_bytes(SETTINGS);
+    fs.insert_file(SETTINGS, r#"{"features":{"ping_fake":false}}"#);
+    visual.run_until_parked();
+
+    pick("flexoki dark", window, &mut visual);
+    reload.release();
+    visual.run_until_parked();
+
+    assert!(!names_ping(window, &mut visual));
+}
+
+#[gpui::test]
+fn a_broken_settings_file_keeps_the_switches(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = ping_shell(cx);
+    switch_ping(&fs, false, &mut visual);
+    assert!(!names_ping(window, &mut visual));
+
+    fs.insert_file(SETTINGS, "{");
+    visual.run_until_parked();
+
+    assert!(!names_ping(window, &mut visual));
 }

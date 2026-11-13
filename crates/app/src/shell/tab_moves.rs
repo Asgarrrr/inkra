@@ -248,7 +248,7 @@ impl AppShell {
     ) -> impl Fn(&DragMoveEvent<DraggedView>, &mut Window, &mut App) + 'static {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedView>, window, cx| {
-                let Some((from, _)) = shell.tab_of(event.drag(cx).view) else {
+                let Some((from, _)) = shell.tab_of(event.drag(cx).decl.id) else {
                     return;
                 };
                 let splits = shell.may_split(group, from)
@@ -325,12 +325,12 @@ impl AppShell {
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
             if let Some(direction) = shell.group_mut(group).drop_split.take() {
-                let Some(tab) = shell.tab_of(dragged.view) else {
+                let Some(tab) = shell.tab_of(dragged.decl.id) else {
                     return;
                 };
                 shell.split_off(tab, group, direction, window, cx);
             } else if dragged.group != group {
-                shell.drop_view_at_end(dragged.view, group, window, cx);
+                shell.drop_view_at_end(dragged.decl.id, group, window, cx);
             }
         })
     }
