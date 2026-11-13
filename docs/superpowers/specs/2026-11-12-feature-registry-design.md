@@ -1,8 +1,9 @@
 # Feature registry: one base for built-in and external features
 
-Status: **draft, revision 3**, 2026-11-13, against `main` at `f0e65ef7`.
+Status: **implemented**, slices 0 to 2 merged 2026-11-13 as PR #41 (`6a932d54`).
+Revision 4 closes O1 and O5 and aligns D3 and D6 with the code.
 Revision 1 was attacked by three reviews, revision 2 by a second red team (see
-Review). This revision applies their fixes and four owner verdicts: decorations
+Review). Revision 3 applied their fixes and four owner verdicts: decorations
 leave this spec, the host surface is built now, switches are per vault, and
 built-ins reach the index through a floor-2 accessor. Read D1, D3, D4 and D9 first.
 
@@ -12,7 +13,7 @@ The owner wants features on a shared base. Four properties are required:
 
 - add as many features as wanted;
 - no effect on launch time;
-- every feature can be switched on or off;
+- every feature can be switched on or off; a core item (D2) is not a feature;
 - users can add their own, and those can have their own panes and change how
   the editor renders text.
 
@@ -105,9 +106,19 @@ else depends on it. Otherwise it is core.
 | following a link | |
 | settings, themes, command palette | |
 
-The index is core because link resolution needs it. The palette is core because
-it is where every feature's commands appear. Both are tentative (O1). A core
-feature may still use the registry's contracts (Files uses D5) without a switch.
+Each core item fails the test on the code. The file tree is the only surface for
+new folder, rename and trash (`keymap.rs:71,74`). The palette is the only door to a
+command with no key (`SelectTheme`, `RebuildIndex`). Following a link resolves
+through the index (`activation.rs:246-257`). A core item uses a registry contract
+where one exists (Files implements `Pane`) and has no manifest. The tree gets a
+switch when its operations have a second surface; the palette when a second
+surface lists every command.
+
+Prior art agrees. Neovim's `gx` lived in netrw, so switching netrw off broke it;
+0.10 moved `gx` into core. Zed always loads its project panel and switches only
+its AI panel (`zed.rs:778-855`). Obsidian can switch its file explorer and palette
+off because a menu and the Hotkeys page offer the same operations; Inkra has
+neither.
 
 ### D3. A feature is a const manifest plus an activation function
 
@@ -147,6 +158,14 @@ and puts the handle back. The handler reaches its state through the entity it
 captured. `FeatureCx` holds an `Option<&mut Window>`: an action brings a window, an
 event subscription does not.
 
+As built (`feature/mod.rs`, `feature/registry.rs`, `shell/features.rs`): `activate`
+is `fn(&mut FeatureCx)` and returns nothing; the registry creates the handle and
+`FeatureCx` fills it. The manifest has no `name`, and `after_first_frame: bool`
+replaces `triggers` (D6). Handlers are `Rc<dyn Fn(&dyn Action, &mut FeatureCx)>`.
+The handle holds handlers, entities and subscriptions, and no tasks: a feature's
+tasks live in its own entity and end with it. `FeatureCx` holds a `&mut Window`,
+not an `Option`, since every activation and handler runs with a window.
+
 The registry is owned by the
 `AppShell`, one per shell: `⌘O` builds a fresh shell by `replace_root`
 (`shell/open_vault.rs:125`), and a feature holds vault-specific entities. Zed does
@@ -155,9 +174,11 @@ The wiring lives in `shell/features.rs`; `shell.rs` is at 388 lines.
 
 `FeatureCx` is the only door a feature gets. It wraps the shell's context and
 exposes only what the handle tracks: host calls (D4), subscriptions to host events,
-owned tasks, owned entities, owned modals, pane registration (D5). It exposes no
-`&mut App`. Dropping the `FeatureHandle` drops every subscription and entity and
-cancels every task, since a dropped gpui `Task` is cancelled.
+owned entities, owned modals, pane registration (D5). It does not
+hide gpui: `FeatureCx::new` and `update` hand the feature its entity's `Context`,
+which derefs to `App` (`shell/features.rs:57-72`). The ast-grep rule below is the
+real guard. Dropping the `FeatureHandle` drops every subscription and entity, and
+with them the tasks those entities hold, since a dropped gpui `Task` is cancelled.
 
 An ast-grep rule in `.ast-grep/rules/`, scoped by path to the feature modules
 (`backlinks/`, `quick_open/`, `feature/`), bans the registrations that outlive
@@ -326,8 +347,9 @@ feature; the launch line prints once, so an activation after it is not in it.
 A feature that owns a pane stops work when the pane is hidden. Backlinks marks
 itself stale on `NotesChanged` and on a build applying while hidden, and rebuilds once when shown.
 
-Activation states: dormant, active, or failed. A failed activation logs a line,
-leaves the feature dormant, and does not retry until the switch changes.
+Activation states, as built: off, dormant, or active (`Slot`, `feature/registry.rs`).
+`activate` is infallible, so there is no failed state; a feature that cannot start
+(no vault open, D4) returns early and stays inert.
 
 ### D7. The switch, per vault
 
@@ -563,16 +585,22 @@ and count tests.
 
 ## Open questions
 
-- **O1.** Is the core list right? In particular: index and palette in core; file
-  tree in core where Obsidian makes it a plugin.
 - **O4.** User tier: Rust compiled to WASM, or an embedded script runtime (Luau)
   for save-and-reload? The neutral audit found no trustworthy numbers; a short
   spike of each would settle it. Next spec.
-- **O5.** Is floor 2 a formal contract, or only "built-in features live in `app`
-  and may use gpui through `FeatureCx`"?
 
 O2 (highlighting as the second decoration producer) left with D9 of revision 1.
 O3 (switch scope) is settled: per vault.
+O1 (the core list) is settled in revision 4: as in D2, file tree included.
+
+O5 (floor 2) is settled in revision 4. Floor 2 is not a contract. Built-in
+features live in `app`, `pub(crate)`, and use gpui through `FeatureCx` and their
+own entities' `Context`. It follows gpui's pinned rev, and gpui is pre-1.0, so it
+promises nothing (D14). A floor-2 call becomes public when a compiled-in feature
+outside `app` needs it. That change cuts a feature crate and passes the catalog
+from `main`. `Registry::new` already takes the catalog; outside tests, only
+`bootstrap.rs:297`, `keymap.rs:31` and `Registry`'s `Default` name `BUILTIN` today. The
+WIT mirrors floor 1 only (D13).
 
 ## Review
 
