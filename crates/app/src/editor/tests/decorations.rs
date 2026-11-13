@@ -4,7 +4,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use gpui::{Entity, Hsla, TestAppContext, WindowHandle, prelude::*};
+use gpui::{App, Entity, Hsla, TestAppContext, WindowHandle, prelude::*};
 use inkra_text::Buffer;
 
 use super::{at, dispatching, window_on};
@@ -35,16 +35,20 @@ fn publish_warning(buffer: &Entity<Buffer>, mark: Range<usize>, cx: &mut TestApp
     cx.run_until_parked();
 }
 
-/// The first line's runs: each one's length, and whether it is in the warning colour.
+impl EditorView {
+    /// The first drawn line's runs: each one's length, and whether it is in the warning colour.
+    pub(crate) fn warning_runs(&self, cx: &App) -> Vec<(usize, bool)> {
+        let warning = Hsla::from(theme::current(cx).colors.warning);
+        let runs = self.drawn_layout().run_colors(0);
+        runs.into_iter()
+            .map(|(len, color)| (len, color == warning))
+            .collect()
+    }
+}
+
 fn warning_runs(window: WindowHandle<EditorView>, cx: &mut TestAppContext) -> Vec<(usize, bool)> {
     window
-        .update(cx, |view, _, cx| {
-            let warning = Hsla::from(theme::current(cx).colors.warning);
-            let runs = view.input.last_layout().unwrap().run_colors(0);
-            runs.into_iter()
-                .map(|(len, color)| (len, color == warning))
-                .collect()
-        })
+        .update(cx, |view, _, cx| view.warning_runs(cx))
         .unwrap()
 }
 

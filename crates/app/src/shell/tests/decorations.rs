@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use gpui::{Focusable, Hsla, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Focusable, TestAppContext, VisualTestContext, WindowHandle};
 
 use super::features::shell_with;
 use super::{at, editor, open};
@@ -12,7 +12,7 @@ use crate::feature::fakes::{self, CATALOG, TODO_CATALOG};
 use crate::feature::{Manifest, Registry};
 use crate::settings::Switches;
 use crate::shell::AppShell;
-use crate::{test_support, theme};
+use crate::test_support;
 
 /// `/vault/a.md` holding `text`, open and focused behind a launched shell with `catalog`.
 fn opened(
@@ -38,16 +38,9 @@ fn opened(
     (window, visual)
 }
 
-/// The first line's runs: each one's length, and whether it is in the warning colour.
 fn warning_runs(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<(usize, bool)> {
     let editor = editor(&window, cx);
-    cx.update(|_, cx| {
-        let warning = Hsla::from(theme::current(cx).colors.warning);
-        let runs = editor.read(cx).drawn_layout().run_colors(0);
-        runs.into_iter()
-            .map(|(len, color)| (len, color == warning))
-            .collect()
-    })
+    cx.update(|_, cx| editor.read(cx).warning_runs(cx))
 }
 
 #[gpui::test]
