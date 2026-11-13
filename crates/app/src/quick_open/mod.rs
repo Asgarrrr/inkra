@@ -16,7 +16,7 @@ use crate::index::{IndexSync, NotesChanged};
 use crate::open::{FileActivated, Open};
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
-use crate::shell::FeatureCx;
+use crate::shell::Activation;
 use crate::theme;
 use list::List;
 
@@ -45,7 +45,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
 };
 
 /// No state of its own: the MRU is the shell's, read at each open.
-fn activate(fcx: &mut FeatureCx) {
+fn activate(fcx: &mut Activation) {
     fcx.on_command::<QuickOpen>(|_, fcx| {
         let Some(links) = fcx.index() else {
             return;

@@ -3,6 +3,7 @@
 Status: **implemented**, slices 0 to 2 merged 2026-11-13 as PR #41 (`6a932d54`).
 Revision 4 closes O1 and O5 and aligns D3 and D6 with the code.
 Revision 5: slice 3 moves vault search onto the registry.
+Revision 6 splits the door in two: `Activation` wires, `FeatureCx` reads and acts (D3).
 Revision 1 was attacked by three reviews, revision 2 by a second red team (see
 Review). Revision 3 applied their fixes and four owner verdicts: decorations
 leave this spec, the host surface is built now, switches are per vault, and
@@ -160,9 +161,9 @@ and puts the handle back. The handler reaches its state through the entity it
 captured. `FeatureCx` holds an `Option<&mut Window>`: an action brings a window, an
 event subscription does not.
 
-As built (`feature/mod.rs`, `feature/registry.rs`, `shell/features.rs`): `activate`
-is `fn(&mut FeatureCx)` and returns nothing; the registry creates the handle and
-`FeatureCx` fills it. The manifest has no `name`, and `after_first_frame: bool`
+As built (`feature/mod.rs`, `feature/registry.rs`, `shell/features/`): `activate`
+is `fn(&mut Activation)` and returns nothing; the registry creates the handle and
+`Activation` fills it. The manifest has no `name`, and `after_first_frame: bool`
 replaces `triggers` (D6). The manifest also lists `buttons`, header buttons it adds
 to other panes (D5). Handlers are `Rc<dyn Fn(&dyn Action, &mut FeatureCx)>`.
 The handle holds handlers, entities and subscriptions, and no tasks: a feature's
@@ -173,13 +174,17 @@ The registry is owned by the
 `AppShell`, one per shell: `⌘O` builds a fresh shell by `replace_root`
 (`shell/open_vault.rs:125`), and a feature holds vault-specific entities. Zed does
 the same: its features register per workspace through `observe_new::<Workspace>`.
-The wiring lives in `shell/features.rs`; `shell.rs` is at 388 lines.
+The wiring lives in `shell/features/mod.rs`; `shell.rs` is at 388 lines.
 
-`FeatureCx` is the only door a feature gets. It wraps the shell's context and
-exposes only what the handle tracks: host calls (D4), subscriptions to host events,
-owned entities, owned modals, pane registration (D5). It does not
-hide gpui: `FeatureCx::new` and `update` hand the feature its entity's `Context`,
-which derefs to `App` (`shell/features.rs:57-72`). The ast-grep rule below is the
+A feature gets two doors, one per phase. `Activation` (`shell/features/activation.rs`) is
+what `activate` receives: commands, owned entities, subscriptions to host events and pane
+registration (D5), everything the handle tracks. `FeatureCx` (`shell/features/cx.rs`) is what
+a command handler, a pick or an event receives: host calls (D4), `update` and owned modals. It
+registers nothing, so a handler cannot grow the handle on each call; the compiler, not review,
+enforces the split. `Activation` derefs to `FeatureCx`, as gpui's `Context` derefs to `App`.
+Neither hides gpui: `Activation::new` and `FeatureCx::update` hand the feature its entity's
+`Context`, which derefs to `App`. A `FeatureCx` call returns data or does an action, never a
+shell entity. The ast-grep rule below is the
 real guard. Dropping the `FeatureHandle` drops every subscription and entity, and
 with them the tasks those entities hold, since a dropped gpui `Task` is cancelled.
 
@@ -201,7 +206,7 @@ the WASM host needs to read manifests without gpui. Built-in features stay insid
 
 ### D4. The host surface
 
-A feature reaches the shell, the index and the vault only through `FeatureCx`.
+A feature reaches the shell, the index and the vault only through `Activation` and `FeatureCx`.
 The surface has two parts.
 
 **Shell calls, floor 1.** They take and return plain values, so the WIT can mirror
@@ -276,7 +281,7 @@ pub(crate) struct PaneEntry {
 }
 ```
 
-`FeatureCx::register_pane::<T: Pane>(entity)` builds the `PaneEntry`, as Zed's
+`Activation::register_pane::<T: Pane>(entity)` builds the `PaneEntry`, as Zed's
 `PanelHandle` wraps a `Panel`. The shell renders every pane through it: body,
 header, focus. The `match view` arms in `render_view_body` and `render_view_header`
 (`dock_chrome.rs:135-180`) go away. Files implements `Pane` as a core pane;

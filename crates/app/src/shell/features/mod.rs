@@ -15,8 +15,10 @@ use crate::settings::Switches;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{ConfigChanged, NoteStore};
 
+mod activation;
 mod cx;
 
+pub(crate) use activation::Activation;
 pub(crate) use cx::FeatureCx;
 
 /// A feature's activation or call past this logs a line (spec D11).
@@ -92,14 +94,14 @@ impl AppShell {
             log::warn!("feature {} has no handler for {}", id.name(), action.name());
             return;
         };
-        self.with_feature(id, window, cx, |fcx| handler(action, fcx));
+        self.with_feature(id, window, cx, |mut fcx| handler(action, &mut fcx));
     }
 
     fn activate(&mut self, id: FeatureId, window: &mut Window, cx: &mut Context<Self>) {
-        // Active before `activate` runs, so `FeatureCx` has a handle to write into.
+        // Active before `activate` runs, so `Activation` has a handle to write into.
         *self.features.slot_mut(id) = Slot::Active(FeatureHandle::default());
         let activate = self.features.manifest(id).activate;
-        self.with_feature(id, window, cx, activate);
+        self.with_feature(id, window, cx, |fcx| activate(&mut Activation(fcx)));
         Timeline::mark(Step::Activated(id.name()), cx);
     }
 
@@ -108,13 +110,13 @@ impl AppShell {
         id: FeatureId,
         window: &mut Window,
         cx: &mut Context<Self>,
-        f: impl FnOnce(&mut FeatureCx) -> R,
+        f: impl FnOnce(FeatureCx) -> R,
     ) -> Option<R> {
         if !matches!(self.features.slot(id), Slot::Active(_)) {
             return None;
         }
         let started = Instant::now();
-        let result = f(&mut FeatureCx {
+        let result = f(FeatureCx {
             shell: self,
             window,
             cx,
