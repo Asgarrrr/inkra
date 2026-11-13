@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use futures::executor::block_on;
 use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::Side;
+use inkra_layout::{GroupId, Side, SplitDirection};
 use inkra_vault::Vault;
 use inkra_vault::mem_fs::MemFs;
 
@@ -15,14 +15,14 @@ use super::dragging::drag;
 use super::pane_features::{SETTINGS, right_dock, switch};
 use super::restore_lands::{backlinks_left, launch_as, save_docks, vault};
 use super::session_writes::SESSION;
-use super::splits::check_layout;
+use super::splits::{centre, check_layout};
 use super::tab_bar::click;
 use super::{keys, open, shell_focused};
 use crate::backlinks::{BACKLINKS, BacklinksPanel};
 use crate::bootstrap::Launch;
 use crate::feature::{BUILTIN, Registry};
 use crate::settings;
-use crate::shell::docks::MoveFilesToOtherDock;
+use crate::shell::docks::{MoveFilesToOtherDock, SplitView};
 use crate::shell::{AppShell, FILES};
 use crate::test_support;
 
@@ -52,6 +52,14 @@ fn panel(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Entity<
         .expect("backlinks is active")
 }
 
+fn group_of(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Option<GroupId> {
+    window
+        .update(cx, |shell, _, _| {
+            shell.tab_of(BACKLINKS).map(|(group, _)| group)
+        })
+        .unwrap()
+}
+
 fn sources(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Vec<String> {
     panel(window, cx).read_with(cx, |panel, _| panel.source_names())
 }
@@ -67,17 +75,40 @@ fn assert_gone(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) {
         .unwrap();
 }
 
+/// The launch activates backlinks after the first frame; with no scan or watch left to redraw the
+/// shell, its body still draws.
+#[gpui::test]
+fn backlinks_activated_by_the_launch_draws_its_body(cx: &mut TestAppContext) {
+    let fs = vault();
+    fs.make_unwatchable("/vault");
+    let scanned = block_on(Vault::scan(&*fs, Path::new("/vault"))).unwrap();
+    let launched = Launch::Vault(scanned, None, None);
+
+    let (_window, mut cx) = launch_as(cx, &fs, launched, Registry::default());
+    cx.run_until_parked();
+
+    assert!(cx.debug_bounds("backlinks-message").is_some());
+}
+
 #[gpui::test]
 fn disable_backlinks_while_alone_in_its_group(cx: &mut TestAppContext) {
     let (fs, window, mut cx) = linked_shell(cx);
-    click(&mut cx, "dock-right-group");
+    cx.dispatch_action(MoveFilesToOtherDock);
+    cx.dispatch_action(SplitView {
+        view: BACKLINKS,
+        direction: SplitDirection::Down,
+    });
+    cx.run_until_parked();
+    let group = group_of(&window, &mut cx).expect("split off");
+    assert_eq!(right_dock(window, &mut cx).0, [FILES]);
+    click(&mut cx, "dock-right-group-1");
 
     switch(&fs, "backlinks", false, &mut cx);
 
     assert_gone(&window, &mut cx);
     window
         .update(&mut cx, |shell, window, cx| {
-            assert!(shell.layout.dock_groups(Side::Right).is_empty());
+            assert!(shell.layout.groups().all(|held| held != group));
             assert!(shell.focus_handle(cx).is_focused(window));
         })
         .unwrap();
@@ -88,7 +119,10 @@ fn closed_backlinks_tab_does_not_reopen_after_disable(cx: &mut TestAppContext) {
     let (fs, window, mut cx) = linked_shell(cx);
     open_named(&window, &mut cx, "a");
     drag(&mut cx, "dock-icon-backlinks", "group-strip");
+    let group = group_of(&window, &mut cx).expect("dragged into a tab");
+    assert!(centre(&window, &mut cx).contains(&group));
     keys(&mut cx, "cmd-w");
+    assert_eq!(side_of(&window, &mut cx, BACKLINKS), Some(Side::Right));
 
     switch(&fs, "backlinks", false, &mut cx);
     keys(&mut cx, "cmd-shift-t");
@@ -176,18 +210,20 @@ fn hidden_backlinks_rebuild_zero_times_then_once_on_show(cx: &mut TestAppContext
 #[gpui::test]
 fn palette_drops_backlinks_move_when_disabled(cx: &mut TestAppContext) {
     let (fs, window, mut cx) = linked_shell(cx);
-    switch(&fs, "backlinks", false, &mut cx);
-
-    keys(&mut cx, "cmd-shift-p");
-
-    let names = window
-        .update(&mut cx, |shell, _, cx| shell.palette_names(cx))
-        .unwrap()
-        .expect("the palette is open");
-    assert!(names.iter().any(|name| name == "Move files to other dock"));
-    assert!(
-        !names
+    let lists_move = |cx: &mut VisualTestContext| {
+        keys(cx, "cmd-shift-p");
+        let names = window
+            .update(cx, |shell, _, cx| shell.palette_names(cx))
+            .unwrap()
+            .expect("the palette is open");
+        keys(cx, "escape");
+        names
             .iter()
             .any(|name| name == "Move backlinks to other dock")
-    );
+    };
+    assert!(lists_move(&mut cx));
+
+    switch(&fs, "backlinks", false, &mut cx);
+
+    assert!(!lists_move(&mut cx));
 }
