@@ -8,6 +8,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::open_vault_with;
+use super::themes::pick;
 use crate::feature::{self, Registry, fakes};
 use crate::keymap::key_bindings;
 use crate::settings::Switches;
@@ -186,5 +187,20 @@ fn open_vault_b_never_builds_a_disabled_feature(cx: &mut TestAppContext) {
 
     press_ping(&mut visual);
     assert_eq!(ping(&mut visual), None);
+    assert!(!names_ping(window, &mut visual));
+}
+
+#[gpui::test]
+fn a_theme_pick_keeps_a_switch_reload_in_flight(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = ping_shell(cx);
+    fs.make_unwritable(SETTINGS);
+    let reload = fs.block_read_bytes(SETTINGS);
+    fs.insert_file(SETTINGS, r#"{"features":{"ping_fake":false}}"#);
+    visual.run_until_parked();
+
+    pick("flexoki dark", window, &mut visual);
+    reload.release();
+    visual.run_until_parked();
+
     assert!(!names_ping(window, &mut visual));
 }

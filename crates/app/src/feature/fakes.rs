@@ -31,6 +31,28 @@ pub(crate) static CLASH_FAKE: Manifest = Manifest {
     activate: |_| {},
 };
 
+pub(crate) static UNDO_FAKE: Manifest = Manifest {
+    id: FeatureId::new("undo_fake"),
+    default_on: true,
+    commands: &[CommandDecl::new::<ClashFake>(&["cmd-z"])],
+    activate: |_| {},
+};
+
+pub(crate) static CHORD_FAKE: Manifest = Manifest {
+    id: FeatureId::new("chord_fake"),
+    default_on: true,
+    commands: &[CommandDecl::new::<ClashFake>(&["cmd-k"])],
+    activate: |_| {},
+};
+
+/// Shares `ctrl-alt-p` with `PING_FAKE`.
+pub(crate) static TWIN_FAKE: Manifest = Manifest {
+    id: FeatureId::new("twin_fake"),
+    default_on: true,
+    commands: &[CommandDecl::new::<ClashFake>(&["ctrl-alt-p"])],
+    activate: |_| {},
+};
+
 pub(crate) static CATALOG: &[&Manifest] = &[&PING_FAKE];
 
 fn activate_ping(fcx: &mut FeatureCx) {
