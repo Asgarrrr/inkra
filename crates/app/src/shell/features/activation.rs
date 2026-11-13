@@ -12,9 +12,7 @@ use super::{FeatureCx, NoteShown};
 use crate::feature::{FeatureHandle, Slot};
 use crate::pane::{Pane, PaneEntry};
 
-/// Commands, owned entities, subscriptions and panes are registered here and nowhere else, so all
-/// of them land in the handle that switching the feature off drops. Derefs to `FeatureCx`, as
-/// gpui's `Context` derefs to `App`.
+/// Wiring during `activate`, released when the feature switches off; derefs as gpui's `Context` to `App`.
 pub(crate) struct Activation<'a, 'b>(pub(super) FeatureCx<'a, 'b>);
 
 impl<'a, 'b> Deref for Activation<'a, 'b> {

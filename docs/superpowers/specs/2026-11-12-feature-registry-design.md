@@ -183,8 +183,7 @@ a command handler, a pick or an event receives: host calls (D4), `update` and ow
 registers nothing, so a handler cannot grow the handle on each call; the compiler, not review,
 enforces the split. `Activation` derefs to `FeatureCx`, as gpui's `Context` derefs to `App`.
 Neither hides gpui: `Activation::new` and `FeatureCx::update` hand the feature its entity's
-`Context`, which derefs to `App`. A `FeatureCx` call returns data or does an action, never a
-shell entity. The ast-grep rule below is the
+`Context`, which derefs to `App`. Neither hands out the `AppShell` or the handle. The ast-grep rule below is the
 real guard. Dropping the `FeatureHandle` drops every subscription and entity, and
 with them the tasks those entities hold, since a dropped gpui `Task` is cancelled.
 
@@ -255,7 +254,7 @@ Deviation (slice 3): `open` takes the range to select, `open(file, at, Open)` wi
 `at: Option<Range<ByteOffset>>`. A vault-search hit lands selected; quick open and
 backlinks pass `None`. The range is a plain value, so floor 1 can still mirror it.
 
-`FeatureCx` is a concrete struct with one implementation. Tests drive it through a
+`Activation` and `FeatureCx` are concrete structs with one implementation each. Tests drive it through a
 real `AppShell` on `MemFs`, as every app test does, so it needs no trait.
 
 ### D5. The pane contract
@@ -642,7 +641,7 @@ Where they agreed, and what this revision does:
 |---|---|
 | The decoration seam is unbuildable (unordered `Version`, markdown structure, no merge contract, no layout revision, conflicts with the highlighting spec) | out of scope (D1); goes to a highlighting spec revision |
 | The registry must be per shell; settings load in the wrong order | D3, D7 |
-| Dropping the handle revokes nothing (modal, layout, history, `on_action`) | `FeatureCx`, ast-grep rule (D3); disable transaction (D9) |
+| Dropping the handle revokes nothing (modal, layout, history, `on_action`) | `Activation`, ast-grep rule (D3); disable transaction (D9) |
 | The palette lists rendered handlers, not bindings; a parameterized action vanishes | rendered adapters, one action type per pane (D8) |
 | Lazy activation saves nothing for backlinks; a late panel misses `NoteShown` | the D6 property; `shown()` snapshot plus event (D4) |
 | The budget gates nothing | count tests as gates, timing as diagnosis (D11) |

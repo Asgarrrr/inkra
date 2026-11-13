@@ -12,8 +12,7 @@ use crate::open::Open;
 use crate::picker::{Picker, PickerDelegate};
 use crate::shell::AppShell;
 
-/// Reads and acts; wires nothing, so a handler cannot register or hold anything new. Returns
-/// data or does an action, never a shell entity.
+/// Reads and acts; nothing here adds to the feature's handle.
 pub(crate) struct FeatureCx<'a, 'b> {
     pub(super) shell: &'a mut AppShell,
     pub(super) window: &'a mut Window,
