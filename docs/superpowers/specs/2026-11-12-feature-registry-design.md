@@ -217,6 +217,11 @@ Revision 2 listed `follow(spot)`. It is dropped: `Spot` and `LinkActivated` come
 from the link-landing spec, which is not implemented. The call joins this table
 when that spec lands.
 
+Deviation (slice 1b): `index()` and `vault()` return an `Option`, `None` with no vault
+open, so a feature's `activate` returns early instead of the host checking first. Quick
+open's most-recent order is the shell's `recent`, read through `recent()`; the feature
+keeps no list of its own.
+
 `FeatureCx` is a concrete struct with one implementation. Tests drive it through a
 real `AppShell` on `MemFs`, as every app test does, so it needs no trait.
 
