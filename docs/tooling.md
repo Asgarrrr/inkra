@@ -76,6 +76,13 @@ off-screen shots spec, the `trash` crate in the create-rename-delete spec.
   never raises a ceiling or adds a file. A hand edit that does shows in the diff, where review
   refuses it: a source file that must grow is split first. Growth from rustfmt
   (a multi-line `#[expect]`) counts like any other growth.
+- **The duplication ratchet.** `scripts/duplication.sh` fails when a run of 6 source lines
+  holding 3 statements appears more often than at the branch base (the merge base with
+  `origin/main`): copied logic is extracted, not pasted. Blank lines, comments, `use` lines and
+  lone braces do not count; test files and benches are exempt. A duplicate already at the base
+  passes, so the rule only stops new copies. Replayed on the 205 commits of the repo past
+  10 000 lines, it fails 6, each a real copy. `scripts/verify` runs it before `check.sh`; CI's
+  shallow checkout has no base, so CI does not.
 - **The ~400-line warning stays in the hook.** The PostToolUse hook warns on the
   file just edited, when the split is cheap; the ceilings only stop growth.
 
