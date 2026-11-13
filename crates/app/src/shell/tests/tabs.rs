@@ -10,6 +10,7 @@ use super::{
     start_trash, tab_files, tall_notes, text_of, trash, view_of,
 };
 use crate::bootstrap::{Launch, root};
+use crate::feature::Registry;
 use crate::file_kind::FileKind;
 use crate::keymap::key_bindings;
 use crate::shell::NextTab;
@@ -220,7 +221,16 @@ fn single_file_mode_switches_back_to_its_file(cx: &mut TestAppContext) {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(Arc::clone(&fs) as Arc<dyn Fs>, launch, None, window, cx),
+                |window, cx| {
+                    root(
+                        Arc::clone(&fs) as Arc<dyn Fs>,
+                        launch,
+                        None,
+                        Registry::default(),
+                        window,
+                        cx,
+                    )
+                },
             )
         })
         .unwrap();

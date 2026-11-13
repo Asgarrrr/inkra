@@ -5,6 +5,7 @@ use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, p
 use inkra_vault::{EntryId, New};
 
 use crate::editor::EditorView;
+use crate::feature::Registry;
 use crate::open::FileActivated;
 use crate::pane::{CORE_PANES, sides};
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
@@ -21,6 +22,7 @@ mod dock_chrome;
 mod dock_drag;
 mod docks;
 mod drop_marker;
+mod features;
 mod geometry;
 mod group;
 mod leave;
@@ -56,6 +58,7 @@ use session::{Restore, SessionFile};
 use shown::{Bound, Shown};
 
 pub(crate) use docks::{FILES, FILES_PANE, ToggleLeftDock, ToggleRightDock};
+pub(crate) use features::FeatureCx;
 pub(crate) use leave::Left;
 pub(crate) use notice::couldnt_open;
 pub(crate) use open_vault::OpenVault;
@@ -114,15 +117,18 @@ pub(crate) struct AppShell {
     /// Painted under everything where the window has no blur: an off-screen shot.
     backdrop: Option<Rgba>,
     themes: ThemeStore,
+    features: Registry,
 }
 
 impl AppShell {
+    #[expect(clippy::too_many_arguments, reason = "one per part of the shell")]
     pub(crate) fn new(
         editor: Option<Entity<EditorView>>,
         notes: Entity<NoteStore>,
         session: Option<Opened>,
         cache: Option<PathBuf>,
         left: Left,
+        features: Registry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -197,6 +203,7 @@ impl AppShell {
                 },
             );
         }
+        let features = Self::vault_features(features, panes.is_some());
         let shell = Self {
             layout,
             groups,
@@ -216,6 +223,7 @@ impl AppShell {
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),
+            features,
         };
         if cfg!(debug_assertions) {
             shell.check_layout(cx);

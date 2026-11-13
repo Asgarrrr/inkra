@@ -18,6 +18,7 @@ use super::splits::{centre, close, editor_in, last, shown_in, tabs_in};
 use super::{check, tab_files};
 use crate::backlinks::BACKLINKS;
 use crate::bootstrap::{Launch, read_session, root};
+use crate::feature::Registry;
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
@@ -110,7 +111,7 @@ pub(super) fn launch_as(
                 },
                 |window, cx| {
                     let opened = read_session(&fs, &launched, cx);
-                    root(fs, launched, opened, window, cx)
+                    root(fs, launched, opened, Registry::default(), window, cx)
                 },
             )
         })

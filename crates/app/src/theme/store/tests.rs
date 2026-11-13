@@ -39,20 +39,6 @@ fn no_choice_follows_the_system_silently() {
 }
 
 #[test]
-fn code_block_wrap_reads_true_false_missing_and_non_bool() {
-    for (settings, expected) in [
-        (r#"{"code_block_wrap":true}"#, true),
-        (r#"{"code_block_wrap":false}"#, false),
-        ("{}", false),
-        (r#"{"code_block_wrap":"yes"}"#, false),
-    ] {
-        let resolved = resolve(&vault(Some(settings)));
-        assert_eq!(resolved.code_block_wrap, expected, "{settings}");
-        assert!(resolved.notices.is_empty(), "{settings}");
-    }
-}
-
-#[test]
 fn a_builtin_name_wins_over_a_file_of_that_name() {
     let fs = vault(Some(r#"{"theme":"Flexoki Light"}"#));
     fs.insert_file("/v/.inkra/themes/Flexoki Light.json", SOLAR);
@@ -88,19 +74,6 @@ fn a_name_is_never_a_path() {
     assert_eq!(resolved.notices, [r#"theme "../x" not found"#]);
     assert_eq!(fs.reads(Path::new("/v/.inkra/x.json")), 0);
     assert_eq!(fs.reads(Path::new("/v/.inkra/themes/../x.json")), 0);
-}
-
-#[test]
-fn broken_settings_fall_back_with_their_line() {
-    let resolved = resolve(&vault(Some("{")));
-    assert!(resolved.theme.is_none());
-    let [notice] = resolved.notices.as_slice() else {
-        panic!("one notice: {:?}", resolved.notices);
-    };
-    assert!(
-        notice.starts_with(".inkra/settings.json: line 1: "),
-        "{notice}"
-    );
 }
 
 #[test]

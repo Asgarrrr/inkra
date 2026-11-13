@@ -9,6 +9,7 @@ use crate::editor::actions::{
     Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, FollowLinkInSplit, Newline,
     Paste, Redo, SelectDown, SelectUp, Undo, Up,
 };
+use crate::feature;
 use crate::field::{Cancel, Confirm};
 use crate::picker;
 use crate::quick_open::QuickOpen;
@@ -27,6 +28,12 @@ use crate::vault::Save;
 use crate::vault_search::SearchVault;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
+    let mut bindings = core_bindings();
+    bindings.extend(feature::bindings(feature::BUILTIN));
+    bindings
+}
+
+fn core_bindings() -> Vec<KeyBinding> {
     let input = Some(text_input::CONTEXT);
     let editor = Some(text_input::EDITOR_CONTEXT);
     let field = Some(text_input::FIELD_CONTEXT);

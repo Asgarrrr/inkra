@@ -9,6 +9,7 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{Fs, Vault};
 
 use crate::bootstrap::{Launch, root};
+use crate::feature::Registry;
 use crate::keymap::key_bindings;
 use crate::shell::{AppShell, EditorView, Left, Save};
 use crate::test_support::{detached_store, entry_id};
@@ -24,7 +25,16 @@ fn a_keystroke_through_app_shell_reaches_the_editor(cx: &mut TestAppContext) {
     let (buffer, notes) = detached_store(cx, fs, "/notes/a.md");
     let editor = cx.update(|cx| cx.new(|cx| EditorView::new(buffer.clone(), cx)));
     let window = cx.add_window(move |window, cx| {
-        AppShell::new(Some(editor), notes, None, None, Left::default(), window, cx)
+        AppShell::new(
+            Some(editor),
+            notes,
+            None,
+            None,
+            Left::default(),
+            Registry::default(),
+            window,
+            cx,
+        )
     });
     window
         .update(cx, |shell, window, cx| {
@@ -237,7 +247,7 @@ fn rooted(cx: &mut TestAppContext, fs: Arc<dyn Fs>, launched: Launch) -> WindowH
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |window, cx| root(fs, launched, None, window, cx),
+            |window, cx| root(fs, launched, None, Registry::default(), window, cx),
         )
     })
     .expect("open the window")

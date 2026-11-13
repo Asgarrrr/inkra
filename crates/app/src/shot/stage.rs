@@ -11,13 +11,13 @@ use inkra_layout::Side;
 use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{Fs, Vault};
 
-use crate::Quit;
 use crate::bootstrap::{Launch, WINDOW_SIZE, read_session, root};
 use crate::keymap::key_bindings;
 use crate::restore::{SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
 use crate::theme::{self, Appearance};
 use crate::ui::Assets;
+use crate::{Quit, feature::Registry};
 
 const VAULT_ROOT: &str = "/vault";
 
@@ -167,7 +167,7 @@ impl Stage {
             .open_offscreen_window(WINDOW_SIZE, |window, cx| {
                 let fs: Arc<dyn Fs> = fs;
                 let opened = read_session(&fs, &launched, cx);
-                root(fs, launched, opened, window, cx)
+                root(fs, launched, opened, Registry::default(), window, cx)
             })
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         // A new window reports the platform's Dark, so the shell's observer just overrode the theme.

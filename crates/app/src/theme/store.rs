@@ -9,6 +9,7 @@ use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
 use super::{Theme, builtin, file};
+use crate::settings::{self, Settings, Switches};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum Choice {
@@ -23,7 +24,7 @@ impl Choice {
     const SYSTEM: &str = "system";
 
     /// `theme` in `settings.json`; a missing one follows the system.
-    fn from_setting(name: Option<&str>) -> Self {
+    pub(crate) fn from_setting(name: Option<&str>) -> Self {
         match name {
             Some(name) if name != Self::SYSTEM => Self::Named(name.to_owned().into()),
             _ => Self::System,
@@ -45,6 +46,7 @@ pub(crate) struct Resolved {
     /// `None` follows the system.
     pub(crate) theme: Option<Arc<Theme>>,
     pub(crate) code_block_wrap: bool,
+    pub(crate) features: Switches,
     pub(crate) notices: Vec<String>,
 }
 
@@ -124,7 +126,7 @@ impl ThemeStore {
 /// A vault can come from anywhere, and the first read runs before the window.
 const MAX_CONFIG_BYTES: u64 = 1 << 20;
 
-async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
+pub(crate) async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
     let bytes = fs.read_bytes(path, MAX_CONFIG_BYTES).await?;
     String::from_utf8(bytes).map_err(|_| VaultError::NotUtf8 {
         path: path.to_path_buf(),
@@ -135,7 +137,11 @@ async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
 pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
     let config = root.join(CONFIG_DIR);
     let mut notices = Vec::new();
-    let (choice, code_block_wrap) = settings(fs, &config, &mut notices).await;
+    let Settings {
+        choice,
+        code_block_wrap,
+        features,
+    } = settings::read(fs, &config, &mut notices).await;
     let theme = match &choice {
         Choice::System => None,
         Choice::Named(name) => named(fs, &config, name, &mut notices).await,
@@ -144,36 +150,8 @@ pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
         choice,
         theme,
         code_block_wrap,
+        features,
         notices,
-    }
-}
-
-/// The theme choice and `code_block_wrap`, from the one parse of `settings.json`.
-async fn settings(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> (Choice, bool) {
-    let text = match read_text(fs, &config.join("settings.json")).await {
-        Ok(text) => text,
-        Err(error) => {
-            if error.io_kind() != Some(ErrorKind::NotFound) {
-                notices.push(error.to_string());
-            }
-            return (Choice::System, false);
-        }
-    };
-    match serde_json::from_str::<Value>(&text) {
-        Ok(settings) => (
-            Choice::from_setting(settings.get("theme").and_then(Value::as_str)),
-            settings
-                .get("code_block_wrap")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        ),
-        Err(error) => {
-            notices.push(file::describe(
-                &format!("{CONFIG_DIR}/settings.json"),
-                &error,
-            ));
-            (Choice::System, false)
-        }
     }
 }
 

@@ -12,6 +12,7 @@ use inkra_vault::mem_fs::{Gate, MemFs};
 use inkra_vault::{EntryId, Fs};
 
 use crate::bootstrap::{Launch, root};
+use crate::feature::Registry;
 use crate::keymap::key_bindings;
 use crate::picker::PickerDelegate as _;
 use crate::quick_open::QuickOpenDelegate;
@@ -38,6 +39,7 @@ mod dragging;
 mod drop_marker;
 mod edge_drops;
 mod failed_trash;
+mod features;
 mod files_header;
 mod following;
 mod geometry;
@@ -119,10 +121,29 @@ pub(super) fn open_vault(
     cx: &mut TestAppContext,
     fs: Arc<dyn Fs>,
 ) -> (WindowHandle<AppShell>, Entity<Sidebar>, Entity<NoteStore>) {
+    open_vault_with(cx, fs, Registry::default())
+}
+
+pub(super) fn open_vault_with(
+    cx: &mut TestAppContext,
+    fs: Arc<dyn Fs>,
+    features: Registry,
+) -> (WindowHandle<AppShell>, Entity<Sidebar>, Entity<NoteStore>) {
     let notes = test_support::scan_notes(cx, fs);
     let window = cx.add_window({
         let notes = notes.clone();
-        move |window, cx| AppShell::new(None, notes, None, None, Left::default(), window, cx)
+        move |window, cx| {
+            AppShell::new(
+                None,
+                notes,
+                None,
+                None,
+                Left::default(),
+                features,
+                window,
+                cx,
+            )
+        }
     });
     let sidebar = window
         .update(cx, |shell, _, _| shell.panes().sidebar.clone())
@@ -218,7 +239,16 @@ pub(super) fn no_vault(
         })
     });
     let window = cx.add_window(move |window, cx| {
-        AppShell::new(None, notes, None, None, Left::default(), window, cx)
+        AppShell::new(
+            None,
+            notes,
+            None,
+            None,
+            Left::default(),
+            Registry::default(),
+            window,
+            cx,
+        )
     });
     let visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
@@ -248,7 +278,7 @@ pub(super) fn detached(
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |window, cx| root(fs, launch, None, window, cx),
+                |window, cx| root(fs, launch, None, Registry::default(), window, cx),
             )
         })
         .unwrap();

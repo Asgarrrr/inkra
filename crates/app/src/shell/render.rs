@@ -69,7 +69,7 @@ impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             // Scoped here, not on `EditorView`: a note row can hold focus too, and dispatch walks up to the root.
-            .key_context("AppShell")
+            .key_context(self.key_context())
             .group(SHELL_GROUP)
             // Load-bearing: with no editor, focus lives on `self.focus_handle`; untracked, `cmd-s` is unreachable (gpui/src/window.rs:6757-6764).
             .track_focus(&self.focus_handle)
@@ -109,6 +109,19 @@ impl Render for AppShell {
                             shell.move_to_other_dock(id, window, cx);
                         }),
                     )
+                })
+            })
+            .map(|root| {
+                self.features.enabled().fold(root, |root, manifest| {
+                    let id = manifest.id;
+                    manifest.commands.iter().fold(root, |root, decl| {
+                        root.on_boxed_action(
+                            &*(decl.action)(),
+                            cx.listener(move |shell, action: &dyn Action, window, cx| {
+                                shell.run_command(id, action, window, cx);
+                            }),
+                        )
+                    })
                 })
             })
             .on_action(cx.listener(Self::split_view))

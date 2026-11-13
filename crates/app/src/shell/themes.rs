@@ -41,7 +41,10 @@ impl AppShell {
                 .background_spawn(async move { store::load(&*fs, &root).await })
                 .await;
             shell
-                .update(cx, |shell, cx| shell.adopt_theme(resolved, cx))
+                .update(cx, |shell, cx| {
+                    shell.apply_switches(&resolved.features, cx);
+                    shell.adopt_theme(resolved, cx);
+                })
                 .ok();
         }));
     }

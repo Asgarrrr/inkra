@@ -9,6 +9,7 @@ mod buffer_events;
 mod command_palette;
 mod count;
 mod editor;
+mod feature;
 mod field;
 mod file_kind;
 mod images;
@@ -23,6 +24,7 @@ mod picker;
 mod quick_open;
 mod restore;
 mod row_text;
+mod settings;
 mod shell;
 mod sidebar;
 #[cfg(test)]
