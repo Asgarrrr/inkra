@@ -13,7 +13,7 @@ use crate::one_line::one_line;
 use crate::open::FileActivated;
 use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::row_text::LitText;
-use crate::shell::FeatureCx;
+use crate::shell::Activation;
 use crate::ui::IconName;
 
 #[cfg(test)]
@@ -54,7 +54,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
 };
 
 /// Activated once its pane shows, so `shown()` is read late and `NoteShown` keeps it current.
-fn activate(fcx: &mut FeatureCx) {
+fn activate(fcx: &mut Activation) {
     let (Some(index), Some(vault)) = (fcx.index(), fcx.vault()) else {
         return;
     };

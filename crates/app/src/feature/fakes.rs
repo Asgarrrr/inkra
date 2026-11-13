@@ -11,7 +11,7 @@ use inkra_layout::{Side, ViewId};
 
 use super::{CommandDecl, FeatureId, Manifest};
 use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
-use crate::shell::FeatureCx;
+use crate::shell::Activation;
 use crate::ui::IconName;
 
 actions!(fakes, [PingFake, ClashFake, MovePaneFakeToOtherDock]);
@@ -141,7 +141,7 @@ pub(crate) static EAGER_CATALOG: &[&Manifest] = &[&EAGER_FAKE];
 /// Backlinks first, so the fake pane docks right after it, as a second feature pane would.
 pub(crate) static PANE_CATALOG: &[&Manifest] = &[&crate::backlinks::MANIFEST, &PANE_FAKE];
 
-fn activate_ping(fcx: &mut FeatureCx) {
+fn activate_ping(fcx: &mut Activation) {
     let ping = fcx.new(|_| Ping { count: 0 });
     PING.set(Some(ping.downgrade()));
     fcx.on_command::<PingFake>(move |_, fcx| {
@@ -163,7 +163,7 @@ pub(crate) fn eager_count() -> usize {
     EAGER.get()
 }
 
-fn activate_pane(fcx: &mut FeatureCx) {
+fn activate_pane(fcx: &mut Activation) {
     let input = fcx.new(|cx| InputPane {
         focus: cx.focus_handle(),
         hidden: 0,

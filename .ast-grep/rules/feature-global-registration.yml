@@ -1,8 +1,8 @@
-# Feature registry spec, D3: a feature registers only through `FeatureCx`, whose handle drops on disable.
+# Feature registry spec, D3: a feature registers only through `Activation`, whose handle drops on disable.
 id: feature-global-registration
 language: Rust
 severity: error
-message: "a registration that outlives the feature: a switched-off feature could never release it; register through `FeatureCx`"
+message: "a registration that outlives the feature: a switched-off feature could never release it; register through `Activation`"
 note: "`App::on_action` returns no `Subscription`, and the window-level `Context::on_action` matches too, on purpose."
 files:
   - crates/app/src/feature/**/*.rs

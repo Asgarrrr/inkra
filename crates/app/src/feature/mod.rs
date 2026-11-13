@@ -3,7 +3,7 @@
 use gpui::{Action, KeyBinding};
 
 use crate::pane::{PaneButton, PaneDecl};
-use crate::shell::FeatureCx;
+use crate::shell::Activation;
 use crate::{backlinks, quick_open, vault_search};
 
 #[cfg(test)]
@@ -38,7 +38,7 @@ pub(crate) struct Manifest {
     pub(crate) panes: &'static [&'static PaneDecl],
     /// Buttons added to other panes' headers; each runs one of this manifest's commands.
     pub(crate) buttons: &'static [PaneButton],
-    pub(crate) activate: fn(&mut FeatureCx),
+    pub(crate) activate: fn(&mut Activation),
 }
 
 pub(crate) struct CommandDecl {

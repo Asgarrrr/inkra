@@ -22,7 +22,7 @@ use crate::open::Open;
 use crate::pane::{HeaderButton, PaneButton, boxed};
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
-use crate::shell::{FILES, FeatureCx};
+use crate::shell::{Activation, FILES};
 use crate::theme;
 use crate::ui::IconName;
 use rows::{HitKey, Results, Row};
@@ -57,7 +57,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
 };
 
 /// No state of its own: each search builds its delegate on the index and the vault.
-fn activate(fcx: &mut FeatureCx) {
+fn activate(fcx: &mut Activation) {
     fcx.on_command::<SearchVault>(|_, fcx| {
         let (Some(links), Some(vault)) = (fcx.index(), fcx.vault()) else {
             return;
