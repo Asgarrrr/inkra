@@ -1,12 +1,12 @@
 //! The `⌘K` keys: a split in each direction, and focus to the neighbour (splits spec, P3).
 
 use gpui::{App, Context, FocusHandle, Focusable, Window, actions};
-use inkra_layout::{Axis, GroupId, SplitDirection, Surface, View};
+use inkra_layout::{Axis, GroupId, SplitDirection, Surface};
 
 use super::docks::SplitView;
 use super::group::Group;
 use super::tabs::{Place, capture};
-use super::{AppShell, Shown};
+use super::{AppShell, FILES, Shown};
 
 actions!(
     pane,
@@ -116,7 +116,8 @@ impl AppShell {
             .tree_focus(cx)
             .is_some_and(|tree| tree.contains_focused(window, cx))
         {
-            self.tab_of(View::Files).0
+            self.tab_of(FILES)
+                .map_or_else(|| self.layout.last_center(), |(group, _)| group)
         } else {
             self.layout.last_center()
         }
@@ -200,7 +201,7 @@ impl AppShell {
                 self.land_focus(window, cx);
             }
             Surface::Dock(_) => {
-                let tree = (self.group(to).shown.view() == Some(View::Files))
+                let tree = (self.group(to).shown.view() == Some(FILES))
                     .then(|| self.tree_focus(cx))
                     .flatten();
                 if let Some(tree) = tree {

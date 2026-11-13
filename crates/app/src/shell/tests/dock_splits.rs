@@ -1,7 +1,7 @@
 //! A dock view split off into its own group, kept across a relaunch (splits spec, S8).
 
 use gpui::{MouseButton, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{GroupId, Side, View};
+use inkra_layout::{GroupId, Side};
 
 use super::dock_menu::{docks, drawn};
 use super::restore_lands::{launch, vault};
@@ -9,8 +9,10 @@ use super::session_writes::wait;
 use super::splits::{centre, close};
 use super::tab_bar::{click, press};
 use super::{ab_focused, open};
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
+use crate::shell::FILES;
 use crate::shell::session::THROTTLE;
 use crate::shell::split::SplitRight;
 use crate::theme::TITLE_BAR_HEIGHT;
@@ -40,7 +42,7 @@ fn assert_split_left(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext
                 .collect::<Vec<Vec<_>>>()
         })
         .unwrap();
-    assert_eq!(held, [vec![View::Files], vec![View::Backlinks]]);
+    assert_eq!(held, [vec![FILES], vec![BACKLINKS]]);
     let column = cx.debug_bounds("dock-left").expect("drawn");
     let bar = cx.debug_bounds("dock-bar-left-1").expect("drawn");
     assert!(column.contains(&bar.center()), "{bar:?} in {column:?}");

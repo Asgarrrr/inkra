@@ -5,25 +5,20 @@ use gpui::{
     MouseDownEvent, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder,
 };
-use inkra_layout::{GroupId, Side, SplitPath, Surface, View};
+use inkra_layout::{GroupId, Side, SplitPath, Surface, ViewId};
 
 use super::dock_drag::DraggedView;
-use super::docks::{ToggleLeftDock, ToggleRightDock, icon, title};
+use super::docks::{FILES, FILES_PANE, ToggleLeftDock, ToggleRightDock};
 use super::drop_marker;
 use super::group::selector;
 use super::members::Slot;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
+use crate::backlinks::{BACKLINKS, BACKLINKS_PANE};
+use crate::pane::PaneDecl;
 use crate::sidebar::{NewFolder, NewNote};
 use crate::theme;
 use crate::ui::{IconButton, IconName, PanelHeader, Tooltip, h_flex, keep_focus, lower_header};
 use crate::vault_search::SearchVault;
-
-fn icon_id(view: View) -> &'static str {
-    match view {
-        View::Files => "dock-icon-files",
-        View::Backlinks => "dock-icon-backlinks",
-    }
-}
 
 pub(super) fn name(side: Side) -> &'static str {
     match side {
@@ -121,7 +116,7 @@ impl AppShell {
                 .child(div().flex_none().w(theme::ROW_INSET))
                 .children(self.render_dock_strip(side, group, k, cx))
         });
-        let rows = view.map(|view| self.render_view_header(view, cx));
+        let rows = view.and_then(|view| self.render_view_header(view, cx));
         let body = self.group_body(
             group,
             selector(format_args!("dock-{}-drop-overlay", name(side)), k),
@@ -132,19 +127,24 @@ impl AppShell {
     }
 
     /// What `view` draws under its header; `None` with no vault.
-    pub(super) fn render_view_body(&self, view: View) -> Option<AnyElement> {
+    pub(super) fn render_view_body(&self, view: ViewId) -> Option<AnyElement> {
         let panes = self.panes.as_ref()?;
-        Some(match view {
-            View::Files => panes.sidebar.clone().into_any_element(),
-            View::Backlinks => panes.backlinks.clone().into_any_element(),
-        })
+        match view {
+            FILES => Some(panes.sidebar.clone().into_any_element()),
+            BACKLINKS => Some(panes.backlinks.clone().into_any_element()),
+            _ => None,
+        }
     }
 
     /// The view's own first row. A press keeps the focus, as every header's does.
-    pub(super) fn render_view_header(&self, view: View, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_view_header(
+        &self,
+        view: ViewId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         match view {
-            View::Files => {
-                PanelHeader::bar("panel-header-files")
+            FILES => Some(
+                PanelHeader::bar(FILES_PANE.header_id)
                     .child(
                         IconButton::new("sidebar-new-note", IconName::PenLine, "New note")
                             .on_click(cx.listener(|shell, _, window, cx| {
@@ -164,17 +164,20 @@ impl AppShell {
                             })),
                     )
                     .on_mouse_down(MouseButton::Left, keep_focus)
-                    .into_any_element()
-            }
-            View::Backlinks => PanelHeader::new("panel-header-backlinks", title(view))
-                .when_some(
-                    self.panes
-                        .as_ref()
-                        .and_then(|panes| panes.backlinks.read(cx).count()),
-                    PanelHeader::count,
-                )
-                .on_mouse_down(MouseButton::Left, keep_focus)
-                .into_any_element(),
+                    .into_any_element(),
+            ),
+            BACKLINKS => Some(
+                PanelHeader::new(BACKLINKS_PANE.header_id, BACKLINKS_PANE.title)
+                    .when_some(
+                        self.panes
+                            .as_ref()
+                            .and_then(|panes| panes.backlinks.read(cx).count()),
+                        PanelHeader::count,
+                    )
+                    .on_mouse_down(MouseButton::Left, keep_focus)
+                    .into_any_element(),
+            ),
+            _ => None,
         }
     }
 
@@ -199,8 +202,11 @@ impl AppShell {
                     self.group(group)
                         .views()
                         .enumerate()
-                        .map(|(ix, (_, view))| {
-                            Self::render_dock_icon(view, Some(view) == active, group, ix, cx)
+                        .filter_map(|(ix, (_, view))| {
+                            let decl = self.pane(view);
+                            debug_assert!(decl.is_some(), "{view:?} has no pane");
+                            let active = Some(view) == active;
+                            Some(Self::render_dock_icon(decl?, active, group, ix, cx))
                         }),
                 ),
         )
@@ -209,16 +215,16 @@ impl AppShell {
     /// Rule 4: a click on the active icon changes nothing, as `change_layout` drops an equal layout.
     /// A drop on it inserts at `ix`, counted after the dragged view left (`Tabs::move_tab`'s rule).
     fn render_dock_icon(
-        view: View,
+        decl: &'static PaneDecl,
         active: bool,
         group: GroupId,
         ix: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = theme::current(cx).colors;
-        IconButton::new(icon_id(view), icon(view), title(view))
+        let (view, colors) = (decl.id, theme::current(cx).colors);
+        IconButton::new(decl.icon_id, decl.icon, decl.title)
             .toggled(active)
-            .tooltip(Tooltip::text(title(view)))
+            .tooltip(Tooltip::text(decl.title))
             .on_mouse_down(MouseButton::Right, Self::open_menu_on_press(view, cx))
             .on_click(cx.listener(move |shell, _, window, cx| {
                 shell.reveal(view, window, cx);
@@ -226,6 +232,7 @@ impl AppShell {
             .on_drag(
                 DraggedView {
                     view,
+                    decl,
                     index: ix,
                     group,
                 },
@@ -244,7 +251,7 @@ impl AppShell {
 
     /// `prevent_default`: the root would take focus from the menu on the press (`div.rs:2765-2780`).
     fn open_menu_on_press(
-        view: View,
+        view: ViewId,
         cx: &mut Context<Self>,
     ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, event: &MouseDownEvent, window, cx| {

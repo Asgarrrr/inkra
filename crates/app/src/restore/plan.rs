@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 
-use inkra_layout::{GroupId, Layout, Shape, Side, View, kept_active};
+use inkra_layout::{GroupId, Layout, Shape, Side, ViewId, kept_active};
 use inkra_vault::{EntryId, Vault};
 
 use super::format::dock_views;
@@ -16,7 +16,7 @@ use crate::file_kind::FileKind;
 /// and the centre's saved groups still to load. No session restores docks rule 6's layout.
 pub(crate) struct Surfaces {
     pub(crate) layout: Layout,
-    pub(crate) docks: Vec<(GroupId, Vec<View>, usize)>,
+    pub(crate) docks: Vec<(GroupId, Vec<ViewId>, usize)>,
     pub(crate) pending: Option<Pending>,
 }
 
@@ -68,7 +68,7 @@ pub(crate) struct Landed<L> {
 }
 
 impl Surfaces {
-    pub(crate) fn resolve(session: Option<Session>) -> Self {
+    pub(crate) fn resolve(session: Option<Session>, catalog: &[(ViewId, Side)]) -> Self {
         let mut saved = Vec::new();
         let (center, [left, right], shown, active) = match session {
             None => (Shape::Group, [None, None], [true, true], None),
@@ -81,9 +81,9 @@ impl Surfaces {
                 Some(session.active),
             ),
         };
-        let views = dock_views([left.as_ref(), right.as_ref()]);
+        let views = dock_views([left.as_ref(), right.as_ref()], catalog);
         // A side saved empty is drawn only if it took a view no other dock kept.
-        let dock_shape = |dock: Option<SavedMember>, views: &[(Vec<View>, usize)]| match dock {
+        let dock_shape = |dock: Option<SavedMember>, views: &[(Vec<ViewId>, usize)]| match dock {
             Some(dock) => Some(shape(dock, &mut Vec::new())),
             None => (!views.is_empty()).then_some(Shape::Group),
         };

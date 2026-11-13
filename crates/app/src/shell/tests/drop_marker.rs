@@ -2,11 +2,12 @@
 
 use std::cmp::Ordering;
 
-use inkra_layout::{GroupId, Layout, Side, View};
+use inkra_layout::{GroupId, Layout, Side};
 use inkra_tabs::Tabs;
 
 use crate::shell::dock_drag::DraggedView;
 use crate::shell::tab_bar::DraggedTab;
+use crate::shell::{FILES, FILES_PANE};
 
 /// The dragged item stood at index 1 of `own`.
 fn lands_beside_its_own_slot_and_before_a_foreign_one(
@@ -27,7 +28,8 @@ fn a_view_lands_beside_its_own_slot_and_before_a_foreign_one() {
     let layout = Layout::default();
     let (own, other) = (layout.dock_groups(Side::Left)[0], layout.last_center());
     let dragged = DraggedView {
-        view: View::Files,
+        view: FILES,
+        decl: &FILES_PANE,
         index: 1,
         group: own,
     };

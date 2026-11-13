@@ -18,6 +18,7 @@ mod last_vault;
 mod logger;
 mod one_line;
 mod open;
+mod pane;
 mod picker;
 mod quick_open;
 mod restore;

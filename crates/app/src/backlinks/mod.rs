@@ -2,14 +2,17 @@
 
 use std::collections::HashMap;
 
-use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
+use gpui::{Context, Entity, EventEmitter, SharedString, Subscription, actions};
 use inkra_index::{Backlink, Failures, Slot};
+use inkra_layout::{Side, ViewId};
 use inkra_vault::{EntryId, Vault};
 
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
 use crate::open::FileActivated;
+use crate::pane::{PaneDecl, boxed};
 use crate::row_text::LitText;
+use crate::ui::IconName;
 
 #[cfg(test)]
 mod context_tests;
@@ -23,6 +26,20 @@ mod stale_tests;
 mod tests;
 
 use job::{Job, READ_SOURCES, Wanted};
+
+actions!(docks, [MoveBacklinksToOtherDock]);
+
+pub(crate) const BACKLINKS: ViewId = ViewId::new("backlinks");
+
+pub(crate) static BACKLINKS_PANE: PaneDecl = PaneDecl {
+    id: BACKLINKS,
+    title: "Backlinks",
+    icon: IconName::Link,
+    icon_id: "dock-icon-backlinks",
+    header_id: "panel-header-backlinks",
+    side: Side::Right,
+    move_action: boxed::<MoveBacklinksToOtherDock>,
+};
 
 impl EventEmitter<FileActivated> for BacklinksPanel {}
 

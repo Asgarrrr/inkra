@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use proptest::prelude::*;
 
 use super::{
-    Axis, GroupId, Layout, Member, Side, SplitDirection, StoredDock, Surface, View, restore_views,
+    Axis, GroupId, Layout, Member, Side, SplitDirection, StoredDock, Surface, ViewId, restore_views,
 };
 
 mod direction;
@@ -11,6 +11,10 @@ mod flex;
 mod resize;
 mod surface;
 mod tree;
+
+pub(super) const FILES: ViewId = ViewId::new("files");
+pub(super) const BACKLINKS: ViewId = ViewId::new("backlinks");
+pub(super) const CATALOG: &[(ViewId, Side)] = &[(FILES, Side::Left), (BACKLINKS, Side::Right)];
 
 /// No group has a minimum, so every split fits.
 fn no_min(_: GroupId, _: Axis) -> f32 {
@@ -33,8 +37,6 @@ fn row(layout: &Layout) -> (Vec<GroupId>, Vec<f32>) {
 #[test]
 fn the_default_puts_files_left_and_backlinks_right_both_shown() {
     let layout = Layout::default();
-    assert_eq!(View::Files.default_side(), Side::Left);
-    assert_eq!(View::Backlinks.default_side(), Side::Right);
     assert_eq!(Side::Left.other(), Side::Right);
     assert_eq!(Side::Right.other(), Side::Left);
     for side in [Side::Left, Side::Right] {
@@ -297,7 +299,7 @@ fn a_second_group_in_one_dock_panics() {
     Layout::default().add_dock(Side::Left);
 }
 
-fn state(views: &[View], active: usize) -> StoredDock {
+fn state(views: &[ViewId], active: usize) -> StoredDock {
     StoredDock {
         views: views
             .iter()
@@ -308,20 +310,21 @@ fn state(views: &[View], active: usize) -> StoredDock {
 }
 
 /// Both views in the left dock, `active` the active one's index; the right dock empty.
-fn both_left(active: usize) -> [(Vec<View>, usize); 2] {
-    [
-        (vec![View::Files, View::Backlinks], active),
-        (Vec::new(), 0),
-    ]
+fn both_left(active: usize) -> [(Vec<ViewId>, usize); 2] {
+    [(vec![FILES, BACKLINKS], active), (Vec::new(), 0)]
 }
 
-fn defaults() -> [(Vec<View>, usize); 2] {
-    [(vec![View::Files], 0), (vec![View::Backlinks], 0)]
+fn defaults() -> [(Vec<ViewId>, usize); 2] {
+    [(vec![FILES], 0), (vec![BACKLINKS], 0)]
 }
 
 /// `restore_views` on one group a side.
-fn restore_pair(left: &StoredDock, right: &StoredDock) -> [(Vec<View>, usize); 2] {
-    restore_views([std::slice::from_ref(left), std::slice::from_ref(right)]).map(|groups| {
+fn restore_pair(left: &StoredDock, right: &StoredDock) -> [(Vec<ViewId>, usize); 2] {
+    restore_views(
+        [std::slice::from_ref(left), std::slice::from_ref(right)],
+        CATALOG,
+    )
+    .map(|groups| {
         let [group] = <[_; 1]>::try_from(groups).expect("one group a side");
         group
     })
@@ -329,40 +332,31 @@ fn restore_pair(left: &StoredDock, right: &StoredDock) -> [(Vec<View>, usize); 2
 
 #[test]
 fn a_view_in_both_docks_is_kept_left() {
-    let views = restore_pair(
-        &state(&[View::Files, View::Backlinks], 1),
-        &state(&[View::Backlinks], 0),
-    );
+    let views = restore_pair(&state(&[FILES, BACKLINKS], 1), &state(&[BACKLINKS], 0));
     assert_eq!(views, both_left(1));
 }
 
 #[test]
 fn a_view_twice_in_one_dock_is_kept_first() {
-    let views = restore_pair(
-        &state(&[View::Files, View::Files], 0),
-        &state(&[View::Backlinks], 0),
-    );
+    let views = restore_pair(&state(&[FILES, FILES], 0), &state(&[BACKLINKS], 0));
     assert_eq!(views, defaults());
 }
 
 #[test]
 fn a_missing_view_is_appended_to_its_default_side() {
-    let views = restore_pair(&state(&[], 0), &state(&[View::Backlinks], 0));
+    let views = restore_pair(&state(&[], 0), &state(&[BACKLINKS], 0));
     assert_eq!(views, defaults());
 
-    let views = restore_pair(&state(&[View::Files], 0), &state(&[], 0));
+    let views = restore_pair(&state(&[FILES], 0), &state(&[], 0));
     assert_eq!(views, defaults());
 
-    let views = restore_pair(&state(&[], 0), &state(&[View::Files], 0));
-    assert_eq!(
-        views,
-        [(Vec::new(), 0), (vec![View::Files, View::Backlinks], 0)]
-    );
+    let views = restore_pair(&state(&[], 0), &state(&[FILES], 0));
+    assert_eq!(views, [(Vec::new(), 0), (vec![FILES, BACKLINKS], 0)]);
 }
 
 #[test]
 fn an_active_index_out_of_range_is_clamped() {
-    let views = restore_pair(&state(&[View::Files, View::Backlinks], 7), &state(&[], 3));
+    let views = restore_pair(&state(&[FILES, BACKLINKS], 7), &state(&[], 3));
     assert_eq!(views, both_left(1));
 }
 
@@ -385,7 +379,7 @@ fn an_unknown_name_before_the_active_keeps_the_active_view() {
         &stored(&["graph", "files", "backlinks"], 1),
         &stored(&[], 0),
     );
-    assert_eq!(views[active], View::Files);
+    assert_eq!(views[active], FILES);
 }
 
 #[test]
@@ -394,17 +388,16 @@ fn an_active_duplicate_maps_to_its_kept_view() {
         &stored(&["files", "files", "backlinks"], 1),
         &stored(&[], 0),
     );
-    assert_eq!(views[active], View::Files);
+    assert_eq!(views[active], FILES);
 }
 
 #[test]
 fn views_are_stored_by_these_names() {
-    assert_eq!(View::Files.name(), "files");
-    assert_eq!(View::Backlinks.name(), "backlinks");
-    for view in View::ALL {
-        assert_eq!(View::named(view.name()), Some(view));
-    }
-    assert_eq!(View::named("graph"), None);
+    let views = restore_views(
+        [&[stored(&["files", "graph", "backlinks"], 0)], &[]],
+        CATALOG,
+    );
+    assert_eq!(views, [vec![(vec![FILES, BACKLINKS], 0)], Vec::new()]);
 }
 
 fn name() -> impl Strategy<Value = String> {
@@ -498,8 +491,8 @@ proptest! {
     fn restore_repairs_any_stored_names(left in stored_dock(), right in stored_dock()) {
         let docks = restore_pair(&left, &right);
         let mut views = [docks[0].0.clone(), docks[1].0.clone()].concat();
-        views.sort_by_key(|&view| view == View::Backlinks);
-        prop_assert_eq!(views, [View::Files, View::Backlinks]);
+        views.sort_by_key(|view| view.name());
+        prop_assert_eq!(views, [BACKLINKS, FILES]);
 
         let entries: Vec<_> = [(Side::Left, &left), (Side::Right, &right)]
             .into_iter()
@@ -512,7 +505,7 @@ proptest! {
                 prop_assert!(*active < views.len());
             }
             let Some(name) = stored.views.get(stored.active) else { continue };
-            let Some(view) = name.as_deref().and_then(View::named) else { continue };
+            let Some(&(view, _)) = CATALOG.iter().find(|(view, _)| name.as_deref() == Some(view.name())) else { continue };
             let first = entries.iter().find(|(_, _, held)| *held == name);
             if first == Some(&(side, stored.active, name)) {
                 prop_assert_eq!(views[*active], view);

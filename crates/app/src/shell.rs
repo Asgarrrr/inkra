@@ -6,6 +6,7 @@ use inkra_vault::{EntryId, New};
 
 use crate::editor::EditorView;
 use crate::open::FileActivated;
+use crate::pane::{CORE_PANES, sides};
 use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
@@ -46,7 +47,7 @@ mod title_bar;
 mod workspace;
 
 use group::Group;
-use inkra_layout::{GroupId, Layout, View};
+use inkra_layout::{GroupId, Layout};
 use leave::Leave;
 use modal::Modal;
 use notice::Notice;
@@ -54,7 +55,7 @@ use panes::VaultPanes;
 use session::{Restore, SessionFile};
 use shown::{Bound, Shown};
 
-pub(crate) use docks::{ToggleLeftDock, ToggleRightDock};
+pub(crate) use docks::{FILES, FILES_PANE, ToggleLeftDock, ToggleRightDock};
 pub(crate) use leave::Left;
 pub(crate) use notice::couldnt_open;
 pub(crate) use open_vault::OpenVault;
@@ -130,7 +131,8 @@ impl AppShell {
             .map_or((None, None), |Opened { file, session }| {
                 (Some(file), session)
             });
-        let (layout, mut groups, pending) = Self::restored_groups(read);
+        let (layout, mut groups, pending) =
+            Self::restored_groups(read, &sides(CORE_PANES.iter().copied()));
         let panes = notes
             .read(cx)
             .vault()
@@ -324,7 +326,7 @@ impl AppShell {
 
     /// Reveals the tree first: the name field it focuses must be drawn.
     fn create(&mut self, new: New, window: &mut Window, cx: &mut Context<Self>) {
-        self.reveal(View::Files, window, cx);
+        self.reveal(FILES, window, cx);
         if let Some(panes) = &self.panes {
             panes.sidebar.update(cx, |sidebar, cx| {
                 sidebar.start_creating(new, window, cx);

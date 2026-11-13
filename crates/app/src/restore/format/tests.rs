@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use inkra_layout::View;
 use serde_json::json;
 
 use super::{
     Rejected, SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedView, SavedWindow,
     Session, dock_views,
 };
+use crate::backlinks::BACKLINKS;
+use crate::pane::{CORE_PANES, sides};
+use crate::shell::FILES;
 
 fn note(note: &str) -> SavedTab {
     SavedTab::File(SavedFileTab {
@@ -248,9 +250,15 @@ fn an_unknown_view_name_is_dropped() {
       "left": { "tabs": [{ "view": "graph" }, { "view": "files" }], "active": 0 },
       "right": { "tabs": [{ "view": "backlinks" }], "active": 0 } }"#;
     let session = decoded(text);
-    let docks = dock_views([session.left.as_ref(), session.right.as_ref()]);
-    assert_eq!(docks, dock_views([None, None]));
-    assert_eq!(docks[0][0].0, [View::Files]);
+    let docks = dock_views(
+        [session.left.as_ref(), session.right.as_ref()],
+        &sides(CORE_PANES.iter().copied()),
+    );
+    assert_eq!(
+        docks,
+        dock_views([None, None], &sides(CORE_PANES.iter().copied()))
+    );
+    assert_eq!(docks[0][0].0, [FILES]);
 }
 
 #[test]
@@ -266,8 +274,11 @@ fn docks_round_trip_through_the_file() {
 
     assert_eq!(decoded, session);
     assert_eq!(
-        dock_views([decoded.left.as_ref(), decoded.right.as_ref()]),
-        [Vec::new(), vec![(vec![View::Backlinks, View::Files], 0)]]
+        dock_views(
+            [decoded.left.as_ref(), decoded.right.as_ref()],
+            &sides(CORE_PANES.iter().copied())
+        ),
+        [Vec::new(), vec![(vec![BACKLINKS, FILES], 0)]]
     );
 }
 
@@ -279,8 +290,8 @@ fn a_note_tab_in_a_dock_is_dropped() {
         1,
     ));
     assert_eq!(
-        dock_views([Some(&left), None]),
-        [vec![(vec![View::Backlinks, View::Files], 0)], Vec::new()]
+        dock_views([Some(&left), None], &sides(CORE_PANES.iter().copied())),
+        [vec![(vec![BACKLINKS, FILES], 0)], Vec::new()]
     );
 }
 
@@ -325,8 +336,11 @@ fn a_v2_single_group_dock_decodes() {
         )))
     );
     assert_eq!(
-        dock_views([session.left.as_ref(), session.right.as_ref()]),
-        [vec![(vec![View::Files, View::Backlinks], 1)], Vec::new()]
+        dock_views(
+            [session.left.as_ref(), session.right.as_ref()],
+            &sides(CORE_PANES.iter().copied())
+        ),
+        [vec![(vec![FILES, BACKLINKS], 1)], Vec::new()]
     );
 }
 

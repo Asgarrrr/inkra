@@ -1,8 +1,8 @@
 //! The shell's layout: the title row over the docks and the note column, and the picker over them.
 
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Styled, Window,
-    div, prelude::FluentBuilder,
+    Action, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Styled,
+    Window, div, prelude::FluentBuilder,
 };
 use inkra_layout::{Axis, Member, Side, SplitPath, Surface};
 
@@ -10,6 +10,7 @@ use super::AppShell;
 use super::dock_drag::SHELL_GROUP;
 use super::members::Slot;
 use crate::index::{IndexSync, RebuildIndex};
+use crate::pane::CORE_PANES;
 
 impl AppShell {
     /// Under the title row: the left dock, the centre and the right dock.
@@ -99,8 +100,17 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::activate_pane_down))
             .on_action(cx.listener(Self::toggle_left_dock))
             .on_action(cx.listener(Self::toggle_right_dock))
-            .on_action(cx.listener(Self::move_files_to_other_dock))
-            .on_action(cx.listener(Self::move_backlinks_to_other_dock))
+            .map(|root| {
+                CORE_PANES.iter().fold(root, |root, pane| {
+                    let id = pane.id;
+                    root.on_boxed_action(
+                        &*(pane.move_action)(),
+                        cx.listener(move |shell, _: &dyn Action, window, cx| {
+                            shell.move_to_other_dock(id, window, cx);
+                        }),
+                    )
+                })
+            })
             .on_action(cx.listener(Self::split_view))
             .on_action(cx.listener(Self::select_theme))
             .on_action(cx.listener(|shell, _: &RebuildIndex, _, cx| {

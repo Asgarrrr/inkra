@@ -3,26 +3,23 @@
 use std::collections::HashSet;
 
 use gpui::{App, Context, Focusable, Window};
-use inkra_layout::{GroupId, Side, View};
+use inkra_layout::{GroupId, Side, ViewId};
 use inkra_tabs::TabId;
 
-use super::AppShell;
+use super::{AppShell, FILES};
+use crate::pane::CORE_PANES;
 use crate::sidebar::Sidebar;
 
 /// Each group in `Layout::groups` order: its views in tab order, its active view and its tab count.
-type TabState = Vec<(Vec<View>, Option<View>, usize)>;
+type TabState = Vec<(Vec<ViewId>, Option<ViewId>, usize)>;
 
 impl AppShell {
-    /// # Panics
-    /// Only on a broken invariant: each view sits in exactly one tab.
-    pub(super) fn tab_of(&self, view: View) -> (GroupId, TabId) {
-        self.layout
-            .groups()
-            .find_map(|group| {
-                let (tab, _) = self.group(group).views().find(|&(_, held)| held == view)?;
-                Some((group, tab))
-            })
-            .unwrap_or_else(|| panic!("{view:?} sits in no tab"))
+    /// `None` for a view no tab holds.
+    pub(super) fn tab_of(&self, view: ViewId) -> Option<(GroupId, TabId)> {
+        self.layout.groups().find_map(|group| {
+            let (tab, _) = self.group(group).views().find(|&(_, held)| held == view)?;
+            Some((group, tab))
+        })
     }
 
     fn tab_state(&self) -> TabState {
@@ -51,13 +48,13 @@ impl AppShell {
             return;
         }
         let (layout, tabs) = (self.layout.clone(), self.tab_state());
-        let files_shown = self.is_visible(View::Files);
+        let files_shown = self.is_visible(FILES);
         change(self, window, cx);
         if self.layout == layout && self.tab_state() == tabs {
             return;
         }
         if files_shown
-            && !self.is_visible(View::Files)
+            && !self.is_visible(FILES)
             && let Some(panes) = &self.panes
         {
             let sidebar = panes.sidebar.clone();
@@ -107,11 +104,11 @@ impl AppShell {
                 );
             }
         }
-        let views: Vec<View> = held
+        let views: Vec<ViewId> = held
             .iter()
             .flat_map(|&group| self.group(group).views().map(|(_, view)| view))
             .collect();
-        for view in View::ALL {
+        for view in CORE_PANES.iter().map(|pane| pane.id) {
             let tabs = views.iter().filter(|&&held| held == view).count();
             assert_eq!(tabs, 1, "{view:?} sits in exactly one tab");
         }

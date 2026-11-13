@@ -7,18 +7,18 @@ use gpui::{
     MouseDownEvent, ParentElement, Pixels, Point, Render, Role, SharedString,
     StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
-use inkra_layout::{GroupId, View};
+use inkra_layout::{GroupId, ViewId};
 use inkra_tabs::TabId;
 use inkra_vault::EntryId;
 
 use super::dock_drag::DraggedView;
-use super::docks::title;
 use super::drop_marker;
 use super::group::selector;
 use super::parked::Parked;
 use super::split::{SplitDown, SplitRight};
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
+use crate::pane::PaneDecl;
 use crate::theme;
 use crate::ui::{
     Color, ContextMenu, IconButton, IconName, Indicator, Label, MenuEntry, Tab, UiText, strip_slot,
@@ -43,13 +43,13 @@ impl DraggedTab {
     }
 }
 
-/// One tab as its bar draws it; `view` is the view it holds, if any.
+/// One tab as its bar draws it; `pane` is the pane it holds, if any.
 struct TabEntry {
     id: TabId,
     title: SharedString,
     is_active: bool,
     indicator: Option<Indicator>,
-    view: Option<View>,
+    pane: Option<&'static PaneDecl>,
 }
 
 /// The centre group a strip draws: `k` is its place in the row, for the selectors.
@@ -89,7 +89,7 @@ impl AppShell {
     }
 
     /// The view each tab holds; `None` for a note's or an empty tab.
-    fn tab_views(&self, group: GroupId) -> impl Iterator<Item = Option<View>> + '_ {
+    fn tab_views(&self, group: GroupId) -> impl Iterator<Item = Option<ViewId>> + '_ {
         let group = self.group(group);
         group
             .tabs
@@ -103,7 +103,11 @@ impl AppShell {
         self.tab_files(group)
             .zip(self.tab_views(group))
             .map(|(file, view)| match view {
-                Some(view) => SharedString::new_static(title(view)),
+                Some(view) => {
+                    let title = self.pane(view).map(|pane| pane.title);
+                    debug_assert!(title.is_some(), "{view:?} has no pane");
+                    SharedString::new_static(title.unwrap_or_default())
+                }
                 None => tab_title(file, notes, cx),
             })
             .collect()
@@ -130,22 +134,25 @@ impl AppShell {
                 note.and_then(|id| Indicator::of(notes.is_dirty(id, cx), notes.save_failed(id)))
             })
             .collect();
-        let views: Vec<_> = self.tab_views(group).collect();
+        let panes: Vec<_> = self
+            .tab_views(group)
+            .map(|view| view.and_then(|view| self.pane(view)))
+            .collect();
         let tabs: Vec<_> = self
             .group(group)
             .tabs
             .iter()
             .zip(self.tab_titles(group, cx))
             .zip(indicators)
-            .zip(views)
+            .zip(panes)
             .enumerate()
-            .map(|(ix, (((tab, title), indicator), view))| {
+            .map(|(ix, (((tab, title), indicator), pane))| {
                 let entry = TabEntry {
                     id: tab.id(),
                     title,
                     is_active: tab.id() == active,
                     indicator,
-                    view,
+                    pane,
                 };
                 Self::render_tab(strip, ix, entry, cx)
             })
@@ -178,7 +185,7 @@ impl AppShell {
             title,
             is_active,
             indicator,
-            view,
+            pane,
         }: TabEntry,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -218,10 +225,11 @@ impl AppShell {
                     shell.close_tab(group, id, window, cx);
                 }
             }))
-            .map(|tab| match view {
-                Some(view) => tab.on_drag(
+            .map(|tab| match pane {
+                Some(decl) => tab.on_drag(
                     DraggedView {
-                        view,
+                        view: decl.id,
+                        decl,
                         index: ix,
                         group,
                     },

@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{App, Context, Window, actions};
-use inkra_layout::{GroupId, Surface, View};
+use inkra_layout::{GroupId, Surface, ViewId};
 use inkra_tabs::{Closed, Direction, TabId, Way};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
@@ -48,7 +48,7 @@ pub(super) enum Place {
     #[default]
     Empty,
     File(OnFile<ViewState>),
-    View(View),
+    View(ViewId),
 }
 
 impl inkra_tabs::Place for Place {
@@ -137,7 +137,7 @@ impl AppShell {
 
     /// Showing the tab now active saves the note left, through `set_current` or `clear_current`.
     /// A split's only tab takes its group with it (L6); the centre's last refills with an empty tab (L3).
-    /// A view is never closed: its tab moves to its default side's dock.
+    /// A view is never closed: its tab moves to its pane's dock.
     pub(super) fn close_tab(
         &mut self,
         group: GroupId,
@@ -147,7 +147,13 @@ impl AppShell {
     ) {
         let view = self.group(group).views().find(|&(tab, _)| tab == id);
         if let Some((_, view)) = view {
-            self.append(view, view.default_side(), window, cx);
+            // The plain close would push the view onto the closed stack and drop it from the layout.
+            let pane = self.pane(view);
+            debug_assert!(pane.is_some(), "{view:?} has no pane");
+            let Some(pane) = pane else {
+                return;
+            };
+            self.append(view, pane.side, window, cx);
             return;
         }
         let tabs = &self.group(group).tabs;

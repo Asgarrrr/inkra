@@ -5,11 +5,11 @@ use std::cmp::Ordering;
 use gpui::{
     Context, InteractiveElement, IntoElement, Pixels, Point, Render, Styled, Window, div, px,
 };
-use inkra_layout::{GroupId, Side, View};
+use inkra_layout::{GroupId, Side, ViewId};
 
 use super::AppShell;
-use super::docks::{icon, title};
 use super::drop_marker;
+use crate::pane::PaneDecl;
 use crate::theme;
 use crate::ui::IconButton;
 
@@ -22,7 +22,8 @@ const DROP_STRIP_WIDTH: Pixels = px(40.);
 /// drag began.
 #[derive(Clone)]
 pub(super) struct DraggedView {
-    pub(super) view: View,
+    pub(super) view: ViewId,
+    pub(super) decl: &'static PaneDecl,
     pub(super) index: usize,
     pub(super) group: GroupId,
 }
@@ -37,7 +38,7 @@ impl DraggedView {
 
 impl Render for DraggedView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        IconButton::new("dock-view-preview", icon(self.view), title(self.view)).toggled(true)
+        IconButton::new("dock-view-preview", self.decl.icon, self.decl.title).toggled(true)
     }
 }
 

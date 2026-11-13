@@ -7,7 +7,7 @@ use std::sync::Arc;
 use gpui::{
     Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
 };
-use inkra_layout::{Axis, Member, Side, View};
+use inkra_layout::{Axis, Member, Side};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
@@ -16,11 +16,13 @@ use super::dock_menu::{default_docks, docks, side_of};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::{centre, close, editor_in, last, shown_in, tabs_in};
 use super::{check, tab_files};
+use crate::backlinks::BACKLINKS;
 use crate::bootstrap::{Launch, read_session, root};
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
+use crate::shell::FILES;
 use crate::shell::column::Empty;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -386,7 +388,7 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
 }
 
 fn backlinks_left() -> SavedMember {
-    let views = [View::Files, View::Backlinks].map(|view| SavedTab::View {
+    let views = [FILES, BACKLINKS].map(|view| SavedTab::View {
         view: view.name().to_owned(),
     });
     SavedMember::Group(SavedGroup {
@@ -402,7 +404,7 @@ fn a_saved_layout_is_restored(cx: &mut TestAppContext) {
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 
-    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, BACKLINKS), Some(Side::Left));
     assert!(cx.debug_bounds("dock-bar-left").is_some());
 }
 
@@ -414,7 +416,7 @@ fn a_saved_layout_is_drawn_by_the_first_frame(cx: &mut TestAppContext) {
     let (window, mut cx) = launch(cx, &fs);
 
     assert!(cx.debug_bounds("dock-bar-left").is_some());
-    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, BACKLINKS), Some(Side::Left));
 }
 
 /// The restore reuses the session `bootstrap::read_session` read before the window opened.

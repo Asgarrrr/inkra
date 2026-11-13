@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use inkra_layout::{Axis, StoredDock, View, restore_views};
+use inkra_layout::{Axis, Side, StoredDock, ViewId, restore_views};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -178,13 +178,16 @@ impl SavedGroup {
 }
 
 /// Each dock group's views and active index, depth-first, left then right; each view in exactly one.
-pub(crate) fn dock_views(docks: [Option<&SavedMember>; 2]) -> [Vec<(Vec<View>, usize)>; 2] {
+pub(crate) fn dock_views(
+    docks: [Option<&SavedMember>; 2],
+    catalog: &[(ViewId, Side)],
+) -> [Vec<(Vec<ViewId>, usize)>; 2] {
     let stored = docks.map(|dock| {
         dock.map_or_else(Vec::new, |dock| {
             dock.groups().into_iter().map(SavedGroup::stored).collect()
         })
     });
-    restore_views(stored.each_ref().map(Vec::as_slice))
+    restore_views(stored.each_ref().map(Vec::as_slice), catalog)
 }
 
 /// Why a session file restores nothing.

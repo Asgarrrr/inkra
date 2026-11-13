@@ -2,7 +2,7 @@
 //! a group by a drop near its edge (splits spec, P4).
 
 use gpui::{App, Context, DragMoveEvent, Window};
-use inkra_layout::{GroupId, Side, SplitDirection, Surface, View, drop_zone};
+use inkra_layout::{GroupId, Side, SplitDirection, Surface, ViewId, drop_zone};
 use inkra_tabs::{Detached, TabId, Tabs};
 
 use super::dock_drag::DraggedView;
@@ -56,20 +56,22 @@ impl AppShell {
     /// `view`'s tab to `to` at `index`, as `move_tab_to` moves it (docks rules 1 and 2, P4).
     pub(super) fn move_view(
         &mut self,
-        view: View,
+        view: ViewId,
         to: GroupId,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (from, id) = self.tab_of(view);
+        let Some((from, id)) = self.tab_of(view) else {
+            return;
+        };
         self.move_tab_to(from, id, to, index, window, cx);
     }
 
     /// Moves `view` to the end of `side`'s first group, as `move_view` does; to a fresh dock on an empty side.
     pub(super) fn append(
         &mut self,
-        view: View,
+        view: ViewId,
         side: Side,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -79,7 +81,9 @@ impl AppShell {
             return;
         }
         self.change_layout(window, cx, |shell, window, cx| {
-            let (source, tab) = shell.tab_of(view);
+            let Some((source, tab)) = shell.tab_of(view) else {
+                return;
+            };
             let detached = shell.detach(source, tab, window, cx);
             let group = shell.layout.add_dock(side);
             shell.attach_alone(detached, group, window, cx);
@@ -93,7 +97,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (group, tab) = self.tab_of(view);
+        let Some((group, tab)) = self.tab_of(view) else {
+            return;
+        };
         if self.group(group).tabs.count() >= 2 {
             self.split_off((group, tab), group, direction, window, cx);
         }
@@ -109,12 +115,15 @@ impl AppShell {
     /// `view` to the end of `group`, counted after it left (`move_tab_to`'s rule).
     pub(super) fn drop_view_at_end(
         &mut self,
-        view: View,
+        view: ViewId,
         group: GroupId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let index = self.group(group).tabs.count() - usize::from(self.tab_of(view).0 == group);
+        let Some((from, _)) = self.tab_of(view) else {
+            return;
+        };
+        let index = self.group(group).tabs.count() - usize::from(from == group);
         self.move_view(view, group, index, window, cx);
     }
 
@@ -239,7 +248,9 @@ impl AppShell {
     ) -> impl Fn(&DragMoveEvent<DraggedView>, &mut Window, &mut App) + 'static {
         cx.listener(
             move |shell, event: &DragMoveEvent<DraggedView>, window, cx| {
-                let (from, _) = shell.tab_of(event.drag(cx).view);
+                let Some((from, _)) = shell.tab_of(event.drag(cx).view) else {
+                    return;
+                };
                 let splits = shell.may_split(group, from)
                     && !shell.drop_strip_hit()(event.event.position, window);
                 shell.track_drop(group, splits, event, window, cx);
@@ -314,7 +325,9 @@ impl AppShell {
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
             if let Some(direction) = shell.group_mut(group).drop_split.take() {
-                let tab = shell.tab_of(dragged.view);
+                let Some(tab) = shell.tab_of(dragged.view) else {
+                    return;
+                };
                 shell.split_off(tab, group, direction, window, cx);
             } else if dragged.group != group {
                 shell.drop_view_at_end(dragged.view, group, window, cx);
