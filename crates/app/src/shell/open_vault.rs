@@ -18,6 +18,7 @@ use crate::bootstrap::{self, Launch, build_shell, vault_launch, vault_root};
 use crate::feature::Registry;
 use crate::last_vault;
 use crate::restore::Opened;
+use crate::settings::Switches;
 use crate::theme::store::{self, Resolved};
 use crate::timeline::Timeline;
 use crate::vault::NoteStore;
@@ -126,7 +127,14 @@ impl AppShell {
             // Before the replace, while the old store lives: it copies out text typed during the leave.
             let left = left.then(notes.update(cx, NoteStore::flush_all), window, cx);
             // The new vault's switches, not the old shell's: a shell never builds a feature its vault disables.
-            let features = Registry::new(catalog, &ready.resolved.features);
+            let features = Registry::new(
+                catalog,
+                ready
+                    .resolved
+                    .features
+                    .as_ref()
+                    .unwrap_or(&Switches::default()),
+            );
             let shell = window.replace_root(cx, |window, cx| {
                 build_shell(fs, ready.launched, ready.opened, left, features, window, cx)
             });

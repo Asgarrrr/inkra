@@ -47,7 +47,7 @@ pub(crate) struct Resolved {
     /// `None` follows the system.
     pub(crate) theme: Option<Arc<Theme>>,
     pub(crate) code_block_wrap: bool,
-    pub(crate) features: Switches,
+    pub(crate) features: Option<Switches>,
     pub(crate) notices: Vec<String>,
 }
 

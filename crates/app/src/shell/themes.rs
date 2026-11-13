@@ -43,7 +43,9 @@ impl AppShell {
                 .await;
             shell
                 .update(cx, |shell, cx| {
-                    shell.apply_switches(&resolved.features, cx);
+                    if let Some(switches) = &resolved.features {
+                        shell.apply_switches(switches, cx);
+                    }
                     if shell.themes.picks() == picks {
                         shell.adopt_theme(resolved, cx);
                     }

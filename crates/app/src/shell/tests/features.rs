@@ -204,3 +204,15 @@ fn a_theme_pick_keeps_a_switch_reload_in_flight(cx: &mut TestAppContext) {
 
     assert!(!names_ping(window, &mut visual));
 }
+
+#[gpui::test]
+fn a_broken_settings_file_keeps_the_switches(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = ping_shell(cx);
+    switch_ping(&fs, false, &mut visual);
+    assert!(!names_ping(window, &mut visual));
+
+    fs.insert_file(SETTINGS, "{");
+    visual.run_until_parked();
+
+    assert!(!names_ping(window, &mut visual));
+}
