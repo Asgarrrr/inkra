@@ -232,6 +232,27 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
     assert_ne!(buffer.version(), Version::default());
 }
 
+#[test]
+fn undo_and_redo_increase_the_edit_mark() {
+    let mut buffer = Buffer::new("abc");
+    let start = buffer.edit_mark();
+    assert_eq!(start, EditMark::default());
+    buffer.transact(|buffer| buffer.insert(at(3), "x"));
+    let edited = buffer.edit_mark();
+    buffer.undo();
+    let undone = buffer.edit_mark();
+    buffer.redo();
+    let redone = buffer.edit_mark();
+    assert!(start < edited && edited < undone && undone < redone);
+
+    buffer.transact(|_| {});
+    assert_eq!(
+        buffer.edit_mark(),
+        redone,
+        "an empty transaction edits nothing"
+    );
+}
+
 /// Regression pin: `close` merges by extending the previous transaction, so its id must live
 /// on the edit, not the transaction — else a merged edit would report "saved" over unsaved text.
 #[test]

@@ -8,10 +8,13 @@ mod anchors;
 mod graphemes;
 mod history;
 mod lines;
+mod log;
 mod utf16;
 
 use history::Transaction;
 pub use history::{GROUP_INTERVAL, Txn, Version};
+pub use log::EditMark;
+use log::SpliceLog;
 use utf16::utf16_len;
 
 pub struct Buffer {
@@ -24,6 +27,7 @@ pub struct Buffer {
     anchors: Vec<Option<AnchorState>>,
     /// The last conversion's answer; the next walks only from here.
     utf16: Cell<(ByteOffset, Utf16Offset)>,
+    log: SpliceLog,
 }
 
 impl Buffer {
@@ -36,6 +40,7 @@ impl Buffer {
             next_edit_id: 1,
             anchors: Vec::new(),
             utf16: Cell::new((ByteOffset::default(), Utf16Offset::default())),
+            log: SpliceLog::default(),
         }
     }
 
@@ -61,6 +66,11 @@ impl Buffer {
         self.text.is_empty()
     }
 
+    #[must_use]
+    pub fn edit_mark(&self) -> EditMark {
+        self.log.mark()
+    }
+
     /// The one text mutation, so the anchors and the UTF-16 checkpoint follow every edit.
     fn splice(&mut self, at: ByteOffset, removed: &str, inserted: &str) {
         let (byte, utf16) = self.utf16.get();
@@ -77,6 +87,7 @@ impl Buffer {
         }
         self.text.replace_range(at.get()..end.get(), inserted);
         self.shift_anchors(at, removed.len(), inserted.len());
+        self.log.push();
     }
 }
 

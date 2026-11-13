@@ -6,6 +6,7 @@ use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
 use super::{BlockScrolls, Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
+use crate::decorations::Drawn;
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
 use crate::text_input::painted_caret;
@@ -171,6 +172,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
                 code_block_wrap: false,
                 theme: builtin::dark(),
                 scrolls: &BlockScrolls::default(),
+                decorations: Drawn::default(),
             };
             let layout = shape_document(&inputs, None, window);
 

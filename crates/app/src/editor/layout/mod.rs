@@ -30,6 +30,7 @@ use inkra_text::{Bias, Buffer, ByteOffset, Version};
 use prefix::Prefix;
 use shape::{LineShape, reads_margin};
 
+use crate::decorations::Drawn;
 use crate::theme::Theme;
 
 const NEWLINE_STUB: f32 = 0.25;
@@ -79,6 +80,7 @@ pub(crate) struct LayoutInputs<'a> {
     pub(crate) theme: &'a Arc<Theme>,
     /// Read live, never compared: a scroll reshapes nothing.
     pub(crate) scrolls: &'a BlockScrolls,
+    pub(crate) decorations: Drawn<'a>,
 }
 
 /// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
@@ -100,7 +102,8 @@ pub(crate) struct DocumentLayout {
     code_block_wrap: bool,
     /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
     theme: Arc<Theme>,
-    version: Version,
+    /// The buffer's version and the decorations' revision.
+    shaped_at: (Version, u64),
     selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
     scrolls: BlockScrolls,
@@ -126,7 +129,7 @@ impl DocumentLayout {
     /// Whether `shape_document` would give this layout back. The selection counts only
     /// through the elements it reveals, so a caret move within the same ones reuses it.
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
-        self.version == inputs.buffer.version()
+        self.shaped_at == (inputs.buffer.version(), inputs.decorations.revision)
             && self.wrap_width == inputs.wrap_width
             && (self.margin == inputs.margin
                 || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
@@ -154,6 +157,13 @@ impl DocumentLayout {
     #[cfg(test)]
     pub(crate) fn shown(&self, line: usize) -> &str {
         &self.lines[line].shape.wrapped.text
+    }
+
+    /// Each run of line `line`: its length in shown bytes and its colour.
+    #[cfg(test)]
+    pub(crate) fn run_colors(&self, line: usize) -> Vec<(usize, gpui::Hsla)> {
+        let runs = &self.lines[line].shape.runs;
+        runs.iter().map(|run| (run.len, run.color)).collect()
     }
 
     #[cfg(test)]

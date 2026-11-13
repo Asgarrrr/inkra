@@ -12,6 +12,7 @@ use inkra_editor::Selection;
 use inkra_markdown::Markdown;
 use inkra_text::{Buffer, ByteOffset};
 
+use crate::decorations::Drawn;
 use crate::editor::layout::{BlockScrolls, LayoutInputs, shape_document};
 use crate::text_input::{self, FIELD_CONTEXT, InputHost, Mode, Prepainted, Quads, TextInput};
 use crate::theme;
@@ -172,6 +173,7 @@ impl Element for FieldElement {
             code_block_wrap: false,
             theme: theme::current(cx),
             scrolls: &BlockScrolls::default(),
+            decorations: Drawn::default(),
         };
         let layout = shape_document(&inputs, None, window);
         let (caret, end) = (layout.caret_bounds(head), layout.caret_bounds(len).right());

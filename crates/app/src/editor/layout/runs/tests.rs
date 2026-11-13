@@ -5,6 +5,7 @@ use inkra_markdown::{DisplayLine, parse};
 use inkra_text::ByteOffset;
 
 use super::{RunStyles, line_runs};
+use crate::decorations::Drawn;
 use crate::theme::builtin::dark;
 
 fn range(start: usize, end: usize) -> Range<ByteOffset> {
@@ -20,7 +21,7 @@ fn runs_follow_the_spans_and_cover_the_line() {
     let text = "a **b** c";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base, dark());
+    let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(0, text.len());
     let display = DisplayLine::new(line.clone(), []);
@@ -39,7 +40,7 @@ fn a_composition_inside_bold_stays_bold_and_gains_the_underline() {
     let text = "a **b** c";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base, dark());
+    let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(0, text.len());
     let display = DisplayLine::new(line.clone(), []);
@@ -60,7 +61,7 @@ fn runs_are_indexed_from_the_line_start() {
     let text = "ab\n**c**";
     let spans = parse(text).spans;
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base, dark());
+    let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(3, 8);
     let display = DisplayLine::new(line.clone(), []);
@@ -73,7 +74,7 @@ fn runs_are_indexed_from_the_line_start() {
 #[test]
 fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base, dark());
+    let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     for (line, expected) in [(range(0, 5), vec![5]), (range(4, 4), vec![0])] {
         let display = DisplayLine::new(line.clone(), []);
@@ -87,7 +88,7 @@ fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
 #[test]
 fn a_stale_span_past_the_line_is_clipped_not_fatal() {
     let base = TextStyle::default();
-    let mut styles = RunStyles::new(&base, dark());
+    let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
     let spans = parse("**long bold text**").spans;
 
     let line = range(0, 4);

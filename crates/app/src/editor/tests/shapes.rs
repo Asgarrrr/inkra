@@ -7,6 +7,7 @@ use gpui::{Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude:
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{at, dispatching, window_on, with_editor};
+use crate::decorations::Drawn;
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
@@ -84,6 +85,7 @@ pub(super) fn shape(
         code_block_wrap: false,
         theme: builtin::dark(),
         scrolls: &BlockScrolls::default(),
+        decorations: Drawn::default(),
     };
     shape_document(&inputs, previous, window)
 }
@@ -237,6 +239,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap: false,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             // `last_layout` still holds the end-of-document caret the window opened with.
@@ -261,6 +264,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap: false,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             assert!(!other(&bigger), "another style");
@@ -277,6 +281,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             assert!(other_wrap(false), "the same code block wrap");

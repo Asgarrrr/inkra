@@ -10,6 +10,7 @@ mod reload;
 mod swap;
 #[cfg(test)]
 mod tests;
+mod view_state;
 mod viewport;
 
 use std::ops::Range;
@@ -24,8 +25,9 @@ use gpui::{
 };
 use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
-use inkra_text::{Bias, Buffer, ByteOffset, Version};
+use inkra_text::{Buffer, ByteOffset, Version};
 
+use crate::decorations;
 use crate::open::Open;
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
@@ -33,6 +35,7 @@ use element::TextElement;
 use viewport::{Reveal, Viewport};
 
 pub(crate) use parked::ParkedView;
+pub(crate) use view_state::ViewState;
 pub(crate) use viewport::TopLine;
 
 /// A link the user asked to follow: ⌘-click or ⌘↵ here, ⌘⇧-click or ⌘⇧↵ in a new tab.
@@ -43,29 +46,6 @@ pub(crate) struct LinkFollowed {
 }
 
 impl EventEmitter<LinkFollowed> for EditorView {}
-
-/// What a tab puts back on its note: the selection and the text on top (tabs spec, A2).
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ViewState {
-    pub(crate) selection: Selection,
-    pub(crate) top: TopLine,
-    /// Each scrolled block's start and offset; never saved to disk.
-    pub(crate) scrolls: Vec<(ByteOffset, Pixels)>,
-}
-
-impl ViewState {
-    /// Onto `buffer`'s graphemes, tail then head, so direction and goal survive.
-    fn clipped(self, buffer: &Buffer) -> Self {
-        let clip = |offset| buffer.clip_grapheme(offset, Bias::Left);
-        let mut selection = Selection::at(clip(self.selection.tail()));
-        selection.set_head(clip(self.selection.head()), self.selection.goal());
-        Self {
-            selection,
-            top: self.top.clipped(buffer),
-            scrolls: self.scrolls,
-        }
-    }
-}
 
 pub(crate) struct EditorView {
     input: TextInput,
@@ -260,6 +240,7 @@ impl EditorView {
             code_block_wrap: theme::code_block_wrap(cx),
             theme: theme::current(cx),
             scrolls: &self.scrolls,
+            decorations: decorations::drawn(self.input.buffer(), cx),
         };
         let previous = self.input.last_layout();
         match previous.filter(|layout| layout.is_shaped_from(&inputs)) {

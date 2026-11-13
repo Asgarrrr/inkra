@@ -17,6 +17,7 @@ mod code_block_scroll;
 mod code_block_wrap;
 mod code_blocks;
 mod conceal;
+mod decorations;
 mod dispatch;
 mod drag;
 mod follow;

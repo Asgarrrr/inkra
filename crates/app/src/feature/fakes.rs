@@ -10,6 +10,7 @@ use gpui::{
 use inkra_layout::{Side, ViewId};
 
 use super::{CommandDecl, FeatureId, Manifest};
+use crate::decorations::{LayerDecl, LayerId};
 use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::shell::Activation;
 use crate::ui::IconName;
@@ -135,6 +136,10 @@ pub(crate) static PANE_FAKE: Manifest = Manifest {
     buttons: &[],
     activate: activate_pane,
 };
+
+pub(crate) const TODO_LAYER: LayerId = LayerId::new(FeatureId::new("todo_fake"), "todo");
+
+pub(crate) static TODO_DECL: LayerDecl = LayerDecl { id: TODO_LAYER };
 
 pub(crate) static CATALOG: &[&Manifest] = &[&PING_FAKE];
 pub(crate) static EAGER_CATALOG: &[&Manifest] = &[&EAGER_FAKE];
