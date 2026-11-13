@@ -8,17 +8,14 @@ use gpui::{
 use inkra_layout::{GroupId, Side, SplitPath, Surface, ViewId};
 
 use super::dock_drag::DraggedView;
-use super::docks::{FILES, FILES_PANE, ToggleLeftDock, ToggleRightDock};
+use super::docks::{ToggleLeftDock, ToggleRightDock};
 use super::drop_marker;
 use super::group::selector;
 use super::members::Slot;
 use super::{AppShell, LEFT_DOCK_WIDTH, RIGHT_DOCK_WIDTH};
-use crate::backlinks::{BACKLINKS, BACKLINKS_PANE};
-use crate::pane::PaneDecl;
-use crate::sidebar::{NewFolder, NewNote};
+use crate::pane::{PaneDecl, PaneHeader};
 use crate::theme;
 use crate::ui::{IconButton, IconName, PanelHeader, Tooltip, h_flex, keep_focus, lower_header};
-use crate::vault_search::SearchVault;
 
 pub(super) fn name(side: Side) -> &'static str {
     match side {
@@ -126,59 +123,43 @@ impl AppShell {
         Self::group_column(base, (slot, path), k, header, rows, body, cx)
     }
 
-    /// What `view` draws under its header; `None` with no vault.
+    /// What `view` draws under its header: an empty body until its feature registers it; `None` with no vault.
     pub(super) fn render_view_body(&self, view: ViewId) -> Option<AnyElement> {
         let panes = self.panes.as_ref()?;
-        match view {
-            FILES => Some(panes.sidebar.clone().into_any_element()),
-            BACKLINKS => Some(panes.backlinks.clone().into_any_element()),
-            _ => None,
-        }
+        Some(match panes.entries.get(&view) {
+            Some(entry) => entry.view().into_any_element(),
+            None => div().into_any_element(),
+        })
     }
 
     /// The view's own first row. A press keeps the focus, as every header's does.
-    pub(super) fn render_view_header(
-        &self,
-        view: ViewId,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        match view {
-            FILES => Some(
-                PanelHeader::bar(FILES_PANE.header_id)
-                    .child(
-                        IconButton::new("sidebar-new-note", IconName::PenLine, "New note")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.new_note(&NewNote, window, cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("sidebar-new-folder", IconName::FolderPlus, "New folder")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.new_folder(&NewFolder, window, cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("sidebar-search", IconName::Search, "Search vault")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.search_vault(&SearchVault, window, cx);
-                            })),
-                    )
-                    .on_mouse_down(MouseButton::Left, keep_focus)
-                    .into_any_element(),
-            ),
-            BACKLINKS => Some(
-                PanelHeader::new(BACKLINKS_PANE.header_id, BACKLINKS_PANE.title)
-                    .when_some(
-                        self.panes
-                            .as_ref()
-                            .and_then(|panes| panes.backlinks.read(cx).count()),
-                        PanelHeader::count,
-                    )
-                    .on_mouse_down(MouseButton::Left, keep_focus)
-                    .into_any_element(),
-            ),
-            _ => None,
-        }
+    pub(super) fn render_view_header(&self, view: ViewId, cx: &App) -> Option<AnyElement> {
+        let decl = self.pane(view)?;
+        let header = self
+            .pane_entry(view)
+            .map_or(PaneHeader::Title { count: None }, |entry| entry.header(cx));
+        let header = match header {
+            PaneHeader::Title { count } => {
+                PanelHeader::new(decl.header_id, decl.title).when_some(count, PanelHeader::count)
+            }
+            PaneHeader::Buttons(buttons) => {
+                buttons
+                    .iter()
+                    .fold(PanelHeader::bar(decl.header_id), |header, button| {
+                        let action = button.action;
+                        header.child(
+                            IconButton::new(button.id, button.icon, button.tooltip).on_click(
+                                move |_, window, cx| window.dispatch_action(action(), cx),
+                            ),
+                        )
+                    })
+            }
+        };
+        Some(
+            header
+                .on_mouse_down(MouseButton::Left, keep_focus)
+                .into_any_element(),
+        )
     }
 
     /// Dock group `k`'s view icons; `None` when the dock is not drawn.

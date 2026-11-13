@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{Context, Entity, EventEmitter, SharedString, Subscription, actions};
+use gpui::{App, Context, Entity, EventEmitter, SharedString, Subscription, actions};
 use inkra_index::{Backlink, Failures, Slot};
 use inkra_layout::{Side, ViewId};
 use inkra_vault::{EntryId, Vault};
@@ -10,7 +10,7 @@ use inkra_vault::{EntryId, Vault};
 use crate::index::{IndexSync, IndexWatch, NotesChanged};
 use crate::one_line::one_line;
 use crate::open::FileActivated;
-use crate::pane::{PaneDecl, boxed};
+use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::row_text::LitText;
 use crate::ui::IconName;
 
@@ -230,5 +230,13 @@ fn occurrences(backlink: &Backlink, slot: Option<&Slot>) -> Vec<Occurrence> {
                 link: LitText::default(),
             })
             .collect(),
+    }
+}
+
+impl Pane for BacklinksPanel {
+    fn header(&self, _: &App) -> PaneHeader {
+        PaneHeader::Title {
+            count: self.count(),
+        }
     }
 }

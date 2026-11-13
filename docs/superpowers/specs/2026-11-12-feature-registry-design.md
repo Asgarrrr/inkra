@@ -263,6 +263,13 @@ Header buttons dispatch actions; they no longer call shell methods through
 actions. `SearchVault` becomes a feature action, so its button renders only while
 `window.is_action_available` says so.
 
+As built, `PaneHeader` is an enum: `Title { count }` for a titled header, or
+`Buttons(&'static [HeaderButton])` for a bar of buttons, as Files draws today. The
+`SearchVault` gate is deferred. `SearchVault` is still a core action, so the button
+always renders; the gate comes with the slice that moves vault search onto the
+registry. `Pane` also has `shown`, the pair of `hidden`, which the shell calls
+when a registered pane starts showing.
+
 `PaneDecl` also carries the pane's move action, which `open_dock_menu` builds by
 `match view` today (`shell/docks.rs:99-102`), and its debug selector
 (`dock-icon-<id>`, which tests already use). The move action activates nothing: it
@@ -410,6 +417,20 @@ Switching a feature off runs, in order:
 `tab_of` returns an `Option`, and so do its three callers. The workspace invariant
 and the restore defaults iterate the enabled catalog, not `View::ALL`. Switching a
 feature back on puts its panes in their manifest's default dock, last, inactive.
+
+As built, step 3 calls `detach` on each of the feature's tabs, and step 4 needs no
+`inkra-tabs` API. Four facts make this enough:
+
+- `close_tab` is wrong here: it sends a view tab to its dock before `tabs.close`
+  runs, so the pane would survive in its dock;
+- `remember` skips a blank entry, so the closed stack never holds a view;
+- an inactive `Parked::View` slot is the pane's own tab, which `detach` removes;
+- `Tabs::take`, which `detach` calls, leaves the closed stack alone.
+
+`Parked` lives at `crates/app/src/shell/parked.rs:18`, not
+`crates/tabs/src/parked.rs:18` as step 4 says. Switching a feature back on appends
+each pane last and inactive to its side's first dock group, or to one new dock
+group. The dock stays shown or hidden as it was.
 
 Tests, each a `#[gpui::test]` on `MemFs`:
 

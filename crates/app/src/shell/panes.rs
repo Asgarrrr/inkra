@@ -1,15 +1,18 @@
 //! The shell's vault-mode half: the panes that have no meaning without a vault.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui::{AppContext as _, Context, Entity, Subscription, Window};
+use inkra_layout::ViewId;
 use inkra_vault::{Departures, Vault};
 
-use super::AppShell;
-use crate::backlinks::BacklinksPanel;
+use super::{AppShell, FILES};
+use crate::backlinks::{BACKLINKS, BacklinksPanel};
 use crate::images::Images;
 use crate::index::IndexSync;
 use crate::open::FileActivated;
+use crate::pane::PaneEntry;
 use crate::sidebar::Sidebar;
 use crate::vault::NoteStore;
 
@@ -20,6 +23,8 @@ pub(super) struct VaultPanes {
     pub(super) sidebar: Entity<Sidebar>,
     pub(super) backlinks: Entity<BacklinksPanel>,
     pub(super) images: Entity<Images>,
+    /// Each registered pane: the core two from the start, a feature's once it activates.
+    pub(super) entries: HashMap<ViewId, PaneEntry>,
     /// The vault's `departures` at the last walk of the tabs for gone files; `None` before the first.
     pub(super) checked: Option<Departures>,
     /// The two panes' `FileActivated`, the vault (tab titles, the session file and a waiting
@@ -56,12 +61,17 @@ impl VaultPanes {
             }),
             cx.observe(&images, |_, _, cx| cx.notify()),
         ];
+        let entries = HashMap::from([
+            (FILES, PaneEntry::new(sidebar.clone())),
+            (BACKLINKS, PaneEntry::new(backlinks.clone())),
+        ]);
         Self {
             vault,
             links,
             sidebar,
             backlinks,
             images,
+            entries,
             checked: None,
             _subscriptions: subscriptions,
         }

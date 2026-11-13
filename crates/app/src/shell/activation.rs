@@ -12,7 +12,7 @@ use inkra_vault::EntryId;
 use super::group::Group;
 use super::surface::Landing;
 use super::tabs::{Place, capture};
-use super::{AppShell, Bound, FILES, Shown, remember};
+use super::{AppShell, Bound, Shown, remember};
 use crate::editor::{EditorView, LinkFollowed, ViewState};
 use crate::file_kind::FileKind;
 use crate::open::Open;
@@ -149,13 +149,12 @@ impl AppShell {
         }
     }
 
-    /// The note's handle to focus now, or the tree's if the active group shows Files; `None` while a
-    /// picker keeps the keys typed into it, until its dismissal lands there.
+    /// The note's handle to focus now, or the pane's if the active group shows one that focuses; `None`
+    /// while a picker keeps the keys typed into it, until its dismissal lands there.
     fn focus_target(&mut self, cx: &App) -> Option<FocusHandle> {
-        let tree = (self.center().shown.view() == Some(FILES))
-            .then(|| self.tree_focus(cx))
-            .flatten();
-        let focus = tree.unwrap_or_else(|| self.focus_handle(cx));
+        let pane = self.center().shown.view();
+        let pane = pane.and_then(|view| self.pane_focus(view, cx));
+        let focus = pane.unwrap_or_else(|| self.focus_handle(cx));
         match &mut self.modal {
             Some(modal) => {
                 modal.restore_to(focus);

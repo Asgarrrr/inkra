@@ -10,7 +10,6 @@ use super::AppShell;
 use super::dock_drag::SHELL_GROUP;
 use super::members::Slot;
 use crate::index::{IndexSync, RebuildIndex};
-use crate::pane::CORE_PANES;
 
 impl AppShell {
     /// Under the title row: the left dock, the centre and the right dock.
@@ -100,7 +99,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::toggle_left_dock))
             .on_action(cx.listener(Self::toggle_right_dock))
             .map(|root| {
-                CORE_PANES.iter().fold(root, |root, pane| {
+                self.pane_decls().fold(root, |root, pane| {
                     let id = pane.id;
                     root.on_boxed_action(
                         &*(pane.move_action)(),

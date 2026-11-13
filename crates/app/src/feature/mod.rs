@@ -2,6 +2,7 @@
 
 use gpui::{Action, KeyBinding};
 
+use crate::pane::PaneDecl;
 use crate::quick_open;
 use crate::shell::FeatureCx;
 
@@ -33,6 +34,8 @@ pub(crate) struct Manifest {
     /// Activates once the shell's first frame is drawn, rather than on its first command.
     pub(crate) after_first_frame: bool,
     pub(crate) commands: &'static [CommandDecl],
+    /// Docked like the core panes; the feature registers each one's view when it activates.
+    pub(crate) panes: &'static [&'static PaneDecl],
     pub(crate) activate: fn(&mut FeatureCx),
 }
 

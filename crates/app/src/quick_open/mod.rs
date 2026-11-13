@@ -39,6 +39,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     default_on: true,
     after_first_frame: false,
     commands: &[CommandDecl::new::<QuickOpen>(&["cmd-p"])],
+    panes: &[],
     activate,
 };
 

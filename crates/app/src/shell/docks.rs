@@ -51,12 +51,13 @@ impl AppShell {
         self.toggle_dock(Side::Right, window, cx);
     }
 
-    #[expect(
-        clippy::unused_self,
-        reason = "the feature registry slice reads the shell's own panes here"
-    )]
+    /// The core panes, then each enabled feature's.
+    pub(super) fn pane_decls(&self) -> impl Iterator<Item = &'static PaneDecl> + '_ {
+        CORE_PANES.iter().copied().chain(self.features.panes())
+    }
+
     pub(super) fn pane(&self, view: ViewId) -> Option<&'static PaneDecl> {
-        CORE_PANES.iter().copied().find(|pane| pane.id == view)
+        self.pane_decls().find(|pane| pane.id == view)
     }
 
     pub(super) fn move_to_other_dock(

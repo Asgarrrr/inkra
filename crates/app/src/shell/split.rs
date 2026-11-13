@@ -1,12 +1,12 @@
 //! The `⌘K` keys: a split in each direction, and focus to the neighbour (splits spec, P3).
 
-use gpui::{App, Context, FocusHandle, Focusable, Window, actions};
-use inkra_layout::{Axis, GroupId, SplitDirection, Surface};
+use gpui::{App, Context, FocusHandle, Window, actions};
+use inkra_layout::{Axis, GroupId, SplitDirection, Surface, ViewId};
 
 use super::docks::SplitView;
 use super::group::Group;
 use super::tabs::{Place, capture};
-use super::{AppShell, FILES, Shown};
+use super::{AppShell, Shown};
 
 actions!(
     pane,
@@ -110,22 +110,24 @@ impl AppShell {
         self.activate_pane(SplitDirection::Down, window, cx);
     }
 
-    /// The Files dock group while the tree holds focus, else `last_center`: no field stores it.
+    /// The group of the pane holding focus, else `last_center`: no field stores it.
     fn active_group(&self, window: &Window, cx: &App) -> GroupId {
-        if self
-            .tree_focus(cx)
-            .is_some_and(|tree| tree.contains_focused(window, cx))
-        {
-            self.tab_of(FILES)
-                .map_or_else(|| self.layout.last_center(), |(group, _)| group)
-        } else {
-            self.layout.last_center()
-        }
+        self.panes
+            .as_ref()
+            .and_then(|panes| {
+                panes.entries.iter().find(|(_, entry)| {
+                    entry
+                        .focus(cx)
+                        .is_some_and(|focus| focus.contains_focused(window, cx))
+                })
+            })
+            .and_then(|(&view, _)| self.tab_of(view))
+            .map_or_else(|| self.layout.last_center(), |(group, _)| group)
     }
 
-    pub(super) fn tree_focus(&self, cx: &App) -> Option<FocusHandle> {
-        let panes = self.panes.as_ref()?;
-        Some(panes.sidebar.read(cx).focus_handle(cx))
+    /// The handle `view`'s pane focuses; `None` for a pane with none, or not registered.
+    pub(super) fn pane_focus(&self, view: ViewId, cx: &App) -> Option<FocusHandle> {
+        self.pane_entry(view)?.focus(cx)
     }
 
     /// A view moves out as its menu splits it: off a group it shares, with room for both. A
@@ -201,11 +203,9 @@ impl AppShell {
                 self.land_focus(window, cx);
             }
             Surface::Dock(_) => {
-                let tree = (self.group(to).shown.view() == Some(FILES))
-                    .then(|| self.tree_focus(cx))
-                    .flatten();
-                if let Some(tree) = tree {
-                    window.focus(&tree, cx);
+                let focus = self.group(to).shown.view();
+                if let Some(focus) = focus.and_then(|view| self.pane_focus(view, cx)) {
+                    window.focus(&focus, cx);
                 }
             }
         }

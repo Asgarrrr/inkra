@@ -5,12 +5,16 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{Action, AppContext as _, Context, Entity, EventEmitter, KeyContext, Window};
+use inkra_layout::ViewId;
 use inkra_vault::EntryId;
 
 use super::AppShell;
+use super::group::Group;
+use super::parked::Parked;
 use crate::feature::{FeatureHandle, FeatureId, Registry, Slot};
 use crate::index::IndexSync;
 use crate::open::Open;
+use crate::pane::{Pane, PaneDecl, PaneEntry};
 use crate::picker::{Picker, PickerDelegate};
 use crate::settings::Switches;
 use crate::timeline::{Step, Timeline};
@@ -74,6 +78,34 @@ impl FeatureCx<'_, '_> {
         f: impl FnOnce(&mut T, &mut Context<T>) -> R,
     ) -> R {
         entity.update(self.cx, f)
+    }
+
+    /// `entity` draws `view`, one of this feature's panes, until the feature switches off.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no built-in feature holds an entity before backlinks"
+        )
+    )]
+    pub(crate) fn register_pane<T: Pane>(&mut self, view: ViewId, entity: Entity<T>) {
+        debug_assert!(
+            self.shell
+                .features
+                .manifest(self.feature)
+                .panes
+                .iter()
+                .any(|pane| pane.id == view),
+            "{view:?} is not a pane of {}",
+            self.feature.name()
+        );
+        let entry = PaneEntry::new(entity);
+        if !self.shell.is_visible(view) {
+            entry.hidden(self.cx);
+        }
+        if let Some(panes) = &mut self.shell.panes {
+            panes.entries.insert(view, entry);
+        }
     }
 
     /// `None` with no vault: `expect_used` is denied, so the type says it.
@@ -141,7 +173,17 @@ impl AppShell {
     fn launch_features(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Timeline::mark(Step::Registry, cx);
         self.features.launch();
+        for view in self.visible_views() {
+            self.wake_pane(view, window, cx);
+        }
         self.activate_due(window, cx);
+    }
+
+    /// Activates the dormant feature whose pane `view` is, once that pane shows (spec D6).
+    pub(super) fn wake_pane(&mut self, view: ViewId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.features.dormant_owner(view) {
+            self.activate(id, window, cx);
+        }
     }
 
     fn activate_due(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -239,8 +281,8 @@ impl AppShell {
         context
     }
 
-    /// A feature switched off closes its modal before its handle drops; one switched on after
-    /// the launch activates now if it waits for the first frame.
+    /// A feature switched off closes its modal and its panes' tabs before its handle drops; one
+    /// switched on puts its panes back, inactive, and activates now if it waits for the first frame.
     pub(super) fn apply_switches(
         &mut self,
         switches: &Switches,
@@ -251,8 +293,16 @@ impl AppShell {
         if replaced.is_empty() {
             return;
         }
-        // `_old` drops at the end of its turn, after the modal: a feature's handle goes last.
-        for (id, _old) in replaced {
+        for (id, old) in replaced {
+            let panes = self.features.manifest(id).panes;
+            if matches!(old, Slot::Off) {
+                self.change_layout(window, cx, |shell, _, cx| {
+                    for &pane in panes {
+                        shell.return_pane(pane, cx);
+                    }
+                });
+                continue;
+            }
             if self
                 .modal
                 .as_ref()
@@ -260,8 +310,38 @@ impl AppShell {
             {
                 self.dismiss_modal(window, cx);
             }
+            // Not `close_tab`: it sends a view tab back to its dock (spec D9).
+            self.change_layout(window, cx, |shell, window, cx| {
+                for pane in panes {
+                    if let Some((group, tab)) = shell.tab_of(pane.id) {
+                        drop(shell.detach(group, tab, window, cx));
+                    }
+                }
+            });
+            if let Some(vault) = &mut self.panes {
+                for pane in panes {
+                    vault.entries.remove(&pane.id);
+                }
+            }
+            // The handle goes last: its entities outlive their modal and their tabs.
+            drop(old);
         }
         self.activate_due(window, cx);
         cx.notify();
+    }
+
+    /// `pane` last and inactive in its side's first dock group, or alone in a new one; the dock
+    /// stays shown or hidden as it was.
+    fn return_pane(&mut self, pane: &PaneDecl, cx: &mut Context<Self>) {
+        let Some(&group) = self.layout.dock_groups(pane.side).first() else {
+            let group = self.layout.add_dock(pane.side);
+            self.groups.insert(group, Group::holding(&[pane.id], 0));
+            return;
+        };
+        let Group { tabs, shown, .. } = self.group_mut(group);
+        let active = tabs.active();
+        tabs.insert(tabs.count(), || Parked::park(shown, cx));
+        // `shown` never left the active tab: the copy parked for it drops.
+        drop(tabs.activate(active, || Parked::View(pane.id)));
     }
 }

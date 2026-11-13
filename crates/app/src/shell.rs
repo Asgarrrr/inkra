@@ -135,8 +135,11 @@ impl AppShell {
             .map_or((None, None), |Opened { file, session }| {
                 (Some(file), session)
             });
-        let (layout, mut groups, pending) =
-            Self::restored_groups(read, &sides(CORE_PANES.iter().copied()));
+        let features = Self::vault_features(features, notes.read(cx).vault().is_some());
+        let (layout, mut groups, pending) = Self::restored_groups(
+            read,
+            &sides(CORE_PANES.iter().copied().chain(features.panes())),
+        );
         let panes = notes
             .read(cx)
             .vault()
@@ -199,7 +202,6 @@ impl AppShell {
                 },
             );
         }
-        let features = Self::vault_features(features, panes.is_some());
         let shell = Self {
             layout,
             groups,

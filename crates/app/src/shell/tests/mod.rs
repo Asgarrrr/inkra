@@ -54,6 +54,7 @@ mod notices;
 mod open;
 mod open_first;
 mod open_vault;
+mod pane_features;
 mod pane_keys;
 mod parked;
 mod quick_open;

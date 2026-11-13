@@ -4,8 +4,10 @@ use std::any::TypeId;
 use std::rc::Rc;
 
 use gpui::{Action, AnyEntity};
+use inkra_layout::ViewId;
 
 use super::{BUILTIN, FeatureId, Manifest};
+use crate::pane::PaneDecl;
 use crate::settings::Switches;
 use crate::shell::FeatureCx;
 
@@ -86,6 +88,23 @@ impl Registry {
             .zip(&self.slots)
             .filter(|(_, slot)| !matches!(slot, Slot::Off))
             .map(|(&manifest, _)| manifest)
+    }
+
+    /// Each enabled feature's panes, in catalog order.
+    pub(crate) fn panes(&self) -> impl Iterator<Item = &'static PaneDecl> + '_ {
+        self.enabled()
+            .flat_map(|manifest| manifest.panes.iter().copied())
+    }
+
+    /// The dormant feature that declares `view`; `None` if it is core, off or active.
+    pub(crate) fn dormant_owner(&self, view: ViewId) -> Option<FeatureId> {
+        self.catalog
+            .iter()
+            .zip(&self.slots)
+            .find(|(manifest, slot)| {
+                matches!(slot, Slot::Dormant) && manifest.panes.iter().any(|pane| pane.id == view)
+            })
+            .map(|(manifest, _)| manifest.id)
     }
 
     pub(crate) fn launch(&mut self) {
