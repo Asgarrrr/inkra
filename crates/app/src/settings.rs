@@ -13,8 +13,7 @@ use crate::theme::store::{Choice, describe, read_text};
 pub(crate) struct Settings {
     pub(crate) choice: Choice,
     pub(crate) code_block_wrap: bool,
-    /// `None` when the file is there but unreadable: the shell keeps the switches it has.
-    pub(crate) features: Option<Switches>,
+    pub(crate) features: Switches,
 }
 
 /// `features` in `settings.json`: a feature's switch, by id; an absent id keeps its default.
@@ -27,23 +26,18 @@ impl Switches {
     }
 }
 
-/// Never fails: a missing file reads the defaults; a broken one says why and reads no switches.
 pub(crate) async fn read(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> Settings {
     let text = match read_text(fs, &config.join("settings.json")).await {
         Ok(text) => text,
-        Err(error) if error.io_kind() == Some(ErrorKind::NotFound) => {
-            return Settings {
-                features: Some(Switches::default()),
-                ..Settings::default()
-            };
-        }
         Err(error) => {
-            notices.push(error.to_string());
+            if error.io_kind() != Some(ErrorKind::NotFound) {
+                notices.push(error.to_string());
+            }
             return Settings::default();
         }
     };
     match serde_json::from_str::<Value>(&text) {
-        Ok(value) => parse(&value),
+        Ok(settings) => parse(&settings),
         Err(error) => {
             notices.push(describe(&format!("{CONFIG_DIR}/settings.json"), &error));
             Settings::default()
@@ -68,7 +62,7 @@ fn parse(value: &Value) -> Settings {
             .get("code_block_wrap")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        features: Some(Switches(features)),
+        features: Switches(features),
     }
 }
 

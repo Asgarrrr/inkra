@@ -228,6 +228,7 @@ impl AppShell {
             .map(|tab| match pane {
                 Some(decl) => tab.on_drag(
                     DraggedView {
+                        view: decl.id,
                         decl,
                         index: ix,
                         group,
@@ -247,7 +248,7 @@ impl AppShell {
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.move_view(dragged.decl.id, group, ix, window, cx);
+                    shell.move_view(dragged.view, group, ix, window, cx);
                 }),
             )
             .map(|tab| {

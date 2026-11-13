@@ -104,7 +104,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> impl Fn(&DraggedView, &mut Window, &mut App) + 'static {
         cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-            shell.drop_view_at_end(dragged.decl.id, group, window, cx);
+            shell.drop_view_at_end(dragged.view, group, window, cx);
         })
     }
 

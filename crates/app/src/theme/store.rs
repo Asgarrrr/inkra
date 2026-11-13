@@ -47,7 +47,7 @@ pub(crate) struct Resolved {
     /// `None` follows the system.
     pub(crate) theme: Option<Arc<Theme>>,
     pub(crate) code_block_wrap: bool,
-    pub(crate) features: Option<Switches>,
+    pub(crate) features: Switches,
     pub(crate) notices: Vec<String>,
 }
 
@@ -55,10 +55,8 @@ pub(crate) struct Resolved {
 #[derive(Default)]
 pub(crate) struct ThemeStore {
     choice: Choice,
-    /// Held: a newer reload drops it, so a stale one never lands.
+    /// Held: a newer reload or a pick drops it, so a stale one never lands.
     reload: Option<Task<()>>,
-    /// Picks so far: a reload that began before the latest one must not adopt its theme.
-    picks: u64,
     /// The vault's themes, listed before the picker opens.
     listing: Option<Task<()>>,
     /// The last write of the choice; the next one awaits it, so two picks land in order.
@@ -74,10 +72,6 @@ impl ThemeStore {
         self.choice = choice;
     }
 
-    pub(crate) fn picks(&self) -> u64 {
-        self.picks
-    }
-
     pub(crate) fn reload(&mut self, task: Task<()>) {
         self.reload = Some(task);
     }
@@ -86,7 +80,7 @@ impl ThemeStore {
         self.listing = Some(task);
     }
 
-    /// Adopts `choice` over the theme of any reload in flight, and writes it to `vault` after the previous write.
+    /// Adopts `choice` over any reload in flight, and writes it to `vault` after the previous write.
     pub(crate) fn pick<V: 'static>(
         &mut self,
         choice: Choice,
@@ -95,7 +89,7 @@ impl ThemeStore {
         failed: fn(&mut V, String, &mut Context<V>),
     ) {
         self.choice = choice.clone();
-        self.picks += 1;
+        self.reload = None;
         let Some((fs, root)) = vault else {
             return;
         };

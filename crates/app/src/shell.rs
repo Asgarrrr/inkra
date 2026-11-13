@@ -203,11 +203,14 @@ impl AppShell {
                 },
             );
         }
-        let features = Self::vault_features(features, panes.is_some());
         let shell = Self {
             layout,
             groups,
             notes,
+            features: match panes {
+                Some(_) => features,
+                None => Registry::disabled(features.catalog()),
+            },
             panes,
             focus_handle: cx.focus_handle(),
             modal: None,
@@ -223,7 +226,6 @@ impl AppShell {
             notice: unwatched.as_ref().map(Notice::unwatched),
             backdrop: None,
             themes: ThemeStore::default(),
-            features,
         };
         if cfg!(debug_assertions) {
             shell.check_layout(cx);

@@ -87,7 +87,7 @@ impl AppShell {
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.append(dragged.decl.id, side, window, cx);
+                    shell.append(dragged.view, side, window, cx);
                 }),
             );
         let column = match side {
@@ -231,6 +231,7 @@ impl AppShell {
             }))
             .on_drag(
                 DraggedView {
+                    view,
                     decl,
                     index: ix,
                     group,
@@ -242,7 +243,7 @@ impl AppShell {
             })
             .on_drop(
                 cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                    shell.move_view(dragged.decl.id, group, ix, window, cx);
+                    shell.move_view(dragged.view, group, ix, window, cx);
                 }),
             )
             .into_any_element()

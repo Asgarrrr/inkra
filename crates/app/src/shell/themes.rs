@@ -36,19 +36,14 @@ impl AppShell {
         let Some((fs, root)) = self.vault_root(cx) else {
             return;
         };
-        let picks = self.themes.picks();
         self.themes.reload(cx.spawn(async move |shell, cx| {
             let resolved = cx
                 .background_spawn(async move { store::load(&*fs, &root).await })
                 .await;
             shell
                 .update(cx, |shell, cx| {
-                    if let Some(switches) = &resolved.features {
-                        shell.apply_switches(switches, cx);
-                    }
-                    if shell.themes.picks() == picks {
-                        shell.adopt_theme(resolved, cx);
-                    }
+                    shell.apply_switches(&resolved.features, cx);
+                    shell.adopt_theme(resolved, cx);
                 })
                 .ok();
         }));

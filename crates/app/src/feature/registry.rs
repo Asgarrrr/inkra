@@ -27,18 +27,8 @@ pub(crate) enum Slot {
 /// Dropped when the feature is switched off, and its entities with it.
 #[derive(Default)]
 pub(crate) struct FeatureHandle {
-    handlers: Vec<(TypeId, Rc<Handler>)>,
-    entities: Vec<AnyEntity>,
-}
-
-impl FeatureHandle {
-    pub(crate) fn on(&mut self, action: TypeId, handler: Rc<Handler>) {
-        self.handlers.push((action, handler));
-    }
-
-    pub(crate) fn hold(&mut self, entity: AnyEntity) {
-        self.entities.push(entity);
-    }
+    pub(crate) handlers: Vec<(TypeId, Rc<Handler>)>,
+    pub(crate) entities: Vec<AnyEntity>,
 }
 
 fn wanted(manifest: &Manifest, switches: &Switches) -> bool {
@@ -94,36 +84,13 @@ impl Registry {
         changed
     }
 
-    pub(crate) fn manifest(&self, id: FeatureId) -> &'static Manifest {
-        self.catalog[self.index(id)]
-    }
-
-    pub(crate) fn slot(&self, id: FeatureId) -> &Slot {
-        &self.slots[self.index(id)]
-    }
-
-    pub(crate) fn slot_mut(&mut self, id: FeatureId) -> &mut Slot {
-        let index = self.index(id);
-        &mut self.slots[index]
-    }
-
-    /// `None` unless the feature is active and handles `action`.
-    pub(crate) fn handler(&self, id: FeatureId, action: TypeId) -> Option<Rc<Handler>> {
-        let Slot::Active(handle) = self.slot(id) else {
-            return None;
-        };
-        handle
-            .handlers
+    /// The manifest and slot of `id`; `None` for an id outside the catalog.
+    pub(crate) fn get_mut(&mut self, id: FeatureId) -> Option<(&'static Manifest, &mut Slot)> {
+        self.catalog
             .iter()
-            .find(|(type_id, _)| *type_id == action)
-            .map(|(_, handler)| handler.clone())
-    }
-
-    fn index(&self, id: FeatureId) -> usize {
-        let Some(index) = self.catalog.iter().position(|manifest| manifest.id == id) else {
-            panic!("{} is not in this registry's catalog", id.name());
-        };
-        index
+            .zip(&mut self.slots)
+            .find(|(manifest, _)| manifest.id == id)
+            .map(|(&manifest, slot)| (manifest, slot))
     }
 }
 

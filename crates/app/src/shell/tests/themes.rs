@@ -296,7 +296,7 @@ fn a_theme_file_named_system_is_not_a_row(cx: &mut TestAppContext) {
     assert_eq!(labels, ["System", "Flexoki Dark", "Flexoki Light"]);
 }
 
-pub(super) fn pick(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+fn pick(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
     open_theme_picker(cx);
     assert!(
         theme_picker(window, cx).is_some(),
