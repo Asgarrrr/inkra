@@ -13,8 +13,8 @@ mod utf16;
 
 use history::Transaction;
 pub use history::{GROUP_INTERVAL, Txn, Version};
-pub use log::EditMark;
 use log::SpliceLog;
+pub use log::{EditMark, Splice};
 use utf16::utf16_len;
 
 pub struct Buffer {
@@ -71,6 +71,14 @@ impl Buffer {
         self.log.mark()
     }
 
+    /// The splices since `mark`, oldest first; `None` once the log dropped one of them.
+    ///
+    /// # Panics
+    /// If `mark` is past `edit_mark()`: it came from another buffer.
+    pub fn edits_since(&self, mark: EditMark) -> Option<impl Iterator<Item = Splice> + '_> {
+        self.log.since(mark)
+    }
+
     /// The one text mutation, so the anchors and the UTF-16 checkpoint follow every edit.
     fn splice(&mut self, at: ByteOffset, removed: &str, inserted: &str) {
         let (byte, utf16) = self.utf16.get();
@@ -87,7 +95,11 @@ impl Buffer {
         }
         self.text.replace_range(at.get()..end.get(), inserted);
         self.shift_anchors(at, removed.len(), inserted.len());
-        self.log.push();
+        self.log.push(Splice {
+            at,
+            removed_len: removed.len(),
+            inserted_len: inserted.len(),
+        });
     }
 }
 

@@ -132,6 +132,33 @@ pub(crate) fn publish(
     }
 }
 
+/// Brings every layer of `buffer` to its edit mark. A non-empty layer behind it draws something
+/// else after, moved or lost, so the entry's revision moves: undo can bring back a shaped version.
+pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
+    if cx
+        .try_global::<Decorations>()
+        .is_none_or(|decorations| decorations.declared.is_empty())
+    {
+        return;
+    }
+    cx.update_global(|decorations: &mut Decorations, cx| {
+        let Some(entry) = decorations.entries.get_mut(&buffer.entity_id()) else {
+            return;
+        };
+        let text = buffer.read(cx);
+        let mut moved = false;
+        for layer in &mut entry.layers {
+            moved |= !layer.is_empty() && layer.at() != text.edit_mark();
+            // `Lost` clears the layer, a change `moved` already counts.
+            let _ = layer.catch_up(text);
+        }
+        if moved {
+            decorations.revisions += 1;
+            entry.revision = decorations.revisions;
+        }
+    });
+}
+
 /// What a view draws of a buffer's layers.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Drawn<'a> {

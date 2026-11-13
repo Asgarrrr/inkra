@@ -130,9 +130,9 @@ impl EditorView {
         &self.markdown
     }
 
-    /// Parses only when the buffer moved since the last parse; the block scrolls sync on every
-    /// call, so never inside a buffer update.
+    /// Parses only on a new version; decorations and block scrolls sync always: never in an update.
     fn refresh(&mut self, cx: &mut App) {
+        decorations::sync(self.input.buffer(), cx);
         let version = self.input.buffer().read(cx).version();
         if self.parsed_at != Some(version) {
             self.markdown = parses::parsed(self.input.buffer(), cx);

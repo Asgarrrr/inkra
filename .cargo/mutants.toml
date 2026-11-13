@@ -36,6 +36,10 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Equivalent. A chunk that starts where the published one ends has no head, and its
 # tail is all of it, so `<=` takes it out and puts the same chunk back.
 #
+# Equivalent. A chunk that starts where the splice's removed bytes end is past the
+# splice: `<=` hands it to `map_chunk`, whose `map_mark` moves it and its marks by
+# `inserted_len - removed_len` as the shift loop does.
+#
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
 # which keeps this config, so the entries below apply.
 #
@@ -92,6 +96,7 @@ exclude_re = [
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::marks_in$",
     "^crates/editor/src/layer\\.rs:[0-9]+:64: replace < with <= in Layer<S>::publish$",
+    "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::shift$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
     "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",

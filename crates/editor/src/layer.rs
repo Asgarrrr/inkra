@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use inkra_text::{Buffer, ByteOffset, EditMark};
+use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 
 /// A layer could not follow the buffer's edits and holds nothing until it is published again.
 #[derive(Debug, PartialEq, Eq)]
@@ -63,18 +63,40 @@ impl<S: Clone + PartialEq> Layer<S> {
             .flat_map(move |chunk| chunk.marks_in(range.clone()))
     }
 
-    /// Brings the layer to `buffer`'s edit mark.
+    /// Brings the layer to `buffer`'s edit mark, shifting its marks through every splice since.
     ///
     /// # Errors
-    /// `Lost` when the buffer was edited since: the layer is cleared.
+    /// `Lost` when the buffer's log dropped a splice since: the layer is cleared.
     pub fn catch_up(&mut self, buffer: &Buffer) -> Result<(), Lost> {
-        let current = buffer.edit_mark();
-        if self.at == current {
-            return Ok(());
+        let Some(splices) = buffer.edits_since(self.at) else {
+            self.clear();
+            self.at = buffer.edit_mark();
+            return Err(Lost);
+        };
+        for splice in splices {
+            self.shift(splice);
         }
-        self.clear();
-        self.at = current;
-        Err(Lost)
+        self.at = buffer.edit_mark();
+        Ok(())
+    }
+
+    /// Maps the chunks `splice` reaches and moves the start of every chunk after them.
+    fn shift(&mut self, splice: Splice) {
+        let first = self
+            .chunks
+            .partition_point(|chunk| chunk.end() <= splice.at);
+        let last = self
+            .chunks
+            .partition_point(|chunk| chunk.start < splice.at + splice.removed_len);
+        let reached: Vec<_> = self
+            .chunks
+            .drain(first..last)
+            .filter_map(|chunk| map_chunk(chunk, splice))
+            .collect();
+        for chunk in &mut self.chunks[first..] {
+            chunk.start = chunk.start + splice.inserted_len - splice.removed_len;
+        }
+        self.chunks.splice(first..first, reached);
     }
 
     /// Replaces everything inside `chunk` with `marks`, computed at the edit mark `at`.
@@ -161,6 +183,45 @@ impl<S: Clone> Chunk<S> {
             Self::new(range, marks)
         })
     }
+}
+
+/// D3: what is left of `mark` after `splice`, left and right of the inserted bytes, which it never
+/// covers. The two pieces are one when they touch.
+fn map_mark(
+    mark: Range<ByteOffset>,
+    splice: Splice,
+) -> (Option<Range<ByteOffset>>, Option<Range<ByteOffset>>) {
+    let removed_end = splice.at + splice.removed_len;
+    let left = (mark.start < splice.at).then(|| mark.start..mark.end.min(splice.at));
+    let kept = mark.start.max(removed_end);
+    let right = (kept < mark.end).then(|| {
+        kept - splice.removed_len + splice.inserted_len
+            ..mark.end - splice.removed_len + splice.inserted_len
+    });
+    match (left, right) {
+        (Some(left), Some(right)) if left.end == right.start => (Some(left.start..right.end), None),
+        pieces => pieces,
+    }
+}
+
+/// As `map_mark` on the chunk's range, except that a splice strictly inside it grows it (decoration
+/// layer spec, deviation 5). Either way at most one piece is left, and its marks follow `map_mark`.
+fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
+    let (start, end) = (chunk.start, chunk.end());
+    let range = if start < splice.at && splice.at + splice.removed_len < end {
+        start..end - splice.removed_len + splice.inserted_len
+    } else {
+        let (left, right) = map_mark(start..end, splice);
+        left.or(right)?
+    };
+    let marks = chunk.marks.into_iter().flat_map(|(mark, style)| {
+        let (left, right) = map_mark(start + mark.start..start + mark.end, splice);
+        [left, right]
+            .into_iter()
+            .flatten()
+            .map(move |piece| (piece, style.clone()))
+    });
+    Some(Chunk::new(range, marks))
 }
 
 fn check<S>(buffer: &Buffer, chunk: &Range<ByteOffset>, marks: &[(Range<ByteOffset>, S)]) {

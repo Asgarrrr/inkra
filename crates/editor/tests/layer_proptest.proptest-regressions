@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7d475d3880671c68f02ecbc003eb4cb3c49587c5ca223e1b9b611623777b36d4 # shrinks to parts = ["a", "a", "aaa", "é", "é", "e\u{301}"], steps = [Edit(1049310590562455370, 2, ""), Edit(24716130376999552, 2, ""), Publish(Chunk { bounds: (1659085362309808097, 4814641588383249222), marks: [(3848843321301973911, 0), (4780018383150667670, 0)] }), Edit(9924198422162358836, 0, "a")]

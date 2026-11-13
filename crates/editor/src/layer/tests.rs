@@ -17,6 +17,14 @@ fn marks(layer: &Layer<char>, range: Range<usize>) -> Vec<(Range<usize>, char)> 
         .collect()
 }
 
+fn chunks(layer: &Layer<char>) -> Vec<Range<usize>> {
+    layer
+        .chunks
+        .iter()
+        .map(|chunk| chunk.start.get()..chunk.end().get())
+        .collect()
+}
+
 fn publish(
     layer: &mut Layer<char>,
     buffer: &Buffer,
@@ -101,27 +109,69 @@ fn a_publish_at_a_chunk_edge_leaves_no_empty_chunk() {
     publish(&mut layer, &buffer, 0..5, &[(1..2, 'b')]).unwrap();
     publish(&mut layer, &buffer, 7..10, &[]).unwrap();
 
-    let chunks: Vec<_> = layer
-        .chunks
-        .iter()
-        .map(|chunk| chunk.start.get()..chunk.end().get())
-        .collect();
-    assert_eq!(chunks, [0..5, 5..7, 7..10]);
+    assert_eq!(chunks(&layer), [0..5, 5..7, 7..10]);
 }
 
 #[test]
-fn an_edit_loses_the_layer_until_it_catches_up() {
+fn an_overflow_loses_the_layer_until_it_catches_up() {
     let mut buffer = twenty();
     let mut layer = Layer::new(buffer.edit_mark());
     publish(&mut layer, &buffer, 0..10, &[(2..4, 'a')]).unwrap();
     assert!(!layer.is_empty());
 
-    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+    buffer.transact(|buffer| {
+        for _ in 0..257 {
+            buffer.insert(at(20), "x");
+        }
+    });
 
     assert_eq!(layer.catch_up(&buffer), Err(Lost));
     assert!(layer.is_empty());
     assert_eq!(layer.at(), buffer.edit_mark());
     assert_eq!(layer.catch_up(&buffer), Ok(()));
+}
+
+#[test]
+fn a_splice_inside_a_chunk_grows_it() {
+    let mut buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 0..10, &[(2..4, 'a'), (6..9, 'b')]).unwrap();
+    publish(&mut layer, &buffer, 10..20, &[(12..15, 'c')]).unwrap();
+
+    buffer.transact(|buffer| buffer.replace(span(7..8), "xyz"));
+    layer.catch_up(&buffer).unwrap();
+
+    assert_eq!(chunks(&layer), [0..12, 12..22]);
+    assert_eq!(
+        marks(&layer, 0..22),
+        [(2..4, 'a'), (6..7, 'b'), (10..11, 'b'), (14..17, 'c')]
+    );
+}
+
+#[test]
+fn a_splice_reaching_a_chunk_edge_cuts_it_by_the_mark_rule() {
+    for (removed, expected) in [(5..6, 8..17), (14..15, 5..14)] {
+        let mut buffer = twenty();
+        let mut layer = Layer::new(buffer.edit_mark());
+        publish(&mut layer, &buffer, 5..15, &[]).unwrap();
+
+        buffer.transact(|buffer| buffer.replace(span(removed.clone()), "xyz"));
+        layer.catch_up(&buffer).unwrap();
+
+        assert_eq!(chunks(&layer), [expected], "{removed:?}");
+    }
+}
+
+#[test]
+fn a_deletion_inside_a_mark_leaves_one_mark() {
+    let mut buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 0..20, &[(2..8, 'a')]).unwrap();
+
+    buffer.transact(|buffer| buffer.delete(span(4..6)));
+    layer.catch_up(&buffer).unwrap();
+
+    assert_eq!(marks(&layer, 0..18), [(2..6, 'a')]);
 }
 
 #[test]
