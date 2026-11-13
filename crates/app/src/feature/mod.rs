@@ -33,6 +33,8 @@ impl FeatureId {
 pub(crate) struct Manifest {
     pub(crate) id: FeatureId,
     pub(crate) default_on: bool,
+    /// Activates once the shell's first frame is drawn, rather than on its first command.
+    pub(crate) after_first_frame: bool,
     pub(crate) commands: &'static [CommandDecl],
     pub(crate) activate: fn(&mut FeatureCx),
 }

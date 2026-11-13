@@ -296,6 +296,21 @@ Triggers:
 - `AfterFirstFrame`: VS Code's `onStartupFinished`, for features with no pane or
   command to wait for.
 
+Deviation (slice 1a): `AfterFirstFrame` is `Manifest.after_first_frame: bool`, not a
+`triggers` list, and it activates from a task spawned in `AppShell::new` with
+`cx.spawn_in`, not from a `window.defer` queued by the first render. `open_window`
+draws once before it returns, and a foreground task cannot run before that turn ends.
+The property becomes: no activation inside `AppShell::new` or inside the first draw;
+activation runs after `open_window`'s first draw, possibly before AppKit presents it
+(`docs/startup-floor.md:63-65`: AppKit shows the window about 23 ms after the first draw). A
+`window.defer` has the same limit, so this loses nothing. Truly after the present
+needs `window.on_next_frame` and then a spawn, which costs a `simulate_next_frame` in
+every window-opening test helper and in the shot stage's settle; that is an owner
+question. Tests drain the task with `run_until_parked`; the shot stage drains it in
+`settle`. A feature switched on after the launch activates in the turn its settings
+reload lands. `Timeline` marks `registry` when the task runs and `activated` per
+feature; the launch line prints once, so an activation after it is not in it.
+
 A feature that owns a pane stops work when the pane is hidden. Backlinks marks
 itself stale on `NotesChanged` and on a build applying while hidden, and rebuilds once when shown.
 
@@ -475,6 +490,9 @@ stable API promise, a marketplace, multiple instances of one pane.
   Built-in manifests here are `const`, so there is no file at all.
 - Zed registers features per workspace (`observe_new::<Workspace>`). We follow it:
   one registry per `AppShell`.
+- Zed loads its panels from a task spawned while the workspace is set up
+  (`vendor/zed-reference/crates/zed/src/zed.rs:778-818`). We follow it for
+  `AfterFirstFrame` (D6), in place of a `window.defer` from the first render.
 - Zed adds runtime identifiers to the workspace key context. We follow it for the
   switches (D8).
 - Zed's docks render through the `Panel` trait. We follow it with a smaller `Pane`

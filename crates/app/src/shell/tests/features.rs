@@ -1,8 +1,10 @@
 //! Features in a real shell: the switch, the gated key, the palette entry, the release (feature registry spec).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures::executor::block_on;
 use gpui::{App, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
@@ -10,7 +12,8 @@ use inkra_vault::mem_fs::MemFs;
 use super::open_vault_with;
 use crate::feature::{self, Registry, fakes};
 use crate::keymap::key_bindings;
-use crate::settings::Switches;
+use crate::settings::{self, Switches};
+use crate::shell::features::over_budget;
 use crate::shell::{AppShell, Left, NoteStore};
 
 const SETTINGS: &str = "/vault/.inkra/settings.json";
@@ -63,6 +66,20 @@ fn names_ping(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> boo
     window
         .update(cx, |shell, _, _| shell.key_context().contains("ping_fake"))
         .unwrap()
+}
+
+/// `⌘O` to `/b`, the shell rebuilt on it.
+fn open_b(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
+    cx.simulate_keystrokes("cmd-o");
+    cx.run_until_parked();
+    cx.simulate_path_prompt_response(|_| Some(vec![PathBuf::from("/b")]));
+    cx.run_until_parked();
+    let root = window
+        .update(cx, |shell, _, cx| {
+            shell.vault_root(cx).map(|(_, root)| root)
+        })
+        .unwrap();
+    assert_eq!(root, Some(PathBuf::from("/b")));
 }
 
 fn palette_lists_ping(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
@@ -173,18 +190,88 @@ fn open_vault_b_never_builds_a_disabled_feature(cx: &mut TestAppContext) {
     );
     assert!(names_ping(window, &mut visual));
 
-    visual.simulate_keystrokes("cmd-o");
-    visual.run_until_parked();
-    visual.simulate_path_prompt_response(|_| Some(vec![PathBuf::from("/b")]));
-    visual.run_until_parked();
-    let root = window
-        .update(&mut visual, |shell, _, cx| {
-            shell.vault_root(cx).map(|(_, root)| root)
-        })
-        .unwrap();
-    assert_eq!(root, Some(PathBuf::from("/b")));
+    open_b(window, &mut visual);
 
     press_ping(&mut visual);
     assert_eq!(ping(&mut visual), None);
     assert!(!names_ping(window, &mut visual));
+}
+
+/// `/vault/a.md` behind a shell with the eager catalog, switched by `settings`; nothing has run since the window opened.
+fn eager_shell(
+    cx: &mut TestAppContext,
+    settings: Option<&str>,
+) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    if let Some(settings) = settings {
+        fs.insert_file(SETTINGS, settings);
+    }
+    let switches = block_on(settings::read(
+        &*fs,
+        Path::new("/vault/.inkra"),
+        &mut Vec::new(),
+    ))
+    .features;
+    cx.update(bind);
+    let (window, _sidebar, _notes) = open_vault_with(
+        cx,
+        Arc::clone(&fs) as Arc<dyn Fs>,
+        Registry::new(fakes::EAGER_CATALOG, &switches),
+    );
+    let visual = VisualTestContext::from_window(window.into(), cx);
+    (fs, window, visual)
+}
+
+#[gpui::test]
+fn eager_feature_activates_after_the_first_draw(cx: &mut TestAppContext) {
+    let (_fs, _window, visual) = eager_shell(cx, None);
+    assert_eq!(
+        fakes::eager_count(),
+        0,
+        "not inside the shell's build or first draw"
+    );
+
+    visual.run_until_parked();
+    assert_eq!(fakes::eager_count(), 1);
+}
+
+#[gpui::test]
+fn open_vault_b_keeps_a_disabled_eager_feature_off(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = eager_shell(cx, None);
+    focus_root(window, &mut visual);
+    assert_eq!(fakes::eager_count(), 1);
+    fs.insert_file("/b/x.md", "x");
+    fs.insert_file(
+        "/b/.inkra/settings.json",
+        r#"{"features":{"eager_fake":false}}"#,
+    );
+
+    open_b(window, &mut visual);
+    assert_eq!(fakes::eager_count(), 1);
+    let named = window
+        .update(&mut visual, |shell, _, _| {
+            shell.key_context().contains("eager_fake")
+        })
+        .unwrap();
+    assert!(!named);
+}
+
+#[gpui::test]
+fn eager_feature_switched_on_after_launch_activates_at_once(cx: &mut TestAppContext) {
+    let (fs, _window, visual) = eager_shell(cx, Some(r#"{"features":{"eager_fake":false}}"#));
+    visual.run_until_parked();
+    assert_eq!(fakes::eager_count(), 0);
+
+    fs.insert_file(SETTINGS, r#"{"features":{"eager_fake":true}}"#);
+    visual.run_until_parked();
+    assert_eq!(fakes::eager_count(), 1);
+}
+
+#[test]
+fn over_budget_is_strictly_above_two_ms() {
+    assert!(!over_budget(Duration::from_millis(2)));
+    assert!(over_budget(
+        Duration::from_millis(2) + Duration::from_micros(1)
+    ));
 }

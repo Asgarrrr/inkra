@@ -12,7 +12,7 @@ use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
-use crate::vault::{ConfigChanged, GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
+use crate::vault::{GoneChanged, NoteClosed, NoteStore, Save, TrashFailed};
 use crate::vault_search::{HitActivated, SearchVault, VaultSearchDelegate};
 
 mod activation;
@@ -180,16 +180,14 @@ impl AppShell {
             },
         )
         .detach();
-        cx.subscribe(&notes, |shell, _notes, event: &ConfigChanged, cx| {
-            shell.config_changed(&event.0, cx);
-        })
-        .detach();
+        Self::watch_config(&notes, window, cx);
         cx.observe_window_appearance(window, |_, window, cx| {
             theme::follow_system(window.appearance(), cx);
         })
         .detach();
         Self::watch_failures(&notes, cx);
         Self::quit_on_close(window, cx);
+        Self::start_launch(window, cx);
         let first = notes.read(cx).current();
         let unwatched = notes.update(cx, |notes, _| notes.take_unwatched());
         let (session, restore) = Self::open_session(file, pending, &notes, window, cx);

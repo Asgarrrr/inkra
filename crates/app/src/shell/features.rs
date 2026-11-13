@@ -1,13 +1,21 @@
-//! The shell's side of the feature registry: running a feature's commands, and switching it.
+//! The shell's side of the feature registry: launching features, running their commands, and switching them.
 
 use std::any::TypeId;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{Action, AppContext as _, Context, Entity, KeyContext, Window};
 
 use super::AppShell;
 use crate::feature::{FeatureHandle, FeatureId, Slot};
 use crate::settings::Switches;
+use crate::timeline::{Step, Timeline};
+use crate::vault::{ConfigChanged, NoteStore};
+
+/// A feature's activation or call past this logs a line (spec D11).
+pub(super) fn over_budget(took: Duration) -> bool {
+    took > Duration::from_millis(2)
+}
 
 /// What a feature reaches while it activates or runs a command.
 pub(crate) struct FeatureCx<'a, 'b> {
@@ -66,6 +74,41 @@ impl FeatureCx<'_, '_> {
 }
 
 impl AppShell {
+    /// A task cannot run before the turn that opens the window ends, so it lands after the first draw.
+    pub(super) fn start_launch(window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |shell, cx| {
+            shell.update_in(cx, Self::launch_features).ok();
+        })
+        .detach();
+    }
+
+    fn launch_features(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        Timeline::mark(Step::Registry, cx);
+        self.features.launch();
+        self.activate_due(window, cx);
+    }
+
+    fn activate_due(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for id in self.features.due() {
+            self.activate(id, window, cx);
+        }
+    }
+
+    pub(super) fn watch_config(
+        notes: &Entity<NoteStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.subscribe_in(
+            notes,
+            window,
+            |shell, _notes, event: &ConfigChanged, window, cx| {
+                shell.config_changed(&event.0, window, cx);
+            },
+        )
+        .detach();
+    }
+
     pub(super) fn run_command(
         &mut self,
         id: FeatureId,
@@ -100,6 +143,7 @@ impl AppShell {
             // Active before `activate` runs, so `FeatureCx` has a handle to write into.
             *slot = Slot::Active(FeatureHandle::default());
             self.with_feature(id, window, cx, manifest.activate);
+            Timeline::mark(Step::Activated(id.name()), cx);
         }
     }
 
@@ -110,14 +154,24 @@ impl AppShell {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut FeatureCx) -> R,
     ) -> Option<R> {
-        matches!(self.features.get_mut(id), Some((_, Slot::Active(_)))).then(|| {
-            f(&mut FeatureCx {
-                shell: self,
-                window,
-                cx,
-                feature: id,
-            })
-        })
+        if !matches!(self.features.get_mut(id), Some((_, Slot::Active(_)))) {
+            return None;
+        }
+        let started = Instant::now();
+        let result = f(&mut FeatureCx {
+            shell: self,
+            window,
+            cx,
+            feature: id,
+        });
+        let took = started.elapsed();
+        if over_budget(took) {
+            log::warn!(
+                "feature {} took {took:.1?}, over its 2 ms budget",
+                id.name()
+            );
+        }
+        Some(result)
     }
 
     /// `AppShell` and every enabled feature, so a feature's keys are live only while it is on.
@@ -130,8 +184,15 @@ impl AppShell {
         context
     }
 
-    pub(super) fn apply_switches(&mut self, switches: &Switches, cx: &mut Context<Self>) {
+    /// A feature switched on after the launch activates now if it waits for the first frame.
+    pub(super) fn apply_switches(
+        &mut self,
+        switches: &Switches,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.features.apply(switches) {
+            self.activate_due(window, cx);
             cx.notify();
         }
     }

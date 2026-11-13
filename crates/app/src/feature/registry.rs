@@ -15,6 +15,8 @@ pub(crate) struct Registry {
     catalog: &'static [&'static Manifest],
     /// Index-aligned with `catalog`.
     slots: Vec<Slot>,
+    /// The shell's first frame is drawn: an `after_first_frame` feature switched on activates at once.
+    launched: bool,
 }
 
 pub(crate) enum Slot {
@@ -49,13 +51,18 @@ impl Registry {
                 }
             })
             .collect();
-        Self { catalog, slots }
+        Self {
+            catalog,
+            slots,
+            launched: false,
+        }
     }
 
     pub(crate) fn disabled(catalog: &'static [&'static Manifest]) -> Self {
         Self {
             catalog,
             slots: catalog.iter().map(|_| Slot::Off).collect(),
+            launched: false,
         }
     }
 
@@ -69,6 +76,22 @@ impl Registry {
             .zip(&self.slots)
             .filter(|(_, slot)| !matches!(slot, Slot::Off))
             .map(|(&manifest, _)| manifest)
+    }
+
+    pub(crate) fn launch(&mut self) {
+        self.launched = true;
+    }
+
+    /// The dormant `after_first_frame` features, once launched; none before.
+    pub(crate) fn due(&self) -> Vec<FeatureId> {
+        self.catalog
+            .iter()
+            .zip(&self.slots)
+            .filter(|(manifest, slot)| {
+                self.launched && manifest.after_first_frame && matches!(slot, Slot::Dormant)
+            })
+            .map(|(manifest, _)| manifest.id)
+            .collect()
     }
 
     /// Whether any slot changed; a feature switched off drops its handle.

@@ -24,7 +24,8 @@ fn each_step_keeps_its_first_time() {
     assert!(!timeline.record(Step::NamesReady, start + ms(20)));
     assert_eq!(
         timeline.line(),
-        "launch: first frame -, session read -, root 5.0ms, scanned -, names ready 20.0ms, cache -, seed turn -, indexed -"
+        "launch: first frame -, session read -, root 5.0ms, scanned -, names ready 20.0ms, cache -, seed turn -, indexed -, \
+         registry -, activated -"
     );
 }
 
@@ -34,7 +35,8 @@ fn the_line_shows_how_long_the_session_read_took() {
     timeline.record_session_read(Duration::from_micros(250));
     assert_eq!(
         timeline.line(),
-        "launch: first frame -, session read 250.00µs, root -, scanned -, names ready -, cache -, seed turn -, indexed -"
+        "launch: first frame -, session read 250.00µs, root -, scanned -, names ready -, cache -, seed turn -, indexed -, \
+         registry -, activated -"
     );
 }
 
@@ -52,7 +54,7 @@ fn the_line_is_due_once_when_indexing_first_ends() {
     assert_eq!(
         timeline.line(),
         "launch: first frame 40.0ms, session read -, root -, scanned -, names ready -, cache -, \
-         seed turn -, indexed 900.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms)"
+         seed turn -, indexed 900.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms), registry -, activated -"
     );
 }
 
@@ -70,7 +72,7 @@ fn indexed_before_first_frame_is_due_at_the_first_frame() {
     assert_eq!(
         timeline.line(),
         "launch: first frame 40.0ms, session read -, root -, scanned -, names ready -, cache -, \
-         seed turn -, indexed 30.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms)"
+         seed turn -, indexed 30.00ms (3 notes, corpus 1234 bytes, words 567 bytes, names 89 bytes, longest turn 1.5ms), registry -, activated -"
     );
 }
 
@@ -85,7 +87,9 @@ fn the_longest_turn_counts_until_the_line_is_due() {
     assert!(timeline.record(indexed(3), start + ms(900)));
     timeline.record_turn(ms(50));
     assert!(
-        timeline.line().ends_with("longest turn 2.5ms)"),
+        timeline
+            .line()
+            .ends_with("longest turn 2.5ms), registry -, activated -"),
         "{}",
         timeline.line()
     );
@@ -100,7 +104,7 @@ fn the_line_names_the_cache_outcome_at_its_first_time() {
     assert_eq!(
         timeline.line(),
         "launch: first frame -, session read -, root -, scanned -, names ready -, \
-         cache decoded 12.0ms, seed turn -, indexed -"
+         cache decoded 12.0ms, seed turn -, indexed -, registry -, activated -"
     );
 }
 
@@ -112,7 +116,25 @@ fn the_line_shows_the_first_seed_turn() {
     assert_eq!(
         timeline.line(),
         "launch: first frame -, session read -, root -, scanned -, names ready -, cache -, \
-         seed turn 4.25ms, indexed -"
+         seed turn 4.25ms, indexed -, registry -, activated -"
+    );
+}
+
+#[test]
+fn registry_and_activations_show_in_the_line() {
+    let start = Instant::now();
+    let mut timeline = Timeline::new(start);
+    assert!(!timeline.record(Step::Registry, start + ms(50)));
+    assert!(!timeline.record(Step::Registry, start + ms(70)));
+    assert!(!timeline.record(Step::Activated("eager"), start + ms(51)));
+    assert!(!timeline.record(Step::Activated("other"), start + ms(52)));
+    assert!(!timeline.record(Step::Activated("eager"), start + ms(80)));
+    assert!(
+        timeline
+            .line()
+            .ends_with(", indexed -, registry 50.0ms, activated eager 51.0ms; other 52.0ms"),
+        "{}",
+        timeline.line()
     );
 }
 
