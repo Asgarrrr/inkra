@@ -138,23 +138,29 @@ impl AppShell {
         let header = self
             .pane_entry(view)
             .map_or(PaneHeader::Title { count: None }, |entry| entry.header(cx));
-        let header = match header {
-            PaneHeader::Title { count } => {
-                PanelHeader::new(decl.header_id, decl.title).when_some(count, PanelHeader::count)
-            }
-            PaneHeader::Buttons(buttons) => {
-                buttons
-                    .iter()
-                    .fold(PanelHeader::bar(decl.header_id), |header, button| {
-                        let action = button.action;
-                        header.child(
-                            IconButton::new(button.id, button.icon, button.tooltip).on_click(
-                                move |_, window, cx| window.dispatch_action(action(), cx),
-                            ),
-                        )
-                    })
-            }
+        let (header, own) = match header {
+            PaneHeader::Title { count } => (
+                PanelHeader::new(decl.header_id, decl.title).when_some(count, PanelHeader::count),
+                &[][..],
+            ),
+            PaneHeader::Buttons(buttons) => (PanelHeader::bar(decl.header_id), buttons),
         };
+        let contributed = self
+            .features
+            .enabled()
+            .flat_map(|manifest| manifest.buttons)
+            .filter(|contributed| contributed.pane == view)
+            .map(|contributed| &contributed.button);
+        let header = own
+            .iter()
+            .chain(contributed)
+            .fold(header, |header, button| {
+                let action = button.action;
+                header.child(
+                    IconButton::new(button.id, button.icon, button.tooltip)
+                        .on_click(move |_, window, cx| window.dispatch_action(action(), cx)),
+                )
+            });
         Some(
             header
                 .on_mouse_down(MouseButton::Left, keep_focus)

@@ -59,6 +59,7 @@ pub(crate) static PING_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<PingFake>(&["ctrl-alt-p"])],
     panes: &[],
+    buttons: &[],
     activate: activate_ping,
 };
 
@@ -68,6 +69,7 @@ pub(crate) static CLASH_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<ClashFake>(&["cmd-o"])],
     panes: &[],
+    buttons: &[],
     activate: |_| {},
 };
 
@@ -77,6 +79,7 @@ pub(crate) static EAGER_FAKE: Manifest = Manifest {
     after_first_frame: true,
     commands: &[],
     panes: &[],
+    buttons: &[],
     activate: |_| EAGER.set(EAGER.get() + 1),
 };
 
@@ -86,6 +89,7 @@ pub(crate) static UNDO_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<ClashFake>(&["cmd-z"])],
     panes: &[],
+    buttons: &[],
     activate: |_| {},
 };
 
@@ -95,6 +99,7 @@ pub(crate) static CHORD_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<ClashFake>(&["cmd-k"])],
     panes: &[],
+    buttons: &[],
     activate: |_| {},
 };
 
@@ -105,6 +110,7 @@ pub(crate) static TWIN_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<ClashFake>(&["ctrl-alt-p"])],
     panes: &[],
+    buttons: &[],
     activate: |_| {},
 };
 
@@ -126,6 +132,7 @@ pub(crate) static PANE_FAKE: Manifest = Manifest {
     after_first_frame: false,
     commands: &[],
     panes: &[&PANE_FAKE_DECL],
+    buttons: &[],
     activate: activate_pane,
 };
 

@@ -2,7 +2,7 @@
 
 use gpui::{Action, KeyBinding};
 
-use crate::pane::PaneDecl;
+use crate::pane::{PaneButton, PaneDecl};
 use crate::shell::FeatureCx;
 use crate::{backlinks, quick_open, vault_search};
 
@@ -36,6 +36,8 @@ pub(crate) struct Manifest {
     pub(crate) commands: &'static [CommandDecl],
     /// Docked like the core panes; the feature registers each one's view when it activates.
     pub(crate) panes: &'static [&'static PaneDecl],
+    /// Buttons added to other panes' headers; each runs one of this manifest's commands.
+    pub(crate) buttons: &'static [PaneButton],
     pub(crate) activate: fn(&mut FeatureCx),
 }
 

@@ -49,6 +49,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     after_first_frame: false,
     commands: &[],
     panes: &[&BACKLINKS_PANE],
+    buttons: &[],
     activate,
 };
 

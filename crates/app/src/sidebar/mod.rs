@@ -13,7 +13,6 @@ use crate::pane::{HeaderButton, Pane, PaneHeader, boxed};
 use crate::theme;
 use crate::ui::{Color, IconName, UiText};
 use crate::vault::NoteStore;
-use crate::vault_search::SearchVault;
 
 mod edit;
 mod render;
@@ -109,7 +108,7 @@ impl Focusable for Sidebar {
     }
 }
 
-static FILES_BUTTONS: [HeaderButton; 3] = [
+static FILES_BUTTONS: [HeaderButton; 2] = [
     HeaderButton {
         id: "sidebar-new-note",
         icon: IconName::PenLine,
@@ -121,12 +120,6 @@ static FILES_BUTTONS: [HeaderButton; 3] = [
         icon: IconName::FolderPlus,
         tooltip: "New folder",
         action: boxed::<NewFolder>,
-    },
-    HeaderButton {
-        id: "sidebar-search",
-        icon: IconName::Search,
-        tooltip: "Search vault",
-        action: boxed::<SearchVault>,
     },
 ];
 

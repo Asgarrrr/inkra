@@ -19,10 +19,12 @@ use crate::count::thousands;
 use crate::feature::{CommandDecl, FeatureId, Manifest};
 use crate::index::{IndexSync, Reader};
 use crate::open::Open;
+use crate::pane::{HeaderButton, PaneButton, boxed};
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
-use crate::shell::FeatureCx;
+use crate::shell::{FILES, FeatureCx};
 use crate::theme;
+use crate::ui::IconName;
 use rows::{HitKey, Results, Row};
 
 #[cfg(test)]
@@ -42,6 +44,15 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     after_first_frame: false,
     commands: &[CommandDecl::new::<SearchVault>(&["cmd-shift-f"])],
     panes: &[],
+    buttons: &[PaneButton {
+        pane: FILES,
+        button: HeaderButton {
+            id: "sidebar-search",
+            icon: IconName::Search,
+            tooltip: "Search vault",
+            action: boxed::<SearchVault>,
+        },
+    }],
     activate,
 };
 

@@ -45,6 +45,12 @@ pub(crate) struct HeaderButton {
     pub(crate) action: fn() -> Box<dyn Action>,
 }
 
+/// A button a feature adds to `pane`'s header, drawn after the pane's own while the feature is on.
+pub(crate) struct PaneButton {
+    pub(crate) pane: ViewId,
+    pub(crate) button: HeaderButton,
+}
+
 type Read<R> = Box<dyn Fn(&App) -> R>;
 type Hook = Box<dyn Fn(&mut App)>;
 
