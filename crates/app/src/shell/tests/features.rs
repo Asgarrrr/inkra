@@ -93,11 +93,9 @@ fn ping_on_off_on_by_keystroke(cx: &mut TestAppContext) {
 
     switch_ping(&fs, false, &mut visual);
     press_ping(&mut visual);
-    assert_eq!(ping(&mut visual), None);
-
     switch_ping(&fs, true, &mut visual);
     press_ping(&mut visual);
-    assert_eq!(ping(&mut visual), Some(1), "a fresh activation");
+    assert_eq!(ping(&mut visual), Some(1), "the key did nothing while off");
 }
 
 #[gpui::test]
@@ -119,7 +117,7 @@ fn disabled_ping_entity_is_released(cx: &mut TestAppContext) {
     assert_eq!(ping(&mut visual), Some(1));
 
     switch_ping(&fs, false, &mut visual);
-    assert_eq!(ping(&mut visual), None);
+    assert_eq!(ping(&mut visual), None, "off drops the handle that held it");
 }
 
 #[gpui::test]

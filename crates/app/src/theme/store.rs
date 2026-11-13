@@ -8,6 +8,7 @@ use gpui::{AppContext as _, Context, SharedString, Task};
 use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
+pub(crate) use super::file::describe;
 use super::{Theme, builtin, file};
 use crate::settings::{self, Settings, Switches};
 

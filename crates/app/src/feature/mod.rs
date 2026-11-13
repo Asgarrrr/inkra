@@ -58,6 +58,7 @@ impl CommandDecl {
     }
 }
 
+// The pinned gpui's `KeyBinding::new` takes `&'static str` keystrokes.
 fn bind<A: Action + Default>(keys: &'static str, context: Option<&str>) -> KeyBinding {
     KeyBinding::new(keys, A::default(), context)
 }

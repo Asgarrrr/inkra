@@ -7,8 +7,7 @@ use std::path::Path;
 use inkra_vault::{CONFIG_DIR, Fs};
 use serde_json::Value;
 
-use crate::theme::file;
-use crate::theme::store::{Choice, read_text};
+use crate::theme::store::{Choice, describe, read_text};
 
 #[derive(Default)]
 pub(crate) struct Settings {
@@ -41,10 +40,7 @@ pub(crate) async fn read(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) 
     match serde_json::from_str::<Value>(&text) {
         Ok(value) => parse(&value),
         Err(error) => {
-            notices.push(file::describe(
-                &format!("{CONFIG_DIR}/settings.json"),
-                &error,
-            ));
+            notices.push(describe(&format!("{CONFIG_DIR}/settings.json"), &error));
             Settings::default()
         }
     }

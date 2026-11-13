@@ -1,6 +1,6 @@
 pub(crate) mod builtin;
 mod colors;
-pub(crate) mod file;
+mod file;
 mod markdown;
 pub(crate) mod picker;
 pub(crate) mod store;
