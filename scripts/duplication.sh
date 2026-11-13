@@ -4,7 +4,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-base=${1:-$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main)}
+base=${1:-}
+if [ -z "$base" ] && ! base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null); then
+  echo "ERROR: no merge base with origin/main or main — pass a base: $0 <base>" >&2
+  exit 1
+fi
 
 # Tests and benches are exempt: a fixture repeated per case reads better than a helper.
 source_files() {
@@ -19,8 +23,9 @@ if [ -n "$base_files" ]; then
   # shellcheck disable=SC2086 # paths under crates/ hold no spaces
   git archive "$base" -- $base_files | tar -x -C "$tmp"
 fi
-current_files=$(git ls-files --cached --others --exclude-standard -- crates | source_files |
-  while IFS= read -r path; do [ -f "$path" ] && echo "$path"; done)
+# sort -u: a path in a merge conflict is listed once per stage.
+current_files=$(git ls-files --cached --others --exclude-standard -- crates | sort -u | source_files |
+  while IFS= read -r path; do [ ! -f "$path" ] || echo "$path"; done)
 
 # A window counts when it repeats, repeats more than at the base, and holds 3 statements:
 # runs of braces, field lists and match arms repeat by nature and say nothing about copied logic.
