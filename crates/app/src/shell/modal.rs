@@ -7,6 +7,7 @@ use gpui::{
 };
 
 use super::AppShell;
+use crate::feature::FeatureId;
 use crate::picker::{Dismissed, Picker, PickerDelegate};
 use crate::theme;
 use crate::ui::{ContextMenu, MenuClosed};
@@ -22,6 +23,8 @@ pub(super) struct Modal {
     /// `None` centres a picker; a menu is anchored here.
     at: Option<Point<Pixels>>,
     subscriptions: Vec<Subscription>,
+    /// The feature that opened it: switching that feature off closes it.
+    pub(super) owner: Option<FeatureId>,
 }
 
 impl Modal {
@@ -65,6 +68,7 @@ impl AppShell {
             focus: focus.clone(),
             at: None,
             subscriptions: vec![dismissed],
+            owner: None,
         });
         window.focus(&focus, cx);
         cx.notify();
@@ -102,6 +106,7 @@ impl AppShell {
             focus: focus.clone(),
             at: Some(at),
             subscriptions: vec![closed],
+            owner: None,
         });
         window.focus(&focus, cx);
         cx.notify();

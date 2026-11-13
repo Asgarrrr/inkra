@@ -1,0 +1,20 @@
+# Feature registry spec, D3: a feature registers only through `FeatureCx`, whose handle drops on disable.
+id: feature-global-registration
+language: Rust
+severity: error
+message: "a registration that outlives the feature: a switched-off feature could never release it; register through `FeatureCx`"
+note: "`App::on_action` returns no `Subscription`, and the window-level `Context::on_action` matches too, on purpose."
+files:
+  - crates/app/src/feature/**/*.rs
+  - crates/app/src/quick_open/**/*.rs
+  - crates/app/src/backlinks/**/*.rs
+ignores:
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/test_support.rs'
+  - '**/tests/**'
+rule:
+  kind: call_expression
+  has:
+    field: function
+    regex: '^cx\.(on_action|set_global|bind_keys|observe_global|observe_new|observe_keystrokes)\b'

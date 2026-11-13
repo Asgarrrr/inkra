@@ -6,9 +6,7 @@ use inkra_vault::{EntryId, New};
 
 use crate::editor::EditorView;
 use crate::feature::Registry;
-use crate::open::FileActivated;
 use crate::pane::{CORE_PANES, sides};
-use crate::quick_open::{QuickOpen, QuickOpenDelegate};
 use crate::restore::Opened;
 use crate::sidebar::{Cursor, NewFolder, NewNote};
 use crate::theme::{self, store::ThemeStore};
@@ -302,19 +300,6 @@ impl AppShell {
         self.create(New::Dir, window, cx);
     }
 
-    fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(panes) = &self.panes else {
-            return;
-        };
-        let (links, showing, recent) = (panes.links.clone(), self.showing(), self.recent.clone());
-        self.toggle_picker_with(
-            window,
-            cx,
-            |cx| QuickOpenDelegate::new(&links, showing, recent, cx),
-            |shell, event: &FileActivated, cx| shell.open(event.file, None, event.open, cx),
-        );
-    }
-
     fn search_vault(&mut self, _: &SearchVault, window: &mut Window, cx: &mut Context<Self>) {
         let Some(panes) = &self.panes else {
             return;
@@ -377,7 +362,7 @@ impl AppShell {
 
     /// Where quick open's row `ix` was drawn last; `None` when quick open is not drawn.
     pub(crate) fn quick_open_row_center(&self, ix: f32, cx: &App) -> Option<gpui::Point<Pixels>> {
-        self.modal_picker::<QuickOpenDelegate>()?
+        self.modal_picker::<crate::quick_open::QuickOpenDelegate>()?
             .read(cx)
             .row_center(ix)
     }

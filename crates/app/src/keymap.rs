@@ -12,7 +12,6 @@ use crate::editor::actions::{
 use crate::feature;
 use crate::field::{Cancel, Confirm};
 use crate::picker;
-use crate::quick_open::QuickOpen;
 use crate::shell::{
     ActivateLastTab, ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp,
     ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, OpenVault, PreviousTab,
@@ -91,7 +90,6 @@ fn core_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
         KeyBinding::new("cmd-o", OpenVault, Some("AppShell")),
-        KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
         KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-shift-p", command_palette::Toggle, Some("AppShell")),
         KeyBinding::new("cmd-t", NewTab, Some("AppShell")),

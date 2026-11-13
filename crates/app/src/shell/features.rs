@@ -4,10 +4,14 @@ use std::any::TypeId;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui::{Action, AppContext as _, Context, Entity, KeyContext, Window};
+use gpui::{Action, AppContext as _, Context, Entity, EventEmitter, KeyContext, Window};
+use inkra_vault::EntryId;
 
 use super::AppShell;
 use crate::feature::{FeatureHandle, FeatureId, Registry, Slot};
+use crate::index::IndexSync;
+use crate::open::Open;
+use crate::picker::{Picker, PickerDelegate};
 use crate::settings::Switches;
 use crate::timeline::{Step, Timeline};
 use crate::vault::{ConfigChanged, NoteStore};
@@ -20,16 +24,11 @@ pub(super) fn over_budget(took: Duration) -> bool {
 /// What a feature reaches while it activates or runs a command.
 pub(crate) struct FeatureCx<'a, 'b> {
     shell: &'a mut AppShell,
-    #[expect(dead_code, reason = "no feature draws in the window before quick open")]
     window: &'a mut Window,
     cx: &'a mut Context<'b, AppShell>,
     feature: FeatureId,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "BUILTIN is empty until quick open joins it")
-)]
 impl FeatureCx<'_, '_> {
     pub(crate) fn on_command<A: Action>(&mut self, f: impl Fn(&A, &mut FeatureCx) + 'static) {
         let handler = move |action: &dyn Action, fcx: &mut FeatureCx| {
@@ -41,6 +40,13 @@ impl FeatureCx<'_, '_> {
     }
 
     /// Held by the feature: switching it off releases the entity.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no built-in feature holds an entity before backlinks"
+        )
+    )]
     #[expect(
         clippy::new_ret_no_self,
         clippy::wrong_self_convention,
@@ -55,12 +61,62 @@ impl FeatureCx<'_, '_> {
         entity
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no built-in feature holds an entity before backlinks"
+        )
+    )]
     pub(crate) fn update<T: 'static, R>(
         &mut self,
         entity: &Entity<T>,
         f: impl FnOnce(&mut T, &mut Context<T>) -> R,
     ) -> R {
         entity.update(self.cx, f)
+    }
+
+    /// `None` with no vault: `expect_used` is denied, so the type says it.
+    pub(crate) fn index(&self) -> Option<Entity<IndexSync>> {
+        self.shell.panes.as_ref().map(|panes| panes.links.clone())
+    }
+
+    pub(crate) fn shown(&self) -> Option<EntryId> {
+        self.shell.showing()
+    }
+
+    pub(crate) fn recent(&self) -> Vec<EntryId> {
+        self.shell.recent.clone()
+    }
+
+    pub(crate) fn open(&mut self, file: EntryId, open: Open) {
+        self.shell.open(file, None, open, self.cx);
+    }
+
+    /// A modal owned by the feature: switching it off closes the modal. Each `E` reaches `on_pick` while it is on.
+    pub(crate) fn open_picker<D, E: 'static>(
+        &mut self,
+        delegate: impl FnOnce(&mut Context<Picker<D>>) -> D,
+        on_pick: impl Fn(&E, &mut FeatureCx) + 'static,
+    ) where
+        D: PickerDelegate,
+        Picker<D>: EventEmitter<E>,
+    {
+        let Some(picker) = self.shell.toggle_picker(self.window, self.cx, delegate) else {
+            return;
+        };
+        let id = self.feature;
+        let subscription = self.cx.subscribe_in(
+            &picker,
+            self.window,
+            move |shell, _, event: &E, window, cx| {
+                shell.with_feature(id, window, cx, |fcx| on_pick(event, fcx));
+            },
+        );
+        if let Some(modal) = &mut self.shell.modal {
+            modal.hold(subscription);
+            modal.owner = Some(id);
+        }
     }
 
     fn handle(&mut self) -> &mut FeatureHandle {
@@ -183,16 +239,29 @@ impl AppShell {
         context
     }
 
-    /// A feature switched on after the launch activates now if it waits for the first frame.
+    /// A feature switched off closes its modal before its handle drops; one switched on after
+    /// the launch activates now if it waits for the first frame.
     pub(super) fn apply_switches(
         &mut self,
         switches: &Switches,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.features.apply(switches) {
-            self.activate_due(window, cx);
-            cx.notify();
+        let replaced = self.features.apply(switches);
+        if replaced.is_empty() {
+            return;
         }
+        // `_old` drops at the end of its turn, after the modal: a feature's handle goes last.
+        for (id, _old) in replaced {
+            if self
+                .modal
+                .as_ref()
+                .is_some_and(|modal| modal.owner == Some(id))
+            {
+                self.dismiss_modal(window, cx);
+            }
+        }
+        self.activate_due(window, cx);
+        cx.notify();
     }
 }

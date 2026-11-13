@@ -5,14 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::executor::block_on;
-use gpui::{App, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{App, Focusable, Keystroke, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
-use super::open_vault_with;
 use super::themes::pick;
+use super::{ab_focused, editor, open, open_vault_with, tab_files};
 use crate::feature::{self, Registry, fakes};
 use crate::keymap::key_bindings;
+use crate::quick_open::QuickOpenDelegate;
 use crate::settings::{self, Switches};
 use crate::shell::features::over_budget;
 use crate::shell::{AppShell, Left, NoteStore};
@@ -30,11 +31,18 @@ fn fakes_on() -> Registry {
 
 /// `/vault/a.md` behind a shell with the fake catalog, its root focused.
 fn ping_shell(cx: &mut TestAppContext) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
+    shell_with(cx, fakes_on())
+}
+
+/// `/vault/a.md` behind a shell with `features`, its root focused.
+fn shell_with(
+    cx: &mut TestAppContext,
+    features: Registry,
+) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "alpha");
     cx.update(bind);
-    let (window, _sidebar, _notes) =
-        open_vault_with(cx, Arc::clone(&fs) as Arc<dyn Fs>, fakes_on());
+    let (window, _sidebar, _notes) = open_vault_with(cx, Arc::clone(&fs) as Arc<dyn Fs>, features);
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     focus_root(window, &mut visual);
     (fs, window, visual)
@@ -49,9 +57,13 @@ fn focus_root(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 
-fn switch_ping(fs: &MemFs, on: bool, cx: &mut VisualTestContext) {
-    fs.insert_file(SETTINGS, format!(r#"{{"features":{{"ping_fake":{on}}}}}"#));
+fn switch(fs: &MemFs, feature: &str, on: bool, cx: &mut VisualTestContext) {
+    fs.insert_file(SETTINGS, format!(r#"{{"features":{{"{feature}":{on}}}}}"#));
     cx.run_until_parked();
+}
+
+fn switch_ping(fs: &MemFs, on: bool, cx: &mut VisualTestContext) {
+    switch(fs, "ping_fake", on, cx);
 }
 
 fn ping(cx: &mut VisualTestContext) -> Option<usize> {
@@ -84,6 +96,10 @@ fn open_b(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
 }
 
 fn palette_lists_ping(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+    palette_lists("Ping fake", window, cx)
+}
+
+fn palette_lists(name: &str, window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
     cx.simulate_keystrokes("cmd-shift-p");
     cx.run_until_parked();
     let names = window
@@ -95,8 +111,8 @@ fn palette_lists_ping(window: WindowHandle<AppShell>, cx: &mut VisualTestContext
     names.iter().any(|label| {
         label
             .split_once(", ")
-            .map_or(label.as_str(), |(name, _)| name)
-            == "Ping fake"
+            .map_or(label.as_str(), |(label, _)| label)
+            == name
     })
 }
 
@@ -303,4 +319,67 @@ fn a_broken_settings_file_keeps_the_switches(cx: &mut TestAppContext) {
     visual.run_until_parked();
 
     assert!(!names_ping(window, &mut visual));
+}
+
+fn quick_open_shown(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) -> bool {
+    window
+        .update(cx, |shell, _, _| shell.modal_is::<QuickOpenDelegate>())
+        .unwrap()
+}
+
+#[gpui::test]
+fn quick_open_on_off_on_by_keystroke(cx: &mut TestAppContext) {
+    let (fs, window, mut visual) = shell_with(cx, Registry::default());
+    visual.simulate_keystrokes("cmd-p");
+    assert!(quick_open_shown(window, &mut visual));
+    visual.simulate_keystrokes("cmd-p");
+
+    switch(&fs, "quick_open", false, &mut visual);
+    visual.simulate_keystrokes("cmd-p");
+    assert!(!quick_open_shown(window, &mut visual));
+    assert!(!palette_lists("Quick open", window, &mut visual));
+
+    switch(&fs, "quick_open", true, &mut visual);
+    visual.simulate_keystrokes("cmd-p");
+    assert!(quick_open_shown(window, &mut visual));
+}
+
+#[gpui::test]
+fn disabling_quick_open_closes_its_picker_mid_query(cx: &mut TestAppContext) {
+    let (fs, window, mut visual, a, _b) = ab_focused(cx);
+    open(&window, &mut visual, a);
+    let editor = editor(&window, &mut visual);
+    window
+        .update(&mut visual, |_, window, cx| {
+            window.focus(&editor.focus_handle(cx), cx);
+        })
+        .unwrap();
+    visual.simulate_keystrokes("cmd-p");
+    let picker = window
+        .update(&mut visual, |shell, _, _| {
+            shell.modal_picker::<QuickOpenDelegate>()
+        })
+        .unwrap()
+        .expect("quick open is open")
+        .downgrade();
+    // An excerpt read of the match, if one starts, stays outstanding across the switch.
+    let excerpt = fs.block_load("/vault/b.md");
+
+    visual.dispatch_keystroke(window.into(), Keystroke::parse("b").unwrap());
+    switch(&fs, "quick_open", false, &mut visual);
+    excerpt.release();
+    visual.run_until_parked();
+
+    let (modal, editor_focused) = window
+        .update(&mut visual, |shell, window, cx| {
+            (
+                shell.modal.is_some(),
+                editor.focus_handle(cx).is_focused(window),
+            )
+        })
+        .unwrap();
+    assert!(!modal);
+    assert!(editor_focused, "focus is back on the editor it left");
+    assert!(picker.upgrade().is_none(), "nothing holds the picker");
+    assert_eq!(tab_files(&window, &mut visual), (vec![Some(a)], 0));
 }

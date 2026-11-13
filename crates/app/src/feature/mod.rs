@@ -2,6 +2,7 @@
 
 use gpui::{Action, KeyBinding};
 
+use crate::quick_open;
 use crate::shell::FeatureCx;
 
 #[cfg(test)]
@@ -17,10 +18,6 @@ pub(crate) struct FeatureId(&'static str);
 
 impl FeatureId {
     /// `name` matches `[a-z_]+`: it is also the feature's key context.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "BUILTIN is empty until quick open joins it")
-    )]
     pub(crate) const fn new(name: &'static str) -> Self {
         Self(name)
     }
@@ -47,10 +44,6 @@ pub(crate) struct CommandDecl {
 
 impl CommandDecl {
     /// `A` is a unit action: `on_boxed_action` hands the listener the registered clone, not the dispatched one.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "BUILTIN is empty until quick open joins it")
-    )]
     pub(crate) const fn new<A: Action + Default>(keys: &'static [&'static str]) -> Self {
         Self {
             keys,
@@ -65,7 +58,7 @@ fn bind<A: Action + Default>(keys: &'static str, context: Option<&str>) -> KeyBi
     KeyBinding::new(keys, A::default(), context)
 }
 
-pub(crate) static BUILTIN: &[&Manifest] = &[];
+pub(crate) static BUILTIN: &[&Manifest] = &[&quick_open::MANIFEST];
 
 /// Each feature's keys, live only while the shell's key context names the feature.
 pub(crate) fn bindings(catalog: &[&Manifest]) -> Vec<KeyBinding> {

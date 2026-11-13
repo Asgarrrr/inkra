@@ -105,17 +105,18 @@ impl Registry {
             .collect()
     }
 
-    /// Whether any slot changed; a feature switched off drops its handle.
-    pub(crate) fn apply(&mut self, switches: &Switches) -> bool {
-        let mut changed = false;
+    /// Each slot it changed, with the value it replaced: a feature switched off hands its handle back,
+    /// for the caller to drop once its modal is closed.
+    pub(crate) fn apply(&mut self, switches: &Switches) -> Vec<(FeatureId, Slot)> {
+        let mut replaced = Vec::new();
         for (manifest, slot) in self.catalog.iter().zip(&mut self.slots) {
             let wanted = wanted(manifest, switches);
             if wanted == matches!(slot, Slot::Off) {
-                *slot = if wanted { Slot::Dormant } else { Slot::Off };
-                changed = true;
+                let new = if wanted { Slot::Dormant } else { Slot::Off };
+                replaced.push((manifest.id, std::mem::replace(slot, new)));
             }
         }
-        changed
+        replaced
     }
 
     pub(crate) fn manifest(&self, id: FeatureId) -> &'static Manifest {
