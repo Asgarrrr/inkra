@@ -661,7 +661,8 @@ fn an_image_deleted_before_the_landing_closes_its_tab(cx: &mut TestAppContext) {
         view: None,
     };
     save(&fs, 0, vec![image, tab("a.md", 0, 0)]);
-    let gate = fs.block_load("/vault/a.md");
+    // An image lands with no read; the note holds the landing. Every load: the index loads it too.
+    let gate = fs.hold_loads("/vault/a.md");
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 

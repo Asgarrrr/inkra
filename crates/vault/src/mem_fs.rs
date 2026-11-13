@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::channel::oneshot;
+use futures::future::Shared;
 
 use crate::fs::{
     DirEntry, FileIdentity, Fs, Kind, Loaded, MAX_TEXT_BYTES, Mtime, New, Result, Saved, Stamp,
@@ -38,6 +39,7 @@ struct State {
     /// exists, but a create/rename has no file at the destination yet.
     uncreatable: BTreeSet<PathBuf>,
     blocked_loads: BTreeMap<PathBuf, oneshot::Receiver<()>>,
+    held_loads: BTreeMap<PathBuf, Shared<oneshot::Receiver<()>>>,
     blocked_read_bytes: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_saves: BTreeMap<PathBuf, oneshot::Receiver<()>>,
     blocked_replaces: BTreeMap<PathBuf, oneshot::Receiver<()>>,
@@ -232,12 +234,18 @@ impl Fs for MemFs {
     }
 
     async fn load(&self, path: &Path) -> Result<Loaded> {
-        let blocked = {
+        let (blocked, held) = {
             let mut state = self.state();
             *state.loads.entry(path.to_path_buf()).or_default() += 1;
-            state.blocked_loads.remove(path)
+            (
+                state.blocked_loads.remove(path),
+                state.held_loads.get(path).cloned(),
+            )
         };
         if let Some(wait) = blocked {
+            let _ = wait.await;
+        }
+        if let Some(wait) = held {
             let _ = wait.await;
         }
 
