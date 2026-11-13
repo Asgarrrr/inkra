@@ -94,12 +94,13 @@ impl Registry {
 
     /// The dormant `after_first_frame` features, once launched; none before.
     pub(crate) fn due(&self) -> Vec<FeatureId> {
+        if !self.launched {
+            return Vec::new();
+        }
         self.catalog
             .iter()
             .zip(&self.slots)
-            .filter(|(manifest, slot)| {
-                self.launched && manifest.after_first_frame && matches!(slot, Slot::Dormant)
-            })
+            .filter(|(manifest, slot)| manifest.after_first_frame && matches!(slot, Slot::Dormant))
             .map(|(manifest, _)| manifest.id)
             .collect()
     }

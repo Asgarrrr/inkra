@@ -1,5 +1,5 @@
-//! Test features: one that counts its command, one whose key clashes with a core key, one
-//! that counts its activations after the first frame.
+//! Test features: one that counts its command, one that counts its activations after the
+//! first frame, and key-conflict fakes the keymap tests check.
 
 use std::cell::{Cell, RefCell};
 
