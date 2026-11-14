@@ -1,6 +1,7 @@
 //! A feature's published marks colour the editor's text and follow its edits (decoration layer
 //! spec, S1, S2 and D8).
 
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -290,6 +291,28 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
 
     assert_eq!(fakes::heard(), ["opened+seed"]);
     assert_eq!(warning_runs(window, cx), [(4, true), (3, false), (4, true)]);
+}
+
+thread_local! {
+    static DEADLINES: RefCell<Vec<Instant>> = const { RefCell::new(Vec::new()) };
+}
+
+fn record_deadline(_: &str, deadline: Instant) -> decorations::Opened {
+    DEADLINES.with_borrow_mut(|deadlines| deadlines.push(deadline));
+    decorations::Opened {
+        chunks: Vec::new(),
+        seed: None,
+    }
+}
+
+#[test]
+fn every_open_function_of_a_note_shares_one_deadline_8_ms_after_the_text() {
+    let ready = Instant::now();
+    let openers = [(TODO_LAYER, record_deadline as decorations::OpenFn); 2];
+    decorations::run_openers("", &openers, ready);
+
+    let deadline = ready + Duration::from_millis(8);
+    assert_eq!(DEADLINES.take(), [deadline, deadline]);
 }
 
 #[gpui::test]
