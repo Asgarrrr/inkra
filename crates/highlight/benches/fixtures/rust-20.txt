@@ -1,0 +1,20 @@
+//! Writes the `-- <notes>` vault the Obsidian comparison opens, and prints its path.
+//! Content and layout: docs/benchmarks.md.
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::{Error, ErrorKind};
+use std::path::Path;
+
+const SEED: u64 = 29;
+/// Bumped when the content or the layout changes, so the vault is written again.
+const FORMAT: u32 = 1;
+const MAX_FOLDERS: usize = 100;
+const NOTES_PER_FOLDER: usize = 50;
+/// Written last, so a vault cut short is written again; hidden, so neither app lists it.
+const WRITTEN: &str = ".written";
+/// Obsidian's per-vault state: the benchmark decides when it goes, not the generator.
+const KEEP: &str = ".obsidian";
+const COMMON: &[&str] = &[
+    "the", "of", "and", "to", "a", "in", "is", "that", "for", "it", "as", "with", "on", "be", "at",
+    "by", "this", "from", "or", "an", "are", "not", "but", "we", "can", "all", "will", "one",

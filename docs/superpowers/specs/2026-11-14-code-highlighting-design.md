@@ -484,7 +484,8 @@ light. The look is tuned after it ships, as for code blocks.
 
 | Figure | Expected | How it is checked |
 |---|---|---|
-| Binary size | a few hundred KB for eight lexers, mostly keyword tables; not measured | `stat -f %z` on the release binary, `main` against each slice |
+| Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B | `stat -f %z` on the release binary, `main` against each slice |
+| Lex, Rust | S1a medians: 1.71 us for 20 lines (923 B), 54.7 us for 500 lines (16.1 KB), 646 us for 5,000 lines (169 KB) | `cargo bench -p inkra-highlight -- --quick`, the texts of the 2026-11-11 tree-sitter figures |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` count test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition | a bench of the whole call, S1b |
