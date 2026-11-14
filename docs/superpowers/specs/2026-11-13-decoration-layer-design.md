@@ -376,6 +376,59 @@ Each slice ends green on `./scripts/check.sh`.
   inserted at its edge (`inclusive`). Here the feature's next publish colours
   it (D3).
 
+## Deviations from this spec
+
+The build differs from the design above in these points. Code cites them by
+number.
+
+1. **The listener takes `&mut App`.** It is
+   `Fn(&Entity<Buffer>, TextChange, &mut App)` (`decorations/listen.rs`). It
+   takes the change by value, because `Opened` moves its seed out (D4, D12).
+2. **`publish` and `drawn` are free functions** in `crate::decorations`, not
+   `FeatureCx` methods. A listener reads the edit mark from the buffer, so
+   `FeatureCx::edit_mark` is not built. `publish` takes a `WeakEntity`, so a
+   background task does not keep a closed note alive (D12, O3).
+3. **The listener hooks in `EditorView::refresh`.** `decorations::sync` runs
+   first there, and the listeners run after the global is released. `refresh`
+   runs for every change a view draws, reloads included, outside any lease. A
+   buffer that no view shows hears its changes when a view binds it (O2).
+4. **`LayerDecl` has no kind field.** It is `{ id, open }`. Mark is the one
+   kind; the field arrives with a second kind (D1, D12).
+5. **A chunk grows over a splice strictly inside it.** D3's rule would cut the
+   chunk at a text insertion inside it. Instead, the chunk covers the inserted
+   text, and its marks still follow D3. A splice at a chunk's edge or across
+   it follows D3 (`map_chunk`). The feature's next publish of that chunk thus
+   covers the typed text too (D3, D5).
+6. **"Undeclared" means not in the catalog.** A publish to a layer that no
+   feature declares panics (`rank`). A publish carries no feature, so a
+   publish to another feature's layer does not panic. `on_text_change` checks
+   in debug builds that its layer belongs to its feature (D12).
+7. **The launch note gets no open-function colours.** The note opened from
+   the command line (`bootstrap.rs`, `Launch::Note`) is built without
+   `open_note`. Its listener colours it after the feature activates (D8).
+8. **`ColorToken` comes from `tokens!`** (`theme/colors.rs`). The macro now
+   takes `name => Variant` pairs and emits the enum and its lookup (O1).
+9. **`Decorations` lives in `app/src/decorations/`**, not beside `Parses` in
+   `editor/`. It follows `parses.rs`: a global keyed by the buffer's
+   `EntityId`. A view other than the editor reads it too (D9).
+10. **Released entries are pruned lazily.** An entry holds its buffer weakly.
+    The entries of released buffers drop when the next entry is created, not
+    at the release (D9).
+11. **A seed is valid only at its edit mark.** If the buffer changed before the
+    listener arrived, the core drops the seed and sends `Opened(None)`, a full
+    recompute (D8).
+12. **Every layer starts off.** `decorations::enable` turns a feature's layers
+    on and off. A layer that is off takes no publish, hears nothing, runs no
+    open function and keeps no seed. Turning it off clears its marks; turning
+    it on sends `Lost` (D10).
+13. **`sync` bumps the revision too.** A non-empty layer behind the edit mark
+    draws something else once it catches up, so the revision moves. An undo
+    can otherwise bring back a version the layout shaped with older marks (D9).
+14. **A late publish is bounds-checked after the mapping.** A reversed chunk
+    and unsorted, overlapping or outside marks panic at once. The end of the
+    text and the char boundaries are checked on the mapped chunk, against the
+    current text: the text the publish was computed on is gone (D5, D6).
+
 ## Deferred
 
 | Item | Trigger |
@@ -394,10 +447,12 @@ Each slice ends green on `./scripts/check.sh`.
 
 - **O1. `ColorToken` from `tokens!`.** The macro lists every `ThemeColors`
   field, so it can emit the enum and its lookup. Slice 3 confirms this, or
-  falls back to a hand-written enum of the tokens a layer may use.
+  falls back to a hand-written enum of the tokens a layer may use. Resolved:
+  deviation 8.
 - **O2. Where the listener hooks.** The listener must run once per change and
   after the lease drops. An observer of each live buffer in `NoteStore` fits;
   an `edit_buffer` hook misses reloads. The plan picks one and states why.
+  Resolved: deviation 3.
 - **O3. A publish for a released buffer.** A background task can finish after
   its note closed. The publish should be a no-op, not a panic. The plan checks
-  that `Decorations` can tell.
+  that `Decorations` can tell. Resolved: deviations 2 and 10.
