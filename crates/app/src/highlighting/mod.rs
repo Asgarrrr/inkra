@@ -60,6 +60,9 @@ fn listener(buffer: &Entity<Buffer>, _change: TextChange, cx: &mut App) {
 
 fn token(class: TokenClass) -> ColorToken {
     match class {
+        TokenClass::Comment => ColorToken::SyntaxComment,
         TokenClass::Keyword => ColorToken::SyntaxKeyword,
+        TokenClass::String => ColorToken::SyntaxString,
+        TokenClass::Type => ColorToken::SyntaxType,
     }
 }

@@ -73,6 +73,31 @@ fn a_quote_block_with_an_empty_line_colours_its_content_not_its_prefix(cx: &mut 
 }
 
 #[gpui::test]
+fn comments_strings_and_lifetimes_colour_and_skip_the_quote_prefix(cx: &mut TestAppContext) {
+    let marks = coloured(
+        cx,
+        "> ```rust\n> // c\n> let s = \"a\n> b\";\n> fn f<'a>() {}\n> ```\n",
+    );
+
+    let (comment, string, ty) = (
+        ColorToken::SyntaxComment,
+        ColorToken::SyntaxString,
+        ColorToken::SyntaxType,
+    );
+    assert_eq!(
+        marks,
+        [
+            (12, 16, comment),
+            (19, 22, K),
+            (27, 29, string),
+            (32, 34, string),
+            (38, 40, K),
+            (43, 45, ty)
+        ]
+    );
+}
+
+#[gpui::test]
 fn a_list_item_block_with_an_empty_line_colours_its_content_not_its_indent(
     cx: &mut TestAppContext,
 ) {

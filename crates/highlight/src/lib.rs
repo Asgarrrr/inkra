@@ -4,7 +4,10 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
+use state::LineState;
+
 mod rust;
+mod state;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
@@ -24,10 +27,14 @@ impl Language {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenClass {
+    Comment,
     Keyword,
+    String,
+    Type,
 }
 
-type Lexer = fn(&str, ByteOffset, &mut Vec<(Range<ByteOffset>, TokenClass)>);
+type Lexer =
+    fn(LineState, &str, ByteOffset, &mut Vec<(Range<ByteOffset>, TokenClass)>) -> LineState;
 
 /// Appends the tokens of each content line, at its start offset, to `out`; sorted and disjoint
 /// when the lines are in order.
@@ -39,9 +46,9 @@ pub fn highlight<'a>(
     let lex: Lexer = match language {
         Language::Rust => rust::lex,
     };
-    for (start, line) in lines {
-        lex(line, start, out);
-    }
+    lines.fold(LineState::default(), |state, (start, line)| {
+        lex(state, line, start, out)
+    });
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use super::lex;
+use crate::state::LineState;
 use crate::{Language, TokenClass, highlight};
 
 const KEYWORDS: [&str; 35] = [
@@ -26,7 +27,7 @@ fn keywords(ranges: &[(usize, usize)]) -> Vec<(Range<ByteOffset>, TokenClass)> {
 
 fn lexed(line: &str, start: usize) -> Vec<(Range<ByteOffset>, TokenClass)> {
     let mut out = Vec::new();
-    lex(line, ByteOffset::new(start), &mut out);
+    lex(LineState::default(), line, ByteOffset::new(start), &mut out);
     out
 }
 
