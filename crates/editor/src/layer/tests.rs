@@ -207,6 +207,25 @@ fn an_older_publish_beside_a_newer_chunk_lands() {
 }
 
 #[test]
+fn an_older_publish_over_a_newer_chunk_fills_around_it() {
+    let mut buffer = twenty();
+    let old = buffer.edit_mark();
+    buffer.transact(|buffer| buffer.insert(at(20), "x"));
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 8..12, &[(9..10, 'n')]).unwrap();
+
+    let marks_at_old = vec![(span(2..4), 'a'), (span(7..11), 'b'), (span(14..16), 'c')];
+    let published = layer.publish(&buffer, span(0..20), marks_at_old, old);
+
+    assert_eq!(published, Ok(true));
+    assert_eq!(chunks(&layer), [0..8, 8..12, 12..20]);
+    assert_eq!(
+        marks(&layer, 0..21),
+        [(2..4, 'a'), (7..8, 'b'), (9..10, 'n'), (14..16, 'c')]
+    );
+}
+
+#[test]
 #[should_panic(expected = "past the end")]
 fn a_chunk_past_the_end_panics() {
     let buffer = twenty();

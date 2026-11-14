@@ -429,6 +429,15 @@ number.
     and unsorted, overlapping or outside marks panic at once. The end of the
     text and the char boundaries are checked on the mapped chunk, against the
     current text: the text the publish was computed on is gone (D5, D6).
+15. **A late publish fills around newer chunks.** Each chunk keeps the edit
+    mark it was computed at. A publish leaves every chunk computed after it in
+    place and lands only around them, so a byte shows the newest result that
+    covers it. A whole-note recompute that finishes after the edit of one block
+    therefore colours the rest of the note (D5, D6).
+16. **Splices are mapped one at a time.** `catch_up` walks the chunks once per
+    splice, not once for all of them. A keystroke is one splice, so it costs one
+    walk; a transaction of many splices, such as `apply_diff`, costs one walk
+    per splice (D5).
 
 ## Deferred
 

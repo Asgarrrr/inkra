@@ -284,8 +284,9 @@ proptest! {
         prop_assert_eq!(marks(&late, &buffer), marks(&early, &buffer));
     }
 
+    /// Byte by byte, the newer publish wins inside its chunk and the older one fills the rest.
     #[test]
-    fn an_older_publish_never_replaces_a_newer_one(
+    fn an_older_publish_fills_only_around_a_newer_chunk(
         parts in prop::collection::vec(text_strategy(), 1..12),
         older in chunk_strategy(),
         newer in chunk_strategy(),
@@ -298,12 +299,21 @@ proptest! {
             edit_all(&mut buffer, edits);
         }
         prop_assume!(p1.at < buffer.edit_mark());
+        let mut older_alone = Layer::new(buffer.edit_mark());
+        prop_assert!(p1.clone().deliver(&mut older_alone, &buffer).is_ok());
         let mut layer = Layer::new(buffer.edit_mark());
-        prop_assert!(Publish::whole(&buffer, &newer).deliver(&mut layer, &buffer).is_ok());
-        let alone = marks(&layer, &buffer);
+        let range = publish(&mut layer, &buffer, &newer)?;
+        let newer_alone = styles(&layer, &buffer);
 
-        prop_assert_eq!(p1.deliver(&mut layer, &buffer), Ok(false));
-        prop_assert_eq!(marks(&layer, &buffer), alone);
+        prop_assert!(p1.deliver(&mut layer, &buffer).is_ok());
+
+        let expected: Vec<_> = styles(&older_alone, &buffer)
+            .into_iter()
+            .zip(newer_alone)
+            .enumerate()
+            .map(|(byte, (older, newer))| if range.contains(&byte) { newer } else { older })
+            .collect();
+        prop_assert_eq!(styles(&layer, &buffer), expected);
     }
 
     #[test]

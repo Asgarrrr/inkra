@@ -102,8 +102,8 @@ impl<S: Clone + PartialEq> Layer<S> {
     }
 
     /// Replaces everything inside `chunk` with `marks`, both computed at the edit mark `at` and
-    /// mapped through the edits since (D6). `Ok(true)` when the marks inside the mapped chunk
-    /// changed; `Ok(false)` too when a chunk it overlaps was computed later, and it is dropped.
+    /// mapped through the edits since (D6), except where a chunk computed later lies: that one
+    /// stays. `Ok(true)` when the marks inside the mapped chunk changed.
     ///
     /// # Errors
     /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
@@ -135,22 +135,26 @@ impl<S: Clone + PartialEq> Layer<S> {
         let chunk = new.start..new.end();
         let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
         let last = self.chunks.partition_point(|old| old.start < chunk.end);
-        let overlapped = &self.chunks[first..last];
-        if overlapped.iter().any(|old| old.published > at) {
-            return Ok(false);
-        }
-        let head = overlapped
-            .first()
-            .and_then(|head| head.piece(head.start..chunk.start));
-        let tail = overlapped
-            .last()
-            .and_then(|tail| tail.piece(chunk.end..tail.end()));
         let before: Vec<_> = self
             .marks_in(chunk.clone())
             .map(|(mark, style)| (mark, style.clone()))
             .collect();
-        self.chunks
-            .splice(first..last, head.into_iter().chain([new]).chain(tail));
+        let mut pieces = Vec::new();
+        let mut tail = None;
+        let mut gap = chunk.start;
+        for old in self.chunks.drain(first..last) {
+            if old.published > at {
+                pieces.extend(new.piece(gap..old.start));
+                gap = old.end();
+                pieces.push(old);
+            } else {
+                pieces.extend(old.piece(old.start..chunk.start));
+                tail = old.piece(chunk.end..old.end());
+            }
+        }
+        pieces.extend(new.piece(gap..chunk.end));
+        pieces.extend(tail);
+        self.chunks.splice(first..first, pieces);
         let after = self.marks_in(chunk);
         Ok(!after.eq(before.iter().map(|(mark, style)| (mark.clone(), style))))
     }
