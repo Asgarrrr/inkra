@@ -8,6 +8,7 @@ mod bootstrap;
 mod buffer_events;
 mod command_palette;
 mod count;
+mod decorations;
 mod editor;
 mod feature;
 mod field;

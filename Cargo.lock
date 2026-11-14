@@ -2485,6 +2485,7 @@ dependencies = [
 name = "inkra-editor"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "inkra-text",
  "proptest",
 ]

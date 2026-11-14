@@ -35,7 +35,7 @@ pub(super) struct LineShape {
     pub(super) wrapped: WrappedLine,
     text: SharedString,
     font_size: Pixels,
-    runs: Vec<TextRun>,
+    pub(super) runs: Vec<TextRun>,
     wrap: Option<Pixels>,
 }
 
@@ -103,7 +103,7 @@ pub(crate) fn shape_document(
         scrolls,
         ..
     } = inputs;
-    let mut styles = RunStyles::new(style, theme);
+    let mut styles = RunStyles::new(style, theme, &inputs.decorations);
     let body_size = style.font_size.to_pixels(window.rem_size());
     let body_height = style.line_height_in_pixels(window.rem_size());
 
@@ -187,7 +187,7 @@ pub(crate) fn shape_document(
         margin: inputs.margin,
         code_block_wrap,
         theme: Arc::clone(theme),
-        version: buffer.version(),
+        shaped_at: (buffer.version(), inputs.decorations.revision),
         selection: selection.clone(),
         marked: marked.cloned(),
         scrolls: scrolls.clone(),

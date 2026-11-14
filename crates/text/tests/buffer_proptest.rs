@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use inkra_text::{Buffer, ByteOffset, Utf16Offset, Version};
+use inkra_text::{Buffer, ByteOffset, Utf16Offset, Version, diff};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -315,6 +315,60 @@ proptest! {
 
         while buf.undo().is_some() {
             check_line_index(&buf)?;
+        }
+    }
+
+    #[test]
+    fn edits_since_replays_onto_the_new_text(
+        parts in prop::collection::vec(text_strategy(), 0..8),
+        ops in prop::collection::vec(op_strategy(), 0..20),
+        rewrite in prop::collection::vec(text_strategy(), 0..8),
+    ) {
+        let mut buf = Buffer::new(parts.concat());
+        let old = buf.text().to_owned();
+        let mark = buf.edit_mark();
+        for op in ops {
+            match op {
+                Op::Insert(at, text) => {
+                    let at = boundary(buf.text(), at);
+                    buf.transact(|buf| buf.insert(ByteOffset::new(at), &text));
+                }
+                Op::Delete(start, end) => {
+                    let (start, end) = ordered_boundaries(buf.text(), start, end);
+                    buf.transact(|buf| buf.delete(ByteOffset::new(start)..ByteOffset::new(end)));
+                }
+                Op::ReplaceInTransaction(start, end, text) => {
+                    let (start, end) = ordered_boundaries(buf.text(), start, end);
+                    buf.transact(|buf| buf.replace(ByteOffset::new(start)..ByteOffset::new(end), &text));
+                }
+                Op::InsertTwiceInTransaction(first_at, second_at, first, second) => {
+                    let first_at = boundary(buf.text(), first_at);
+                    buf.transact(|buf| {
+                        buf.insert(ByteOffset::new(first_at), &first);
+                        let second_at = boundary(buf.text(), second_at);
+                        buf.insert(ByteOffset::new(second_at), &second);
+                    });
+                }
+                Op::Undo => {
+                    buf.undo();
+                }
+                Op::Redo => {
+                    buf.redo();
+                }
+            }
+        }
+        prop_assert!(buf.apply_diff(&diff(buf.version(), buf.text(), &rewrite.concat())));
+
+        let mut provenance: Vec<Option<usize>> = (0..old.len()).map(Some).collect();
+        for splice in buf.edits_since(mark).unwrap() {
+            let at = splice.at.get();
+            provenance.splice(at..at + splice.removed_len, std::iter::repeat_n(None, splice.inserted_len));
+        }
+        prop_assert_eq!(provenance.len(), buf.text().len());
+        for (new, old_index) in provenance.iter().enumerate() {
+            if let Some(old_index) = old_index {
+                prop_assert_eq!(buf.text().as_bytes()[new], old.as_bytes()[*old_index]);
+            }
         }
     }
 

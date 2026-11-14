@@ -3,9 +3,11 @@
 mod assets;
 mod code_blocks;
 mod command_palette;
+mod decorations;
 mod docks;
 mod failures;
 mod gone;
+mod headings;
 mod hover;
 mod markdown_blocks;
 mod quick_open;
@@ -58,17 +60,6 @@ const MARKDOWN: &str = "---\n\
                         | a | b |\n\
                         |---|---|\n\
                         | 1 | 2 |";
-
-const HEADINGS: &str = "# Heading one, long enough that it wraps onto a second row at this size\n\
-                        Body text under it.\n\
-                        ## Heading two\n\
-                        ### Heading three\n\
-                        #### Heading four\n\
-                        ##### Heading five\n\
-                        ###### Heading six\n\
-                        Setext heading\n\
-                        ==============\n\
-                        Last body line.";
 
 const VAULT: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
@@ -142,12 +133,12 @@ const CATALOGUE: &[Scene] = &[
     Scene {
         name: "editor-headings",
         shows: "heading sizes H1 to H6 and setext, caret on body text so every `#` is hidden",
-        open: editor_headings,
+        open: headings::concealed,
     },
     Scene {
         name: "editor-heading-revealed",
         shows: "the caret on the wrapped H1: `# ` shows dimmed in the margin, and no text moves",
-        open: editor_heading_revealed,
+        open: headings::revealed,
     },
     Scene {
         name: "sidebar-vault",
@@ -469,6 +460,11 @@ const CATALOGUE: &[Scene] = &[
         shows: "code_block_wrap on, written to settings.json after the open: every long line wraps inside its background, nothing is clipped, the quoted block wraps past its bars",
         open: code_blocks::wrapped,
     },
+    Scene {
+        name: "todo-marks",
+        shows: "three TODOs in the warning colour from a decoration layer, one inside **bold** with the caret in it: its revealed `**` stay dimmed",
+        open: decorations::todo_marks,
+    },
 ];
 
 pub(crate) fn catalogue() -> &'static [Scene] {
@@ -544,21 +540,6 @@ fn editor_revealed_link(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(MARKDOWN);
     stage.focus(window);
     let keys = format!("cmd-up {}ctrl-e {}", "down ".repeat(8), "left ".repeat(31));
-    stage.keys(window, keys.trim_end());
-    window
-}
-
-fn editor_headings(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_note(HEADINGS);
-    stage.focus(window);
-    stage.keys(window, "cmd-down");
-    window
-}
-
-fn editor_heading_revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_note(HEADINGS);
-    stage.focus(window);
-    let keys = format!("cmd-up {}", "right ".repeat(5));
     stage.keys(window, keys.trim_end());
     window
 }

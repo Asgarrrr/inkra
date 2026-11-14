@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gpui::{App, Global, Pixels, Point, WindowAppearance, point, px};
 use inkra_markdown::HeadingLevel;
 
-pub(crate) use colors::ThemeColors;
+pub(crate) use colors::{ColorToken, ThemeColors};
 pub(crate) use markdown::markdown_style;
 
 #[derive(Debug, Clone, PartialEq)]

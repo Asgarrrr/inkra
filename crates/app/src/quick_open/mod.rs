@@ -41,6 +41,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     commands: &[CommandDecl::new::<QuickOpen>(&["cmd-p"])],
     panes: &[],
     buttons: &[],
+    layers: &[],
     activate,
 };
 

@@ -232,6 +232,56 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
     assert_ne!(buffer.version(), Version::default());
 }
 
+#[test]
+fn undo_and_redo_increase_the_edit_mark() {
+    let mut buffer = Buffer::new("abc");
+    let start = buffer.edit_mark();
+    assert_eq!(start, EditMark::default());
+    buffer.transact(|buffer| buffer.insert(at(3), "x"));
+    let edited = buffer.edit_mark();
+    buffer.undo();
+    let undone = buffer.edit_mark();
+    buffer.redo();
+    let redone = buffer.edit_mark();
+    assert!(start < edited && edited < undone && undone < redone);
+
+    buffer.transact(|_| {});
+    assert_eq!(
+        buffer.edit_mark(),
+        redone,
+        "an empty transaction edits nothing"
+    );
+}
+
+#[test]
+fn more_than_256_splices_past_a_mark_is_none() {
+    let mut buffer = Buffer::new("");
+    let start = buffer.edit_mark();
+    buffer.transact(|buffer| {
+        for _ in 0..256 {
+            buffer.insert(at(0), "x");
+        }
+    });
+    assert_eq!(buffer.edits_since(start).map(Iterator::count), Some(256));
+
+    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+
+    assert!(buffer.edits_since(start).is_none());
+    assert_eq!(
+        buffer.edits_since(buffer.edit_mark()).map(Iterator::count),
+        Some(0)
+    );
+}
+
+#[test]
+#[should_panic(expected = "is past")]
+fn a_mark_from_the_future_panics() {
+    let mut edited = Buffer::new("");
+    edited.transact(|buffer| buffer.insert(at(0), "x"));
+
+    let _ = Buffer::new("").edits_since(edited.edit_mark());
+}
+
 /// Regression pin: `close` merges by extending the previous transaction, so its id must live
 /// on the edit, not the transaction — else a merged edit would report "saved" over unsaved text.
 #[test]

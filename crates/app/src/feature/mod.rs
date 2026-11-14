@@ -1,7 +1,10 @@
 //! What a feature declares, and the bindings its commands get (feature registry spec).
 
+use std::time::Duration;
+
 use gpui::{Action, KeyBinding};
 
+use crate::decorations::LayerDecl;
 use crate::pane::{PaneButton, PaneDecl};
 use crate::shell::Activation;
 use crate::{backlinks, quick_open, vault_search};
@@ -38,7 +41,14 @@ pub(crate) struct Manifest {
     pub(crate) panes: &'static [&'static PaneDecl],
     /// Buttons added to other panes' headers; each runs one of this manifest's commands.
     pub(crate) buttons: &'static [PaneButton],
+    /// Drawn over every note in this order, after every earlier feature's (decoration layer spec, D10).
+    pub(crate) layers: &'static [LayerDecl],
     pub(crate) activate: fn(&mut Activation),
+}
+
+/// A feature's activation, call or listener past this logs a line (registry spec, D11).
+pub(crate) fn over_budget(took: Duration) -> bool {
+    took > Duration::from_millis(2)
 }
 
 pub(crate) struct CommandDecl {

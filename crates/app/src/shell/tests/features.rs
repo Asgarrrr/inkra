@@ -11,11 +11,10 @@ use inkra_vault::mem_fs::MemFs;
 
 use super::themes::pick;
 use super::{ab_focused, editor, open, open_vault_with, tab_files};
-use crate::feature::{self, Registry, fakes};
+use crate::feature::{self, Registry, fakes, over_budget};
 use crate::keymap::key_bindings;
 use crate::quick_open::QuickOpenDelegate;
 use crate::settings::{self, Switches};
-use crate::shell::features::over_budget;
 use crate::shell::{AppShell, Left, NoteStore};
 
 const SETTINGS: &str = "/vault/.inkra/settings.json";
@@ -35,7 +34,7 @@ fn ping_shell(cx: &mut TestAppContext) -> (Arc<MemFs>, WindowHandle<AppShell>, V
 }
 
 /// `/vault/a.md` behind a shell with `features`, its root focused.
-fn shell_with(
+pub(super) fn shell_with(
     cx: &mut TestAppContext,
     features: Registry,
 ) -> (Arc<MemFs>, WindowHandle<AppShell>, VisualTestContext) {
@@ -57,7 +56,7 @@ fn focus_root(window: WindowHandle<AppShell>, cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 
-fn switch(fs: &MemFs, feature: &str, on: bool, cx: &mut VisualTestContext) {
+pub(super) fn switch(fs: &MemFs, feature: &str, on: bool, cx: &mut VisualTestContext) {
     fs.insert_file(SETTINGS, format!(r#"{{"features":{{"{feature}":{on}}}}}"#));
     cx.run_until_parked();
 }

@@ -53,6 +53,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
             action: boxed::<SearchVault>,
         },
     }],
+    layers: &[],
     activate,
 };
 

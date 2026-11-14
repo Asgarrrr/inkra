@@ -32,6 +32,7 @@ mod code_block_wrap;
 mod column;
 mod command_palette;
 mod creating;
+mod decorations;
 mod dock_drag;
 mod dock_menu;
 mod dock_moves;
