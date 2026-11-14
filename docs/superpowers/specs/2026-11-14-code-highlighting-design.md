@@ -101,7 +101,10 @@ lexer reads across a line end. Nothing resets at a line start, so a generic
 list, a template or a JSX element can span lines. It holds:
 
 - what is open: a block comment and its depth, a string and its delimiter, a
-  raw string's hash count, a heredoc's tag as a hash;
+  raw string's hash count;
+- Bash's pending heredocs, a queue of at most two: each tag as a hash, and
+  whether `<<-` strips leading tabs. `cat <<A <<B` reads A's body, then B's. A
+  third pending heredoc is not queued, and its body colours as commands;
 - the class of the previous significant token, for D4's look-behind;
 - a nesting stack of at most 16 entries, one byte each: a bracket, a generic
   list, a template's `${`, a JSX element, an embedded language (HTML).
@@ -120,12 +123,17 @@ keeps `md_code_block`.
 
 ### D3. Content lines come from the markdown parse
 
-A block's content lines are its spans in `Markdown.spans` that carry
+A block's content lines are one per physical line between its fences, in
+order. A line's content is its span in `Markdown.spans` that carries
 `Styles::CODE_BLOCK` and not `Styles::MARKER`. Spans never cross a `\n`
-(`parse.rs:13`), so each span is one content line, or part of one. pulldown-cmark
-hands the code text without container prefixes, so a block in a quote or a
-list lexes as the code alone. A test pins a block in a quote and one in a list
-item.
+(`parse.rs:13`), and `push` merges touching spans with equal styles, so a line
+has at most one such span. A line with no such span, an empty one, is still
+yielded, as an empty content line at its line end. Bash needs it: an empty
+line ends a heredoc whose tag is empty.
+
+pulldown-cmark hands the code text without container prefixes, so a block in
+a quote or a list lexes as the code alone. Tests pin a block in a quote, one
+in a list item, and an empty line inside each.
 
 The language comes from `CodeBlock.language`, as the label reads it
 (code-blocks spec, D1). An indented block has no language and keeps
@@ -152,12 +160,15 @@ significant token) and a small bracket stack. That covers:
 
 Two rules use the look-behind to settle classic ambiguities:
 
-- **Expression start.** After an identifier, a number, a string, `)` or `]`,
-  a `/` is a division and a `<` is a comparison. Anywhere else, `/` opens a
-  regex literal (JavaScript, TypeScript) and `<` followed by a letter opens a
-  JSX tag where JSX is on (Languages). A keyword that takes an expression
-  (`return`, `typeof`, `case`, `yield`, `await` and the like) is an expression
-  start, so `return <div>` opens a tag and `return /a/` a regex.
+- **Expression start.** After a value end, a `/` is a division and a `<` is a
+  comparison. Anywhere else, `/` opens a regex literal (JavaScript,
+  TypeScript) and `<` followed by a letter opens a JSX tag where JSX is on
+  (Languages). A value end is an identifier, a number, a string, `]`, a
+  postfix `++` or `--`, or a `)`, except a `)` that closes the condition of
+  `if`, `while`, `for` or `with`; the nesting stack marks that `(`. A keyword
+  that takes an expression (`return`, `typeof`, `case`, `yield`, `await` and
+  the like) is an expression start. So `return <div>` opens a tag, `if (ok)
+  /x/.test(s)` a regex, and `x++ / y` is a division. Tests pin all three.
 - **Rust lifetime.** A `'` followed by an identifier and no closing `'` right
   after one char is a lifetime, coloured `Type`. Otherwise it opens a char
   literal.
@@ -246,25 +257,30 @@ It then calls one pure function, in `inkra-highlight` (`plan.rs`):
 
 ```rust
 pub fn plan(
-    blocks: &[Range<ByteOffset>],
+    blocks: &[(Range<ByteOffset>, ByteOffset)],
     held: &[(Range<ByteOffset>, bool)],
     dirty: Option<Range<ByteOffset>>,
 ) -> Plan;
 ```
 
 `blocks` are the current text's code blocks, from
-`parses::parsed(buffer).code_blocks`; the draw needs the same parse, so this
-adds no parse. `held` are the layer's chunks and whether each has marks (D9).
+`parses::parsed(buffer).code_blocks`. Each comes with its reach start: the
+start of its opening fence's line. A block's range starts after the fence's
+indent and after any quote prefix (`parse/tests/code_blocks.rs:21`). An edit
+there changes how much indent each content line loses, so it changes the
+code. The parse is cached per version and the draw needs it too, so this adds
+no parse. `held` are the layer's chunks and whether each has marks (D9).
 `Plan` holds two sorted lists:
 
 1. **clear**: each held chunk with marks whose range is no block's range. It
    clears a block that a removed or typed fence turned into prose, or that
    merged with a neighbour.
-2. **lex**: each block that no held chunk has exactly, or whose range meets
-   the dirty range. Meets counts touching: `dirty.start <= block.end &&
-   block.start <= dirty.end`. So a deletion right before a block's opening
-   fence relexes it, even when the core mapped an old chunk onto exactly the
-   block's range.
+2. **lex**: each block that no held chunk has exactly, or whose reach meets
+   the dirty range. The reach runs from the reach start to the block's end.
+   Meets counts touching: `dirty.start <= block.end && reach_start <=
+   dirty.end`. So a deletion in the fence's indent, in its quote prefix, or
+   right before its line relexes the block, even when the core mapped an old
+   chunk onto exactly the block's range.
 
 The listener publishes every clear range empty first, then the lexed blocks.
 At one edit mark the later publish wins (`layer.rs`, `publish`), so a lexed
@@ -273,7 +289,8 @@ merged block right after colouring it.
 
 A changed info word and a typed or deleted fence are caught too: the fence
 line lies inside the block chunk, so the splice meets the block. The plan is
-one merge of three sorted lists and reads no text. A keystroke in prose lexes
+one merge of three sorted lists and reads no text: its cost grows with the
+number of blocks and chunks, not with the text. A keystroke in prose lexes
 nothing.
 
 The listener lexes the blocks of **lex** on the main thread, in order, while
@@ -286,7 +303,12 @@ whose splices span the note.
 
 The layer's open function, `fn(&str, Instant) -> Opened`, runs in the open's
 background task (decoration layer D8). It runs `inkra_markdown::parse` on the
-text, then lexes the blocks in document order until the deadline. A block over
+text, then lexes the blocks in document order until the deadline. The parse
+cannot stop at the deadline, so a text over `OPEN_PARSE_LIMIT` bytes skips it:
+the open function returns no chunk and the seed, and D7 colours the note from
+the main thread and the background task. S1b sets the limit from `cargo bench
+-p inkra-markdown`, so the parse at the limit takes at most 4 ms, half the
+landing deadline. A block over
 `MAIN_THREAD_BUDGET` is skipped there, so one large block cannot spend the
 whole deadline. Every block it reaches gets its block chunk, coloured or
 empty.
@@ -342,6 +364,12 @@ block list. When D7 leaves blocks unlexed:
   reads the buffer's edit mark, and spawns one task that lexes them;
 - with a task in flight, it does nothing more.
 
+A task lexes its blocks in order and stops before the one that would take its
+marks past `PUBLISH_BUDGET`; the first block always goes. The landing's
+publish runs on the main thread and costs time per mark (`layer.rs`,
+`publish`), so this bounds it. S2 sets the budget so a landing's publish takes
+at most 0.5 ms. The blocks left go to the next task through the replan below.
+
 When the task lands, it publishes each block at the edit mark read before the
 copy. The core maps the late publish, and deviation 15 keeps any chunk
 published since. Then it runs D7 once more, with the edits since that mark as
@@ -375,7 +403,7 @@ char boundaries, and the lexer never panics.
 **The plan, against the real core.** A model test in `inkra-highlight` drives
 a `Buffer`, a `Layer` and `inkra_markdown::parse` through random edits on a
 note with several blocks. The edits favour backticks, newlines, fence lines,
-info words, quote prefixes and undo. After each edit, it runs D7 and publishes
+fence indents, info words, quote prefixes and undo. After each edit, it runs D7 and publishes
 the plan. Then the layer's marks must equal a fresh colouring of the current
 text. The test needs `inkra-editor` and `inkra-markdown` as
 dev-dependencies of `inkra-highlight`. Both edges join `allowed_edges` in
@@ -470,8 +498,11 @@ light. The look is tuned after it ships, as for code blocks.
   resolves, in any case; an unknown word resolves to `None`.
 - `inkra-highlight`, `#[test]` on `plan`, one per case: deleting the closing
   fence between two blocks clears both old chunks and lexes the merged block;
-  deleting a line right before a block's opening fence lexes the block; a
-  chunk with no marks on prose is not cleared again.
+  deleting a line right before a block's opening fence lexes the block;
+  deleting a space of an indented fence's indent lexes the block; a chunk with
+  no marks on prose is not cleared again.
+- `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
+  with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
   each with whether it holds a mark, after random edits and publishes
   (`proptest`, beside the layer's own).
@@ -515,10 +546,11 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
 2. **S1b, block chunks.** `plan` (D7) and its tests, `Layer::chunks` and
    `decorations::chunks` (D9), the open function and the seed (D8), the main
    thread budget, the model test (D12). The whole-text listener of S1a goes.
-   Bench the whole listener call and set `MAIN_THREAD_BUDGET` (D10). Every
-   block over the budget still lexes on the main thread until S2.
-3. **S2, the background task.** D10's one task per buffer, the replan on
-   landing, the 512 KiB bound, D8's skip of large blocks at open. The tests
+   Bench the whole listener call and set `MAIN_THREAD_BUDGET` (D10); bench the
+   parse and set `OPEN_PARSE_LIMIT` (D8). Every block over the budget still
+   lexes on the main thread until S2.
+3. **S2, the background task.** D10's one task per buffer, `PUBLISH_BUDGET`,
+   the replan on landing, the 512 KiB bound, D8's skip of large blocks at open. The tests
    for a block over the budget.
 4. **S3, Python, JSON and Bash.** Three lexers, their info words, their
    scene blocks. Bash carries the heredoc state.
