@@ -2468,6 +2468,7 @@ dependencies = [
  "gpui_platform",
  "image",
  "inkra-editor",
+ "inkra-highlight",
  "inkra-index",
  "inkra-layout",
  "inkra-markdown",
@@ -2483,6 +2484,15 @@ dependencies = [
 
 [[package]]
 name = "inkra-editor"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "inkra-text",
+ "proptest",
+]
+
+[[package]]
+name = "inkra-highlight"
 version = "0.1.0"
 dependencies = [
  "criterion",

@@ -7,7 +7,7 @@ use gpui::{Action, KeyBinding};
 use crate::decorations::LayerDecl;
 use crate::pane::{PaneButton, PaneDecl};
 use crate::shell::Activation;
-use crate::{backlinks, quick_open, vault_search};
+use crate::{backlinks, highlighting, quick_open, vault_search};
 
 #[cfg(test)]
 pub(crate) mod fakes;
@@ -77,6 +77,7 @@ pub(crate) static BUILTIN: &[&Manifest] = &[
     &quick_open::MANIFEST,
     &vault_search::MANIFEST,
     &backlinks::MANIFEST,
+    &highlighting::MANIFEST,
 ];
 
 /// Each feature's keys, live only while the shell's key context names the feature.

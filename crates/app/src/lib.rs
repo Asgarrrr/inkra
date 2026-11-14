@@ -13,6 +13,7 @@ mod editor;
 mod feature;
 mod field;
 mod file_kind;
+mod highlighting;
 mod images;
 mod index;
 mod keymap;

@@ -1,12 +1,5 @@
 //! Styled ranges features publish over a buffer, one layer per declared `LayerDecl`, drawn by
 //! every view of that buffer (decoration layer spec).
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only the test feature listens and publishes until a feature does"
-    )
-)]
 
 use std::collections::HashMap;
 use std::ops::Range;

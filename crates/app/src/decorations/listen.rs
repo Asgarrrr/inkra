@@ -15,7 +15,7 @@ pub(crate) type Seed = Box<dyn Any + Send>;
 
 #[expect(
     dead_code,
-    reason = "no listener reads the splices or the seed until highlighting does"
+    reason = "no listener reads the splices or the seed until highlighting's plan does (S1b)"
 )]
 pub(crate) enum TextChange {
     /// The listener has not heard of the buffer before.

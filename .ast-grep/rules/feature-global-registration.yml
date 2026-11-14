@@ -9,6 +9,7 @@ files:
   - crates/app/src/quick_open/**/*.rs
   - crates/app/src/backlinks/**/*.rs
   - crates/app/src/vault_search/**/*.rs
+  - crates/app/src/highlighting/**/*.rs
 ignores:
   - '**/tests.rs'
   - '**/*_tests.rs'

@@ -51,6 +51,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
   After changing `vault` logic, run the diff command with
   `-p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
+  After changing `highlight` logic, run the diff command with
+  `-p inkra-highlight --test-package inkra-highlight -f 'crates/highlight/src/**/*.rs'`.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
@@ -66,11 +68,13 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
   `inkra-tabs` and `inkra-layout` depend on no workspace crate; `app` depends on both.
-- `text`, `editor`, `vault`, `markdown`, `index`, `tabs` and `layout` have no gpui dependency; `check.sh`
+  `inkra-highlight` depends on `inkra-text` only; `app` depends on it.
+- `text`, `editor`, `vault`, `markdown`, `index`, `tabs`, `layout` and `highlight` have no gpui dependency; `check.sh`
   enforces it for every workspace member except `inkra-app`.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
+  - lexing code into token classes → `highlight`; never a colour
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
   - which tab is active, what a close activates, which place back and forward reach, what `⌘⇧T`

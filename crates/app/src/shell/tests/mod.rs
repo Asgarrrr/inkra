@@ -47,6 +47,7 @@ mod files_header;
 mod following;
 mod geometry;
 mod gone;
+mod highlighting;
 mod history;
 mod history_hold;
 mod history_menu;

@@ -52,6 +52,19 @@ impl EditorView {
             .map(|(len, color)| (len, color == warning))
             .collect()
     }
+
+    /// Line `line` as shown, and each run of it in its colour, equal neighbours merged.
+    pub(crate) fn line_colors(&self, line: usize) -> (String, Vec<(usize, Hsla)>) {
+        let layout = self.drawn_layout();
+        let mut runs: Vec<(usize, Hsla)> = Vec::new();
+        for (len, color) in layout.run_colors(line) {
+            match runs.last_mut() {
+                Some((last, last_color)) if *last_color == color => *last += len,
+                _ => runs.push((len, color)),
+            }
+        }
+        (layout.shown(line).to_string(), runs)
+    }
 }
 
 fn warning_runs(window: WindowHandle<EditorView>, cx: &mut TestAppContext) -> Vec<(usize, bool)> {

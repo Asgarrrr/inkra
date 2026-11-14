@@ -5,7 +5,7 @@ pub(crate) mod layout;
 mod motion;
 mod mouse;
 mod parked;
-mod parses;
+pub(crate) mod parses;
 mod reload;
 mod swap;
 #[cfg(test)]
