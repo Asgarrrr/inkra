@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Weak;
 
-use gpui::{App, BorrowAppContext, Entity, EntityId, Global, WeakEntity};
+use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
 use inkra_editor::Layer;
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
@@ -65,7 +65,8 @@ struct Decorations {
 impl Global for Decorations {}
 
 struct Entry {
-    buffer: WeakEntity<Buffer>,
+    /// Removes the entry when its buffer is released.
+    _released: Subscription,
     /// Moves on every change a view must draw.
     revision: u64,
     /// One per declared layer, by rank.
@@ -146,23 +147,22 @@ fn rank(layer: LayerId, cx: &App) -> usize {
         })
 }
 
-/// `buffer`'s entry, created with every layer at its edit mark, unheard; creating one drops the
-/// entries of released buffers.
+/// `buffer`'s entry, created with every layer at its edit mark, unheard; it drops at the buffer's
+/// release.
 fn entry<'a>(
     entries: &'a mut HashMap<EntityId, Entry>,
     declared: usize,
     buffer: &Entity<Buffer>,
-    text: &Buffer,
+    cx: &App,
 ) -> &'a mut Entry {
     let id = buffer.entity_id();
-    if !entries.contains_key(&id) {
-        entries.retain(|_, entry| entry.buffer.is_upgradable());
-    }
     entries.entry(id).or_insert_with(|| Entry {
-        buffer: buffer.downgrade(),
+        _released: cx.observe_release(buffer, move |_, cx| {
+            cx.global_mut::<Decorations>().entries.remove(&id);
+        }),
         revision: 0,
         layers: (0..declared)
-            .map(|_| Layer::new(text.edit_mark()))
+            .map(|_| Layer::new(buffer.read(cx).edit_mark()))
             .collect(),
         heard: (0..declared).map(|_| Heard::Unheard).collect(),
         seeds: (0..declared).map(|_| None).collect(),
@@ -191,9 +191,9 @@ pub(crate) fn publish(
         return;
     }
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
-        let text = buffer.read(cx);
         let declared = decorations.declared.len();
-        let entry = entry(&mut decorations.entries, declared, &buffer, text);
+        let entry = entry(&mut decorations.entries, declared, &buffer, cx);
+        let text = buffer.read(cx);
         let published = entry.layers[rank].publish(text, chunk, marks, at);
         if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
             entry.heard[rank] = Heard::Lost;
@@ -222,13 +222,13 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
         return;
     }
     let unheard = cx.update_global(|decorations: &mut Decorations, cx| {
-        let text = buffer.read(cx);
         let entry = entry(
             &mut decorations.entries,
             decorations.declared.len(),
             buffer,
-            text,
+            cx,
         );
+        let text = buffer.read(cx);
         let mut moved = false;
         let mut unheard = Vec::new();
         let ranks = entry

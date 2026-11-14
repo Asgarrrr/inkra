@@ -34,6 +34,7 @@ thread_local! {
     static HEARD: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     static DELAY: Cell<Option<Duration>> = const { Cell::new(None) };
     static SILENT: Cell<bool> = const { Cell::new(false) };
+    static UNBOUNDED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// A pane whose one element takes keyboard focus.
@@ -231,12 +232,13 @@ fn todo_mark((start, word): (usize, &str)) -> (Range<ByteOffset>, MarkStyle) {
     )
 }
 
-/// Marks each to-do marker of `text` before `deadline`; its seed is where it stopped.
+/// Marks each to-do marker of `text` before `deadline`, unless `set_unbounded` lifted it; its seed
+/// is where it stopped.
 pub(crate) fn open_todo(text: &str, deadline: Instant) -> Opened {
     let mut stop = text.len();
     let mut marks = Vec::new();
     for found in text.match_indices("TODO") {
-        if Instant::now() >= deadline {
+        if !UNBOUNDED.get() && Instant::now() >= deadline {
             stop = found.0;
             break;
         }
@@ -292,6 +294,12 @@ pub(crate) fn declare_todo(cx: &mut App) {
 /// Makes `todo_listener` note what it heard and publish nothing.
 pub(crate) fn set_silent(silent: bool) {
     SILENT.set(silent);
+}
+
+/// Makes `open_todo` ignore its deadline, so a landing through `NoteStore`, which reads the wall
+/// clock, colours every marker.
+pub(crate) fn set_unbounded(unbounded: bool) {
+    UNBOUNDED.set(unbounded);
 }
 
 /// Makes `todo_listener` publish `delay` after it computed, as a background task would.

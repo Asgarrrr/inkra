@@ -412,9 +412,10 @@ number.
 9. **`Decorations` lives in `app/src/decorations/`**, not beside `Parses` in
    `editor/`. It follows `parses.rs`: a global keyed by the buffer's
    `EntityId`. A view other than the editor reads it too (D9).
-10. **Released entries are pruned lazily.** An entry holds its buffer weakly.
-    The entries of released buffers drop when the next entry is created, not
-    at the release (D9).
+10. **An entry drops at its buffer's release.** An entry holds no handle on
+    its buffer, only a release subscription that removes it (D9). `Parses`
+    instead prunes on its next miss; an entry's seed is opaque and can be
+    large, so it does not wait for the next note.
 11. **A seed is valid only at its edit mark.** If the buffer changed before the
     listener arrived, the core drops the seed and sends `Opened(None)`, a full
     recompute (D8).

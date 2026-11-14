@@ -59,13 +59,18 @@ fn the_test_feature_colours_its_words_once_launched(cx: &mut TestAppContext) {
     );
 }
 
+/// The listener publishes nothing: every colour comes from the open function's chunks.
 #[gpui::test]
-fn a_note_opens_with_the_seed_from_its_open_function(cx: &mut TestAppContext) {
+fn a_note_opens_with_the_colours_and_seed_from_its_open_function(cx: &mut TestAppContext) {
     fakes::set_silent(true);
-    let (_, _window, _visual) = opened(cx, TODO_CATALOG, "TODO a TODO\n");
+    fakes::set_unbounded(true);
+    let (_, window, mut visual) = opened(cx, TODO_CATALOG, "TODO a TODO\n");
 
-    // The colours depend on the open function beating a real 8 ms deadline; the seed does not.
     assert_eq!(fakes::heard(), ["opened+seed"]);
+    assert_eq!(
+        warning_runs(window, &mut visual),
+        [(4, true), (3, false), (4, true)]
+    );
 }
 
 #[gpui::test]
@@ -156,25 +161,25 @@ fn an_overflow_sends_lost_and_a_full_publish_restores_the_colours(cx: &mut TestA
     );
 }
 
-/// The delayed publish holds the buffer weakly, so the next entry prunes the released one (D9).
+/// The release drops the entry, and the delayed publish, holding the buffer weakly, brings none
+/// back (D9).
 #[gpui::test]
-fn a_publish_for_a_released_buffer_is_a_no_op(cx: &mut TestAppContext) {
+fn a_released_buffer_drops_its_entry_and_a_late_publish_is_a_no_op(cx: &mut TestAppContext) {
     fakes::set_delay(Some(DELAY));
     cx.update(fakes::declare_todo);
     let _listening =
         cx.update(|cx| decorations::listen(TODO_LAYER, Rc::new(fakes::todo_listener), cx));
     let released = cx.new(|_| Buffer::new("TODO\n"));
     cx.update(|cx| decorations::sync(&released, cx));
-    drop(released);
-    cx.run_until_parked();
-
-    let buffer = cx.new(|_| Buffer::new("TODO\n"));
-    cx.update(|cx| decorations::sync(&buffer, cx));
     assert_eq!(cx.update(|cx| decorations::tracked(cx)), 1);
+
+    // gpui releases a dropped entity when an update ends.
+    cx.update(|_| drop(released));
+    assert_eq!(cx.update(|cx| decorations::tracked(cx)), 0);
+
     cx.executor().advance_clock(DELAY);
     cx.run_until_parked();
-
-    assert_eq!(cx.update(|cx| decorations::tracked(cx)), 1);
+    assert_eq!(cx.update(|cx| decorations::tracked(cx)), 0);
 }
 
 #[gpui::test]

@@ -90,17 +90,20 @@ pub(super) fn line_runs(
     cuts.sort_unstable();
     cuts.dedup();
 
-    // Each segment's colour, by its start's index in `cuts`; a later rank paints over.
-    let mut colors = vec![None; cuts.len()];
+    // Each segment's colour, by its start's index in `cuts`; a later rank paints over. It stops at
+    // the last coloured segment, so an undecorated line allocates none.
+    let mut colors = Vec::new();
     for (range, token) in decorations {
         let first = cuts.partition_point(|&cut| cut < range.start);
         let last = cuts.partition_point(|&cut| cut < range.end);
+        colors.resize(colors.len().max(last), None);
         colors[first..last].fill(Some(token));
     }
 
     let mut spans = spans.iter().peekable();
     let mut runs = Vec::with_capacity(cuts.len());
-    for (pair, &color) in cuts.windows(2).zip(&colors) {
+    for (ix, pair) in cuts.windows(2).enumerate() {
+        let color = colors.get(ix).copied().flatten();
         let (start, end) = (pair[0], pair[1]);
         let len = display.to_display(end).get() - display.to_display(start).get();
         if len == 0 {

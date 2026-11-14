@@ -67,14 +67,14 @@ pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Opened)>, cx: 
         .map(|(layer, opened)| (rank(layer, cx), opened))
         .collect();
     cx.update_global(|decorations: &mut Decorations, cx| {
-        let text = buffer.read(cx);
-        let at = text.edit_mark();
         let entry = entry(
             &mut decorations.entries,
             decorations.declared.len(),
             buffer,
-            text,
+            cx,
         );
+        let text = buffer.read(cx);
+        let at = text.edit_mark();
         let mut landed = false;
         // A rank switched off since its opener was read.
         let enabled = opened
