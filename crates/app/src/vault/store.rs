@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::Buffer;
@@ -9,6 +9,7 @@ use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault, VaultError};
 
 use super::OpenFailed;
 use super::session::{Lifecycle, Location, OpenNote, Sessions};
+use crate::decorations;
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
 pub(crate) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
@@ -186,13 +187,18 @@ impl NoteStore {
             return Task::ready(None);
         };
         let fs = Arc::clone(&self.fs);
+        let openers = decorations::openers(cx);
 
         cx.spawn(async move |this, cx| {
-            let loaded = match cx
-                .background_spawn(async move { fs.load(&path).await })
+            let (loaded, opened) = match cx
+                .background_spawn(async move {
+                    let loaded = fs.load(&path).await?;
+                    let opened = decorations::run_openers(&loaded.text, &openers, Instant::now());
+                    Ok::<_, VaultError>((loaded, opened))
+                })
                 .await
             {
-                Ok(loaded) => loaded,
+                Ok(landed) => landed,
                 Err(error) => {
                     let _ = this.update(cx, |_, cx| cx.emit(OpenFailed { id, error }));
                     return None;
@@ -204,6 +210,7 @@ impl NoteStore {
                 if this.sessions.note(id).is_none() {
                     let stamp = loaded.stamp;
                     let buffer = cx.new(|_| Buffer::new(loaded.text));
+                    decorations::seed(&buffer, opened, cx);
                     this.track(id, buffer, Location::Vault, stamp, cx);
                     cx.notify();
                 }

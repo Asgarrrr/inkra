@@ -17,6 +17,7 @@ const FEATURE: FeatureId = FeatureId::new("todo_marks");
 
 static TODO_MARKS: LayerDecl = LayerDecl {
     id: LayerId::new(FEATURE, "todo"),
+    open: None,
 };
 
 /// Published by hand, with no feature: the scene shows the drawing, not a listener.

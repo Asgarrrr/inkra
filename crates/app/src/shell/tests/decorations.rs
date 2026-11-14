@@ -60,9 +60,20 @@ fn the_test_feature_colours_its_words_once_launched(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_note_opens_coloured_from_its_open_function(cx: &mut TestAppContext) {
+    fakes::set_silent(true);
+    let (_, window, mut visual) = opened(cx, TODO_CATALOG, "TODO a TODO\n");
+
+    assert_eq!(
+        warning_runs(window, &mut visual),
+        [(4, true), (3, false), (4, true)]
+    );
+}
+
+#[gpui::test]
 fn each_change_is_heard_once(cx: &mut TestAppContext) {
     let (_, _window, mut visual) = opened(cx, TODO_CATALOG, "a TODO b TODO\n");
-    assert_eq!(fakes::heard(), ["opened"]);
+    assert_eq!(fakes::heard(), ["opened+seed"]);
 
     visual.simulate_input("x");
     visual.run_until_parked();

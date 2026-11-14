@@ -38,10 +38,17 @@ pub(super) enum Heard {
 
 impl Heard {
     /// What the listener has not heard of `text` yet, if anything; after, it has heard all of it.
-    pub(super) fn hear(&mut self, text: &Buffer) -> Option<TextChange> {
+    /// A first hearing hands over `seed` if `text` is still at its edit mark.
+    pub(super) fn hear(
+        &mut self,
+        text: &Buffer,
+        seed: Option<(EditMark, Seed)>,
+    ) -> Option<TextChange> {
         let now = text.edit_mark();
         let change = match *self {
-            Self::Unheard => Some(TextChange::Opened(None)),
+            Self::Unheard => Some(TextChange::Opened(
+                seed.filter(|(mark, _)| *mark == now).map(|(_, seed)| seed),
+            )),
             Self::Lost => Some(TextChange::Lost),
             Self::At(mark) if mark == now => None,
             Self::At(mark) => Some(text.edits_since(mark).map_or(TextChange::Lost, |splices| {
@@ -81,15 +88,21 @@ pub(super) fn tell(
     cx: &mut App,
 ) {
     for (listener, layer, change) in unheard {
-        let started = Instant::now();
-        listener(buffer, change, cx);
-        let took = started.elapsed();
-        if over_budget(took) {
-            log::warn!(
-                "layer {} of feature {} took {took:.1?}, over its 2 ms budget",
-                layer.name,
-                layer.feature.name()
-            );
-        }
+        timed(layer, || listener(buffer, change, cx));
     }
+}
+
+/// `call`'s result; past its budget, a line names `layer` and its feature (D11).
+pub(super) fn timed<T>(layer: LayerId, call: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let result = call();
+    let took = started.elapsed();
+    if over_budget(took) {
+        log::warn!(
+            "layer {} of feature {} took {took:.1?}, over its 2 ms budget",
+            layer.name,
+            layer.feature.name()
+        );
+    }
+    result
 }

@@ -3,7 +3,8 @@
 //! and key-conflict fakes the keymap tests check.
 
 use std::cell::{Cell, RefCell};
-use std::time::Duration;
+use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use gpui::{
     App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, Render, Styled, WeakEntity,
@@ -13,7 +14,7 @@ use inkra_layout::{Side, ViewId};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{CommandDecl, FeatureId, Manifest};
-use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, TextChange};
+use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, Opened, TextChange};
 use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::shell::Activation;
 use crate::theme::ColorToken;
@@ -32,6 +33,7 @@ thread_local! {
     static PANE_ACTIVATIONS: Cell<usize> = const { Cell::new(0) };
     static HEARD: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     static DELAY: Cell<Option<Duration>> = const { Cell::new(None) };
+    static SILENT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// A pane whose one element takes keyboard focus.
@@ -152,7 +154,10 @@ pub(crate) static PANE_FAKE: Manifest = Manifest {
 
 pub(crate) const TODO_LAYER: LayerId = LayerId::new(FeatureId::new("todo_fake"), "todo");
 
-pub(crate) const TODO_DECL: LayerDecl = LayerDecl { id: TODO_LAYER };
+pub(crate) const TODO_DECL: LayerDecl = LayerDecl {
+    id: TODO_LAYER,
+    open: Some(open_todo),
+};
 
 pub(crate) static TODO_FAKE: Manifest = Manifest {
     id: FeatureId::new("todo_fake"),
@@ -215,33 +220,53 @@ pub(crate) fn pane_activations() -> usize {
     PANE_ACTIVATIONS.get()
 }
 
-/// Notes what it heard, then publishes the warning colour over each to-do marker of `buffer`,
-/// after the delay `set_delay` asked for, if any.
+/// The warning colour over the to-do marker `word` at `start`.
+fn todo_mark((start, word): (usize, &str)) -> (Range<ByteOffset>, MarkStyle) {
+    let warning = MarkStyle {
+        color: Some(ColorToken::Warning),
+    };
+    (
+        ByteOffset::new(start)..ByteOffset::new(start + word.len()),
+        warning,
+    )
+}
+
+/// Marks each to-do marker of `text` before `deadline`; its seed is where it stopped.
+pub(crate) fn open_todo(text: &str, deadline: Instant) -> Opened {
+    let mut stop = text.len();
+    let mut marks = Vec::new();
+    for found in text.match_indices("TODO") {
+        if Instant::now() >= deadline {
+            stop = found.0;
+            break;
+        }
+        marks.push(todo_mark(found));
+    }
+    Opened {
+        chunks: vec![(ByteOffset::new(0)..ByteOffset::new(stop), marks)],
+        seed: Some(Box::new(stop)),
+    }
+}
+
+/// Notes what it heard, then, unless `set_silent` asked otherwise, publishes the warning colour
+/// over each to-do marker of `buffer`, after the delay `set_delay` asked for, if any.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "a `Listener` takes the change by value"
 )]
 pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let heard = match change {
-        TextChange::Opened(_) => "opened",
+        TextChange::Opened(Some(_)) => "opened+seed",
+        TextChange::Opened(None) => "opened",
         TextChange::Edited(_) => "edited",
         TextChange::Lost => "lost",
     };
     HEARD.with_borrow_mut(|all| all.push(heard));
+    if SILENT.get() {
+        return;
+    }
     let text = buffer.read(cx);
-    let warning = MarkStyle {
-        color: Some(ColorToken::Warning),
-    };
-    let marks = text
-        .text()
-        .match_indices("TODO")
-        .map(|(start, word)| {
-            (
-                ByteOffset::new(start)..ByteOffset::new(start + word.len()),
-                warning,
-            )
-        })
-        .collect();
+    let marks = text.text().match_indices("TODO").map(todo_mark).collect();
     let (chunk, at, buffer) = (
         ByteOffset::new(0)..text.len(),
         text.edit_mark(),
@@ -262,6 +287,11 @@ pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mu
 pub(crate) fn declare_todo(cx: &mut App) {
     decorations::declare([&TODO_DECL], cx);
     decorations::enable([TODO_FAKE.id], cx);
+}
+
+/// Makes `todo_listener` note what it heard and publish nothing.
+pub(crate) fn set_silent(silent: bool) {
+    SILENT.set(silent);
 }
 
 /// Makes `todo_listener` publish `delay` after it computed, as a background task would.
