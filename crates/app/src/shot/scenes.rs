@@ -468,8 +468,13 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "code-highlighting",
-        shows: "caret in the first paragraph, every fence concealed: the rust block's tokens coloured; the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
+        shows: "caret in the first paragraph, every fence concealed: every Rust token class coloured in the rust block",
         open: code_highlighting::code_highlighting,
+    },
+    Scene {
+        name: "code-highlighting-plain",
+        shows: "the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
+        open: code_highlighting::code_highlighting_plain,
     },
 ];
 

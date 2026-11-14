@@ -1,4 +1,4 @@
-use gpui::{WindowHandle, point, px};
+use gpui::WindowHandle;
 
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
@@ -26,15 +26,27 @@ const INDENTED: &str = "    let mut indented = 1;";
 
 const QUOTED: &str = "> ```rust\n> let mut quoted = 1;\n> ```";
 
-/// The four plain and quoted blocks sit below the rust one, so the view scrolls to the end.
-pub(super) fn code_highlighting(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let text = format!(
-        "A prose line before the blocks.\n\n```rust\n{RUST}\n```\n\n{NOPE}\n\n{NO_INFO}\n\n{INDENTED}\n\n{QUOTED}\n"
-    );
-    let window = stage.open_vault(&[("blocks.md", &text)]);
+/// The caret sits on the first prose line, so every fence is concealed.
+fn open_blocks(stage: &mut Stage, text: &str) -> WindowHandle<AppShell> {
+    let window = stage.open_vault(&[("blocks.md", text)]);
     stage.click_tree_row(window, 0.);
     stage.focus(window);
     stage.keys(window, "cmd-up");
-    stage.scroll(window, point(px(700.), px(300.)), point(px(0.), px(-2000.)));
     window
+}
+
+pub(super) fn code_highlighting(stage: &mut Stage) -> WindowHandle<AppShell> {
+    open_blocks(
+        stage,
+        &format!("A prose line before the block.\n\n```rust\n{RUST}\n```\n"),
+    )
+}
+
+pub(super) fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
+    open_blocks(
+        stage,
+        &format!(
+            "A prose line before the blocks.\n\n{NOPE}\n\n{NO_INFO}\n\n{INDENTED}\n\n{QUOTED}\n"
+        ),
+    )
 }
