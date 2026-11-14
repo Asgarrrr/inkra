@@ -26,6 +26,7 @@ fn a_block_comment_nests_and_hides_everything_inside() {
             &[(0, 1, Constant), (4, 5, Constant), (6, 8, Keyword)],
         ),
         ("/* /* */ x */ fn", &[(0, 13, Comment), (14, 16, Keyword)]),
+        ("/* /**/ */ fn", &[(0, 10, Comment), (11, 13, Keyword)]),
         (
             "/* fn \"x\" 'a // */ fn",
             &[(0, 18, Comment), (19, 21, Keyword)],
