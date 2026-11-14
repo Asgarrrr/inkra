@@ -1,0 +1,589 @@
+# Code highlighting: our own lexers on the decoration layer
+
+Status: **proposed** 2026-11-14. Replaces the engine choice of
+`2026-11-11-code-highlighting-design.md` (tree-sitter), which stays as the
+measured evidence for the fallback (D14). Builds on the decoration layer
+(`2026-11-13-decoration-layer-design.md`) and the feature registry
+(`2026-11-12-feature-registry-design.md`). Read their D3 to D8 and D12 first.
+
+## Why
+
+A fenced block today has one colour for every byte: `md_code_block`. A note
+taker pastes code to read it later, and uniform grey code is slow to read.
+
+The 2026-11-11 spec picked tree-sitter. On 2026-11-14 the owner chose to write
+our own highlighter instead. The decision weighed these points:
+
+- tree-sitter adds 5,215,184 B (+27 %) to the release binary for eight
+  grammars, and a C compiler to the build;
+- it needs a waiver of the 12-month rule for `streaming-iterator`, on every
+  tree-sitter path, and for six of eight upstream grammar crates;
+- a hand-written lexer is pure Rust, tested like `inkra-text`, with no
+  dependency and no waiver;
+- for reading a note, a lexer gives the colours that carry the reading.
+  What it cannot give needs scope analysis, which Zed itself gets from a
+  language server, not from tree-sitter.
+
+What a lexer loses is listed in D4. D14 keeps tree-sitter as a fallback, one
+language at a time, behind the same output.
+
+## Terms
+
+- **lexer**: the function that turns one language's code into tokens, one
+  line at a time.
+- **token**: a byte range and its `TokenClass`.
+- **line state**: what is still open at a line's end: a block comment, a
+  string, a heredoc. The lexer takes it in and hands it out per line.
+- **content line**: the code bytes of one block line, without fence, quote
+  prefix or list indent.
+- **block chunk**: the decoration layer's chunk for one code block, its whole
+  range, fences included.
+
+Chunk, publish, splice and edit mark are the decoration layer's terms.
+
+## Scope
+
+In scope:
+
+- the `inkra-highlight` crate: the lexers, `TokenClass`, the language table;
+- the `highlighting` built-in feature: one layer, its listener, its open
+  function;
+- one read added to the decoration layer: the chunks a layer holds (D9);
+- eleven theme tokens;
+- the first set of eight languages.
+
+Out of scope:
+
+- highlighting inline code and front matter;
+- languages described as data by the user (Deferred);
+- scope-based colouring: parameters, fields, locals (D4);
+- any style other than colour (decoration layer, D2).
+
+## Design
+
+### D1. A new crate, `inkra-highlight`, holds the lexers
+
+It holds the lexers and D7's `plan`. It depends on `inkra-text` only, for
+`ByteOffset`; `inkra-app` depends on it. It has no gpui dependency, no clock
+and no external dependency. Its tests also use `inkra-editor` and
+`inkra-markdown`, as dev-dependencies (D12).
+
+`inkra-markdown` would compile every lexer into `inkra-index` and its benches,
+against "one role per crate". `inkra-app` would put a `Window`-free algorithm
+where its tests need gpui. The build adds the crate to `CLAUDE.md`
+(Architecture and the mutants line), to `allowed_edges` in `scripts/check.sh`,
+and to `examine_globs` and `test_package` in `.cargo/mutants.toml`.
+
+### D2. The output is tokens on content lines
+
+The crate's one entry point:
+
+```rust
+pub fn highlight(
+    language: Language,
+    lines: impl Iterator<Item = (ByteOffset, &str)>,
+    out: &mut Vec<(Range<ByteOffset>, TokenClass)>,
+);
+```
+
+`lines` yields each content line with its start offset, in order. The lexer
+carries the line state from one line to the next. Tokens are absolute buffer
+offsets, sorted, disjoint, on char boundaries, and inside a content line. So a
+token never covers a quote prefix, a list indent or a fence.
+
+A lexer is a function `fn(LineState, &str, ByteOffset, &mut Vec<…>) ->
+LineState`. The language table holds one lexer per language as a function
+pointer. There is no trait: a table of functions is the simpler shape for many
+implementations of one signature.
+
+`LineState` is a `Copy + Eq` value of fixed size, and it carries everything a
+lexer reads across a line end. Nothing resets at a line start, so a generic
+list, a template or a JSX element can span lines. It holds:
+
+- what is open: a block comment and its depth, a string and its delimiter, a
+  raw string's hash count, a heredoc's tag as a hash;
+- the class of the previous significant token, for D4's look-behind;
+- a nesting stack of at most 16 entries, one byte each: a bracket, a generic
+  list, a template's `${`, a JSX element, an embedded language (HTML).
+
+A nesting deeper than 16 stops pushing, and its closers stop popping. Past
+that depth the colours degrade; the lexer never panics. CodeMirror 5 keeps
+one copyable state per line for the same reason
+(`codemirror.net/5/doc/manual.html`, `copyState`).
+
+`Language` is a `Copy` enum. `Language::from_info(word)` resolves a fence info
+word case-insensitively against each language's names (Languages). An unknown
+word gives `None`. Zed matches the same way (`available_languages.rs:218`).
+
+`TokenClass` is a `Copy` enum of eleven classes (D5). Text without a token
+keeps `md_code_block`.
+
+### D3. Content lines come from the markdown parse
+
+A block's content lines are its spans in `Markdown.spans` that carry
+`Styles::CODE_BLOCK` and not `Styles::MARKER`. Spans never cross a `\n`
+(`parse.rs:13`), so each span is one content line, or part of one. pulldown-cmark
+hands the code text without container prefixes, so a block in a quote or a
+list lexes as the code alone. A test pins a block in a quote and one in a list
+item.
+
+The language comes from `CodeBlock.language`, as the label reads it
+(code-blocks spec, D1). An indented block has no language and keeps
+`md_code_block`.
+
+### D4. What a lexer colours, and what it does not
+
+Every lexer is a single pass with a one-token look-behind (the previous
+significant token) and a small bracket stack. That covers:
+
+| Class | Rule |
+|---|---|
+| `Comment` | the language's comment syntax, block comments across lines |
+| `String` | the language's string syntax, escapes included; raw strings, template strings, heredocs |
+| `Constant` | numbers; `true`, `false`, `null`, `None`, `undefined` and the like; an all-caps identifier |
+| `Keyword` | the language's keyword list |
+| `Function` | an identifier followed by `(` on the same line; an identifier after a definition keyword (`fn`, `def`, `function`); a Rust macro name before `!` |
+| `Type` | an identifier after a type keyword (`struct`, `enum`, `trait`, `type`, `class`, `interface`, `impl`); a capitalised identifier in Rust, TypeScript and Python; a built-in type (`i32`, `str`, `number`, `string`); an identifier inside a generic list |
+| `Property` | an identifier after `.` and not followed by `(`; a JSON object key; a CSS property name |
+| `Attribute` | a Rust `#[…]`, a Python `@decorator`, an HTML attribute name |
+| `Tag` | an HTML or JSX tag name |
+| `Punctuation` | brackets, `,`, `;`, `:` |
+| `Operator` | the language's operator characters |
+
+Two rules use the look-behind to settle classic ambiguities:
+
+- **Expression start.** After an identifier, a number, a string, `)` or `]`,
+  a `/` is a division and a `<` is a comparison. Anywhere else, `/` opens a
+  regex literal (JavaScript, TypeScript) and `<` followed by a letter opens a
+  JSX tag where JSX is on (Languages). A keyword that takes an expression
+  (`return`, `typeof`, `case`, `yield`, `await` and the like) is an expression
+  start, so `return <div>` opens a tag and `return /a/` a regex.
+- **Rust lifetime.** A `'` followed by an identifier and no closing `'` right
+  after one char is a lifetime, coloured `Type`. Otherwise it opens a char
+  literal.
+- **Generic list.** A `<` right after a type keyword's name, after `impl`, after
+  `::`, or after a capitalised identifier opens a generic list. Identifiers
+  inside it are `Type` until the matching `>`.
+
+**What a lexer does not do.** It does not know scopes. So a parameter used in
+the body, a field against a local variable, or a type declared elsewhere and
+written in lower case keep the plain colour. Zed gets these from a language
+server's semantic tokens. They are out of reach for a note app, and a parser
+per language would only redo tree-sitter.
+
+**Malformed code.** A lexer is local: an error mis-colours its own token only.
+An unclosed string or block comment colours the rest of the block, as it does
+in tree-sitter and in every editor.
+
+### D5. Eleven classes, eleven theme tokens
+
+| Class | Token |
+|---|---|
+| `Comment` | `syntax_comment` |
+| `Keyword` | `syntax_keyword` |
+| `String` | `syntax_string` |
+| `Constant` | `syntax_constant` |
+| `Function` | `syntax_function` |
+| `Type` | `syntax_type` |
+| `Property` | `syntax_property` |
+| `Tag` | `syntax_tag` |
+| `Attribute` | `syntax_attribute` |
+| `Punctuation` | `syntax_punctuation` |
+| `Operator` | `syntax_operator` |
+
+The classes are the 2026-11-11 spec's, so its palette (below) and its capture
+table stay valid for the fallback (D14). The tokens join `tokens!` in
+`theme/colors.rs` as `name => Variant` pairs, after `md_code_block_background`.
+`ThemeColors::NAMES.len()` moves from 30 to 41 (`theme/file/tests.rs:9`).
+
+A vault theme starts from the built-in of its appearance (`theme/file.rs`), so
+a theme without these keys shows the built-in colours. The mapping from
+`TokenClass` to `ColorToken` lives in `app`; the crate knows no colour.
+
+### D6. One built-in feature, one layer
+
+`highlighting::MANIFEST` joins `BUILTIN` after `backlinks`:
+
+- `id: FeatureId::new("highlighting")`, `default_on: true`;
+- `after_first_frame: true`, as decoration layer D8 requires for a feature
+  with layers;
+- `layers: &[SYNTAX_DECL]`, one layer named `syntax`, with an open function;
+- no command, no pane, no button.
+
+`activate` calls `on_text_change(SYNTAX, listener)`. The feature glue lives in
+`app/src/highlighting/`. The registry's switch turns it off and on; the layer
+clears and recomputes by decoration layer D10.
+
+Every code block is one block chunk, coloured or not. A block with no
+language, an unknown one, or over 512 KiB (D10) gets an empty block chunk. A
+chunk that no longer is a block is published empty (D7) and stays, with no
+marks. So after the listener, and once its background task lands, the layer
+holds:
+
+- for each current code block, one chunk of exactly its range;
+- elsewhere, only chunks with no marks.
+
+D7's test pins this invariant: the layer's marks equal a fresh colouring of
+the current text.
+
+Once highlighting publishes, these `dead_code` expectations stop firing, and
+the build removes them: in `decorations/mod.rs`, in `decorations/listen.rs`,
+and on `Activation::on_text_change` (`shell/features/activation.rs`).
+`decorations/mod.rs` also re-exports `Opened` outside `cfg(test)`, since the
+open function returns it. An expectation that stops firing fails the build
+anyway.
+
+### D7. A pure plan decides what to clear and what to lex
+
+On each `TextChange`, the listener computes a dirty range:
+
+- `Edited(splices)`: the splices folded into one range, in the current text's
+  offsets;
+- `Lost`, and `Opened(None)` (D8): the whole text;
+- `Opened(Some(_))` (D8): no range.
+
+It then calls one pure function, in `inkra-highlight` (`plan.rs`):
+
+```rust
+pub fn plan(
+    blocks: &[Range<ByteOffset>],
+    held: &[(Range<ByteOffset>, bool)],
+    dirty: Option<Range<ByteOffset>>,
+) -> Plan;
+```
+
+`blocks` are the current text's code blocks, from
+`parses::parsed(buffer).code_blocks`; the draw needs the same parse, so this
+adds no parse. `held` are the layer's chunks and whether each has marks (D9).
+`Plan` holds two sorted lists:
+
+1. **clear**: each held chunk with marks whose range is no block's range. It
+   clears a block that a removed or typed fence turned into prose, or that
+   merged with a neighbour.
+2. **lex**: each block that no held chunk has exactly, or whose range meets
+   the dirty range. Meets counts touching: `dirty.start <= block.end &&
+   block.start <= dirty.end`. So a deletion right before a block's opening
+   fence relexes it, even when the core mapped an old chunk onto exactly the
+   block's range.
+
+The listener publishes every clear range empty first, then the lexed blocks.
+At one edit mark the later publish wins (`layer.rs`, `publish`), so a lexed
+block replaces every clear it overlaps. The reverse order would erase a
+merged block right after colouring it.
+
+A changed info word and a typed or deleted fence are caught too: the fence
+line lies inside the block chunk, so the splice meets the block. The plan is
+one merge of three sorted lists and reads no text. A keystroke in prose lexes
+nothing.
+
+The listener lexes the blocks of **lex** on the main thread, in order, while
+their total size stays within `MAIN_THREAD_BUDGET` bytes (D10). The rest goes
+to the buffer's background task (D10). So one listener call is bounded,
+whether it follows a keystroke, a `Lost`, an open or an `apply_diff` reload
+whose splices span the note.
+
+### D8. A note lands with its colours
+
+The layer's open function, `fn(&str, Instant) -> Opened`, runs in the open's
+background task (decoration layer D8). It runs `inkra_markdown::parse` on the
+text, then lexes the blocks in document order until the deadline. A block over
+`MAIN_THREAD_BUDGET` is skipped there, so one large block cannot spend the
+whole deadline. Every block it reaches gets its block chunk, coloured or
+empty.
+
+`Opened.chunks` holds the finished block chunks; the core lands them at the
+buffer's edit mark (`decorations/open.rs`, `seed`). `Opened.seed` is a unit
+value, `Box::new(())`, and carries no data: the listener reads the landed
+chunks back through D9. The core hands the seed over only if the text is still
+at that edit mark (`Heard::hear`). So:
+
+- `Opened(Some(_))`: the landed chunks are current. D7 runs with no dirty
+  range, which lexes only the blocks the open did not reach.
+- `Opened(None)`: the text moved before the first hearing, and no splice says
+  where. The landed chunks may be stale, and some may lie on prose now. D7
+  runs with the whole text dirty, which clears them and relexes every block.
+  This happens to a restored inactive tab: it hears its changes only when a
+  view binds it (decoration layer, deviation 3).
+
+Decoration layer deviation 7 holds: a note launched alone has no vault, so it
+gets no colours.
+
+### D9. The decoration layer gains one read: the chunks a layer holds
+
+```rust
+pub(crate) fn chunks(layer: LayerId, buffer: &Entity<Buffer>, cx: &App) -> Vec<(Range<ByteOffset>, bool)>;
+```
+
+It returns the layer's chunk ranges over `buffer`, sorted, each with whether
+it holds a mark. `sync` catches every layer up before it calls a listener
+(`decorations/mod.rs`, `sync`), so inside the listener the ranges are in the
+current text's offsets. It needs a `Layer::chunks()` iterator in
+`inkra-editor`. The core already maps chunks through every splice (decoration
+layer D3, deviation 5), so the feature keeps no block list of its own and maps
+nothing. This follows decoration layer D3: "the core shifts the marks; the
+feature does nothing".
+
+The registry rule for contract growth holds: the read adds nothing to
+`Activation`, and no `Manifest` field changes.
+
+### D10. What the main thread does not lex, one background task lexes
+
+`MAIN_THREAD_BUDGET` is the number of block bytes one listener call lexes on
+the main thread. It starts at 64 KiB, the 2026-11-11 spec's main-thread bound.
+S1b measures the whole listener call, lex and publish together, by size. It
+sets the budget so a call at the budget takes at most 0.5 ms. The keystroke
+budget is 1 ms; the listener's 2 ms log line is the decoration layer's (D11).
+
+**One background task per buffer.** The feature keeps a map from a buffer to
+its task in flight; an entry leaves the map when its task lands. It holds no
+block list. When D7 leaves blocks unlexed:
+
+- with no task in flight, the listener copies those blocks' content lines,
+  reads the buffer's edit mark, and spawns one task that lexes them;
+- with a task in flight, it does nothing more.
+
+When the task lands, it publishes each block at the edit mark read before the
+copy. The core maps the late publish, and deviation 15 keeps any chunk
+published since. Then it runs D7 once more, with the edits since that mark as
+the dirty range, or the whole text if the log dropped them. That run lexes
+what changed during the task and spawns the next task if needed. Fast typing
+in a large block therefore costs one lex in flight per buffer, and the colours
+catch up when typing stops.
+
+Until a task lands, its blocks show their shifted old marks, and typed bytes
+show `md_code_block`.
+
+A block over 512 KiB is not lexed; it gets an empty block chunk (D6). The
+bound is the 2026-11-11 spec's, which Zed's highlight cache also uses
+(`highlight_cache.rs:14-16`). A mark is `(Range<ByteOffset>, MarkStyle)`, 24
+bytes, so marks cost about 3.4 times the block text.
+
+### D11. The label and the fence are unchanged
+
+The label shows the info word's source bytes (code-blocks spec, D1).
+`MARKER` wins over every layer (decoration layer D7), so a revealed fence stays
+dimmed.
+
+### D12. Each lexer and the plan are tested like `inkra-text`
+
+**Lexers.** Each language gets known inputs with known tokens, one test per
+rule of D4 that applies to it, and the ambiguities each lexer settles. A
+shared `proptest` runs every lexer on any text, ASCII and Unicode, split into
+lines at random. Tokens are sorted, disjoint, inside their content line and on
+char boundaries, and the lexer never panics.
+
+**The plan, against the real core.** A model test in `inkra-highlight` drives
+a `Buffer`, a `Layer` and `inkra_markdown::parse` through random edits on a
+note with several blocks. The edits favour backticks, newlines, fence lines,
+info words, quote prefixes and undo. After each edit, it runs D7 and publishes
+the plan. Then the layer's marks must equal a fresh colouring of the current
+text. The test needs `inkra-editor` and `inkra-markdown` as
+dev-dependencies of `inkra-highlight`. Both edges join `allowed_edges` in
+`scripts/check.sh`, which counts every dependency kind, and CLAUDE.md's
+Architecture.
+
+`cargo mutants` on `inkra-highlight`: zero missed.
+
+### D13. Adding a language
+
+Adding a language is one lexer module in `inkra-highlight`, one row in the
+language table, and its tests. A language that most lexer rules cover with
+lists (keywords, comment and string syntax) could become data instead of
+code; that is Deferred.
+
+### D14. tree-sitter stays a fallback, one language at a time
+
+The seam is the output: `(Range<ByteOffset>, TokenClass)` per content line.
+If a language's lexer proves too weak, that language alone can switch to a
+tree-sitter grammar. The `arborium-*` grammar crates (2.18.2, 2026-08-28, MIT)
+export `language() -> LanguageFn` and `HIGHLIGHTS_QUERY` at ABI 15, and their
+capture names match D5's classes through the 2026-11-11 spec's capture table.
+Nothing in `app` or in the theme changes for such a switch.
+
+No engine trait is built ahead of that day: there is one engine.
+
+## Languages
+
+**The first set is Rust, Python, JavaScript, TypeScript, JSON, Bash, HTML and
+CSS.** The repo's own `docs/` use `rust` most, then `bash`, then `toml`
+(2026-11-11 spec, Languages). Open question 1 asks about TOML.
+
+| Language | Info words |
+|---|---|
+| Rust | `rust`, `rs` |
+| Python | `python`, `py` |
+| JavaScript | `javascript`, `js`, `mjs`, `cjs`, `jsx` |
+| TypeScript | `typescript`, `ts` |
+| TSX | `tsx` |
+| JSON | `json`, `jsonc` |
+| Bash | `bash`, `sh`, `shell`, `zsh` |
+| HTML | `html`, `htm` |
+| CSS | `css` |
+
+JSX tags come from D4's expression-start rule, under a JSX flag the language
+sets. JavaScript has it on, for every info word: plain JavaScript has no `<`
+in expression position that JSX would take. TypeScript has it off, because
+`<T>(x: T) => x` is a generic there; TypeScript itself forbids that form in
+`.tsx` files for this reason. TSX is TypeScript with the flag on, so it needs
+no lexer of its own. TypeScript's lexer extends JavaScript's with type
+keywords and the generic list rule. HTML hands `<style>` content to the CSS
+lexer and `<script>` content to the JavaScript lexer, with the line state
+recording which one is open.
+
+## Palette
+
+Unchanged from the 2026-11-11 spec. Every colour is a Flexoki name: a base
+shade, or the 400 shade on dark and the 600 shade on light.
+
+| Class | Dark | Light |
+|---|---|---|
+| `Comment` | base-500, `#878580` | base-500, `#878580` |
+| `Keyword` | green-400 | green-600 |
+| `String` | cyan-400 | cyan-600 |
+| `Constant` | purple-400 | purple-600 |
+| `Function` | orange-400 | orange-600, `#BC5215` |
+| `Type` | yellow-400 | yellow-600, `#AD8301` |
+| `Property` | blue-400 | blue-600, `#205EA6` |
+| `Tag` | red-400 | red-600, `#AF3029` |
+| `Attribute` | magenta-400 | magenta-600 |
+| `Punctuation` | base-300, `#B7B5AC` | base-600, `#6F6E69` |
+| `Operator` | base-300, `#B7B5AC` | base-600, `#6F6E69` |
+
+Text without a token keeps `md_code_block`: `#CECDC3` on dark, `#403E3C` on
+light. The look is tuned after it ships, as for code blocks.
+
+## Cost
+
+| Figure | Expected | How it is checked |
+|---|---|---|
+| Binary size | a few hundred KB for eight lexers, mostly keyword tables; not measured | `stat -f %z` on the release binary, `main` against each slice |
+| Build time | no C, no build script | clean build of `inkra-highlight` |
+| Keystroke outside a block | D7's merge; no lex | `app` count test |
+| One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition | a bench of the whole call, S1b |
+| Opening a note | the lex shares decoration layer D8's 8 ms deadline | the open-time test; the launch figure |
+| Memory | marks only, no trees: about 3.4 times the block text (D10) | — |
+
+## Tests
+
+- `inkra-highlight`: D12's tests, per language, shared and the model test.
+- `inkra-highlight`, `#[test]`: every info word of the Languages table
+  resolves, in any case; an unknown word resolves to `None`.
+- `inkra-highlight`, `#[test]` on `plan`, one per case: deleting the closing
+  fence between two blocks clears both old chunks and lexes the merged block;
+  deleting a line right before a block's opening fence lexes the block; a
+  chunk with no marks on prose is not cleared again.
+- `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
+  each with whether it holds a mark, after random edits and publishes
+  (`proptest`, beside the layer's own).
+- `app`, headless `#[gpui::test]` against `MemFs`:
+  - a block's runs carry the token colours; a revealed fence stays
+    `md_marker`;
+  - a keystroke in prose lexes nothing, counted by a test-only counter;
+  - a keystroke in one block lexes that block only;
+  - a typed fence, a deleted fence and a changed info word recolour the right
+    blocks, and leave no mark on prose;
+  - a block in a quote and one in a list item colour their code only;
+  - an opened note's first frame with text has its colours;
+  - a note edited before its first hearing (`Opened(None)`) loses the marks
+    its open landed on prose;
+  - a listener call lexes at most `MAIN_THREAD_BUDGET` bytes, and the rest
+    lands from the background task;
+  - a block over the budget shows its old marks until the task lands; edits
+    during the task start one more task when it lands, never two at once;
+  - switching the feature off removes the colours on the next frame; on
+    restores them;
+  - a vault theme without `syntax_*` keys shows the built-in colours.
+- Scene `code-highlighting`, dark and light: one block per language, an
+  unknown word, no info word, an indented block, a block in a quote. Look at
+  it after each slice.
+
+## Slices
+
+Each slice is vertical and ends green on `./scripts/check.sh`.
+
+1. **S1a, Rust on screen.** `inkra-highlight` with the Rust lexer,
+   `Language`, `TokenClass` and the lexer tests; the eleven theme tokens; the
+   feature with a listener that, on every change, lexes the whole note and
+   publishes it as one chunk over the whole text; the scene with its Rust
+   block. No D7, D8 or D9 yet, so a keystroke lexes every block.
+   - Measure: `cargo bench -p inkra-highlight` on Rust texts of 20, 500 and
+     5,000 lines from this repo, and the binary size against `main`.
+   - Shot comparison: the scene's Rust block next to the same block on
+     `spike/highlight-tree-sitter`. The owner judges.
+   - STOP rule: if the owner finds the lexer's shot clearly worse, stop and
+     reopen D14 for Rust. Nothing of D7 to D10 is built before this verdict.
+2. **S1b, block chunks.** `plan` (D7) and its tests, `Layer::chunks` and
+   `decorations::chunks` (D9), the open function and the seed (D8), the main
+   thread budget, the model test (D12). The whole-text listener of S1a goes.
+   Bench the whole listener call and set `MAIN_THREAD_BUDGET` (D10). Every
+   block over the budget still lexes on the main thread until S2.
+3. **S2, the background task.** D10's one task per buffer, the replan on
+   landing, the 512 KiB bound, D8's skip of large blocks at open. The tests
+   for a block over the budget.
+4. **S3, Python, JSON and Bash.** Three lexers, their info words, their
+   scene blocks. Bash carries the heredoc state.
+5. **S4, JavaScript, TypeScript, TSX, CSS and HTML.** In this order: HTML
+   embeds CSS and JavaScript. The expression-start rule, the JSX flag, regex
+   literals, JSX tags, template strings.
+
+## Deferred
+
+| Item | Trigger |
+|---|---|
+| TOML, YAML, Markdown, Go, SQL and more | Asked for, or a fence word the set lacks becomes common in a vault |
+| Languages described as data in the vault, for the user to add | The extensions tier asks for user-addable content |
+| A partial relex from the edited line, using the line state | S1b's bench sets `MAIN_THREAD_BUDGET` under 16 KiB, so common blocks colour from the background |
+| A `Definition` class, distinct from `Function` and `Type` | Asked for; the lexer already knows a definition from its keyword |
+| tree-sitter for one language (D14) | A lexer proves too weak for that language |
+| Highlighting inline code and front matter | Asked for |
+| A per-language colour override in vault themes | Asked for after the eleven tokens ship |
+| Persisting marks across launches | Opening a note with much code measures over one frame later than today |
+
+## Open questions
+
+1. **TOML in the first set.** It is the third fence word in this repo's docs.
+   A TOML lexer is small: comments, strings, keys, tables, values.
+   Recommendation: add it to S3.
+2. **The `Definition` class.** Recommendation: not in the first version. The
+   name at a definition and at a call share `Function`, as in the 2026-11-11
+   spec's capture table.
+
+## Rejected alternatives
+
+- **tree-sitter with upstream grammar crates.** The 2026-11-11 spec's pick:
+  +5.2 MB, a C compiler, and waivers for `streaming-iterator` and six stale
+  grammar crates. Its measurements stay in that spec.
+- **tree-sitter with `arborium-*` grammars.** It removes the grammar waivers,
+  not the `streaming-iterator` one, the C compiler or the size. Kept as the
+  per-language fallback (D14).
+- **syntect with two-face.** `cargo deny` fails on bincode in every feature
+  set; its full pass is 3 to 12 times slower than tree-sitter's (2026-11-11
+  spec, Measurements).
+- **giallo.** TextMate grammars in pure Rust, released 2026-11-04, but under
+  EUPL-1.2, which `deny.toml` does not allow, and regex-based like syntect.
+- **tree-house (Helix).** Its highlighter takes `ropey` text, and it brings
+  the same C grammars.
+- **lumis, syntastica, inkjet.** lumis pulls the stale upstream grammar
+  crates and a WASM runtime; syntastica (2025-06) and inkjet (2024-09) are
+  stale themselves.
+- **Our own incremental parser per language.** Months per grammar, to redo
+  tree-sitter less well.
+- **Lexing inside `inkra_markdown::parse`.** Every keystroke would pay for
+  every block, and every lexer would compile into `inkra-index`.
+- **A block list kept by the feature.** It would map ranges through splices a
+  second time, beside the core. D9's read keeps one source of truth.
+
+## Deviations from Zed
+
+- **Lexers, not tree-sitter.** Zed parses every language with tree-sitter. A
+  note's code is read, not edited at scale; the size, the C build and the
+  waivers outweigh the scope-free precision a parser adds (Why, D4).
+- **Eleven classes, not a theme of free capture names.** A note app needs a
+  short, fixed token list that a vault theme can set in full.
+- **The whole block relexed per keystroke, not an incremental reparse.** Zed
+  reparses incrementally because its buffers are whole files. A note's block
+  is small; D10 sends the large ones to the background, as Zed's markdown
+  highlights in a background task (`markdown.rs:1286`).
+- **Colour computed in the open's background task.** Zed opens a buffer and
+  parses it afterwards. Inkra already loads off the main thread, so the note
+  lands coloured (D8).
