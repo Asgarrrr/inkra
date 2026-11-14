@@ -5,6 +5,3 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7d475d3880671c68f02ecbc003eb4cb3c49587c5ca223e1b9b611623777b36d4 # shrinks to parts = ["a", "a", "aaa", "é", "é", "e\u{301}"], steps = [Edit(1049310590562455370, 2, ""), Edit(24716130376999552, 2, ""), Publish(Chunk { bounds: (1659085362309808097, 4814641588383249222), marks: [(3848843321301973911, 0), (4780018383150667670, 0)] }), Edit(9924198422162358836, 0, "a")]
-cc 7aecc139042054539bf322953de0c97f60931ffdaead321eeb34de1164571a91 # shrinks to parts = ["e\u{301}"], chunk = Chunk { bounds: (0, 650261479146272350), marks: [] }, edits = [[(534025439085879690, 1, "")], [(0, 0, "")]]
-cc f70ab845ff24a21a4421bb0da17625c47cb9bc95f2175dedd8ba00fc7cba3c01 # shrinks to parts = ["e\u{301}"], older = Chunk { bounds: (0, 7793783675357164), marks: [] }, newer = Chunk { bounds: (0, 0), marks: [] }, edits = [[(9688290500601976010, 0, "é"), (1238124706341429020, 0, "é")], [(0, 0, "")]]
-cc 026a3ce348dcc79f4784d4042cce6c9a0fba5416a62aa182b26db562827cfc46 # shrinks to parts = ["aa", "e\u{301}", "e\u{301}", "a", "a", "a", "a"], older = Chunk { bounds: (0, 0), marks: [(547027706123865, 0), (4367392745658855099, 0)] }, newer = Chunk { bounds: (0, 0), marks: [] }, edits = [[(0, 0, "a")]], newer_first = true

@@ -51,12 +51,6 @@ impl Heard {
         *self = Self::At(now);
         change
     }
-    /// After its layer was cleared: the listener hears `Lost` next, unless it has heard nothing.
-    pub(super) fn lose(&mut self) {
-        if let Self::At(_) = self {
-            *self = Self::Lost;
-        }
-    }
 }
 
 /// `listener` hears every buffer `layer` is synced over until the subscription drops; every window

@@ -147,8 +147,8 @@ pub(crate) fn publish(
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, text);
         let published = entry.layers[rank].publish(text, chunk, marks, at);
-        if published.is_err() {
-            entry.heard[rank].lose();
+        if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
+            entry.heard[rank] = Heard::Lost;
         }
         // A lost layer was cleared: what it drew is gone too.
         let changed = published != Ok(false);
@@ -191,8 +191,8 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
         for ((layer, heard), (decl, listener)) in ranks {
             moved |= !layer.is_empty() && layer.at() != text.edit_mark();
             // `Lost` clears the layer, a change `moved` already counts.
-            if layer.catch_up(text).is_err() {
-                heard.lose();
+            if layer.catch_up(text).is_err() && matches!(heard, Heard::At(_)) {
+                *heard = Heard::Lost;
             }
             if let Some(listener) = listener.as_ref().and_then(Weak::upgrade)
                 && let Some(change) = heard.hear(text)

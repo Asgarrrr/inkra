@@ -96,20 +96,26 @@ fn a_feature_without_layers_tracks_no_buffer(cx: &mut TestAppContext) {
     assert_eq!(visual.update(|_, cx| decorations::tracked(cx)), 0);
 }
 
-/// The publishes computed before and after `a` land after `b` is typed; the one after `b` has not.
+/// The publish computed after `T` lands after `!` is typed, mapped past it; the one after `!` has
+/// not landed yet.
 #[gpui::test]
 fn a_late_publish_lands_mapped(cx: &mut TestAppContext) {
     fakes::set_delay(Some(DELAY));
-    let (window, mut visual) = opened(cx, TODO_CATALOG, "TODO\n");
+    let (window, mut visual) = opened(cx, TODO_CATALOG, "ODO\n");
+    visual.executor().advance_clock(DELAY);
     visual.simulate_keystrokes("cmd-up");
 
-    visual.simulate_input("a");
+    visual.simulate_input("T");
     visual.executor().advance_clock(DELAY / 2);
-    visual.simulate_input("b");
+    visual.simulate_keystrokes("cmd-up");
+    visual.simulate_input("!");
     visual.executor().advance_clock(DELAY / 2);
     visual.run_until_parked();
+    assert_eq!(warning_runs(window, &mut visual), [(1, false), (4, true)]);
 
-    assert_eq!(warning_runs(window, &mut visual), [(2, false), (4, true)]);
+    visual.executor().advance_clock(DELAY);
+    visual.run_until_parked();
+    assert_eq!(warning_runs(window, &mut visual), [(1, false), (4, true)]);
 }
 
 /// The publish computed at open lands past the log, after the listener republished on `Lost`.
@@ -139,6 +145,7 @@ fn an_overflow_sends_lost_and_a_full_publish_restores_the_colours(cx: &mut TestA
     );
 }
 
+/// The delayed publish holds the buffer weakly, so the next entry prunes the released one (D9).
 #[gpui::test]
 fn a_publish_for_a_released_buffer_is_a_no_op(cx: &mut TestAppContext) {
     fakes::set_delay(Some(DELAY));
@@ -152,6 +159,7 @@ fn a_publish_for_a_released_buffer_is_a_no_op(cx: &mut TestAppContext) {
 
     let buffer = cx.new(|_| Buffer::new("TODO\n"));
     cx.update(|cx| decorations::sync(&buffer, cx));
+    assert_eq!(cx.update(|cx| decorations::tracked(cx)), 1);
     cx.executor().advance_clock(DELAY);
     cx.run_until_parked();
 
