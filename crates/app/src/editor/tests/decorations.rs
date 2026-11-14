@@ -342,3 +342,22 @@ fn a_seed_after_a_frame_colours_the_next_one(cx: &mut TestAppContext) {
 
     assert_eq!(warning_runs(window, cx), [(4, true), (2, false)]);
 }
+
+/// The opener was read while the layer was on; the switch off before the landing drops its marks.
+#[gpui::test]
+fn a_seed_for_a_layer_switched_off_since_its_open_draws_nothing(cx: &mut TestAppContext) {
+    let text = "TODO a\n";
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
+    let window = window_on(cx, buffer.clone());
+    cx.update(|cx| {
+        fakes::declare_todo(cx);
+        let ready = Instant::now() + Duration::from_secs(3600);
+        let opened = decorations::run_openers(text, &decorations::openers(cx), ready);
+        decorations::enable([], cx);
+        decorations::seed(&buffer, opened, cx);
+    });
+    window.update(cx, |_, _, cx| cx.notify()).unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(warning_runs(window, cx), [(6, false)]);
+}

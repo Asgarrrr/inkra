@@ -21,7 +21,7 @@ pub(crate) struct Opened {
     pub(crate) seed: Option<Seed>,
 }
 
-/// Runs off the main thread, and returns once the deadline passes.
+/// Runs off the main thread; stops early when the deadline passes.
 pub(crate) type OpenFn = fn(&str, Instant) -> Opened;
 
 /// The highlighting spec's landing budget (its D8), shared by every open function of a note.
