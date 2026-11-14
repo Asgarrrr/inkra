@@ -403,9 +403,10 @@ number.
    feature declares panics (`rank`). A publish carries no feature, so a
    publish to another feature's layer does not panic. `on_text_change` checks
    in debug builds that its layer belongs to its feature (D12).
-7. **The launch note gets no open-function colours.** The note opened from
-   the command line (`bootstrap.rs`, `Launch::Note`) is built without
-   `open_note`. Its listener colours it after the feature activates (D8).
+7. **A note launched alone gets no colours.** A note opened from the command
+   line (`bootstrap.rs`, `Launch::Note`) has no vault, and with no vault no
+   feature activates (`vault_features`). No layer is on, so no open function
+   runs and no listener hears the note. D8 holds for every note of a vault.
 8. **`ColorToken` comes from `tokens!`** (`theme/colors.rs`). The macro now
    takes `name => Variant` pairs and emits the enum and its lookup (O1).
 9. **`Decorations` lives in `app/src/decorations/`**, not beside `Parses` in
