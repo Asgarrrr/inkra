@@ -414,8 +414,8 @@ number.
    `EntityId`. A view other than the editor reads it too (D9).
 10. **An entry drops at its buffer's release.** An entry holds no handle on
     its buffer, only a release subscription that removes it (D9). `Parses`
-    instead prunes on its next miss; an entry's seed is opaque and can be
-    large, so it does not wait for the next note.
+    drops a parse the same way, so neither a seed nor a parse waits for the
+    next note.
 11. **A seed is valid only at its edit mark.** If the buffer changed before the
     listener arrived, the core drops the seed and sends `Opened(None)`, a full
     recompute (D8).
