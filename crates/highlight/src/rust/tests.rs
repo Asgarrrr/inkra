@@ -226,6 +226,14 @@ fn a_name_before_a_paren_on_its_line_is_a_function() {
 }
 
 #[test]
+fn a_raw_prefix_without_a_name_is_no_token() {
+    check(&[(
+        "r#( fn r# struct r# x.r#",
+        &[(4, 6, Keyword), (10, 16, Keyword)],
+    )]);
+}
+
+#[test]
 fn every_other_token_resets_the_look_behind() {
     check(&[
         ("fn \"s\" x", &[(0, 2, Keyword), (3, 6, String)]),

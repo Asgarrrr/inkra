@@ -194,7 +194,9 @@ impl Tokens<'_> {
             };
             (name.end, class)
         };
-        if let Some(class) = class {
+        if let Some(class) = class
+            && !name.is_empty()
+        {
             self.push(token..end, class);
         }
         self.prev = match (keyword, word) {
