@@ -3,6 +3,7 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LineState {
     pub(crate) open: Open,
+    pub(crate) prev: Prev,
 }
 
 /// What is open at a line end.
@@ -17,4 +18,16 @@ pub(crate) enum Open {
     Str {
         raw_hashes: Option<u8>,
     },
+}
+
+/// The previous significant token, D4's one-token look-behind; whitespace and comments leave it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Prev {
+    #[default]
+    Other,
+    /// A lone `.`, not `..` or `...`.
+    Dot,
+    Fn,
+    /// `struct`, `enum`, `trait`, `type` or `impl`.
+    TypeKeyword,
 }

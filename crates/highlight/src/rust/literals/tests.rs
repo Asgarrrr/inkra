@@ -1,35 +1,13 @@
-use inkra_text::ByteOffset;
-
-use crate::TokenClass::{self, Comment, Keyword, String, Type};
-use crate::{Language, highlight};
-
-type Token = (usize, usize, TokenClass);
-
-/// The tokens of `text`, each line at its offset in `text`.
-fn tokens(text: &str) -> Vec<Token> {
-    let mut start = 0;
-    let lines = text.split('\n').map(|line| {
-        let at = start;
-        start += line.len() + 1;
-        (ByteOffset::new(at), line)
-    });
-    let mut out = Vec::new();
-    highlight(Language::Rust, lines, &mut out);
-    out.into_iter()
-        .map(|(range, class)| (range.start.get(), range.end.get(), class))
-        .collect()
-}
-
-fn check(cases: &[(&str, &[Token])]) {
-    for &(text, expected) in cases {
-        assert_eq!(tokens(text), expected, "{text:?}");
-    }
-}
+use crate::TokenClass::{Comment, Constant, Function, Keyword, Property, String, Type};
+use crate::rust::tests::{check, tokens};
 
 #[test]
 fn a_line_comment_runs_to_the_line_end() {
     check(&[
-        ("fn x // let \"a", &[(0, 2, Keyword), (5, 14, Comment)]),
+        (
+            "fn x // let \"a",
+            &[(0, 2, Keyword), (3, 4, Function), (5, 14, Comment)],
+        ),
         (
             "/// a\n//! b\nfn",
             &[(0, 5, Comment), (6, 11, Comment), (12, 14, Keyword)],
@@ -43,7 +21,10 @@ fn a_block_comment_nests_and_hides_everything_inside() {
         ("/**/ fn", &[(0, 4, Comment), (5, 7, Keyword)]),
         ("/***/ fn", &[(0, 5, Comment), (6, 8, Keyword)]),
         ("/*/ fn", &[(0, 6, Comment)]),
-        ("1 / 2 fn", &[(6, 8, Keyword)]),
+        (
+            "1 / 2 fn",
+            &[(0, 1, Constant), (4, 5, Constant), (6, 8, Keyword)],
+        ),
         ("/* /* */ x */ fn", &[(0, 13, Comment), (14, 16, Keyword)]),
         (
             "/* fn \"x\" 'a // */ fn",
@@ -139,7 +120,14 @@ fn a_raw_string_hash_count_saturates() {
 fn a_raw_identifier_is_never_a_keyword() {
     check(&[
         ("r#fn r#let fn", &[(11, 13, Keyword)]),
-        ("r fn x#fn", &[(2, 4, Keyword), (7, 9, Keyword)]),
+        (
+            "r#MAX r#Foo r#u8",
+            &[(0, 5, Constant), (6, 11, Type), (12, 16, Type)],
+        ),
+        (
+            "r fn x#fn",
+            &[(2, 4, Keyword), (5, 6, Function), (7, 9, Keyword)],
+        ),
     ]);
 }
 
@@ -160,7 +148,7 @@ fn a_quote_opens_a_char_literal_or_a_lifetime() {
         ("'\\u{1F980 fn", &[(0, 12, String)]),
         ("b'x' fn", &[(0, 4, String), (5, 7, Keyword)]),
         ("c'x' fn", &[(1, 4, String), (5, 7, Keyword)]),
-        ("&'a str", &[(1, 3, Type)]),
+        ("&'a str", &[(1, 3, Type), (4, 7, Type)]),
         ("'static fn", &[(0, 7, Type), (8, 10, Keyword)]),
         ("'r#fn fn", &[(0, 5, Type), (6, 8, Keyword)]),
         ("'é", &[(0, 3, Type)]),
@@ -174,5 +162,39 @@ fn a_char_literal_or_lifetime_never_spans_lines() {
     check(&[
         ("'\\\nfn", &[(0, 2, String), (3, 5, Keyword)]),
         ("'a\nfn", &[(0, 2, Type), (3, 5, Keyword)]),
+    ]);
+}
+
+#[test]
+fn a_number_is_a_constant_up_to_its_one_joining_dot() {
+    check(&[
+        ("1..2", &[(0, 1, Constant), (3, 4, Constant)]),
+        ("1.foo()", &[(0, 1, Constant), (2, 5, Function)]),
+        ("2.f64", &[(0, 1, Constant), (2, 5, Property)]),
+        ("1.", &[(0, 2, Constant)]),
+        ("1. x", &[(0, 2, Constant)]),
+        ("1.5", &[(0, 3, Constant)]),
+        (
+            "1._x 1.é",
+            &[
+                (0, 1, Constant),
+                (2, 4, Property),
+                (5, 6, Constant),
+                (7, 9, Property),
+            ],
+        ),
+        ("1.2.3", &[(0, 3, Constant), (4, 5, Constant)]),
+        ("1e5.0", &[(0, 3, Constant), (4, 5, Constant)]),
+        ("x.0", &[(2, 3, Constant)]),
+    ]);
+}
+
+#[test]
+fn a_decimal_exponent_takes_its_sign() {
+    check(&[
+        ("1.5e-3", &[(0, 6, Constant)]),
+        ("1E+2 0e+2", &[(0, 4, Constant), (5, 9, Constant)]),
+        ("0x1e+2", &[(0, 4, Constant), (5, 6, Constant)]),
+        ("1_000u8", &[(0, 7, Constant)]),
     ]);
 }

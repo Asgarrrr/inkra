@@ -1,5 +1,5 @@
-//! Rust comments, strings, char literals and lifetimes, scanned byte by byte: every byte they
-//! stop on is ASCII, so every end is a char boundary.
+//! Rust comments, strings, char literals, lifetimes and numbers, scanned byte by byte: every
+//! byte they stop on is ASCII, so every end is a char boundary.
 
 use crate::TokenClass;
 use crate::state::Open;
@@ -57,6 +57,29 @@ pub(super) fn raw_open(bytes: &[u8], at: usize) -> Option<(usize, u8)> {
     let hashes = bytes[at..].iter().take_while(|&&byte| byte == b'#').count();
     (bytes.get(at + hashes) == Some(&b'"'))
         .then(|| (at + hashes + 1, u8::try_from(hashes).unwrap_or(u8::MAX)))
+}
+
+/// The end of the number at the digit at `at`: `[0-9A-Za-z_]`, at most one `.` before any
+/// exponent, and a decimal exponent's sign.
+pub(super) fn number(bytes: &[u8], at: usize) -> usize {
+    let decimal = !(bytes[at] == b'0' && matches!(bytes.get(at + 1), Some(b'x' | b'o' | b'b')));
+    let mut end = at;
+    loop {
+        end += bytes[end..]
+            .iter()
+            .take_while(|&&byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            .count();
+        let taken = &bytes[at..end];
+        let exponent = decimal && taken.iter().any(|&byte| matches!(byte, b'e' | b'E'));
+        let joins = bytes
+            .get(end + 1)
+            .is_none_or(|&byte| byte != b'.' && !is_ident_start(byte));
+        match bytes.get(end) {
+            Some(b'+' | b'-') if decimal && matches!(taken.last(), Some(b'e' | b'E')) => end += 1,
+            Some(b'.') if !exponent && !taken.contains(&b'.') && joins => end += 1,
+            _ => return end,
+        }
+    }
 }
 
 /// The char literal or lifetime at the `'` at `at`: its end and class. Neither spans lines, so

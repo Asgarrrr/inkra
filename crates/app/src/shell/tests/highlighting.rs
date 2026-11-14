@@ -92,7 +92,25 @@ fn comments_strings_and_lifetimes_colour_and_skip_the_quote_prefix(cx: &mut Test
             (27, 29, string),
             (32, 34, string),
             (38, 40, K),
+            (41, 42, ColorToken::SyntaxFunction),
             (43, 45, ty)
+        ]
+    );
+}
+
+#[gpui::test]
+fn constants_properties_calls_and_macros_colour(cx: &mut TestAppContext) {
+    let marks = coloured(cx, "```rust\nconst MAX\np.x\nv.len()\nprintln!(\n```\n");
+
+    let function = ColorToken::SyntaxFunction;
+    assert_eq!(
+        marks,
+        [
+            (8, 13, K),
+            (14, 17, ColorToken::SyntaxConstant),
+            (20, 21, ColorToken::SyntaxProperty),
+            (24, 27, function),
+            (30, 38, function)
         ]
     );
 }

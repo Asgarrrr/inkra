@@ -30,7 +30,10 @@ pub enum TokenClass {
     Comment,
     Keyword,
     String,
+    Constant,
+    Function,
     Type,
+    Property,
 }
 
 type Lexer =

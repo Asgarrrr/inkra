@@ -63,6 +63,9 @@ fn token(class: TokenClass) -> ColorToken {
         TokenClass::Comment => ColorToken::SyntaxComment,
         TokenClass::Keyword => ColorToken::SyntaxKeyword,
         TokenClass::String => ColorToken::SyntaxString,
+        TokenClass::Constant => ColorToken::SyntaxConstant,
+        TokenClass::Function => ColorToken::SyntaxFunction,
         TokenClass::Type => ColorToken::SyntaxType,
+        TokenClass::Property => ColorToken::SyntaxProperty,
     }
 }
