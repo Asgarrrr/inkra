@@ -333,8 +333,8 @@ fn a_seed_after_a_frame_colours_the_next_one(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     cx.update(|cx| {
-        let opened =
-            decorations::run_openers(text, &[(TODO_LAYER, fakes::open_todo)], Instant::now());
+        let ready = Instant::now() + Duration::from_secs(3600);
+        let opened = decorations::run_openers(text, &[(TODO_LAYER, fakes::open_todo)], ready);
         decorations::seed(&buffer, opened, cx);
     });
     window.update(cx, |_, _, cx| cx.notify()).unwrap();
