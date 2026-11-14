@@ -258,6 +258,12 @@ pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mu
     .detach();
 }
 
+/// Declares `TODO_DECL` alone and switches it on, as a shell with `TODO_FAKE` on does.
+pub(crate) fn declare_todo(cx: &mut App) {
+    decorations::declare([&TODO_DECL], cx);
+    decorations::enable([TODO_FAKE.id], cx);
+}
+
 /// Makes `todo_listener` publish `delay` after it computed, as a background task would.
 pub(crate) fn set_delay(delay: Option<Duration>) {
     DELAY.set(delay);

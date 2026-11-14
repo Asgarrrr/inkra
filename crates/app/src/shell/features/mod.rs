@@ -174,6 +174,7 @@ impl AppShell {
         if replaced.is_empty() {
             return;
         }
+        decorations::enable(self.features.enabled().map(|manifest| manifest.id), cx);
         for (id, old) in replaced {
             let panes = self.features.manifest(id).panes;
             if matches!(old, Slot::Off) {

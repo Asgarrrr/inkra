@@ -53,6 +53,8 @@ struct Decorations {
     revisions: u64,
     /// One per declared layer, by rank: the listener its `listen` subscription holds.
     listeners: Vec<Option<Weak<Listener>>>,
+    /// One per declared layer, by rank: whether its feature is on.
+    enabled: Vec<bool>,
 }
 
 impl Global for Decorations {}
@@ -80,8 +82,41 @@ pub(crate) fn declare(layers: impl IntoIterator<Item = &'static LayerDecl>, cx: 
         return;
     }
     decorations.listeners.resize(layers.len(), None);
+    decorations.enabled = vec![false; layers.len()];
     decorations.declared = layers;
     decorations.entries.clear();
+}
+
+/// Switches each layer on when its feature is in `features`. A layer switched off drops its marks
+/// and redraws; one switched either way is heard as lost, so a listener publishes it all again.
+pub(crate) fn enable(features: impl IntoIterator<Item = FeatureId>, cx: &mut App) {
+    let features: Vec<_> = features.into_iter().collect();
+    let Decorations {
+        declared,
+        entries,
+        revisions,
+        enabled,
+        ..
+    } = cx.default_global::<Decorations>();
+    let now: Vec<_> = declared
+        .iter()
+        .map(|decl| features.contains(&decl.id.feature))
+        .collect();
+    if now == *enabled {
+        return;
+    }
+    for rank in (0..now.len()).filter(|&rank| now[rank] != enabled[rank]) {
+        for entry in entries.values_mut() {
+            entry.heard[rank] = Heard::Lost;
+            if !now[rank] && !entry.layers[rank].is_empty() {
+                entry.layers[rank].clear();
+                *revisions += 1;
+                entry.revision = *revisions;
+            }
+        }
+    }
+    *enabled = now;
+    cx.refresh_windows();
 }
 
 /// # Panics
@@ -142,6 +177,10 @@ pub(crate) fn publish(
         return;
     };
     let rank = rank(layer, cx);
+    // A publish computed before its feature went off.
+    if !cx.global::<Decorations>().enabled[rank] {
+        return;
+    }
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
         let text = buffer.read(cx);
         let declared = decorations.declared.len();
@@ -187,7 +226,9 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
             .layers
             .iter_mut()
             .zip(&mut entry.heard)
-            .zip(decorations.declared.iter().zip(&decorations.listeners));
+            .zip(decorations.declared.iter().zip(&decorations.listeners))
+            .zip(&decorations.enabled)
+            .filter_map(|(rank, &enabled)| enabled.then_some(rank));
         for ((layer, heard), (decl, listener)) in ranks {
             moved |= !layer.is_empty() && layer.at() != text.edit_mark();
             // `Lost` clears the layer, a change `moved` already counts.
@@ -236,6 +277,17 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
         revision: entry.revision,
         layers: &entry.layers,
         at: buffer.read(cx).edit_mark(),
+    }
+}
+
+#[cfg(test)]
+impl<'a> Drawn<'a> {
+    pub(crate) fn for_tests(layers: &'a [Layer<MarkStyle>], at: EditMark) -> Self {
+        Self {
+            revision: 0,
+            layers,
+            at,
+        }
     }
 }
 

@@ -8,9 +8,11 @@ use gpui::{Context, Entity, TestAppContext, VisualTestContext, Window, div, prel
 use inkra_text::{Buffer, ByteOffset};
 
 use super::at;
+use super::decorations::publish_warning;
 use crate::buffer_events::Reloaded;
 use crate::editor::EditorView;
 use crate::editor::actions::Undo;
+use crate::feature::fakes;
 use crate::text_input::InputHost;
 
 /// Draws both editors, so a stale pinned selection reaches the layout.
@@ -190,6 +192,25 @@ fn two_views_share_one_parse(cx: &mut TestAppContext) {
         view.read_with(cx, |view, _| Rc::clone(&view.markdown))
     };
     assert!(Rc::ptr_eq(&markdown(&a, &mut cx), &markdown(&b, &mut cx)));
+}
+
+#[gpui::test]
+fn two_views_of_one_buffer_draw_the_same_marks(cx: &mut TestAppContext) {
+    let Split {
+        a,
+        b,
+        buffer,
+        mut cx,
+    } = split(cx, "TODO here\n");
+    cx.update(|_, cx| fakes::declare_todo(cx));
+
+    publish_warning(&buffer, 0..4, &mut cx);
+
+    let runs = |view: &Entity<EditorView>, cx: &mut VisualTestContext| {
+        view.read_with(cx, EditorView::warning_runs)
+    };
+    assert_eq!(runs(&a, &mut cx), [(4, true), (5, false)]);
+    assert_eq!(runs(&b, &mut cx), [(4, true), (5, false)]);
 }
 
 #[gpui::test]

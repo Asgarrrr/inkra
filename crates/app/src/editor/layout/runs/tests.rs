@@ -1,11 +1,13 @@
 use std::ops::Range;
 
 use gpui::{FontWeight, Hsla, TextStyle};
+use inkra_editor::Layer;
 use inkra_markdown::{DisplayLine, parse};
-use inkra_text::ByteOffset;
+use inkra_text::{Buffer, ByteOffset};
 
 use super::{RunStyles, line_runs};
-use crate::decorations::Drawn;
+use crate::decorations::{Drawn, MarkStyle};
+use crate::theme::ColorToken;
 use crate::theme::builtin::dark;
 
 fn range(start: usize, end: usize) -> Range<ByteOffset> {
@@ -97,4 +99,87 @@ fn a_stale_span_past_the_line_is_clipped_not_fatal() {
     let runs = line_runs(&line, &spans, None, &display, &mut styles);
 
     assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 4);
+}
+
+/// One layer over `text` holding `marks`, published at its edit mark.
+fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> Layer<MarkStyle> {
+    let mut layer = Layer::new(text.edit_mark());
+    let published = layer.publish(
+        text,
+        ByteOffset::new(0)..text.len(),
+        marks,
+        text.edit_mark(),
+    );
+    assert_eq!(published, Ok(true));
+    layer
+}
+
+fn colored(color: ColorToken) -> MarkStyle {
+    MarkStyle { color: Some(color) }
+}
+
+/// Whether each run of `text`'s one line, with `marked` composing, is in the warning colour.
+fn warning_runs(
+    text: &str,
+    marked: Option<&Range<ByteOffset>>,
+    layers: &[Layer<MarkStyle>],
+) -> Vec<bool> {
+    let buffer = Buffer::new(text);
+    let base = TextStyle::default();
+    let drawn = Drawn::for_tests(layers, buffer.edit_mark());
+    let mut styles = RunStyles::new(&base, dark(), &drawn);
+    let line = range(0, text.len());
+    let display = DisplayLine::new(line.clone(), []);
+    let warning = Hsla::from(dark().colors.warning);
+    line_runs(&line, &parse(text).spans, marked, &display, &mut styles)
+        .iter()
+        .map(|run| run.color == warning)
+        .collect()
+}
+
+#[test]
+fn a_revealed_marker_wins_over_a_layer() {
+    let text = "a **b** c";
+    let layers = [layer(
+        &Buffer::new(text),
+        vec![(range(0, text.len()), colored(ColorToken::Warning))],
+    )];
+
+    assert_eq!(
+        warning_runs(text, None, &layers),
+        [true, false, true, false, true]
+    );
+}
+
+#[test]
+fn marked_text_wins_over_a_layer() {
+    let text = "a b c";
+    let layers = [layer(
+        &Buffer::new(text),
+        vec![(range(0, text.len()), colored(ColorToken::Warning))],
+    )];
+
+    assert_eq!(
+        warning_runs(text, Some(&range(2, 3)), &layers),
+        [true, false, true]
+    );
+}
+
+#[test]
+fn a_layer_without_a_colour_leaves_the_one_below() {
+    let text = "a b c";
+    let buffer = Buffer::new(text);
+    let layers = [
+        layer(
+            &buffer,
+            vec![(range(0, text.len()), colored(ColorToken::Warning))],
+        ),
+        layer(&buffer, vec![(range(2, 3), MarkStyle::default())]),
+    ];
+
+    assert!(
+        warning_runs(text, None, &layers)
+            .iter()
+            .all(|&warning| warning)
+    );
 }

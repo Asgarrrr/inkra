@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Rgba, Window, px};
 use inkra_vault::{EntryId, New};
 
+use crate::decorations;
 use crate::editor::EditorView;
 use crate::feature::Registry;
 use crate::pane::{CORE_PANES, sides};
@@ -136,6 +137,7 @@ impl AppShell {
             });
         let features = Self::vault_features(features, notes.read(cx).vault().is_some());
         Self::declare_layers(&features, cx);
+        decorations::enable(features.enabled().map(|manifest| manifest.id), cx);
         let (layout, mut groups, pending) = Self::restored_groups(
             read,
             &sides(CORE_PANES.iter().copied().chain(features.panes())),
@@ -340,6 +342,11 @@ impl AppShell {
             .tab_scroll
             .bounds_for_item(ix)
             .map(|bounds| bounds.center())
+    }
+
+    /// The buffer of the note the editor shows, for a scene to publish over.
+    pub(crate) fn note_buffer(&self, cx: &App) -> Option<Entity<inkra_text::Buffer>> {
+        self.notes.read(cx).buffer_for(self.bound_note()?).cloned()
     }
 
     /// Where the editor's code block `ix` was drawn last; `None` before it is drawn.

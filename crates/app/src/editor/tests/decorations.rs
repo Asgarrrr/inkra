@@ -8,31 +8,37 @@ use gpui::{App, Entity, Hsla, TestAppContext, WindowHandle, prelude::*};
 use inkra_text::Buffer;
 
 use super::{at, dispatching, window_on};
-use crate::decorations::{self, MarkStyle};
+use crate::decorations::{self, LayerDecl, LayerId, MarkStyle};
 use crate::editor::EditorView;
 use crate::editor::layout::shape_count;
-use crate::feature::fakes::{TODO_DECL, TODO_LAYER};
+use crate::feature::FeatureId;
+use crate::feature::fakes::{self, TODO_DECL, TODO_FAKE, TODO_LAYER};
 use crate::theme::{self, ColorToken};
 
-/// Publishes the warning colour over `mark` at the buffer's current edit mark, in one chunk
+/// Publishes `token` over `mark` on `layer` at the buffer's current edit mark, in one chunk
 /// covering the buffer.
-fn publish_warning(buffer: &Entity<Buffer>, mark: Range<usize>, cx: &mut TestAppContext) {
+fn publish_color(
+    layer: LayerId,
+    token: ColorToken,
+    buffer: &Entity<Buffer>,
+    mark: Range<usize>,
+    cx: &mut TestAppContext,
+) {
     cx.update(|cx| {
-        let warning = MarkStyle {
-            color: Some(ColorToken::Warning),
-        };
+        let style = MarkStyle { color: Some(token) };
         let (at_mark, len) = (buffer.read(cx).edit_mark(), buffer.read(cx).len());
-        let marks = vec![(at(mark.start)..at(mark.end), warning)];
-        decorations::publish(
-            TODO_LAYER,
-            &buffer.downgrade(),
-            at(0)..len,
-            marks,
-            at_mark,
-            cx,
-        );
+        let marks = vec![(at(mark.start)..at(mark.end), style)];
+        decorations::publish(layer, &buffer.downgrade(), at(0)..len, marks, at_mark, cx);
     });
     cx.run_until_parked();
+}
+
+pub(super) fn publish_warning(
+    buffer: &Entity<Buffer>,
+    mark: Range<usize>,
+    cx: &mut TestAppContext,
+) {
+    publish_color(TODO_LAYER, ColorToken::Warning, buffer, mark, cx);
 }
 
 impl EditorView {
@@ -56,7 +62,7 @@ fn warning_runs(window: WindowHandle<EditorView>, cx: &mut TestAppContext) -> Ve
 fn a_publish_colours_its_range(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
     let window = window_on(cx, buffer.clone());
-    cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+    cx.update(fakes::declare_todo);
     cx.run_until_parked();
     let before = shape_count();
 
@@ -70,7 +76,7 @@ fn a_publish_colours_its_range(cx: &mut TestAppContext) {
 fn a_frame_without_an_edit_reuses_the_coloured_layout(cx: &mut TestAppContext) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
     let window = window_on(cx, buffer.clone());
-    cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+    cx.update(fakes::declare_todo);
     publish_warning(&buffer, 0..4, cx);
     let before = shape_count();
 
@@ -87,7 +93,7 @@ fn an_edit_shifts_the_marks_and_an_overflow_hides_them_until_published_again(
 ) {
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
     let window = window_on(cx, buffer.clone());
-    cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+    cx.update(fakes::declare_todo);
     publish_warning(&buffer, 0..4, cx);
 
     buffer.update(cx, |buffer, cx| {
@@ -127,7 +133,7 @@ fn a_delete_undone_out_of_sight_draws_no_stale_colour(cx: &mut TestAppContext) {
     for redo_pairs in [0, 129] {
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
         let window = window_on(cx, buffer.clone());
-        cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+        cx.update(fakes::declare_todo);
         publish_warning(&buffer, 0..4, cx);
 
         buffer.update(cx, |buffer, cx| {
@@ -151,7 +157,7 @@ fn a_keystroke_shifts_the_colours_and_leaves_typed_text_plain(cx: &mut TestAppCo
     let buffer = window
         .update(&mut visual, |view, _, _| view.input.buffer().clone())
         .unwrap();
-    visual.update(|_, cx| decorations::declare([&TODO_DECL], cx));
+    visual.update(|_, cx| fakes::declare_todo(cx));
     publish_warning(&buffer, 2..6, &mut visual);
 
     visual.simulate_keystrokes("cmd-up right right");
@@ -170,8 +176,63 @@ fn a_keystroke_shifts_the_colours_and_leaves_typed_text_plain(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn the_later_layer_in_the_catalog_wins_whatever_the_publish_order(cx: &mut TestAppContext) {
+    static LATER: LayerDecl = LayerDecl {
+        id: LayerId::new(FeatureId::new("todo_fake"), "later"),
+    };
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
+    let window = window_on(cx, buffer.clone());
+    cx.update(|cx| {
+        decorations::declare([&TODO_DECL, &LATER], cx);
+        decorations::enable([TODO_FAKE.id], cx);
+    });
+
+    publish_color(LATER.id, ColorToken::Warning, &buffer, 0..4, cx);
+    publish_color(TODO_LAYER, ColorToken::Accent, &buffer, 0..4, cx);
+
+    assert_eq!(warning_runs(window, cx), [(4, true), (5, false)]);
+}
+
+#[gpui::test]
+fn switching_off_a_layer_without_marks_keeps_the_layout(cx: &mut TestAppContext) {
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
+    let window = window_on(cx, buffer.clone());
+    cx.update(|cx| {
+        fakes::declare_todo(cx);
+        decorations::sync(&buffer, cx);
+    });
+    cx.run_until_parked();
+    let before = shape_count();
+
+    cx.update(|cx| decorations::enable([], cx));
+    window.update(cx, |_, _, cx| cx.notify()).unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(shape_count(), before);
+}
+
+/// `other` published last, then left; the switch off must still give `buffer` a revision it never had.
+#[gpui::test]
+fn switching_off_reshapes_a_buffer_another_published_after(cx: &mut TestAppContext) {
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO here\n")));
+    let window = window_on(cx, buffer.clone());
+    cx.update(fakes::declare_todo);
+    publish_warning(&buffer, 0..4, cx);
+    let other = cx.update(|cx| cx.new(|_| Buffer::new("TODO")));
+    publish_warning(&other, 0..4, cx);
+    drop(other);
+    let tracked = cx.update(|cx| cx.new(|_| Buffer::new("")));
+    cx.update(|cx| decorations::sync(&tracked, cx));
+
+    cx.update(|cx| decorations::enable([], cx));
+    cx.run_until_parked();
+
+    assert_eq!(warning_runs(window, cx), [(9, false)]);
+}
+
+#[gpui::test]
 fn a_released_buffer_is_untracked_once_another_is_tracked(cx: &mut TestAppContext) {
-    cx.update(|cx| decorations::declare([&TODO_DECL], cx));
+    cx.update(fakes::declare_todo);
     let released = cx.update(|cx| cx.new(|_| Buffer::new("TODO")));
     publish_warning(&released, 0..4, cx);
     drop(released);

@@ -12,7 +12,7 @@ use crate::decorations::{self, Drawn, MarkStyle};
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
-use crate::feature::fakes::{TODO_DECL, TODO_LAYER};
+use crate::feature::fakes::{self, TODO_LAYER};
 use crate::theme::{self, Appearance, ColorToken, Theme, ThemeColors, builtin};
 
 #[gpui::test]
@@ -31,7 +31,7 @@ fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
 fn a_keystroke_shapes_the_note_once_with_a_layer(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "TODO\n");
     let _listening = cx.update(|_, cx| {
-        decorations::declare([&TODO_DECL], cx);
+        fakes::declare_todo(cx);
         // One mark over the whole text, so each keystroke changes the marks.
         let whole = |buffer: &gpui::Entity<Buffer>, _, cx: &mut gpui::App| {
             let (len, mark) = (buffer.read(cx).len(), buffer.read(cx).edit_mark());

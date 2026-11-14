@@ -34,6 +34,8 @@ impl<'a> RunStyles<'a> {
         color: Option<ColorToken>,
         len: usize,
     ) -> TextRun {
+        // Revealed syntax and marked text win over every layer (decoration layer spec, D7).
+        let color = color.filter(|_| !composing && !styles.contains(Styles::MARKER));
         let (base, theme) = (self.base, self.theme);
         self.resolved
             .entry((styles, composing, color))
