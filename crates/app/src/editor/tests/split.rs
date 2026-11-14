@@ -12,6 +12,7 @@ use super::decorations::publish_warning;
 use crate::buffer_events::Reloaded;
 use crate::editor::EditorView;
 use crate::editor::actions::Undo;
+use crate::editor::parses;
 use crate::feature::fakes;
 use crate::text_input::InputHost;
 
@@ -192,6 +193,22 @@ fn two_views_share_one_parse(cx: &mut TestAppContext) {
         view.read_with(cx, |view, _| Rc::clone(&view.markdown))
     };
     assert!(Rc::ptr_eq(&markdown(&a, &mut cx), &markdown(&b, &mut cx)));
+}
+
+/// A version miss keeps the release subscription its first parse made.
+#[gpui::test]
+fn a_released_buffer_drops_its_parse(cx: &mut TestAppContext) {
+    let released = cx.new(|_| Buffer::new("# T\n"));
+    cx.update(|cx| parses::parsed(&released, cx));
+    released.update(cx, |buffer, _| {
+        buffer.transact_at(Instant::now(), |buffer| buffer.insert(at(3), "x"));
+    });
+    cx.update(|cx| parses::parsed(&released, cx));
+    assert_eq!(cx.update(|cx| parses::cached(cx)), 1);
+
+    // gpui releases a dropped entity when an update ends.
+    cx.update(|_| drop(released));
+    assert_eq!(cx.update(|cx| parses::cached(cx)), 0);
 }
 
 #[gpui::test]
