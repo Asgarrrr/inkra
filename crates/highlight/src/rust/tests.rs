@@ -139,6 +139,8 @@ fn a_name_before_a_bang_is_a_macro_with_its_bang() {
     check(&[
         ("println!(\"a\")", &[(0, 8, Function), (9, 12, String)]),
         ("Vec! MAX!", &[(0, 4, Function), (5, 9, Function)]),
+        ("fn m!", &[(0, 2, Keyword), (3, 5, Function)]),
+        ("struct Foo!", &[(0, 6, Keyword), (7, 11, Function)]),
         ("x != y x!=y", &[]),
     ]);
 }
