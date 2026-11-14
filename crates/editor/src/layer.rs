@@ -16,6 +16,8 @@ pub struct Layer<S> {
 struct Chunk<S> {
     start: ByteOffset,
     len: usize,
+    /// The edit mark its marks were computed at: an older publish never replaces them.
+    published: EditMark,
     /// Relative to `start`: sorted, disjoint, non-empty and inside `0..len`.
     marks: Vec<(Range<usize>, S)>,
 }
@@ -99,15 +101,17 @@ impl<S: Clone + PartialEq> Layer<S> {
         self.chunks.splice(first..first, reached);
     }
 
-    /// Replaces everything inside `chunk` with `marks`, computed at the edit mark `at`.
-    /// `Ok(true)` when the marks inside `chunk` changed.
+    /// Replaces everything inside `chunk` with `marks`, both computed at the edit mark `at` and
+    /// mapped through the edits since (D6). `Ok(true)` when the marks inside the mapped chunk
+    /// changed; `Ok(false)` too when a chunk it overlaps was computed later, and it is dropped.
     ///
     /// # Errors
-    /// `Lost` when the layer could not catch up; the publish is dropped.
+    /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
+    /// the layer is cleared and the publish dropped.
     ///
     /// # Panics
-    /// If `chunk` is past the end of `buffer`, a bound splits a char, or `marks` are unsorted,
-    /// overlapping or outside `chunk`.
+    /// If `chunk` is reversed, `marks` are unsorted, overlapping or outside `chunk`, or once
+    /// mapped, `chunk` is past the end of `buffer` or a bound splits a char.
     pub fn publish(
         &mut self,
         buffer: &Buffer,
@@ -115,25 +119,36 @@ impl<S: Clone + PartialEq> Layer<S> {
         marks: Vec<(Range<ByteOffset>, S)>,
         at: EditMark,
     ) -> Result<bool, Lost> {
-        check(buffer, &chunk, &marks);
+        check(&chunk, &marks);
         self.catch_up(buffer)?;
-        if at != self.at || chunk.is_empty() {
+        let Some(mut splices) = buffer.edits_since(at) else {
+            self.clear();
+            return Err(Lost);
+        };
+        let Some(new) = splices
+            .try_fold(Chunk::new(chunk, at, marks), map_chunk)
+            .filter(|new| new.len != 0)
+        else {
             return Ok(false);
-        }
-        let before: Vec<_> = self
-            .marks_in(chunk.clone())
-            .map(|(mark, style)| (mark, style.clone()))
-            .collect();
+        };
+        new.check(buffer);
+        let chunk = new.start..new.end();
         let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
         let last = self.chunks.partition_point(|old| old.start < chunk.end);
         let overlapped = &self.chunks[first..last];
+        if overlapped.iter().any(|old| old.published > at) {
+            return Ok(false);
+        }
         let head = overlapped
             .first()
             .and_then(|head| head.piece(head.start..chunk.start));
         let tail = overlapped
             .last()
             .and_then(|tail| tail.piece(chunk.end..tail.end()));
-        let new = Chunk::new(chunk.clone(), marks);
+        let before: Vec<_> = self
+            .marks_in(chunk.clone())
+            .map(|(mark, style)| (mark, style.clone()))
+            .collect();
         self.chunks
             .splice(first..last, head.into_iter().chain([new]).chain(tail));
         let after = self.marks_in(chunk);
@@ -144,12 +159,14 @@ impl<S: Clone + PartialEq> Layer<S> {
 impl<S: Clone> Chunk<S> {
     fn new(
         range: Range<ByteOffset>,
+        published: EditMark,
         marks: impl IntoIterator<Item = (Range<ByteOffset>, S)>,
     ) -> Self {
         let start = range.start;
         Self {
             start,
             len: range.end - start,
+            published,
             marks: marks
                 .into_iter()
                 .filter(|(mark, _)| !mark.is_empty())
@@ -180,8 +197,26 @@ impl<S: Clone> Chunk<S> {
             let marks = self
                 .marks_in(range.clone())
                 .map(|(mark, style)| (mark, style.clone()));
-            Self::new(range, marks)
+            Self::new(range, self.published, marks)
         })
+    }
+
+    fn check(&self, buffer: &Buffer) {
+        let chunk = self.start..self.end();
+        assert!(
+            chunk.end <= buffer.len(),
+            "chunk {chunk:?} is past the end of the buffer"
+        );
+        let marks = self
+            .marks
+            .iter()
+            .flat_map(|(mark, _)| [self.start + mark.start, self.start + mark.end]);
+        for bound in [chunk.start, chunk.end].into_iter().chain(marks) {
+            assert!(
+                buffer.text().is_char_boundary(bound.get()),
+                "{bound} in chunk {chunk:?} splits a char"
+            );
+        }
     }
 }
 
@@ -221,14 +256,12 @@ fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
             .flatten()
             .map(move |piece| (piece, style.clone()))
     });
-    Some(Chunk::new(range, marks))
+    Some(Chunk::new(range, chunk.published, marks))
 }
 
-fn check<S>(buffer: &Buffer, chunk: &Range<ByteOffset>, marks: &[(Range<ByteOffset>, S)]) {
-    assert!(
-        [chunk.start, chunk.end, buffer.len()].is_sorted(),
-        "chunk {chunk:?} is reversed or past the end of the buffer"
-    );
+/// What holds of a publish at any edit mark; the bounds are checked once mapped (`Chunk::check`).
+fn check<S>(chunk: &Range<ByteOffset>, marks: &[(Range<ByteOffset>, S)]) {
+    assert!(chunk.start <= chunk.end, "chunk {chunk:?} is reversed");
     let mut floor = chunk.start;
     for (mark, _) in marks {
         assert!(
@@ -236,13 +269,6 @@ fn check<S>(buffer: &Buffer, chunk: &Range<ByteOffset>, marks: &[(Range<ByteOffs
             "mark {mark:?} is reversed, overlaps the one before or lies outside chunk {chunk:?}"
         );
         floor = mark.end;
-    }
-    let bounds = marks.iter().flat_map(|(mark, _)| [mark.start, mark.end]);
-    for bound in [chunk.start, chunk.end].into_iter().chain(bounds) {
-        assert!(
-            buffer.text().is_char_boundary(bound.get()),
-            "{bound} in chunk {chunk:?} splits a char"
-        );
     }
 }
 

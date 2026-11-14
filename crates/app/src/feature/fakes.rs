@@ -3,6 +3,7 @@
 //! and key-conflict fakes the keymap tests check.
 
 use std::cell::{Cell, RefCell};
+use std::time::Duration;
 
 use gpui::{
     App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, Render, Styled, WeakEntity,
@@ -30,6 +31,7 @@ thread_local! {
     static INPUT: RefCell<Option<WeakEntity<InputPane>>> = const { RefCell::new(None) };
     static PANE_ACTIVATIONS: Cell<usize> = const { Cell::new(0) };
     static HEARD: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    static DELAY: Cell<Option<Duration>> = const { Cell::new(None) };
 }
 
 /// A pane whose one element takes keyboard focus.
@@ -213,7 +215,8 @@ pub(crate) fn pane_activations() -> usize {
     PANE_ACTIVATIONS.get()
 }
 
-/// Notes what it heard, then publishes the warning colour over each to-do marker of `buffer`.
+/// Notes what it heard, then publishes the warning colour over each to-do marker of `buffer`,
+/// after the delay `set_delay` asked for, if any.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "a `Listener` takes the change by value"
@@ -239,15 +242,25 @@ pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mu
             )
         })
         .collect();
-    let (len, at) = (text.len(), text.edit_mark());
-    decorations::publish(
-        TODO_LAYER,
-        &buffer.downgrade(),
-        ByteOffset::new(0)..len,
-        marks,
-        at,
-        cx,
+    let (chunk, at, buffer) = (
+        ByteOffset::new(0)..text.len(),
+        text.edit_mark(),
+        buffer.downgrade(),
     );
+    let Some(delay) = DELAY.get() else {
+        decorations::publish(TODO_LAYER, &buffer, chunk, marks, at, cx);
+        return;
+    };
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(delay).await;
+        cx.update(|cx| decorations::publish(TODO_LAYER, &buffer, chunk, marks, at, cx));
+    })
+    .detach();
+}
+
+/// Makes `todo_listener` publish `delay` after it computed, as a background task would.
+pub(crate) fn set_delay(delay: Option<Duration>) {
+    DELAY.set(delay);
 }
 
 /// What `todo_listener` heard on this thread since the last call, in order.

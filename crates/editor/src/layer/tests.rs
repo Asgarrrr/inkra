@@ -175,14 +175,42 @@ fn a_deletion_inside_a_mark_leaves_one_mark() {
 }
 
 #[test]
-fn a_publish_at_an_old_mark_changes_nothing() {
+fn a_publish_past_the_ring_is_lost() {
     let mut buffer = twenty();
     let old = buffer.edit_mark();
-    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+    buffer.transact(|buffer| {
+        for _ in 0..257 {
+            buffer.insert(at(20), "x");
+        }
+    });
     let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 0..10, &[(2..4, 'a')]).unwrap();
+
+    let published = layer.publish(&buffer, span(0..10), vec![(span(6..8), 'b')], old);
+
+    assert_eq!(published, Err(Lost));
+    assert!(layer.is_empty());
+}
+
+#[test]
+fn an_older_publish_beside_a_newer_chunk_lands() {
+    let mut buffer = twenty();
+    let old = buffer.edit_mark();
+    buffer.transact(|buffer| buffer.insert(at(20), "x"));
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 10..21, &[(12..15, 'b')]).unwrap();
 
     let published = layer.publish(&buffer, span(0..10), vec![(span(2..4), 'a')], old);
 
-    assert_eq!(published, Ok(false));
-    assert!(layer.is_empty());
+    assert_eq!(published, Ok(true));
+    assert_eq!(marks(&layer, 0..21), [(2..4, 'a'), (12..15, 'b')]);
+}
+
+#[test]
+#[should_panic(expected = "past the end")]
+fn a_chunk_past_the_end_panics() {
+    let buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+
+    let _ = publish(&mut layer, &buffer, 0..25, &[]);
 }

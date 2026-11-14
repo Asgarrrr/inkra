@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use inkra_editor::Layer;
-use inkra_text::{Buffer, ByteOffset, Splice};
+use inkra_editor::{Layer, Lost};
+use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -10,6 +10,8 @@ enum Step {
     /// Several splices, one catch-up.
     Edit(Vec<(usize, usize, String)>),
 }
+
+type Edits = Vec<(usize, usize, String)>;
 
 /// A chunk's two bounds and its marks' bounds, each a pick among the char boundaries.
 #[derive(Debug, Clone)]
@@ -36,15 +38,18 @@ fn chunk_strategy() -> impl Strategy<Value = Chunk> {
         .prop_map(|(bounds, marks)| Chunk { bounds, marks })
 }
 
+fn edits_strategy() -> impl Strategy<Value = Edits> {
+    prop::collection::vec(
+        (any::<usize>(), 0usize..4, prop::option::of(text_strategy()))
+            .prop_map(|(at, len, text)| (at, len, text.unwrap_or_default())),
+        1..4,
+    )
+}
+
 fn step_strategy() -> impl Strategy<Value = Step> {
     prop_oneof![
         chunk_strategy().prop_map(Step::Publish),
-        prop::collection::vec(
-            (any::<usize>(), 0usize..4, prop::option::of(text_strategy()))
-                .prop_map(|(at, len, text)| (at, len, text.unwrap_or_default())),
-            1..4,
-        )
-        .prop_map(Step::Edit),
+        edits_strategy().prop_map(Step::Edit),
     ]
 }
 
@@ -65,6 +70,49 @@ fn span(range: Range<usize>) -> Range<ByteOffset> {
     ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
+/// A publish computed against the text at `at`, delivered whenever.
+#[derive(Clone)]
+struct Publish {
+    chunk: Range<usize>,
+    marks: Vec<(Range<ByteOffset>, u8)>,
+    at: EditMark,
+}
+
+impl Publish {
+    /// `chunk`'s marks over `range` of `buffer`'s text now.
+    fn new(buffer: &Buffer, range: Range<usize>, chunk: &Chunk) -> Self {
+        let text = buffer.text();
+        let mut bounds: Vec<usize> = chunk
+            .marks
+            .iter()
+            .map(|&(pick, _)| boundary(text, range.clone(), pick))
+            .collect();
+        bounds.sort_unstable();
+        bounds.dedup();
+        let marks = bounds
+            .as_chunks()
+            .0
+            .iter()
+            .zip(&chunk.marks)
+            .map(|(&[start, end], &(_, style))| (span(start..end), style))
+            .collect();
+        Self {
+            chunk: range,
+            marks,
+            at: buffer.edit_mark(),
+        }
+    }
+
+    /// Over the whole of `buffer`'s text now.
+    fn whole(buffer: &Buffer, chunk: &Chunk) -> Self {
+        Self::new(buffer, 0..buffer.text().len(), chunk)
+    }
+
+    fn deliver(self, layer: &mut Layer<u8>, buffer: &Buffer) -> Result<bool, Lost> {
+        layer.publish(buffer, span(self.chunk), self.marks, self.at)
+    }
+}
+
 /// Publishes `chunk` at the buffer's edit mark; returns its range.
 fn publish(
     layer: &mut Layer<u8>,
@@ -73,21 +121,7 @@ fn publish(
 ) -> Result<Range<usize>, TestCaseError> {
     let text = buffer.text();
     let range = ordered(text, 0..text.len(), chunk.bounds);
-    let mut bounds: Vec<usize> = chunk
-        .marks
-        .iter()
-        .map(|&(pick, _)| boundary(text, range.clone(), pick))
-        .collect();
-    bounds.sort_unstable();
-    bounds.dedup();
-    let marks = bounds
-        .as_chunks()
-        .0
-        .iter()
-        .zip(&chunk.marks)
-        .map(|(&[start, end], &(_, style))| (span(start..end), style))
-        .collect();
-    let published = layer.publish(buffer, span(range.clone()), marks, buffer.edit_mark());
+    let published = Publish::new(buffer, range.clone(), chunk).deliver(layer, buffer);
     prop_assert!(published.is_ok(), "{:?}", published);
     Ok(range)
 }
@@ -100,6 +134,14 @@ fn edit(buffer: &mut Buffer, range: Range<usize>, at: usize, len: usize, text: &
         .nth(len)
         .unwrap_or(range.end);
     buffer.transact(|buffer| buffer.replace(span(start..end), text));
+}
+
+/// Applies `edits` one after another, each anywhere in the text.
+fn edit_all(buffer: &mut Buffer, edits: &Edits) {
+    for (at, len, text) in edits {
+        let all = 0..buffer.text().len();
+        edit(buffer, all, *at, *len, text);
+    }
 }
 
 fn marks(layer: &Layer<u8>, buffer: &Buffer) -> Vec<(Range<usize>, u8)> {
@@ -145,10 +187,7 @@ proptest! {
                     publish(&mut layer, &buffer, &chunk)?;
                 }
                 Step::Edit(edits) => {
-                    for (at, len, text) in edits {
-                        let all = 0..buffer.text().len();
-                        edit(&mut buffer, all, at, len, &text);
-                    }
+                    edit_all(&mut buffer, &edits);
                     prop_assert_eq!(layer.catch_up(&buffer), Ok(()));
                 }
             }
@@ -179,10 +218,7 @@ proptest! {
                 Step::Edit(edits) => {
                     let before = styles(&layer, &buffer);
                     let mark = buffer.edit_mark();
-                    for (at, len, text) in edits {
-                        let all = 0..buffer.text().len();
-                        edit(&mut buffer, all, at, len, &text);
-                    }
+                    edit_all(&mut buffer, &edits);
                     prop_assert_eq!(layer.catch_up(&buffer), Ok(()));
 
                     let after = styles(&layer, &buffer);
@@ -223,5 +259,78 @@ proptest! {
             .map(|(mark, style)| (shift(mark.start)..shift(mark.end), style))
             .collect();
         prop_assert_eq!(marks(&layer, &buffer), expected);
+    }
+
+    #[test]
+    fn a_late_publish_equals_an_early_publish_shifted(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        chunk in chunk_strategy(),
+        edits in prop::collection::vec(edits_strategy(), 0..8),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let mut early = Layer::new(buffer.edit_mark());
+        let mut late = Layer::new(buffer.edit_mark());
+        let range = publish(&mut early, &buffer, &chunk)?;
+        let computed = Publish::new(&buffer, range, &chunk);
+
+        for edits in &edits {
+            edit_all(&mut buffer, edits);
+            prop_assert_eq!(early.catch_up(&buffer), Ok(()));
+            prop_assert_eq!(late.catch_up(&buffer), Ok(()));
+        }
+        let published = computed.deliver(&mut late, &buffer);
+
+        prop_assert!(published.is_ok(), "{:?}", published);
+        prop_assert_eq!(marks(&late, &buffer), marks(&early, &buffer));
+    }
+
+    #[test]
+    fn an_older_publish_never_replaces_a_newer_one(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        older in chunk_strategy(),
+        newer in chunk_strategy(),
+        edits in prop::collection::vec(edits_strategy(), 1..8),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let text = buffer.text();
+        let p1 = Publish::new(&buffer, ordered(text, 0..text.len(), older.bounds), &older);
+        for edits in &edits {
+            edit_all(&mut buffer, edits);
+        }
+        prop_assume!(p1.at < buffer.edit_mark());
+        let mut layer = Layer::new(buffer.edit_mark());
+        prop_assert!(Publish::whole(&buffer, &newer).deliver(&mut layer, &buffer).is_ok());
+        let alone = marks(&layer, &buffer);
+
+        prop_assert_eq!(p1.deliver(&mut layer, &buffer), Ok(false));
+        prop_assert_eq!(marks(&layer, &buffer), alone);
+    }
+
+    #[test]
+    fn out_of_order_publishes_keep_the_newer_marks(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        older in chunk_strategy(),
+        newer in chunk_strategy(),
+        edits in prop::collection::vec(edits_strategy(), 1..8),
+        newer_first in any::<bool>(),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let p1 = Publish::whole(&buffer, &older);
+        for edits in &edits {
+            edit_all(&mut buffer, edits);
+        }
+        prop_assume!(p1.at < buffer.edit_mark());
+        let p2 = Publish::whole(&buffer, &newer);
+        let mut alone = Layer::new(buffer.edit_mark());
+        prop_assert!(p2.clone().deliver(&mut alone, &buffer).is_ok());
+
+        let mut layer = Layer::new(p1.at);
+        let order = if newer_first { [p2, p1] } else { [p1, p2] };
+        for computed in order {
+            let published = computed.deliver(&mut layer, &buffer);
+            prop_assert!(published.is_ok(), "{:?}", published);
+        }
+
+        prop_assert_eq!(marks(&layer, &buffer), marks(&alone, &buffer));
     }
 }
