@@ -1,4 +1,6 @@
-use crate::TokenClass::{Comment, Constant, Function, Keyword, Property, String, Type};
+use crate::TokenClass::{
+    Comment, Constant, Function, Keyword, Operator, Property, Punctuation, String, Type,
+};
 use crate::rust::tests::{check, tokens};
 
 #[test]
@@ -23,7 +25,12 @@ fn a_block_comment_nests_and_hides_everything_inside() {
         ("/*/ fn", &[(0, 6, Comment)]),
         (
             "1 / 2 fn",
-            &[(0, 1, Constant), (4, 5, Constant), (6, 8, Keyword)],
+            &[
+                (0, 1, Constant),
+                (2, 3, Operator),
+                (4, 5, Constant),
+                (6, 8, Keyword),
+            ],
         ),
         ("/* /* */ x */ fn", &[(0, 13, Comment), (14, 16, Keyword)]),
         ("/* /**/ */ fn", &[(0, 10, Comment), (11, 13, Keyword)]),
@@ -82,6 +89,7 @@ fn a_string_spans_lines_one_token_per_line() {
             "let s = \"a\\\nfn\" fn",
             &[
                 (0, 3, Keyword),
+                (6, 7, Operator),
                 (8, 11, String),
                 (12, 15, String),
                 (16, 18, Keyword),
@@ -149,7 +157,7 @@ fn a_quote_opens_a_char_literal_or_a_lifetime() {
         ("'\\u{1F980 fn", &[(0, 12, String)]),
         ("b'x' fn", &[(0, 4, String), (5, 7, Keyword)]),
         ("c'x' fn", &[(1, 4, String), (5, 7, Keyword)]),
-        ("&'a str", &[(1, 3, Type), (4, 7, Type)]),
+        ("&'a str", &[(0, 1, Operator), (1, 3, Type), (4, 7, Type)]),
         ("'static fn", &[(0, 7, Type), (8, 10, Keyword)]),
         ("'r#fn fn", &[(0, 5, Type), (6, 8, Keyword)]),
         ("'é", &[(0, 3, Type)]),
@@ -169,9 +177,24 @@ fn a_char_literal_or_lifetime_never_spans_lines() {
 #[test]
 fn a_number_is_a_constant_up_to_its_one_joining_dot() {
     check(&[
-        ("1..2", &[(0, 1, Constant), (3, 4, Constant)]),
-        ("1.foo()", &[(0, 1, Constant), (2, 5, Function)]),
-        ("2.f64", &[(0, 1, Constant), (2, 5, Property)]),
+        (
+            "1..2",
+            &[(0, 1, Constant), (1, 3, Operator), (3, 4, Constant)],
+        ),
+        (
+            "1.foo()",
+            &[
+                (0, 1, Constant),
+                (1, 2, Operator),
+                (2, 5, Function),
+                (5, 6, Punctuation),
+                (6, 7, Punctuation),
+            ],
+        ),
+        (
+            "2.f64",
+            &[(0, 1, Constant), (1, 2, Operator), (2, 5, Property)],
+        ),
         ("1.", &[(0, 2, Constant)]),
         ("1. x", &[(0, 2, Constant)]),
         ("1.5", &[(0, 3, Constant)]),
@@ -179,14 +202,22 @@ fn a_number_is_a_constant_up_to_its_one_joining_dot() {
             "1._x 1.é",
             &[
                 (0, 1, Constant),
+                (1, 2, Operator),
                 (2, 4, Property),
                 (5, 6, Constant),
+                (6, 7, Operator),
                 (7, 9, Property),
             ],
         ),
-        ("1.2.3", &[(0, 3, Constant), (4, 5, Constant)]),
-        ("1e5.0", &[(0, 3, Constant), (4, 5, Constant)]),
-        ("x.0", &[(2, 3, Constant)]),
+        (
+            "1.2.3",
+            &[(0, 3, Constant), (3, 4, Operator), (4, 5, Constant)],
+        ),
+        (
+            "1e5.0",
+            &[(0, 3, Constant), (3, 4, Operator), (4, 5, Constant)],
+        ),
+        ("x.0", &[(1, 2, Operator), (2, 3, Constant)]),
     ]);
 }
 
@@ -195,7 +226,10 @@ fn a_decimal_exponent_takes_its_sign() {
     check(&[
         ("1.5e-3", &[(0, 6, Constant)]),
         ("1E+2 0e+2", &[(0, 4, Constant), (5, 9, Constant)]),
-        ("0x1e+2", &[(0, 4, Constant), (5, 6, Constant)]),
+        (
+            "0x1e+2",
+            &[(0, 4, Constant), (4, 5, Operator), (5, 6, Constant)],
+        ),
         ("1_000u8", &[(0, 7, Constant)]),
     ]);
 }

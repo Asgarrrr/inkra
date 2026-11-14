@@ -6,9 +6,10 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
-use crate::state::{LineState, Open, Prev};
+use crate::state::{LineState, Nest, Open, Prev};
 
 mod literals;
+mod nesting;
 
 /// `Self`, `true`, `false`, `union` and `macro_rules` are not keywords here.
 const KEYWORDS: [&str; 35] = [
@@ -55,7 +56,7 @@ struct Tokens<'a> {
     line: &'a str,
     start: ByteOffset,
     out: &'a mut Vec<(Range<ByteOffset>, TokenClass)>,
-    prev: Prev,
+    state: LineState,
 }
 
 impl Tokens<'_> {
@@ -76,7 +77,7 @@ impl Tokens<'_> {
                 (end, open, TokenClass::Comment)
             }
             Open::Str { raw_hashes } => {
-                self.prev = Prev::Other;
+                self.state.prev = Prev::Other;
                 let (end, open) = literals::string(bytes, at, raw_hashes);
                 (end, open, TokenClass::String)
             }
@@ -89,7 +90,7 @@ impl Tokens<'_> {
     fn quote(&mut self, token: usize, quote: usize) -> (usize, Open) {
         let (end, class) = literals::quote(self.line, quote);
         self.push(token..end, class);
-        self.prev = Prev::Other;
+        self.state.prev = Prev::Other;
         (end, Open::Nothing)
     }
 
@@ -105,27 +106,15 @@ impl Tokens<'_> {
             b'/' if next == Some(b'*') => self.literal(Open::BlockComment { depth: 1 }, at, at + 2),
             b'"' => self.literal(Open::Str { raw_hashes: None }, at, at + 1),
             b'\'' => self.quote(at, at),
-            b'.' => {
-                let end = at + bytes[at..].iter().take_while(|&&byte| byte == b'.').count();
-                self.prev = if end - at == 1 {
-                    Prev::Dot
-                } else {
-                    Prev::Other
-                };
-                (end, Open::Nothing)
-            }
             byte if byte.is_ascii_digit() => {
                 let end = literals::number(bytes, at);
                 self.push(at..end, TokenClass::Constant);
-                self.prev = Prev::Other;
+                self.state.prev = Prev::Other;
                 (end, Open::Nothing)
             }
             byte if is_word(byte) => self.word(at),
             byte if byte.is_ascii_whitespace() => (at + 1, Open::Nothing),
-            _ => {
-                self.prev = Prev::Other;
-                (at + 1, Open::Nothing)
-            }
+            _ => (self.symbol(at), Open::Nothing),
         }
     }
 
@@ -168,9 +157,13 @@ impl Tokens<'_> {
             .iter()
             .find(|byte| !byte.is_ascii_whitespace())
             == Some(&b'(');
-        let (end, class) = if keyword {
+        let (end, class) = if self.state.attribute.is_some() {
+            (name.end, Some(TokenClass::Attribute))
+        } else if keyword {
             (name.end, Some(TokenClass::Keyword))
-        } else if self.prev == Prev::Dot {
+        } else if self.state.top() == Some(Nest::Generic) {
+            (name.end, Some(TokenClass::Type))
+        } else if self.state.prev == Prev::Dot {
             let class = if call {
                 TokenClass::Function
             } else {
@@ -180,7 +173,7 @@ impl Tokens<'_> {
         } else if bytes.get(name.end) == Some(&b'!') && bytes.get(name.end + 1) != Some(&b'=') {
             (name.end + 1, Some(TokenClass::Function))
         } else {
-            let class = match self.prev {
+            let class = match self.state.prev {
                 Prev::Fn => Some(TokenClass::Function),
                 Prev::TypeKeyword => Some(TokenClass::Type),
                 _ if is_constant(word) => Some(TokenClass::Constant),
@@ -199,9 +192,11 @@ impl Tokens<'_> {
         {
             self.push(token..end, class);
         }
-        self.prev = match (keyword, word) {
+        self.state.prev = match (keyword, word) {
             (true, "fn") => Prev::Fn,
             (true, "struct" | "enum" | "trait" | "type" | "impl") => Prev::TypeKeyword,
+            (false, _) if self.state.prev == Prev::Fn => Prev::FnName,
+            _ if class == Some(TokenClass::Type) => Prev::Type,
             _ => Prev::Other,
         };
         end
@@ -218,7 +213,7 @@ pub(crate) fn lex(
         line,
         start,
         out,
-        prev: state.prev,
+        state,
     };
     let (mut at, mut open) = tokens.literal(state.open, 0, 0);
     while open == Open::Nothing && at < line.len() {
@@ -226,7 +221,7 @@ pub(crate) fn lex(
     }
     LineState {
         open,
-        prev: tokens.prev,
+        ..tokens.state
     }
 }
 

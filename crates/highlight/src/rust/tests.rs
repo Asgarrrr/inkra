@@ -3,7 +3,9 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use super::lex;
-use crate::TokenClass::{self, Comment, Constant, Function, Keyword, Property, String, Type};
+use crate::TokenClass::{
+    self, Comment, Constant, Function, Keyword, Operator, Property, Punctuation, String, Type,
+};
 use crate::state::LineState;
 use crate::{Language, highlight};
 
@@ -112,36 +114,82 @@ fn highlight_appends_to_what_out_holds() {
 #[test]
 fn a_keyword_wins_over_every_context() {
     check(&[
-        ("x.await", &[(2, 7, Keyword)]),
-        ("fn self()", &[(0, 2, Keyword), (3, 7, Keyword)]),
-        ("struct if!", &[(0, 6, Keyword), (7, 9, Keyword)]),
+        ("x.await", &[(1, 2, Operator), (2, 7, Keyword)]),
+        (
+            "fn self()",
+            &[
+                (0, 2, Keyword),
+                (3, 7, Keyword),
+                (7, 8, Punctuation),
+                (8, 9, Punctuation),
+            ],
+        ),
+        (
+            "struct if!",
+            &[(0, 6, Keyword), (7, 9, Keyword), (9, 10, Operator)],
+        ),
     ]);
 }
 
 #[test]
 fn after_a_dot_a_call_is_a_function_and_else_a_property() {
     check(&[
-        ("p.x", &[(2, 3, Property)]),
-        ("v.len ()", &[(2, 5, Function)]),
+        ("p.x", &[(1, 2, Operator), (2, 3, Property)]),
+        (
+            "v.len ()",
+            &[
+                (1, 2, Operator),
+                (2, 5, Function),
+                (6, 7, Punctuation),
+                (7, 8, Punctuation),
+            ],
+        ),
         (
             "p.MAX p.X p.i32",
-            &[(2, 5, Property), (8, 9, Property), (12, 15, Property)],
+            &[
+                (1, 2, Operator),
+                (2, 5, Property),
+                (7, 8, Operator),
+                (8, 9, Property),
+                (11, 12, Operator),
+                (12, 15, Property),
+            ],
         ),
-        ("p.f!()", &[(2, 3, Property)]),
-        ("p. /* c */ x", &[(3, 10, Comment), (11, 12, Property)]),
-        ("p.\nx", &[(3, 4, Property)]),
-        ("a..x a...x", &[]),
+        (
+            "p.f!()",
+            &[
+                (1, 2, Operator),
+                (2, 3, Property),
+                (3, 4, Operator),
+                (4, 5, Punctuation),
+                (5, 6, Punctuation),
+            ],
+        ),
+        (
+            "p. /* c */ x",
+            &[(1, 2, Operator), (3, 10, Comment), (11, 12, Property)],
+        ),
+        ("p.\nx", &[(1, 2, Operator), (3, 4, Property)]),
+        ("a..x a...x", &[(1, 3, Operator), (6, 9, Operator)]),
     ]);
 }
 
 #[test]
 fn a_name_before_a_bang_is_a_macro_with_its_bang() {
     check(&[
-        ("println!(\"a\")", &[(0, 8, Function), (9, 12, String)]),
+        (
+            "println!(\"a\")",
+            &[
+                (0, 8, Function),
+                (8, 9, Punctuation),
+                (9, 12, String),
+                (12, 13, Punctuation),
+            ],
+        ),
         ("Vec! MAX!", &[(0, 4, Function), (5, 9, Function)]),
         ("fn m!", &[(0, 2, Keyword), (3, 5, Function)]),
         ("struct Foo!", &[(0, 6, Keyword), (7, 11, Function)]),
-        ("x != y x!=y", &[]),
+        ("x != y x!=y", &[(2, 4, Operator), (8, 10, Operator)]),
     ]);
 }
 
@@ -178,7 +226,15 @@ fn after_a_type_keyword_a_name_is_a_type() {
     }
     check(&[
         ("struct MAX", &[(0, 6, Keyword), (7, 10, Type)]),
-        ("struct f()", &[(0, 6, Keyword), (7, 8, Type)]),
+        (
+            "struct f()",
+            &[
+                (0, 6, Keyword),
+                (7, 8, Type),
+                (8, 9, Punctuation),
+                (9, 10, Punctuation),
+            ],
+        ),
     ]);
 }
 
@@ -193,6 +249,8 @@ fn booleans_and_all_caps_names_are_constants() {
                 (4, 6, Constant),
                 (7, 11, Constant),
                 (12, 15, Constant),
+                (15, 16, Punctuation),
+                (16, 17, Punctuation),
             ],
         ),
         ("N Ab _A", &[(0, 1, Type), (2, 4, Type)]),
@@ -203,7 +261,13 @@ fn booleans_and_all_caps_names_are_constants() {
 fn a_capitalised_name_is_a_type() {
     check(&[(
         "Self T Some(x)",
-        &[(0, 4, Type), (5, 6, Type), (7, 11, Type)],
+        &[
+            (0, 4, Type),
+            (5, 6, Type),
+            (7, 11, Type),
+            (11, 12, Punctuation),
+            (13, 14, Punctuation),
+        ],
     )]);
 }
 
@@ -215,15 +279,27 @@ fn every_builtin_type_alone_is_a_type() {
     ] {
         check(&[(name, &[(0, name.len(), Type)])]);
     }
-    check(&[("u8(x)", &[(0, 2, Type)])]);
+    check(&[(
+        "u8(x)",
+        &[(0, 2, Type), (2, 3, Punctuation), (4, 5, Punctuation)],
+    )]);
 }
 
 #[test]
 fn a_name_before_a_paren_on_its_line_is_a_function() {
     check(&[
-        ("foo(x)", &[(0, 3, Function)]),
-        ("foo (x)", &[(0, 3, Function)]),
-        ("foo bar\n(x)", &[]),
+        (
+            "foo(x)",
+            &[(0, 3, Function), (3, 4, Punctuation), (5, 6, Punctuation)],
+        ),
+        (
+            "foo (x)",
+            &[(0, 3, Function), (4, 5, Punctuation), (6, 7, Punctuation)],
+        ),
+        (
+            "foo bar\n(x)",
+            &[(8, 9, Punctuation), (10, 11, Punctuation)],
+        ),
     ]);
 }
 
@@ -231,7 +307,12 @@ fn a_name_before_a_paren_on_its_line_is_a_function() {
 fn a_raw_prefix_without_a_name_is_no_token() {
     check(&[(
         "r#( fn r# struct r# x.r#",
-        &[(4, 6, Keyword), (10, 16, Keyword)],
+        &[
+            (2, 3, Punctuation),
+            (4, 6, Keyword),
+            (10, 16, Keyword),
+            (21, 22, Operator),
+        ],
     )]);
 }
 
@@ -241,10 +322,10 @@ fn every_other_token_resets_the_look_behind() {
         ("fn \"s\" x", &[(0, 2, Keyword), (3, 6, String)]),
         ("fn 'a x", &[(0, 2, Keyword), (3, 5, Type)]),
         ("fn 1 x", &[(0, 2, Keyword), (3, 4, Constant)]),
-        ("fn < x", &[(0, 2, Keyword)]),
+        ("fn < x", &[(0, 2, Keyword), (3, 4, Operator)]),
         ("fn y x", &[(0, 2, Keyword), (3, 4, Function)]),
         ("fn const x", &[(0, 2, Keyword), (3, 8, Keyword)]),
         ("fn r#fn x", &[(0, 2, Keyword), (3, 7, Function)]),
-        (". \"s\" x", &[(2, 5, String)]),
+        (". \"s\" x", &[(0, 1, Operator), (2, 5, String)]),
     ]);
 }

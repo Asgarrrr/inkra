@@ -79,21 +79,30 @@ fn comments_strings_and_lifetimes_colour_and_skip_the_quote_prefix(cx: &mut Test
         "> ```rust\n> // c\n> let s = \"a\n> b\";\n> fn f<'a>() {}\n> ```\n",
     );
 
-    let (comment, string, ty) = (
+    let (comment, string, ty, p) = (
         ColorToken::SyntaxComment,
         ColorToken::SyntaxString,
         ColorToken::SyntaxType,
+        ColorToken::SyntaxPunctuation,
     );
     assert_eq!(
         marks,
         [
             (12, 16, comment),
             (19, 22, K),
+            (25, 26, ColorToken::SyntaxOperator),
             (27, 29, string),
             (32, 34, string),
+            (34, 35, p),
             (38, 40, K),
             (41, 42, ColorToken::SyntaxFunction),
-            (43, 45, ty)
+            (42, 43, p),
+            (43, 45, ty),
+            (45, 46, p),
+            (46, 47, p),
+            (47, 48, p),
+            (49, 50, p),
+            (50, 51, p)
         ]
     );
 }
@@ -102,15 +111,44 @@ fn comments_strings_and_lifetimes_colour_and_skip_the_quote_prefix(cx: &mut Test
 fn constants_properties_calls_and_macros_colour(cx: &mut TestAppContext) {
     let marks = coloured(cx, "```rust\nconst MAX\np.x\nv.len()\nprintln!(\n```\n");
 
-    let function = ColorToken::SyntaxFunction;
+    let (function, dot, p) = (
+        ColorToken::SyntaxFunction,
+        ColorToken::SyntaxOperator,
+        ColorToken::SyntaxPunctuation,
+    );
     assert_eq!(
         marks,
         [
             (8, 13, K),
             (14, 17, ColorToken::SyntaxConstant),
+            (19, 20, dot),
             (20, 21, ColorToken::SyntaxProperty),
+            (23, 24, dot),
             (24, 27, function),
-            (30, 38, function)
+            (27, 28, p),
+            (28, 29, p),
+            (30, 38, function),
+            (38, 39, p)
+        ]
+    );
+}
+
+#[gpui::test]
+fn attributes_punctuation_and_operators_colour(cx: &mut TestAppContext) {
+    let marks = coloured(cx, "```rust\n#[derive(Debug)]\na -> b;\n```\n");
+
+    let attribute = ColorToken::SyntaxAttribute;
+    assert_eq!(
+        marks,
+        [
+            (8, 10, attribute),
+            (10, 16, attribute),
+            (16, 17, attribute),
+            (17, 22, attribute),
+            (22, 23, attribute),
+            (23, 24, attribute),
+            (27, 29, ColorToken::SyntaxOperator),
+            (31, 32, ColorToken::SyntaxPunctuation)
         ]
     );
 }

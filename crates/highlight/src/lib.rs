@@ -34,6 +34,9 @@ pub enum TokenClass {
     Function,
     Type,
     Property,
+    Attribute,
+    Punctuation,
+    Operator,
 }
 
 type Lexer =
