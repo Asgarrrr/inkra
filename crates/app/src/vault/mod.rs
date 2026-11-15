@@ -4,6 +4,7 @@
 use gpui::actions;
 
 mod events;
+mod moves;
 mod reload;
 mod save;
 mod scans;

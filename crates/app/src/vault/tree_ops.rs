@@ -68,19 +68,12 @@ impl NoteStore {
 
     /// A None move means no path is safe; callers skip.
     pub(super) fn path_of(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
-        match self.moves.get(&id) {
-            Some(moved) => moved.clone(),
-            None => self.vault.as_ref()?.read(cx).absolute(id),
-        }
+        self.moves.resolve(id, self.vault.as_ref()?.read(cx))
     }
 
     /// The note's path under the vault root, following a rename ahead of its rescan; the session file's name for it.
     pub(crate) fn vault_path(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
-        let vault = self.vault.as_ref()?.read(cx);
-        match self.moves.get(&id) {
-            Some(Some(moved)) => moved.strip_prefix(vault.root()).ok().map(PathBuf::from),
-            _ => Some(vault.entry(id)?.path.as_path().to_path_buf()),
-        }
+        self.moves.relative(id, self.vault.as_ref()?.read(cx))
     }
 
     /// `None`: nothing on disk is the note's. With no entry, only the file at a gone note's last path
@@ -163,13 +156,12 @@ impl NoteStore {
         let queued = self.queue(id, PendingSave::Write, cx, async move |this, cx| {
             // Resolved here, not at issue time: an operation queued behind
             // a rename must act on the moved name.
-            let Ok(Some((from, to, before))) = this.update(cx, |this, cx| {
+            let Ok(Some((from, to, begun))) = this.update(cx, |this, cx| {
                 let vault = this.vault.as_ref()?.read(cx);
                 let from = this.path_of(id, cx)?;
                 let file_name = vault.entry(id)?.kind.file_name(&name);
                 let to = from.parent()?.join(file_name);
-                let before = this.moves.insert(id, None);
-                Some((from, to, before))
+                Some((from, to, this.moves.begin(id)))
             }) else {
                 return false;
             };
@@ -183,14 +175,11 @@ impl NoteStore {
 
             this.update(cx, |this, cx| {
                 if let Err(error) = moved {
-                    match before {
-                        Some(prev) => this.moves.insert(id, prev),
-                        None => this.moves.remove(&id),
-                    };
+                    this.moves.fail(id, begun);
                     cx.emit(RenameFailed { id, error });
                     return false;
                 }
-                this.moves.insert(id, Some(to.clone()));
+                this.moves.moved(id, to.clone());
                 let _ = rescanned.send((to, this.rescan(cx)));
                 true
             })
@@ -204,8 +193,8 @@ impl NoteStore {
             if moved && let Ok((to, applied)) = rescan_rx.await {
                 let landed = applied.await.is_ok();
                 let _ = this.update(cx, |this, cx| {
-                    if landed && this.moves.get(&id) == Some(&Some(to)) {
-                        this.moves.remove(&id);
+                    if landed {
+                        this.moves.settle(id, &to);
                     }
                     cx.notify();
                 });

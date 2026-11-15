@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -8,6 +8,7 @@ use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault, VaultError};
 
 use super::OpenFailed;
+use super::moves::Moves;
 use super::session::{Lifecycle, Location, OpenNote, PendingSave, Sessions};
 use crate::decorations;
 
@@ -22,8 +23,7 @@ pub(crate) struct NoteStore {
     /// `Buffer::version` can't order writes: undo lowers it.
     next_write: u64,
     pub(super) scans: Scans,
-    /// Our own rename, until its rescan swaps in: `None` while `Fs::rename` runs, then the new path.
-    pub(super) moves: HashMap<EntryId, Option<PathBuf>>,
+    pub(super) moves: Moves,
     _watch: Option<Task<()>>,
     /// Why there is no watch; the shell takes it once, for the opening notice.
     unwatched: Option<VaultError>,
@@ -60,7 +60,7 @@ impl NoteStore {
             current: None,
             next_write: 0,
             scans: Scans::default(),
-            moves: HashMap::new(),
+            moves: Moves::default(),
             _watch: watch,
             unwatched,
             #[cfg(test)]
