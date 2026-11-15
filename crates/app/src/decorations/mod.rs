@@ -43,6 +43,9 @@ pub(crate) struct MarkStyle {
     pub(crate) color: Option<ColorToken>,
 }
 
+// Every stored mark carries one: a wider style grows each mark (decoration layer spec, deviation 17).
+const _: () = assert!(size_of::<MarkStyle>() == 1);
+
 #[derive(Default)]
 struct Decorations {
     /// A layer's rank is its index here: a later layer draws over an earlier one.

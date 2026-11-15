@@ -452,8 +452,10 @@ number.
     capacity: 12 bytes a mark for a one-byte style. A load is capped at
     `MAX_TEXT_BYTES`, but a paste grows a buffer with no cap. So when one
     bound lies more than `u32::MAX` bytes past the chunk's start, the chunk
-    holds no mark and no tag, as a cleared chunk its feature republishes
-    (`Chunk::new`, D5).
+    holds no mark and no tag (`Chunk::new`, D5). Its feature sees an untagged
+    chunk and republishes it. From S2a the syntax layer never loops on it: a
+    block over `BLOCK_LIMIT` gets an empty chunk, which keeps its tag (code
+    highlighting spec, deviation 11).
 
 ## Deferred
 

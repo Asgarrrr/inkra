@@ -236,7 +236,8 @@ impl<S: Clone> Chunk<S> {
             .filter(|(mark, _)| !mark.is_empty())
             .map(|(mark, style)| Mark::new(start, mark, style))
             .collect();
-        // A bound past `u32` from `start` drops all marks and the tag, so it is republished (dev. 17).
+        // A bound past `u32` from `start` drops all marks and the tag, so it is republished
+        // (decoration layer spec, deviation 17).
         let (marks, tag) = marks.map_or_else(|_| (Box::default(), None), |marks| (marks, tag));
         Self {
             start,
