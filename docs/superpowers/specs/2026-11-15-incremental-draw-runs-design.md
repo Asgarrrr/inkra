@@ -965,9 +965,10 @@ Deviation after S4, from architecture run 5:
 
 1. `HeardLayer::catch_up` returns `Option<Moved>`, not `Result<bool, Lost>`
    (D8): `None`, `Shift`, or `Whole` when the layer was lost.
-   `HeardLayer::publish` returns `Option<Moved>` too: `Range` at the buffer's
-   edit mark, or `Whole` when the layer was lost. The sites bump what they
-   get, and `sync` still lets `Whole` win over `Shift`.
+   `HeardLayer::publish` returns `Option<Moved>` too: `None` when no mark
+   changed, `Range` at the buffer's edit mark, or `Whole` when the layer was
+   lost. The sites bump what they get, and `sync` still lets `Whole` win over
+   `Shift`.
 
 ## Unverified
 

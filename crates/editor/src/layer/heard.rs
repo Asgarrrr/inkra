@@ -50,6 +50,7 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
 
     /// As `Layer::catch_up`; `Shift` when the layer held marks behind `text`, which now draw
     /// elsewhere, `Whole` when it was lost.
+    #[must_use]
     pub fn catch_up(&mut self, text: &Buffer) -> Option<Moved> {
         let shifts = self.layer.trails(text.edit_mark());
         let caught = self.layer.catch_up(text);
@@ -65,6 +66,7 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
     ///
     /// # Panics
     /// As `Layer::publish`.
+    #[must_use]
     pub fn publish(
         &mut self,
         text: &Buffer,
