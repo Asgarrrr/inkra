@@ -90,7 +90,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - network → `app`, until a crate earns it
   - a reusable piece of chrome (row, icon, button) → `app/src/ui/`; a view composes it and keeps its own handlers
 - `inkra-app` is a library with two entry points (`main.rs`, `examples/shot.rs`);
-  `examples/seed_session.rs` writes the session `scripts/screenshot.sh` opens. Views stay `pub(crate)`. An example touching a feature-gated module needs
+  `examples/seed_session.rs` writes the session `scripts/screenshot.sh` opens; `benches/layout.rs`
+  drives the `bench`-gated `inkra_app::bench`. Views stay `pub(crate)`. An example touching a feature-gated module needs
   `required-features`, or `cargo test` breaks.
 - Area rules load on demand from `.claude/rules/` when you read the matching
   files: editor, shell and sidebar, vault, app tests, gpui.

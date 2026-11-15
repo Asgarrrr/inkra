@@ -17,23 +17,33 @@ struct Case {
     name: &'static str,
     text: String,
     caret: usize,
+    colours: bool,
 }
 
 impl fmt::Display for Case {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name)
+        let colours = if self.colours { "colours" } else { "plain" };
+        write!(formatter, "{}/{colours}", self.name)
     }
 }
 
 impl Case {
     /// The caret sits inside the first `needle` past `fraction` of the text.
-    fn new(name: &'static str, text: String, needle: &str, fraction: usize) -> Self {
+    ///
+    /// # Panics
+    ///
+    /// If no `needle` follows that point.
+    fn new(name: &'static str, text: String, needle: &str, fraction: usize, colours: bool) -> Self {
         let from = text.ceil_char_boundary(text.len() * fraction / 100);
-        let found = text[from..].find(needle).map_or(0, |at| from + at);
+        let found = from
+            + text[from..]
+                .find(needle)
+                .unwrap_or_else(|| panic!("no {needle:?} past {fraction}% of {name}"));
         Self {
             name,
             caret: found + needle.len() / 2,
             text,
+            colours,
         }
     }
 }
@@ -80,17 +90,29 @@ fn one_block() -> String {
 }
 
 fn cases() -> Vec<Case> {
-    vec![
-        Case::new("1000-blocks-prose", many_blocks(), "Plain prose", 50),
-        Case::new("one-block-prose", one_block(), "Plain prose", 20),
-        Case::new("one-block-code", one_block(), "fn ", 70),
-    ]
+    [true, false]
+        .into_iter()
+        .flat_map(|colours| {
+            [
+                Case::new(
+                    "1000-blocks-prose",
+                    many_blocks(),
+                    "Plain prose",
+                    50,
+                    colours,
+                ),
+                Case::new("one-block-prose", one_block(), "Plain prose", 20, colours),
+                Case::new("one-block-code", one_block(), "fn ", 70, colours),
+            ]
+        })
+        .collect()
 }
 
 #[gpui::bench(inputs = cases(), input_name = "case", group = "layout/keystroke", sample_size = 10)]
 fn keystroke(case: &Case, cx: &mut BenchAppContext) {
     let mut window = cx.add_empty_window();
-    let typing = window.update(|window, _| Typing::new(case.text.clone(), case.caret, window));
+    let typing =
+        window.update(|window, _| Typing::new(case.text.clone(), case.caret, case.colours, window));
     let typing = Rc::new(RefCell::new(typing));
     cx.bench_batched_task(
         {

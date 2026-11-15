@@ -614,8 +614,19 @@ alone; the edit, parse and highlight run untimed. `LineLayout` went from
 | One block, type in prose | 17.60 ms | 10.18 ms | 128.7 MB | 31.5 MB |
 | One block, type in the block | 18.02 ms | 10.09 ms | 128.7 MB | 31.5 MB |
 
+Without colours (`plain`), after the box only. The case was added after the
+review, so it has no pre-box figure. Neither lexing nor publishing runs, and
+`Drawn` holds an empty layer.
+
+| Case | After | Requested after |
+|---|---|---|
+| 1000 blocks, type in prose | 7.83 ms | 32.6 MB |
+| One block, type in prose | 4.95 ms | 16.5 MB |
+| One block, type in the block | 4.91 ms | 16.5 MB |
+
 gpui's `bench-support` turns on criterion's default features (plotters,
-rayon), against `docs/tooling.md`; only under the `bench` feature.
+rayon), against `docs/tooling.md`; only under the `bench` feature. The
+tooling doc records the exception.
 
 ## Unverified
 

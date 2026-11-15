@@ -1,5 +1,6 @@
-//! Inkra: a note editor on GPUI. A library with two entry points, `run` and `shot`, and
-//! `seed_session` for the screenshot script, so every view stays `pub(crate)`.
+//! Inkra: a note editor on GPUI. A library with two entry points, `run` and `shot`, plus
+//! `seed_session` for the screenshot script and `bench` for the layout bench, so every view stays
+//! `pub(crate)`.
 
 mod app_files;
 mod background;

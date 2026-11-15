@@ -11,11 +11,13 @@ use crate::editor::layout::{BlockScrolls, DocumentLayout, LayoutInputs, shape_do
 use crate::highlighting::styled;
 use crate::theme::builtin;
 
-/// A note with its code blocks coloured, its layout shaped, and a caret that types `x`.
+/// A note with its layout shaped, its code blocks coloured or not, and a caret that types `x`.
 pub struct Typing {
     buffer: Buffer,
     markdown: Markdown,
+    /// Empty and never published to without colours.
     syntax: [HeardLayer<MarkStyle>; 1],
+    colours: bool,
     style: TextStyle,
     scrolls: BlockScrolls,
     caret: ByteOffset,
@@ -25,22 +27,25 @@ pub struct Typing {
 }
 
 impl Typing {
-    /// Shapes `text` from scratch, its blocks lexed, with the caret at byte `caret`.
+    /// Shapes `text` from scratch, its blocks lexed when `colours`, with the caret at byte `caret`.
     ///
     /// # Panics
     ///
     /// If `caret` is past the end of `text` or not on a char boundary.
     #[must_use]
-    pub fn new(text: String, caret: usize, window: &mut Window) -> Self {
+    pub fn new(text: String, caret: usize, colours: bool, window: &mut Window) -> Self {
         let buffer = Buffer::new(text);
         let markdown = parse(buffer.text());
         let mut syntax = [HeardLayer::new(buffer.edit_mark())];
-        let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[], None);
-        syntax[0].land(&buffer, lexed.into_iter().map(styled).collect());
+        if colours {
+            let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[], None);
+            syntax[0].land(&buffer, lexed.into_iter().map(styled).collect());
+        }
         let mut typing = Self {
             buffer,
             markdown,
             syntax,
+            colours,
             style: window.text_style(),
             scrolls: BlockScrolls::default(),
             caret: ByteOffset::new(caret),
@@ -51,7 +56,7 @@ impl Typing {
         typing
     }
 
-    /// Types `x` at the caret, then parses and recolours as the editor's listeners do.
+    /// Types `x` at the caret, then parses, and recolours when `colours`, as the editor's listeners do.
     pub fn keystroke(&mut self) {
         self.retired = None;
         let mark = self.buffer.edit_mark();
@@ -59,6 +64,9 @@ impl Typing {
         self.buffer.transact(|txn| txn.insert(caret, "x"));
         self.caret = caret + 1;
         self.markdown = parse(self.buffer.text());
+        if !self.colours {
+            return;
+        }
         let [syntax] = &mut self.syntax;
         syntax.catch_up(&self.buffer);
         let held: Vec<_> = syntax.layer().chunks().collect();
