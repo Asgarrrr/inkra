@@ -584,6 +584,7 @@ not on the synthetic one.
    line anyway. Check the other `DisplayLine` users in S1a first.
 4. *The parse becomes the floor at 1.4–2 ms.* **Recommend** leaving it out of
    scope. Add a roadmap row, "incremental parse", triggered by the S4 bench.
+   Done in S4: the row's trigger is a real-note profile, not the bench.
 5. *The oracle's text system.* **Recommend** `NoopTextSystem` for the proptest,
    plus one `#[ignore]` test on CoreText for bold widths.
 6. *Where buffer identity lives.* An id on `Buffer`, recorded by
