@@ -51,6 +51,7 @@ mod highlighting;
 mod history;
 mod history_hold;
 mod history_menu;
+mod image_files;
 mod images;
 mod modal;
 mod nav;

@@ -12,6 +12,9 @@ use super::moves::Moves;
 use super::session::{Lifecycle, Location, OpenNote, PendingSave, Sessions};
 use crate::decorations;
 
+/// A file's path and what reading it returned.
+pub(crate) type BytesRead = (PathBuf, inkra_vault::Result<Vec<u8>>);
+
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
 pub(crate) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
 
@@ -230,7 +233,7 @@ impl NoteStore {
         id: EntryId,
         max_len: u64,
         cx: &mut Context<Self>,
-    ) -> Task<Option<(PathBuf, inkra_vault::Result<Vec<u8>>)>> {
+    ) -> Task<Option<BytesRead>> {
         let fs = Arc::clone(&self.fs);
         self.queue(id, PendingSave::Keep, cx, async move |this, cx| {
             let path = this.update(cx, |this, cx| this.path_of(id, cx)).ok()??;

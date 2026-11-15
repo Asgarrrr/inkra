@@ -26,7 +26,7 @@ fn a_failed_rename_restores_the_earlier_move() {
     moves.moved(a, PathBuf::from("/vault/z.md"));
 
     let begun = moves.begin(a);
-    moves.fail(a, begun);
+    moves.fail(begun);
 
     assert_eq!(moves.resolve(a, &vault), Some(PathBuf::from("/vault/z.md")));
 }

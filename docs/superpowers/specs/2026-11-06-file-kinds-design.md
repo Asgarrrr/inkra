@@ -172,8 +172,10 @@ enum Shown { Empty, Bound(Bound), Image(EntryId), Trashing(EntryId), View(View) 
 - An app-side store `EntryId → Slot` (loading, `Arc<RenderImage>`, failed), the image twin of
   `NoteStore`'s buffers. `display` reads it synchronously.
 - An image place shows at once. A miss draws the empty image area and starts
-  one load (`Fs::read_bytes`, then the decode on the background executor, K5); the
-  landing notifies. A second miss on the same id joins the running load.
+  one load (`NoteStore::read_bytes` on the entry's chain, then the decode on the
+  background executor, K5); the landing notifies. A second miss on the same id
+  joins the running load. Dropping the entry cancels the decode, not a read
+  already queued on the chain.
 - Eviction: an entry lives while some group shows it. When no `Shown::Image`
   holds the id, the entry drops and gpui's image cache entry is removed (the
   plan names the call after reading `platform.rs:2989`). Going back to an

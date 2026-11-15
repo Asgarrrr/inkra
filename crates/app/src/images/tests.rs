@@ -137,16 +137,16 @@ impl Store {
             );
         });
     }
-}
 
-fn slot(images: &Entity<Images>, id: EntryId, cx: &mut TestAppContext) -> Option<&'static str> {
-    images.read_with(cx, |images, _| {
-        images.slot(id).map(|slot| match slot {
-            Slot::Loading { .. } => "loading",
-            Slot::Ready(_) => "ready",
-            Slot::Failed => "failed",
+    fn slot(&self, id: EntryId, cx: &mut TestAppContext) -> Option<&'static str> {
+        self.images.read_with(cx, |images, _| {
+            images.slot(id).map(|slot| match slot {
+                Slot::Loading { .. } => "loading",
+                Slot::Ready(_) => "ready",
+                Slot::Failed => "failed",
+            })
         })
-    })
+    }
 }
 
 #[gpui::test]
@@ -154,11 +154,11 @@ fn an_image_is_loading_until_its_decode_lands(cx: &mut TestAppContext) {
     let store = images(cx, &[("photo.png", png(4, 3))]);
 
     store.want(store.ids[0], cx);
-    let before = slot(&store.images, store.ids[0], cx);
+    let before = store.slot(store.ids[0], cx);
     cx.run_until_parked();
 
     assert_eq!(before, Some("loading"));
-    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
+    assert_eq!(store.slot(store.ids[0], cx), Some("ready"));
 }
 
 #[gpui::test]
@@ -185,7 +185,7 @@ fn a_tga_image_decodes_by_its_extension(cx: &mut TestAppContext) {
     store.want(store.ids[0], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
+    assert_eq!(store.slot(store.ids[0], cx), Some("ready"));
 }
 
 #[gpui::test]
@@ -197,7 +197,7 @@ fn an_image_with_no_path_fails(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
 
-    assert_eq!(slot(&store.images, store.ids[0], cx), Some("failed"));
+    assert_eq!(store.slot(store.ids[0], cx), Some("failed"));
 }
 
 #[gpui::test]
@@ -207,7 +207,7 @@ fn an_image_that_is_no_image_fails(cx: &mut TestAppContext) {
     store.want(store.ids[0], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&store.images, store.ids[0], cx), Some("failed"));
+    assert_eq!(store.slot(store.ids[0], cx), Some("failed"));
 }
 
 #[gpui::test]
@@ -223,8 +223,8 @@ fn an_image_one_byte_over_the_read_cap_fails(cx: &mut TestAppContext) {
     store.want(store.ids[1], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
-    assert_eq!(slot(&store.images, store.ids[1], cx), Some("failed"));
+    assert_eq!(store.slot(store.ids[0], cx), Some("ready"));
+    assert_eq!(store.slot(store.ids[1], cx), Some("failed"));
 }
 
 #[gpui::test]
@@ -242,7 +242,7 @@ fn retain_drops_every_image_not_kept(cx: &mut TestAppContext) {
         store.images.read_with(cx, |images, _| images.ids()),
         HashSet::from([store.ids[1]])
     );
-    assert_eq!(slot(&store.images, store.ids[1], cx), Some("ready"));
+    assert_eq!(store.slot(store.ids[1], cx), Some("ready"));
 }
 
 #[gpui::test]
@@ -251,7 +251,7 @@ fn a_load_dropped_before_it_lands_never_lands(cx: &mut TestAppContext) {
     let gate = store.fs.block_read_bytes("/vault/photo.png");
     store.want(store.ids[0], cx);
     cx.run_until_parked();
-    let before = slot(&store.images, store.ids[0], cx);
+    let before = store.slot(store.ids[0], cx);
 
     store
         .images
@@ -260,5 +260,5 @@ fn a_load_dropped_before_it_lands_never_lands(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!(before, Some("loading"));
-    assert_eq!(slot(&store.images, store.ids[0], cx), None);
+    assert_eq!(store.slot(store.ids[0], cx), None);
 }

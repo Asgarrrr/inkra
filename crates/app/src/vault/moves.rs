@@ -20,7 +20,10 @@ enum Move {
 
 /// The entry a `begin` replaced, for `fail` to put back.
 #[must_use]
-pub(super) struct Begun(Option<Move>);
+pub(super) struct Begun {
+    id: EntryId,
+    before: Option<Move>,
+}
 
 impl Moves {
     /// `vault`'s path unless a rename is ahead of it; `None` while one runs.
@@ -41,11 +44,12 @@ impl Moves {
     }
 
     pub(super) fn begin(&mut self, id: EntryId) -> Begun {
-        Begun(self.0.insert(id, Move::Running))
+        let before = self.0.insert(id, Move::Running);
+        Begun { id, before }
     }
 
-    pub(super) fn fail(&mut self, id: EntryId, begun: Begun) {
-        match begun.0 {
+    pub(super) fn fail(&mut self, Begun { id, before }: Begun) {
+        match before {
             Some(before) => self.0.insert(id, before),
             None => self.0.remove(&id),
         };

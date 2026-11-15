@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 #[cfg(any(test, feature = "shot"))]
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::{App, Context, RenderImage, Task, prelude::*};
 use image::ImageFormat;
 use inkra_vault::EntryId;
 
+use crate::vault::BytesRead;
 use decode::decode;
 
 mod decode;
@@ -24,7 +25,7 @@ pub(crate) struct Images {
 }
 
 pub(crate) enum Slot {
-    /// Dropping the load cancels it.
+    /// Dropping it cancels the decode; a read already on the chain still finishes.
     Loading {
         _load: Task<()>,
     },
@@ -38,7 +39,7 @@ impl Images {
     pub(crate) fn want(
         &mut self,
         id: EntryId,
-        read: impl FnOnce(u64, &mut App) -> Task<Option<(PathBuf, inkra_vault::Result<Vec<u8>>)>>,
+        read: impl FnOnce(u64, &mut App) -> Task<Option<BytesRead>>,
         cx: &mut Context<Self>,
     ) {
         if self.slots.contains_key(&id) {
@@ -47,13 +48,7 @@ impl Images {
         let read = read(MAX_IMAGE_BYTES, cx);
         let task = cx.spawn(async move |this, cx| {
             let landed = match read.await {
-                Some((path, read)) => Some(
-                    cx.background_spawn(async move {
-                        let decoded = load(read, &path);
-                        (path, decoded)
-                    })
-                    .await,
-                ),
+                Some(read) => Some(cx.background_spawn(async move { decode_read(read) }).await),
                 None => None,
             };
             let _ = this.update(cx, |this, cx| {
@@ -66,7 +61,10 @@ impl Images {
                         log::warn!("image {}: {error}", path.display());
                         Slot::Failed
                     }
-                    None => Slot::Failed,
+                    None => {
+                        log::warn!("image {id:?}: no path to read");
+                        Slot::Failed
+                    }
                 };
                 cx.notify();
             });
@@ -99,11 +97,15 @@ impl Images {
     }
 }
 
-fn load(
-    read: inkra_vault::Result<Vec<u8>>,
-    path: &Path,
-) -> Result<RenderImage, Box<dyn Error + Send + Sync>> {
-    Ok(decode(&read?, ImageFormat::from_path(path).ok())?)
+/// The path names the format, and the file in a failure's log.
+fn decode_read(
+    (path, read): BytesRead,
+) -> (PathBuf, Result<RenderImage, Box<dyn Error + Send + Sync>>) {
+    let decoded = match read {
+        Ok(bytes) => decode(&bytes, ImageFormat::from_path(&path).ok()).map_err(Into::into),
+        Err(error) => Err(error.into()),
+    };
+    (path, decoded)
 }
 
 /// A gradient, so a drawn image shows its orientation and its fit.

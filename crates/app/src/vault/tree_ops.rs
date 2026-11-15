@@ -104,17 +104,14 @@ impl NoteStore {
         let file_name = Kind::from(new).file_name(name);
 
         let root = match parent {
-            None => vault.read(cx).root().to_path_buf(),
-            Some(parent) => {
-                let is_dir = vault
-                    .read(cx)
-                    .entry(parent)
-                    .is_some_and(|entry| entry.kind == Kind::Dir);
-                match self.path_of(parent, cx).filter(|_| is_dir) {
-                    Some(root) => root,
-                    None => return Task::ready(Ok(Created::Refused)),
-                }
-            }
+            None => Some(vault.read(cx).root().to_path_buf()),
+            Some(parent) => match vault.read(cx).entry(parent) {
+                Some(entry) if entry.kind == Kind::Dir => self.path_of(parent, cx),
+                _ => None,
+            },
+        };
+        let Some(root) = root else {
+            return Task::ready(Ok(Created::Refused));
         };
         let path = root.join(&file_name);
         let fs = Arc::clone(&self.fs);
@@ -175,7 +172,7 @@ impl NoteStore {
 
             this.update(cx, |this, cx| {
                 if let Err(error) = moved {
-                    this.moves.fail(id, begun);
+                    this.moves.fail(begun);
                     cx.emit(RenameFailed { id, error });
                     return false;
                 }
