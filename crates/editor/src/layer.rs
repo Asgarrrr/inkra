@@ -1,3 +1,4 @@
+use std::num::TryFromIntError;
 use std::ops::Range;
 
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
@@ -26,7 +27,13 @@ struct Chunk<S> {
     /// cut it.
     tag: Option<u64>,
     /// Relative to `start`: sorted, disjoint, non-empty and inside `0..len`.
-    marks: Vec<(Range<usize>, S)>,
+    marks: Box<[Mark<S>]>,
+}
+
+struct Mark<S> {
+    start: u32,
+    end: u32,
+    style: S,
 }
 
 /// A chunk as `Layer::publish` takes it: its range, its tag and the marks inside it.
@@ -224,16 +231,20 @@ impl<S: Clone> Chunk<S> {
         marks: impl IntoIterator<Item = (Range<ByteOffset>, S)>,
     ) -> Self {
         let start = range.start;
+        let marks: Result<Box<[_]>, _> = marks
+            .into_iter()
+            .filter(|(mark, _)| !mark.is_empty())
+            .map(|(mark, style)| Mark::new(start, mark, style))
+            .collect();
+        // A bound past `u32` from `start` drops all marks and the tag, so it is republished
+        // (decoration layer spec, deviation 17).
+        let (marks, tag) = marks.map_or_else(|_| (Box::default(), None), |marks| (marks, tag));
         Self {
             start,
             len: range.end - start,
             published,
             tag,
-            marks: marks
-                .into_iter()
-                .filter(|(mark, _)| !mark.is_empty())
-                .map(|(mark, style)| (mark.start - start..mark.end - start, style))
-                .collect(),
+            marks,
         }
     }
 
@@ -245,10 +256,10 @@ impl<S: Clone> Chunk<S> {
     fn marks_in(&self, range: Range<ByteOffset>) -> impl Iterator<Item = (Range<ByteOffset>, &S)> {
         let first = self
             .marks
-            .partition_point(|(mark, _)| self.start + mark.end <= range.start);
+            .partition_point(|mark| mark.range(self.start).end <= range.start);
         self.marks[first..]
             .iter()
-            .map(|(mark, style)| (self.start + mark.start..self.start + mark.end, style))
+            .map(|mark| (mark.range(self.start), &mark.style))
             .take_while(move |(mark, _)| mark.start < range.end)
             .map(move |(mark, style)| (mark.start.max(range.start)..mark.end.min(range.end), style))
     }
@@ -273,13 +284,28 @@ impl<S: Clone> Chunk<S> {
         let marks = self
             .marks
             .iter()
-            .flat_map(|(mark, _)| [self.start + mark.start, self.start + mark.end]);
+            .map(|mark| mark.range(self.start))
+            .flat_map(|mark| [mark.start, mark.end]);
         for bound in [chunk.start, chunk.end].into_iter().chain(marks) {
             assert!(
                 buffer.text().is_char_boundary(bound.get()),
                 "{bound} in chunk {chunk:?} splits a char"
             );
         }
+    }
+}
+
+impl<S> Mark<S> {
+    fn new(chunk: ByteOffset, mark: Range<ByteOffset>, style: S) -> Result<Self, TryFromIntError> {
+        Ok(Self {
+            start: u32::try_from(mark.start - chunk)?,
+            end: u32::try_from(mark.end - chunk)?,
+            style,
+        })
+    }
+
+    fn range(&self, chunk: ByteOffset) -> Range<ByteOffset> {
+        chunk + self.start as usize..chunk + self.end as usize
     }
 }
 
@@ -316,12 +342,12 @@ fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
         let (left, right) = map_mark(start..end, splice);
         left.or(right)?
     };
-    let marks = chunk.marks.into_iter().flat_map(|(mark, style)| {
-        let (left, right) = map_mark(start + mark.start..start + mark.end, splice);
+    let marks = chunk.marks.into_iter().flat_map(|mark| {
+        let (left, right) = map_mark(mark.range(start), splice);
         [left, right]
             .into_iter()
             .flatten()
-            .map(move |piece| (piece, style.clone()))
+            .map(move |piece| (piece, mark.style.clone()))
     });
     Some(Chunk::new(range, chunk.published, tag, marks))
 }
