@@ -25,3 +25,7 @@ workspace = true
 [[bench]]
 name = "lex"
 harness = false
+
+[[bench]]
+name = "listener"
+harness = false

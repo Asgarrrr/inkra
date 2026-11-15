@@ -363,10 +363,28 @@ The registry rule for contract growth holds: the read adds nothing to
 ### D10. What the main thread does not lex, one background task lexes
 
 `MAIN_THREAD_BUDGET` is the number of block bytes one listener call lexes on
-the main thread. It starts at 64 KiB, the 2026-11-11 spec's main-thread bound.
-S1b measures the whole listener call, lex and publish together, by size. It
-sets the budget so a call at the budget takes at most 0.5 ms. The keystroke
+the main thread. A call at the budget takes at most 0.5 ms. The keystroke
 budget is 1 ms; the listener's 2 ms log line is the decoration layer's (D11).
+
+`cargo bench -p inkra-highlight --bench listener` measures the listener's pure
+part, lex and publish together (deviation 5), in two worse cases: one block of
+the size, and 1,000 blocks of 512 bytes with the first blocks that add up to the
+size dirty. It measured these medians on 2026-11-15:
+
+| Bytes   | One block | Many blocks |
+| ------- | --------- | ----------- |
+| 4 KiB   | 15.0 us   | 28.6 us     |
+| 8 KiB   | 36.0 us   | 49.8 us     |
+| 16 KiB  | 74.7 us   | 96.2 us     |
+| 32 KiB  | 154.7 us  | 187.5 us    |
+| 64 KiB  | 313.7 us  | 366.8 us    |
+| 128 KiB | 638.9 us  | 719.5 us    |
+
+The budget is the largest size where the worse of the two is at most 0.5 ms:
+64 KiB, at 366.8 us. It is also the 2026-11-11 spec's main-thread bound. The
+budget is not under 16 KiB, so the partial relex of the Deferred table stays
+deferred. Until S2, nothing enforces the budget: every lexed block runs on the
+main thread.
 
 **One background task per buffer.** The feature keeps a map from a buffer to
 its task in flight; an entry leaves the map when its task lands. It holds no
@@ -500,7 +518,7 @@ light. The look is tuned after it ships, as for code blocks.
 | Lex, Rust | S1a medians: 1.71 us for 20 lines (923 B), 54.7 us for 500 lines (16.1 KB), 646 us for 5,000 lines (169 KB) | `cargo bench -p inkra-highlight -- --quick`, the texts of the 2026-11-11 tree-sitter figures |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` count test |
-| One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition | a bench of the whole call, S1b |
+| One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
 | Opening a note | the lex shares decoration layer D8's 8 ms deadline | the open-time test; the launch figure |
 | Memory | marks only, no trees: about 3.4 times the block text (D10) | — |
 
@@ -654,3 +672,11 @@ number.
    short run never reaches. `Opened(None)` is edits, then a whole dirty range.
    `Opened(Some(_))` is a fresh layer seeded with the first k blocks, then no
    dirty range.
+5. **The listener bench measures the pure part, not the gpui glue.** It runs
+   `catch_up`, `chunks`, `plan`, the lex and `publish` on a `Layer` in
+   `inkra-highlight`. It does not measure `parses::parsed`'s cache lookup,
+   `decorations::publish`'s entry lookup and `refresh_windows`, or
+   `decorations::chunks`' collect. It excludes the parse, which the draw shares
+   through the cache. `app` is out of reach of a `highlight` bench. A
+   `TokenClass` mark and a `MarkStyle` mark are both 24 bytes, so `publish`
+   copies the same amount.

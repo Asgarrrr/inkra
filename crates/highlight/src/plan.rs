@@ -5,6 +5,9 @@ use std::ops::Range;
 
 use inkra_text::{ByteOffset, Splice};
 
+/// Block bytes one listener call lexes on the main thread; a call at this size takes at most 0.5 ms (D10).
+pub const MAIN_THREAD_BUDGET: usize = 65_536;
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     /// Each held chunk with marks that is no block's range, in order.

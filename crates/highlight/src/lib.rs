@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-pub use plan::{Plan, dirty, plan};
+pub use plan::{MAIN_THREAD_BUDGET, Plan, dirty, plan};
 use state::LineState;
 
 mod plan;
