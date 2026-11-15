@@ -62,8 +62,8 @@ fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
     markdown
         .code_blocks
         .iter()
-        .flat_map(|block| colour(text, &markdown.spans, block))
-        .filter_map(|(range, style)| Some((range.start.get(), range.end.get(), style.color?)))
+        .flat_map(|block| inkra_highlight::block_marks(text, &markdown.spans, block))
+        .map(|(range, class)| (range.start.get(), range.end.get(), token(class)))
         .collect()
 }
 
@@ -158,15 +158,14 @@ fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
 /// Lands the first `count` blocks of `buffer`'s text, planted, as the open function would, with
 /// its seed.
 fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
-    let text = buffer.read(cx).text().to_string();
-    let markdown = inkra_markdown::parse(&text);
-    let chunks = markdown.code_blocks[..count]
-        .iter()
-        .map(|block| {
-            let marks = colour(&text, &markdown.spans, block);
-            (block.range.clone(), block.shape, marks)
-        })
-        .collect();
+    let mut calls = 0;
+    let chunks = inkra_highlight::open_chunks(buffer.read(cx).text(), || {
+        calls += 1;
+        calls <= count
+    })
+    .into_iter()
+    .map(styled)
+    .collect();
     let mut opened = decorations::Opened {
         chunks,
         seed: Some(Box::new(())),

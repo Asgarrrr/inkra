@@ -1,14 +1,11 @@
 //! Code blocks coloured by token class, as a built-in feature with one layer (code highlighting
 //! spec, D6).
 
-use std::ops::Range;
-
 use gpui::{App, Entity};
-use inkra_highlight::{Plan, TokenClass, block_tokens, dirty, plan};
-use inkra_markdown::{CodeBlock, Span, content_lines};
+use inkra_highlight::{Batch, BlockChunk, TokenClass, batch, dirty};
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, TextChange};
+use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
 use crate::editor::parses::parsed;
 use crate::feature::{FeatureId, Manifest};
 use crate::theme::ColorToken;
@@ -36,7 +33,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
 };
 
 /// Removes each chunk no longer a block's, then lexes the blocks the plan names, in one publish
-/// (D7, deviations 6 and 8).
+/// (D7, deviations 6, 8 and 9).
 fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let markdown = parsed(buffer, cx);
     let held = decorations::chunks(SYNTAX, buffer, cx);
@@ -46,38 +43,23 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
         TextChange::Opened(Some(_)) => None,
         TextChange::Opened(None) | TextChange::Lost => Some(ByteOffset::new(0)..text.len()),
     };
-    let blocks: Vec<_> = markdown
-        .code_blocks
-        .iter()
-        .map(|block| (block.range.clone(), block.shape))
-        .collect();
-    let Plan { clear, lex } = plan(&blocks, &held, dirty);
-    let lexed: Vec<_> = lex
-        .into_iter()
-        .map(|index| {
-            let block = &markdown.code_blocks[index];
-            (
-                block.range.clone(),
-                block.shape,
-                colour(text.text(), &markdown.spans, block),
-            )
-        })
-        .collect();
+    let Batch { clear, lexed } = batch(text.text(), &markdown, &held, dirty);
+    let lexed = lexed.into_iter().map(styled).collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
     // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.
     decorations::publish(SYNTAX, &buffer, clear, lexed, at, cx);
 }
 
-/// `block`'s marks, none when its info word names no known language.
-fn colour(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffset>, MarkStyle)> {
-    let lines = content_lines(text, spans, block);
-    block_tokens(text, block.language.clone(), lines)
+/// A block chunk with each token class as its theme colour.
+fn styled((range, shape, tokens): BlockChunk) -> Chunk {
+    let marks = tokens
         .into_iter()
         .map(|(range, class)| {
             let color = Some(token(class));
             (range, MarkStyle { color })
         })
-        .collect()
+        .collect();
+    (range, shape, marks)
 }
 
 fn token(class: TokenClass) -> ColorToken {
