@@ -3,7 +3,6 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use inkra_markdown::{Conceal, changed, is_active};
 use inkra_text::{Bias, ByteOffset, Splice};
@@ -32,11 +31,8 @@ pub(super) fn carry<'p>(
     let buffer = inputs.buffer;
     // First: a mark from another buffer panics in `edits_since`.
     if previous.buffer != buffer.id()
-        || previous.style != *inputs.style
-        || !Arc::ptr_eq(&previous.theme, inputs.theme)
-        || previous.wrap_width != inputs.wrap_width
+        || !previous.same_settings(inputs)
         || previous.margin != inputs.margin
-        || previous.code_block_wrap != inputs.code_block_wrap
     {
         return None;
     }
