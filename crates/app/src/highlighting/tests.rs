@@ -1,5 +1,6 @@
 use std::ops::Range;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{App, Entity, Subscription, TestAppContext, prelude::*};
 use inkra_text::{Buffer, ByteOffset, Txn};
@@ -73,21 +74,25 @@ fn held(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<(Range<usize>, 
         .collect()
 }
 
+/// Each code block's range in `text`.
+fn blocks(text: &str) -> Vec<Range<usize>> {
+    inkra_markdown::parse(text)
+        .code_blocks
+        .into_iter()
+        .map(|block| block.range.start.get()..block.range.end.get())
+        .collect()
+}
+
 fn text(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> String {
     buffer.read_with(cx, |buffer, _| buffer.text().to_string())
 }
 
 #[gpui::test]
 fn each_block_is_its_own_chunk_and_prose_holds_none(cx: &mut TestAppContext) {
-    let note = "prose\n\n```rust\nlet\n```\n\n```nope\nx\n```\n";
+    let note = PROSE_RUST_NOPE;
     let (buffer, _listening) = shown(cx, note);
 
-    let blocks: Vec<_> = inkra_markdown::parse(note)
-        .code_blocks
-        .into_iter()
-        .map(|block| block.range.start.get()..block.range.end.get())
-        .zip([true, false])
-        .collect();
+    let blocks: Vec<_> = blocks(note).into_iter().zip([true, false]).collect();
     assert_eq!(blocks.len(), 2);
     assert_eq!(held(cx, &buffer), blocks);
 }
@@ -208,11 +213,7 @@ fn a_typed_fence_recolours_the_blocks_after_it(cx: &mut TestAppContext) {
 
     let text = text(cx, &buffer);
     assert_eq!(marks(cx, &buffer), fresh(&text));
-    let blocks: Vec<_> = inkra_markdown::parse(&text)
-        .code_blocks
-        .into_iter()
-        .map(|block| block.range.start.get()..block.range.end.get())
-        .collect();
+    let blocks = blocks(&text);
     for (chunk, marked) in held(cx, &buffer) {
         assert!(
             !marked || blocks.contains(&chunk),
@@ -265,4 +266,82 @@ fn an_open_landed_on_prose_loses_its_marks(cx: &mut TestAppContext) {
         "{:?}",
         held(cx, &buffer)
     );
+}
+
+const PROSE_RUST_NOPE: &str = "prose\n\n```rust\nlet\n```\n\n```nope\nx\n```\n";
+
+fn far() -> Instant {
+    Instant::now() + Duration::from_secs(3600)
+}
+
+/// A rust block, then `x` up to `len` bytes.
+fn padded(len: usize) -> String {
+    let mut text = String::from("```rust\nlet\n```\n");
+    text.extend(std::iter::repeat_n('x', len - text.len()));
+    text
+}
+
+#[test]
+fn open_colours_every_block_before_its_deadline() {
+    let markdown = inkra_markdown::parse(PROSE_RUST_NOPE);
+    let [a, b] = &markdown.code_blocks[..] else {
+        panic!("{:?}", markdown.code_blocks);
+    };
+
+    let opened = open::open(PROSE_RUST_NOPE, far());
+
+    assert_eq!(
+        opened.chunks,
+        [
+            (a.range.clone(), colour(PROSE_RUST_NOPE, &markdown.spans, a)),
+            (b.range.clone(), Vec::new()),
+        ]
+    );
+    assert!(opened.seed.is_some());
+}
+
+#[test]
+fn open_past_its_deadline_lands_only_the_seed() {
+    let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+
+    let opened = open::open(PROSE_RUST_NOPE, past);
+
+    assert_eq!(opened.chunks, []);
+    assert!(opened.seed.is_some());
+}
+
+#[test]
+fn a_text_over_the_parse_limit_lands_only_the_seed() {
+    let opened = open::open(&padded(open::OPEN_PARSE_LIMIT + 1), far());
+
+    assert_eq!(opened.chunks, []);
+    assert!(opened.seed.is_some());
+}
+
+#[test]
+fn a_text_at_the_parse_limit_is_coloured() {
+    let opened = open::open(&padded(open::OPEN_PARSE_LIMIT), far());
+
+    let [(_, marks)] = &opened.chunks[..] else {
+        panic!("{} chunks", opened.chunks.len());
+    };
+    assert_ne!(marks, &[]);
+}
+
+#[gpui::test]
+fn a_seeded_open_lexes_nothing_on_its_first_hearing(cx: &mut TestAppContext) {
+    let before = lexed();
+
+    let (buffer, _listening) = opened(cx, PROSE_RUST_NOPE, |buffer, cx| {
+        let opened = open::open(PROSE_RUST_NOPE, far());
+        decorations::seed(buffer, vec![(SYNTAX, opened)], cx);
+    });
+
+    assert_eq!(lexed() - before, 0);
+    assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
+    let blocks: Vec<_> = blocks(PROSE_RUST_NOPE)
+        .into_iter()
+        .zip([true, false])
+        .collect();
+    assert_eq!(held(cx, &buffer), blocks);
 }

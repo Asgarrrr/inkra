@@ -3,8 +3,8 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use inkra_markdown::parse;
 
-/// Bytes, matching the live-preview spec's X1 table.
-const SIZES: [usize; 3] = [5_000, 50_000, 500_000];
+/// Bytes: the live-preview spec's X1 table, then the sizes that set `OPEN_PARSE_LIMIT`.
+const SIZES: [usize; 6] = [5_000, 50_000, 500_000, 1_000_000, 2_000_000, 4_000_000];
 
 const SECTION: &str = "## A section heading\n\
 \n\

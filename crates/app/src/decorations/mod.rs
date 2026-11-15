@@ -17,7 +17,6 @@ mod open;
 
 use listen::{Heard, Listener, Seed};
 pub(crate) use listen::{TextChange, listen};
-#[cfg(test)]
 pub(crate) use open::Opened;
 pub(crate) use open::{OpenFn, openers, run_openers, seed};
 

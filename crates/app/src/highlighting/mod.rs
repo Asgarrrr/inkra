@@ -15,6 +15,8 @@ use crate::editor::parses::parsed;
 use crate::feature::{FeatureId, Manifest};
 use crate::theme::ColorToken;
 
+mod open;
+
 const FEATURE: FeatureId = FeatureId::new("highlighting");
 
 const SYNTAX: LayerId = LayerId::new(FEATURE, "syntax");
@@ -24,7 +26,7 @@ thread_local! { static LEXED: Cell<usize> = const { Cell::new(0) }; }
 
 const SYNTAX_DECL: LayerDecl = LayerDecl {
     id: SYNTAX,
-    open: None,
+    open: Some(open::open),
 };
 
 pub(crate) static MANIFEST: Manifest = Manifest {

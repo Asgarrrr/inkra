@@ -308,9 +308,19 @@ background task (decoration layer D8). It runs `inkra_markdown::parse` on the
 text, then lexes the blocks in document order until the deadline. The parse
 cannot stop at the deadline, so a text over `OPEN_PARSE_LIMIT` bytes skips it:
 the open function returns no chunk and the seed, and D7 colours the note from
-the main thread and the background task. S1b sets the limit from `cargo bench
--p inkra-markdown`, so the parse at the limit takes at most 4 ms, half the
-landing deadline. A block over
+the main thread and the background task. The parse at the limit takes at most
+4 ms, half the landing deadline. `cargo bench -p inkra-markdown --bench parse`
+measured these medians on 2026-11-15:
+
+| Bytes     | `parse` median |
+| --------- | -------------- |
+| 500 000   | 2.63 ms        |
+| 1 000 000 | 5.65 ms        |
+| 2 000 000 | 14.29 ms       |
+| 4 000 000 | 28.78 ms       |
+
+So `OPEN_PARSE_LIMIT` is 500 000 bytes, the largest measured size within
+4 ms. A block over
 `MAIN_THREAD_BUDGET` is skipped there, so one large block cannot spend the
 whole deadline. Every block it reaches gets its block chunk, coloured or
 empty.
