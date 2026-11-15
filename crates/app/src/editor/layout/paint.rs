@@ -66,9 +66,10 @@ impl DocumentLayout {
             window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
         }
         for index in lines {
-            let line = &self.lines[index];
-            let line_origin = origin + point(px(0.), line.top);
-            let clip = line
+            let placed = &self.lines[index];
+            let line = &*placed.line;
+            let line_origin = origin + point(px(0.), placed.top);
+            let clip = placed
                 .block
                 .and_then(|block| Some((self.block_clip(block)?, self.block_scroll(block))));
             let (x, mask) = match clip {

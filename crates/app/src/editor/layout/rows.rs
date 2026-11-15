@@ -1,22 +1,25 @@
-use std::ops::Range;
-
 use gpui::{WrappedLine, px};
 use inkra_markdown::{DisplayLine, DisplayOffset};
-use inkra_text::{Bias, ByteOffset};
+use inkra_text::Bias;
 use unicode_segmentation::GraphemeCursor;
 
-use super::Row;
+use super::line::Row;
 
 /// One row per gpui row. Each wrap point snaps forward to the next grapheme
 /// boundary of `shown`, so no caret lands inside a cluster (the glyphs before the snap still paint on the new row).
+/// `len` is the line's, and `display` is over `0..len`.
 pub(super) fn rows(
     shown: &str,
     wrapped: &WrappedLine,
-    range: &Range<ByteOffset>,
+    len: usize,
     display: &DisplayLine,
 ) -> Vec<Row> {
     let layout = &wrapped.unwrapped_layout;
-    let at = |index: usize| display.to_buffer(DisplayOffset::new(index), Bias::Left);
+    let at = |index: usize| {
+        display
+            .to_buffer(DisplayOffset::new(index), Bias::Left)
+            .get()
+    };
 
     let mut starts = vec![(0, px(0.))];
     for boundary in wrapped.wrap_boundaries() {
@@ -38,10 +41,7 @@ pub(super) fn rows(
         .map(|(&(start, start_x), next)| Row {
             start: at(start),
             // The last row ends at the line's true end, past any hidden suffix (live-preview spec, D5).
-            caret_end: next.map_or(
-                range.end,
-                |next| at(grapheme_before(shown, next).max(start)),
-            ),
+            caret_end: next.map_or(len, |next| at(grapheme_before(shown, next).max(start))),
             start_x,
         })
         .collect()

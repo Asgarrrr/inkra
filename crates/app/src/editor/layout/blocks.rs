@@ -4,7 +4,7 @@ use gpui::{Bounds, Pixels, Point, ShapedLine, SharedString, TextStyle, Window, p
 use inkra_markdown::CodeBlock;
 use inkra_text::ByteOffset;
 
-use super::{DocumentLayout, LineLayout};
+use super::{DocumentLayout, Placed};
 use crate::theme::{self, Theme};
 
 #[cfg(test)]
@@ -100,15 +100,9 @@ impl Blocks {
         Some(self.done.len() + usize::from(closes_first))
     }
 
-    /// `block` holds `line`, from the cursor `line_metrics` reads; `bottom` is the line's last row's
-    /// bottom. `label` is read on the line that opens the block.
-    pub(super) fn line(
-        &mut self,
-        block: Option<&CodeBlock>,
-        label: Option<ShapedLine>,
-        line: &LineLayout,
-        bottom: Pixels,
-    ) {
+    /// `block` holds `line`; `bottom` is the line's last row's bottom. The label is read on the line
+    /// that opens the block.
+    pub(super) fn line(&mut self, block: Option<&CodeBlock>, line: &Placed, bottom: Pixels) {
         if self
             .open
             .as_ref()
@@ -121,7 +115,7 @@ impl Blocks {
         {
             self.open = Some(Building {
                 start: block.range.start,
-                label,
+                label: line.line.label.as_deref().cloned(),
                 top: line.top,
                 left: DocumentLayout::content_x(line, 0, block.range.start)
                     - theme::CODE_BLOCK_OUTSET,
@@ -130,6 +124,7 @@ impl Blocks {
             });
         }
         if let Some(open) = &mut self.open {
+            let line = &line.line;
             open.widest = open.widest.max(line.indent() + line.shape.wrapped.width());
             open.bottom = bottom;
         }

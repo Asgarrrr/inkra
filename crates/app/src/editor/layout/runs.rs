@@ -62,8 +62,9 @@ fn underlined(style: TextStyle) -> TextStyle {
     })
 }
 
-/// Runs indexed from zero within the line's shown text. Every range is clamped to the line,
-/// so a stale span mis-colours one frame instead of breaking the run lengths.
+/// Runs indexed from zero within the line's shown text; `display` is over the line's own offsets.
+/// Every range is clamped to the line, so a stale span mis-colours one frame instead of breaking
+/// the run lengths.
 pub(super) fn line_runs(
     line: &Range<ByteOffset>,
     spans: &[Span],
@@ -81,7 +82,10 @@ pub(super) fn line_runs(
         cuts.extend([clamp(marked.start), clamp(marked.end)]);
     }
     for hidden in display.hidden() {
-        cuts.extend([hidden.start, hidden.end]);
+        cuts.extend([
+            line.start + hidden.start.get(),
+            line.start + hidden.end.get(),
+        ]);
     }
     let decorations = styles.decorations.colors_in(line.clone());
     for (range, _) in &decorations {
@@ -105,7 +109,8 @@ pub(super) fn line_runs(
     for (ix, pair) in cuts.windows(2).enumerate() {
         let color = colors.get(ix).copied().flatten();
         let (start, end) = (pair[0], pair[1]);
-        let len = display.to_display(end).get() - display.to_display(start).get();
+        let shown = |offset: ByteOffset| display.to_display(ByteOffset::new(offset - line.start));
+        let len = shown(end).get() - shown(start).get();
         if len == 0 {
             continue;
         }

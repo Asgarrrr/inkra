@@ -126,7 +126,7 @@ impl EditorView {
         ]
     }
 
-    fn markdown(&self) -> &Markdown {
+    fn markdown(&self) -> &Rc<Markdown> {
         &self.markdown
     }
 

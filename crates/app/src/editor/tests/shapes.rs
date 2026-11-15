@@ -105,7 +105,7 @@ fn joining_two_lines_hands_only_the_joined_line_to_shape_text(cx: &mut TestAppCo
     assert_eq!(line_shape_count() - before, 1);
 }
 
-/// `text` shaped from scratch, or carrying what it can from `previous`.
+/// `text` in a buffer of its own, so `previous` carries no line.
 pub(super) fn shape(
     text: &str,
     marked: Option<&Range<ByteOffset>>,
@@ -113,11 +113,34 @@ pub(super) fn shape(
     previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
-    let buffer = Buffer::new(text);
-    let markdown = inkra_markdown::parse(text);
+    layout_of(&Buffer::new(text), marked, wrap_width, previous, window)
+}
+
+/// `buffer` brought to `text` through a diff, as a reload does, so `previous` can carry lines.
+pub(super) fn reshape(
+    buffer: &mut Buffer,
+    text: &str,
+    marked: Option<&Range<ByteOffset>>,
+    wrap_width: Option<Pixels>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    let diff = inkra_text::diff(buffer.version(), buffer.text(), text);
+    assert!(buffer.apply_diff(&diff));
+    layout_of(buffer, marked, wrap_width, previous, window)
+}
+
+pub(super) fn layout_of(
+    buffer: &Buffer,
+    marked: Option<&Range<ByteOffset>>,
+    wrap_width: Option<Pixels>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
     let style = window.text_style();
     let inputs = LayoutInputs {
-        buffer: &buffer,
+        buffer,
         markdown: &markdown,
         selection: &(at(0)..at(0)),
         marked,
@@ -141,8 +164,16 @@ fn a_carried_line_matches_a_fresh_shape(cx: &mut TestAppContext) {
     ];
     with_editor(cx, "", |_, window, _| {
         for (before, after, wrap_before, wrap_after) in cases {
-            let previous = shape(before, None, wrap_before, None, window);
-            let carried = shape(after, None, wrap_after, Some(&previous), window);
+            let mut buffer = Buffer::new(before);
+            let previous = layout_of(&buffer, None, wrap_before, None, window);
+            let carried = reshape(
+                &mut buffer,
+                after,
+                None,
+                wrap_after,
+                Some(&previous),
+                window,
+            );
             let fresh = shape(after, None, wrap_after, None, window);
 
             assert_eq!(carried.row_count(), fresh.row_count(), "{after:?}");
@@ -162,9 +193,16 @@ fn a_carried_line_matches_a_fresh_shape(cx: &mut TestAppContext) {
 fn a_composition_reshapes_only_its_line(cx: &mut TestAppContext) {
     let text = "zero\none two\nthree";
     with_editor(cx, "", |_, window, _| {
-        let previous = shape(text, None, None, None, window);
+        let buffer = Buffer::new(text);
+        let previous = layout_of(&buffer, None, None, None, window);
         let before = line_shape_count();
-        shape(text, Some(&(at(5)..at(8))), None, Some(&previous), window);
+        layout_of(
+            &buffer,
+            Some(&(at(5)..at(8))),
+            None,
+            Some(&previous),
+            window,
+        );
         assert_eq!(line_shape_count() - before, 1);
     });
 }

@@ -26,7 +26,7 @@ fn runs_follow_the_spans_and_cover_the_line() {
     let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(0, text.len());
-    let display = DisplayLine::new(line.clone(), []);
+    let display = DisplayLine::new(range(0, line.end - line.start), []);
 
     let runs = line_runs(&line, &spans, None, &display, &mut styles);
 
@@ -45,7 +45,7 @@ fn a_composition_inside_bold_stays_bold_and_gains_the_underline() {
     let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(0, text.len());
-    let display = DisplayLine::new(line.clone(), []);
+    let display = DisplayLine::new(range(0, line.end - line.start), []);
 
     let runs = line_runs(&line, &spans, Some(&range(3, 6)), &display, &mut styles);
 
@@ -66,7 +66,7 @@ fn runs_are_indexed_from_the_line_start() {
     let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     let line = range(3, 8);
-    let display = DisplayLine::new(line.clone(), []);
+    let display = DisplayLine::new(range(0, line.end - line.start), []);
 
     let runs = line_runs(&line, &spans[..], None, &display, &mut styles);
 
@@ -79,7 +79,7 @@ fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
     let mut styles = RunStyles::new(&base, dark(), &Drawn::default());
 
     for (line, expected) in [(range(0, 5), vec![5]), (range(4, 4), vec![0])] {
-        let display = DisplayLine::new(line.clone(), []);
+        let display = DisplayLine::new(range(0, line.end - line.start), []);
         assert_eq!(
             lens(&line_runs(&line, &[], None, &display, &mut styles)),
             expected
@@ -94,7 +94,7 @@ fn a_stale_span_past_the_line_is_clipped_not_fatal() {
     let spans = parse("**long bold text**").spans;
 
     let line = range(0, 4);
-    let display = DisplayLine::new(line.clone(), []);
+    let display = DisplayLine::new(range(0, line.end - line.start), []);
 
     let runs = line_runs(&line, &spans, None, &display, &mut styles);
 
@@ -124,7 +124,7 @@ fn warning_runs(
     let drawn = Drawn::for_tests(layers, buffer.edit_mark());
     let mut styles = RunStyles::new(&base, dark(), &drawn);
     let line = range(0, text.len());
-    let display = DisplayLine::new(line.clone(), []);
+    let display = DisplayLine::new(range(0, line.end - line.start), []);
     let warning = Hsla::from(dark().colors.warning);
     line_runs(&line, &parse(text).spans, marked, &display, &mut styles)
         .iter()

@@ -2,20 +2,22 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, point, px};
 use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Markdown, Span, is_active};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::blocks::{Blocks, Labels};
-use super::prefix::{GutterCarry, Hanging, Prefix, indent};
+use super::dirty::carry;
+use super::line::{LineLayout, LineShape, Placed};
+use super::prefix::{GutterCarry, Prefix, heading_opening, indent, line_prefix};
 use super::runs::{RunStyles, line_runs};
-use super::{DocumentLayout, LayoutInputs, LineLayout, rows::rows};
+use super::{DocumentLayout, LayoutInputs, rows::rows};
 use crate::theme;
 
 #[cfg(test)]
 thread_local! {
     static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Whole-document shapes so far on this thread; a keystroke's budget is one.
@@ -24,66 +26,16 @@ pub(crate) fn shape_count() -> usize {
     SHAPES.with(std::cell::Cell::get)
 }
 
-/// Lines handed to `shape_text` so far on this thread.
+/// Lines built rather than carried so far on this thread.
 #[cfg(test)]
-pub(crate) fn line_shape_count() -> usize {
-    LINES.with(std::cell::Cell::get)
-}
-
-/// One line's `shape_text` output and every argument it took; a later layout reuses it only when all match.
-pub(super) struct LineShape {
-    pub(super) wrapped: WrappedLine,
-    text: SharedString,
-    font_size: Pixels,
-    pub(super) runs: Vec<TextRun>,
-    wrap: Option<Pixels>,
-}
-
-impl LineShape {
-    fn new(
-        text: &str,
-        font_size: Pixels,
-        runs: Vec<TextRun>,
-        wrap: Option<Pixels>,
-        start: ByteOffset,
-        window: &mut Window,
-    ) -> Self {
-        #[cfg(test)]
-        LINES.with(|lines| lines.set(lines.get() + 1));
-        let text = SharedString::from(text.to_owned());
-        let wrapped = window
-            .text_system()
-            .shape_text(text.clone(), font_size, &runs, wrap, None)
-            .map_err(|err| log::warn!("failed to shape line at {start}: {err}"))
-            .ok()
-            .and_then(|mut shaped| shaped.pop())
-            .unwrap_or_default();
-        Self {
-            wrapped,
-            text,
-            font_size,
-            runs,
-            wrap,
-        }
-    }
-
-    fn shaped_from(
-        &self,
-        text: &str,
-        font_size: Pixels,
-        runs: &[TextRun],
-        wrap: Option<Pixels>,
-    ) -> bool {
-        self.font_size == font_size
-            && self.wrap == wrap
-            && self.text.as_ref() == text
-            && self.runs == runs
-    }
+pub(crate) fn line_build_count() -> usize {
+    BUILDS.with(std::cell::Cell::get)
 }
 
 /// Takes `style` explicitly since the editor also shapes outside any draw,
 /// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
-/// A line carries a shape from `previous` when every `shape_text` argument matches.
+/// A clean line carries its whole layout from `previous`; a built one still carries a shape when
+/// every `shape_text` argument matches.
 pub(crate) fn shape_document(
     inputs: &LayoutInputs<'_>,
     previous: Option<&DocumentLayout>,
@@ -103,77 +55,67 @@ pub(crate) fn shape_document(
         scrolls,
         ..
     } = inputs;
-    let mut styles = RunStyles::new(style, theme, &inputs.decorations);
     let body_size = style.font_size.to_pixels(window.rem_size());
     let body_height = style.line_height_in_pixels(window.rem_size());
+    let text = buffer.text();
+    let mut build = Build {
+        inputs,
+        previous,
+        text,
+        styles: RunStyles::new(style, theme, &inputs.decorations),
+        labels: Labels::new(style, theme),
+        gutter_carry: GutterCarry::new(body_size),
+        body: (body_size, body_height),
+        spans: &markdown.spans,
+        conceals: &markdown.conceals,
+        gutters: &markdown.gutters,
+        headings: &markdown.headings,
+    };
+    let mut carry = previous.and_then(|previous| carry(inputs, previous));
 
+    let mut lines = Vec::with_capacity(previous.map_or(0, |previous| previous.lines.len()));
     let mut row_count = 0;
     let mut top = px(0.);
     let mut bars = Vec::new();
     let mut blocks = Blocks::new(wrap_width);
-    let mut labels = Labels::new(style, theme);
-    // Spans, markers and gutters never cross a `\n`, so each line's are the next ones in order.
-    let mut rest = markdown.spans.as_slice();
-    let mut conceals = markdown.conceals.as_slice();
-    let mut gutters = markdown.gutters.as_slice();
-    let mut headings = markdown.headings.as_slice();
     let mut code_blocks = markdown.code_blocks.as_slice();
-    let mut carry = GutterCarry::new(body_size);
-    let lines = buffer
-        .lines()
-        .enumerate()
-        .map(|(index, (start, text))| {
-            let range = start..start + text.len();
-            let heading = line_holder(&mut headings, &range, |heading| &heading.range);
-            let block = line_holder(&mut code_blocks, &range, |block| &block.range);
-            let (font_size, row_height) = line_metrics(heading, block, (body_size, body_height));
-            let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
-            let line_conceals =
-                line_items(&mut conceals, |conceal| conceal.marker.start <= range.end);
-            let line_gutters = line_items(&mut gutters, |gutter| gutter.range.start <= range.end);
-            let gutter = line_gutters
-                .first()
-                .map(|gutter| (gutter, &text[..gutter.range.end - start]));
-            let label = label_text(block, &range, text, line_conceals, selection)
-                .map(|label| labels.shape(label, window));
-            let (prefix, text_conceals) = line_prefix(
-                gutter,
-                &mut carry,
-                heading_opening(heading, &range, font_size, inputs.margin),
-                line_conceals,
-                selection,
-                |range, size| show(range, text, line_spans, marked, size, &mut styles, window),
-            );
-            let display = display_line(
-                &range,
-                text_conceals,
-                prefix.as_ref().map(Prefix::range),
-                selection,
-            );
-            let shown = display.text(text);
-            let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
-            let wrap = line_wrap(wrap_width, block, code_block_wrap, prefix.as_ref());
-            let near = candidates(previous, index, start, buffer.len());
-            let shape = carry_or_shape(near, &shown, font_size, runs, wrap, start, window);
-            let rows = rows(&shown, &shape.wrapped, &range, &display);
-            let line = LineLayout {
-                shape,
-                range,
-                display,
-                first_row: row_count,
-                rows,
-                top,
-                row_height,
-                prefix,
-                block: blocks.index_of(block),
-            };
-            row_count += line.rows.len();
-            top += rows_height(line.rows.len(), row_height);
-            bars.extend(line_bars(line.prefix.as_ref(), line.top, top));
-            blocks.line(block, label, &line, top);
-            line
-        })
-        .collect();
+    let mut at = 0;
+    let mut above_built = false;
+    loop {
+        let start = ByteOffset::new(at);
+        // A lazy quote line reads the geometry of the line above, so it follows its rebuild (D7).
+        let lazy = above_built && build.lazy_gutter(&(start..start + line_len(text, at)));
+        let clean = carry
+            .as_mut()
+            .filter(|_| !lazy)
+            .and_then(|carry| carry.clean(start));
+        above_built = clean.is_none();
+        let len = clean.map_or_else(|| line_len(text, at), |line| line.len);
+        let range = start..start + len;
+        let block = line_holder(&mut code_blocks, &range, |block| &block.range);
+        let line = match clean {
+            Some(line) => Rc::clone(line),
+            None => Rc::new(build.line(&range, block, lines.len(), window)),
+        };
+        build.gutter_carry.pass(line.prefix.as_ref());
+        let placed = Placed {
+            start,
+            top,
+            first_row: row_count,
+            block: blocks.index_of(block),
+            line,
+        };
+        row_count += placed.line.rows.len();
+        top += rows_height(placed.line.rows.len(), placed.line.row_height);
+        bars.extend(line_bars(placed.line.prefix.as_ref(), placed.top, top));
+        blocks.line(block, &placed, top);
+        lines.push(placed);
+        at += len;
+        if at == text.len() {
+            break;
+        }
+        at += 1;
+    }
 
     DocumentLayout {
         lines,
@@ -188,9 +130,110 @@ pub(crate) fn shape_document(
         code_block_wrap,
         theme: Arc::clone(theme),
         shaped_at: (buffer.version(), inputs.decorations.revision),
+        buffer: buffer.id(),
+        at: buffer.edit_mark(),
+        markdown: Rc::clone(markdown),
         selection: selection.clone(),
         marked: marked.cloned(),
         scrolls: scrolls.clone(),
+    }
+}
+
+/// The bytes of the line at `at`, without its `\n`.
+fn line_len(text: &str, at: usize) -> usize {
+    text[at..].find('\n').unwrap_or(text.len() - at)
+}
+
+/// What building a line reads, and the cursors over the parse; spans, markers and gutters never
+/// cross a `\n`, so each line's are the next ones in order.
+struct Build<'a, 'i> {
+    inputs: &'i LayoutInputs<'a>,
+    previous: Option<&'i DocumentLayout>,
+    text: &'a str,
+    styles: RunStyles<'a>,
+    labels: Labels<'a>,
+    gutter_carry: GutterCarry<'a>,
+    /// The body's font size and row height.
+    body: (Pixels, Pixels),
+    spans: &'a [Span],
+    conceals: &'a [Conceal],
+    gutters: &'a [Gutter],
+    headings: &'a [Heading],
+}
+
+impl Build<'_, '_> {
+    /// Whether the line at `range` has a gutter missing some of its `>`.
+    fn lazy_gutter(&self, range: &Range<ByteOffset>) -> bool {
+        let next = self
+            .gutters
+            .partition_point(|gutter| gutter.range.start < range.start);
+        self.gutters.get(next).is_some_and(|gutter| {
+            gutter.range.start <= range.end && gutter.quotes.len() < gutter.depth
+        })
+    }
+
+    /// The line at `range`, the `index`th, which `block` holds.
+    fn line(
+        &mut self,
+        range: &Range<ByteOffset>,
+        block: Option<&CodeBlock>,
+        index: usize,
+        window: &mut Window,
+    ) -> LineLayout {
+        #[cfg(test)]
+        BUILDS.with(|builds| builds.set(builds.get() + 1));
+        let &LayoutInputs {
+            buffer,
+            selection,
+            marked,
+            wrap_width,
+            code_block_wrap,
+            margin,
+            ..
+        } = self.inputs;
+        let text = &self.text[range.start.get()..range.end.get()];
+        let heading = line_holder(&mut self.headings, range, |heading| &heading.range);
+        let (font_size, row_height) = line_metrics(heading, block, self.body);
+        let line_spans = line_items(&mut self.spans, range, |span| span.range.start);
+        let line_conceals = line_items(&mut self.conceals, range, |conceal| conceal.marker.start);
+        let line_gutters = line_items(&mut self.gutters, range, |gutter| gutter.range.start);
+        let gutter = line_gutters
+            .first()
+            .map(|gutter| (gutter, &text[..gutter.range.end - range.start]));
+        let label = label_text(block, range, text, line_conceals, selection)
+            .map(|label| Box::new(self.labels.shape(label, window)));
+        let styles = &mut self.styles;
+        let (prefix, text_conceals) = line_prefix(
+            gutter,
+            range.start,
+            &mut self.gutter_carry,
+            heading_opening(heading, range, font_size, margin),
+            line_conceals,
+            selection,
+            |range, size| show(range, text, line_spans, marked, size, styles, window),
+        );
+        let display = display_line(
+            range,
+            text_conceals,
+            prefix.as_ref().map(Prefix::range),
+            selection,
+        );
+        let shown = display.text(text);
+        let runs = line_runs(range, line_spans, marked, &display, &mut self.styles);
+        let wrap = line_wrap(wrap_width, block, code_block_wrap, prefix.as_ref());
+        let near = candidates(self.previous, index, range.start, buffer.len());
+        let shape = carry_or_shape(near, &shown, font_size, runs, wrap, range.start, window);
+        let len = range.end - range.start;
+        let rows = rows(&shown, &shape.wrapped, len, &display);
+        LineLayout {
+            shape,
+            len,
+            display,
+            rows,
+            row_height,
+            prefix,
+            label,
+        }
     }
 }
 
@@ -209,31 +252,6 @@ fn carry_or_shape<'p>(
         Some(shape) => Rc::clone(shape),
         None => Rc::new(LineShape::new(text, font_size, runs, wrap, start, window)),
     }
-}
-
-/// A heading's marker that opens its line, at the heading's size, with the room left of the text.
-struct Opening {
-    range: Range<ByteOffset>,
-    font_size: Pixels,
-    margin: Pixels,
-}
-
-/// The marker that opens the line as a margin. Inside a container it keeps its inline conceal:
-/// no margin exists there.
-fn heading_opening(
-    heading: Option<&Heading>,
-    range: &Range<ByteOffset>,
-    font_size: Pixels,
-    margin: Pixels,
-) -> Option<Opening> {
-    heading
-        .and_then(|heading| heading.marker.clone())
-        .filter(|marker| marker.start == range.start)
-        .map(|range| Opening {
-            range,
-            font_size,
-            margin,
-        })
 }
 
 /// Whether a revealed heading marker opens its line, so `margin` decides whether it hangs (D13).
@@ -306,17 +324,18 @@ fn candidates(
         let moved = previous
             .lines
             .last()
-            .and_then(|last| (start.get() + last.range.end.get()).checked_sub(len.get()))
+            .and_then(|last| (start.get() + last.end().get()).checked_sub(len.get()))
             .and_then(|target| {
                 previous
                     .lines
-                    .binary_search_by_key(&ByteOffset::new(target), |line| line.range.start)
+                    .binary_search_by_key(&ByteOffset::new(target), |line| line.start)
                     .ok()
             });
         [Some(index), moved]
             .into_iter()
             .flatten()
             .filter_map(|index| previous.lines.get(index))
+            .map(|placed| &*placed.line)
     })
 }
 
@@ -366,82 +385,49 @@ fn line_bars(
     })
 }
 
-/// The items of a sorted cursor that start on this line; `rest` moves past them. The next line's
-/// start at `range.end + 1` at the earliest, so `start <= range.end` holds for an empty item too.
-fn line_items<'a, T>(rest: &mut &'a [T], on_line: impl Fn(&T) -> bool) -> &'a [T] {
-    let own = rest.iter().take_while(|item| on_line(item)).count();
-    let (line, next) = rest.split_at(own);
+/// The items of a sorted cursor that start on the line at `range`; `rest` moves past them. The next
+/// line starts at `range.end + 1` at the earliest, so `start <= range.end` holds for an empty item too.
+fn line_items<'a, T>(
+    rest: &mut &'a [T],
+    range: &Range<ByteOffset>,
+    start: impl Fn(&T) -> ByteOffset,
+) -> &'a [T] {
+    let first = rest.partition_point(|item| start(item) < range.start);
+    let own = rest[first..].partition_point(|item| start(item) <= range.end);
+    let (line, next) = rest[first..].split_at(own);
     *rest = next;
     line
 }
 
-/// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
-/// prefix and the conceals left for the text. A revealed marker wider than `margin` gets no prefix
-/// and leaves its conceal to the text, so it shows inline (live-preview spec, D13).
-fn line_prefix<'a, 'c>(
-    gutter: Option<(&Gutter, &'a str)>,
-    carry: &mut GutterCarry<'a>,
-    opening: Option<Opening>,
-    conceals: &'c [Conceal],
-    selection: &Range<ByteOffset>,
-    mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
-) -> (Option<Prefix>, &'c [Conceal]) {
-    let own = gutter
-        .map(|(gutter, _)| &gutter.range)
-        .or(opening.as_ref().map(|opening| &opening.range))
-        .map_or(0, |prefix| {
-            conceals.partition_point(|conceal| conceal.marker.start < prefix.end)
-        });
-    let (own, rest) = conceals.split_at(own);
-    // A gap conceal skips a line's leading `[ \t>]*` and a heading's own marker is the only conceal
-    // before `opening.end`, so every conceal before the prefix's end is the prefix's own.
-    debug_assert!(match gutter {
-        Some((gutter, _)) => own.len() == gutter.quotes.len(),
-        None =>
-            own.len() <= 1
-                && own
-                    .iter()
-                    .all(|conceal| Some(&conceal.marker) == opening.as_ref().map(|o| &o.range)),
-    });
-    let revealed = own.iter().any(|conceal| !is_active(conceal, selection));
-    if let Some((gutter, source)) = gutter {
-        let layout = carry.layout(gutter, source, revealed, &mut shape);
-        return (Some(Prefix::Gutter(layout)), rest);
-    }
-    let Some(Opening {
-        range,
-        font_size,
-        margin,
-    }) = opening
-    else {
-        return (None, rest);
-    };
-    let shaped = revealed.then(|| Box::new(shape(&range, font_size)));
-    if shaped
-        .as_ref()
-        .is_some_and(|shaped| shaped.width() > margin)
-    {
-        return (None, conceals);
-    }
-    (Some(Prefix::Margin(Hanging { range, shaped })), rest)
-}
-
-/// The prefix never enters the shaped text, so no reveal can re-wrap its line.
+/// Over the line's own offsets. The prefix never enters the shaped text, so no reveal can re-wrap
+/// its line.
 fn display_line(
     range: &Range<ByteOffset>,
     conceals: &[Conceal],
-    prefix: Option<&Range<ByteOffset>>,
+    prefix: Option<&Range<usize>>,
     selection: &Range<ByteOffset>,
 ) -> DisplayLine {
+    let within = |offset: ByteOffset| ByteOffset::new(offset - range.start);
     // A lazy line's gutter hides nothing.
-    let hidden = prefix
-        .filter(|prefix| !prefix.is_empty())
-        .map(|prefix| (prefix.clone(), ""));
+    let hidden = prefix.filter(|prefix| !prefix.is_empty()).map(|prefix| {
+        (
+            ByteOffset::new(prefix.start)..ByteOffset::new(prefix.end),
+            "",
+        )
+    });
     let active = conceals
         .iter()
         .filter(|conceal| is_active(conceal, selection))
-        .map(|conceal| (conceal.marker.clone(), conceal.replacement));
-    DisplayLine::new(range.clone(), hidden.into_iter().chain(active))
+        .map(|conceal| {
+            (
+                within(conceal.marker.start)..within(conceal.marker.end),
+                conceal.replacement,
+            )
+        });
+    DisplayLine::new(
+        within(range.start)..within(range.end),
+        hidden.into_iter().chain(active),
+    )
 }
 
 /// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
@@ -455,9 +441,10 @@ fn show(
     styles: &mut RunStyles<'_>,
     window: &mut Window,
 ) -> ShapedLine {
-    let identity = DisplayLine::new(range.clone(), []);
+    let len = range.end - range.start;
+    let identity = DisplayLine::new(ByteOffset::default()..ByteOffset::new(len), []);
     let runs = line_runs(range, spans, marked, &identity, styles);
-    let text = SharedString::from(line[..range.end - range.start].to_owned());
+    let text = SharedString::from(line[..len].to_owned());
     window
         .text_system()
         .shape_line(text, font_size, &runs, None)

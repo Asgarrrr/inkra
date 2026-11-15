@@ -9,7 +9,6 @@ use gpui::{
     Render, Style, Styled, Window, actions, point, prelude::*, px, relative,
 };
 use inkra_editor::Selection;
-use inkra_markdown::Markdown;
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::decorations::Drawn;
@@ -164,7 +163,7 @@ impl Element for FieldElement {
         let style = window.text_style();
         let inputs = LayoutInputs {
             buffer: input.buffer().read(cx),
-            markdown: &Markdown::default(),
+            markdown: &Rc::default(),
             selection: &range,
             marked: marked.as_ref(),
             style: &style,
