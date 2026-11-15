@@ -66,14 +66,18 @@ impl Group {
         }
     }
 
+    /// Every tab in tab order, with the view it holds; `None` for a note's or an empty tab.
+    pub(super) fn tab_views(&self) -> impl Iterator<Item = (TabId, Option<ViewId>)> + '_ {
+        self.tabs.iter().map(|tab| {
+            let view = tab.place().map_or_else(|| self.shown.view(), Parked::view);
+            (tab.id(), view)
+        })
+    }
+
     /// The view each tab holds, in tab order; a tab holding none is skipped.
     pub(super) fn views(&self) -> impl Iterator<Item = (TabId, ViewId)> + '_ {
-        self.tabs.iter().filter_map(|tab| {
-            let view = tab
-                .place()
-                .map_or_else(|| self.shown.view(), Parked::view)?;
-            Some((tab.id(), view))
-        })
+        self.tab_views()
+            .filter_map(|(tab, view)| Some((tab, view?)))
     }
 }
 

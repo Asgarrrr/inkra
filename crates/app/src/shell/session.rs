@@ -186,8 +186,9 @@ impl AppShell {
         cx: &App,
     ) -> SavedGroup {
         let group = self.group(group);
-        let tabs = group.tabs.iter().map(|tab| {
-            if let Some(view) = tab.place().map_or_else(|| group.shown.view(), Parked::view) {
+        let tab_views = group.tabs.iter().zip(group.tab_views());
+        let tabs = tab_views.map(|(tab, (_, view))| {
+            if let Some(view) = view {
                 return SavedTab::View {
                     view: view.name().to_owned(),
                 };

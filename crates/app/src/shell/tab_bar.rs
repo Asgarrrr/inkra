@@ -14,7 +14,6 @@ use inkra_vault::EntryId;
 use super::dock_drag::DraggedView;
 use super::drop_marker;
 use super::group::selector;
-use super::parked::Parked;
 use super::split::{SplitDown, SplitRight};
 use super::{AppShell, CloseTab, NewTab};
 use crate::one_line::one_line;
@@ -90,11 +89,7 @@ impl AppShell {
 
     /// The view each tab holds; `None` for a note's or an empty tab.
     fn tab_views(&self, group: GroupId) -> impl Iterator<Item = Option<ViewId>> + '_ {
-        let group = self.group(group);
-        group
-            .tabs
-            .iter()
-            .map(|tab| tab.place().map_or_else(|| group.shown.view(), Parked::view))
+        self.group(group).tab_views().map(|(_, view)| view)
     }
 
     /// Every tab's title, reading the store once.
