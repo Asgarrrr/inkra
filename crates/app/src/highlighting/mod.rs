@@ -1,8 +1,6 @@
 //! Code blocks coloured by token class, as a built-in feature with one layer (code highlighting
 //! spec, D6).
 
-#[cfg(test)]
-use std::cell::Cell;
 use std::ops::Range;
 
 use gpui::{App, Entity};
@@ -20,9 +18,6 @@ mod open;
 const FEATURE: FeatureId = FeatureId::new("highlighting");
 
 const SYNTAX: LayerId = LayerId::new(FEATURE, "syntax");
-
-#[cfg(test)]
-thread_local! { static LEXED: Cell<usize> = const { Cell::new(0) }; }
 
 const SYNTAX_DECL: LayerDecl = LayerDecl {
     id: SYNTAX,
@@ -57,8 +52,6 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
         .map(|block| (block.range.clone(), block.shape))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
-    #[cfg(test)]
-    LEXED.with(|lexed| lexed.set(lexed.get() + lex.len()));
     let lexed: Vec<_> = lex
         .into_iter()
         .map(|index| {

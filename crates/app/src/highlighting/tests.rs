@@ -122,11 +122,40 @@ fn merging_two_blocks_colours_the_merged_block(cx: &mut TestAppContext) {
 
 const TWO_BLOCKS: &str = "```rust\nlet\n```\n\n```rust\nmut\n```\n";
 
-fn lexed() -> usize {
-    LEXED.with(Cell::get)
+/// What a planted mark paints: a block the listener lexes shows its real colours instead.
+const PLANTED: ColorToken = ColorToken::SyntaxComment;
+
+fn plant(opened: &mut decorations::Opened) {
+    for (_, _, marks) in &mut opened.chunks {
+        for (_, style) in marks {
+            style.color = Some(PLANTED);
+        }
+    }
 }
 
-/// Lands the first `count` blocks of `buffer`'s text, coloured, as the open function would, with
+/// The colours of `text` once the blocks at `relexed` are lexed and every other one is planted.
+fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
+    let markdown = inkra_markdown::parse(text);
+    let fresh = fresh(text);
+    assert!(fresh.iter().any(|&(_, _, token)| token != PLANTED));
+    fresh
+        .into_iter()
+        .map(|(start, end, token)| {
+            let index = markdown
+                .code_blocks
+                .iter()
+                .position(|block| block.range.start.get() <= start && end <= block.range.end.get());
+            let token = if index.is_some_and(|index| relexed.contains(&index)) {
+                token
+            } else {
+                PLANTED
+            };
+            (start, end, token)
+        })
+        .collect()
+}
+
+/// Lands the first `count` blocks of `buffer`'s text, planted, as the open function would, with
 /// its seed.
 fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
     let text = buffer.read(cx).text().to_string();
@@ -138,50 +167,50 @@ fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
             (block.range.clone(), block.shape, marks)
         })
         .collect();
-    let opened = decorations::Opened {
+    let mut opened = decorations::Opened {
         chunks,
         seed: Some(Box::new(())),
     };
+    plant(&mut opened);
     decorations::seed(buffer, vec![(SYNTAX, opened)], cx);
+}
+
+/// As `shown`, every block planted by `seed`.
+fn seeded(cx: &mut TestAppContext, text: &str) -> (Entity<Buffer>, Subscription) {
+    let count = blocks(text).len();
+    opened(cx, text, |buffer, cx| seed(buffer, count, cx))
 }
 
 #[gpui::test]
 fn an_edit_in_prose_lexes_nothing(cx: &mut TestAppContext) {
-    let (buffer, _listening) = shown(cx, "prose\n\n```rust\nlet\n```\n");
-    let before = lexed();
+    let (buffer, _listening) = seeded(cx, "prose\n\n```rust\nlet\n```\n");
 
     edit(cx, &buffer, |t| t.insert(at(0), "x"));
 
-    assert_eq!(lexed() - before, 0);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[]));
 }
 
 #[gpui::test]
 fn an_edit_in_one_block_lexes_that_block(cx: &mut TestAppContext) {
-    let (buffer, _listening) = shown(cx, TWO_BLOCKS);
-    let before = lexed();
+    let (buffer, _listening) = seeded(cx, TWO_BLOCKS);
 
     edit(cx, &buffer, |t| t.insert(at(8), "fn "));
 
-    assert_eq!(lexed() - before, 1);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0]));
 }
 
 #[gpui::test]
 fn deleting_a_fence_indent_space_relexes_the_block(cx: &mut TestAppContext) {
-    let (buffer, _listening) = shown(cx, "  ```rust\n  let\n  ```\n\n```rust\nmut\n```\n");
-    let before = lexed();
+    let (buffer, _listening) = seeded(cx, "  ```rust\n  let\n  ```\n\n```rust\nmut\n```\n");
 
     edit(cx, &buffer, |t| t.delete(at(0)..at(1)));
 
-    assert_eq!(lexed() - before, 1);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0]));
 }
 
 #[gpui::test]
 fn two_edits_in_one_hearing_relex_both_blocks(cx: &mut TestAppContext) {
-    let (buffer, _listening) = shown(cx, TWO_BLOCKS);
-    let before = lexed();
+    let (buffer, _listening) = seeded(cx, TWO_BLOCKS);
 
     buffer.update(cx, |buffer, cx| {
         buffer.transact(|t| t.insert(at(25), "fn "));
@@ -190,8 +219,7 @@ fn two_edits_in_one_hearing_relex_both_blocks(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
 
-    assert_eq!(lexed() - before, 2);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0, 1]));
 }
 
 #[gpui::test]
@@ -218,20 +246,15 @@ fn a_typed_fence_recolours_the_blocks_after_it(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_partly_seeded_open_lexes_only_the_rest(cx: &mut TestAppContext) {
-    let before = lexed();
-
     let (buffer, _listening) = opened(cx, TWO_BLOCKS, |buffer, cx| {
         seed(buffer, 1, cx);
     });
 
-    assert_eq!(lexed() - before, 1);
-    assert_eq!(marks(cx, &buffer), fresh(TWO_BLOCKS));
+    assert_eq!(marks(cx, &buffer), kept(TWO_BLOCKS, &[1]));
 }
 
 #[gpui::test]
 fn an_edit_before_the_first_hearing_relexes_every_block(cx: &mut TestAppContext) {
-    let before = lexed();
-
     let (buffer, _listening) = opened(cx, TWO_BLOCKS, |buffer, cx| {
         seed(buffer, 2, cx);
         buffer.update(cx, |buffer, cx| {
@@ -240,8 +263,7 @@ fn an_edit_before_the_first_hearing_relexes_every_block(cx: &mut TestAppContext)
         });
     });
 
-    assert_eq!(lexed() - before, 2);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0, 1]));
 }
 
 #[gpui::test]
@@ -325,15 +347,13 @@ fn a_text_at_the_parse_limit_is_coloured() {
 
 #[gpui::test]
 fn a_seeded_open_lexes_nothing_on_its_first_hearing(cx: &mut TestAppContext) {
-    let before = lexed();
-
     let (buffer, _listening) = opened(cx, PROSE_RUST_NOPE, |buffer, cx| {
-        let opened = open::open(PROSE_RUST_NOPE, far());
+        let mut opened = open::open(PROSE_RUST_NOPE, far());
+        plant(&mut opened);
         decorations::seed(buffer, vec![(SYNTAX, opened)], cx);
     });
 
-    assert_eq!(lexed() - before, 0);
-    assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
+    assert_eq!(marks(cx, &buffer), kept(PROSE_RUST_NOPE, &[]));
     assert_eq!(held(cx, &buffer), blocks(PROSE_RUST_NOPE));
 }
 
@@ -442,11 +462,14 @@ fn a_block_renamed_inside_an_html_block_is_coloured_when_it_comes_back(cx: &mut 
 #[gpui::test]
 fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut TestAppContext) {
     let buffer = cx.new(|_| Buffer::new(PROSE_RUST_NOPE));
-    let before = lexed();
     let listening = cx.update(|cx| {
         decorations::declare(MANIFEST.layers, cx);
         decorations::enable([FEATURE], cx);
-        let opened = decorations::run_openers(PROSE_RUST_NOPE, &decorations::openers(cx), far());
+        let mut opened =
+            decorations::run_openers(PROSE_RUST_NOPE, &decorations::openers(cx), far());
+        for (_, opened) in &mut opened {
+            plant(opened);
+        }
         decorations::seed(&buffer, opened, cx);
         decorations::listen(SYNTAX, Rc::new(listener), cx)
     });
@@ -454,8 +477,7 @@ fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut Tes
     cx.add_window(|_, cx| EditorView::new(view, cx));
     cx.run_until_parked();
 
-    assert_eq!(lexed() - before, 0);
-    assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
+    assert_eq!(marks(cx, &buffer), kept(PROSE_RUST_NOPE, &[]));
     drop(listening);
 }
 
@@ -464,13 +486,11 @@ const OUTLINE: &str = "- Project\n  - a long line of prose about the plan\n  ```
 
 #[gpui::test]
 fn a_keystroke_in_nested_prose_lexes_no_block(cx: &mut TestAppContext) {
-    let (buffer, _listening) = shown(cx, OUTLINE);
-    let before = lexed();
+    let (buffer, _listening) = seeded(cx, OUTLINE);
 
     edit(cx, &buffer, |t| t.insert(at(20), "x"));
 
-    assert_eq!(lexed() - before, 0);
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[]));
 }
 
 /// Each edit lies outside the block, which keeps its range while a container above turns it from
