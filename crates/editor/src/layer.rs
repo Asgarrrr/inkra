@@ -210,6 +210,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         differing(&before, &self.owned_marks(chunk))
     }
 
+    /// As `marks_in`, with each style cloned, so the marks outlive a `replace`.
     fn owned_marks(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, S)> {
         self.marks_in(range)
             .map(|(mark, style)| (mark, style.clone()))
