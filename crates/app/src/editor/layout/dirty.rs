@@ -135,29 +135,37 @@ impl<'p> Carry<'p> {
         }
     }
 
-    fn is_dirty(&self, offset: ByteOffset) -> bool {
-        let next = self.dirty.partition_point(|dirty| dirty.end < offset);
-        self.dirty
-            .get(next)
-            .is_some_and(|dirty| dirty.start <= offset)
-    }
-
     /// Whether a conceal on a clean line reveals under one selection and not the other. Clean
-    /// lines hold the same conceals, in order, in both parses (`changed`); an element can still
-    /// span the edit, so each side reads its own.
+    /// lines hold the same conceals, at the same markers, in both parses (`changed`), so the two
+    /// agree iff they reveal the same markers there. An element can still span the edit, so each
+    /// side reads its own parse.
     fn flips(
         &self,
         (old, before): (&[Conceal], &Range<ByteOffset>),
         (new, after): (&[Conceal], &Range<ByteOffset>),
     ) -> bool {
-        let was = old
-            .iter()
-            .filter(|conceal| !self.is_dirty(self.edit.map(conceal.marker.start, Bias::Left)))
-            .map(|conceal| is_active(conceal, before));
-        let is = new
-            .iter()
-            .filter(|conceal| !self.is_dirty(conceal.marker.start))
-            .map(|conceal| is_active(conceal, after));
+        let was = self.revealed(old, before, |marker| self.edit.map(marker, Bias::Left));
+        let is = self.revealed(new, after, |marker| marker);
         was.ne(is)
+    }
+
+    /// The markers, placed in the new text by `place`, of the conceals on clean lines that
+    /// `selection` reveals. A selection touches few elements, so few reach the dirty lookup.
+    fn revealed<'c>(
+        &'c self,
+        conceals: &'c [Conceal],
+        selection: &'c Range<ByteOffset>,
+        place: impl Fn(ByteOffset) -> ByteOffset + 'c,
+    ) -> impl Iterator<Item = ByteOffset> + 'c {
+        conceals
+            .iter()
+            .filter(|conceal| !is_active(conceal, selection))
+            .map(move |conceal| place(conceal.marker.start))
+            .filter(|&marker| {
+                let next = self.dirty.partition_point(|dirty| dirty.end < marker);
+                self.dirty
+                    .get(next)
+                    .is_none_or(|dirty| dirty.start > marker)
+            })
     }
 }
