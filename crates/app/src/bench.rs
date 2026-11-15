@@ -2,7 +2,7 @@
 
 use gpui::{TextStyle, Window, px};
 use inkra_editor::HeardLayer;
-use inkra_highlight::{Batch, batch, dirty};
+use inkra_highlight::{Batch, batch};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -38,7 +38,7 @@ impl Typing {
         let markdown = parse(buffer.text());
         let mut syntax = [HeardLayer::new(buffer.edit_mark())];
         if colours {
-            let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[], None);
+            let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
             syntax[0].land(&buffer, lexed.into_iter().map(styled).collect());
         }
         let mut typing = Self {
@@ -59,7 +59,6 @@ impl Typing {
     /// Types `x` at the caret, then parses, and recolours when `colours`, as the editor's listeners do.
     pub fn keystroke(&mut self) {
         self.retired = None;
-        let mark = self.buffer.edit_mark();
         let caret = self.caret;
         self.buffer.transact(|txn| txn.insert(caret, "x"));
         self.caret = caret + 1;
@@ -70,8 +69,7 @@ impl Typing {
         let [syntax] = &mut self.syntax;
         syntax.catch_up(&self.buffer);
         let held: Vec<_> = syntax.layer().chunks().collect();
-        let dirty = self.buffer.edits_since(mark).and_then(dirty);
-        let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held, dirty);
+        let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
         let lexed = lexed.into_iter().map(styled).collect();
         syntax.publish(&self.buffer, clear, lexed, self.buffer.edit_mark());
     }
