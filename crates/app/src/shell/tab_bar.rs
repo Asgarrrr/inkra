@@ -88,7 +88,7 @@ impl AppShell {
     }
 
     /// The view each tab holds; `None` for a note's or an empty tab.
-    fn tab_views(&self, group: GroupId) -> impl Iterator<Item = Option<ViewId>> + '_ {
+    fn tab_view_ids(&self, group: GroupId) -> impl Iterator<Item = Option<ViewId>> + '_ {
         self.group(group).tab_views().map(|(_, view)| view)
     }
 
@@ -96,7 +96,7 @@ impl AppShell {
     pub(super) fn tab_titles(&self, group: GroupId, cx: &App) -> Vec<SharedString> {
         let notes = self.notes.read(cx);
         self.tab_files(group)
-            .zip(self.tab_views(group))
+            .zip(self.tab_view_ids(group))
             .map(|(file, view)| match view {
                 Some(view) => {
                     let title = self.pane(view).map(|pane| pane.title);
@@ -130,7 +130,7 @@ impl AppShell {
             })
             .collect();
         let panes: Vec<_> = self
-            .tab_views(group)
+            .tab_view_ids(group)
             .map(|view| view.and_then(|view| self.pane(view)))
             .collect();
         let tabs: Vec<_> = self
