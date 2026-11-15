@@ -115,6 +115,19 @@ fn a_block_at_the_block_limit_is_lexed() {
     assert_eq!(marks[0], (r(8, 11), TokenClass::Keyword));
 }
 
+/// The limit counts the block's own bytes, not its end offset.
+#[test]
+fn a_small_block_ending_past_the_block_limit_is_lexed() {
+    let text = format!("{}\n\n```rust\nlet\n```\n", "x".repeat(BLOCK_LIMIT));
+    let markdown = parse(&text);
+
+    let batch = batch(&text, &markdown, &[]);
+
+    let (range, _, marks) = &batch.lexed[0];
+    assert!(range.end.get() > BLOCK_LIMIT);
+    assert_eq!(marks.len(), 1);
+}
+
 #[test]
 fn block_marks_are_the_tokens_of_its_content_lines() {
     let text = "> ```rust\n> let\n> ```\n";

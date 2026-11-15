@@ -20,7 +20,8 @@ pub type BlockChunk = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, TokenClas
 pub struct Batch {
     /// Each held chunk that is no block's range, in order (deviation 6).
     pub clear: Vec<Range<ByteOffset>>,
-    /// Each block `plan` lexes, in order.
+    /// The chunk of each block `plan` lexes, in order; empty for an unknown language or a block over
+    /// `BLOCK_LIMIT` (deviation 11).
     pub lexed: Vec<BlockChunk>,
 }
 
