@@ -13,7 +13,7 @@ use crate::editor::layout::{BlockScrolls, DocumentLayout, LayoutInputs, shape_do
 use crate::highlighting::styled;
 use crate::theme::builtin;
 
-/// A note with its layout shaped, its code blocks coloured or not, and a caret that types `x`.
+/// A note with its layout shaped, its code blocks coloured or not, and a caret that types `x` or moves.
 pub struct Typing {
     buffer: Buffer,
     markdown: Rc<Markdown>,
@@ -92,6 +92,13 @@ impl Typing {
         if let Some(moved) = published {
             self.log.bump(self.log.revision() + 1, moved);
         }
+    }
+
+    /// Moves the caret to byte `caret`, as a click does, and returns the byte it left. The text, the
+    /// parse and the colours stay.
+    pub fn move_caret(&mut self, caret: usize) -> usize {
+        self.retired = None;
+        std::mem::replace(&mut self.caret, ByteOffset::new(caret)).get()
     }
 
     /// Lays the note out from the previous layout, as a keystroke's frame does; from scratch at first.
