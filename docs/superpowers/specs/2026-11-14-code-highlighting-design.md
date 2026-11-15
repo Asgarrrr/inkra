@@ -258,6 +258,9 @@ On each `TextChange`, the listener computes a dirty range:
 - `Lost`, and `Opened { fresh: false }` (D8): the whole text;
 - `Opened { fresh: true }` (D8): no range.
 
+Deviation 10 takes the range out of `plan`: S2a reads none, and S2b's
+`batch` reads it again for D10's split.
+
 It then calls `batch` (deviation 9), which calls one pure function, in
 `inkra-highlight` (`plan.rs`):
 
@@ -353,8 +356,8 @@ text is still at that edit mark and the layer was not lost since
 - `Opened { fresh: true }`: the landed chunks are current. D7 runs with no
   dirty range, which lexes only the blocks the open did not reach.
 - `Opened { fresh: false }`: the text moved before the first hearing, and no splice says
-  where. The landed chunks may be stale, and some may lie on prose now. D7
-  runs with the whole text dirty, which clears those on prose. It relexes
+  where. The landed chunks may be stale, and some may lie on prose now. Plan's
+  **clear** removes those on prose (deviation 6). It relexes
   every block the edits left inexact; the core already mapped the landed
   chunks through those edits (deviation 10).
   This happens to a restored inactive tab: it hears its changes only when a
@@ -390,16 +393,17 @@ budget is 1 ms; the listener's 2 ms log line is the decoration layer's (D11).
 `cargo bench -p inkra-highlight --bench listener` measures the listener's pure
 part, lex and publish together (deviation 5), in two worse cases: one block of
 the size, and 1,000 blocks of 512 bytes with the first blocks that add up to the
-size dirty. It measured these medians on 2026-11-15:
+size held inexact: the same marks under another tag (deviation 10). The
+many-blocks column was re-measured in S2a with that setup. It measured these medians on 2026-11-15:
 
 | Bytes   | One block | Many blocks |
 | ------- | --------- | ----------- |
-| 4 KiB   | 15.0 us   | 28.6 us     |
-| 8 KiB   | 36.0 us   | 49.8 us     |
-| 16 KiB  | 74.7 us   | 96.2 us     |
-| 32 KiB  | 154.7 us  | 187.5 us    |
-| 64 KiB  | 313.7 us  | 366.8 us    |
-| 128 KiB | 638.9 us  | 719.5 us    |
+| 4 KiB   | 15.0 us   | 29.2 us     |
+| 8 KiB   | 36.0 us   | 51.8 us     |
+| 16 KiB  | 74.7 us   | 99.7 us     |
+| 32 KiB  | 154.7 us  | 194.4 us    |
+| 64 KiB  | 313.7 us  | 378.8 us    |
+| 128 KiB | 638.9 us  | 743.7 us    |
 
 The budget is the largest size where the worse of the two is at most 0.5 ms:
 64 KiB, at 366.8 us. It is also the 2026-11-11 spec's main-thread bound. The
@@ -520,11 +524,11 @@ fence indents, info words, quote prefixes and undo. After each edit, it runs D7 
 the plan. Then the layer's marks must equal a fresh colouring of the current
 text.
 
-From S2b the model drains `pending` as D10 does, through `backlog` and
-`lex_backlog`. A step lands a backlog at once, or holds it across later edits
-and lands it at its old edit mark, then runs `batch` with no dirty range, as
-D10's landing does. Every hearing runs with no dirty range too, so exactness
-alone must carry the invariant (deviation 10). The notes include blocks with
+From S2a every hearing runs with no dirty range, so exactness alone must
+carry the invariant (deviation 10). From S2b the model drains `pending` as
+D10 does, through `backlog` and `lex_backlog`. A step lands a backlog at once,
+or holds it across later edits and lands it at its old edit mark, then runs
+`batch` with no dirty range, as D10's landing does. The notes include blocks with
 no content. At the end of each case, and after any step the generator picks,
 the model drains with no edit. Each landing must land at least one block, and
 the drain must end within one landing per pending block. Then the marks must
@@ -805,17 +809,18 @@ number.
    index reaches it without a search; a range would need one per block.
 2. **The splices fold in a pure `inkra_highlight::dirty`, beside `plan`, not
    in the listener.** The model test and the listener bench then fold the same
-   way, and mutants reach the fold. A pure deletion folds to an empty range at
+   way, and mutants reach the fold. From S2a only its unit test calls it;
+   S2b's listener calls it again (deviation 10). A pure deletion folds to an empty range at
    its offset; `plan`'s meets counts touching, so it still relexes a block it
    touches.
 3. **`content_lines` lives in `inkra-markdown`, not in `app`.** The model test
    (D12) and the listener then read the same content lines from one function.
    A copy in the test could drift from the app's.
-4. **The model test emulates the core's `Heard`.** `Lost` is a clear and a
-   whole dirty range, because the splice log drops edits only past a bound a
-   short run never reaches. `Opened { fresh: false }` is edits, then a whole
-   dirty range. `Opened { fresh: true }` is a fresh layer seeded with the first
-   k blocks, then no dirty range.
+4. **The model test emulates the core's `Heard`.** `Lost` is a clear, then a
+   hearing, because the splice log drops edits only past a bound a short run
+   never reaches. A hearing reads no dirty range (deviation 10), so
+   `Opened { fresh: false }` is a plain edit step. `Opened { fresh: true }` is
+   a fresh layer seeded with the first k blocks, then a hearing.
 5. **The listener bench measures the pure part, not the gpui glue.** It runs
    `catch_up`, `chunks`, `plan`, the lex and `publish` on a `Layer` in
    `inkra-highlight`. It does not measure `parses::parsed`'s cache lookup,
@@ -869,13 +874,13 @@ number.
    `inkra-markdown`.** The listener, the model test (D12) and the listener
    bench each built the block list, called `plan`, read the content lines and
    lexed the blocks, in three copies. So the model test and the bench did not
-   run the code that ships. `batch(text, &Markdown, held, dirty)` now returns
+   run the code that ships. `batch(text, &Markdown, held)` now returns
    the clears and the lexed block chunks, and `block_marks` lexes one block
    over its content lines. `open_chunks` takes the text and the deadline, and
    parses inside, with the same `OPEN_PARSE_LIMIT` check and the same deadline
    check before each block. `plan` is crate-private: `batch` is its one
-   caller. The app keeps the dirty range of D7, the map from `TokenClass` to
-   `ColorToken` and the publish. D3 already read the content lines from the
+   caller. The app keeps the map from `TokenClass` to `ColorToken` and the
+   publish; the dirty range returns to `batch` in S2b (deviation 10). D3 already read the content lines from the
    parse, and `inkra-app` already depends on `inkra-markdown`, so the edge
    adds no crate to the app's build. D1's objections still hold.
 10. **`lex` holds the blocks no held chunk has exactly; the dirty range only
