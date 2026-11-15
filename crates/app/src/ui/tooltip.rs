@@ -3,8 +3,7 @@ use gpui::{
     SharedString, Styled, Window, div,
 };
 
-use super::{Label, LabelSize, UiText};
-use crate::theme;
+use super::{Elevation, Label, LabelSize, UiText, elevated};
 
 /// A hover's name for a control with no text.
 pub(crate) struct Tooltip {
@@ -22,7 +21,6 @@ impl Tooltip {
 
 impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::current(cx).colors;
         let text = self.text.clone();
         // Drawn at the window's root, so it inherits no text style; the inset keeps it off the pointer, as Zed's.
         div()
@@ -31,14 +29,7 @@ impl Render for Tooltip {
             .pl_2()
             .pt_2p5()
             .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .bg(colors.elevated_background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded(theme::ELEVATED_RADIUS)
-                    .shadow_md()
+                elevated(div().px_2().py_1(), Elevation::Hover, cx)
                     .child(Label::new(self.text.clone()).size(LabelSize::Small)),
             )
     }
