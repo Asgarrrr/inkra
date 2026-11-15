@@ -166,6 +166,20 @@ fn an_unreadable_image_shows_the_message(cx: &mut TestAppContext) {
     vault.check();
 }
 
+/// The failure is about its path: a vault change that leaves the path alone reads nothing.
+#[gpui::test]
+fn an_unreadable_image_is_not_read_again_when_another_file_changes(cx: &mut TestAppContext) {
+    let mut vault = vault(cx, b"not an image".to_vec());
+    vault.click_photo();
+
+    vault.fs.insert_file("/vault/b.md", "beta");
+    vault.cx.run_until_parked();
+
+    assert_eq!(vault.reads(), 1);
+    assert!(vault.drawn("image-failed"));
+    vault.check();
+}
+
 #[gpui::test]
 fn an_image_no_group_shows_is_evicted_from_the_atlas(cx: &mut TestAppContext) {
     let mut vault = vault(cx, png(40, 30));

@@ -143,7 +143,7 @@ impl Store {
             images.slot(id).map(|slot| match slot {
                 Slot::Loading { .. } => "loading",
                 Slot::Ready(_) => "ready",
-                Slot::Failed => "failed",
+                Slot::Failed(_) => "failed",
             })
         })
     }

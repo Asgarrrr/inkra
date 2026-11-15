@@ -151,12 +151,17 @@ impl AppShell {
         }
     }
 
-    /// A load failed against an older vault may find its file in this one, after a folder's rename.
+    /// Reads again each shown image that failed at a path its id no longer has, after a folder's
+    /// rename.
     pub(super) fn retry_failed_images(&self, cx: &mut Context<Self>) {
         let Some(panes) = &self.panes else {
             return;
         };
-        panes.images.update(cx, |images, _| images.forget_failed());
+        let notes = self.notes.clone();
+        panes.images.update(cx, |images, cx| {
+            let notes = notes.read(cx);
+            images.forget_moved(|id| notes.path_of(id, cx));
+        });
         for id in self.shown_images() {
             self.want_image(id, cx);
         }
@@ -174,7 +179,7 @@ impl AppShell {
                 .size_full()
                 .debug_selector(|| "image-view".into())
                 .into_any_element(),
-            Some(Slot::Failed) => div()
+            Some(Slot::Failed(_)) => div()
                 .size_full()
                 .flex()
                 .items_center()

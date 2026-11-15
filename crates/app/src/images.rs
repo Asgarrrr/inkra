@@ -30,7 +30,8 @@ pub(crate) enum Slot {
         _load: Task<()>,
     },
     Ready(Arc<RenderImage>),
-    Failed,
+    /// The path the read failed at; `None` when no path was safe.
+    Failed(Option<PathBuf>),
 }
 
 impl Images {
@@ -59,11 +60,11 @@ impl Images {
                     Some((_, Ok(image))) => Slot::Ready(Arc::new(image)),
                     Some((path, Err(error))) => {
                         log::warn!("image {}: {error}", path.display());
-                        Slot::Failed
+                        Slot::Failed(Some(path))
                     }
                     None => {
                         log::warn!("image {id:?}: no path to read");
-                        Slot::Failed
+                        Slot::Failed(None)
                     }
                 };
                 cx.notify();
@@ -72,9 +73,13 @@ impl Images {
         self.slots.insert(id, Slot::Loading { _load: task });
     }
 
-    /// Drops every failed slot, so the next `want` of its id reads again.
-    pub(crate) fn forget_failed(&mut self) {
-        self.slots.retain(|_, slot| !matches!(slot, Slot::Failed));
+    /// Drops each failed slot whose path is no longer `path_of` its id, so the next `want` reads
+    /// the new path.
+    pub(crate) fn forget_moved(&mut self, path_of: impl Fn(EntryId) -> Option<PathBuf>) {
+        self.slots.retain(|&id, slot| match slot {
+            Slot::Failed(failed) => *failed == path_of(id),
+            Slot::Loading { .. } | Slot::Ready(_) => true,
+        });
     }
 
     pub(crate) fn slot(&self, id: EntryId) -> Option<&Slot> {

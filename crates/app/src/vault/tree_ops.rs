@@ -67,7 +67,7 @@ impl NoteStore {
     }
 
     /// A None move means no path is safe; callers skip.
-    pub(super) fn path_of(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
+    pub(crate) fn path_of(&self, id: EntryId, cx: &App) -> Option<PathBuf> {
         self.moves.resolve(id, self.vault.as_ref()?.read(cx))
     }
 
