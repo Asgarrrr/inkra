@@ -1,0 +1,305 @@
+//! The oracle: a layout carried through any steps matches a fresh one (incremental layout spec, D10).
+
+use std::cell::RefCell;
+use std::ops::Range;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{Pixels, TestAppContext, Window, px};
+use inkra_text::{Buffer, ByteOffset};
+use proptest::prelude::*;
+use proptest::sample::Index;
+use proptest::test_runner::{Config, TestCaseError, TestRunner};
+
+use super::line::Placed;
+use super::{BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document};
+use crate::decorations::Drawn;
+use crate::theme::{Appearance, Theme, builtin};
+
+const TOKENS: &[&str] = &[
+    "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",
+    "## ", "===", "---", "*", "**", "_", "[[", "]]", "[l](u)", "#h", "- [ ] ", "- [x] ", "- ",
+    "    ", "\t", "é", "日",
+];
+
+fn markdown(max: usize) -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(TOKENS), 0..max).prop_map(|tokens| tokens.concat())
+}
+
+/// A splice in the text it lands on: a start, whether it moves to its line's start, where block
+/// markers change, a removed length past it, the inserted text.
+type Edit = (Index, bool, usize, String);
+
+fn edit() -> impl Strategy<Value = Edit> {
+    (any::<Index>(), any::<bool>(), 0..8usize, markdown(4))
+}
+
+#[derive(Debug, Clone)]
+enum Step {
+    Splice(Edit),
+    /// Several hunks reach the buffer as one `apply_diff`, as a reload does.
+    Diff(Vec<Edit>),
+    /// Several splices in one transaction, so its undo or redo is a batch.
+    Group(Vec<Edit>),
+    Undo,
+    Redo,
+    /// A composition: the inserted text stays marked.
+    Compose(Edit),
+    /// `unmark_text`, or a restore's `reset_state`: both drop the composition.
+    Unmark,
+    Wrap(Option<f32>),
+    Margin,
+    CodeBlockWrap,
+    Theme,
+}
+
+fn step() -> impl Strategy<Value = Step> {
+    prop_oneof![
+        6 => edit().prop_map(Step::Splice),
+        2 => prop::collection::vec(edit(), 2..5).prop_map(Step::Diff),
+        2 => prop::collection::vec(edit(), 2..5).prop_map(Step::Group),
+        2 => Just(Step::Undo),
+        1 => Just(Step::Redo),
+        2 => edit().prop_map(Step::Compose),
+        1 => Just(Step::Unmark),
+        1 => prop::sample::select(vec![None, Some(120.), Some(300.)]).prop_map(Step::Wrap),
+        1 => Just(Step::Margin),
+        1 => Just(Step::CodeBlockWrap),
+        1 => Just(Step::Theme),
+    ]
+}
+
+/// The edit as a byte range and its text, on char boundaries of `text`.
+fn resolve(
+    text: &str,
+    (start, line_start, removed, inserted): &Edit,
+) -> (Range<ByteOffset>, String) {
+    let floor = |mut offset: usize| {
+        offset = offset.min(text.len());
+        while !text.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        offset
+    };
+    let mut start = floor(start.index(text.len() + 1));
+    if *line_start {
+        start = text[..start].rfind('\n').map_or(0, |newline| newline + 1);
+    }
+    let end = floor(start + removed).max(start);
+    (
+        ByteOffset::new(start)..ByteOffset::new(end),
+        inserted.clone(),
+    )
+}
+
+/// Each edit resolved against the text the ones before it leave, and that final text.
+fn resolve_all(text: &str, edits: &[Edit]) -> (Vec<(Range<ByteOffset>, String)>, String) {
+    let mut text = text.to_owned();
+    let resolved = edits
+        .iter()
+        .map(|edit| {
+            let (range, inserted) = resolve(&text, edit);
+            text.replace_range(range.start.get()..range.end.get(), &inserted);
+            (range, inserted)
+        })
+        .collect();
+    (resolved, text)
+}
+
+/// Every layout input a step can change, beside the buffer.
+struct Inputs {
+    marked: Option<Range<ByteOffset>>,
+    wrap_width: Option<Pixels>,
+    margin: Pixels,
+    code_block_wrap: bool,
+    theme: &'static Arc<Theme>,
+}
+
+impl Inputs {
+    fn apply(&mut self, buffer: &mut Buffer, step: &Step) {
+        match step {
+            Step::Splice(edit) => {
+                let (range, inserted) = resolve(buffer.text(), edit);
+                buffer.transact(|txn| txn.replace(range, &inserted));
+                self.marked = None;
+            }
+            Step::Diff(edits) => {
+                let (_, after) = resolve_all(buffer.text(), edits);
+                let diff = inkra_text::diff(buffer.version(), buffer.text(), &after);
+                assert!(buffer.apply_diff(&diff));
+                self.marked = None;
+            }
+            Step::Group(edits) => {
+                let (resolved, _) = resolve_all(buffer.text(), edits);
+                buffer.transact(|txn| {
+                    for (range, inserted) in resolved {
+                        txn.replace(range, &inserted);
+                    }
+                });
+                self.marked = None;
+            }
+            Step::Undo => {
+                buffer.undo();
+                self.marked = None;
+            }
+            Step::Redo => {
+                buffer.redo();
+                self.marked = None;
+            }
+            Step::Compose(edit) => {
+                let (range, inserted) = resolve(buffer.text(), edit);
+                let start = range.start;
+                buffer.transact(|txn| txn.replace(range, &inserted));
+                self.marked = (!inserted.is_empty()).then_some(start..start + inserted.len());
+            }
+            Step::Unmark => self.marked = None,
+            Step::Wrap(width) => self.wrap_width = width.map(px),
+            Step::Margin => {
+                self.margin = if self.margin == px(76.) {
+                    px(20.)
+                } else {
+                    px(76.)
+                };
+            }
+            Step::CodeBlockWrap => self.code_block_wrap = !self.code_block_wrap,
+            Step::Theme => {
+                let light = builtin::of(Appearance::Light);
+                self.theme = if Arc::ptr_eq(self.theme, light) {
+                    builtin::dark()
+                } else {
+                    light
+                };
+            }
+        }
+    }
+
+    fn layout(
+        &self,
+        buffer: &Buffer,
+        previous: Option<&DocumentLayout>,
+        window: &mut Window,
+    ) -> DocumentLayout {
+        let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
+        let style = window.text_style();
+        let inputs = LayoutInputs {
+            buffer,
+            markdown: &markdown,
+            selection: &(ByteOffset::default()..ByteOffset::default()),
+            marked: self.marked.as_ref(),
+            style: &style,
+            wrap_width: self.wrap_width,
+            margin: self.margin,
+            code_block_wrap: self.code_block_wrap,
+            theme: self.theme,
+            scrolls: &BlockScrolls::default(),
+            decorations: Drawn::default(),
+        };
+        shape_document(&inputs, previous, window)
+    }
+}
+
+fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
+    let at = carried.start;
+    prop_assert_eq!(carried.start, fresh.start);
+    prop_assert_eq!(carried.top, fresh.top, "top at {}", at);
+    prop_assert_eq!(carried.first_row, fresh.first_row, "first row at {}", at);
+    prop_assert_eq!(carried.block, fresh.block, "block at {}", at);
+    let (carried, fresh) = (&*carried.line, &*fresh.line);
+    prop_assert_eq!(carried.len, fresh.len, "len at {}", at);
+    prop_assert_eq!(carried.row_height, fresh.row_height, "row height at {}", at);
+    let rows = |line: &super::LineLayout| {
+        let rows = line.rows.iter();
+        rows.map(|row| (row.start, row.caret_end, row.start_x))
+            .collect::<Vec<_>>()
+    };
+    prop_assert_eq!(rows(carried), rows(fresh), "rows at {}", at);
+    prop_assert_eq!(
+        format!("{:?}", carried.display),
+        format!("{:?}", fresh.display),
+        "display at {}",
+        at
+    );
+    let prefix = |line: &super::LineLayout| {
+        line.prefix.as_ref().map(|prefix| {
+            let shown = prefix
+                .shown()
+                .map(|(shaped, x)| (shaped.text.to_string(), x));
+            (
+                prefix.range().clone(),
+                prefix.indent(),
+                prefix.bars().to_vec(),
+                shown,
+            )
+        })
+    };
+    prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);
+    let label = |line: &super::LineLayout| line.label.as_ref().map(|label| label.text.to_string());
+    prop_assert_eq!(label(carried), label(fresh), "label at {}", at);
+    prop_assert!(carried.shape.same_args(&fresh.shape), "shape at {}", at);
+    Ok(())
+}
+
+fn assert_same(carried: &DocumentLayout, fresh: &DocumentLayout) -> Result<(), TestCaseError> {
+    prop_assert_eq!(carried.lines.len(), fresh.lines.len());
+    for (carried, fresh) in carried.lines.iter().zip(&fresh.lines) {
+        assert_line(carried, fresh)?;
+    }
+    prop_assert_eq!(carried.row_count, fresh.row_count);
+    prop_assert_eq!(carried.height, fresh.height);
+    prop_assert_eq!(&carried.bars, &fresh.bars);
+    let blocks = |layout: &DocumentLayout| {
+        let blocks = layout.code_blocks.iter().map(|block| {
+            let label = block.label.as_ref();
+            let label = label.map(|(at, shaped)| (*at, shaped.text.to_string()));
+            (block.start, block.max, block.background, label)
+        });
+        blocks.collect::<Vec<_>>()
+    };
+    prop_assert_eq!(blocks(carried), blocks(fresh));
+    Ok(())
+}
+
+fn check(text: &str, steps: &[Step], window: &mut Window) -> Result<(), TestCaseError> {
+    let mut buffer = Buffer::new(text);
+    let mut inputs = Inputs {
+        marked: None,
+        wrap_width: None,
+        margin: px(76.),
+        code_block_wrap: false,
+        theme: builtin::dark(),
+    };
+    let mut layout = inputs.layout(&buffer, None, window);
+    for step in steps {
+        inputs.apply(&mut buffer, step);
+        layout = inputs.layout(&buffer, Some(&layout), window);
+        assert_same(&layout, &inputs.layout(&buffer, None, window))?;
+        // Nothing changed since, so every line carries, after a flip too.
+        let before = line_build_count();
+        let again = inputs.layout(&buffer, Some(&layout), window);
+        if inputs.marked.is_none() {
+            prop_assert_eq!(line_build_count() - before, 0, "after {:?}", step);
+        }
+        assert_same(&again, &layout)?;
+    }
+    Ok(())
+}
+
+#[gpui::test]
+fn a_carried_layout_matches_a_fresh_one(cx: &mut TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.update(|window, _| {
+        let window = RefCell::new(window);
+        let config = Config {
+            cases: 2048,
+            source_file: Some(file!()),
+            ..Config::default()
+        };
+        let strategy = (markdown(48), prop::collection::vec(step(), 1..10));
+        let result = TestRunner::new(config).run(&strategy, |(text, steps)| {
+            check(&text, &steps, &mut window.borrow_mut())
+        });
+        if let Err(failure) = result {
+            panic!("{failure}");
+        }
+    });
+}

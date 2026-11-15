@@ -69,6 +69,11 @@ impl LineShape {
             && self.text.as_ref() == text
             && self.runs == runs
     }
+
+    #[cfg(test)]
+    pub(super) fn same_args(&self, other: &Self) -> bool {
+        other.shaped_from(&self.text, self.font_size, &self.runs, self.wrap)
+    }
 }
 
 /// Holds nothing an edit above the line can move, so a later layout carries it whole.
