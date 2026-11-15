@@ -4,6 +4,8 @@
 mod app_files;
 mod background;
 mod backlinks;
+#[cfg(feature = "bench")]
+pub mod bench;
 mod bootstrap;
 mod buffer_events;
 mod command_palette;
