@@ -527,7 +527,7 @@ light. The look is tuned after it ships, as for code blocks.
 | Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B | `stat -f %z` on the release binary, `main` against each slice |
 | Lex, Rust | S1a medians: 1.71 us for 20 lines (923 B), 54.7 us for 500 lines (16.1 KB), 646 us for 5,000 lines (169 KB) | `cargo bench -p inkra-highlight -- --quick`, the texts of the 2026-11-11 tree-sitter figures |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
-| Keystroke outside a block | D7's merge; no lex | `app` count test |
+| Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
 | Opening a note | the lex shares decoration layer D8's 8 ms deadline | the open-time test; the launch figure |
 | Memory | marks only, no trees: about 3.4 times the block text (D10) | — |
