@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::anchor::AnchorState;
 use crate::offset::{ByteOffset, Utf16Offset};
@@ -28,7 +29,11 @@ pub struct Buffer {
     /// The last conversion's answer; the next walks only from here.
     utf16: Cell<(ByteOffset, Utf16Offset)>,
     log: SpliceLog,
+    id: u64,
 }
+
+/// The next `Buffer::id`; every buffer counts its edit marks from zero, so a mark alone cannot tell two apart.
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 impl Buffer {
     pub fn new(text: impl Into<String>) -> Self {
@@ -41,7 +46,14 @@ impl Buffer {
             anchors: Vec::new(),
             utf16: Cell::new((ByteOffset::default(), Utf16Offset::default())),
             log: SpliceLog::default(),
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         }
+    }
+
+    /// Unique in the process: `Buffer` is not `Clone`, so no two buffers share one.
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     #[must_use]
