@@ -207,7 +207,9 @@ impl Inputs {
         let decorations = decorations::drawn(buffer, cx);
         let buffer = buffer.read(cx);
         let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
-        let style = window.text_style();
+        let mut style = window.text_style();
+        // Off `CODE_BLOCK_TEXT_SIZE`, so a line that leaves or joins a block changes its shape.
+        style.font_size = px(14.).into();
         let inputs = LayoutInputs {
             buffer,
             markdown: &markdown,
