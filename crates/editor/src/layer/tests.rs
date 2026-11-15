@@ -30,17 +30,18 @@ fn publish(
     buffer: &Buffer,
     chunk: Range<usize>,
     marks: &[(Range<usize>, char)],
-) -> Result<bool, Lost> {
+) -> Result<Option<Range<usize>>, Lost> {
     let marks = marks
         .iter()
         .map(|(range, style)| (span(range.clone()), *style))
         .collect();
-    layer.publish(
+    let published = layer.publish(
         buffer,
         Vec::new(),
         vec![(span(chunk), 0, marks)],
         buffer.edit_mark(),
-    )
+    );
+    published.map(|range| range.map(|range| range.start.get()..range.end.get()))
 }
 
 fn twenty() -> Buffer {
@@ -52,11 +53,11 @@ fn a_publish_replaces_the_marks_inside_its_chunk_only() {
     let buffer = twenty();
     let mut layer = Layer::new(buffer.edit_mark());
     let first = [(2..4, 'a'), (6..9, 'b'), (12..15, 'c')];
-    assert_eq!(publish(&mut layer, &buffer, 0..20, &first), Ok(true));
+    assert_eq!(publish(&mut layer, &buffer, 0..20, &first), Ok(Some(2..15)));
 
     assert_eq!(
         publish(&mut layer, &buffer, 5..10, &[(7..8, 'd')]),
-        Ok(true)
+        Ok(Some(6..9))
     );
 
     assert_eq!(
@@ -70,9 +71,94 @@ fn an_identical_publish_changes_nothing() {
     let buffer = twenty();
     let mut layer = Layer::new(buffer.edit_mark());
     let marks = [(2..4, 'a'), (6..9, 'b')];
-    assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(true));
+    assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(Some(2..9)));
 
-    assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(false));
+    assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(None));
+}
+
+#[test]
+fn a_publish_spans_only_the_marks_that_differ() {
+    let first = [(1..3, 'a'), (5..7, 'b'), (9..11, 'c'), (13..15, 'd')];
+    for (second, recoloured) in [
+        (
+            [(1..3, 'a'), (5..7, 'x'), (9..11, 'c'), (13..15, 'd')],
+            5..7,
+        ),
+        (
+            [(1..3, 'a'), (5..8, 'b'), (9..11, 'c'), (13..15, 'd')],
+            5..8,
+        ),
+        (
+            [(1..3, 'a'), (5..7, 'b'), (9..10, 'c'), (13..15, 'd')],
+            9..11,
+        ),
+        (
+            [(0..3, 'a'), (5..7, 'b'), (9..11, 'c'), (13..15, 'd')],
+            0..3,
+        ),
+        (
+            [(1..3, 'a'), (5..7, 'b'), (9..11, 'c'), (13..16, 'd')],
+            13..16,
+        ),
+        (
+            [(1..3, 'x'), (5..7, 'b'), (9..11, 'c'), (13..15, 'x')],
+            1..15,
+        ),
+    ] {
+        let buffer = twenty();
+        let mut layer = Layer::new(buffer.edit_mark());
+        publish(&mut layer, &buffer, 0..20, &first).unwrap();
+
+        let published = publish(&mut layer, &buffer, 0..20, &second);
+
+        assert_eq!(published, Ok(Some(recoloured)), "{second:?}");
+    }
+}
+
+#[test]
+fn a_mark_added_or_dropped_spans_itself() {
+    let first = [(1..3, 'a'), (9..11, 'c')];
+    for (second, recoloured) in [
+        (&[(1..3, 'a'), (5..7, 'b'), (9..11, 'c')][..], 5..7),
+        (&[(9..11, 'c')], 1..3),
+        (&[(1..3, 'a')], 9..11),
+    ] {
+        let buffer = twenty();
+        let mut layer = Layer::new(buffer.edit_mark());
+        publish(&mut layer, &buffer, 0..20, &first).unwrap();
+
+        let published = publish(&mut layer, &buffer, 0..20, second);
+
+        assert_eq!(published, Ok(Some(recoloured)), "{second:?}");
+    }
+}
+
+#[test]
+fn a_batch_spans_every_change_it_made_and_none_it_did_not() {
+    let buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 0..20, &[(1..2, 'a'), (8..9, 'b')]).unwrap();
+    let at = buffer.edit_mark();
+    let chunk = |range: Range<usize>, marks: Vec<(Range<usize>, char)>| {
+        let marks = marks.into_iter().map(|(mark, style)| (span(mark), style));
+        (span(range), 0, marks.collect())
+    };
+
+    let unchanged = layer.publish(
+        &buffer,
+        vec![span(12..14)],
+        vec![chunk(6..10, vec![(8..9, 'b')])],
+        at,
+    );
+    let changed = layer.publish(
+        &buffer,
+        vec![span(0..3)],
+        vec![chunk(15..20, vec![(16..17, 'c')])],
+        at,
+    );
+
+    assert_eq!(unchanged, Ok(None));
+    assert_eq!(changed, Ok(Some(span(1..17))));
 }
 
 #[test]
@@ -217,7 +303,7 @@ fn an_older_publish_beside_a_newer_chunk_lands() {
         old,
     );
 
-    assert_eq!(published, Ok(true));
+    assert_eq!(published, Ok(Some(span(2..4))));
     assert_eq!(marks(&layer, 0..21), [(2..4, 'a'), (12..15, 'b')]);
 }
 
@@ -237,7 +323,7 @@ fn an_older_publish_over_a_newer_chunk_fills_around_it() {
         old,
     );
 
-    assert_eq!(published, Ok(true));
+    assert_eq!(published, Ok(Some(span(2..16))));
     assert_eq!(chunks(&layer), [0..8, 8..12, 12..20]);
     assert_eq!(
         marks(&layer, 0..21),
@@ -284,7 +370,7 @@ fn a_removal_leaves_no_chunk_inside_its_range_and_cuts_the_ones_it_reaches() {
 
     assert_eq!(
         layer.publish(&buffer, vec![span(4..14)], Vec::new(), buffer.edit_mark()),
-        Ok(true)
+        Ok(Some(span(4..14)))
     );
 
     assert_eq!(chunks(&layer), [0..4, 14..18]);
@@ -299,7 +385,7 @@ fn removing_a_chunk_without_marks_changes_no_mark() {
 
     assert_eq!(
         layer.publish(&buffer, vec![span(8..10)], Vec::new(), buffer.edit_mark()),
-        Ok(false)
+        Ok(None)
     );
 
     assert!(layer.is_empty());
@@ -317,7 +403,7 @@ fn a_late_removal_lands_where_its_range_moved_and_keeps_a_newer_chunk() {
 
     assert_eq!(
         layer.publish(&buffer, vec![span(8..16)], Vec::new(), old),
-        Ok(true)
+        Ok(Some(span(11..12)))
     );
 
     assert_eq!(chunks(&layer), [5..9, 14..16]);

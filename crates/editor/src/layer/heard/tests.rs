@@ -116,3 +116,30 @@ fn catch_up_past_the_log_is_lost_and_clears_the_layer() {
     assert!(layer.layer().is_empty());
     assert_eq!(layer.catch_up(&buffer), Ok(false));
 }
+
+#[test]
+fn a_publish_returns_the_range_it_recoloured() {
+    let buffer = Buffer::new("abcdef");
+    let mut layer = HeardLayer::new(buffer.edit_mark());
+    layer.land(&buffer, marked());
+    let recoloured = vec![(
+        at(0)..at(6),
+        0,
+        vec![(at(0)..at(1), 'a'), (at(4)..at(5), 'b')],
+    )];
+
+    let published = layer.publish(&buffer, Vec::new(), recoloured.clone(), buffer.edit_mark());
+    let again = layer.publish(&buffer, Vec::new(), recoloured, buffer.edit_mark());
+
+    assert_eq!(published, Ok(Some(at(4)..at(5))));
+    assert_eq!(again, Ok(None));
+}
+
+#[test]
+fn landing_the_marks_held_reports_no_change() {
+    let buffer = Buffer::new("abc");
+    let mut layer = HeardLayer::new(buffer.edit_mark());
+
+    assert!(layer.land(&buffer, marked()));
+    assert!(!layer.land(&buffer, marked()));
+}

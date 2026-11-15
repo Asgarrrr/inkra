@@ -29,7 +29,7 @@ fn layered() -> (Buffer, Layer<u8>) {
         })
         .collect();
     let published = layer.publish(&buffer, Vec::new(), chunks, buffer.edit_mark());
-    assert_eq!(published, Ok(true));
+    assert!(matches!(published, Ok(Some(_))));
     (buffer, layer)
 }
 

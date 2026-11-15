@@ -108,7 +108,25 @@ impl Publish {
         Self::new(buffer, 0..buffer.text().len(), chunk)
     }
 
-    fn deliver(self, layer: &mut Layer<u8>, buffer: &Buffer) -> Result<bool, Lost> {
+    /// Delivers the chunk, or with `removal`, empties its range.
+    fn land(
+        self,
+        layer: &mut Layer<u8>,
+        buffer: &Buffer,
+        removal: bool,
+    ) -> Result<Option<Range<ByteOffset>>, Lost> {
+        if removal {
+            layer.publish(buffer, vec![span(self.chunk)], Vec::new(), self.at)
+        } else {
+            self.deliver(layer, buffer)
+        }
+    }
+
+    fn deliver(
+        self,
+        layer: &mut Layer<u8>,
+        buffer: &Buffer,
+    ) -> Result<Option<Range<ByteOffset>>, Lost> {
         let chunk = (span(self.chunk), 0, self.marks);
         layer.publish(buffer, Vec::new(), vec![chunk], self.at)
     }
@@ -150,10 +168,7 @@ fn tags(layer: &Layer<u8>) -> Vec<(Range<ByteOffset>, Option<u64>)> {
 }
 
 fn marks(layer: &Layer<u8>, buffer: &Buffer) -> Vec<(Range<usize>, u8)> {
-    layer
-        .marks_in(span(0..buffer.text().len()))
-        .map(|(range, &style)| (range.start.get()..range.end.get(), style))
-        .collect()
+    marks_in(layer, 0..buffer.text().len())
 }
 
 /// Each byte's style, `None` where no mark covers it.
@@ -176,6 +191,43 @@ fn provenance(splices: impl Iterator<Item = Splice>, old_len: usize) -> Vec<Opti
         );
     }
     provenance
+}
+
+/// Runs `steps`, publishing at the buffer's edit mark and editing without catching up.
+fn prepare(
+    layer: &mut Layer<u8>,
+    buffer: &mut Buffer,
+    steps: Vec<Step>,
+) -> Result<(), TestCaseError> {
+    for step in steps {
+        match step {
+            Step::Publish(chunk) => {
+                publish(layer, buffer, &chunk)?;
+            }
+            Step::Edit(edits) => edit_all(buffer, &edits),
+        }
+    }
+    Ok(())
+}
+
+fn marks_in(layer: &Layer<u8>, range: Range<usize>) -> Vec<(Range<usize>, u8)> {
+    layer
+        .marks_in(span(range))
+        .map(|(range, &style)| (range.start.get()..range.end.get(), style))
+        .collect()
+}
+
+/// From the first to the last mark in one list and not the other, `None` when they hold the same.
+fn differing(before: &[(Range<usize>, u8)], after: &[(Range<usize>, u8)]) -> Option<Range<usize>> {
+    let only: Vec<_> = before
+        .iter()
+        .filter(|mark| !after.contains(mark))
+        .chain(after.iter().filter(|mark| !before.contains(mark)))
+        .map(|(mark, _)| mark.clone())
+        .collect();
+    let start = only.iter().map(|mark| mark.start).min()?;
+    let end = only.iter().map(|mark| mark.end).max()?;
+    Some(start..end)
 }
 
 proptest! {
@@ -383,6 +435,60 @@ proptest! {
         prop_assert_eq!(marks(&layer, &buffer), marks(&alone, &buffer));
     }
 
+    /// A removal or a chunk, computed at the buffer's edit mark or before edits.
+    #[test]
+    fn a_publish_spans_every_byte_it_recoloured(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        steps in prop::collection::vec(step_strategy(), 0..12),
+        chunk in chunk_strategy(),
+        removal in any::<bool>(),
+        edits in prop::collection::vec(edits_strategy(), 0..3),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let mut layer = Layer::new(buffer.edit_mark());
+        prepare(&mut layer, &mut buffer, steps)?;
+        let text = buffer.text();
+        let computed = Publish::new(&buffer, ordered(text, 0..text.len(), chunk.bounds), &chunk);
+        for edits in &edits {
+            edit_all(&mut buffer, edits);
+        }
+        prop_assert_eq!(layer.catch_up(&buffer), Ok(()));
+        let before = styles(&layer, &buffer);
+
+        let published = computed.land(&mut layer, &buffer, removal);
+
+        prop_assert!(published.is_ok(), "{:?}", published);
+        let range = published.unwrap_or_default().map(|range| range.start.get()..range.end.get());
+        let after = styles(&layer, &buffer);
+        for (byte, (old, new)) in before.iter().zip(&after).enumerate() {
+            let inside = range.as_ref().is_some_and(|range| range.contains(&byte));
+            prop_assert!(old == new || inside, "byte {} outside {:?}", byte, range);
+        }
+    }
+
+    /// Tight: the first and the last mark that differ in the chunk bound it, not the chunk.
+    #[test]
+    fn a_publish_spans_no_mark_it_left_alone(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        steps in prop::collection::vec(step_strategy(), 0..12),
+        chunk in chunk_strategy(),
+        removal in any::<bool>(),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let mut layer = Layer::new(buffer.edit_mark());
+        prepare(&mut layer, &mut buffer, steps)?;
+        prop_assert_eq!(layer.catch_up(&buffer), Ok(()));
+        let text = buffer.text();
+        let computed = Publish::new(&buffer, ordered(text, 0..text.len(), chunk.bounds), &chunk);
+        let range = computed.chunk.clone();
+        let before = marks_in(&layer, range.clone());
+
+        let published = computed.land(&mut layer, &buffer, removal);
+
+        let expected = differing(&before, &marks_in(&layer, range)).map(span);
+        prop_assert_eq!(published, Ok(expected));
+    }
+
     /// Removals first, then chunks, each list in its order, all computed at one edit mark.
     #[test]
     fn a_batch_equals_its_changes_one_at_a_time(
@@ -421,16 +527,17 @@ proptest! {
             edit_all(&mut buffer, edits);
         }
 
-        let mut changed = false;
-        for range in &removed {
-            let published = single.publish(&buffer, vec![range.clone()], Vec::new(), at);
+        let mut changed: Option<Range<ByteOffset>> = None;
+        let removals = removed.iter().map(|range| (vec![range.clone()], Vec::new()));
+        let fills = chunks.iter().map(|chunk| (Vec::new(), vec![chunk.clone()]));
+        for (removed, chunks) in removals.chain(fills) {
+            let published = single.publish(&buffer, removed, chunks, at);
             prop_assert!(published.is_ok(), "{:?}", published);
-            changed |= published == Ok(true);
-        }
-        for chunk in &chunks {
-            let published = single.publish(&buffer, Vec::new(), vec![chunk.clone()], at);
-            prop_assert!(published.is_ok(), "{:?}", published);
-            changed |= published == Ok(true);
+            if let Ok(Some(range)) = published {
+                changed = Some(changed.map_or(range.clone(), |span| {
+                    span.start.min(range.start)..span.end.max(range.end)
+                }));
+            }
         }
         prop_assert_eq!(single.catch_up(&buffer), Ok(()));
         let published = batched.publish(&buffer, removed, chunks, at);

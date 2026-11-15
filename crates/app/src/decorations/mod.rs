@@ -195,10 +195,10 @@ pub(crate) fn publish(
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
-        let recoloured = recolour(&removed, &chunks, at);
-        let moved = match entry.layers[rank].publish(buffer.read(cx), removed, chunks, at) {
-            Ok(false) => return false,
-            Ok(true) => recoloured,
+        let text = buffer.read(cx);
+        let moved = match entry.layers[rank].publish(text, removed, chunks, at) {
+            Ok(None) => return false,
+            Ok(Some(range)) => Moved::Range(text.edit_mark(), range),
             Err(Lost) => Moved::Whole,
         };
         entry.bump(&mut decorations.revisions, moved);
@@ -207,17 +207,6 @@ pub(crate) fn publish(
     if changed {
         cx.refresh_windows();
     }
-}
-
-/// What a publish that changed the marks moved: only marks inside its ranges, mapped from `at`.
-pub(crate) fn recolour(removed: &[Range<ByteOffset>], chunks: &[Chunk], at: EditMark) -> Moved {
-    let ranges = removed
-        .iter()
-        .chain(chunks.iter().map(|(range, _, _)| range));
-    let span = ranges
-        .cloned()
-        .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end));
-    span.map_or(Moved::Whole, |span| Moved::Range(at, span))
 }
 
 /// The chunks `layer` holds over `buffer`, each with its tag, sorted (code highlighting spec, D9
