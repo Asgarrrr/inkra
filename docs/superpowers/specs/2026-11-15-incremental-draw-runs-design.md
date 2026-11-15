@@ -643,6 +643,21 @@ rebuild the whole note on each keystroke, since the decorations revision
 moves (S1b): 12.98 ms, 10.69 ms and 10.17 ms after, against 12.82 ms,
 11.58 ms and 11.24 ms before.
 
+After review, each block's label is an `Rc<ShapedLine>` shared by its line and
+its `BlockLayout`, and `Blocks` sizes its list from the parse. Before, every
+layout cloned each label inline, about 3 KB a block, into a list grown from
+empty. Before is the table's S1a, after is with the shared label, both measured
+in one sitting:
+
+| Case | Before | After | Requested before | Requested after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose, plain | 0.97 ms | 0.59 ms | 7.46 MB | 1.32 MB |
+| One block, type in prose, plain | 0.48 ms | 0.44 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, plain | 2.47 ms | 2.49 ms | 5.59 MB | 5.59 MB |
+| 1000 blocks, type in prose, colours | 11.23 ms | 11.28 ms | 39.70 MB | 30.57 MB |
+| One block, type in prose, colours | 9.65 ms | 9.99 ms | 29.30 MB | 29.29 MB |
+| One block, type in the block, colours | 9.68 ms | 9.63 ms | 29.28 MB | 29.28 MB |
+
 S1a deviations from this spec:
 
 1. `changed(old, new, edit)` takes one `Splice`, the hull of every splice since

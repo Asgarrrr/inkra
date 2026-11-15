@@ -88,7 +88,7 @@ pub(super) struct LineLayout {
     /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
     pub(super) prefix: Option<Prefix>,
     /// The language a block's opening line shows at its right.
-    pub(super) label: Option<Box<ShapedLine>>,
+    pub(super) label: Option<Rc<ShapedLine>>,
 }
 
 // Every keystroke collects one per line, so an inline prefix shape cost milliseconds (incremental layout spec, D4).

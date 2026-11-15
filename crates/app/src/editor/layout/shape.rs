@@ -77,7 +77,7 @@ pub(crate) fn shape_document(
     let mut row_count = 0;
     let mut top = px(0.);
     let mut bars = Vec::new();
-    let mut blocks = Blocks::new(wrap_width);
+    let mut blocks = Blocks::new(wrap_width, markdown.code_blocks.len());
     let mut code_blocks = markdown.code_blocks.as_slice();
     let mut at = 0;
     let mut above_built = false;
@@ -201,7 +201,7 @@ impl Build<'_, '_> {
             .first()
             .map(|gutter| (gutter, &text[..gutter.range.end - range.start]));
         let label = label_text(block, range, text, line_conceals, selection)
-            .map(|label| Box::new(self.labels.shape(label, window)));
+            .map(|label| self.labels.shape(label, window));
         let styles = &mut self.styles;
         let (prefix, text_conceals) = line_prefix(
             gutter,
