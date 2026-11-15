@@ -71,6 +71,51 @@ fn only_the_blocks_no_chunk_matches_are_lexed() {
 }
 
 #[test]
+fn an_unknown_language_block_gets_an_empty_chunk() {
+    let text = "```nope\nlet\n```\n";
+    let markdown = parse(text);
+
+    let batch = batch(text, &markdown, &[]);
+
+    assert_eq!(
+        batch.lexed,
+        [(r(0, 15), markdown.code_blocks[0].shape, vec![])]
+    );
+}
+
+/// A rust block whose range is `len` bytes, fences included: `let`, then an identifier.
+fn rust_block(len: usize) -> String {
+    let fences = "```rust\nlet \n```".len();
+    format!("```rust\nlet {}\n```\n", "x".repeat(len - fences))
+}
+
+#[test]
+fn a_block_over_the_block_limit_gets_an_empty_chunk() {
+    let text = rust_block(BLOCK_LIMIT + 1);
+    let markdown = parse(&text);
+
+    let batch = batch(&text, &markdown, &[]);
+
+    let range = r(0, BLOCK_LIMIT + 1);
+    assert_eq!(
+        batch.lexed,
+        [(range, markdown.code_blocks[0].shape, vec![])]
+    );
+}
+
+#[test]
+fn a_block_at_the_block_limit_is_lexed() {
+    let text = rust_block(BLOCK_LIMIT);
+    let markdown = parse(&text);
+
+    let batch = batch(&text, &markdown, &[]);
+
+    let (range, _, marks) = &batch.lexed[0];
+    assert_eq!(*range, r(0, BLOCK_LIMIT));
+    assert_eq!(marks[0], (r(8, 11), TokenClass::Keyword));
+}
+
+#[test]
 fn block_marks_are_the_tokens_of_its_content_lines() {
     let text = "> ```rust\n> let\n> ```\n";
     let markdown = parse(text);

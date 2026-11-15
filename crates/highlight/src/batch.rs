@@ -9,6 +9,10 @@ use inkra_text::ByteOffset;
 use crate::plan::{Plan, plan};
 use crate::{TokenClass, block_tokens};
 
+/// The longest block, in bytes, fences included, that `batch` lexes; a longer one gets an empty chunk
+/// (D10, deviation 11).
+pub(crate) const BLOCK_LIMIT: usize = 524_288;
+
 /// A code block's range, its shape and its tokens: one block chunk of the syntax layer.
 pub type BlockChunk = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, TokenClass)>);
 
@@ -32,7 +36,14 @@ pub fn batch(text: &str, markdown: &Markdown, held: &[(Range<ByteOffset>, Option
     let Plan { clear, lex } = plan(&blocks, held);
     let lexed = lex
         .into_iter()
-        .map(|index| block_chunk(text, &markdown.spans, &markdown.code_blocks[index]))
+        .map(|index| {
+            let block = &markdown.code_blocks[index];
+            if block.range.end - block.range.start > BLOCK_LIMIT {
+                (block.range.clone(), block.shape, Vec::new())
+            } else {
+                block_chunk(text, &markdown.spans, block)
+            }
+        })
         .collect();
     Batch { clear, lexed }
 }
