@@ -235,14 +235,14 @@ fn a_chunk_past_the_end_panics() {
 }
 
 #[test]
-fn chunks_follow_edits_and_flag_their_marks() {
+fn chunks_follow_edits() {
     let mut buffer = twenty();
     let mut layer = Layer::new(buffer.edit_mark());
     publish(&mut layer, &buffer, 2..6, &[(3..4, 'a')]).unwrap();
     publish(&mut layer, &buffer, 8..12, &[]).unwrap();
     assert_eq!(
         layer.chunks().collect::<Vec<_>>(),
-        [(span(2..6), true), (span(8..12), false)]
+        [span(2..6), span(8..12)]
     );
 
     buffer.transact(|buffer| buffer.insert(at(0), "xyz"));
@@ -250,6 +250,53 @@ fn chunks_follow_edits_and_flag_their_marks() {
 
     assert_eq!(
         layer.chunks().collect::<Vec<_>>(),
-        [(span(5..9), true), (span(11..15), false)]
+        [span(5..9), span(11..15)]
     );
+}
+
+#[test]
+fn a_removal_leaves_no_chunk_inside_its_range_and_cuts_the_ones_it_reaches() {
+    let buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 0..6, &[(1..5, 'a')]).unwrap();
+    publish(&mut layer, &buffer, 8..10, &[]).unwrap();
+    publish(&mut layer, &buffer, 12..18, &[(13..17, 'b')]).unwrap();
+
+    assert_eq!(
+        layer.remove(&buffer, span(4..14), buffer.edit_mark()),
+        Ok(true)
+    );
+
+    assert_eq!(chunks(&layer), [0..4, 14..18]);
+    assert_eq!(marks(&layer, 0..20), [(1..4, 'a'), (14..17, 'b')]);
+}
+
+#[test]
+fn removing_a_chunk_without_marks_changes_no_mark() {
+    let buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 8..10, &[]).unwrap();
+
+    assert_eq!(
+        layer.remove(&buffer, span(8..10), buffer.edit_mark()),
+        Ok(false)
+    );
+
+    assert!(layer.is_empty());
+}
+
+#[test]
+fn a_late_removal_lands_where_its_range_moved_and_keeps_a_newer_chunk() {
+    let mut buffer = twenty();
+    let old = buffer.edit_mark();
+    let mut layer = Layer::new(old);
+    publish(&mut layer, &buffer, 2..6, &[(3..4, 'a')]).unwrap();
+    publish(&mut layer, &buffer, 8..10, &[(8..9, 'b')]).unwrap();
+    buffer.transact(|buffer| buffer.insert(at(0), "xyz"));
+    publish(&mut layer, &buffer, 14..16, &[(14..15, 'n')]).unwrap();
+
+    assert_eq!(layer.remove(&buffer, span(8..16), old), Ok(true));
+
+    assert_eq!(chunks(&layer), [5..9, 14..16]);
+    assert_eq!(marks(&layer, 0..23), [(6..7, 'a'), (14..15, 'n')]);
 }

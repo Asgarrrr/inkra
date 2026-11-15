@@ -65,11 +65,9 @@ impl<S: Clone + PartialEq> Layer<S> {
             .flat_map(move |chunk| chunk.marks_in(range.clone()))
     }
 
-    /// Each chunk's range and whether it holds a mark, in order.
-    pub fn chunks(&self) -> impl Iterator<Item = (Range<ByteOffset>, bool)> + '_ {
-        self.chunks
-            .iter()
-            .map(|chunk| (chunk.start..chunk.end(), !chunk.marks.is_empty()))
+    /// Each chunk's range, in order.
+    pub fn chunks(&self) -> impl Iterator<Item = Range<ByteOffset>> + '_ {
+        self.chunks.iter().map(|chunk| chunk.start..chunk.end())
     }
 
     /// Brings the layer to `buffer`'s edit mark, shifting its marks through every splice since.
@@ -126,20 +124,52 @@ impl<S: Clone + PartialEq> Layer<S> {
         marks: Vec<(Range<ByteOffset>, S)>,
         at: EditMark,
     ) -> Result<bool, Lost> {
-        check(&chunk, &marks);
+        self.replace(buffer, chunk, Some(marks), at)
+    }
+
+    /// As `publish`, except that no chunk takes the place of what it removes from inside `chunk`.
+    ///
+    /// # Errors
+    /// As `publish`.
+    ///
+    /// # Panics
+    /// As `publish`.
+    pub fn remove(
+        &mut self,
+        buffer: &Buffer,
+        chunk: Range<ByteOffset>,
+        at: EditMark,
+    ) -> Result<bool, Lost> {
+        self.replace(buffer, chunk, None, at)
+    }
+
+    /// `publish` with `Some(marks)`, `remove` with `None`.
+    fn replace(
+        &mut self,
+        buffer: &Buffer,
+        chunk: Range<ByteOffset>,
+        marks: Option<Vec<(Range<ByteOffset>, S)>>,
+        at: EditMark,
+    ) -> Result<bool, Lost> {
+        check(&chunk, marks.as_deref().unwrap_or_default());
         self.catch_up(buffer)?;
         let Some(mut splices) = buffer.edits_since(at) else {
             self.clear();
             return Err(Lost);
         };
+        let fills = marks.is_some();
         let Some(new) = splices
-            .try_fold(Chunk::new(chunk, at, marks), map_chunk)
+            .try_fold(
+                Chunk::new(chunk, at, marks.into_iter().flatten()),
+                map_chunk,
+            )
             .filter(|new| new.len != 0)
         else {
             return Ok(false);
         };
         new.check(buffer);
         let chunk = new.start..new.end();
+        let new = fills.then_some(new);
         let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
         let last = self.chunks.partition_point(|old| old.start < chunk.end);
         let before: Vec<_> = self
@@ -151,7 +181,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         let mut gap = chunk.start;
         for old in self.chunks.drain(first..last) {
             if old.published > at {
-                pieces.extend(new.piece(gap..old.start));
+                pieces.extend(new.as_ref().and_then(|new| new.piece(gap..old.start)));
                 gap = old.end();
                 pieces.push(old);
             } else {
@@ -159,7 +189,7 @@ impl<S: Clone + PartialEq> Layer<S> {
                 tail = old.piece(chunk.end..old.end());
             }
         }
-        pieces.extend(new.piece(gap..chunk.end));
+        pieces.extend(new.as_ref().and_then(|new| new.piece(gap..chunk.end)));
         pieces.extend(tail);
         self.chunks.splice(first..first, pieces);
         let after = self.marks_in(chunk);

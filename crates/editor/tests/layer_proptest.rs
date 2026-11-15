@@ -203,7 +203,7 @@ proptest! {
     }
 
     #[test]
-    fn chunks_are_sorted_disjoint_and_flag_their_marks(
+    fn chunks_are_sorted_disjoint_and_hold_every_mark(
         parts in prop::collection::vec(text_strategy(), 1..12),
         steps in prop::collection::vec(step_strategy(), 0..24),
     ) {
@@ -221,16 +221,15 @@ proptest! {
             }
             let chunks: Vec<_> = layer.chunks().collect();
             let mut floor = ByteOffset::new(0);
-            for (range, marked) in &chunks {
+            for range in &chunks {
                 prop_assert!(floor <= range.start && range.start < range.end, "{:?} after {}", range, floor);
-                prop_assert_eq!(*marked, layer.marks_in(range.clone()).next().is_some(), "{:?}", range);
                 floor = range.end;
             }
             prop_assert!(floor <= buffer.len());
             for (mark, _) in layer.marks_in(span(0..buffer.text().len())) {
                 let holders = chunks
                     .iter()
-                    .filter(|(range, _)| range.start <= mark.start && mark.end <= range.end)
+                    .filter(|range| range.start <= mark.start && mark.end <= range.end)
                     .count();
                 prop_assert_eq!(holders, 1, "{:?}", mark);
             }

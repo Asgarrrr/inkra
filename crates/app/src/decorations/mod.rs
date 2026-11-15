@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
-use inkra_editor::Layer;
+use inkra_editor::{Layer, Lost};
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
@@ -174,6 +174,34 @@ pub(crate) fn publish(
     at: EditMark,
     cx: &mut App,
 ) {
+    change(layer, buffer, cx, |layer, text| {
+        layer.publish(text, chunk, marks, at)
+    });
+}
+
+/// As `Layer::remove`, on `layer` over `buffer`, with `publish`'s redraw and loss.
+///
+/// # Panics
+/// As `publish`.
+pub(crate) fn remove(
+    layer: LayerId,
+    buffer: &WeakEntity<Buffer>,
+    chunk: Range<ByteOffset>,
+    at: EditMark,
+    cx: &mut App,
+) {
+    change(layer, buffer, cx, |layer, text| {
+        layer.remove(text, chunk, at)
+    });
+}
+
+/// `publish`'s or `remove`'s edit of the layer, with what both do around it.
+fn change(
+    layer: LayerId,
+    buffer: &WeakEntity<Buffer>,
+    cx: &mut App,
+    edit: impl FnOnce(&mut Layer<MarkStyle>, &Buffer) -> Result<bool, Lost>,
+) {
     let Some(buffer) = buffer.upgrade() else {
         return;
     };
@@ -186,7 +214,7 @@ pub(crate) fn publish(
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
         let text = buffer.read(cx);
-        let published = entry.layers[rank].publish(text, chunk, marks, at);
+        let published = edit(&mut entry.layers[rank], text);
         if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
             entry.heard[rank] = Heard::Lost;
         }
@@ -203,16 +231,11 @@ pub(crate) fn publish(
     }
 }
 
-/// The chunks `layer` holds over `buffer`, sorted, each with whether it holds a mark (code
-/// highlighting spec, D9).
+/// The chunks `layer` holds over `buffer`, sorted (code highlighting spec, D9 and deviation 6).
 ///
 /// # Panics
 /// If `layer` is not declared.
-pub(crate) fn chunks(
-    layer: LayerId,
-    buffer: &Entity<Buffer>,
-    cx: &App,
-) -> Vec<(Range<ByteOffset>, bool)> {
+pub(crate) fn chunks(layer: LayerId, buffer: &Entity<Buffer>, cx: &App) -> Vec<Range<ByteOffset>> {
     let rank = rank(layer, cx);
     let Some(entry) = cx.global::<Decorations>().entries.get(&buffer.entity_id()) else {
         return Vec::new();

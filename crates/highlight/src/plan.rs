@@ -10,18 +10,18 @@ pub const MAIN_THREAD_BUDGET: usize = 65_536;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
-    /// Each held chunk with marks that is no block's range, in order.
+    /// Each held chunk that is no block's range, in order (spec deviation 6).
     pub clear: Vec<Range<ByteOffset>>,
     /// The index in `blocks` of each block to lex, in order (spec deviation 1).
     pub lex: Vec<usize>,
 }
 
-/// One merge of `blocks`, each with its reach start, and the `held` chunks, each with whether it
-/// holds a mark; both sorted, disjoint and non-empty.
+/// One merge of `blocks`, each with its reach start, and the `held` chunks; both sorted, disjoint
+/// and non-empty.
 #[must_use]
 pub fn plan(
     blocks: &[(Range<ByteOffset>, ByteOffset)],
-    held: &[(Range<ByteOffset>, bool)],
+    held: &[Range<ByteOffset>],
     dirty: Option<Range<ByteOffset>>,
 ) -> Plan {
     // A dirty range that only touches a reach meets it.
@@ -29,16 +29,11 @@ pub fn plan(
     let mut clear = Vec::new();
     let mut lex = Vec::new();
     let mut held = held.iter().peekable();
-    let mut clear_marked = |(chunk, marked): &(Range<ByteOffset>, bool)| {
-        if *marked {
+    for (index, (block, reach_start)) in blocks.iter().enumerate() {
+        while let Some(chunk) = held.next_if(|chunk| chunk.start < block.start) {
             clear.push(chunk.clone());
         }
-    };
-    for (index, (block, reach_start)) in blocks.iter().enumerate() {
-        while let Some(chunk) = held.next_if(|(chunk, _)| chunk.start < block.start) {
-            clear_marked(chunk);
-        }
-        let exact = held.next_if(|(chunk, _)| chunk == block).is_some();
+        let exact = held.next_if_eq(&block).is_some();
         let meets = dirty
             .as_ref()
             .is_some_and(|dirty| *dirty.start() <= block.end && reach_start <= dirty.end());
@@ -46,7 +41,7 @@ pub fn plan(
             lex.push(index);
         }
     }
-    held.for_each(clear_marked);
+    clear.extend(held.cloned());
     Plan { clear, lex }
 }
 

@@ -684,3 +684,14 @@ number.
    through the cache. `app` is out of reach of a `highlight` bench. A
    `TokenClass` mark and a `MarkStyle` mark are both 24 bytes, so `publish`
    copies the same amount.
+6. **A clear removes the chunk; the layer holds only block chunks.** D6 and D7
+   publish a clear empty, so the chunk stays, shifts with edits, and counts as
+   held. A block that comes back on exactly its range, as when `<div>` or
+   `<!--` above a fence is removed, then matched it and was never lexed. An
+   unknown-language block's empty chunk left on prose did the same once its
+   info word changed. Each clear also added a chunk for good. So the core gains
+   `Layer::remove` and `decorations::remove`, the publish path with no new
+   chunk, and **clear** holds every held chunk that is no block's range. After
+   the listener, the chunks are exactly the blocks' ranges, and an empty one
+   means "lexed, nothing to colour". D9's read and `plan` take bare ranges: no
+   caller reads whether a chunk holds a mark any more.

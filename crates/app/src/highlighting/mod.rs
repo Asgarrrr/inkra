@@ -40,7 +40,7 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     activate: |fcx| fcx.on_text_change(SYNTAX, listener),
 };
 
-/// Clears each chunk no longer a block's, then lexes the blocks the plan names (D7).
+/// Removes each chunk no longer a block's, then lexes the blocks the plan names (D7, deviation 6).
 fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let markdown = parsed(buffer, cx);
     let held = decorations::chunks(SYNTAX, buffer, cx);
@@ -58,20 +58,22 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     #[cfg(test)]
     LEXED.with(|lexed| lexed.set(lexed.get() + lex.len()));
-    // Clears first: at one edit mark the later publish wins, and a lexed block may cover a clear.
-    let publishes: Vec<_> = clear
+    let lexed: Vec<_> = lex
         .into_iter()
-        .map(|chunk| (chunk, Vec::new()))
-        .chain(lex.into_iter().map(|index| {
+        .map(|index| {
             let block = &markdown.code_blocks[index];
             (
                 block.range.clone(),
                 colour(text.text(), &markdown.spans, block),
             )
-        }))
+        })
         .collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
-    for (chunk, marks) in publishes {
+    // Clears first: at one edit mark the later change wins, and a lexed block may cover a clear.
+    for chunk in clear {
+        decorations::remove(SYNTAX, &buffer, chunk, at, cx);
+    }
+    for (chunk, marks) in lexed {
         decorations::publish(SYNTAX, &buffer, chunk, marks, at, cx);
     }
 }

@@ -67,10 +67,10 @@ fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
         .collect()
 }
 
-fn held(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<(Range<usize>, bool)> {
+fn held(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<Range<usize>> {
     cx.update(|cx| decorations::chunks(SYNTAX, buffer, cx))
         .into_iter()
-        .map(|(range, marked)| (range.start.get()..range.end.get(), marked))
+        .map(|range| range.start.get()..range.end.get())
         .collect()
 }
 
@@ -92,7 +92,7 @@ fn each_block_is_its_own_chunk_and_prose_holds_none(cx: &mut TestAppContext) {
     let note = PROSE_RUST_NOPE;
     let (buffer, _listening) = shown(cx, note);
 
-    let blocks: Vec<_> = blocks(note).into_iter().zip([true, false]).collect();
+    let blocks = blocks(note);
     assert_eq!(blocks.len(), 2);
     assert_eq!(held(cx, &buffer), blocks);
 }
@@ -104,12 +104,9 @@ fn a_deleted_opening_fence_leaves_no_mark(cx: &mut TestAppContext) {
 
     edit(cx, &buffer, |t| t.delete(at(0)..at(3)));
 
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
-    assert!(
-        held(cx, &buffer).iter().all(|(_, marked)| !marked),
-        "{:?}",
-        held(cx, &buffer)
-    );
+    let text = text(cx, &buffer);
+    assert_eq!(marks(cx, &buffer), fresh(&text));
+    assert_eq!(held(cx, &buffer), blocks(&text));
 }
 
 #[gpui::test]
@@ -213,13 +210,7 @@ fn a_typed_fence_recolours_the_blocks_after_it(cx: &mut TestAppContext) {
 
     let text = text(cx, &buffer);
     assert_eq!(marks(cx, &buffer), fresh(&text));
-    let blocks = blocks(&text);
-    for (chunk, marked) in held(cx, &buffer) {
-        assert!(
-            !marked || blocks.contains(&chunk),
-            "{chunk:?} in {blocks:?}"
-        );
-    }
+    assert_eq!(held(cx, &buffer), blocks(&text));
 }
 
 #[gpui::test]
@@ -260,12 +251,9 @@ fn an_open_landed_on_prose_loses_its_marks(cx: &mut TestAppContext) {
         });
     });
 
-    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
-    assert!(
-        held(cx, &buffer).iter().all(|(_, marked)| !marked),
-        "{:?}",
-        held(cx, &buffer)
-    );
+    let text = text(cx, &buffer);
+    assert_eq!(marks(cx, &buffer), fresh(&text));
+    assert_eq!(held(cx, &buffer), blocks(&text));
 }
 
 const PROSE_RUST_NOPE: &str = "prose\n\n```rust\nlet\n```\n\n```nope\nx\n```\n";
@@ -339,11 +327,7 @@ fn a_seeded_open_lexes_nothing_on_its_first_hearing(cx: &mut TestAppContext) {
 
     assert_eq!(lexed() - before, 0);
     assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
-    let blocks: Vec<_> = blocks(PROSE_RUST_NOPE)
-        .into_iter()
-        .zip([true, false])
-        .collect();
-    assert_eq!(held(cx, &buffer), blocks);
+    assert_eq!(held(cx, &buffer), blocks(PROSE_RUST_NOPE));
 }
 
 /// A list item's marker line decides whether the fence under it is a fence or indented code.
@@ -366,6 +350,74 @@ fn typing_a_list_marker_turns_indented_code_into_a_fenced_block(cx: &mut TestApp
     let coloured = fresh(&text(cx, &buffer));
     assert_ne!(coloured, []);
     assert_eq!(marks(cx, &buffer), coloured);
+}
+
+fn undo(cx: &mut TestAppContext, buffer: &Entity<Buffer>) {
+    buffer.update(cx, |buffer, cx| {
+        buffer.undo();
+        cx.notify();
+    });
+    cx.run_until_parked();
+}
+
+/// `<div>` opens an HTML block that swallows the fence under it.
+const UNDER_PROSE: &str = "foo\n```rust\nlet\n```\n";
+
+#[gpui::test]
+fn a_block_swallowed_by_an_html_block_leaves_no_chunk(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, UNDER_PROSE);
+
+    edit(cx, &buffer, |t| t.insert(at(0), "<div>"));
+
+    let none: Vec<Range<usize>> = Vec::new();
+    assert_eq!(blocks(&text(cx, &buffer)), none);
+    assert_eq!(held(cx, &buffer), none);
+}
+
+#[gpui::test]
+fn a_block_back_from_an_html_block_is_coloured(cx: &mut TestAppContext) {
+    for back in [
+        (|cx: &mut TestAppContext, buffer: &Entity<Buffer>| {
+            edit(cx, buffer, |t| t.delete(at(0)..at(5)));
+        }) as fn(&mut TestAppContext, &Entity<Buffer>),
+        undo,
+    ] {
+        let (buffer, _listening) = shown(cx, UNDER_PROSE);
+        edit(cx, &buffer, |t| t.insert(at(0), "<div>"));
+
+        back(cx, &buffer);
+
+        assert_eq!(text(cx, &buffer), UNDER_PROSE);
+        assert_ne!(marks(cx, &buffer), []);
+        assert_eq!(marks(cx, &buffer), fresh(UNDER_PROSE));
+    }
+}
+
+#[gpui::test]
+fn closing_a_comment_over_two_blocks_colours_both(cx: &mut TestAppContext) {
+    let note = "a\n```rust\nlet\n```\n\n```rust\nmut\n```\n";
+    let (buffer, _listening) = shown(cx, note);
+    edit(cx, &buffer, |t| t.insert(at(0), "<!--"));
+    assert_eq!(marks(cx, &buffer), []);
+
+    edit(cx, &buffer, |t| t.insert(at(5), "-->"));
+
+    let text = text(cx, &buffer);
+    assert_eq!(blocks(&text).len(), 2);
+    assert_eq!(marks(cx, &buffer), fresh(&text));
+}
+
+/// A block with no known language holds an unmarked chunk; it must not outlive the block either.
+#[gpui::test]
+fn a_block_renamed_inside_an_html_block_is_coloured_when_it_comes_back(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, "foo\n```nope\nlet\n```\n");
+    edit(cx, &buffer, |t| t.insert(at(0), "<div>"));
+    edit(cx, &buffer, |t| t.replace(at(12)..at(16), "rust"));
+
+    edit(cx, &buffer, |t| t.delete(at(0)..at(5)));
+
+    assert_eq!(text(cx, &buffer), UNDER_PROSE);
+    assert_eq!(marks(cx, &buffer), fresh(UNDER_PROSE));
 }
 
 /// The real open function, as the editor reads it from the declared layers.

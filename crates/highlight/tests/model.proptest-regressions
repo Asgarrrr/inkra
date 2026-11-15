@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 3bee32f66bd5ca1b4aaac04680990f0918d6abb1f29b151b7fb01f510812fa3c # shrinks to steps = [Edit([Delete(Index(3035540164028154064), 1)])]
 cc 6b864b0a98df5ae18d12d3530dff8f13bd4e3786d5f2962d22a196aae0a7109b # shrinks to a list item merge that turns an empty chunk into a fenced block
+cc 24b14023f6503cc3d6f9e1c8d602a2e8479c72d261c043db917378f784a739c2 # shrinks to steps = [Edit([Replace(Index(11597320113851152704), 4, "<!--")]), Edit([Delete(Index(2802037074487526828), 1)])]

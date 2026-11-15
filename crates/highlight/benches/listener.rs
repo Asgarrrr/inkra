@@ -54,9 +54,7 @@ fn call(
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();
     for chunk in clear {
-        layer
-            .publish(buffer, chunk, Vec::new(), at)
-            .expect("a clear lands");
+        layer.remove(buffer, chunk, at).expect("a clear lands");
     }
     for &index in &lex {
         let block = &markdown.code_blocks[index];

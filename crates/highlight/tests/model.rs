@@ -50,6 +50,10 @@ const FRAGMENTS: &[&str] = &[
     "  ",
     "> ",
     "- ",
+    "\n-\n",
+    "<div>",
+    "<!--",
+    "-->",
     "rust",
     "nope",
     "fn ",
@@ -170,7 +174,7 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();
     for chunk in clear {
-        let cleared = layer.publish(buffer, chunk, Vec::new(), at);
+        let cleared = layer.remove(buffer, chunk, at);
         prop_assert!(cleared.is_ok(), "{:?}", cleared);
     }
     for index in lex {
@@ -263,13 +267,7 @@ proptest! {
                 .iter()
                 .map(|block| block.range.clone())
                 .collect();
-            for block in &blocks {
-                let chunk = chunks.iter().any(|(chunk, _)| chunk == block);
-                prop_assert!(chunk, "{:?} is no chunk", block);
-            }
-            for (chunk, marked) in &chunks {
-                prop_assert!(!marked || blocks.contains(chunk), "{:?} is marked and no block", chunk);
-            }
+            prop_assert_eq!(chunks, blocks, "{:?}", text);
         }
     }
 }
