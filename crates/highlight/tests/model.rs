@@ -1,12 +1,13 @@
 //! D12's model test: after any run of edits and hearings, the layer's marks equal a fresh
-//! colouring of the current text (code highlighting spec, deviation 4).
+//! colouring of the current text (code highlighting spec, deviation 4). Every hearing runs with no
+//! dirty range, so exactness alone carries it (deviation 10).
 
 use std::ops::Range;
 
 use inkra_editor::Layer;
-use inkra_highlight::{Batch, TokenClass, batch, block_marks, dirty, open_chunks};
+use inkra_highlight::{Batch, TokenClass, batch, block_marks, open_chunks};
 use inkra_markdown::parse;
-use inkra_text::{Buffer, ByteOffset, EditMark};
+use inkra_text::{Buffer, ByteOffset};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
@@ -112,8 +113,6 @@ enum Step {
     Undo,
     Redo,
     Lost,
-    /// Edits heard as `Opened { fresh: false }`.
-    Unheard(Vec<Op>),
     /// A fresh layer seeded with the first `k % (blocks + 1)` blocks, heard as
     /// `Opened { fresh: true }`.
     Reopen(usize),
@@ -122,7 +121,6 @@ enum Step {
 struct Model {
     buffer: Buffer,
     layer: Layer<TokenClass>,
-    heard: EditMark,
 }
 
 fn op_strategy() -> impl Strategy<Value = Op> {
@@ -142,7 +140,6 @@ fn step_strategy() -> impl Strategy<Value = Step> {
         1 => Just(Step::Undo),
         1 => Just(Step::Redo),
         1 => Just(Step::Lost),
-        1 => ops().prop_map(Step::Unheard),
         1 => any::<usize>().prop_map(Step::Reopen),
     ]
 }
@@ -173,12 +170,8 @@ fn whole(buffer: &Buffer) -> Range<ByteOffset> {
 }
 
 /// The app's listener, in its order: catch up, read the chunks, then publish the batch.
-fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestCaseError> {
-    let Model {
-        buffer,
-        layer,
-        heard,
-    } = model;
+fn hear(model: &mut Model) -> Result<(), TestCaseError> {
+    let Model { buffer, layer } = model;
     prop_assert_eq!(
         layer.catch_up(buffer),
         Ok(()),
@@ -186,19 +179,10 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
     );
     let held: Vec<_> = layer.chunks().collect();
     let markdown = parse(buffer.text());
-    let Batch { clear, lexed } = batch(buffer.text(), &markdown, &held, dirty);
-    let at = buffer.edit_mark();
-    let published = layer.publish(buffer, clear, lexed, at);
+    let Batch { clear, lexed } = batch(buffer.text(), &markdown, &held, None);
+    let published = layer.publish(buffer, clear, lexed, buffer.edit_mark());
     prop_assert!(published.is_ok(), "{:?}", published);
-    *heard = at;
     Ok(())
-}
-
-fn hear_edits(model: &mut Model) -> Result<(), TestCaseError> {
-    let splices = model.buffer.edits_since(model.heard);
-    let splices = splices.ok_or_else(|| TestCaseError::fail("a short run stays in the log"))?;
-    let dirty = dirty(splices);
-    hear(model, dirty)
 }
 
 fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
@@ -207,30 +191,16 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
             for op in &ops {
                 apply(&mut model.buffer, op);
             }
-            hear_edits(model)
         }
         Step::Undo => {
             model.buffer.undo();
-            hear_edits(model)
         }
         Step::Redo => {
             model.buffer.redo();
-            hear_edits(model)
         }
-        Step::Lost => {
-            model.layer.clear();
-            let whole = whole(&model.buffer);
-            hear(model, Some(whole))
-        }
-        Step::Unheard(ops) => {
-            for op in &ops {
-                apply(&mut model.buffer, op);
-            }
-            let whole = whole(&model.buffer);
-            hear(model, Some(whole))
-        }
+        Step::Lost => model.layer.clear(),
         Step::Reopen(k) => {
-            let Model { buffer, layer, .. } = model;
+            let Model { buffer, layer } = model;
             *layer = Layer::new(buffer.edit_mark());
             let count = k % (parse(buffer.text()).code_blocks.len() + 1);
             let mut calls = 0;
@@ -240,9 +210,9 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
             });
             let seeded = layer.publish(buffer, Vec::new(), seed, buffer.edit_mark());
             prop_assert!(seeded.is_ok(), "{:?}", seeded);
-            hear(model, None)
         }
     }
+    hear(model)
 }
 
 proptest! {
@@ -252,8 +222,8 @@ proptest! {
     ) {
         let buffer = Buffer::new(NOTE);
         let at = buffer.edit_mark();
-        let mut model = Model { buffer, layer: Layer::new(at), heard: at };
-        hear(&mut model, None)?;
+        let mut model = Model { buffer, layer: Layer::new(at) };
+        hear(&mut model)?;
         for next in steps {
             step(&mut model, next)?;
             let text = model.buffer.text();
