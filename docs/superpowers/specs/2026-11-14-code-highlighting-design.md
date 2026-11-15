@@ -246,8 +246,7 @@ the current text.
 Once highlighting publishes, these `dead_code` expectations stop firing, and
 the build removes them: in `decorations/mod.rs`, in `decorations/listen.rs`,
 and on `Activation::on_text_change` (`shell/features/activation.rs`).
-`decorations/mod.rs` also re-exports `Opened` outside `cfg(test)`, since the
-open function returns it. An expectation that stops firing fails the build
+An expectation that stops firing fails the build
 anyway.
 
 ### D7. A pure plan decides what to clear and what to lex
@@ -256,8 +255,8 @@ On each `TextChange`, the listener computes a dirty range:
 
 - `Edited(splices)`: the splices folded into one range, in the current text's
   offsets;
-- `Lost`, and `Opened(None)` (D8): the whole text;
-- `Opened(Some(_))` (D8): no range.
+- `Lost`, and `Opened { fresh: false }` (D8): the whole text;
+- `Opened { fresh: true }` (D8): no range.
 
 It then calls `batch` (deviation 9), which calls one pure function, in
 `inkra-highlight` (`plan.rs`):
@@ -322,11 +321,11 @@ whose splices span the note.
 
 ### D8. A note lands with its colours
 
-The layer's open function, `fn(&str, Instant) -> Opened`, runs in the open's
+The layer's open function, `fn(&str, Instant) -> Vec<Chunk>`, runs in the open's
 background task (decoration layer D8). It runs `inkra_markdown::parse` on the
 text, then lexes the blocks in document order until the deadline. The parse
 cannot stop at the deadline, so a text over `OPEN_PARSE_LIMIT` bytes skips it:
-the open function returns no chunk and the seed, and D7 colours the note from
+the open function returns no chunk, and D7 colours the note from
 the main thread and the background task. The parse at the limit takes at most
 4 ms, half the landing deadline. `cargo bench -p inkra-markdown --bench parse`
 measured these medians on 2026-11-15:
@@ -344,15 +343,14 @@ So `OPEN_PARSE_LIMIT` is 500 000 bytes, the largest measured size within
 whole deadline. Every block it reaches gets its block chunk, coloured or
 empty.
 
-`Opened.chunks` holds the finished block chunks; the core lands them at the
-buffer's edit mark (`decorations/open.rs`, `seed`). `Opened.seed` is a unit
-value, `Box::new(())`, and carries no data: the listener reads the landed
-chunks back through D9. The core hands the seed over only if the text is still
-at that edit mark (`Heard::hear`). So:
+The open function returns the finished block chunks; the core lands them at
+the buffer's edit mark (`decorations/open.rs`, `seed`) and records that mark.
+The listener reads the landed chunks back through D9. The first hearing is
+fresh only if the text is still at that edit mark (`HeardLayer::hear`). So:
 
-- `Opened(Some(_))`: the landed chunks are current. D7 runs with no dirty
-  range, which lexes only the blocks the open did not reach.
-- `Opened(None)`: the text moved before the first hearing, and no splice says
+- `Opened { fresh: true }`: the landed chunks are current. D7 runs with no
+  dirty range, which lexes only the blocks the open did not reach.
+- `Opened { fresh: false }`: the text moved before the first hearing, and no splice says
   where. The landed chunks may be stale, and some may lie on prose now. D7
   runs with the whole text dirty, which clears them and relexes every block.
   This happens to a restored inactive tab: it hears its changes only when a
@@ -566,7 +564,7 @@ light. The look is tuned after it ships, as for code blocks.
     blocks, and leave no mark on prose;
   - a block in a quote and one in a list item colour their code only;
   - an opened note's first frame with text has its colours;
-  - a note edited before its first hearing (`Opened(None)`) loses the marks
+  - a note edited before its first hearing (`Opened { fresh: false }`) loses the marks
     its open landed on prose;
   - a listener call lexes at most `MAIN_THREAD_BUDGET` bytes, and the rest
     lands from the background task;
@@ -689,9 +687,9 @@ number.
    A copy in the test could drift from the app's.
 4. **The model test emulates the core's `Heard`.** `Lost` is a clear and a
    whole dirty range, because the splice log drops edits only past a bound a
-   short run never reaches. `Opened(None)` is edits, then a whole dirty range.
-   `Opened(Some(_))` is a fresh layer seeded with the first k blocks, then no
-   dirty range.
+   short run never reaches. `Opened { fresh: false }` is edits, then a whole
+   dirty range. `Opened { fresh: true }` is a fresh layer seeded with the first
+   k blocks, then no dirty range.
 5. **The listener bench measures the pure part, not the gpui glue.** It runs
    `catch_up`, `chunks`, `plan`, the lex and `publish` on a `Layer` in
    `inkra-highlight`. It does not measure `parses::parsed`'s cache lookup,
@@ -724,13 +722,13 @@ number.
    layer reads nothing in it. It drops the tag to `None` when a splice removes
    one of the chunk's bytes or inserts strictly inside it, and when a publish
    cuts the chunk to a piece. The syntax layer passes `CodeBlock::shape`;
-   other layers pass 0. `Opened.chunks` carries the tag too, so D7 matches a
-   seeded chunk the same way.
+   other layers pass 0. An open function's chunks carry the tag too, so D7
+   matches a seeded chunk the same way.
 8. **One publish per listener call, a batch of clears and chunks.** Deviation
    6's listener called `decorations::remove` once per clear and
    `decorations::publish` once per lexed block. Each call repeated the rank
    lookup, the entry lookup, the catch-up, the read of the splices since its
-   edit mark, the global update and the redraw. A `Lost`, an `Opened(None)` or
+   edit mark, the global update and the redraw. A `Lost`, an `Opened { fresh: false }` or
    an `apply_diff` reload on a note with hundreds of blocks made hundreds of
    calls. So `Layer::publish` and `decorations::publish` take a batch: the
    ranges to empty, then the chunks with their tags and marks, all at one edit

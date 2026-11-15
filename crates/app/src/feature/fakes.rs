@@ -14,7 +14,7 @@ use inkra_layout::{Side, ViewId};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{CommandDecl, FeatureId, Manifest};
-use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, Opened, TextChange};
+use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
 use crate::pane::{Pane, PaneDecl, PaneHeader, boxed};
 use crate::shell::Activation;
 use crate::theme::ColorToken;
@@ -232,9 +232,9 @@ fn todo_mark((start, word): (usize, &str)) -> (Range<ByteOffset>, MarkStyle) {
     )
 }
 
-/// Marks each to-do marker of `text` before `deadline`, unless `set_unbounded` lifted it; its seed
-/// is where it stopped.
-pub(crate) fn open_todo(text: &str, deadline: Instant) -> Opened {
+/// Marks each to-do marker of `text` before `deadline`, unless `set_unbounded` lifted it, in one
+/// chunk that ends where it stopped.
+pub(crate) fn open_todo(text: &str, deadline: Instant) -> Vec<Chunk> {
     let mut stop = text.len();
     let mut marks = Vec::new();
     for found in text.match_indices("TODO") {
@@ -244,10 +244,7 @@ pub(crate) fn open_todo(text: &str, deadline: Instant) -> Opened {
         }
         marks.push(todo_mark(found));
     }
-    Opened {
-        chunks: vec![(ByteOffset::new(0)..ByteOffset::new(stop), 0, marks)],
-        seed: Some(Box::new(stop)),
-    }
+    vec![(ByteOffset::new(0)..ByteOffset::new(stop), 0, marks)]
 }
 
 /// Notes what it heard, then, unless `set_silent` asked otherwise, publishes the warning colour
@@ -258,8 +255,8 @@ pub(crate) fn open_todo(text: &str, deadline: Instant) -> Opened {
 )]
 pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let heard = match change {
-        TextChange::Opened(Some(_)) => "opened+seed",
-        TextChange::Opened(None) => "opened",
+        TextChange::Opened { fresh: true } => "opened+seed",
+        TextChange::Opened { fresh: false } => "opened",
         TextChange::Edited(_) => "edited",
         TextChange::Lost => "lost",
     };

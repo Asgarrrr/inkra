@@ -1,6 +1,5 @@
 //! A layer's listener: what it hears of each buffer, once per change (decoration layer spec, D4).
 
-use std::any::Any;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -10,12 +9,10 @@ use inkra_text::{Buffer, EditMark, Splice};
 use super::{Decorations, LayerId, rank};
 use crate::feature::over_budget;
 
-/// What a layer's open function hands its listener (D8).
-pub(crate) type Seed = Box<dyn Any + Send>;
-
 pub(crate) enum TextChange {
-    /// The listener has not heard of the buffer before.
-    Opened(Option<Seed>),
+    /// The listener has not heard of the buffer before; `fresh` when the buffer is still at the edit
+    /// mark its open landed chunks at (D8).
+    Opened { fresh: bool },
     /// The splices since it last heard.
     Edited(Vec<Splice>),
     /// The layer's marks over the buffer are gone: it publishes them all again.
@@ -34,17 +31,13 @@ pub(super) enum Heard {
 
 impl Heard {
     /// What the listener has not heard of `text` yet, if anything; after, it has heard all of it.
-    /// A first hearing hands over `seed` if `text` is still at its edit mark.
-    pub(super) fn hear(
-        &mut self,
-        text: &Buffer,
-        seed: Option<(EditMark, Seed)>,
-    ) -> Option<TextChange> {
+    /// A first hearing is fresh if `text` is still at `opened`, where its open landed.
+    pub(super) fn hear(&mut self, text: &Buffer, opened: Option<EditMark>) -> Option<TextChange> {
         let now = text.edit_mark();
         let change = match *self {
-            Self::Unheard => Some(TextChange::Opened(
-                seed.filter(|(mark, _)| *mark == now).map(|(_, seed)| seed),
-            )),
+            Self::Unheard => Some(TextChange::Opened {
+                fresh: opened == Some(now),
+            }),
             Self::Lost => Some(TextChange::Lost),
             Self::At(mark) if mark == now => None,
             Self::At(mark) => Some(text.edits_since(mark).map_or(TextChange::Lost, |splices| {

@@ -15,10 +15,9 @@ use crate::theme::ColorToken;
 mod listen;
 mod open;
 
-use listen::{Heard, Listener, Seed};
+use listen::{Heard, Listener};
 pub(crate) use listen::{TextChange, listen};
 pub(crate) use open::Chunk;
-pub(crate) use open::Opened;
 pub(crate) use open::{OpenFn, openers, run_openers, seed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -66,8 +65,8 @@ struct Entry {
     layers: Vec<Layer<MarkStyle>>,
     /// One per declared layer, by rank.
     heard: Vec<Heard>,
-    /// One per declared layer, by rank: its open function's seed, valid only at its edit mark.
-    seeds: Vec<Option<(EditMark, Seed)>>,
+    /// One per declared layer, by rank: the edit mark its open landed chunks at.
+    opened: Vec<Option<EditMark>>,
 }
 
 /// Replaces the declared layers, dropping every published mark, unless they are unchanged.
@@ -109,7 +108,7 @@ pub(crate) fn enable(features: impl IntoIterator<Item = FeatureId>, cx: &mut App
     for rank in (0..now.len()).filter(|&rank| now[rank] != enabled[rank]) {
         for entry in entries.values_mut() {
             entry.heard[rank] = Heard::Lost;
-            entry.seeds[rank] = None;
+            entry.opened[rank] = None;
             if !now[rank] && !entry.layers[rank].is_empty() {
                 entry.layers[rank].clear();
                 *revisions += 1;
@@ -158,7 +157,7 @@ fn entry<'a>(
             .map(|_| Layer::new(buffer.read(cx).edit_mark()))
             .collect(),
         heard: (0..declared).map(|_| Heard::Unheard).collect(),
-        seeds: (0..declared).map(|_| None).collect(),
+        opened: vec![None; declared],
     })
 }
 
@@ -247,18 +246,18 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
         let ranks = entry
             .layers
             .iter_mut()
-            .zip(entry.heard.iter_mut().zip(&mut entry.seeds))
+            .zip(entry.heard.iter_mut().zip(&mut entry.opened))
             .zip(decorations.declared.iter().zip(&decorations.listeners))
             .zip(&decorations.enabled)
             .filter_map(|(rank, &enabled)| enabled.then_some(rank));
-        for ((layer, (heard, seed)), (decl, listener)) in ranks {
+        for ((layer, (heard, opened)), (decl, listener)) in ranks {
             moved |= !layer.is_empty() && layer.at() != text.edit_mark();
             // `Lost` clears the layer, a change `moved` already counts.
             if layer.catch_up(text).is_err() && matches!(heard, Heard::At(_)) {
                 *heard = Heard::Lost;
             }
             if let Some(listener) = listener.as_ref().and_then(Weak::upgrade)
-                && let Some(change) = heard.hear(text, seed.take())
+                && let Some(change) = heard.hear(text, opened.take())
             {
                 unheard.push((listener, decl.id, change));
             }
