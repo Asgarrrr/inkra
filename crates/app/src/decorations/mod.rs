@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
-use inkra_editor::{Layer, Lost};
+use inkra_editor::Layer;
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
@@ -17,6 +17,7 @@ mod open;
 
 use listen::{Heard, Listener, Seed};
 pub(crate) use listen::{TextChange, listen};
+use open::Chunk;
 pub(crate) use open::Opened;
 pub(crate) use open::{OpenFn, openers, run_openers, seed};
 
@@ -161,47 +162,18 @@ fn entry<'a>(
     })
 }
 
-/// As `Layer::publish`, on `layer` over `buffer`; redraws every window when the marks change. A
-/// lost layer's listener hears `Lost` at the next sync, and publishes it all again.
+/// As `Layer::publish`, on `layer` over `buffer`; redraws every window once when the marks change.
+/// A lost layer's listener hears `Lost` at the next sync, and publishes it all again.
 ///
 /// # Panics
 /// If `layer` is not declared, or as `Layer::publish`.
 pub(crate) fn publish(
     layer: LayerId,
     buffer: &WeakEntity<Buffer>,
-    chunk: Range<ByteOffset>,
-    tag: u64,
-    marks: Vec<(Range<ByteOffset>, MarkStyle)>,
+    removed: Vec<Range<ByteOffset>>,
+    chunks: Vec<Chunk>,
     at: EditMark,
     cx: &mut App,
-) {
-    change(layer, buffer, cx, |layer, text| {
-        layer.publish(text, chunk, tag, marks, at)
-    });
-}
-
-/// As `Layer::remove`, on `layer` over `buffer`, with `publish`'s redraw and loss.
-///
-/// # Panics
-/// As `publish`.
-pub(crate) fn remove(
-    layer: LayerId,
-    buffer: &WeakEntity<Buffer>,
-    chunk: Range<ByteOffset>,
-    at: EditMark,
-    cx: &mut App,
-) {
-    change(layer, buffer, cx, |layer, text| {
-        layer.remove(text, chunk, at)
-    });
-}
-
-/// `publish`'s or `remove`'s edit of the layer, with what both do around it.
-fn change(
-    layer: LayerId,
-    buffer: &WeakEntity<Buffer>,
-    cx: &mut App,
-    edit: impl FnOnce(&mut Layer<MarkStyle>, &Buffer) -> Result<bool, Lost>,
 ) {
     let Some(buffer) = buffer.upgrade() else {
         return;
@@ -215,7 +187,7 @@ fn change(
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
         let text = buffer.read(cx);
-        let published = edit(&mut entry.layers[rank], text);
+        let published = entry.layers[rank].publish(text, removed, chunks, at);
         if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
             entry.heard[rank] = Heard::Lost;
         }

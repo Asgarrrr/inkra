@@ -25,6 +25,9 @@ struct Chunk<S> {
     marks: Vec<(Range<usize>, S)>,
 }
 
+/// A chunk as `Layer::publish` takes it: its range, its tag and the marks inside it.
+type Published<S> = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, S)>);
+
 impl<S: Clone + PartialEq> Layer<S> {
     #[must_use]
     pub fn new(at: EditMark) -> Self {
@@ -111,79 +114,81 @@ impl<S: Clone + PartialEq> Layer<S> {
         self.chunks.splice(first..first, reached);
     }
 
-    /// Replaces everything inside `chunk` with `marks`, both computed at the edit mark `at` and
-    /// mapped through the edits since (D6), except where a chunk computed later lies: that one
-    /// stays. The chunk holds `tag` while it stays whole and its bytes unchanged. `Ok(true)` when
-    /// the marks inside the mapped chunk changed.
+    /// Empties each range of `removed`, then replaces everything inside each chunk of `chunks`, a
+    /// range with its tag and its marks. All are computed at the edit mark `at` and mapped through
+    /// the edits since (D6), except where a chunk computed later lies: that one stays. Inside the
+    /// batch, a later change wins over an earlier one. A chunk holds its tag while it stays whole
+    /// and its bytes unchanged. `Ok(true)` when a change moved the marks inside its mapped range.
     ///
     /// # Errors
     /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
-    /// the layer is cleared and the publish dropped.
+    /// the layer is cleared and the whole batch dropped.
     ///
     /// # Panics
-    /// If `chunk` is reversed, `marks` are unsorted, overlapping or outside `chunk`, or once
-    /// mapped, `chunk` is past the end of `buffer` or a bound splits a char.
+    /// If a range is reversed, a chunk's marks are unsorted, overlapping or outside it, or once
+    /// mapped, a range is past the end of `buffer` or a bound splits a char.
     pub fn publish(
         &mut self,
         buffer: &Buffer,
-        chunk: Range<ByteOffset>,
-        tag: u64,
-        marks: Vec<(Range<ByteOffset>, S)>,
+        removed: Vec<Range<ByteOffset>>,
+        chunks: Vec<Published<S>>,
         at: EditMark,
     ) -> Result<bool, Lost> {
-        self.replace(buffer, chunk, Some(tag), Some(marks), at)
-    }
-
-    /// As `publish`, except that no chunk takes the place of what it removes from inside `chunk`.
-    ///
-    /// # Errors
-    /// As `publish`.
-    ///
-    /// # Panics
-    /// As `publish`.
-    pub fn remove(
-        &mut self,
-        buffer: &Buffer,
-        chunk: Range<ByteOffset>,
-        at: EditMark,
-    ) -> Result<bool, Lost> {
-        self.replace(buffer, chunk, None, None, at)
-    }
-
-    /// `publish` with `Some(marks)`, `remove` with `None`.
-    fn replace(
-        &mut self,
-        buffer: &Buffer,
-        chunk: Range<ByteOffset>,
-        tag: Option<u64>,
-        marks: Option<Vec<(Range<ByteOffset>, S)>>,
-        at: EditMark,
-    ) -> Result<bool, Lost> {
-        check(&chunk, marks.as_deref().unwrap_or_default());
+        for range in &removed {
+            check::<S>(range, &[]);
+        }
+        for (range, _, marks) in &chunks {
+            check(range, marks);
+        }
         self.catch_up(buffer)?;
-        let Some(mut splices) = buffer.edits_since(at) else {
+        let Some(splices) = buffer.edits_since(at) else {
             self.clear();
             return Err(Lost);
         };
-        let fills = marks.is_some();
+        let splices: Vec<_> = splices.collect();
+        let removed = removed
+            .into_iter()
+            .map(|range| (Chunk::new(range, at, None, []), false));
+        let chunks = chunks
+            .into_iter()
+            .map(|(range, tag, marks)| (Chunk::new(range, at, Some(tag), marks), true));
+        let mut changed = false;
+        for (new, fills) in removed.chain(chunks) {
+            changed = self.replace(buffer, new, fills, &splices, changed);
+        }
+        Ok(changed)
+    }
+
+    /// Maps `new` through `splices` and puts it in place of what its range holds; with `fills`
+    /// false, nothing takes that place. Returns whether the marks there changed, or `true` at once
+    /// when `changed` already says an earlier change of the batch moved some.
+    fn replace(
+        &mut self,
+        buffer: &Buffer,
+        new: Chunk<S>,
+        fills: bool,
+        splices: &[Splice],
+        changed: bool,
+    ) -> bool {
+        let at = new.published;
         let Some(new) = splices
-            .try_fold(
-                Chunk::new(chunk, at, tag, marks.into_iter().flatten()),
-                map_chunk,
-            )
+            .iter()
+            .copied()
+            .try_fold(new, map_chunk)
             .filter(|new| new.len != 0)
         else {
-            return Ok(false);
+            return changed;
         };
         new.check(buffer);
         let chunk = new.start..new.end();
         let new = fills.then_some(new);
         let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
         let last = self.chunks.partition_point(|old| old.start < chunk.end);
-        let before: Vec<_> = self
-            .marks_in(chunk.clone())
-            .map(|(mark, style)| (mark, style.clone()))
-            .collect();
+        let before: Option<Vec<_>> = (!changed).then(|| {
+            self.marks_in(chunk.clone())
+                .map(|(mark, style)| (mark, style.clone()))
+                .collect()
+        });
         let mut pieces = Vec::new();
         let mut tail = None;
         let mut gap = chunk.start;
@@ -200,8 +205,10 @@ impl<S: Clone + PartialEq> Layer<S> {
         pieces.extend(new.as_ref().and_then(|new| new.piece(gap..chunk.end)));
         pieces.extend(tail);
         self.chunks.splice(first..first, pieces);
-        let after = self.marks_in(chunk);
-        Ok(!after.eq(before.iter().map(|(mark, style)| (mark.clone(), style))))
+        before.is_none_or(|before| {
+            let after = self.marks_in(chunk);
+            !after.eq(before.iter().map(|(mark, style)| (mark.clone(), style)))
+        })
     }
 }
 

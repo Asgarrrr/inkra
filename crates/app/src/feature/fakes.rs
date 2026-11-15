@@ -275,12 +275,20 @@ pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mu
         buffer.downgrade(),
     );
     let Some(delay) = DELAY.get() else {
-        decorations::publish(TODO_LAYER, &buffer, chunk, 0, marks, at, cx);
+        decorations::publish(
+            TODO_LAYER,
+            &buffer,
+            Vec::new(),
+            vec![(chunk, 0, marks)],
+            at,
+            cx,
+        );
         return;
     };
     cx.spawn(async move |cx| {
         cx.background_executor().timer(delay).await;
-        cx.update(|cx| decorations::publish(TODO_LAYER, &buffer, chunk, 0, marks, at, cx));
+        let chunks = vec![(chunk, 0, marks)];
+        cx.update(|cx| decorations::publish(TODO_LAYER, &buffer, Vec::new(), chunks, at, cx));
     })
     .detach();
 }

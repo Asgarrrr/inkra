@@ -109,7 +109,8 @@ impl Publish {
     }
 
     fn deliver(self, layer: &mut Layer<u8>, buffer: &Buffer) -> Result<bool, Lost> {
-        layer.publish(buffer, span(self.chunk), 0, self.marks, self.at)
+        let chunk = (span(self.chunk), 0, self.marks);
+        layer.publish(buffer, Vec::new(), vec![chunk], self.at)
     }
 }
 
@@ -142,6 +143,10 @@ fn edit_all(buffer: &mut Buffer, edits: &Edits) {
         let all = 0..buffer.text().len();
         edit(buffer, all, *at, *len, text);
     }
+}
+
+fn tags(layer: &Layer<u8>) -> Vec<(Range<ByteOffset>, Option<u64>)> {
+    layer.chunks().collect()
 }
 
 fn marks(layer: &Layer<u8>, buffer: &Buffer) -> Vec<(Range<usize>, u8)> {
@@ -376,5 +381,62 @@ proptest! {
         }
 
         prop_assert_eq!(marks(&layer, &buffer), marks(&alone, &buffer));
+    }
+
+    /// Removals first, then chunks, each list in its order, all computed at one edit mark.
+    #[test]
+    fn a_batch_equals_its_changes_one_at_a_time(
+        parts in prop::collection::vec(text_strategy(), 1..12),
+        steps in prop::collection::vec(step_strategy(), 0..12),
+        removed in prop::collection::vec((any::<usize>(), any::<usize>()), 0..4),
+        chunks in prop::collection::vec(chunk_strategy(), 0..4),
+        edits in prop::collection::vec(edits_strategy(), 0..3),
+    ) {
+        let mut buffer = Buffer::new(parts.concat());
+        let mut batched = Layer::new(buffer.edit_mark());
+        let mut single = Layer::new(buffer.edit_mark());
+        for step in steps {
+            match step {
+                Step::Publish(chunk) => {
+                    publish(&mut batched, &buffer, &chunk)?;
+                    publish(&mut single, &buffer, &chunk)?;
+                }
+                Step::Edit(edits) => edit_all(&mut buffer, &edits),
+            }
+        }
+        let text = buffer.text();
+        let removed: Vec<_> = removed
+            .into_iter()
+            .map(|bounds| span(ordered(text, 0..text.len(), bounds)))
+            .collect();
+        let chunks: Vec<_> = (1..)
+            .zip(&chunks)
+            .map(|(tag, chunk)| {
+                let computed = Publish::new(&buffer, ordered(text, 0..text.len(), chunk.bounds), chunk);
+                (span(computed.chunk), tag, computed.marks)
+            })
+            .collect();
+        let at = buffer.edit_mark();
+        for edits in &edits {
+            edit_all(&mut buffer, edits);
+        }
+
+        let mut changed = false;
+        for range in &removed {
+            let published = single.publish(&buffer, vec![range.clone()], Vec::new(), at);
+            prop_assert!(published.is_ok(), "{:?}", published);
+            changed |= published == Ok(true);
+        }
+        for chunk in &chunks {
+            let published = single.publish(&buffer, Vec::new(), vec![chunk.clone()], at);
+            prop_assert!(published.is_ok(), "{:?}", published);
+            changed |= published == Ok(true);
+        }
+        prop_assert_eq!(single.catch_up(&buffer), Ok(()));
+        let published = batched.publish(&buffer, removed, chunks, at);
+
+        prop_assert_eq!(published, Ok(changed));
+        prop_assert_eq!(tags(&batched), tags(&single));
+        prop_assert_eq!(marks(&batched, &buffer), marks(&single, &buffer));
     }
 }

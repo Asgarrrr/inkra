@@ -42,9 +42,8 @@ fn a_keystroke_shapes_the_note_once_with_a_layer(cx: &mut TestAppContext) {
             decorations::publish(
                 TODO_LAYER,
                 &buffer.downgrade(),
-                at(0)..len,
-                0,
-                marks,
+                Vec::new(),
+                vec![(at(0)..len, 0, marks)],
                 mark,
                 cx,
             );

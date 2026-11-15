@@ -40,7 +40,8 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     activate: |fcx| fcx.on_text_change(SYNTAX, listener),
 };
 
-/// Removes each chunk no longer a block's, then lexes the blocks the plan names (D7, deviation 6).
+/// Removes each chunk no longer a block's, then lexes the blocks the plan names, in one publish
+/// (D7, deviations 6 and 8).
 fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let markdown = parsed(buffer, cx);
     let held = decorations::chunks(SYNTAX, buffer, cx);
@@ -70,13 +71,8 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
         })
         .collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
-    // Clears first: at one edit mark the later change wins, and a lexed block may cover a clear.
-    for chunk in clear {
-        decorations::remove(SYNTAX, &buffer, chunk, at, cx);
-    }
-    for (chunk, shape, marks) in lexed {
-        decorations::publish(SYNTAX, &buffer, chunk, shape, marks, at, cx);
-    }
+    // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.
+    decorations::publish(SYNTAX, &buffer, clear, lexed, at, cx);
 }
 
 /// `block`'s marks, none when its info word names no known language.

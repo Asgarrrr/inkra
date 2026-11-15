@@ -33,9 +33,8 @@ fn publish_color(
         decorations::publish(
             layer,
             &buffer.downgrade(),
-            at(0)..len,
-            0,
-            marks,
+            Vec::new(),
+            vec![(at(0)..len, 0, marks)],
             at_mark,
             cx,
         );
@@ -93,6 +92,47 @@ fn a_publish_colours_its_range(cx: &mut TestAppContext) {
 
     assert_eq!(warning_runs(window, cx), [(4, true), (5, false)]);
     assert_eq!(shape_count() - before, 1);
+}
+
+/// The revision moves once per batch, as the redraw does: one per change would redraw each time.
+#[gpui::test]
+fn a_batch_lands_every_change_and_moves_the_revision_once(cx: &mut TestAppContext) {
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO a TODO b\n")));
+    let window = window_on(cx, buffer.clone());
+    cx.update(fakes::declare_todo);
+    publish_warning(&buffer, 5..6, cx);
+    let revision =
+        |cx: &mut TestAppContext| cx.update(|cx| decorations::drawn(&buffer, cx).revision);
+    let before = revision(cx);
+
+    cx.update(|cx| {
+        let warning = MarkStyle {
+            color: Some(ColorToken::Warning),
+        };
+        let chunks = [0..4, 7..11].map(|word| {
+            (
+                at(word.start)..at(word.end),
+                0,
+                vec![(at(word.start)..at(word.end), warning)],
+            )
+        });
+        let mark = buffer.read(cx).edit_mark();
+        decorations::publish(
+            TODO_LAYER,
+            &buffer.downgrade(),
+            vec![at(5)..at(6)],
+            chunks.into(),
+            mark,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    assert_eq!(revision(cx), before + 1);
+    assert_eq!(
+        warning_runs(window, cx),
+        [(4, true), (3, false), (4, true), (2, false)]
+    );
 }
 
 #[gpui::test]
@@ -278,9 +318,8 @@ fn a_publish_to_an_undeclared_layer_panics(cx: &mut TestAppContext) {
         decorations::publish(
             TODO_LAYER,
             &buffer.downgrade(),
-            at(0)..at(4),
-            0,
             Vec::new(),
+            vec![(at(0)..at(4), 0, Vec::new())],
             mark,
             cx,
         );

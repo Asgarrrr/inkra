@@ -185,7 +185,8 @@ fn tokens(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffse
     tokens
 }
 
-/// The app's listener, in its order: catch up, read the chunks, plan, clears, then lexed blocks.
+/// The app's listener, in its order: catch up, read the chunks, plan, then one batch of clears and
+/// lexed blocks.
 fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestCaseError> {
     let Model {
         buffer,
@@ -206,16 +207,16 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();
-    for chunk in clear {
-        let cleared = layer.remove(buffer, chunk, at);
-        prop_assert!(cleared.is_ok(), "{:?}", cleared);
-    }
-    for index in lex {
-        let block = &markdown.code_blocks[index];
-        let marks = tokens(buffer.text(), &markdown.spans, block);
-        let lexed = layer.publish(buffer, block.range.clone(), block.shape, marks, at);
-        prop_assert!(lexed.is_ok(), "{:?}", lexed);
-    }
+    let lexed = lex
+        .into_iter()
+        .map(|index| {
+            let block = &markdown.code_blocks[index];
+            let marks = tokens(buffer.text(), &markdown.spans, block);
+            (block.range.clone(), block.shape, marks)
+        })
+        .collect();
+    let published = layer.publish(buffer, clear, lexed, at);
+    prop_assert!(published.is_ok(), "{:?}", published);
     *heard = at;
     Ok(())
 }
@@ -260,17 +261,15 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
             *layer = Layer::new(buffer.edit_mark());
             let markdown = parse(buffer.text());
             let blocks = &markdown.code_blocks;
-            for block in &blocks[..k % (blocks.len() + 1)] {
-                let marks = tokens(buffer.text(), &markdown.spans, block);
-                let seeded = layer.publish(
-                    buffer,
-                    block.range.clone(),
-                    block.shape,
-                    marks,
-                    buffer.edit_mark(),
-                );
-                prop_assert!(seeded.is_ok(), "{:?}", seeded);
-            }
+            let seed = blocks[..k % (blocks.len() + 1)]
+                .iter()
+                .map(|block| {
+                    let marks = tokens(buffer.text(), &markdown.spans, block);
+                    (block.range.clone(), block.shape, marks)
+                })
+                .collect();
+            let seeded = layer.publish(buffer, Vec::new(), seed, buffer.edit_mark());
+            prop_assert!(seeded.is_ok(), "{:?}", seeded);
             hear(model, None)
         }
     }

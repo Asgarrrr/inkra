@@ -37,7 +37,8 @@ fn tokens(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffse
     tokens
 }
 
-/// The listener's pure part: catch up, read the chunks, plan, clears, then lexed blocks.
+/// The listener's pure part: catch up, read the chunks, plan, then one batch of clears and lexed
+/// blocks.
 fn call(
     buffer: &Buffer,
     layer: &mut Layer<TokenClass>,
@@ -52,17 +53,17 @@ fn call(
         .map(|b| (b.range.clone(), b.shape))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
-    let at = buffer.edit_mark();
-    for chunk in clear {
-        layer.remove(buffer, chunk, at).expect("a clear lands");
-    }
-    for &index in &lex {
-        let block = &markdown.code_blocks[index];
-        let marks = tokens(buffer.text(), &markdown.spans, block);
-        layer
-            .publish(buffer, block.range.clone(), block.shape, marks, at)
-            .expect("a block lands");
-    }
+    let lexed: Vec<_> = lex
+        .iter()
+        .map(|&index| {
+            let block = &markdown.code_blocks[index];
+            let marks = tokens(buffer.text(), &markdown.spans, block);
+            (block.range.clone(), block.shape, marks)
+        })
+        .collect();
+    layer
+        .publish(buffer, clear, lexed, buffer.edit_mark())
+        .expect("the batch lands");
     lex.len()
 }
 

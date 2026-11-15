@@ -715,3 +715,18 @@ number.
    cuts the chunk to a piece. The syntax layer passes `CodeBlock::shape`;
    other layers pass 0. `Opened.chunks` carries the tag too, so D7 matches a
    seeded chunk the same way.
+8. **One publish per listener call, a batch of clears and chunks.** Deviation
+   6's listener called `decorations::remove` once per clear and
+   `decorations::publish` once per lexed block. Each call repeated the rank
+   lookup, the entry lookup, the catch-up, the read of the splices since its
+   edit mark, the global update and the redraw. A `Lost`, an `Opened(None)` or
+   an `apply_diff` reload on a note with hundreds of blocks made hundreds of
+   calls. So `Layer::publish` and `decorations::publish` take a batch: the
+   ranges to empty, then the chunks with their tags and marks, all at one edit
+   mark. They do the lookups, the catch-up, the splice read and the redraw
+   once. `Layer::remove` and `decorations::remove` go; a feature with one
+   chunk passes a batch of one. The removals apply first and in order, then
+   the chunks: a later change still wins, as D7 requires. Once one change of
+   the batch moved marks, the later ones skip the before-and-after comparison.
+   A loss drops the whole batch. The seed lands each layer's chunks as one
+   batch too.

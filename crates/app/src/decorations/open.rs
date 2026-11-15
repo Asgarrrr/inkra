@@ -81,9 +81,7 @@ pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Opened)>, cx: 
             .into_iter()
             .filter(|&(rank, _)| decorations.enabled[rank]);
         for (rank, Opened { chunks, seed }) in enabled {
-            for (chunk, tag, marks) in chunks {
-                landed |= entry.layers[rank].publish(text, chunk, tag, marks, at) == Ok(true);
-            }
+            landed |= entry.layers[rank].publish(text, Vec::new(), chunks, at) == Ok(true);
             entry.seeds[rank] = seed.map(|seed| (at, seed));
         }
         if landed {
