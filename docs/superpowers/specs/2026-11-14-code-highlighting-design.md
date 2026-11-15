@@ -540,12 +540,11 @@ light. The look is tuned after it ships, as for code blocks.
 - `inkra-highlight`, `#[test]` on `plan`, one per case: deleting the closing
   fence between two blocks clears both old chunks and lexes the merged block;
   deleting a line right before a block's opening fence lexes the block;
-  a chunk on a block's range with another tag, or none, is lexed over; a chunk with
-  no marks on prose is not cleared again.
+  a chunk on a block's range with another tag, or none, is lexed over.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
-  each with whether it holds a mark, after random edits and publishes
+  each with its tag, after random edits and publishes
   (`proptest`, beside the layer's own).
 - `app`, headless `#[gpui::test]` against `MemFs`:
   - a block's runs carry the token colours; a revealed fence stays
