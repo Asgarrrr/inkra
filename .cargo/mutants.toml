@@ -40,6 +40,10 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Equivalent. A chunk that starts where a publish ends is past it: `<=` drains it, and
 # either branch puts it back whole, as a newer chunk or as the tail of an older one.
 #
+# Equivalent. A content line ends at a `\n` or at the block's end, which is a `\n` or the
+# text's end; a span is never empty and never holds a `\n`, so none starts there and `<=`
+# consumes no span `<` leaves.
+#
 # App files run with `cargo mutants -p inkra-app --test-package inkra-app -f <file>`,
 # which keeps this config, so the entries below apply.
 #
@@ -97,6 +101,7 @@ exclude_re = [
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::marks_in$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::shift$",
     "^crates/editor/src/layer\\.rs:[0-9]+:64: replace < with <= in Layer<S>::publish$",
+    "^crates/markdown/src/content_lines\\.rs:[0-9]+:37: replace < with <= in content_lines$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
     "^crates/app/src/sidebar/visible\\.rs:[0-9]+:[0-9]+: replace > with >= in Visible::step$",
