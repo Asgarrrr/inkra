@@ -14,6 +14,8 @@ thread_local! {
         const { std::cell::RefCell::new(0..0) };
     static PAINTED_CLIPS: std::cell::RefCell<Vec<(Pixels, Bounds<Pixels>)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static PAINTED_TOPS: std::cell::RefCell<Vec<Pixels>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The lines and bars the last paint on this thread walked.
@@ -26,6 +28,12 @@ pub(crate) fn painted() -> (Range<usize>, Range<usize>) {
 #[cfg(test)]
 pub(crate) fn painted_blocks() -> Range<usize> {
     PAINTED_BLOCKS.with(|painted| painted.borrow().clone())
+}
+
+/// The window y of each line the last paint on this thread drew.
+#[cfg(test)]
+pub(crate) fn painted_tops() -> Vec<Pixels> {
+    PAINTED_TOPS.with(|painted| painted.borrow().clone())
 }
 
 /// Each clipped line the last paint on this thread drew: its text's window x, and its mask.
@@ -62,6 +70,8 @@ impl DocumentLayout {
         PAINTED.with(|painted| *painted.borrow_mut() = (lines.clone(), bars.clone()));
         #[cfg(test)]
         PAINTED_CLIPS.with(|painted| painted.borrow_mut().clear());
+        #[cfg(test)]
+        PAINTED_TOPS.with(|painted| painted.borrow_mut().clear());
         for bar in &self.bars[bars] {
             window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
         }
@@ -69,6 +79,8 @@ impl DocumentLayout {
             let placed = &self.lines[index];
             let line = &*placed.line;
             let line_origin = origin + point(px(0.), placed.top);
+            #[cfg(test)]
+            PAINTED_TOPS.with(|painted| painted.borrow_mut().push(line_origin.y));
             let clip = placed
                 .block
                 .and_then(|block| Some((self.block_clip(block)?, self.block_scroll(block))));

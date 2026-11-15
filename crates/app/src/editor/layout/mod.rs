@@ -17,7 +17,7 @@ pub(crate) use blocks::label_shape_count;
 #[cfg(test)]
 pub(crate) use line::line_shape_count;
 #[cfg(test)]
-pub(crate) use paint::{painted, painted_blocks, painted_clips};
+pub(crate) use paint::{painted, painted_blocks, painted_clips, painted_tops};
 pub(crate) use scrolls::BlockScrolls;
 pub(crate) use shape::shape_document;
 #[cfg(test)]

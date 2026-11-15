@@ -1,11 +1,17 @@
 //! A layout carries every line an edit leaves clean (incremental layout spec, D5 and D7).
 
-use gpui::{TestAppContext, Window};
+use std::rc::Rc;
+
+use gpui::{TestAppContext, Window, px};
 use inkra_text::Buffer;
 
 use super::shapes::{layout_of, reshape, shape};
 use super::{at, dispatching, with_editor};
-use crate::editor::layout::{DocumentLayout, line_build_count};
+use crate::decorations::Drawn;
+use crate::editor::layout::{
+    BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document,
+};
+use crate::theme::builtin;
 
 /// The lines `f` builds rather than carries.
 fn builds<R>(f: impl FnOnce() -> R) -> (R, usize) {
@@ -19,6 +25,31 @@ fn carried(before: &str, after: &str, window: &mut Window) -> (DocumentLayout, u
     let mut buffer = Buffer::new(before);
     let previous = layout_of(&buffer, None, None, None, window);
     builds(|| reshape(&mut buffer, after, None, None, Some(&previous), window))
+}
+
+/// `buffer`'s layout with the caret at byte `caret`, carried from `previous`.
+fn with_caret(
+    buffer: &Buffer,
+    caret: usize,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
+    let style = window.text_style();
+    let inputs = LayoutInputs {
+        buffer,
+        markdown: &markdown,
+        selection: &(at(caret)..at(caret)),
+        marked: None,
+        style: &style,
+        wrap_width: None,
+        margin: px(76.),
+        code_block_wrap: false,
+        theme: builtin::dark(),
+        scrolls: &BlockScrolls::default(),
+        decorations: Drawn::default(),
+    };
+    shape_document(&inputs, previous, window)
 }
 
 /// Every caret position and every line's code block match a fresh layout of `text`.
@@ -104,6 +135,38 @@ fn a_changed_gutter_reaches_its_lazy_lines_and_stops(cx: &mut TestAppContext) {
         let (layout, built) = carried(">  > a\nb\nc\n\n> d\ne\n", after, window);
         assert_eq!(built, 3, "the gutter line and its two lazy lines");
         assert_fresh(&layout, after, window);
+    });
+}
+
+#[gpui::test]
+fn a_whole_gutter_below_an_edit_carries(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let after = "xy\n> a\n\nz\n";
+        let (layout, built) = carried("x\n> a\n\nz\n", after, window);
+        assert_eq!(built, 1);
+        assert_fresh(&layout, after, window);
+    });
+}
+
+#[gpui::test]
+fn a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_the_whole_note(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let mut buffer = Buffer::new("one\n\nsome *b* here");
+        let revealed = with_caret(&buffer, 11, None, window);
+        buffer.transact(|txn| txn.insert(at(0), "x"));
+        let (_, built) = builds(|| with_caret(&buffer, 1, Some(&revealed), window));
+        assert_eq!(built, 3);
+    });
+}
+
+#[gpui::test]
+fn a_conceal_below_an_edit_that_stays_revealed_carries(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let mut buffer = Buffer::new("one\n\nsome *b* here");
+        let revealed = with_caret(&buffer, 11, None, window);
+        buffer.transact(|txn| txn.insert(at(0), "x"));
+        let (_, built) = builds(|| with_caret(&buffer, 12, Some(&revealed), window));
+        assert_eq!(built, 1);
     });
 }
 
