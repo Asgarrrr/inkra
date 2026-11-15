@@ -2,8 +2,8 @@
 //! spec, D6).
 
 use gpui::{App, Entity};
-use inkra_highlight::{Batch, BlockChunk, TokenClass, batch, dirty};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_highlight::{Batch, BlockChunk, TokenClass, batch};
+use inkra_text::Buffer;
 
 use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
 use crate::editor::parses::parsed;
@@ -32,20 +32,13 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     activate: |fcx| fcx.on_text_change(SYNTAX, listener),
 };
 
-/// Removes each chunk no longer a block's, then lexes the blocks the plan names, in one publish
-/// (D7, deviations 6, 8 and 9).
-fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
+/// Removes each chunk no longer a block's, then lexes each block no chunk holds exactly, in one
+/// publish, whatever the change (D7, deviations 6, 8, 9 and 10).
+fn listener(buffer: &Entity<Buffer>, _: TextChange, cx: &mut App) {
     let markdown = parsed(buffer, cx);
     let held = decorations::chunks(SYNTAX, buffer, cx);
     let text = buffer.read(cx);
-    let dirty = match change {
-        TextChange::Edited(splices) => dirty(splices),
-        TextChange::Opened { fresh: true } => None,
-        TextChange::Opened { fresh: false } | TextChange::Lost => {
-            Some(ByteOffset::new(0)..text.len())
-        }
-    };
-    let Batch { clear, lexed } = batch(text.text(), &markdown, &held, dirty);
+    let Batch { clear, lexed } = batch(text.text(), &markdown, &held);
     let lexed = lexed.into_iter().map(styled).collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
     // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.

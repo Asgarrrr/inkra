@@ -179,7 +179,7 @@ fn hear(model: &mut Model) -> Result<(), TestCaseError> {
     );
     let held: Vec<_> = layer.chunks().collect();
     let markdown = parse(buffer.text());
-    let Batch { clear, lexed } = batch(buffer.text(), &markdown, &held, None);
+    let Batch { clear, lexed } = batch(buffer.text(), &markdown, &held);
     let published = layer.publish(buffer, clear, lexed, buffer.edit_mark());
     prop_assert!(published.is_ok(), "{:?}", published);
     Ok(())

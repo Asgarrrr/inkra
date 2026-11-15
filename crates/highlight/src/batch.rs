@@ -21,20 +21,15 @@ pub struct Batch {
 }
 
 /// What one listener call publishes over `text`, parsed as `markdown`, given the layer's `held`
-/// chunks and the `dirty` range (D7); the clears go first in the publish.
+/// chunks (D7); the clears go first in the publish.
 #[must_use]
-pub fn batch(
-    text: &str,
-    markdown: &Markdown,
-    held: &[(Range<ByteOffset>, Option<u64>)],
-    dirty: Option<Range<ByteOffset>>,
-) -> Batch {
+pub fn batch(text: &str, markdown: &Markdown, held: &[(Range<ByteOffset>, Option<u64>)]) -> Batch {
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
         .map(|block| (block.range.clone(), block.shape))
         .collect();
-    let Plan { clear, lex } = plan(&blocks, held, dirty);
+    let Plan { clear, lex } = plan(&blocks, held);
     let lexed = lex
         .into_iter()
         .map(|index| block_chunk(text, &markdown.spans, &markdown.code_blocks[index]))

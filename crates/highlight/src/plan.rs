@@ -18,15 +18,12 @@ pub(crate) struct Plan {
 
 /// One merge of `blocks`, each with its shape, and the `held` chunks, each with its tag; both sorted,
 /// disjoint and non-empty. A chunk on a block's range is kept, and lexed over unless its tag is the
-/// block's shape and the dirty range misses the block.
+/// block's shape (deviation 10).
 #[must_use]
 pub(crate) fn plan(
     blocks: &[(Range<ByteOffset>, u64)],
     held: &[(Range<ByteOffset>, Option<u64>)],
-    dirty: Option<Range<ByteOffset>>,
 ) -> Plan {
-    // A dirty range that only touches a block meets it: an empty one is a deletion there.
-    let dirty = dirty.map(|Range { start, end }| start..=end);
     let mut clear = Vec::new();
     let mut lex = Vec::new();
     let mut held = held.iter().peekable();
@@ -37,10 +34,7 @@ pub(crate) fn plan(
         let exact = held
             .next_if(|(chunk, _)| chunk == block)
             .is_some_and(|&(_, tag)| tag == Some(*shape));
-        let meets = dirty
-            .as_ref()
-            .is_some_and(|dirty| *dirty.start() <= block.end && block.start <= *dirty.end());
-        if !exact || meets {
+        if !exact {
             lex.push(index);
         }
     }
