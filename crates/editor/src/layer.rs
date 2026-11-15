@@ -2,6 +2,10 @@ use std::ops::Range;
 
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 
+mod heard;
+
+pub use heard::{HeardLayer, TextChange};
+
 /// A layer could not follow the buffer's edits and holds nothing until it is published again.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Lost;

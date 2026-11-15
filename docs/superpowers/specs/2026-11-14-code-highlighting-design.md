@@ -344,9 +344,10 @@ whole deadline. Every block it reaches gets its block chunk, coloured or
 empty.
 
 The open function returns the finished block chunks; the core lands them at
-the buffer's edit mark (`decorations/open.rs`, `seed`) and records that mark.
-The listener reads the landed chunks back through D9. The first hearing is
-fresh only if the text is still at that edit mark (`HeardLayer::hear`). So:
+the buffer's edit mark and records that mark (`HeardLayer::land`). The listener
+reads the landed chunks back through D9. The first hearing is fresh only if the
+text is still at that edit mark and the layer was not lost since
+(`HeardLayer::hear`). So:
 
 - `Opened { fresh: true }`: the landed chunks are current. D7 runs with no
   dirty range, which lexes only the blocks the open did not reach.

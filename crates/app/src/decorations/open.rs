@@ -26,8 +26,10 @@ pub(crate) fn openers(cx: &App) -> Vec<(LayerId, OpenFn)> {
             decorations
                 .declared
                 .iter()
-                .zip(&decorations.enabled)
-                .filter_map(|(decl, &enabled)| Some((decl.id, decl.open.filter(|_| enabled)?)))
+                .filter_map(|declared| {
+                    let open = declared.decl.open.filter(|_| declared.enabled)?;
+                    Some((declared.decl.id, open))
+                })
                 .collect()
         })
 }
@@ -48,7 +50,7 @@ pub(crate) fn run_openers(
 /// Lands `opened` on `buffer` at its edit mark, which its listener's first hearing compares.
 ///
 /// # Panics
-/// As `publish`.
+/// As `HeardLayer::land`.
 pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Vec<Chunk>)>, cx: &mut App) {
     // No layer, no entry: a buffer no feature colours stays untracked.
     if opened.is_empty() {
@@ -66,19 +68,16 @@ pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Vec<Chunk>)>, 
             cx,
         );
         let text = buffer.read(cx);
-        let at = text.edit_mark();
         let mut landed = false;
         // A rank switched off since its opener was read.
         let enabled = opened
             .into_iter()
-            .filter(|&(rank, _)| decorations.enabled[rank]);
+            .filter(|&(rank, _)| decorations.declared[rank].enabled);
         for (rank, chunks) in enabled {
-            landed |= entry.layers[rank].publish(text, Vec::new(), chunks, at) == Ok(true);
-            entry.opened[rank] = Some(at);
+            landed |= entry.layers[rank].land(text, chunks);
         }
         if landed {
-            decorations.revisions += 1;
-            entry.revision = decorations.revisions;
+            entry.bump(&mut decorations.revisions);
         }
     });
 }

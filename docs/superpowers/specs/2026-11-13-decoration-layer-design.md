@@ -195,8 +195,9 @@ ready, the highlighting spec's landing budget (its D8). Each function stops
 when the deadline passes and returns what it did.
 
 When the note lands, the core stores the marks at edit mark 0 and records that
-edit mark. It calls the listener with `Opened { fresh: true }` if the text is
-still there. The feature reads the landed chunks back and publishes the rest
+edit mark (`HeardLayer::land`). It calls the listener with
+`Opened { fresh: true }` if the text is still there and the layer was not lost
+since. The feature reads the landed chunks back and publishes the rest
 later, in its own background task. The first frame with the text has the
 colours the functions finished.
 
@@ -220,6 +221,9 @@ The data and the shift are plain and gpui-free:
 - `inkra-text` holds the splice log;
 - `inkra-editor` holds `Layer<S>`: chunks, marks and the shift of D3. It is
   generic over the style `S` and knows no colour or theme;
+- `inkra-editor` also holds `HeardLayer<S>`: a `Layer<S>` and how far its
+  listener has heard the buffer. It decides the `TextChange` of D4, so the
+  rules of D6, D8 and D10 live beside the data they read;
 - `app` instantiates `S = MarkStyle` and converts marks into gpui `TextRun`s in
   `line_runs` (`app/src/editor/layout/runs.rs:53`). This is the only place
   that touches gpui.
@@ -420,7 +424,8 @@ number.
 11. **An open is fresh only at its edit mark.** The core records the edit mark
     an open landed its chunks at. If the buffer changed before the listener
     arrived, the listener hears `Opened { fresh: false }`, a full recompute
-    (D8).
+    (D8). `HeardLayer` keeps that edit mark inside its unheard state, so a
+    switch or a lost layer drops it by construction.
 12. **Every layer starts off.** `decorations::enable` turns a feature's layers
     on and off. A layer that is off takes no publish, hears nothing, runs no
     open function and lands nothing. Turning it off clears its marks; turning

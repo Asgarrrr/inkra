@@ -6,7 +6,8 @@ use std::ops::Range;
 use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
-use inkra_editor::Layer;
+use inkra_editor::HeardLayer;
+pub(crate) use inkra_editor::TextChange;
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
@@ -15,8 +16,8 @@ use crate::theme::ColorToken;
 mod listen;
 mod open;
 
-use listen::{Heard, Listener};
-pub(crate) use listen::{TextChange, listen};
+use listen::Listener;
+pub(crate) use listen::listen;
 pub(crate) use open::Chunk;
 pub(crate) use open::{OpenFn, openers, run_openers, seed};
 
@@ -45,16 +46,20 @@ pub(crate) struct MarkStyle {
 #[derive(Default)]
 struct Decorations {
     /// A layer's rank is its index here: a later layer draws over an earlier one.
-    declared: Vec<&'static LayerDecl>,
+    declared: Vec<Declared>,
     entries: HashMap<EntityId, Entry>,
     revisions: u64,
-    /// One per declared layer, by rank: the listener its `listen` subscription holds.
-    listeners: Vec<Option<Weak<Listener>>>,
-    /// One per declared layer, by rank: whether its feature is on.
-    enabled: Vec<bool>,
 }
 
 impl Global for Decorations {}
+
+struct Declared {
+    decl: &'static LayerDecl,
+    /// The listener its `listen` subscription holds.
+    listener: Option<Weak<Listener>>,
+    /// Whether its feature is on.
+    enabled: bool,
+}
 
 struct Entry {
     /// Removes the entry when its buffer is released.
@@ -62,11 +67,14 @@ struct Entry {
     /// Moves on every change a view must draw.
     revision: u64,
     /// One per declared layer, by rank.
-    layers: Vec<Layer<MarkStyle>>,
-    /// One per declared layer, by rank.
-    heard: Vec<Heard>,
-    /// One per declared layer, by rank: the edit mark its open landed chunks at.
-    opened: Vec<Option<EditMark>>,
+    layers: Vec<HeardLayer<MarkStyle>>,
+}
+
+impl Entry {
+    fn bump(&mut self, revisions: &mut u64) {
+        *revisions += 1;
+        self.revision = *revisions;
+    }
 }
 
 /// Replaces the declared layers, dropping every published mark, unless they are unchanged.
@@ -76,14 +84,20 @@ pub(crate) fn declare(layers: impl IntoIterator<Item = &'static LayerDecl>, cx: 
     if decorations
         .declared
         .iter()
-        .map(|decl| decl.id)
+        .map(|declared| declared.decl.id)
         .eq(layers.iter().map(|decl| decl.id))
     {
         return;
     }
-    decorations.listeners.resize(layers.len(), None);
-    decorations.enabled = vec![false; layers.len()];
-    decorations.declared = layers;
+    let mut old = std::mem::take(&mut decorations.declared).into_iter();
+    decorations.declared = layers
+        .into_iter()
+        .map(|decl| Declared {
+            decl,
+            listener: old.next().and_then(|old| old.listener),
+            enabled: false,
+        })
+        .collect();
     decorations.entries.clear();
 }
 
@@ -95,29 +109,24 @@ pub(crate) fn enable(features: impl IntoIterator<Item = FeatureId>, cx: &mut App
         declared,
         entries,
         revisions,
-        enabled,
-        ..
     } = cx.default_global::<Decorations>();
-    let now: Vec<_> = declared
-        .iter()
-        .map(|decl| features.contains(&decl.id.feature))
-        .collect();
-    if now == *enabled {
-        return;
-    }
-    for rank in (0..now.len()).filter(|&rank| now[rank] != enabled[rank]) {
+    let mut switched = false;
+    for (rank, declared) in declared.iter_mut().enumerate() {
+        let on = features.contains(&declared.decl.id.feature);
+        if on == declared.enabled {
+            continue;
+        }
+        declared.enabled = on;
+        switched = true;
         for entry in entries.values_mut() {
-            entry.heard[rank] = Heard::Lost;
-            entry.opened[rank] = None;
-            if !now[rank] && !entry.layers[rank].is_empty() {
-                entry.layers[rank].clear();
-                *revisions += 1;
-                entry.revision = *revisions;
+            if entry.layers[rank].switch(on) {
+                entry.bump(revisions);
             }
         }
     }
-    *enabled = now;
-    cx.refresh_windows();
+    if switched {
+        cx.refresh_windows();
+    }
 }
 
 /// # Panics
@@ -128,7 +137,7 @@ fn rank(layer: LayerId, cx: &App) -> usize {
             decorations
                 .declared
                 .iter()
-                .position(|decl| decl.id == layer)
+                .position(|declared| declared.decl.id == layer)
         })
         .unwrap_or_else(|| {
             panic!(
@@ -154,18 +163,17 @@ fn entry<'a>(
         }),
         revision: 0,
         layers: (0..declared)
-            .map(|_| Layer::new(buffer.read(cx).edit_mark()))
+            .map(|_| HeardLayer::new(buffer.read(cx).edit_mark()))
             .collect(),
-        heard: (0..declared).map(|_| Heard::Unheard).collect(),
-        opened: vec![None; declared],
     })
 }
 
-/// As `Layer::publish`, on `layer` over `buffer`; redraws every window once when the marks change.
+/// As `HeardLayer::publish`, on `layer` over `buffer`; redraws every window once when the marks
+/// change.
 /// A lost layer's listener hears `Lost` at the next sync, and publishes it all again.
 ///
 /// # Panics
-/// If `layer` is not declared, or as `Layer::publish`.
+/// If `layer` is not declared, or as `HeardLayer::publish`.
 pub(crate) fn publish(
     layer: LayerId,
     buffer: &WeakEntity<Buffer>,
@@ -179,22 +187,15 @@ pub(crate) fn publish(
     };
     let rank = rank(layer, cx);
     // A publish computed before its feature went off.
-    if !cx.global::<Decorations>().enabled[rank] {
+    if !cx.global::<Decorations>().declared[rank].enabled {
         return;
     }
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
-        let text = buffer.read(cx);
-        let published = entry.layers[rank].publish(text, removed, chunks, at);
-        if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
-            entry.heard[rank] = Heard::Lost;
-        }
-        // A lost layer was cleared: what it drew is gone too.
-        let changed = published != Ok(false);
+        let changed = entry.layers[rank].publish(buffer.read(cx), removed, chunks, at);
         if changed {
-            decorations.revisions += 1;
-            entry.revision = decorations.revisions;
+            entry.bump(&mut decorations.revisions);
         }
         changed
     });
@@ -217,7 +218,7 @@ pub(crate) fn chunks(
     let Some(entry) = cx.global::<Decorations>().entries.get(&buffer.entity_id()) else {
         return Vec::new();
     };
-    let layer = &entry.layers[rank];
+    let layer = entry.layers[rank].layer();
     // Offsets behind the buffer's would mis-plan without a sign.
     debug_assert!(layer.is_empty() || layer.at() == buffer.read(cx).edit_mark());
     layer.chunks().collect()
@@ -243,28 +244,21 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
         let text = buffer.read(cx);
         let mut moved = false;
         let mut unheard = Vec::new();
-        let ranks = entry
+        let enabled = entry
             .layers
             .iter_mut()
-            .zip(entry.heard.iter_mut().zip(&mut entry.opened))
-            .zip(decorations.declared.iter().zip(&decorations.listeners))
-            .zip(&decorations.enabled)
-            .filter_map(|(rank, &enabled)| enabled.then_some(rank));
-        for ((layer, (heard, opened)), (decl, listener)) in ranks {
-            moved |= !layer.is_empty() && layer.at() != text.edit_mark();
-            // `Lost` clears the layer, a change `moved` already counts.
-            if layer.catch_up(text).is_err() && matches!(heard, Heard::At(_)) {
-                *heard = Heard::Lost;
-            }
-            if let Some(listener) = listener.as_ref().and_then(Weak::upgrade)
-                && let Some(change) = heard.hear(text, opened.take())
+            .zip(&decorations.declared)
+            .filter(|(_, declared)| declared.enabled);
+        for (layer, declared) in enabled {
+            moved |= layer.catch_up(text);
+            if let Some(listener) = declared.listener.as_ref().and_then(Weak::upgrade)
+                && let Some(change) = layer.hear(text)
             {
-                unheard.push((listener, decl.id, change));
+                unheard.push((listener, declared.decl.id, change));
             }
         }
         if moved {
-            decorations.revisions += 1;
-            entry.revision = decorations.revisions;
+            entry.bump(&mut decorations.revisions);
         }
         unheard
     });
@@ -281,7 +275,7 @@ pub(crate) fn tracked(cx: &App) -> usize {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Drawn<'a> {
     pub(crate) revision: u64,
-    layers: &'a [Layer<MarkStyle>],
+    layers: &'a [HeardLayer<MarkStyle>],
     /// The buffer's edit mark: a layer at another one is stale and not drawn.
     at: EditMark,
 }
@@ -303,7 +297,7 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
 
 #[cfg(test)]
 impl<'a> Drawn<'a> {
-    pub(crate) fn for_tests(layers: &'a [Layer<MarkStyle>], at: EditMark) -> Self {
+    pub(crate) fn for_tests(layers: &'a [HeardLayer<MarkStyle>], at: EditMark) -> Self {
         Self {
             revision: 0,
             layers,
@@ -320,6 +314,7 @@ impl Drawn<'_> {
     ) -> Vec<(Range<ByteOffset>, ColorToken)> {
         self.layers
             .iter()
+            .map(HeardLayer::layer)
             .filter(|layer| layer.at() == self.at)
             .flat_map(|layer| layer.marks_in(line.clone()))
             .filter_map(|(mark, style)| Some((mark, style.color?)))

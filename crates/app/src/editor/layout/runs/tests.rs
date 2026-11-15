@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use gpui::{FontWeight, Hsla, TextStyle};
-use inkra_editor::Layer;
+use inkra_editor::HeardLayer;
 use inkra_markdown::{DisplayLine, parse};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -102,11 +102,10 @@ fn a_stale_span_past_the_line_is_clipped_not_fatal() {
 }
 
 /// One layer over `text` holding `marks`, published at its edit mark.
-fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> Layer<MarkStyle> {
-    let mut layer = Layer::new(text.edit_mark());
+fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> HeardLayer<MarkStyle> {
+    let mut layer = HeardLayer::new(text.edit_mark());
     let chunk = (ByteOffset::new(0)..text.len(), 0, marks);
-    let published = layer.publish(text, Vec::new(), vec![chunk], text.edit_mark());
-    assert_eq!(published, Ok(true));
+    assert!(layer.publish(text, Vec::new(), vec![chunk], text.edit_mark()));
     layer
 }
 
@@ -118,7 +117,7 @@ fn colored(color: ColorToken) -> MarkStyle {
 fn warning_runs(
     text: &str,
     marked: Option<&Range<ByteOffset>>,
-    layers: &[Layer<MarkStyle>],
+    layers: &[HeardLayer<MarkStyle>],
 ) -> Vec<bool> {
     let buffer = Buffer::new(text);
     let base = TextStyle::default();
