@@ -233,3 +233,23 @@ fn a_chunk_past_the_end_panics() {
 
     let _ = publish(&mut layer, &buffer, 0..25, &[]);
 }
+
+#[test]
+fn chunks_follow_edits_and_flag_their_marks() {
+    let mut buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 2..6, &[(3..4, 'a')]).unwrap();
+    publish(&mut layer, &buffer, 8..12, &[]).unwrap();
+    assert_eq!(
+        layer.chunks().collect::<Vec<_>>(),
+        [(span(2..6), true), (span(8..12), false)]
+    );
+
+    buffer.transact(|buffer| buffer.insert(at(0), "xyz"));
+    layer.catch_up(&buffer).unwrap();
+
+    assert_eq!(
+        layer.chunks().collect::<Vec<_>>(),
+        [(span(5..9), true), (span(11..15), false)]
+    );
+}

@@ -65,6 +65,13 @@ impl<S: Clone + PartialEq> Layer<S> {
             .flat_map(move |chunk| chunk.marks_in(range.clone()))
     }
 
+    /// Each chunk's range and whether it holds a mark, in order.
+    pub fn chunks(&self) -> impl Iterator<Item = (Range<ByteOffset>, bool)> + '_ {
+        self.chunks
+            .iter()
+            .map(|chunk| (chunk.start..chunk.end(), !chunk.marks.is_empty()))
+    }
+
     /// Brings the layer to `buffer`'s edit mark, shifting its marks through every splice since.
     ///
     /// # Errors

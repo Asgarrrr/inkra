@@ -1,11 +1,15 @@
 //! Code blocks coloured by token class, as a built-in feature with one layer (code highlighting
 //! spec, D6).
 
+use std::ops::Range;
+
 use gpui::{App, Entity};
-use inkra_highlight::{Language, TokenClass, highlight};
+use inkra_highlight::{Language, Plan, TokenClass, highlight, plan};
+use inkra_markdown::{CodeBlock, Span};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, TextChange};
+use crate::editor::parses::parsed;
 use crate::feature::{FeatureId, Manifest};
 use crate::theme::ColorToken;
 
@@ -31,31 +35,60 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     activate: |fcx| fcx.on_text_change(SYNTAX, listener),
 };
 
-/// Lexes every code block of the note and publishes them all as one chunk over the whole text.
+/// Clears each chunk no longer a block's, then lexes the blocks the plan names (D7).
 fn listener(buffer: &Entity<Buffer>, _change: TextChange, cx: &mut App) {
-    let markdown = crate::editor::parses::parsed(buffer, cx);
+    let markdown = parsed(buffer, cx);
+    let held = decorations::chunks(SYNTAX, buffer, cx);
     let text = buffer.read(cx);
-    let mut tokens = Vec::new();
-    for block in &markdown.code_blocks {
-        let word = block.language.clone().map(|word| text.slice(word));
-        if let Some(language) = word.and_then(Language::from_info) {
-            let lines = lines::content_lines(text.text(), &markdown.spans, block);
-            highlight(language, lines, &mut tokens);
-        }
+    // The whole text until the splices are folded.
+    let dirty = Some(ByteOffset::new(0)..text.len());
+    let blocks: Vec<_> = markdown
+        .code_blocks
+        .iter()
+        .map(|block| (block.range.clone(), text.line_at(block.range.start).start))
+        .collect();
+    let Plan { clear, lex } = plan(&blocks, &held, dirty);
+    // Clears first: at one edit mark the later publish wins, and a lexed block may cover a clear.
+    let publishes: Vec<_> = clear
+        .into_iter()
+        .map(|chunk| (chunk, Vec::new()))
+        .chain(lex.into_iter().map(|index| {
+            let block = &markdown.code_blocks[index];
+            (
+                block.range.clone(),
+                colour(text.text(), &markdown.spans, block),
+            )
+        }))
+        .collect();
+    let (at, buffer) = (text.edit_mark(), buffer.downgrade());
+    for (chunk, marks) in publishes {
+        decorations::publish(SYNTAX, &buffer, chunk, marks, at, cx);
     }
-    let marks = tokens
+}
+
+/// `block`'s marks, none when its info word names no known language.
+fn colour(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffset>, MarkStyle)> {
+    let language = block
+        .language
+        .clone()
+        .map(|word| &text[word.start.get()..word.end.get()])
+        .and_then(Language::from_info);
+    let Some(language) = language else {
+        return Vec::new();
+    };
+    let mut tokens = Vec::new();
+    highlight(
+        language,
+        lines::content_lines(text, spans, block),
+        &mut tokens,
+    );
+    tokens
         .into_iter()
         .map(|(range, class)| {
             let color = Some(token(class));
             (range, MarkStyle { color })
         })
-        .collect();
-    let (chunk, at, buffer) = (
-        ByteOffset::new(0)..text.len(),
-        text.edit_mark(),
-        buffer.downgrade(),
-    );
-    decorations::publish(SYNTAX, &buffer, chunk, marks, at, cx);
+        .collect()
 }
 
 fn token(class: TokenClass) -> ColorToken {
@@ -72,3 +105,6 @@ fn token(class: TokenClass) -> ColorToken {
         TokenClass::Operator => ColorToken::SyntaxOperator,
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -4,8 +4,10 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
+pub use plan::{Plan, plan};
 use state::LineState;
 
+mod plan;
 mod rust;
 mod state;
 

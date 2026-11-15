@@ -204,6 +204,26 @@ pub(crate) fn publish(
     }
 }
 
+/// The chunks `layer` holds over `buffer`, sorted, each with whether it holds a mark (code
+/// highlighting spec, D9).
+///
+/// # Panics
+/// If `layer` is not declared.
+pub(crate) fn chunks(
+    layer: LayerId,
+    buffer: &Entity<Buffer>,
+    cx: &App,
+) -> Vec<(Range<ByteOffset>, bool)> {
+    let rank = rank(layer, cx);
+    let Some(entry) = cx.global::<Decorations>().entries.get(&buffer.entity_id()) else {
+        return Vec::new();
+    };
+    let layer = &entry.layers[rank];
+    // Offsets behind the buffer's would mis-plan without a sign.
+    debug_assert!(layer.is_empty() || layer.at() == buffer.read(cx).edit_mark());
+    layer.chunks().collect()
+}
+
 /// Brings every layer of `buffer` to its edit mark. A non-empty layer behind it draws something
 /// else after, moved or lost, so the entry's revision moves: undo can bring back a shaped version.
 /// Then each listener hears what it has not, once the global is released.

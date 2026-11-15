@@ -622,3 +622,12 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
 - **Colour computed in the open's background task.** Zed opens a buffer and
   parses it afterwards. Inkra already loads off the main thread, so the note
   lands coloured (D8).
+
+## Deviations from this spec
+
+The build differs from the design above in these points. Code cites them by
+number.
+
+1. **`Plan.lex` holds indices into `blocks`, not ranges.** The listener needs
+   each lexed block's `CodeBlock`, for its language and its content lines. An
+   index reaches it without a search; a range would need one per block.
