@@ -5,7 +5,7 @@ use inkra_text::{ByteOffset, Splice};
 use proptest::prelude::*;
 
 use super::changed;
-use crate::{CodeBlock, Conceal, Heading, HeadingLevel, Markdown, Span, Styles, parse};
+use crate::{CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, parse};
 
 /// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it,
 /// sorted and merged.
@@ -206,6 +206,32 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
         };
 
         assert_eq!(typed_after(&old, &new)[0].0, 2, "{new:?}");
+    }
+}
+
+#[test]
+fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
+    let gutter = |end, quotes: &[usize], depth| Gutter {
+        range: offsets(0..end),
+        quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
+        depth,
+    };
+    let old = Markdown {
+        gutters: vec![gutter(4, &[0, 2], 2)],
+        ..Markdown::default()
+    };
+    for new in [
+        gutter(2, &[0, 2], 2),
+        gutter(4, &[0, 1], 2),
+        gutter(4, &[0], 2),
+        gutter(4, &[0, 2], 3),
+    ] {
+        let new = Markdown {
+            gutters: vec![new],
+            ..Markdown::default()
+        };
+
+        assert_eq!(typed_after(&old, &new)[0].0, 0, "{new:?}");
     }
 }
 
