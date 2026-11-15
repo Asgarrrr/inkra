@@ -134,3 +134,23 @@ fn the_dirty_range_meets_the_reach_when_it_touches_it() {
         assert_eq!(plan, Plan { clear: vec![], lex }, "{dirty:?}");
     }
 }
+
+#[test]
+fn dirty_folds_the_splices_into_one_range_in_the_last_text() {
+    let splice = |at, removed_len, inserted_len| Splice {
+        at: ByteOffset::new(at),
+        removed_len,
+        inserted_len,
+    };
+    let range_10_20 = splice(10, 0, 10);
+    for (splices, folded) in [
+        (vec![], None),
+        (vec![splice(10, 0, 3)], Some(r(10, 13))),
+        (vec![splice(10, 4, 0)], Some(r(10, 10))),
+        (vec![splice(200, 0, 5), splice(0, 0, 100)], Some(r(0, 305))),
+        (vec![range_10_20, splice(15, 10, 0)], Some(r(10, 15))),
+        (vec![range_10_20, splice(5, 20, 3)], Some(r(5, 8))),
+    ] {
+        assert_eq!(dirty(splices.clone()), folded, "{splices:?}");
+    }
+}

@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::ByteOffset;
+use inkra_text::{ByteOffset, Splice};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
@@ -45,6 +45,19 @@ pub fn plan(
     }
     held.for_each(clear_marked);
     Plan { clear, lex }
+}
+
+/// The splices, in order, as one range in the text after the last; `None` for none.
+#[must_use]
+pub fn dirty(splices: impl IntoIterator<Item = Splice>) -> Option<Range<ByteOffset>> {
+    splices.into_iter().fold(None, |acc, s| {
+        Some(match acc {
+            None => s.at..s.at + s.inserted_len,
+            Some(r) => {
+                r.start.min(s.at)..r.end.max(s.at + s.removed_len) - s.removed_len + s.inserted_len
+            }
+        })
+    })
 }
 
 #[cfg(test)]

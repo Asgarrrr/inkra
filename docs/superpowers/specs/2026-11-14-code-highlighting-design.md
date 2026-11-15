@@ -631,3 +631,8 @@ number.
 1. **`Plan.lex` holds indices into `blocks`, not ranges.** The listener needs
    each lexed block's `CodeBlock`, for its language and its content lines. An
    index reaches it without a search; a range would need one per block.
+2. **The splices fold in a pure `inkra_highlight::dirty`, beside `plan`, not
+   in the listener.** The model test and the listener bench then fold the same
+   way, and mutants reach the fold. A pure deletion folds to an empty range at
+   its offset; `plan`'s meets counts touching, so it still relexes a block it
+   touches.
