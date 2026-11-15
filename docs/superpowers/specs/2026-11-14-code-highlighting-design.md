@@ -246,8 +246,7 @@ the current text.
 Once highlighting publishes, these `dead_code` expectations stop firing, and
 the build removes them: in `decorations/mod.rs`, in `decorations/listen.rs`,
 and on `Activation::on_text_change` (`shell/features/activation.rs`).
-An expectation that stops firing fails the build
-anyway.
+An expectation that stops firing fails the build anyway.
 
 ### D7. A pure plan decides what to clear and what to lex
 

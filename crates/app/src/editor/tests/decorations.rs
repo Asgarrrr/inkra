@@ -347,7 +347,7 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
     });
     cx.run_until_parked();
 
-    assert_eq!(fakes::heard(), ["opened+seed"]);
+    assert_eq!(fakes::heard(), ["opened+fresh"]);
     assert_eq!(warning_runs(window, cx), [(4, true), (3, false), (4, true)]);
 }
 
@@ -373,7 +373,7 @@ fn every_open_function_of_a_note_shares_one_deadline_8_ms_after_the_text() {
 #[gpui::test]
 fn a_seed_waits_for_the_listener(cx: &mut TestAppContext) {
     cx.update(fakes::declare_todo);
-    for (edited, heard) in [(false, "opened+seed"), (true, "opened")] {
+    for (edited, heard) in [(false, "opened+fresh"), (true, "opened")] {
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO\n")));
         let _window = window_on(cx, buffer.clone());
         cx.update(|cx| {

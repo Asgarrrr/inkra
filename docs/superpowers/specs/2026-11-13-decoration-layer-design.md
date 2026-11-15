@@ -115,7 +115,8 @@ never waits on a feature and never calls one.
 The listener receives a `TextChange`:
 
 - `Opened { fresh }`: the note landed. `fresh` is true when the layer's open
-  function landed chunks (D8) and the text is still at that edit mark.
+  function's landing succeeded (D8), even with no chunk, no lost layer cleared
+  it since, and the text is still at that edit mark.
 - `Edited(splices)`: the splices since the last call.
 - `Lost`: the core dropped the layer's marks for this note and needs a full
   recompute. This follows a log overflow (D6) or a switch on (D10).

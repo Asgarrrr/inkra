@@ -255,7 +255,7 @@ pub(crate) fn open_todo(text: &str, deadline: Instant) -> Vec<Chunk> {
 )]
 pub(crate) fn todo_listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let heard = match change {
-        TextChange::Opened { fresh: true } => "opened+seed",
+        TextChange::Opened { fresh: true } => "opened+fresh",
         TextChange::Opened { fresh: false } => "opened",
         TextChange::Edited(_) => "edited",
         TextChange::Lost => "lost",

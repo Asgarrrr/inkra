@@ -66,7 +66,7 @@ fn a_note_opens_with_the_colours_and_seed_from_its_open_function(cx: &mut TestAp
     fakes::set_unbounded(true);
     let (_, window, mut visual) = opened(cx, TODO_CATALOG, "TODO a TODO\n");
 
-    assert_eq!(fakes::heard(), ["opened+seed"]);
+    assert_eq!(fakes::heard(), ["opened+fresh"]);
     assert_eq!(
         warning_runs(window, &mut visual),
         [(4, true), (3, false), (4, true)]
@@ -76,7 +76,7 @@ fn a_note_opens_with_the_colours_and_seed_from_its_open_function(cx: &mut TestAp
 #[gpui::test]
 fn each_change_is_heard_once(cx: &mut TestAppContext) {
     let (_, _window, mut visual) = opened(cx, TODO_CATALOG, "a TODO b TODO\n");
-    assert_eq!(fakes::heard(), ["opened+seed"]);
+    assert_eq!(fakes::heard(), ["opened+fresh"]);
 
     visual.simulate_input("x");
     visual.run_until_parked();

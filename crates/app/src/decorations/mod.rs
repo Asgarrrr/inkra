@@ -169,8 +169,7 @@ fn entry<'a>(
 }
 
 /// As `HeardLayer::publish`, on `layer` over `buffer`; redraws every window once when the marks
-/// change.
-/// A lost layer's listener hears `Lost` at the next sync, and publishes it all again.
+/// change. A lost layer's listener hears `Lost` at the next sync, and publishes it all again.
 ///
 /// # Panics
 /// If `layer` is not declared, or as `HeardLayer::publish`.
