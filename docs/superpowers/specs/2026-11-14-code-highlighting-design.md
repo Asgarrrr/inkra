@@ -266,11 +266,15 @@ pub fn plan(
 ```
 
 `blocks` are the current text's code blocks, from
-`parses::parsed(buffer).code_blocks`. Each comes with its reach start: the
-start of its opening fence's line. A block's range starts after the fence's
-indent and after any quote prefix (`parse/tests/code_blocks.rs:21`). An edit
-there changes how much indent each content line loses, so it changes the
-code. The parse is cached per version and the draw needs it too, so this adds
+`parses::parsed(buffer).code_blocks`. Each comes with its reach start
+(`CodeBlock::reach`): the start of its opening fence's line. A block's range
+starts after the fence's indent and after any quote prefix
+(`parse/tests/code_blocks.rs:21`). An edit there changes how much indent each
+content line loses, so it changes the code. Two blocks reach further back,
+because a line before the fence decides their kind: a block in a list item
+reaches the line of the outermost item's marker (a deleted `- ` turns the
+fence into indented code), and an indented block reaches the line of the block
+before it (a paragraph there makes the indent a continuation). The parse is cached per version and the draw needs it too, so this adds
 no parse. `held` are the layer's chunks and whether each has marks (D9).
 `Plan` holds two sorted lists:
 

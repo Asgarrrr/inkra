@@ -53,7 +53,7 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
-        .map(|block| (block.range.clone(), text.line_at(block.range.start).start))
+        .map(|block| (block.range.clone(), block.reach))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     #[cfg(test)]

@@ -165,7 +165,7 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
-        .map(|b| (b.range.clone(), buffer.line_at(b.range.start).start))
+        .map(|b| (b.range.clone(), b.reach))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();

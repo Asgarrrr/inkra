@@ -345,3 +345,46 @@ fn a_seeded_open_lexes_nothing_on_its_first_hearing(cx: &mut TestAppContext) {
         .collect();
     assert_eq!(held(cx, &buffer), blocks);
 }
+
+/// A list item's marker line decides whether the fence under it is a fence or indented code.
+#[gpui::test]
+fn deleting_a_list_marker_turns_a_fenced_block_into_indented_code(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, "- a\n\n    ```rust\n    let\n    ```\n");
+    assert_ne!(marks(cx, &buffer), []);
+
+    edit(cx, &buffer, |t| t.delete(at(0)..at(2)));
+
+    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+}
+
+#[gpui::test]
+fn typing_a_list_marker_turns_indented_code_into_a_fenced_block(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, "a\n\n    ```rust\n    let\n    ```\n");
+
+    edit(cx, &buffer, |t| t.insert(at(0), "- "));
+
+    let coloured = fresh(&text(cx, &buffer));
+    assert_ne!(coloured, []);
+    assert_eq!(marks(cx, &buffer), coloured);
+}
+
+/// The real open function, as the editor reads it from the declared layers.
+#[gpui::test]
+fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut TestAppContext) {
+    let buffer = cx.new(|_| Buffer::new(PROSE_RUST_NOPE));
+    let before = lexed();
+    let listening = cx.update(|cx| {
+        decorations::declare(MANIFEST.layers, cx);
+        decorations::enable([FEATURE], cx);
+        let opened = decorations::run_openers(PROSE_RUST_NOPE, &decorations::openers(cx), far());
+        decorations::seed(&buffer, opened, cx);
+        decorations::listen(SYNTAX, Rc::new(listener), cx)
+    });
+    let view = buffer.clone();
+    cx.add_window(|_, cx| EditorView::new(view, cx));
+    cx.run_until_parked();
+
+    assert_eq!(lexed() - before, 0);
+    assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
+    drop(listening);
+}

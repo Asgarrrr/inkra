@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 3bee32f66bd5ca1b4aaac04680990f0918d6abb1f29b151b7fb01f510812fa3c # shrinks to steps = [Edit([Delete(Index(3035540164028154064), 1)])]
+cc 6b864b0a98df5ae18d12d3530dff8f13bd4e3786d5f2962d22a196aae0a7109b # shrinks to a list item merge that turns an empty chunk into a fenced block

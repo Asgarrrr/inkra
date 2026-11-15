@@ -149,3 +149,21 @@ fn the_language_is_the_info_strings_first_word() {
     assert_eq!(language("```\nx\n```"), None);
     assert_eq!(language("    code"), None);
 }
+
+fn reaches(text: &str) -> Vec<usize> {
+    parse(text)
+        .code_blocks
+        .iter()
+        .map(|block| block.reach.get())
+        .collect()
+}
+
+#[test]
+fn reach_starts_at_the_line_that_can_change_the_block() {
+    assert_eq!(reaches("a\n\n  ```\n  x\n  ```"), [3]);
+    assert_eq!(reaches("a\n\n- b\n\n  ```\n  x\n  ```"), [3]);
+    assert_eq!(reaches("a\n\n- b\n\n  - c\n\n    ```\n    x\n    ```"), [3]);
+    assert_eq!(reaches("a\n\n    code"), [0]);
+    assert_eq!(reaches("a\n\nb\n\n    code"), [3]);
+    assert_eq!(reaches("    code"), [0]);
+}
