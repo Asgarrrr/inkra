@@ -341,6 +341,17 @@ fn deleting_a_list_marker_turns_a_fenced_block_into_indented_code(cx: &mut TestA
     assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
 }
 
+/// The item's marker sits alone on the line before, so no block precedes the indented code.
+#[gpui::test]
+fn deleting_a_lone_list_marker_leaves_no_mark_on_the_indented_code(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, "-\n    ```rust\n    let\n    ```\n");
+    assert_ne!(marks(cx, &buffer), []);
+
+    edit(cx, &buffer, |t| t.delete(at(0)..at(1)));
+
+    assert_eq!(marks(cx, &buffer), []);
+}
+
 #[gpui::test]
 fn typing_a_list_marker_turns_indented_code_into_a_fenced_block(cx: &mut TestAppContext) {
     let (buffer, _listening) = shown(cx, "a\n\n    ```rust\n    let\n    ```\n");

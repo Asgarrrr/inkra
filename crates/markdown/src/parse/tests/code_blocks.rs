@@ -167,3 +167,12 @@ fn reach_starts_at_the_line_that_can_change_the_block() {
     assert_eq!(reaches("a\n\nb\n\n    code"), [3]);
     assert_eq!(reaches("    code"), [0]);
 }
+
+/// With no block before it, the line before an indented block is blank or a container's prefix;
+/// text typed there makes the block a paragraph's continuation.
+#[test]
+fn an_indented_block_with_no_block_before_it_reaches_the_line_before() {
+    assert_eq!(reaches("\n    ```rust\n    let\n    ```\n"), [0]);
+    assert_eq!(reaches("\n\n    code"), [1]);
+    assert_eq!(reaches("a\n\n>\n>     code"), [3]);
+}

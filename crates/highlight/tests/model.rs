@@ -38,6 +38,11 @@ call(s);
 ```nope
 plain text
 ```
+
+> -
+>     ```rust
+>     let z = 3;
+>     ```
 ";
 
 const FRAGMENTS: &[&str] = &[

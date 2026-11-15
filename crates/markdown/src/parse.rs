@@ -43,8 +43,8 @@ pub struct CodeBlock {
     /// The info string's first word; `None` without one, and for an indented block.
     pub language: Option<Range<ByteOffset>>,
     /// The start of the first line whose bytes can change this block's kind or indent: the line of
-    /// its outermost list item's marker, for an indented block that of the block before it, else
-    /// its own line.
+    /// its outermost list item's marker; for an indented block that of the block before it, or with
+    /// none the line above; else its own line.
     pub reach: ByteOffset,
 }
 
@@ -85,10 +85,14 @@ pub fn parse(text: &str) -> Markdown {
                 }
                 if let Tag::CodeBlock(kind) = &tag {
                     let before = open.last().map_or(last_root, |parent| parent.last_child);
+                    // The line ending of the line above, which decides whether indented code is code.
+                    let above = text[..range.start].rfind('\n').unwrap_or(0);
+                    let indented =
+                        matches!(kind, CodeBlockKind::Indented).then(|| before.unwrap_or(above));
                     let reach = open
                         .iter()
                         .find_map(|open| open.item)
-                        .or(before.filter(|_| matches!(kind, CodeBlockKind::Indented)))
+                        .or(indented)
                         .unwrap_or(range.start);
                     code_blocks.push(CodeBlock {
                         range: to_offsets(without_line_ending(text, &range)),
