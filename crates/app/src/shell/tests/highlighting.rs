@@ -8,6 +8,7 @@ use super::decorations::opened;
 use super::features::switch;
 use super::{at, editor};
 use crate::decorations;
+use crate::editor::layout::line_build_count;
 use crate::feature::Manifest;
 use crate::highlighting;
 use crate::shell::AppShell;
@@ -208,6 +209,27 @@ fn typing_recolours_the_block(cx: &mut TestAppContext) {
     visual.run_until_parked();
 
     assert_eq!(marks(window, &mut visual), [(8, 11, K)]);
+}
+
+/// The keystroke recolours one `let`, so the publish's range holds its line only.
+#[gpui::test]
+fn typing_in_a_large_block_with_colours_rebuilds_one_line(cx: &mut TestAppContext) {
+    let text = format!("a\n\n```rust\n{}```\n\nb\n", "let x = 1;\n".repeat(50));
+    let (_, window, mut visual) = opened(cx, CATALOG, &text);
+    visual.simulate_keystrokes("cmd-up down down down down right");
+    visual.run_until_parked();
+    let coloured = marks(window, &mut visual).len();
+
+    let before = line_build_count();
+    visual.simulate_input("y");
+    visual.run_until_parked();
+
+    assert_eq!(line_build_count() - before, 1);
+    assert_eq!(
+        marks(window, &mut visual).len(),
+        coloured - 1,
+        "`lyet` is no keyword"
+    );
 }
 
 #[gpui::test]

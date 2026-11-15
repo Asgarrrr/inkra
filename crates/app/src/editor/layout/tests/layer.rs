@@ -34,6 +34,9 @@ type ChunkSpec = (Index, Index, Vec<(Index, Index, usize)>);
 pub(super) enum Paint {
     /// A publish computed at an edit mark picked among those seen: ranges it clears, then chunks.
     Publish(Index, Vec<(Index, Index)>, Vec<ChunkSpec>),
+    /// A held chunk published again at the buffer's edit mark, one of its marks in the next colour:
+    /// the marks that differ are a few inside the chunk.
+    Recolour(Index, Index),
     /// An open's chunks, landed at the buffer's edit mark.
     Seed(Vec<ChunkSpec>),
     /// The layer's feature switched on or off.
@@ -53,6 +56,7 @@ pub(super) fn paint() -> impl Strategy<Value = Paint> {
     prop_oneof![
         4 => (any::<Index>(), cleared, prop::collection::vec(chunk_spec(), 0..3))
             .prop_map(|(at, cleared, chunks)| Paint::Publish(at, cleared, chunks)),
+        3 => (any::<Index>(), any::<Index>()).prop_map(|(chunk, mark)| Paint::Recolour(chunk, mark)),
         1 => prop::collection::vec(chunk_spec(), 1..3).prop_map(Paint::Seed),
         1 => any::<bool>().prop_map(Paint::Enable),
         1 => Just(Paint::Lose),
@@ -128,6 +132,7 @@ pub(super) fn apply(paint: &Paint, buffer: &Entity<Buffer>, seen: &Seen, cx: &mu
             let chunks = chunks.iter().map(|spec| chunk(text, spec)).collect();
             decorations::publish(LAYER.id, &buffer.downgrade(), cleared, chunks, *mark, cx);
         }
+        Paint::Recolour(chunk, mark) => recolour(*chunk, *mark, buffer, cx),
         Paint::Seed(chunks) => {
             let text = buffer.read(cx).text();
             let chunks = chunks.iter().map(|spec| chunk(text, spec)).collect();
@@ -143,4 +148,31 @@ pub(super) fn apply(paint: &Paint, buffer: &Entity<Buffer>, seen: &Seen, cx: &mu
             });
         }),
     }
+}
+
+/// As `Paint::Recolour`; the layer catches up first, as a listener's does.
+fn recolour(chunk: Index, mark: Index, buffer: &Entity<Buffer>, cx: &mut App) {
+    decorations::sync(buffer, cx);
+    let held = decorations::chunks(LAYER.id, buffer, cx);
+    if held.is_empty() {
+        return;
+    }
+    let (chunk, _) = held[chunk.index(held.len())].clone();
+    let colours = decorations::drawn(buffer, cx).colors_in(chunk.clone());
+    let mut marks: Vec<_> = colours
+        .into_iter()
+        .map(|(range, color)| (range, MarkStyle { color: Some(color) }))
+        .collect();
+    if !marks.is_empty() {
+        let picked = mark.index(marks.len());
+        let style = &mut marks[picked].1;
+        let next = COLORS
+            .iter()
+            .position(|color| *color == style.color)
+            .map_or(0, |at| at + 1);
+        style.color = COLORS[next % COLORS.len()];
+    }
+    let at = buffer.read(cx).edit_mark();
+    let chunks = vec![(chunk, 0, marks)];
+    decorations::publish(LAYER.id, &buffer.downgrade(), Vec::new(), chunks, at, cx);
 }

@@ -72,7 +72,7 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
         removed: Vec<Range<ByteOffset>>,
         chunks: Vec<Published<S>>,
         at: EditMark,
-    ) -> Result<bool, Lost> {
+    ) -> Result<Option<Range<ByteOffset>>, Lost> {
         let published = self.layer.publish(text, removed, chunks, at);
         self.track(&published);
         published
@@ -91,7 +91,7 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
             *opened = Some(at);
         }
         self.track(&landed);
-        landed != Ok(false)
+        landed != Ok(None)
     }
 
     /// What the listener has not heard of `text` yet, if anything; after, it has heard all of it.

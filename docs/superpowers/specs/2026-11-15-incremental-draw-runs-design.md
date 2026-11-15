@@ -832,6 +832,64 @@ S2 deviations from this spec:
    `Splice::map` shipped in S1a (S1a deviation 2), and the `transform` unit
    tests cover it.
 
+S3, release, M5 Pro. Before is draw-s2, after is S3, both measured in one
+sitting. Bytes are gpui's bench report, "allocated bytes per iteration".
+
+| Case | Before | After | Allocated before | Allocated after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose, colours | 0.62 ms | 0.61 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, colours | 0.49 ms | 0.46 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, colours | 0.45 ms | 0.40 ms | 2.24 MB | 1.02 MB |
+| 1000 blocks, type in prose, plain | 0.60 ms | 0.61 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, plain | 0.48 ms | 0.47 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, plain | 0.40 ms | 0.38 ms | 1.01 MB | 1.01 MB |
+
+Typing in the block with colours: the per-sample bytes ranged from 1.10 MB to
+20.58 MB before, and are 1.018 MB in every sample after. A recolouring
+keystroke now rebuilds its line, not the whole block.
+
+`replace` compares the marks of each change of a batch, clipped to its mapped
+range, before and after, by common prefix and common suffix. Its answer runs
+from the first to the last mark left between them, on either side. `publish`
+returns the hull of these answers. The batch's answer can hold a mark that a
+later change of the batch put back: each change is compared alone. Before S3,
+`replace` stopped comparing after the first change of a batch; it now compares
+every change, which costs one more collect of the change's marks inside
+`publish`, outside `shape_document`. The range is in the text at the buffer's
+edit mark, where the layer stands after `publish` catches it up, so both
+publish sites log `Moved::Range` at that mark, not at the publish's `at`. The
+oracle fails 3 runs out of 3 when the sites log at `at`.
+
+Two marks of one style that touch count as differing from the one mark they
+equal, so a range can hold bytes whose colour did not change. That is safe and
+rare: only a deletion between two marks makes them touch.
+
+The oracle gains a recolour: one held chunk published again at the buffer's
+edit mark, with one of its marks in the next colour. Every run below starts
+from the committed regressions file. It fails 3 runs out of 3 when the range
+stops at the end of the first differing mark, and when the range starts at the
+first differing mark of the old list only.
+
+The `inkra-editor` proptests check two properties. Every byte whose style
+changed lies inside the range, for a removal or a chunk, late or not. And for
+a publish at the buffer's edit mark, the range runs from the first to the last
+mark inside the chunk that is in one list and not the other. That second
+property fails when the range widens to the chunk. A batch answers the hull of
+its changes published one at a time.
+
+S3 deviations from this spec:
+
+1. `typing_in_a_large_block_rebuilds_one_line` with colours is
+   `typing_in_a_large_block_with_colours_rebuilds_one_line` in
+   `shell/tests/highlighting.rs`, not in `editor/tests/carry.rs`. It needs the
+   real syntax layer and its listener, which only a shell with the
+   highlighting catalog runs.
+2. `a_publish_rebuilds_only_the_lines_it_recolours` replaces S1b's
+   `a_recolour_of_one_block_rebuilds_only_its_lines`. That test published one
+   mark on a block's fence and counted the block's three lines; with S3 the
+   fence's line alone rebuilds. The new test recolours two lines of a
+   five-line block in one chunk and counts two.
+
 ## Unverified
 
 - The expected gain after S4 (D11), and the cost of the placement pass's block

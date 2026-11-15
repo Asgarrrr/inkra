@@ -8,7 +8,7 @@ use inkra_highlight::{Batch, batch};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::decorations::{Drawn, MarkStyle, recolour};
+use crate::decorations::{Drawn, MarkStyle};
 use crate::editor::layout::{BlockScrolls, DocumentLayout, LayoutInputs, shape_document};
 use crate::highlighting::styled;
 use crate::theme::builtin;
@@ -84,10 +84,9 @@ impl Typing {
         let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
         let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
         let at = self.buffer.edit_mark();
-        let recoloured = recolour(&clear, &lexed, at);
         let published = match syntax.publish(&self.buffer, clear, lexed, at) {
-            Ok(false) => None,
-            Ok(true) => Some(recoloured),
+            Ok(None) => None,
+            Ok(Some(range)) => Some(Moved::Range(at, range)),
             Err(Lost) => Some(Moved::Whole),
         };
         if let Some(moved) = published {

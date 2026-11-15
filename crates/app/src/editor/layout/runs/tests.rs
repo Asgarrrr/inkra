@@ -105,10 +105,8 @@ fn a_stale_span_past_the_line_is_clipped_not_fatal() {
 fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> HeardLayer<MarkStyle> {
     let mut layer = HeardLayer::new(text.edit_mark());
     let chunk = (ByteOffset::new(0)..text.len(), 0, marks);
-    assert_eq!(
-        layer.publish(text, Vec::new(), vec![chunk], text.edit_mark()),
-        Ok(true)
-    );
+    let published = layer.publish(text, Vec::new(), vec![chunk], text.edit_mark());
+    assert!(matches!(published, Ok(Some(_))));
     layer
 }
 

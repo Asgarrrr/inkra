@@ -129,7 +129,8 @@ impl<S: Clone + PartialEq> Layer<S> {
     /// range with its tag and its marks. All are computed at the edit mark `at` and mapped through
     /// the edits since (D6), except where a chunk computed later lies: that one stays. Inside the
     /// batch, a later change wins over an earlier one. A chunk holds its tag while it stays whole
-    /// and its bytes unchanged. `Ok(true)` when a change moved the marks inside its mapped range.
+    /// and its bytes unchanged. `Ok(Some(span))` when a change moved marks: in `buffer`'s text,
+    /// from the first to the last mark any change moved.
     ///
     /// # Errors
     /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
@@ -144,7 +145,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         removed: Vec<Range<ByteOffset>>,
         chunks: Vec<Published<S>>,
         at: EditMark,
-    ) -> Result<bool, Lost> {
+    ) -> Result<Option<Range<ByteOffset>>, Lost> {
         for range in &removed {
             check::<S>(range, &[]);
         }
@@ -163,43 +164,33 @@ impl<S: Clone + PartialEq> Layer<S> {
         let chunks = chunks
             .into_iter()
             .map(|(range, tag, marks)| (Chunk::new(range, at, Some(tag), marks), true));
-        let mut changed = false;
-        for (new, fills) in removed.chain(chunks) {
-            changed = self.replace(buffer, new, fills, &splices, changed);
-        }
-        Ok(changed)
+        Ok(removed
+            .chain(chunks)
+            .filter_map(|(new, fills)| self.replace(buffer, new, fills, &splices))
+            .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end)))
     }
 
     /// Maps `new` through `splices` and puts it in place of what its range holds; with `fills`
-    /// false, nothing takes that place. Returns whether the marks there changed, or `true` at once
-    /// when `changed` already says an earlier change of the batch moved some.
+    /// false, nothing takes that place. Returns the span of the marks that changed there.
     fn replace(
         &mut self,
         buffer: &Buffer,
         new: Chunk<S>,
         fills: bool,
         splices: &[Splice],
-        changed: bool,
-    ) -> bool {
+    ) -> Option<Range<ByteOffset>> {
         let at = new.published;
-        let Some(new) = splices
+        let new = splices
             .iter()
             .copied()
             .try_fold(new, map_chunk)
-            .filter(|new| new.len != 0)
-        else {
-            return changed;
-        };
+            .filter(|new| new.len != 0)?;
         new.check(buffer);
         let chunk = new.start..new.end();
         let new = fills.then_some(new);
         let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
         let last = self.chunks.partition_point(|old| old.start < chunk.end);
-        let before: Option<Vec<_>> = (!changed).then(|| {
-            self.marks_in(chunk.clone())
-                .map(|(mark, style)| (mark, style.clone()))
-                .collect()
-        });
+        let before = self.owned_marks(chunk.clone());
         let mut pieces = Vec::new();
         let mut tail = None;
         let mut gap = chunk.start;
@@ -216,11 +207,37 @@ impl<S: Clone + PartialEq> Layer<S> {
         pieces.extend(new.as_ref().and_then(|new| new.piece(gap..chunk.end)));
         pieces.extend(tail);
         self.chunks.splice(first..first, pieces);
-        before.is_none_or(|before| {
-            let after = self.marks_in(chunk);
-            !after.eq(before.iter().map(|(mark, style)| (mark.clone(), style)))
-        })
+        differing(&before, &self.owned_marks(chunk))
     }
+
+    /// As `marks_in`, with each style cloned, so the marks outlive a `replace`.
+    fn owned_marks(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, S)> {
+        self.marks_in(range)
+            .map(|(mark, style)| (mark, style.clone()))
+            .collect()
+    }
+}
+
+/// From the first to the last mark that differs between two sorted lists, `None` when they match.
+fn differing<S: PartialEq>(
+    before: &[(Range<ByteOffset>, S)],
+    after: &[(Range<ByteOffset>, S)],
+) -> Option<Range<ByteOffset>> {
+    let prefix = before
+        .iter()
+        .zip(after)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let (before, after) = (&before[prefix..], &after[prefix..]);
+    let behind = before.iter().rev().zip(after.iter().rev());
+    let suffix = behind.take_while(|(old, new)| old == new).count();
+    let (before, after) = (
+        &before[..before.len() - suffix],
+        &after[..after.len() - suffix],
+    );
+    let starts = before.first().into_iter().chain(after.first());
+    let ends = before.last().into_iter().chain(after.last());
+    Some(starts.map(|(mark, _)| mark.start).min()?..ends.map(|(mark, _)| mark.end).max()?)
 }
 
 impl<S: Clone> Chunk<S> {
