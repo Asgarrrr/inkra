@@ -334,12 +334,9 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
     let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     let opened = decorations::run_openers(text, &[(TODO_LAYER, fakes::open_todo)], past);
     let (_, early) = &opened[0];
-    assert!(early.chunks.iter().all(|(_, _, marks)| marks.is_empty()));
-    let stop = early
-        .seed
-        .as_ref()
-        .and_then(|seed| seed.downcast_ref::<usize>());
-    assert_eq!(stop, Some(&0));
+    assert!(early.iter().all(|(_, _, marks)| marks.is_empty()));
+    let stops: Vec<_> = early.iter().map(|(chunk, _, _)| chunk.end).collect();
+    assert_eq!(stops, [at(0)]);
 
     let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
     let window = window_on(cx, buffer.clone());
@@ -350,7 +347,7 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
     });
     cx.run_until_parked();
 
-    assert_eq!(fakes::heard(), ["opened+seed"]);
+    assert_eq!(fakes::heard(), ["opened+fresh"]);
     assert_eq!(warning_runs(window, cx), [(4, true), (3, false), (4, true)]);
 }
 
@@ -358,12 +355,9 @@ thread_local! {
     static DEADLINES: RefCell<Vec<Instant>> = const { RefCell::new(Vec::new()) };
 }
 
-fn record_deadline(_: &str, deadline: Instant) -> decorations::Opened {
+fn record_deadline(_: &str, deadline: Instant) -> Vec<decorations::Chunk> {
     DEADLINES.with_borrow_mut(|deadlines| deadlines.push(deadline));
-    decorations::Opened {
-        chunks: Vec::new(),
-        seed: None,
-    }
+    Vec::new()
 }
 
 #[test]
@@ -379,7 +373,7 @@ fn every_open_function_of_a_note_shares_one_deadline_8_ms_after_the_text() {
 #[gpui::test]
 fn a_seed_waits_for_the_listener(cx: &mut TestAppContext) {
     cx.update(fakes::declare_todo);
-    for (edited, heard) in [(false, "opened+seed"), (true, "opened")] {
+    for (edited, heard) in [(false, "opened+fresh"), (true, "opened")] {
         let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO\n")));
         let _window = window_on(cx, buffer.clone());
         cx.update(|cx| {

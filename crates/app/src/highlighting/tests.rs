@@ -125,8 +125,8 @@ const TWO_BLOCKS: &str = "```rust\nlet\n```\n\n```rust\nmut\n```\n";
 /// What a planted mark paints: a block the listener lexes shows its real colours instead.
 const PLANTED: ColorToken = ColorToken::SyntaxComment;
 
-fn plant(opened: &mut decorations::Opened) {
-    for (_, _, marks) in &mut opened.chunks {
+fn plant(chunks: &mut [Chunk]) {
+    for (_, _, marks) in chunks {
         for (_, style) in marks {
             style.color = Some(PLANTED);
         }
@@ -155,23 +155,18 @@ fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
         .collect()
 }
 
-/// Lands the first `count` blocks of `buffer`'s text, planted, as the open function would, with
-/// its seed.
+/// Lands the first `count` blocks of `buffer`'s text, planted, as the open function would.
 fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
     let mut calls = 0;
-    let chunks = inkra_highlight::open_chunks(buffer.read(cx).text(), || {
+    let mut chunks: Vec<_> = inkra_highlight::open_chunks(buffer.read(cx).text(), || {
         calls += 1;
         calls <= count
     })
     .into_iter()
     .map(styled)
     .collect();
-    let mut opened = decorations::Opened {
-        chunks,
-        seed: Some(Box::new(())),
-    };
-    plant(&mut opened);
-    decorations::seed(buffer, vec![(SYNTAX, opened)], cx);
+    plant(&mut chunks);
+    decorations::seed(buffer, vec![(SYNTAX, chunks)], cx);
 }
 
 /// As `shown`, every block planted by `seed`.

@@ -40,8 +40,10 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let text = buffer.read(cx);
     let dirty = match change {
         TextChange::Edited(splices) => dirty(splices),
-        TextChange::Opened(Some(_)) => None,
-        TextChange::Opened(None) | TextChange::Lost => Some(ByteOffset::new(0)..text.len()),
+        TextChange::Opened { fresh: true } => None,
+        TextChange::Opened { fresh: false } | TextChange::Lost => {
+            Some(ByteOffset::new(0)..text.len())
+        }
     };
     let Batch { clear, lexed } = batch(text.text(), &markdown, &held, dirty);
     let lexed = lexed.into_iter().map(styled).collect();

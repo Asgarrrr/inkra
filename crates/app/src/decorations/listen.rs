@@ -1,60 +1,16 @@
 //! A layer's listener: what it hears of each buffer, once per change (decoration layer spec, D4).
 
-use std::any::Any;
 use std::rc::Rc;
 use std::time::Instant;
 
 use gpui::{App, Entity, Subscription};
-use inkra_text::{Buffer, EditMark, Splice};
+use inkra_text::Buffer;
 
-use super::{Decorations, LayerId, rank};
+use super::{Decorations, LayerId, TextChange, rank};
 use crate::feature::over_budget;
-
-/// What a layer's open function hands its listener (D8).
-pub(crate) type Seed = Box<dyn Any + Send>;
-
-pub(crate) enum TextChange {
-    /// The listener has not heard of the buffer before.
-    Opened(Option<Seed>),
-    /// The splices since it last heard.
-    Edited(Vec<Splice>),
-    /// The layer's marks over the buffer are gone: it publishes them all again.
-    Lost,
-}
 
 /// Must not update the buffer or any `EditorView`: it runs inside the view's lease.
 pub(crate) type Listener = dyn Fn(&Entity<Buffer>, TextChange, &mut App);
-
-/// How far a layer's listener has heard a buffer.
-pub(super) enum Heard {
-    Unheard,
-    Lost,
-    At(EditMark),
-}
-
-impl Heard {
-    /// What the listener has not heard of `text` yet, if anything; after, it has heard all of it.
-    /// A first hearing hands over `seed` if `text` is still at its edit mark.
-    pub(super) fn hear(
-        &mut self,
-        text: &Buffer,
-        seed: Option<(EditMark, Seed)>,
-    ) -> Option<TextChange> {
-        let now = text.edit_mark();
-        let change = match *self {
-            Self::Unheard => Some(TextChange::Opened(
-                seed.filter(|(mark, _)| *mark == now).map(|(_, seed)| seed),
-            )),
-            Self::Lost => Some(TextChange::Lost),
-            Self::At(mark) if mark == now => None,
-            Self::At(mark) => Some(text.edits_since(mark).map_or(TextChange::Lost, |splices| {
-                TextChange::Edited(splices.collect())
-            })),
-        };
-        *self = Self::At(now);
-        change
-    }
-}
 
 /// `listener` hears every buffer `layer` is synced over until the subscription drops; every window
 /// redraws, so each note shown hears it now.
@@ -63,16 +19,14 @@ impl Heard {
 /// If `layer` is not declared.
 pub(crate) fn listen(layer: LayerId, listener: Rc<Listener>, cx: &mut App) -> Subscription {
     let rank = rank(layer, cx);
-    let listeners = &mut cx.global_mut::<Decorations>().listeners;
+    let held = &mut cx.global_mut::<Decorations>().declared[rank].listener;
     debug_assert!(
-        listeners[rank]
-            .as_ref()
-            .is_none_or(|old| old.strong_count() == 0),
+        held.as_ref().is_none_or(|old| old.strong_count() == 0),
         "layer {} of feature {} already has a listener",
         layer.name,
         layer.feature.name()
     );
-    listeners[rank] = Some(Rc::downgrade(&listener));
+    *held = Some(Rc::downgrade(&listener));
     cx.refresh_windows();
     Subscription::new(move || drop(listener))
 }

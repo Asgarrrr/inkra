@@ -114,8 +114,9 @@ never waits on a feature and never calls one.
 
 The listener receives a `TextChange`:
 
-- `Opened(seed)`: the note landed. `seed` is what the layer's open function
-  returned (D8), or `None`.
+- `Opened { fresh }`: the note landed. `fresh` is true when the layer's open
+  function's landing succeeded (D8), even with no chunk, no lost layer cleared
+  it since, and the text is still at that edit mark.
 - `Edited(splices)`: the splices since the last call.
 - `Lost`: the core dropped the layer's marks for this note and needs a full
   recompute. This follows a log overflow (D6) or a switch on (D10).
@@ -182,12 +183,11 @@ markdown's concealment is a replace decoration in all but name.
 A layer may declare an open function:
 
 ```rust
-fn(text: &str, deadline: Instant) -> Opened
+fn(text: &str, deadline: Instant) -> Vec<Chunk>
 ```
 
-`Opened` holds marks per chunk and an opaque `Seed` (`Box<dyn Any + Send>`),
-for example the tree-sitter trees of each block. The function is pure, `Send`
-and gpui-free.
+Each chunk holds its range, its tag and its marks. The function is pure,
+`Send` and gpui-free.
 
 `NoteStore::open_note` (`app/src/vault/store.rs:174`) runs the open functions
 in its background task (`:192`), after the file read and before the buffer is
@@ -195,9 +195,11 @@ built. They run in catalog order and share one deadline: 8 ms after the text is
 ready, the highlighting spec's landing budget (its D8). Each function stops
 when the deadline passes and returns what it did.
 
-When the note lands, the core stores the marks at edit mark 0 and calls the
-listener with `Opened(seed)`. The feature takes its seed and publishes the
-rest later, in its own background task. The first frame with the text has the
+When the note lands, the core stores the marks at edit mark 0 and records that
+edit mark (`HeardLayer::land`). It calls the listener with
+`Opened { fresh: true }` if the text is still there and the layer was not lost
+since. The feature reads the landed chunks back and publishes the rest
+later, in its own background task. The first frame with the text has the
 colours the functions finished.
 
 A function cannot be preempted. One that ignores its deadline delays the
@@ -206,7 +208,7 @@ and its WASM epoch gives it.
 
 A feature with layers activates after the first frame
 (`Manifest::after_first_frame`). A note that lands before the feature activates
-keeps its seed until the activation delivers `Opened(seed)`.
+keeps its edit mark until the activation delivers `Opened { fresh }`.
 
 ### D9. Storage belongs to the note, not the view
 
@@ -220,6 +222,9 @@ The data and the shift are plain and gpui-free:
 - `inkra-text` holds the splice log;
 - `inkra-editor` holds `Layer<S>`: chunks, marks and the shift of D3. It is
   generic over the style `S` and knows no colour or theme;
+- `inkra-editor` also holds `HeardLayer<S>`: a `Layer<S>` and how far its
+  listener has heard the buffer. It decides the `TextChange` of D4, so the
+  rules of D6, D8 and D10 live beside the data they read;
 - `app` instantiates `S = MarkStyle` and converts marks into gpui `TextRun`s in
   `line_runs` (`app/src/editor/layout/runs.rs:53`). This is the only place
   that touches gpui.
@@ -294,9 +299,10 @@ A keystroke in a note with the test layer:
 A note open:
 
 1. The background task reads the file, runs the open functions within 8 ms,
-   and returns the text, the marks and the seeds.
+   and returns the text and the marks.
 2. The buffer is built; `Decorations` stores the marks at mark 0.
-3. The listener gets `Opened(seed)` and publishes any chunk it did not finish.
+3. The listener gets `Opened { fresh: true }` and publishes any chunk the open
+   did not finish.
 
 ## Tests
 
@@ -383,7 +389,7 @@ number.
 
 1. **The listener takes `&mut App`.** It is
    `Fn(&Entity<Buffer>, TextChange, &mut App)` (`decorations/listen.rs`). It
-   takes the change by value, because `Opened` moves its seed out (D4, D12).
+   takes the change by value, because `Edited` moves its splices out (D4, D12).
 2. **`publish` and `drawn` are free functions** in `crate::decorations`, not
    `FeatureCx` methods. A listener reads the edit mark from the buffer, so
    `FeatureCx::edit_mark` is not built. `publish` takes a `WeakEntity`, so a
@@ -414,14 +420,16 @@ number.
    `EntityId`. A view other than the editor reads it too (D9).
 10. **An entry drops at its buffer's release.** An entry holds no handle on
     its buffer, only a release subscription that removes it (D9). `Parses`
-    drops a parse the same way, so neither a seed nor a parse waits for the
+    drops a parse the same way, so neither an entry nor a parse waits for the
     next note.
-11. **A seed is valid only at its edit mark.** If the buffer changed before the
-    listener arrived, the core drops the seed and sends `Opened(None)`, a full
-    recompute (D8).
+11. **An open is fresh only at its edit mark.** The core records the edit mark
+    an open landed its chunks at. If the buffer changed before the listener
+    arrived, the listener hears `Opened { fresh: false }`, a full recompute
+    (D8). `HeardLayer` keeps that edit mark inside its unheard state, so a
+    switch or a lost layer drops it by construction.
 12. **Every layer starts off.** `decorations::enable` turns a feature's layers
     on and off. A layer that is off takes no publish, hears nothing, runs no
-    open function and keeps no seed. Turning it off clears its marks; turning
+    open function and lands nothing. Turning it off clears its marks; turning
     it on sends `Lost` (D10).
 13. **`sync` bumps the revision too.** A non-empty layer behind the edit mark
     draws something else once it catches up, so the revision moves. An undo

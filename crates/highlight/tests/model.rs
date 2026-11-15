@@ -112,9 +112,10 @@ enum Step {
     Undo,
     Redo,
     Lost,
-    /// Edits heard as `Opened(None)`.
+    /// Edits heard as `Opened { fresh: false }`.
     Unheard(Vec<Op>),
-    /// A fresh layer seeded with the first `k % (blocks + 1)` blocks, heard as `Opened(Some)`.
+    /// A fresh layer seeded with the first `k % (blocks + 1)` blocks, heard as
+    /// `Opened { fresh: true }`.
     Reopen(usize),
 }
 
