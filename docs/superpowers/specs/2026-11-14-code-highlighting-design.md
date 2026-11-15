@@ -275,7 +275,11 @@ far above the block: the outermost item's marker, a fence that swallows an
 inner marker, or a line between the inner marker and the block that ends both
 items. No run of lines before the block catches every case, so the plan
 compares what the lex reads instead. The parse computes each shape after
-`cut`, from the spans inside the block, and scans no text. The parse is cached
+`cut` from the lines `content_lines` yields, so the content-line rule has one
+source. That splits each block's bytes on `\n`, a second pass over code text.
+`cargo bench -p inkra-markdown` measured `parse` at 2.38–2.46 ms before and
+2.41–2.44 ms after on 500 KB, and 24.99–25.51 ms before and 25.52–26.02 ms
+after on 4 MB. The parse is cached
 per version and the draw needs it too, so this adds no parse. `held` are the
 layer's chunks, each with its tag (deviation 7): the shape it was published
 with, or `None` once a splice changed its bytes or a publish cut it.
@@ -355,11 +359,11 @@ gets no colours.
 ### D9. The decoration layer gains one read: the chunks a layer holds
 
 ```rust
-pub(crate) fn chunks(layer: LayerId, buffer: &Entity<Buffer>, cx: &App) -> Vec<(Range<ByteOffset>, bool)>;
+pub(crate) fn chunks(layer: LayerId, buffer: &Entity<Buffer>, cx: &App) -> Vec<(Range<ByteOffset>, Option<u64>)>;
 ```
 
-It returns the layer's chunk ranges over `buffer`, sorted, each with whether
-it holds a mark. `sync` catches every layer up before it calls a listener
+It returns the layer's chunk ranges over `buffer`, sorted, each with its tag
+(deviation 7). `sync` catches every layer up before it calls a listener
 (`decorations/mod.rs`, `sync`), so inside the listener the ranges are in the
 current text's offsets. It needs a `Layer::chunks()` iterator in
 `inkra-editor`. The core already maps chunks through every splice (decoration
@@ -700,8 +704,9 @@ number.
    `Layer::remove` and `decorations::remove`, the publish path with no new
    chunk, and **clear** holds every held chunk that is no block's range. After
    the listener, the chunks are exactly the blocks' ranges, and an empty one
-   means "lexed, nothing to colour". D9's read and `plan` take bare ranges: no
-   caller reads whether a chunk holds a mark any more.
+   means "lexed, nothing to colour". D9's read and `plan` drop the mark flag:
+   no caller reads whether a chunk holds a mark any more. Deviation 7 puts a
+   tag in its place.
 7. **Each chunk carries an opaque tag, and D9's read returns it.** D7's first
    build gave each block a reach start, the first line whose bytes could
    change its kind, and lexed the block when the dirty range met that line. In
