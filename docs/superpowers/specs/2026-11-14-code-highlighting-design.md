@@ -174,7 +174,9 @@ Two rules use the look-behind to settle classic ambiguities:
   literal.
 - **Generic list.** A `<` right after a type keyword's name, after `impl`, after
   `::`, or after a capitalised identifier opens a generic list. Identifiers
-  inside it are `Type` until the matching `>`.
+  inside it are `Type` until the matching `>`, except a path segment before
+  `::`: it takes the rules outside the list, so `std` in `Box<dyn
+  std::error::Error>` keeps the plain colour and `T` in `T::Item` stays `Type`.
 
 **What a lexer does not do.** It does not know scopes. So a parameter used in
 the body, a field against a local variable, or a type declared elsewhere and

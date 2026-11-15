@@ -195,11 +195,12 @@ impl Tokens<'_> {
         let word = &self.line[name.start..name.end];
         let keyword = token == name.start && KEYWORDS.contains(&word);
         let call = is_call(bytes, name.end);
+        let path_segment = bytes[skip_spaces(bytes, name.end)..].starts_with(b"::");
         let (end, class) = if self.state.attribute.is_some() {
             (name.end, Some(TokenClass::Attribute))
         } else if keyword {
             (name.end, Some(TokenClass::Keyword))
-        } else if self.state.top() == Some(Nest::Generic) {
+        } else if self.state.top() == Some(Nest::Generic) && !path_segment {
             (name.end, Some(TokenClass::Type))
         } else if self.state.prev == Prev::Dot {
             let class = if call {

@@ -160,6 +160,46 @@ fn a_generic_list_opens_after_a_type_a_type_keyword_a_fn_name_or_a_path_separato
 }
 
 #[test]
+fn a_path_segment_in_a_generic_list_keeps_its_plain_colour() {
+    let p = Punctuation;
+    check(&[
+        (
+            "Box<dyn std::error::Error>",
+            &[
+                (0, 3, Type),
+                (3, 4, p),
+                (4, 7, Keyword),
+                (11, 13, p),
+                (18, 20, p),
+                (20, 25, Type),
+                (25, 26, p),
+            ],
+        ),
+        (
+            "Vec<T::Item>",
+            &[
+                (0, 3, Type),
+                (3, 4, p),
+                (4, 5, Type),
+                (5, 7, p),
+                (7, 11, Type),
+                (11, 12, p),
+            ],
+        ),
+        (
+            "Vec<a :: b>",
+            &[
+                (0, 3, Type),
+                (3, 4, p),
+                (6, 8, p),
+                (9, 10, Type),
+                (10, 11, p),
+            ],
+        ),
+    ]);
+}
+
+#[test]
 fn a_brace_a_semicolon_and_a_closer_drop_the_open_generic_lists() {
     let p = Punctuation;
     check(&[
