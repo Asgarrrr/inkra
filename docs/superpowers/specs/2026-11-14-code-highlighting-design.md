@@ -1,6 +1,7 @@
 # Code highlighting: our own lexers on the decoration layer
 
-Status: **proposed** 2026-11-14. Replaces the engine choice of
+Status: **proposed** 2026-11-14; D10 rewritten and deviations 10 to 12 added
+for S2 on 2026-11-15. Replaces the engine choice of
 `2026-11-11-code-highlighting-design.md` (tree-sitter), which stays as the
 measured evidence for the fallback (D14). Builds on the decoration layer
 (`2026-11-13-decoration-layer-design.md`) and the feature registry
@@ -234,7 +235,7 @@ clears and recomputes by decoration layer D10.
 Every code block is one block chunk, coloured or not. A block with no
 language, an unknown one, or over 512 KiB (D10) gets an empty block chunk. A
 chunk that no longer is a block is published empty (D7) and stays, with no
-marks. So after the listener, and once its background task lands, the layer
+marks; deviation 6 removes it instead. So after the listener, and once its background task lands, the layer
 holds:
 
 - for each current code block, one chunk of exactly its range;
@@ -292,7 +293,7 @@ with, or `None` once a splice changed its bytes or a publish cut it.
    (deviation 6); the listener removes it. It clears a block that a removed or typed fence turned into prose, or that
    merged with a neighbour.
 2. **lex**: each block that no held chunk has exactly, or that the dirty
-   range meets. A chunk has a block exactly when its range is the block's
+   range meets; deviation 10 drops the second clause. A chunk has a block exactly when its range is the block's
    range and its tag is the block's shape. A chunk on the block's range with
    another tag stays, and the lexed block replaces it. Meets counts touching:
    `dirty.start <= block.end && block.start <= dirty.end`. So a deletion
@@ -312,9 +313,9 @@ one merge of three sorted lists and reads no text: its cost grows with the
 number of blocks and chunks, not with the text. A keystroke in prose lexes
 nothing, in a list item too.
 
-The listener lexes the blocks of **lex** on the main thread, in order, while
-their total size stays within `MAIN_THREAD_BUDGET` bytes (D10). The rest goes
-to the buffer's background task (D10). So one listener call is bounded,
+The listener lexes on the main thread the blocks of **lex** that the dirty
+range meets, in order, while they fit in `MAIN_THREAD_BUDGET` bytes (D10).
+The rest goes to the buffer's background task (D10). So one listener call is bounded,
 whether it follows a keystroke, a `Lost`, an open or an `apply_diff` reload
 whose splices span the note.
 
@@ -337,10 +338,11 @@ measured these medians on 2026-11-15:
 | 4 000 000 | 28.78 ms       |
 
 So `OPEN_PARSE_LIMIT` is 500 000 bytes, the largest measured size within
-4 ms. A block over
-`MAIN_THREAD_BUDGET` is skipped there, so one large block cannot spend the
-whole deadline. Every block it reaches gets its block chunk, coloured or
-empty.
+4 ms. A lexable block over
+`MAIN_THREAD_BUDGET` gets no chunk there, so one large block cannot spend the
+whole deadline; the first hearing finds it inexact and sends it to the
+background task (D10). Every other block it reaches gets its block chunk,
+coloured or empty (deviation 11).
 
 The open function returns the finished block chunks; the core lands them at
 the buffer's edit mark and records that mark (`HeardLayer::land`). The listener
@@ -352,7 +354,9 @@ text is still at that edit mark and the layer was not lost since
   dirty range, which lexes only the blocks the open did not reach.
 - `Opened { fresh: false }`: the text moved before the first hearing, and no splice says
   where. The landed chunks may be stale, and some may lie on prose now. D7
-  runs with the whole text dirty, which clears them and relexes every block.
+  runs with the whole text dirty, which clears those on prose. It relexes
+  every block the edits left inexact; the core already mapped the landed
+  chunks through those edits (deviation 10).
   This happens to a restored inactive tab: it hears its changes only when a
   view binds it (decoration layer, deviation 3).
 
@@ -400,38 +404,100 @@ size dirty. It measured these medians on 2026-11-15:
 The budget is the largest size where the worse of the two is at most 0.5 ms:
 64 KiB, at 366.8 us. It is also the 2026-11-11 spec's main-thread bound. The
 budget is not under 16 KiB, so the partial relex of the Deferred table stays
-deferred. Until S2, nothing enforces the budget: every lexed block runs on the
-main thread.
+deferred.
 
-**One background task per buffer.** The feature keeps a map from a buffer to
-its task in flight; an entry leaves the map when its task lands. It holds no
-block list. When D7 leaves blocks unlexed:
+**What the main thread lexes.** `batch` splits D7's **lex** in three
+(deviations 10 and 11):
 
-- with no task in flight, the listener copies those blocks' content lines,
-  reads the buffer's edit mark, and spawns one task that lexes them;
+- a block with no known language, or over `BLOCK_LIMIT` bytes, gets its empty
+  block chunk at once. It costs no lex, so it counts against no budget;
+- of the others, each block the dirty range meets, in document order, is
+  lexed on the main thread if it fits in what is left of `MAIN_THREAD_BUDGET`;
+- every other block is pending: `Batch.pending` holds its index.
+
+A block over the budget is always pending. A dirty block that does not fit
+does not stop the ones after it, as at open (D8).
+
+**One background task per buffer.** The listener closure owns a map from a
+buffer's `EntityId` to its task in flight, an `Rc<RefCell<HashMap<EntityId,
+Task<()>>>>`. Zed keeps one reparse task per buffer the same way
+(`language/src/buffer.rs:1943-2019`). After its publish, when `pending` is not
+empty:
+
+- with no task in flight for the buffer, the listener copies a backlog, reads
+  the buffer's edit mark `at`, and spawns one task;
 - with a task in flight, it does nothing more.
 
-A task lexes its blocks in order and stops before the one that would take its
-marks past `PUBLISH_BUDGET`; the first block always goes. The landing's
-publish runs on the main thread and costs time per mark (`layer.rs`,
-`publish`), so this bounds it. S2 sets the budget so a landing's publish takes
-at most 0.5 ms. The blocks left go to the next task through the replan below.
+`backlog(text, &Markdown, &pending) -> Backlog` copies the pending blocks'
+content lines, in order, with each block's range, shape and language. It stops
+before the block whose range would take the backlog past `TASK_BYTES` block
+bytes; the first block always goes. It counts whole ranges, fences included,
+as `MAIN_THREAD_BUDGET` does, so a block with no content still counts and the
+number of chunks a landing publishes is bounded too. A `Backlog` owns its bytes, holds no `Rc<Markdown>`,
+and is `Send`. `lex_backlog(Backlog) -> Vec<BlockChunk>` lexes it on the
+background executor. Both are pure, in `inkra-highlight`.
 
-When the task lands, it publishes each block at the edit mark read before the
-copy. The core maps the late publish, and deviation 15 keeps any chunk
-published since. Then it runs D7 once more, with the edits since that mark as
-the dirty range, or the whole text if the log dropped them. That run lexes
-what changed during the task and spawns the next task if needed. Fast typing
-in a large block therefore costs one lex in flight per buffer, and the colours
-catch up when typing stops.
+A mark is never empty and marks never overlap, so a block holds at most one
+mark per content byte, and a block is at least one fence line long. The byte
+bound on the backlog therefore bounds the landing's marks and chunks. It is checked before the lex, so no lexed block is
+thrown away. A block lands exact, so each pending byte is copied once, unless
+an edit changes it again.
+
+**The landing.** On the main thread, in this order:
+
+1. Upgrade the map's `Weak`. If it is gone, the feature went off: stop.
+2. Remove the buffer's entry and release the `RefCell` borrow. A replan that
+   still saw the entry would spawn nothing, and a borrow held across it would
+   panic. Zed clears its task before it reparses again (`buffer.rs:2013-2015`).
+3. Upgrade the buffer's `WeakEntity`. If it is gone, the note closed: stop.
+4. If `edits_since(at)` holds, publish the chunks at `at`. The core maps the
+   late publish, and decoration layer deviation 15 keeps every chunk published
+   since. If the log dropped the splices since `at`, drop the chunks and
+   publish an empty batch at the current edit mark instead. Publishing the
+   chunks at `at` would clear the whole layer (`layer.rs`, `publish`), newer
+   chunks included, though the layer itself still follows the log. Either
+   publish catches the layer up, as D9's read requires. If the layer itself
+   is behind the log, its catch-up clears it either way, and its listener
+   hears `Lost` at the next sync, as any lost layer does.
+5. Run `batch` on the current text with no dirty range, publish its clears and
+   empty chunks, and spawn the next task if blocks are still pending.
+
+A block that changed during the flight lost its tag in the core, so step 5
+finds it inexact and sends it to the next task. A chunk that landed on prose is
+a held chunk that is no block's range, so step 5 clears it. Step 5's parse is
+the one the next frame draws with: `parses::parsed` caches it per version. The
+landing never calls `decorations::sync`.
+
+The task holds the buffer by `WeakEntity` and the map by `Weak`. A strong
+handle to the map would keep the closure's state alive past its subscription.
+Switching the feature off drops the closure, then the map, then each `Task`,
+which cancels it. Fast typing in a large block costs one lex in flight per
+buffer, and the colours catch up when typing stops.
 
 Until a task lands, its blocks show their shifted old marks, and typed bytes
 show `md_code_block`.
 
-A block over 512 KiB is not lexed; it gets an empty block chunk (D6). The
-bound is the 2026-11-11 spec's, which Zed's highlight cache also uses
-(`highlight_cache.rs:14-16`). A mark is `(Range<ByteOffset>, MarkStyle)`, 24
-bytes, so marks cost about 3.4 times the block text.
+**`TASK_BYTES`.** `cargo bench -p inkra-highlight --bench landing` measures a
+landing's publish: a backlog's chunks published at an older edit mark, with
+200 splices since, scattered over the note, as an `apply_diff` reload during
+the flight would leave. The splice log keeps 256 (`buffer/log.rs`). Three worse
+cases: one block of the size; blocks of 512 bytes, both of dense code at about
+one mark per byte, such as `(),;` repeated; and empty fenced blocks, the most
+chunks per byte. `TASK_BYTES` is the largest size where the worst of the three
+takes at most 0.5 ms. The listener bench gains the backlog's copy at
+`TASK_BYTES`; like the rest of that bench, it measures the pure part only
+(deviation 5).
+
+A block over `TASK_BYTES` lands alone, as the first block of its backlog. The
+same bench measures one block at `BLOCK_LIMIT`; its landing must take at most
+4 ms, half a frame at 120 Hz. Otherwise `BLOCK_LIMIT` drops to the largest
+measured size within 4 ms, and this paragraph records it.
+
+**`BLOCK_LIMIT`.** A block over 524,288 bytes (512 KiB) is not lexed; it gets
+an empty block chunk (D6). The bound is the 2026-11-11 spec's, which Zed's
+highlight cache also uses (`highlight_cache.rs:14-16`). A mark is
+`(Range<ByteOffset>, MarkStyle)`, 24 bytes, so marks cost about 3.4 times the
+block text.
 
 ### D11. The label and the fence are unchanged
 
@@ -452,7 +518,18 @@ a `Buffer`, a `Layer` and `inkra_markdown::parse` through random edits on a
 note with several blocks. The edits favour backticks, newlines, fence lines,
 fence indents, info words, quote prefixes and undo. After each edit, it runs D7 and publishes
 the plan. Then the layer's marks must equal a fresh colouring of the current
-text. The test needs `inkra-editor` as a dev-dependency of
+text.
+
+From S2b the model drains `pending` as D10 does, through `backlog` and
+`lex_backlog`. A step lands a backlog at once, or holds it across later edits
+and lands it at its old edit mark, then runs `batch` with no dirty range, as
+D10's landing does. Every hearing runs with no dirty range too, so exactness
+alone must carry the invariant (deviation 10). The notes include blocks with
+no content. At the end of each case, and after any step the generator picks,
+the model drains with no edit. Each landing must land at least one block, and
+the drain must end within one landing per pending block. Then the marks must
+equal a fresh colouring. A drain that does not end is a livelock, and fails
+the test. The test needs `inkra-editor` as a dev-dependency of
 `inkra-highlight`; `inkra-markdown` is a dependency (D1, deviation 9). Both
 edges join `allowed_edges` in `scripts/check.sh`, which counts every
 dependency kind, and CLAUDE.md's Architecture.
@@ -536,6 +613,7 @@ light. The look is tuned after it ships, as for code blocks.
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
+| One landing's publish | at most 0.5 ms at `TASK_BYTES` with 200 splices since; at most 4 ms for one block at `BLOCK_LIMIT` | `cargo bench -p inkra-highlight --bench landing`, D10 |
 | Opening a note | the lex shares decoration layer D8's 8 ms deadline | the open-time test; the launch figure |
 | Memory | marks only, no trees: about 3.4 times the block text (D10) | — |
 
@@ -546,8 +624,16 @@ light. The look is tuned after it ships, as for code blocks.
   resolves, in any case; an unknown word resolves to `None`.
 - `inkra-highlight`, `#[test]` on `plan`, one per case: deleting the closing
   fence between two blocks clears both old chunks and lexes the merged block;
-  deleting a line right before a block's opening fence lexes the block;
+  deleting a line right before a block's opening fence keeps the block's
+  chunk and lexes nothing (deviation 10);
   a chunk on a block's range with another tag, or none, is lexed over.
+- `inkra-highlight`, `#[test]` on `batch` (D10): an unknown-language block and
+  one over `BLOCK_LIMIT` get empty chunks outside the budget; dirty blocks
+  fill the budget in order, and one that does not fit goes pending while the
+  next still fits; an inexact block the dirty range misses goes pending.
+- `inkra-highlight`, `#[test]` on `backlog`: it stops before the block past
+  `TASK_BYTES`; a first block over it still goes; `lex_backlog` gives the
+  marks `block_marks` gives on the same blocks.
 - `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
   deadline, none past it, none over `OPEN_PARSE_LIMIT`, all at the limit.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
@@ -555,6 +641,9 @@ light. The look is tuned after it ships, as for code blocks.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
   each with its tag, after random edits and publishes
   (`proptest`, beside the layer's own).
+- `inkra-editor`: a late publish maps each chunk as the fold of `map_chunk`
+  over every splice since did (deviation 12), after random edits
+  (`proptest`).
 - `app`, headless `#[gpui::test]` against `MemFs`:
   - a block's runs carry the token colours; a revealed fence stays
     `md_marker`;
@@ -568,8 +657,22 @@ light. The look is tuned after it ships, as for code blocks.
     its open landed on prose;
   - a listener call lexes at most `MAIN_THREAD_BUDGET` bytes, and the rest
     lands from the background task;
-  - a block over the budget shows its old marks until the task lands; edits
-    during the task start one more task when it lands, never two at once;
+  - a block over the budget shows its old marks until the task lands, and its
+    colours after `run_until_parked`, with no edit;
+  - pending blocks over `TASK_BYTES` in total all colour after
+    `run_until_parked`, with no edit: each landing spawns the next;
+  - edits during a flight start one more task when it lands, never two at
+    once;
+  - 257 edits during a flight, each heard by a frame, drop the splice log
+    since the task's edit mark; the landing keeps the chunks the main thread
+    published since, and the next run colours the rest;
+  - switching the feature off during a flight leaves no mark once the task
+    would have landed;
+  - switching it off and on before the old task lands: the old task never
+    publishes, one new task runs, and the final colours equal a fresh
+    colouring;
+  - closing the note during a flight, then opening another: the old task
+    lands into nothing, and the new note colours with its own task;
   - switching the feature off removes the colours on the next frame; on
     restores them;
   - a vault theme without `syntax_*` keys shows the built-in colours.
@@ -598,12 +701,28 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
    Bench the whole listener call and set `MAIN_THREAD_BUDGET` (D10); bench the
    parse and set `OPEN_PARSE_LIMIT` (D8). Every block over the budget still
    lexes on the main thread until S2.
-3. **S2, the background task.** D10's one task per buffer, `PUBLISH_BUDGET`,
-   the replan on landing, the 512 KiB bound, D8's skip of large blocks at open. The tests
-   for a block over the budget.
-4. **S3, Python, JSON and Bash.** Three lexers, their info words, their
+3. **S2a, exactness.** Deviation 10 in `plan` and its tests; the model test
+   hears with no dirty range (D12), the gate of deviation 10. Deviation 11:
+   `BLOCK_LIMIT`, the empty chunks outside the budget, in `batch` and in
+   `open_chunks`, and their tests. An `app` test pins that a line deleted
+   right before a fence leaves the block's planted marks.
+   - Gate: if the model test fails with no dirty range, stop; deviation 10
+     goes, and the touching rule of D7 stays.
+4. **S2b, the backlog.** Deviation 12 in `Layer::replace` and its
+   `proptest`. `Batch.pending`, `backlog`, `lex_backlog` and their tests. The
+   model test's late landings and bounded drain (D12). The landing bench: set
+   `TASK_BYTES`, check `BLOCK_LIMIT` at 4 ms; the listener bench gains the
+   copy. The app's listener still lexes every pending block on the main
+   thread, backlog after backlog until none is pending, as S1b did; an `app`
+   test pins that a note with pending blocks over `TASK_BYTES` colours in one
+   listener call.
+5. **S2c, the background task.** D10's map, spawn and landing, in its order;
+   the main thread budget enforced; D8's skip of blocks over the budget at
+   open. The `app` tests of D10's task, lifecycle races included.
+   `docs/buffer-model.md`'s Rope entry gains its two new consumers (Deferred).
+6. **S3, Python, JSON and Bash.** Three lexers, their info words, their
    scene blocks. Bash carries the heredoc state.
-5. **S4, JavaScript, TypeScript, TSX, CSS and HTML.** In this order: HTML
+7. **S4, JavaScript, TypeScript, TSX, CSS and HTML.** In this order: HTML
    embeds CSS and JavaScript. The expression-start rule, the JSX flag, regex
    literals, JSX tags, template strings.
 
@@ -619,6 +738,8 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
 | Highlighting inline code and front matter | Asked for |
 | A per-language colour override in vault themes | Asked for after the eleven tokens ship |
 | Persisting marks across launches | Opening a note with much code measures over one frame later than today |
+| Pending blocks in view first, in place of document order | A large note's visible block colours measurably later than a block above it |
+| A rope snapshot in place of the backlog's copy (`docs/buffer-model.md`, Rope) | The rope lands for its own trigger; the copy is bounded by `TASK_BYTES` and never triggers it alone |
 
 ## Open questions
 
@@ -752,3 +873,31 @@ number.
    `ColorToken` and the publish. D3 already read the content lines from the
    parse, and `inkra-app` already depends on `inkra-markdown`, so the edge
    adds no crate to the app's build. D1's objections still hold.
+10. **`lex` holds the blocks no held chunk has exactly; the dirty range only
+    orders them.** D7 also lexed a block the dirty range met, touching
+    included, even when a chunk had it exactly. A chunk keeps its tag only
+    while no splice removed one of its bytes or inserted strictly inside it,
+    and no publish cut it. So a chunk exact on a block holds marks lexed from
+    the same bytes, the same range and the same shape: a lex gives the same
+    tokens, whatever happened in between. The dirty range added only work, and
+    D10 needs exactness alone: a landing replans with no dirty range, and a
+    buffer no view shows, or a layer `declare` reset, hears no splice at all.
+    The dirty range now picks which inexact blocks the main thread lexes
+    first (D10). Deviation 2's touching rule survives only in that choice.
+    D12's model test is the gate: every hearing runs with no dirty range, and
+    late landings interleave with the edits.
+11. **A block with nothing to lex gets its empty chunk outside every budget.**
+    D6 gave such a block an empty chunk, and D10 counted block bytes against
+    the budget. A block with no known language, or over `BLOCK_LIMIT`, now
+    gets its empty chunk from `batch` at once, whatever the dirty range and
+    the budget, and from `open_chunks` too. Left pending, a block over
+    `BLOCK_LIMIT` would never become exact, and each landing would spawn a
+    task for it, forever.
+12. **A late publish maps a chunk only through the splices that reach it.**
+    `Layer::replace` folded `map_chunk` over every splice since the publish,
+    and `map_chunk` rebuilt every mark even for a splice outside the chunk. A
+    landing after an `apply_diff` reload of 200 hunks then cost its marks 200
+    times over. A splice that removes none of the chunk's bytes and inserts
+    nowhere strictly inside it now moves the chunk's start, or nothing when it
+    lies after the chunk. The marks are relative to the start, so they stay,
+    as `Layer::shift` already does for the chunks a splice does not reach.
