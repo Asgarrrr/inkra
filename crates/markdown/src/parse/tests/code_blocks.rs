@@ -149,3 +149,36 @@ fn the_language_is_the_info_strings_first_word() {
     assert_eq!(language("```\nx\n```"), None);
     assert_eq!(language("    code"), None);
 }
+
+fn shape(text: &str) -> u64 {
+    parse(text).code_blocks[0].shape
+}
+
+#[test]
+fn the_shape_holds_where_the_block_moves_or_only_its_fences_change() {
+    for other in [
+        "prose\n\n```rust\nlet\n```",
+        "> a\n\n```rust\nlet\n```",
+        "```rust\nlet\n````",
+        "~~~rust\nlet\n~~~",
+    ] {
+        assert_eq!(shape("```rust\nlet\n```"), shape(other), "{other:?}");
+    }
+}
+
+/// Each pair differs in its language word or its content lines.
+#[test]
+fn the_shape_changes_with_the_language_or_the_content_lines() {
+    for (one, other) in [
+        ("```rust\nlet\n```", "```rus \nlet\n```"),
+        ("```rust\nlet\n```", "```    \nlet\n```"),
+        ("```\nlet\n```", "```\n let\n```"),
+        ("    let\n    x", "    let\n     x"),
+        (
+            "- a\n\n  ```rust\n  let\n  ```",
+            "- a\n\n      ```rust\n      let\n      ```",
+        ),
+    ] {
+        assert_ne!(shape(one), shape(other), "{one:?}");
+    }
+}

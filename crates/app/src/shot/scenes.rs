@@ -2,6 +2,7 @@
 
 mod assets;
 mod code_blocks;
+mod code_highlighting;
 mod command_palette;
 mod decorations;
 mod docks;
@@ -433,7 +434,7 @@ const CATALOGUE: &[Scene] = &[
     Scene {
         name: "theme-picker",
         shows: "Select theme from cmd-shift-p, then down: the built-in rows, Flexoki Dark selected and previewed",
-        open: theme_picker,
+        open: command_palette::theme_picker,
     },
     Scene {
         name: "markdown-blocks",
@@ -464,6 +465,16 @@ const CATALOGUE: &[Scene] = &[
         name: "todo-marks",
         shows: "three TODOs in the warning colour from a decoration layer, one inside **bold** with the caret in it: its revealed `**` stay dimmed",
         open: decorations::todo_marks,
+    },
+    Scene {
+        name: "code-highlighting",
+        shows: "caret in the first paragraph, every fence concealed: every Rust token class coloured in the rust block",
+        open: code_highlighting::code_highlighting,
+    },
+    Scene {
+        name: "code-highlighting-plain",
+        shows: "the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
+        open: code_highlighting::code_highlighting_plain,
     },
 ];
 
@@ -541,17 +552,6 @@ fn editor_revealed_link(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     let keys = format!("cmd-up {}ctrl-e {}", "down ".repeat(8), "left ".repeat(31));
     stage.keys(window, keys.trim_end());
-    window
-}
-
-fn theme_picker(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(&[("index.md", "# Index\n\nThe front page.\n")]);
-    stage.click_tree_row(window, 0.);
-    stage.focus(window);
-    stage.keys(window, "cmd-shift-p");
-    stage.type_text(window, "theme");
-    stage.keys(window, "enter");
-    stage.keys(window, "down");
     window
 }
 

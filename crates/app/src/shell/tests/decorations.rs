@@ -19,7 +19,7 @@ use crate::shell::AppShell;
 use crate::test_support;
 
 /// `/vault/a.md` holding `text`, open and focused behind a launched shell with `catalog`, and its disk.
-fn opened(
+pub(super) fn opened(
     cx: &mut TestAppContext,
     catalog: &'static [&'static Manifest],
     text: &str,

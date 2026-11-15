@@ -30,7 +30,14 @@ fn publish_color(
         let style = MarkStyle { color: Some(token) };
         let (at_mark, len) = (buffer.read(cx).edit_mark(), buffer.read(cx).len());
         let marks = vec![(at(mark.start)..at(mark.end), style)];
-        decorations::publish(layer, &buffer.downgrade(), at(0)..len, marks, at_mark, cx);
+        decorations::publish(
+            layer,
+            &buffer.downgrade(),
+            Vec::new(),
+            vec![(at(0)..len, 0, marks)],
+            at_mark,
+            cx,
+        );
     });
     cx.run_until_parked();
 }
@@ -52,6 +59,19 @@ impl EditorView {
             .map(|(len, color)| (len, color == warning))
             .collect()
     }
+
+    /// Line `line` as shown, and each run of it in its colour, equal neighbours merged.
+    pub(crate) fn line_colors(&self, line: usize) -> (String, Vec<(usize, Hsla)>) {
+        let layout = self.drawn_layout();
+        let mut runs: Vec<(usize, Hsla)> = Vec::new();
+        for (len, color) in layout.run_colors(line) {
+            match runs.last_mut() {
+                Some((last, last_color)) if *last_color == color => *last += len,
+                _ => runs.push((len, color)),
+            }
+        }
+        (layout.shown(line).to_string(), runs)
+    }
 }
 
 fn warning_runs(window: WindowHandle<EditorView>, cx: &mut TestAppContext) -> Vec<(usize, bool)> {
@@ -72,6 +92,47 @@ fn a_publish_colours_its_range(cx: &mut TestAppContext) {
 
     assert_eq!(warning_runs(window, cx), [(4, true), (5, false)]);
     assert_eq!(shape_count() - before, 1);
+}
+
+/// The revision moves once per batch, as the redraw does: one per change would redraw each time.
+#[gpui::test]
+fn a_batch_lands_every_change_and_moves_the_revision_once(cx: &mut TestAppContext) {
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("TODO a TODO b\n")));
+    let window = window_on(cx, buffer.clone());
+    cx.update(fakes::declare_todo);
+    publish_warning(&buffer, 5..6, cx);
+    let revision =
+        |cx: &mut TestAppContext| cx.update(|cx| decorations::drawn(&buffer, cx).revision);
+    let before = revision(cx);
+
+    cx.update(|cx| {
+        let warning = MarkStyle {
+            color: Some(ColorToken::Warning),
+        };
+        let chunks = [0..4, 7..11].map(|word| {
+            (
+                at(word.start)..at(word.end),
+                0,
+                vec![(at(word.start)..at(word.end), warning)],
+            )
+        });
+        let mark = buffer.read(cx).edit_mark();
+        decorations::publish(
+            TODO_LAYER,
+            &buffer.downgrade(),
+            vec![at(5)..at(6)],
+            chunks.into(),
+            mark,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    assert_eq!(revision(cx), before + 1);
+    assert_eq!(
+        warning_runs(window, cx),
+        [(4, true), (3, false), (4, true), (2, false)]
+    );
 }
 
 #[gpui::test]
@@ -257,8 +318,8 @@ fn a_publish_to_an_undeclared_layer_panics(cx: &mut TestAppContext) {
         decorations::publish(
             TODO_LAYER,
             &buffer.downgrade(),
-            at(0)..at(4),
             Vec::new(),
+            vec![(at(0)..at(4), 0, Vec::new())],
             mark,
             cx,
         );
@@ -273,7 +334,7 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
     let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     let opened = decorations::run_openers(text, &[(TODO_LAYER, fakes::open_todo)], past);
     let (_, early) = &opened[0];
-    assert!(early.chunks.iter().all(|(_, marks)| marks.is_empty()));
+    assert!(early.chunks.iter().all(|(_, _, marks)| marks.is_empty()));
     let stop = early
         .seed
         .as_ref()

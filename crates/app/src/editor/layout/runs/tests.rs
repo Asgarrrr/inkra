@@ -104,12 +104,8 @@ fn a_stale_span_past_the_line_is_clipped_not_fatal() {
 /// One layer over `text` holding `marks`, published at its edit mark.
 fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> Layer<MarkStyle> {
     let mut layer = Layer::new(text.edit_mark());
-    let published = layer.publish(
-        text,
-        ByteOffset::new(0)..text.len(),
-        marks,
-        text.edit_mark(),
-    );
+    let chunk = (ByteOffset::new(0)..text.len(), 0, marks);
+    let published = layer.publish(text, Vec::new(), vec![chunk], text.edit_mark());
     assert_eq!(published, Ok(true));
     layer
 }

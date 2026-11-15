@@ -112,13 +112,6 @@ impl Activation<'_, '_> {
     }
 
     /// Each change to a buffer `layer` is drawn over reaches `f` once while the feature is on.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the test feature listens until a feature does"
-        )
-    )]
     pub(crate) fn on_text_change(
         &mut self,
         layer: LayerId,

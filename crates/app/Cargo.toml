@@ -27,6 +27,7 @@ inkra-markdown = { workspace = true }
 inkra-index = { workspace = true }
 inkra-tabs = { workspace = true }
 inkra-layout = { workspace = true }
+inkra-highlight = { workspace = true }
 # `block_on` before a gpui executor exists; `mpsc` and `oneshot` channels, `lock::Mutex`, `select_biased!`, `join_all`.
 futures = { workspace = true }
 # Wrap snapping per line.

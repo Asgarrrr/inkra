@@ -39,7 +39,14 @@ fn a_keystroke_shapes_the_note_once_with_a_layer(cx: &mut TestAppContext) {
                 color: Some(ColorToken::Warning),
             };
             let marks = vec![(at(0)..len, warning)];
-            decorations::publish(TODO_LAYER, &buffer.downgrade(), at(0)..len, marks, mark, cx);
+            decorations::publish(
+                TODO_LAYER,
+                &buffer.downgrade(),
+                Vec::new(),
+                vec![(at(0)..len, 0, marks)],
+                mark,
+                cx,
+            );
         };
         decorations::listen(TODO_LAYER, Rc::new(whole), cx)
     });

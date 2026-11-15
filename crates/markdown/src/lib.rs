@@ -1,4 +1,5 @@
 mod cmark;
+mod content_lines;
 mod display;
 mod front_matter;
 mod gutters;
@@ -9,6 +10,7 @@ mod reveal;
 mod spans;
 mod styles;
 
+pub use content_lines::content_lines;
 pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
 pub use gutters::Gutter;

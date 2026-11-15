@@ -4,6 +4,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
 use crate::cmark::options;
+use crate::content_lines::shape;
 use crate::gutters::{cut, gutters, quote_conceals};
 use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::{Conceal, Gutter, Styles};
@@ -42,6 +43,10 @@ pub struct CodeBlock {
     pub range: Range<ByteOffset>,
     /// The info string's first word; `None` without one, and for an indented block.
     pub language: Option<Range<ByteOffset>>,
+    /// A fingerprint of what colours the block besides its bytes: its language word and the ranges
+    /// of its content lines, relative to its start. A container that turns it from fenced into
+    /// indented code, or back, changes it (code highlighting spec, D7).
+    pub shape: u64,
 }
 
 /// One pass over pulldown-cmark's events. A byte inside an element that no
@@ -78,10 +83,10 @@ pub fn parse(text: &str) -> Markdown {
                     });
                 }
                 if let Tag::CodeBlock(kind) = &tag {
-                    code_blocks.push(CodeBlock {
-                        range: to_offsets(without_line_ending(text, &range)),
-                        language: language(text, &range, kind).map(to_offsets),
-                    });
+                    code_blocks.push((
+                        to_offsets(without_line_ending(text, &range)),
+                        language(text, &range, kind).map(to_offsets),
+                    ));
                 }
                 let entered = Open::enter(text, &tag, &range, current.as_ref());
                 if entered.leading {
@@ -116,6 +121,18 @@ pub fn parse(text: &str) -> Markdown {
     }
     let gutters = gutters(text, &quotes);
     cut(text, &mut out.spans, &gutters);
+    let code_blocks = code_blocks
+        .into_iter()
+        .map(|(range, language)| {
+            let mut block = CodeBlock {
+                range,
+                language,
+                shape: 0,
+            };
+            block.shape = shape(text, &out.spans, &block);
+            block
+        })
+        .collect();
     let mut conceals = out.conceals;
     conceals.extend(quote_conceals(&gutters));
     // Two sorted runs: the stable sort merges them in one linear pass.

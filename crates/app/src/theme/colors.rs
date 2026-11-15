@@ -70,6 +70,18 @@ tokens! {
     md_code_block => MdCodeBlock,
     /// Behind a code block.
     md_code_block_background => MdCodeBlockBackground,
+    /// Code tokens, by class (code highlighting spec, D5).
+    syntax_comment => SyntaxComment,
+    syntax_keyword => SyntaxKeyword,
+    syntax_string => SyntaxString,
+    syntax_constant => SyntaxConstant,
+    syntax_function => SyntaxFunction,
+    syntax_type => SyntaxType,
+    syntax_property => SyntaxProperty,
+    syntax_tag => SyntaxTag,
+    syntax_attribute => SyntaxAttribute,
+    syntax_punctuation => SyntaxPunctuation,
+    syntax_operator => SyntaxOperator,
     md_link => MdLink,
     md_quote => MdQuote,
     md_quote_bar => MdQuoteBar,

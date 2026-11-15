@@ -1,6 +1,9 @@
 # Code highlighting: tree-sitter in fenced blocks
 
-Status: **proposed** 2026-11-11. Builds on `2026-11-07-code-blocks-design.md`,
+Status: **superseded** 2026-11-14 by `2026-11-14-code-highlighting-design.md`,
+which picks our own lexers. Kept for its measurements, its capture table and
+its palette, which the new spec reuses, and as the evidence for its
+tree-sitter fallback (D14). Builds on `2026-11-07-code-blocks-design.md`,
 which leaves "tree-sitter or syntect" to this spec.
 
 ## Why

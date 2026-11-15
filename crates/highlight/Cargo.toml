@@ -1,0 +1,31 @@
+[package]
+name = "inkra-highlight"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+# Else `cargo bench` forwards criterion flags like `--quick` to the lib and fails.
+bench = false
+
+[dependencies]
+inkra-text = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+inkra-editor = { workspace = true }
+inkra-markdown = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "lex"
+harness = false
+
+[[bench]]
+name = "listener"
+harness = false

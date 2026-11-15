@@ -1,0 +1,5000 @@
+//! Writes the `-- <notes>` vault the Obsidian comparison opens, and prints its path.
+//! Content and layout: docs/benchmarks.md.
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::{Error, ErrorKind};
+use std::path::Path;
+
+const SEED: u64 = 29;
+/// Bumped when the content or the layout changes, so the vault is written again.
+const FORMAT: u32 = 1;
+const MAX_FOLDERS: usize = 100;
+const NOTES_PER_FOLDER: usize = 50;
+/// Written last, so a vault cut short is written again; hidden, so neither app lists it.
+const WRITTEN: &str = ".written";
+/// Obsidian's per-vault state: the benchmark decides when it goes, not the generator.
+const KEEP: &str = ".obsidian";
+const COMMON: &[&str] = &[
+    "the", "of", "and", "to", "a", "in", "is", "that", "for", "it", "as", "with", "on", "be", "at",
+    "by", "this", "from", "or", "an", "are", "not", "but", "we", "can", "all", "will", "one",
+    "which", "their", "more", "about", "when", "into", "some", "than", "then", "only", "also",
+    "after", "before", "because", "project", "meeting", "team", "idea", "plan", "draft", "review",
+    "budget", "design", "release", "customer", "question", "answer", "reading", "book", "chapter",
+    "summary", "decision", "risk", "goal", "week", "month", "morning", "evening", "coffee",
+    "travel", "health", "garden", "music", "recipe", "research", "paper", "method", "result",
+    "data", "model", "system", "change", "problem", "reason", "example", "process", "feedback",
+    "roadmap", "journal", "archive", "habit", "workout", "sleep", "focus", "writing", "course",
+    "lecture", "invoice", "contract",
+];
+/// Rare words are built from these, so the vocabulary has a long tail like real prose.
+const SYLLABLES: &[&str] = &[
+    "ka", "lo", "mi", "ne", "ra", "so", "tu", "vel", "dor", "an", "is", "ber", "cor", "fen", "gal",
+    "hol", "mar", "pen", "ril", "sta", "tor", "wen", "zu", "qua",
+];
+const RARE_WORDS: usize = 20_000;
+const AREAS: &[&str] = &[
+    "Projects",
+    "Areas",
+    "Resources",
+    "Archive",
+    "Journal",
+    "People",
+    "Reading",
+    "Meetings",
+    "Ideas",
+    "Work",
+];
+const TOPICS: &[&str] = &[
+    "General", "Planning", "Research", "Personal", "Clients", "Learning", "Health", "Finance",
+    "Travel", "Home",
+];
+const TAGS: &[&str] = &[
+    "todo",
+    "idea",
+    "meeting",
+    "book",
+    "review",
+    "draft",
+    "project/alpha",
+    "project/beta",
+    "person",
+    "reference",
+    "question",
+    "someday",
+];
+const FENCES: &[&str] = &["rust", "js", "sh", "python", ""];
+
+/// A fixed LCG, so every run writes the same vault.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, below: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        usize::try_from(self.0 >> 33).unwrap_or(0) % below
+    }
+}
+
+fn folder_count(notes: usize) -> usize {
+    (notes / NOTES_PER_FOLDER).clamp(1, MAX_FOLDERS)
+}
+
+fn folder_path(folder: usize) -> String {
+    format!(
+        "{}/{}",
+        AREAS[folder % AREAS.len()],
+        TOPICS[folder / AREAS.len() % TOPICS.len()]
+    )
+}
+
+struct Vault {
+    lcg: Lcg,
+    titles: Vec<String>,
+    folders: usize,
+}
+
+impl Vault {
+    /// Titles first, so a link can name a note written later.
+    fn new(notes: usize) -> Self {
+        let mut vault = Vault {
+            lcg: Lcg(SEED),
+            titles: Vec::with_capacity(notes),
+            folders: folder_count(notes),
+        };
+        for note in 0..notes {
+            let mut title = String::new();
+            vault.words(&mut title, 2, 3);
+            if let Some(first) = title.get_mut(..1) {
+                first.make_ascii_uppercase();
+            }
+            title.push(' ');
+            title.push_str(&note.to_string());
+            vault.titles.push(title);
+        }
+        vault
+    }
+
+    /// Half the words from the common list, half from a skewed long tail.
+    fn word(&mut self, text: &mut String) {
+        if self.lcg.next(2) == 0 {
+            text.push_str(COMMON[self.lcg.next(COMMON.len())]);
+            return;
+        }
+        let skew = self.lcg.next(RARE_WORDS) + 1;
+        let mut rank = self.lcg.next(skew) + SYLLABLES.len();
+        while rank > 0 {
+            text.push_str(SYLLABLES[rank % SYLLABLES.len()]);
+            rank /= SYLLABLES.len();
+        }
+    }
+
+    /// `least` words, plus up to `spread - 1` more.
+    fn words(&mut self, text: &mut String, least: usize, spread: usize) {
+        for index in 0..least + self.lcg.next(spread) {
+            if index > 0 {
+                text.push(' ');
+            }
+            self.word(text);
+        }
+    }
+
+    /// Half the links stay in the note's folder, as notes on one topic link each other.
+    fn link(&mut self, text: &mut String, note: usize) {
+        let notes = self.titles.len();
+        let target = if self.lcg.next(2) == 0 {
+            self.lcg.next(notes / self.folders) * self.folders + note % self.folders
+        } else {
+            self.lcg.next(notes)
+        };
+        let target = if target == note {
+            (target + 1) % notes
+        } else {
+            target
+        };
+        text.push_str("[[");
+        text.push_str(&self.titles[target]);
+        if self.lcg.next(4) == 0 {
+            text.push('|');
+            self.words(text, 1, 2);
+        }
+        text.push_str("]]");
+    }
+
+    fn sentence(&mut self, text: &mut String, note: usize) {
+        for index in 0..6 + self.lcg.next(11) {
+            if index > 0 {
+                text.push(' ');
+            }
+            match self.lcg.next(60) {
+                0 => self.link(text, note),
+                1 => {
+                    text.push_str("**");
+                    self.words(text, 1, 2);
+                    text.push_str("**");
+                }
+                2 => {
+                    text.push('*');
+                    self.word(text);
+                    text.push('*');
+                }
+                3 if self.lcg.next(3) == 0 => {
+                    text.push('#');
+                    text.push_str(TAGS[self.lcg.next(TAGS.len())]);
+                }
+                _ => self.word(text),
+            }
+        }
+        text.push('.');
+    }
+
+    fn list(&mut self, text: &mut String, note: usize, marker: impl Fn(usize) -> String) {
+        for item in 0..2 + self.lcg.next(5) {
+            text.push_str(&marker(item));
+            self.sentence(text, note);
+            text.push('\n');
+        }
+    }
+
+    fn frontmatter(&mut self, text: &mut String) {
+        let created = format!(
+            "2026-{:02}-{:02}",
+            1 + self.lcg.next(12),
+            1 + self.lcg.next(28)
+        );
+        let first = TAGS[self.lcg.next(TAGS.len())];
+        let second = TAGS[self.lcg.next(TAGS.len())];
+        for part in [
+            "---\ncreated: ",
+            &created,
+            "\ntags: [",
+            first,
+            ", ",
+            second,
+            "]\n---\n\n",
+        ] {
+            text.push_str(part);
+        }
+    }
+
+    fn fence(&mut self, text: &mut String) {
+        text.push_str("```");
+        text.push_str(FENCES[self.lcg.next(FENCES.len())]);
+        text.push('\n');
+        for _ in 0..2 + self.lcg.next(5) {
+            text.push_str("let ");
+            self.word(text);
+            text.push_str(" = ");
+            self.word(text);
+            text.push_str("(1);\n");
+        }
+        text.push_str("```\n");
+    }
+
+    /// 0.5 to 5 KB of blocks, mostly paragraphs.
+    fn note_text(&mut self, note: usize) -> String {
+        let target = 512 + self.lcg.next(4_609);
+        let mut text = String::with_capacity(target + 512);
+        if self.lcg.next(5) == 0 {
+            self.frontmatter(&mut text);
+        }
+        if self.lcg.next(3) != 0 {
+            text.push_str("# ");
+            text.push_str(&self.titles[note]);
+            text.push_str("\n\n");
+        }
+        while text.len() < target {
+            match self.lcg.next(20) {
+                0..=8 => {
+                    for _ in 0..2 + self.lcg.next(4) {
+                        self.sentence(&mut text, note);
+                        text.push(' ');
+                    }
+                    text.pop();
+                    text.push('\n');
+                }
+                9..=11 => self.list(&mut text, note, |_| "- ".to_owned()),
+                12 | 13 => self.list(&mut text, note, |item| format!("{}. ", item + 1)),
+                14 | 15 => {
+                    let done = self.lcg.next(2) == 0;
+                    self.list(&mut text, note, |item| {
+                        if done ^ (item % 3 == 0) {
+                            "- [x] "
+                        } else {
+                            "- [ ] "
+                        }
+                        .to_owned()
+                    });
+                }
+                16..=18 => {
+                    text.push_str("## ");
+                    self.words(&mut text, 2, 3);
+                    text.push('\n');
+                }
+                _ => self.fence(&mut text),
+            }
+            text.push('\n');
+        }
+        text
+    }
+}
+
+fn parameters(notes: usize) -> String {
+    let mut hasher = DefaultHasher::new();
+    (
+        FORMAT, notes, SEED, COMMON, SYLLABLES, RARE_WORDS, AREAS, TOPICS, TAGS, FENCES,
+    )
+        .hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Removes an older vault's notes, which would stay beside the new ones, but keeps `.obsidian`.
+fn clear(dir: &Path) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        entries => entries?,
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_name() == KEEP {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn write_vault(dir: &Path, notes: usize, parameters: &str) -> std::io::Result<()> {
+    let mut vault = Vault::new(notes);
+    for folder in 0..vault.folders {
+        std::fs::create_dir_all(dir.join(folder_path(folder)))?;
+    }
+    for note in 0..notes {
+        let path = dir
+            .join(folder_path(note % vault.folders))
+            .join(format!("{}.md", vault.titles[note]));
+        let text = vault.note_text(note);
+        std::fs::write(path, text)?;
+    }
+    std::fs::write(dir.join(WRITTEN), parameters)
+}
+
+fn main() -> std::io::Result<()> {
+    let notes = std::env::args()
+        .nth(1)
+        .and_then(|arg| arg.parse::<usize>().ok())
+        .filter(|&notes| notes > 0)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "expected a note count, e.g. `-- 5000`",
+            )
+        })?;
+    let dir = std::env::temp_dir().join(format!("inkra-bench-{notes}"));
+    let parameters = parameters(notes);
+    let written = std::fs::read_to_string(dir.join(WRITTEN)).unwrap_or_default();
+    if written != parameters {
+        clear(&dir)?;
+        write_vault(&dir, notes, &parameters)?;
+    }
+    println!("{}", dir.display());
+    Ok(())
+}
+//! Trampoline onto `inkra_app::shot`, which lives inside the library so it
+//! can reach the `pub(crate)` views.
+//!
+//!   cargo run -p inkra-app --features shot --example shot
+
+fn main() {
+    inkra_app::shot::run();
+}
+//! Writes the 50,000-note startup vault, 100 folders or `-- flat` in the root, and prints its path.
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
+
+const NOTES: usize = 50_000;
+const FOLDERS: usize = 100;
+const SEED: u64 = 13;
+/// Bumped when `note_text` or the layout changes, so the vault is written again.
+const FORMAT: u32 = 1;
+const WORDS: &[&str] = &[
+    "le", "la", "les", "de", "des", "et", "un", "une", "projet", "projets", "réunion", "été",
+    "équipe", "idée", "café", "santé", "déjà", "très", "être", "après", "the", "and", "of", "to",
+    "project", "meeting", "summer", "team", "idea", "coffee", "notes", "plan", "draft", "review",
+    "roadmap", "budget", "voyage", "lecture", "journal", "archive",
+];
+/// One note in 1,000 holds it once.
+const RARE: &str = "zanzibar";
+/// Written last, so a vault cut short is written again; hidden, so the scan skips it.
+const WRITTEN: &str = ".written";
+
+/// A fixed LCG, so every run writes the same vault.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, below: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        usize::try_from(self.0 >> 33).unwrap_or(0) % below
+    }
+}
+
+/// 1 to 5 KB of prose: lines of 8 to 20 words, `.` or `,` between some.
+fn note_text(lcg: &mut Lcg, note: usize) -> String {
+    let target = 1_024 + lcg.next(4_097);
+    let mut text = String::with_capacity(target + 128);
+    while text.len() < target {
+        for word in 0..8 + lcg.next(13) {
+            if word > 0 {
+                text.push(if lcg.next(9) == 0 { ',' } else { ' ' });
+            }
+            text.push_str(WORDS[lcg.next(WORDS.len())]);
+        }
+        text.push_str(".\n");
+    }
+    if note % 1_000 == 7 {
+        text.push_str(RARE);
+    }
+    text
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+enum Layout {
+    Nested,
+    Flat,
+}
+
+fn parameters(layout: Layout) -> String {
+    let mut hasher = DefaultHasher::new();
+    (FORMAT, NOTES, FOLDERS, SEED, WORDS, RARE, layout).hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn write_vault(dir: &Path, layout: Layout, parameters: &str) -> std::io::Result<()> {
+    let mut lcg = Lcg(SEED);
+    for note in 0..NOTES {
+        let folder = match layout {
+            Layout::Nested => dir.join(format!("f{}", note % FOLDERS)),
+            Layout::Flat => dir.to_path_buf(),
+        };
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(
+            folder.join(format!("n{note}.md")),
+            note_text(&mut lcg, note),
+        )?;
+    }
+    std::fs::write(dir.join(WRITTEN), parameters)
+}
+
+fn main() -> std::io::Result<()> {
+    let (layout, name) = match std::env::args().nth(1).as_deref() {
+        None => (Layout::Nested, "inkra-startup-50k"),
+        Some("flat") => (Layout::Flat, "inkra-startup-50k-flat"),
+        Some(other) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("unknown layout {other:?}, expected `flat` or none"),
+            ));
+        }
+    };
+    let dir = std::env::temp_dir().join(name);
+    let parameters = parameters(layout);
+    let written = std::fs::read_to_string(dir.join(WRITTEN)).unwrap_or_default();
+    if written != parameters {
+        // An older layout would leave its notes beside the new ones.
+        match std::fs::remove_dir_all(&dir) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+        write_vault(&dir, layout, &parameters)?;
+    }
+    println!("{}", dir.display());
+    Ok(())
+}
+//! Where the app keeps a vault's own files, outside the vault (restore-tabs spec, R1; persisted index spec, P4).
+
+use std::path::{Path, PathBuf};
+
+/// FNV-1a 64, written out: `DefaultHasher`'s output may change between Rust releases.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    bytes.iter().fold(OFFSET, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    })
+}
+
+/// Where the session of the vault at `root`, absolute, lives under `home` (R1).
+pub(crate) fn session_file(home: &Path, root: &Path) -> Option<PathBuf> {
+    app_file(
+        home,
+        root,
+        "Library/Application Support/Inkra/sessions",
+        "json",
+    )
+}
+
+/// Where the index cache of the vault at `root` lives under `home` (P4).
+pub(crate) fn cache_file(home: &Path, root: &Path) -> Option<PathBuf> {
+    app_file(home, root, "Library/Caches/Inkra/index", "idx")
+}
+
+/// `None` when the file would lie inside the vault: sync clients would copy it and the watcher would see it.
+fn app_file(home: &Path, root: &Path, folder: &str, extension: &str) -> Option<PathBuf> {
+    let key = fnv1a(root.as_os_str().as_encoded_bytes());
+    let file = home.join(folder).join(format!("{key:016x}.{extension}"));
+    (!file.starts_with(root)).then_some(file)
+}
+
+#[cfg(test)]
+mod tests;
+use std::path::Path;
+
+use super::{cache_file, fnv1a, session_file};
+
+/// Published FNV-1a 64 vectors: the key must not change between builds.
+#[test]
+fn the_key_is_fnv_1a_64() {
+    assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+    assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+    assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
+}
+
+/// This root hashes to a leading zero, which the name keeps: 16 digits always.
+#[test]
+fn the_session_file_is_named_by_the_root_key_in_application_support() {
+    assert_eq!(
+        session_file(Path::new("/Users/me"), Path::new("/Users/me/Notes1800")).as_deref(),
+        Some(Path::new(
+            "/Users/me/Library/Application Support/Inkra/sessions/088abcfd907476e2.json"
+        ))
+    );
+}
+
+/// Caches, not the vault: sync clients would copy the file and the watcher would see it (P4).
+#[test]
+fn the_cache_file_is_named_by_the_root_key_under_caches() {
+    assert_eq!(
+        cache_file(Path::new("/Users/me"), Path::new("/Users/me/Notes1800")).as_deref(),
+        Some(Path::new(
+            "/Users/me/Library/Caches/Inkra/index/088abcfd907476e2.idx"
+        ))
+    );
+}
+
+#[test]
+fn a_vault_holding_the_caches_folder_gets_no_cache_file() {
+    assert_eq!(
+        cache_file(Path::new("/Users/me"), Path::new("/Users/me")),
+        None
+    );
+}
+
+#[test]
+fn a_vault_holding_the_sessions_folder_gets_no_session_file() {
+    assert_eq!(
+        session_file(Path::new("/Users/me"), Path::new("/Users/me/Library")),
+        None
+    );
+}
+//! `inkra_vault::Jobs` on gpui's background threads: a walk's and a query's.
+
+use gpui::{BackgroundExecutor, Priority};
+use inkra_vault::{Job, Jobs};
+
+pub(crate) struct Background {
+    pub(crate) executor: BackgroundExecutor,
+    /// A walk runs `Low`, as Zed's scanner, so a query's scans go first.
+    pub(crate) priority: Priority,
+}
+
+impl Jobs for Background {
+    fn parallelism(&self) -> usize {
+        self.executor.num_cpus()
+    }
+
+    fn run<'a>(&'a self, jobs: Vec<Job<'a>>) -> Job<'a> {
+        Box::pin(self.executor.scoped_priority(self.priority, move |scope| {
+            for job in jobs {
+                scope.spawn(job);
+            }
+        }))
+    }
+}
+//! The notes linking to the one showing, beside the editor.
+
+use gpui::{Context, Entity, EventEmitter, SharedString, Subscription};
+use inkra_vault::{EntryId, Vault};
+
+use crate::index::{IndexSync, IndexWatch, NotesChanged};
+use crate::one_line::one_line;
+use crate::open::FileActivated;
+use crate::row_text::LitText;
+
+mod render;
+#[cfg(test)]
+mod tests;
+
+impl EventEmitter<FileActivated> for BacklinksPanel {}
+
+pub(crate) struct BacklinksPanel {
+    links: Entity<IndexSync>,
+    vault: Entity<Vault>,
+    file: Option<EntryId>,
+    /// Rebuilt when the index or the file changes, never in a draw: `backlinks` walks every
+    /// link sharing the file's name.
+    rows: Vec<Row>,
+    building: bool,
+    /// Throttled: rebuilding on every load's notify repeats `backlinks` hundreds of times.
+    watch: IndexWatch,
+    #[cfg(test)]
+    rebuilds: usize,
+    _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Row {
+    source: EntryId,
+    name: SharedString,
+    occurrences: Vec<Occurrence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Occurrence {
+    /// The link lit inside it.
+    context: LitText,
+}
+
+impl BacklinksPanel {
+    pub(crate) fn new(
+        links: Entity<IndexSync>,
+        vault: Entity<Vault>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // On a build applying, not on the vault's notify, so names and rows come from one table.
+        let subscriptions = vec![
+            IndexWatch::observe(&links, cx, |panel| &mut panel.watch, Self::rebuild),
+            cx.subscribe(&links, |panel, _, _: &NotesChanged, cx| panel.rebuild(cx)),
+        ];
+        Self {
+            links,
+            vault,
+            file: None,
+            rows: Vec::new(),
+            building: false,
+            watch: IndexWatch::default(),
+            #[cfg(test)]
+            rebuilds: 0,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn source_names(&self) -> Vec<String> {
+        self.rows.iter().map(|row| row.name.to_string()).collect()
+    }
+
+    /// The header's count; `None` with no rows.
+    pub(crate) fn count(&self) -> Option<usize> {
+        (!self.rows.is_empty()).then_some(self.rows.len())
+    }
+
+    pub(crate) fn set_file(&mut self, file: Option<EntryId>, cx: &mut Context<Self>) {
+        self.file = file;
+        self.rebuild(cx);
+    }
+
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        #[cfg(test)]
+        {
+            self.rebuilds += 1;
+        }
+        let links = self.links.read(cx);
+        let building = !links.status().is_ready();
+        self.watch.seen(links);
+        let vault = self.vault.read(cx);
+        let name = |id: EntryId| {
+            vault
+                .entry(id)
+                .map(|entry| one_line(&entry.display_name()).into_owned())
+        };
+        let rows: Vec<Row> = self
+            .file
+            .map(|file| links.index().backlinks(file))
+            .unwrap_or_default()
+            .into_iter()
+            // A load may notify after the vault changed and before its build applies.
+            .filter_map(|backlink| {
+                Some(Row {
+                    source: backlink.source(),
+                    name: name(backlink.source())?.into(),
+                    occurrences: backlink
+                        .occurrences()
+                        .map(|link| Occurrence {
+                            context: LitText::context(&link.context, [link.context_link.clone()]),
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
+        // A redraw reshapes the whole editor; most index changes leave this panel as it was.
+        let shown = |rows: &[Row], building: bool| rows.is_empty() && building;
+        let changed =
+            rows != self.rows || shown(&rows, building) != shown(&self.rows, self.building);
+        self.rows = rows;
+        self.building = building;
+        if changed {
+            cx.notify();
+        }
+    }
+}
+use gpui::{
+    Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, div,
+};
+
+use super::{BacklinksPanel, Row};
+use crate::open::{FileActivated, Open};
+use crate::row_text::styled;
+use crate::theme;
+use crate::ui::{Color, Label, ListItem, UiText, v_flex};
+
+impl BacklinksPanel {
+    fn render_row(index: usize, row: &Row, cx: &mut Context<Self>) -> impl IntoElement {
+        let source = row.source;
+        let theme = theme::current(cx);
+        let (name, context, link) = (
+            Color::Default.rgba(theme),
+            Color::Placeholder.rgba(theme),
+            Color::Accent.rgba(theme),
+        );
+        ListItem::new(("backlink", index))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
+                    // The press's modifiers: the row acts at mouse-down, a picker row at the release.
+                    cx.emit(FileActivated {
+                        file: source,
+                        open: Open::from_click(event.modifiers, cx),
+                    });
+                }),
+            )
+            .child(
+                v_flex()
+                    .pb_2()
+                    .child(div().text_color(name).child(row.name.clone()))
+                    .children(row.occurrences.iter().map(|occurrence| {
+                        div()
+                            .text_color(context)
+                            .child(styled(&occurrence.context, link.into()))
+                    })),
+            )
+    }
+}
+
+impl Render for BacklinksPanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let message = match (self.rows.is_empty(), self.building) {
+            (true, true) => Some("Indexing…"),
+            (true, false) => Some("No backlinks"),
+            (false, _) => None,
+        };
+        v_flex()
+            .id("backlinks")
+            .size_full()
+            .ui_text()
+            .overflow_y_scroll()
+            .children(message.map(|message| {
+                div()
+                    .px(theme::ROW_INSET)
+                    .child(Label::new(message).color(Color::Placeholder))
+            }))
+            .child(
+                v_flex().px(theme::MENU_INSET).children(
+                    self.rows
+                        .iter()
+                        .enumerate()
+                        .map(|(index, row)| Self::render_row(index, row, cx).into_any_element())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+    }
+}
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{AppContext as _, Entity, TestAppContext};
+use inkra_vault::mem_fs::MemFs;
+use inkra_vault::{Fs, New};
+
+use super::BacklinksPanel;
+use crate::index::IndexSync;
+use crate::test_support::{entry_id, index_sync, scan_notes, unscanned_notes, vault_of};
+use crate::vault::NoteStore;
+
+fn panel(cx: &mut TestAppContext, fs: &Arc<MemFs>) -> (Entity<NoteStore>, Entity<BacklinksPanel>) {
+    let notes = scan_notes(cx, Arc::clone(fs) as Arc<dyn Fs>);
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
+    (notes, panel)
+}
+
+fn show(
+    cx: &mut TestAppContext,
+    notes: &Entity<NoteStore>,
+    panel: &Entity<BacklinksPanel>,
+    name: &str,
+) {
+    let id = entry_id(notes, cx, name);
+    panel.update(cx, |panel, cx| panel.set_file(Some(id), cx));
+}
+
+/// Each row as its source's name and every occurrence's (context, linked text).
+fn rows(
+    cx: &mut TestAppContext,
+    panel: &Entity<BacklinksPanel>,
+) -> Vec<(String, Vec<(String, String)>)> {
+    panel.read_with(cx, |panel, _| rows_of(panel))
+}
+
+fn rows_of(panel: &BacklinksPanel) -> Vec<(String, Vec<(String, String)>)> {
+    panel
+        .rows
+        .iter()
+        .map(|row| {
+            let occurrences = row
+                .occurrences
+                .iter()
+                .map(|o| {
+                    let text = o.context.text();
+                    (
+                        text.to_string(),
+                        text[o.context.ranges()[0].clone()].to_owned(),
+                    )
+                })
+                .collect();
+            (row.name.to_string(), occurrences)
+        })
+        .collect()
+}
+
+fn one(context: &str, lit: &str) -> (String, String) {
+    (context.to_owned(), lit.to_owned())
+}
+
+#[gpui::test]
+fn the_rows_are_the_sources_in_vault_order_with_each_occurrence(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "see [[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "[[b]] and\n[[b|again]] here");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+
+    show(cx, &notes, &panel, "b");
+
+    assert_eq!(
+        rows(cx, &panel),
+        [
+            ("a".to_owned(), vec![one("see [[b]]", "[[b]]")]),
+            (
+                "c".to_owned(),
+                vec![
+                    one("[[b]] and", "[[b]]"),
+                    one("[[b|again]] here", "[[b|again]]")
+                ]
+            ),
+        ]
+    );
+}
+
+#[gpui::test]
+fn no_note_and_no_backlinks_leave_no_rows(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+
+    assert_eq!(rows(cx, &panel), []);
+    show(cx, &notes, &panel, "a");
+    assert_eq!(rows(cx, &panel), []);
+    assert!(!panel.read_with(cx, |panel, _| panel.building));
+}
+
+#[gpui::test]
+fn the_rows_follow_the_index_as_it_builds(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let gate = fs.block_load("/vault/a.md");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+
+    assert!(panel.read_with(cx, |panel, _| panel.building));
+    assert_eq!(rows(cx, &panel), []);
+
+    gate.release();
+    cx.run_until_parked();
+
+    assert!(!panel.read_with(cx, |panel, _| panel.building));
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("[[b]]", "[[b]]")])]
+    );
+}
+
+#[gpui::test]
+fn a_renamed_source_shows_its_new_name(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+
+    let a = entry_id(&notes, cx, "a");
+    let renamed = notes.update(cx, |notes, cx| notes.rename(a, "z", cx));
+    cx.run_until_parked();
+    drop(renamed);
+
+    assert_eq!(
+        rows(cx, &panel),
+        [("z".to_owned(), vec![one("[[b]]", "[[b]]")])]
+    );
+}
+
+/// Throttled, not frozen: rows land while another note's load is still parked.
+#[gpui::test]
+fn rows_appear_while_the_index_is_still_building(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[c]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "");
+    let gate = fs.block_load("/vault/b.md");
+    let (notes, panel) = panel(cx, &fs);
+    show(cx, &notes, &panel, "c");
+    cx.run_until_parked();
+    assert!(panel.read_with(cx, |panel, _| panel.building));
+
+    cx.executor().advance_clock(crate::index::BUILDING_REFRESH);
+    cx.run_until_parked();
+
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("[[c]]", "[[c]]")])]
+    );
+    gate.release();
+}
+
+/// Notifies of the panel: each one redraws the window, which reshapes the whole editor.
+fn redraws(
+    cx: &mut TestAppContext,
+    panel: &Entity<BacklinksPanel>,
+) -> (Rc<Cell<usize>>, gpui::Subscription) {
+    let count = Rc::new(Cell::new(0));
+    let sink = Rc::clone(&count);
+    let subscription = cx.update(|cx| cx.observe(panel, move |_, _| sink.set(sink.get() + 1)));
+    (count, subscription)
+}
+
+#[gpui::test]
+fn an_index_change_that_leaves_the_rows_alone_redraws_nothing(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "unrelated");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    let (count, _guard) = redraws(cx, &panel);
+
+    fs.insert_file("/vault/c.md", "still unrelated, [[elsewhere]]");
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "d", cx));
+    cx.run_until_parked();
+    drop(created);
+
+    assert_eq!(
+        count.get(),
+        0,
+        "c was reloaded, but b's backlinks are unchanged"
+    );
+
+    fs.insert_file("/vault/c.md", "now [[b]]");
+    let created = notes.update(cx, |notes, cx| notes.create(None, New::Note, "e", cx));
+    cx.run_until_parked();
+    drop(created);
+
+    assert!(count.get() >= 1, "c now links to b");
+    assert_eq!(rows(cx, &panel).len(), 2);
+}
+
+/// What `NoteStore::rescan` does once the trash's walk returns; the new build is not run.
+fn trash_behind_the_store(
+    cx: &mut TestAppContext,
+    notes: &Entity<NoteStore>,
+    fs: &Arc<MemFs>,
+    path: &str,
+) {
+    fs.remove(std::path::Path::new(path));
+    let vault = vault_of(notes, cx);
+    vault.update(cx, |vault, cx| {
+        let rescan = futures::executor::block_on(vault.rescan(&**fs));
+        assert!(rescan.is_ok(), "a MemFs rescan: {rescan:?}");
+        cx.notify();
+    });
+}
+
+/// The state between the vault's notify and the `NoteSet` build applying: at 50,000
+/// notes the build takes about 105 ms.
+#[gpui::test]
+fn a_trashed_source_never_shows_as_a_nameless_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    assert_eq!(rows(cx, &panel).len(), 1);
+
+    trash_behind_the_store(cx, &notes, &fs, "/vault/a.md");
+
+    let names: Vec<String> = rows(cx, &panel).into_iter().map(|(name, _)| name).collect();
+    assert!(names.iter().all(|name| !name.is_empty()), "{names:?}");
+    cx.run_until_parked();
+    assert_eq!(rows(cx, &panel), []);
+}
+
+/// `x.md` at the root wins `[[x]]` over `d/x.md`: the old rows must never take the new name.
+#[gpui::test]
+fn a_rename_never_shows_a_stale_or_nameless_row(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[x]]");
+    fs.insert_file("/vault/c.md", "[[x]]");
+    fs.insert_file("/vault/d/x.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "x");
+    let before = vec![
+        ("a".to_owned(), vec![one("[[x]]", "[[x]]")]),
+        ("c".to_owned(), vec![one("[[x]]", "[[x]]")]),
+    ];
+    let after = Vec::new();
+    assert_eq!(rows(cx, &panel), before);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&seen);
+    let _guard = cx.update(|cx| {
+        cx.observe(&panel, move |panel, cx| {
+            sink.borrow_mut().push(rows_of(panel.read(cx)));
+        })
+    });
+
+    let a = entry_id(&notes, cx, "a");
+    let renamed = notes.update(cx, |notes, cx| notes.rename(a, "x", cx));
+    cx.run_until_parked();
+    drop(renamed);
+
+    let seen = seen.borrow();
+    assert!(
+        seen.iter().all(|rows| *rows == before || *rows == after),
+        "{seen:?}"
+    );
+    assert_eq!(rows(cx, &panel), after);
+}
+
+/// A load's notify can land after the vault changed and before the build of it applies.
+#[gpui::test]
+fn a_source_gone_from_the_vault_is_skipped_until_its_build_applies(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "[[b]]");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    assert_eq!(rows(cx, &panel).len(), 2);
+
+    trash_behind_the_store(cx, &notes, &fs, "/vault/a.md");
+    let links = panel.read_with(cx, |panel, _| panel.links.clone());
+    links.update(cx, |_, cx| cx.notify());
+    assert_eq!(
+        rows(cx, &panel).len(),
+        2,
+        "a notify that changed nothing keeps the rows of the last applied build"
+    );
+
+    links.update(cx, IndexSync::simulate_load);
+    assert_eq!(
+        rows(cx, &panel),
+        [("c".to_owned(), vec![one("[[b]]", "[[b]]")])]
+    );
+}
+
+#[gpui::test]
+fn an_applied_build_recomputes_the_rows_once(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    fs.insert_file("/vault/c.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "b");
+    let before = panel.read_with(cx, |panel, _| panel.rebuilds);
+
+    let c = entry_id(&notes, cx, "c");
+    let renamed = notes.update(cx, |notes, cx| notes.rename(c, "d", cx));
+    cx.run_until_parked();
+    drop(renamed);
+
+    let after = panel.read_with(cx, |panel, _| panel.rebuilds);
+    assert_eq!(
+        after - before,
+        1,
+        "NotesChanged and the notify after it are one change"
+    );
+}
+
+#[gpui::test]
+fn an_indented_link_drops_its_indent_and_draws_a_tab_as_a_space(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    // Two spaces: a leading tab or four spaces would open a code block, which holds no link.
+    fs.insert_file("/vault/a.md", "  see\t[[b]]");
+    fs.insert_file("/vault/b.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+
+    show(cx, &notes, &panel, "b");
+
+    assert_eq!(
+        rows(cx, &panel),
+        [("a".to_owned(), vec![one("see [[b]]", "[[b]]")])]
+    );
+}
+
+#[gpui::test]
+fn a_newline_in_a_source_name_draws_as_a_space(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a\nb.md", "[[c]]");
+    fs.insert_file("/vault/c.md", "");
+    let (notes, panel) = panel(cx, &fs);
+    cx.run_until_parked();
+    show(cx, &notes, &panel, "c");
+
+    assert_eq!(
+        panel.read_with(cx, |panel, _| panel.source_names()),
+        ["a b"]
+    );
+}
+
+/// Before the first build no note has backlinks yet: "Indexing…", never "No backlinks".
+#[gpui::test]
+fn a_note_opened_during_the_initial_scan_shows_building(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "");
+    fs.insert_file("/vault/f/b.md", "[[a]]");
+    let gate = fs.block_read_dir("/vault/f");
+    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
+    cx.run_until_parked();
+
+    show(cx, &notes, &panel, "a");
+
+    assert!(panel.read_with(cx, |panel, _| panel.building));
+    gate.release();
+}
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
+
+use gpui::{
+    App, AppContext as _, Bounds, DisplayId, Entity, Focusable, Pixels, Size, TitlebarOptions,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, point, px, size,
+};
+use inkra_text::Buffer;
+use inkra_vault::{Fs, RealFs, Stamp, Vault};
+
+use crate::Quit;
+use crate::app_files::{cache_file, session_file};
+use crate::editor::EditorView;
+use crate::keymap::key_bindings;
+use crate::restore::{self, Opened, SavedWindow};
+use crate::shell::AppShell;
+use crate::theme::{self, store::Resolved};
+use crate::timeline::{Step, Timeline};
+use crate::ui::Assets;
+use crate::vault::NoteStore;
+
+pub(crate) const WINDOW_SIZE: Size<Pixels> = size(px(1000.), px(640.));
+
+pub(crate) enum Launch {
+    /// `AppShell` renders its empty state; there is no editor in this state.
+    Nothing,
+    /// The path travels for `⌘S` to write back to; the `Stamp` is what the
+    /// first write compares against.
+    Note(PathBuf, String, Stamp),
+    /// Scanned behind the first frame; the session file, if the app keeps one, read before it;
+    /// the index cache file, if the app keeps one, read beside the scan.
+    Vault(Vault, Option<PathBuf>, Option<PathBuf>),
+}
+
+/// Read once, before the window opens: its frame places the window, the first frame draws the saved layout,
+/// and the tabs' restore reuses it.
+pub(crate) fn read_session(fs: &Arc<dyn Fs>, launched: &Launch, cx: &mut App) -> Option<Opened> {
+    let Launch::Vault(vault, Some(file), _) = launched else {
+        return None;
+    };
+    let started = Instant::now();
+    let session = futures::executor::block_on(restore::read(
+        Arc::clone(fs),
+        file.clone(),
+        vault.root().to_path_buf(),
+    ));
+    Timeline::session_read(started.elapsed(), cx);
+    Some(Opened {
+        file: file.clone(),
+        session,
+    })
+}
+
+/// The saved frame on its display while that display is plugged in and the frame overlaps it; else centred on the main one.
+pub(crate) fn placement(
+    saved: Option<&SavedWindow>,
+    cx: &App,
+) -> (Option<DisplayId>, Bounds<Pixels>) {
+    let on_display = saved.and_then(|saved| {
+        let display = cx.displays().into_iter().find(|display| {
+            display
+                .uuid()
+                .is_ok_and(|uuid| uuid.to_string() == saved.display)
+        })?;
+        let frame = Bounds::new(
+            point(px(saved.x), px(saved.y)),
+            size(px(saved.width), px(saved.height)),
+        );
+        display
+            .bounds()
+            .intersects(&frame)
+            .then(|| (Some(display.id()), frame))
+    });
+    on_display.unwrap_or_else(|| (None, Bounds::centered(None, WINDOW_SIZE, cx)))
+}
+
+/// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
+/// runner gets the same composition the real window gets.
+pub(crate) fn root(
+    fs: Arc<dyn Fs>,
+    launched: Launch,
+    opened: Option<Opened>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<AppShell> {
+    let (editor, notes, cache) = match launched {
+        Launch::Nothing => (None, cx.new(|cx| NoteStore::new(fs, None, cx)), None),
+        Launch::Note(path, text, stamp) => {
+            let buffer = cx.new(|_| Buffer::new(text));
+            let editor = cx.new(|cx| EditorView::new(buffer.clone(), cx));
+            let notes = cx.new(|cx| NoteStore::detached(fs, buffer, path, stamp, cx));
+            (Some(editor), notes, None)
+        }
+        Launch::Vault(vault, _, cache) => {
+            let vault = cx.new(|_| vault);
+            (
+                None,
+                cx.new(|cx| NoteStore::new(fs, Some(vault), cx)),
+                cache,
+            )
+        }
+    };
+    cx.new(|cx| AppShell::new(editor, notes, opened, cache, window, cx))
+}
+
+/// Lexical, never `canonicalize`: a symlinked vault keeps its own session (restore-tabs spec, R4).
+fn vault_root(path: &Path) -> io::Result<PathBuf> {
+    // `absolute` keeps a trailing slash; rebuilding from components drops it.
+    Ok(std::path::absolute(path)?.components().collect())
+}
+
+/// No `HOME`, or a vault holding the app's folder: no session and no cache, so none read or written.
+pub(crate) fn vault_launch(root: &Path, home: Option<&Path>) -> Launch {
+    let session = home.and_then(|home| session_file(home, root));
+    let cache = home.and_then(|home| cache_file(home, root));
+    Launch::Vault(Vault::new(root), session, cache)
+}
+
+/// Deliberately blocking: a failure should exit rather than flash an empty window.
+fn launch() -> Result<Launch, String> {
+    // `args_os`, not `args`: the latter panics on a non-UTF-8 path.
+    let Some(argument) = std::env::args_os().nth(1) else {
+        return Ok(Launch::Nothing);
+    };
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    open_argument(&RealFs, PathBuf::from(argument), home.as_deref())
+}
+
+/// A folder is a vault, anything else a note; `fs` tells them apart, so a `MemFs` test sees the choice.
+fn open_argument(fs: &impl Fs, path: PathBuf, home: Option<&Path>) -> Result<Launch, String> {
+    // Opens the folder, lists nothing: a vault of any size costs the first frame nothing (open-first spec, O6).
+    match futures::executor::block_on(fs.check_dir(&path)) {
+        Ok(()) => {
+            let root = vault_root(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            Ok(vault_launch(&root, home))
+        }
+        // A file, or nothing there: the note's load reports which.
+        Err(error)
+            if matches!(
+                error.io_kind(),
+                Some(io::ErrorKind::NotADirectory | io::ErrorKind::NotFound)
+            ) =>
+        {
+            futures::executor::block_on(fs.load(&path))
+                .map(|loaded| Launch::Note(path, loaded.text, loaded.stamp))
+                .map_err(|error| format!("{error}"))
+        }
+        Err(error) => Err(format!("{error}")),
+    }
+}
+
+pub fn run() {
+    crate::logger::init();
+    let started = Instant::now();
+    let app = gpui_platform::application().with_assets(Assets);
+    app.run(move |cx: &mut App| {
+        cx.set_global(Timeline::new(started));
+        cx.bind_keys(key_bindings());
+        cx.on_action(|_: &Quit, cx| cx.quit());
+
+        let launched = match launch() {
+            Ok(launched) => launched,
+            Err(message) => {
+                log::error!("{message}");
+                std::process::exit(1);
+            }
+        };
+
+        let resolved = match &launched {
+            Launch::Vault(vault, ..) => {
+                futures::executor::block_on(theme::store::load(&RealFs, vault.root()))
+            }
+            Launch::Nothing | Launch::Note(..) => Resolved::default(),
+        };
+        theme::install(resolved.theme.clone(), cx);
+        theme::set_code_block_wrap(resolved.code_block_wrap, cx);
+        let fs: Arc<dyn Fs> = Arc::new(RealFs);
+        let opened = read_session(&fs, &launched, cx);
+        let saved = opened
+            .as_ref()
+            .and_then(|opened| opened.session.as_ref()?.window.as_ref());
+        let (display_id, bounds) = placement(saved, cx);
+        let window = cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                display_id,
+                titlebar: Some(TitlebarOptions {
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(theme::TRAFFIC_LIGHT_POSITION),
+                }),
+                // The app moves the window from its drag regions; AppKit never drags it from a tab.
+                app_owns_titlebar_drag: true,
+                // The chrome is translucent over this blur; the note paints itself opaque.
+                window_background: WindowBackgroundAppearance::Blurred,
+                ..Default::default()
+            },
+            |window, cx| root(fs, launched, opened, window, cx),
+        );
+
+        match window {
+            Ok(window) => {
+                let focused = window.update(cx, |view, window, cx| {
+                    window.focus(&view.focus_handle(cx), cx);
+                    cx.activate(true);
+                    // Marks the first draw's start, ~4.5 ms before its present: any later hook waits on AppKit.
+                    window.on_next_frame(|_, cx| Timeline::mark(Step::FirstFrame, cx));
+                    view.adopt_theme(resolved, cx);
+                });
+                if let Err(err) = focused {
+                    log::warn!("failed to focus window: {err}");
+                }
+            }
+            Err(err) => {
+                log::error!("failed to open window: {err}");
+                std::process::exit(1);
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests;
+use std::path::Path;
+
+use gpui::{Bounds, TestAppContext, point, px, size};
+use inkra_vault::mem_fs::MemFs;
+
+use super::{Launch, WINDOW_SIZE, open_argument, placement, vault_root};
+use crate::restore::SavedWindow;
+
+/// One vault, one session file: the key hashes these bytes, so compare bytes, not `Path`'s components.
+#[test]
+fn a_vault_root_drops_a_trailing_slash_and_dot_components() {
+    for spelling in ["/Users/me/Notes/", "/Users/me/./Notes", "/Users/me/Notes"] {
+        assert_eq!(
+            vault_root(Path::new(spelling)).unwrap().as_os_str(),
+            "/Users/me/Notes"
+        );
+    }
+}
+
+/// `Fs` tells a vault from a note, so the launch never stats the disk behind it.
+#[test]
+fn an_argument_opens_a_folder_as_a_vault_and_a_file_as_a_note() {
+    let fs = MemFs::new();
+    fs.insert_dir("/vault");
+    fs.insert_file("/vault/a.md", "alpha");
+    assert!(matches!(
+        open_argument(&fs, "/vault".into(), None),
+        Ok(Launch::Vault(vault, None, None)) if vault.root() == Path::new("/vault")
+    ));
+    assert!(matches!(
+        open_argument(&fs, "/vault/a.md".into(), None),
+        Ok(Launch::Note(path, text, _)) if path == Path::new("/vault/a.md") && text == "alpha"
+    ));
+}
+
+/// An unreadable folder fails the launch itself; loading it as a note would hide why.
+#[test]
+fn a_missing_argument_or_an_unreadable_folder_is_an_error_naming_it() {
+    let fs = MemFs::new();
+    fs.insert_dir("/locked");
+    fs.make_unreadable("/locked");
+    assert!(
+        open_argument(&fs, "/nowhere.md".into(), None)
+            .is_err_and(|error| error.contains("/nowhere.md"))
+    );
+    assert!(
+        open_argument(&fs, "/locked".into(), None).is_err_and(|error| error.contains("/locked"))
+    );
+    assert_eq!(fs.loads(Path::new("/locked")), 0);
+}
+
+#[gpui::test]
+fn a_saved_window_opens_on_its_display_and_one_gone_or_off_its_display_centres(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        let display = cx.primary_display().expect("the test display");
+        let saved = SavedWindow {
+            display: display.uuid().unwrap().to_string(),
+            x: 120.,
+            y: 80.,
+            width: 1200.,
+            height: 760.,
+        };
+        let frame = Bounds::new(point(px(120.), px(80.)), size(px(1200.), px(760.)));
+        assert_eq!(placement(Some(&saved), cx), (Some(display.id()), frame));
+
+        let gone = SavedWindow {
+            display: "a display unplugged since".to_owned(),
+            ..saved
+        };
+        let centred = (None, Bounds::centered(None, WINDOW_SIZE, cx));
+        assert_eq!(placement(Some(&gone), cx), centred);
+        let off = SavedWindow { x: 2000., ..saved };
+        assert_eq!(placement(Some(&off), cx), centred);
+        assert_eq!(placement(None, cx), centred);
+    });
+}
+//! Events a `Buffer` entity emits, apart from the vault so a view hears them without importing it.
+
+use std::sync::Arc;
+
+use gpui::EventEmitter;
+use inkra_text::{Buffer, Diff};
+
+/// The buffer took a change from disk; each view showing it maps its offsets through the diff.
+#[derive(Debug, Clone)]
+pub(crate) struct Reloaded(pub(crate) Arc<Diff>);
+
+impl EventEmitter<Reloaded> for Buffer {}
+use gpui::{Action, App, FocusHandle, KeybindingKeystroke, SharedString, Window};
+
+use crate::editor::actions as editor;
+use crate::field;
+use crate::picker;
+use crate::sidebar;
+use crate::text_input::actions as text_input;
+
+/// Moves, deletions and field keys: a palette entry for one would do nothing a user wants.
+pub(super) fn is_hidden(name: &str) -> bool {
+    [
+        text_input::Backspace::name_for_type(),
+        text_input::Delete::name_for_type(),
+        text_input::Left::name_for_type(),
+        text_input::Right::name_for_type(),
+        text_input::SelectLeft::name_for_type(),
+        text_input::SelectRight::name_for_type(),
+        text_input::Home::name_for_type(),
+        text_input::End::name_for_type(),
+        text_input::LineStart::name_for_type(),
+        text_input::LineEnd::name_for_type(),
+        editor::Up::name_for_type(),
+        editor::Down::name_for_type(),
+        editor::SelectUp::name_for_type(),
+        editor::SelectDown::name_for_type(),
+        editor::DocStart::name_for_type(),
+        editor::DocEnd::name_for_type(),
+        editor::Newline::name_for_type(),
+        sidebar::SelectPrev::name_for_type(),
+        sidebar::SelectNext::name_for_type(),
+        field::Confirm::name_for_type(),
+        picker::SecondaryConfirm::name_for_type(),
+        field::Cancel::name_for_type(),
+        super::Toggle::name_for_type(),
+    ]
+    .contains(&name)
+}
+
+pub(crate) struct Command {
+    pub(super) name: SharedString,
+    /// Run from the palette before: keeps its place above every other match.
+    pub(super) recent: bool,
+    pub(super) key: Option<SharedString>,
+    pub(super) action: Box<dyn Action>,
+}
+
+/// `vault_tree::NewNote` → `New note`: the last segment, a space before each word's capital.
+pub(super) fn humanize(name: &str) -> String {
+    let base = name.rsplit_once("::").map_or(name, |(_, base)| base);
+    let mut out =
+        String::with_capacity(base.len() + base.chars().filter(char::is_ascii_uppercase).count());
+    let mut prev_lower = false;
+    for c in base.chars() {
+        if c.is_uppercase() && prev_lower {
+            out.push(' ');
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+        prev_lower = c.is_lowercase();
+    }
+    out
+}
+
+/// A symbol macOS reports with shift cleared (`gpui_macos/src/events.rs:467-485`), and the key pressed for it (US layout).
+const SHIFTED: &[(&str, &str)] = &[("|", "\\"), ("}", "]"), ("{", "[")];
+
+/// Apple order, `⌃⌥⇧⌘`, then the key's glyph (spec D5); gpui's `Display` orders `⌘⇧` and prints `enter`.
+pub(super) fn key_label(keystroke: &KeybindingKeystroke) -> String {
+    let modifiers = keystroke.modifiers();
+    let shifted = SHIFTED
+        .iter()
+        .find(|(symbol, _)| *symbol == keystroke.key())
+        .map(|(_, key)| *key);
+    let mut out = String::new();
+    for (on, glyph) in [
+        (modifiers.control, '⌃'),
+        (modifiers.alt, '⌥'),
+        (modifiers.shift || shifted.is_some(), '⇧'),
+        (modifiers.platform, '⌘'),
+    ] {
+        if on {
+            out.push(glyph);
+        }
+    }
+    match shifted.unwrap_or(keystroke.key()) {
+        "enter" => out.push('↩'),
+        "backspace" => out.push('⌫'),
+        "delete" => out.push('⌦'),
+        "escape" => out.push('⎋'),
+        "tab" => out.push('⇥'),
+        "up" => out.push('↑'),
+        "down" => out.push('↓'),
+        "left" => out.push('←'),
+        "right" => out.push('→'),
+        "space" => out.push_str("Space"),
+        key => {
+            let mut chars = key.chars();
+            if let Some(first) = chars.next() {
+                out.extend(first.to_uppercase());
+                out.push_str(chars.as_str());
+            }
+        }
+    }
+    out
+}
+
+/// A chord's keystrokes, each drawn by `key_label`, joined with a space.
+pub(super) fn keys_label(keystrokes: &[KeybindingKeystroke]) -> SharedString {
+    keystrokes
+        .iter()
+        .map(key_label)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .into()
+}
+
+/// The commands at `target`, each with its key there: `recent` first, newest first, then by name.
+/// A query moves the rest whose match starts later than their first word down (`update_matches`).
+pub(crate) fn commands(
+    window: &Window,
+    cx: &App,
+    target: &FocusHandle,
+    recent: &[&str],
+) -> Vec<Command> {
+    let mut commands: Vec<Command> = window
+        .available_actions(cx)
+        .into_iter()
+        .filter(|action| !is_hidden(action.name()))
+        .map(|action| {
+            let key = window
+                .highest_precedence_binding_for_action_in(&*action, target)
+                .map(|binding| keys_label(binding.keystrokes()));
+            Command {
+                name: humanize(action.name()).into(),
+                recent: recent.contains(&action.name()),
+                key,
+                action,
+            }
+        })
+        .collect();
+    commands.sort_by_cached_key(|command| {
+        let rank = recent
+            .iter()
+            .position(|&name| name == command.action.name())
+            .unwrap_or(usize::MAX);
+        (rank, command.name.clone())
+    });
+    commands
+}
+//! `⌘⇧P`: the commands the focused view can run, found by word start (command palette spec).
+
+mod commands;
+#[cfg(test)]
+mod tests;
+
+use gpui::{
+    Action, AnyElement, App, Context, EventEmitter, IntoElement, ParentElement, Pixels,
+    SharedString, Styled, actions, div,
+};
+use inkra_index::{NoteQuery, word_starts};
+
+use crate::open::Open;
+use crate::picker::{Arrival, Picker, PickerDelegate, Update};
+use crate::row_text::{LitText, styled};
+use crate::theme;
+use crate::ui::Color;
+
+pub(crate) use commands::{Command, commands};
+
+actions!(command_palette, [Toggle]);
+
+/// The chosen command's action; the shell dispatches it once the palette is gone (spec D4).
+pub(crate) struct CommandChosen(pub(crate) Box<dyn Action>);
+
+impl EventEmitter<CommandChosen> for Picker<CommandPaletteDelegate> {}
+
+pub(crate) struct CommandPaletteDelegate {
+    commands: Vec<Command>,
+    rows: Vec<Row>,
+}
+
+/// One match: its index in `commands` and its name, lit.
+pub(crate) struct Row {
+    command: usize,
+    name: LitText,
+}
+
+impl CommandPaletteDelegate {
+    pub(crate) fn new(commands: Vec<Command>) -> Self {
+        Self {
+            commands,
+            rows: Vec::new(),
+        }
+    }
+}
+
+impl PickerDelegate for CommandPaletteDelegate {
+    type Matches = Vec<Row>;
+
+    fn key_context(&self) -> &'static str {
+        "CommandPalette"
+    }
+
+    fn label(&self) -> &'static str {
+        "Command palette"
+    }
+
+    fn placeholder(&self) -> &'static str {
+        "Run a command…"
+    }
+
+    fn empty_text(&self, _: &App) -> Option<SharedString> {
+        Some("No matching command".into())
+    }
+
+    fn match_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn is_selectable(&self, _: usize) -> bool {
+        true
+    }
+
+    fn update_matches(
+        &mut self,
+        query: &str,
+        _: &mut Context<Picker<Self>>,
+    ) -> Update<Self::Matches> {
+        let query = NoteQuery::new(query, None, &[]);
+        let mut rows: Vec<(bool, Row)> = self
+            .commands
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, command)| {
+                let lit = word_starts(&query, &command.name)?;
+                let later =
+                    !command.recent && !lit.is_empty() && !lit.iter().any(|range| range.start == 0);
+                let row = Row {
+                    command: ix,
+                    name: LitText::line(&command.name, lit),
+                };
+                Some((later, row))
+            })
+            .collect();
+        // Stable: recent keeps its order and each group stays alphabetical (palette spec, D3).
+        rows.sort_by_key(|(later, _)| *later);
+        Update::Ready(rows.into_iter().map(|(_, row)| row).collect())
+    }
+
+    fn apply_matches(
+        &mut self,
+        rows: Self::Matches,
+        _: Option<usize>,
+        _: &mut Context<Picker<Self>>,
+    ) -> Arrival {
+        self.rows = rows;
+        Arrival::first()
+    }
+
+    /// `open` does not apply: `⌘↵` runs the command, as `enter`.
+    fn confirm(&mut self, ix: usize, _: Open, cx: &mut Context<Picker<Self>>) {
+        if let Some(Row { command, .. }) = self.rows.get(ix) {
+            cx.emit(CommandChosen(self.commands[*command].action.boxed_clone()));
+        }
+    }
+
+    fn render_row(&self, ix: usize, _: bool, cx: &mut Context<Picker<Self>>) -> AnyElement {
+        let Some(Row { command, name }) = self.rows.get(ix) else {
+            return div().into_any_element();
+        };
+        let key = self.commands[*command].key.clone();
+        let theme = theme::current(cx);
+        div()
+            .h(self.row_height())
+            .w_full()
+            .flex()
+            .justify_between()
+            .gap_2()
+            .whitespace_nowrap()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(styled(name, Color::Highlight.rgba(theme).into())),
+            )
+            .children(key.map(|key| {
+                div()
+                    .flex_none()
+                    .text_color(Color::Placeholder.rgba(theme))
+                    .child(key)
+            }))
+            .into_any_element()
+    }
+
+    fn row_label(&self, ix: usize) -> SharedString {
+        let Some(Row { command, name }) = self.rows.get(ix) else {
+            return SharedString::default();
+        };
+        match &self.commands[*command].key {
+            Some(key) => format!("{}, {key}", name.text()).into(),
+            None => name.text().clone(),
+        }
+    }
+
+    fn row_height(&self) -> Pixels {
+        theme::UI_LINE_HEIGHT
+    }
+}
+use std::collections::HashSet;
+
+use gpui::{KeybindingKeystroke, Keystroke};
+
+use super::commands::{humanize, is_hidden, key_label, keys_label};
+
+#[test]
+fn humanize_drops_the_namespace_and_splits_words() {
+    assert_eq!(humanize("vault_tree::NewNote"), "New note");
+    assert_eq!(humanize("vault_search::SearchVault"), "Search vault");
+    assert_eq!(humanize("editor::FollowLink"), "Follow link");
+    assert_eq!(humanize("text_input::SelectAll"), "Select all");
+    assert_eq!(humanize("inkra::Quit"), "Quit");
+}
+
+/// Over every registered action, so no focus can show two commands with one name.
+#[gpui::test]
+fn every_shown_name_is_unique(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let shown: Vec<String> = cx
+            .all_action_names()
+            .iter()
+            .filter(|name| !is_hidden(name))
+            .map(|name| humanize(name))
+            .collect();
+        let unique: HashSet<&String> = shown.iter().collect();
+        assert_eq!(unique.len(), shown.len(), "{shown:?}");
+    });
+}
+
+fn keystroke(source: &'static str) -> KeybindingKeystroke {
+    KeybindingKeystroke::from_keystroke(Keystroke::parse(source).expect(source))
+}
+
+fn label(source: &'static str) -> String {
+    key_label(&keystroke(source))
+}
+
+#[test]
+fn keys_draw_in_apple_order_with_glyphs() {
+    for (source, want) in [
+        ("cmd-shift-n", "⇧⌘N"),
+        ("cmd-enter", "⌘↩"),
+        ("enter", "↩"),
+        ("cmd-backspace", "⌘⌫"),
+        ("ctrl-alt-a", "⌃⌥A"),
+        ("ctrl-alt-shift-cmd-a", "⌃⌥⇧⌘A"),
+        ("delete", "⌦"),
+        ("escape", "⎋"),
+        ("tab", "⇥"),
+        ("left", "←"),
+        ("right", "→"),
+        ("up", "↑"),
+        ("down", "↓"),
+        ("space", "Space"),
+        ("f1", "F1"),
+    ] {
+        assert_eq!(label(source), want, "{source}");
+    }
+}
+
+/// macOS reports ⌘⇧\ as `cmd-|`; the label names the keys pressed, in Apple order.
+#[test]
+fn a_shifted_symbol_draws_as_shift_and_its_key() {
+    for (source, want) in [("cmd-|", "⇧⌘\\"), ("cmd-}", "⇧⌘]"), ("cmd-{", "⇧⌘[")] {
+        assert_eq!(label(source), want, "{source}");
+    }
+}
+
+#[test]
+fn a_chord_joins_its_keystrokes_with_a_space() {
+    let chord = [keystroke("cmd-k"), keystroke("cmd-s")];
+    assert_eq!(keys_label(&chord), "⌘K ⌘S");
+}
+
+/// A key gpui names in words (`pageup`, `home`) would draw as a word beside the glyphs.
+#[test]
+fn every_listed_key_draws_as_glyphs_and_capitals() {
+    for binding in crate::keymap::key_bindings() {
+        if is_hidden(binding.action().name()) {
+            continue;
+        }
+        for keystroke in binding.keystrokes() {
+            let label = key_label(keystroke);
+            assert!(
+                !label.chars().any(|c| c.is_ascii_lowercase()),
+                "{} draws as {label}",
+                binding.action().name()
+            );
+        }
+    }
+}
+#[cfg(test)]
+mod tests;
+
+/// `12340` → `12,340`.
+pub(crate) fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+use super::thousands;
+
+#[test]
+fn a_count_groups_its_digits_by_three() {
+    let cases = [
+        (0, "0"),
+        (999, "999"),
+        (1_000, "1,000"),
+        (12_340, "12,340"),
+        (50_000, "50,000"),
+        (1_234_567, "1,234,567"),
+    ];
+    for (n, text) in cases {
+        assert_eq!(thousands(n), text, "{n}");
+    }
+}
+use std::time::Instant;
+
+use gpui::{ClipboardItem, Context, Window, actions};
+use inkra_editor::{Copied, EditorState, LogicalMovement};
+
+use super::motion::Vertical;
+use super::{EditorView, LinkFollowed};
+use crate::open::Open;
+use crate::text_input::InputHost;
+
+actions!(
+    editor,
+    [
+        Copy,
+        Cut,
+        Paste,
+        Up,
+        Down,
+        SelectUp,
+        SelectDown,
+        DocStart,
+        DocEnd,
+        Newline,
+        Undo,
+        Redo,
+        FollowLink,
+        FollowLinkInNewTab,
+        FollowLinkInSplit,
+    ]
+);
+
+/// The metadata a whole-line copy carries, matching gpui's pasteboard type
+/// (`zed-metadata`); anything else, Zed's own JSON included, reads as an ordinary span.
+const WHOLE_LINE: &str = "line";
+
+fn to_clipboard(copied: Copied) -> ClipboardItem {
+    if copied.whole_line {
+        ClipboardItem::new_string_with_metadata(copied.text, WHOLE_LINE.to_owned())
+    } else {
+        ClipboardItem::new_string(copied.text)
+    }
+}
+
+/// `None` when there's nothing to paste. Both must stop before the buffer is
+/// touched: sealing a transaction around an edit that never lands splits the typing run.
+fn from_clipboard(item: &ClipboardItem) -> Option<Copied> {
+    let text = inkra_vault::normalize_line_endings(&item.text()?);
+    if text.is_empty() {
+        return None;
+    }
+    // The trailing newline is `Copied`'s invariant, not the marker's. A foreign
+    // writer that happens to use our token cannot make us weld two lines.
+    let whole_line =
+        item.metadata().is_some_and(|marker| marker == WHOLE_LINE) && text.ends_with('\n');
+    Some(Copied { text, whole_line })
+}
+
+impl EditorView {
+    /// The one action taking no gate: `edit_buffer`'s `as_mut` notifies
+    /// unconditionally, which would schedule an autosave for a keystroke that changed nothing.
+    pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        let copied = self.input.state().copy(self.input.buffer().read(cx));
+        cx.write_to_clipboard(to_clipboard(copied));
+    }
+
+    pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        let copied = self.edit_buffer(window, cx, EditorState::cut);
+        cx.write_to_clipboard(to_clipboard(copied));
+    }
+
+    pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(copied) = cx.read_from_clipboard().as_ref().and_then(from_clipboard) else {
+            return;
+        };
+        self.edit_buffer(window, cx, |state, buffer| {
+            state.paste(buffer, &copied);
+        });
+    }
+
+    pub(super) fn up(&mut self, _: &Up, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Up, false);
+    }
+
+    pub(super) fn down(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Down, false);
+    }
+
+    pub(super) fn select_up(&mut self, _: &SelectUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(window, cx, Vertical::Up, true);
+    }
+
+    pub(super) fn select_down(
+        &mut self,
+        _: &SelectDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_vertically(window, cx, Vertical::Down, true);
+    }
+
+    pub(super) fn doc_start(&mut self, _: &DocStart, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_(buffer, LogicalMovement::DocStart, false);
+        });
+    }
+
+    pub(super) fn doc_end(&mut self, _: &DocEnd, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(window, cx, |state, buffer| {
+            state.move_(buffer, LogicalMovement::DocEnd, false);
+        });
+    }
+
+    pub(super) fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        self.edit_buffer(window, cx, |state, buffer| state.insert(buffer, now, "\n"));
+    }
+
+    pub(super) fn follow_link(&mut self, _: &FollowLink, _: &mut Window, cx: &mut Context<Self>) {
+        self.follow_at_cursor(Open::Here, cx);
+    }
+
+    pub(super) fn follow_link_in_new_tab(
+        &mut self,
+        _: &FollowLinkInNewTab,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_at_cursor(Open::NewTab, cx);
+    }
+
+    pub(super) fn follow_link_in_split(
+        &mut self,
+        _: &FollowLinkInSplit,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_at_cursor(Open::SplitRight, cx);
+    }
+
+    /// Follows at the selection's head; the view never resolves, the shell does.
+    fn follow_at_cursor(&mut self, open: Open, cx: &mut Context<Self>) {
+        let text = self.input.buffer().read(cx).text();
+        if let Some(link) = inkra_markdown::link_at(text, self.cursor()) {
+            cx.emit(LinkFollowed { link, open });
+        }
+    }
+
+    pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_buffer(window, cx, inkra_editor::EditorState::undo);
+    }
+
+    pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_buffer(window, cx, inkra_editor::EditorState::redo);
+    }
+}
+//! A sideways wheel over a code block scrolls that block (code block scroll spec, D6), and a
+//! caret in it scrolls it into view (D5).
+
+use std::time::{Duration, Instant};
+
+use gpui::{App, Context, Pixels, Point, ScrollEvent, TouchPhase, px};
+use inkra_text::{Bias, ByteOffset};
+
+use super::EditorView;
+use super::layout::DocumentLayout;
+use crate::theme::CODE_BLOCK_SCROLL_MARGIN;
+
+/// How long a block's bar stays after it scrolls.
+pub(crate) const BAR_LINGER: Duration = Duration::from_secs(1);
+
+/// gpui's `SCROLL_EVENT_SEPARATION` (private): a longer pause starts a new gesture.
+pub(crate) const GESTURE_GAP: Duration = Duration::from_millis(28);
+/// gpui's unlock thresholds in `OngoingScroll::filter_at`.
+const UNLOCK_RATIO: f32 = 1.9;
+const UNLOCK_LOWER_BOUND: Pixels = px(6.);
+
+#[derive(Clone, Copy, PartialEq)]
+enum Taker {
+    Page,
+    Block,
+}
+
+/// One wheel gesture: gpui's `OngoingScroll` on the executor's clock, plus who took its first
+/// event that moved something; the other refuses the rest, whatever the axis filter unlocks.
+/// Only a sideways lock is kept: a gesture that starts vertical is the page's from its first event.
+#[derive(Default)]
+pub(super) struct Gesture {
+    last: Option<Instant>,
+    sideways: bool,
+    taker: Option<Taker>,
+}
+
+impl Gesture {
+    /// Drops a precise `delta`'s y while the gesture is locked sideways; false when `phase` ends
+    /// the gesture. An imprecise event, a mouse wheel tick, is a gesture of its own.
+    fn filter(
+        &mut self,
+        delta: &mut Point<Pixels>,
+        phase: TouchPhase,
+        precise: bool,
+        now: Instant,
+    ) -> bool {
+        if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            *self = Self::default();
+            return false;
+        }
+        let new = !precise
+            || phase == TouchPhase::Started
+            || self
+                .last
+                .is_none_or(|last| now.duration_since(last) >= GESTURE_GAP);
+        if new {
+            *self = Self::default();
+        }
+        if !precise || *delta == Point::default() {
+            return true;
+        }
+        self.last = Some(now);
+        let (x, y) = (delta.x.abs(), delta.y.abs());
+        if new {
+            self.sideways = x > y;
+        } else if y >= UNLOCK_LOWER_BOUND && y >= x * UNLOCK_RATIO {
+            self.sideways = false;
+        }
+        if self.sideways {
+            delta.y = px(0.);
+        }
+        true
+    }
+
+    fn take(&mut self, wants: Option<Taker>) -> Option<Taker> {
+        self.taker = self.taker.or(wants);
+        self.taker
+    }
+}
+
+impl EditorView {
+    /// `over` is the block under the pointer, as its start and `max`. True when the block took
+    /// the event, at its limit too, so the page never takes the rest of the gesture.
+    pub(super) fn on_wheel(
+        &mut self,
+        event: &ScrollEvent,
+        over: Option<(ByteOffset, Pixels)>,
+        line_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let raw = event.delta.pixel_delta(line_height);
+        let mut delta = raw;
+        let now = cx.background_executor().now();
+        // Fed over prose too, so a gesture keeps its axis across a block (div.rs:3339).
+        if !self
+            .gesture
+            .filter(&mut delta, event.touch_phase, event.delta.precise(), now)
+        {
+            return false;
+        }
+        // The hitbox may come from a frame painted before an edit.
+        let over = over.filter(|&(start, _)| {
+            self.refresh(cx);
+            self.is_block_start(start)
+        });
+        let wants = if delta.y != px(0.) {
+            Some(Taker::Page)
+        } else if over.is_some() && raw != Point::default() {
+            Some(Taker::Block)
+        } else {
+            None
+        };
+        if self.gesture.take(wants) != Some(Taker::Block) {
+            return false;
+        }
+        let Some((start, max)) = over else {
+            return true;
+        };
+        let stored = self.scrolls.x(start);
+        let new = (stored.min(max) - delta.x).clamp(px(0.), max);
+        if new != stored {
+            self.scroll_block(start, new, cx);
+            cx.notify();
+        }
+        true
+    }
+
+    /// Scrolls the caret's block the least that shows the caret, a margin inside the right edge.
+    /// Never notifies: its callers already do, and prepaint runs it mid-frame.
+    pub(super) fn reveal_block(&mut self, layout: &DocumentLayout, cx: &mut Context<Self>) {
+        let Some(span) = layout.block_span(self.cursor()) else {
+            return;
+        };
+        self.refresh(cx);
+        if !self.is_block_start(span.start) {
+            return;
+        }
+        let rel = span.caret - span.left;
+        let x = self.scrolls.x(span.start).min(span.max);
+        let new = if rel < x {
+            rel
+        } else if rel + CODE_BLOCK_SCROLL_MARGIN > x + span.visible {
+            rel + CODE_BLOCK_SCROLL_MARGIN - span.visible
+        } else {
+            x
+        };
+        let new = new.clamp(px(0.), span.max);
+        if new != x {
+            self.scroll_block(span.start, new, cx);
+        }
+    }
+
+    /// Stores block `start`'s new `x` and repaints once when its bar's linger ends.
+    fn scroll_block(&mut self, start: ByteOffset, x: Pixels, cx: &mut Context<Self>) {
+        let now = cx.background_executor().now();
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| self.scrolls.set(start, x, now, buffer));
+        self.expire_bar(cx);
+    }
+
+    /// A later scroll replaces the task, which cancels it.
+    fn expire_bar(&mut self, cx: &mut Context<Self>) {
+        self.bar_expiry = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(BAR_LINGER).await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        }));
+    }
+
+    /// Before the view leaves its buffer: the anchors resolve only there.
+    pub(super) fn forget_scrolls(&self, cx: &mut App) {
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| self.scrolls.forget_all(buffer));
+    }
+
+    /// Clips each start to the bound buffer; the next `refresh` drops any non-block start. Each
+    /// entry is a scroll from zero, so its bar shows as after a swipe.
+    pub(super) fn anchor_scrolls(
+        &mut self,
+        entries: &[(ByteOffset, Pixels)],
+        cx: &mut Context<Self>,
+    ) {
+        let now = cx.background_executor().now();
+        self.input.buffer().update(cx, |buffer, _| {
+            let clipped: Vec<_> = entries
+                .iter()
+                .map(|&(start, x)| (buffer.clip_grapheme(start, Bias::Left), x))
+                .collect();
+            self.scrolls.anchor_all(&clipped, now, buffer);
+        });
+        if !entries.is_empty() {
+            self.expire_bar(cx);
+        }
+    }
+
+    pub(super) fn is_block_start(&self, offset: ByteOffset) -> bool {
+        self.markdown
+            .code_blocks
+            .binary_search_by_key(&offset, |block| block.range.start)
+            .is_ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn block_x(&self, index: usize) -> Pixels {
+        self.drawn_layout().block_scroll(index)
+    }
+
+    /// Block `index`'s centre in window coordinates; `None` before it is drawn.
+    #[cfg(any(test, feature = "shot"))]
+    pub(crate) fn block_center(&self, index: usize) -> Option<Point<Pixels>> {
+        let bounds = self.input.last_bounds()?;
+        let background = *self.input.last_layout()?.block_backgrounds().get(index)?;
+        Some(bounds.origin + background.center())
+    }
+}
+//! `TextElement`: the gpui element that measures, paints and hit-tests the editor.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use gpui::{
+    App, AvailableSpace, Bounds, DispatchPhase, ElementId, Entity, GlobalElementId, Hitbox,
+    HitboxBehavior, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ScrollEvent, Style, TextStyle,
+    Window, fill, point, prelude::*, px, relative, size,
+};
+use inkra_markdown::{HEADING_LEVELS, Styles};
+use inkra_text::ByteOffset;
+
+use super::EditorView;
+use super::block_scroll::BAR_LINGER;
+use super::layout::DocumentLayout;
+use crate::text_input::{self, Prepainted, Quads};
+use crate::theme::{self, Theme};
+
+#[cfg(test)]
+thread_local! {
+    static PAINTED_BARS: RefCell<Vec<Bounds<Pixels>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The bars the last paint on this thread drew, in window coordinates.
+#[cfg(test)]
+pub(crate) fn painted_bars() -> Vec<Bounds<Pixels>> {
+    PAINTED_BARS.with(|painted| painted.borrow().clone())
+}
+
+pub(super) struct TextElement {
+    pub(super) editor: Entity<EditorView>,
+}
+
+/// Every layout shaped this frame: taffy may call the measure closure several times and answer
+/// its final pass from a cache, so the last call isn't necessarily final.
+#[derive(Clone, Default)]
+pub(super) struct Stash(Rc<RefCell<Vec<Measured>>>);
+
+/// Keyed by the place it was measured for, never by the layout's fields: a reused `last_layout`
+/// keeps the margin it was shaped with (live-preview spec, D13).
+struct Measured {
+    element: Pixels,
+    place: Place,
+    layout: Rc<DocumentLayout>,
+}
+
+impl Stash {
+    /// The height of the layout measured for `place`, shaping it on the first ask.
+    pub(super) fn measure(
+        &self,
+        element: Pixels,
+        place: Place,
+        shape: impl FnOnce() -> Rc<DocumentLayout>,
+    ) -> Pixels {
+        let mut stash = self.0.borrow_mut();
+        if let Some(measured) = stash.iter().find(|measured| measured.place == place) {
+            return measured.layout.height();
+        }
+        let layout = shape();
+        let height = layout.height();
+        stash.push(Measured {
+            element,
+            place,
+            layout,
+        });
+        height
+    }
+
+    /// The layout measured nearest the element's width — not equal, since bounds are
+    /// pixel-snapped after taffy measured them — and the place it was measured for.
+    pub(super) fn take(&self, element: Pixels) -> Option<(Place, Rc<DocumentLayout>)> {
+        let mut stash = self.0.borrow_mut();
+        let distance = |measured: &Measured| f32::from((measured.element - element).abs());
+        let index = (0..stash.len())
+            .min_by(|&a, &b| distance(&stash[a]).total_cmp(&distance(&stash[b])))?;
+        let measured = stash.swap_remove(index);
+        Some((measured.place, measured.layout))
+    }
+}
+
+impl Element for TextElement {
+    type RequestLayoutState = (Stash, Inset);
+    type PrepaintState = EditorPrepaint;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // Read here: the closure runs in `compute_layout`, outside the div's
+        // text style, where `window.text_style()` would be the default instead.
+        let text_style = window.text_style();
+        let inset = Inset {
+            column: column_width(&text_style, window),
+            margin: margin_width(&text_style, theme::current(cx), window),
+        };
+        // D12's markers hang in the left margin; the right one mirrors it so the text stays centred.
+        let widest = inset.column + inset.margin * 2.;
+
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.max_size.width = widest.into();
+        // Flex column's default flex_shrink of 1 would squeeze an overtall
+        // document back down instead of overflowing into the scroll container.
+        style.flex_shrink = 0.;
+
+        let stash = Stash::default();
+        let editor = self.editor.clone();
+        let measured = stash.clone();
+        let layout_id =
+            window.request_measured_layout(style, move |known, available, window, cx| {
+                let (definite, reported) = widths(known.width, available.width, widest);
+                let editor = editor.read(cx);
+                // An intrinsic query asks only for a width, so it reuses the last painted place.
+                let place = definite.map_or_else(
+                    || editor.place.unwrap_or_else(|| inset.place(widest)),
+                    |element| inset.place(element),
+                );
+                let element = definite.unwrap_or(place.width + place.margin * 2.);
+                let height = measured.measure(element, place, || {
+                    editor.layout_at(&text_style, Some(place.width), place.margin, window, cx)
+                });
+                size(reported, height)
+            });
+        (layout_id, (stash, inset))
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        (stash, inset): &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        // The measured place, never one recomputed from the snapped bounds: both must agree on
+        // which markers hang (D13).
+        let (place, layout) = stash.take(bounds.size.width).unwrap_or_else(|| {
+            // One frame stale height; corrects next frame. gpui's own `Text`
+            // panics here (`elements/text.rs:782-790`) — a note editor must not.
+            log::warn!("no layout measured at width {}", bounds.size.width);
+            let place = inset.place(bounds.size.width);
+            let style = window.text_style();
+            let layout =
+                self.editor
+                    .read(cx)
+                    .layout_at(&style, Some(place.width), place.margin, window, cx);
+            (place, layout)
+        });
+        let mut text = place.bounds(bounds);
+
+        let applied = window.element_offset().y;
+        let moved = self.editor.update(cx, |editor, cx| {
+            editor.place = Some(place);
+            let cursor = editor.cursor();
+            let resolution = editor.viewport.resolve(text.origin.y, &layout, cursor);
+            // Before the hitboxes and the quads, so this frame paints the caret it revealed.
+            if resolution.revealed {
+                editor.reveal_block(&layout, cx);
+            }
+            resolution.moved
+        });
+        // `layout_bounds` snaps the element offset (`window.rs:5107`); so does the shift.
+        text.origin.y += window.pixel_snap(applied + moved) - window.pixel_snap(applied);
+
+        let text_hitbox = window.insert_hitbox(text, HitboxBehavior::Normal);
+        let mask = window.content_mask().bounds;
+        let top = mask.top() - text.origin.y;
+        let blocks = layout
+            .scrollable_blocks(top, top + mask.size.height)
+            .map(|(index, start, max, background)| BlockHitbox {
+                hitbox: window.insert_hitbox(background + text.origin, HitboxBehavior::Normal),
+                index,
+                start,
+                max,
+            })
+            .collect();
+
+        let selection = self.editor.read(cx).input.state().selection().range();
+        let quads = Quads::new(&layout, &selection, text.origin);
+        EditorPrepaint {
+            painted: Some((layout, quads)),
+            text,
+            text_hitbox,
+            blocks,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some((layout, quads)) = prepaint.painted.take() else {
+            return;
+        };
+        let blocks = Rc::new(std::mem::take(&mut prepaint.blocks));
+        let text_hitbox = prepaint.text_hitbox.clone();
+        let line_height = window.line_height();
+        let editor = self.editor.clone();
+        let wheel_blocks = Rc::clone(&blocks);
+        // Registered after the scroll container's listener, so it bubbles first.
+        window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            let over = wheel_blocks
+                .iter()
+                .find(|block| block.hitbox.should_handle_scroll(window))
+                .map(|block| (block.start, block.max));
+            // A block's padding lies outside the text hitbox.
+            if over.is_none() && !text_hitbox.should_handle_scroll(window) {
+                return;
+            }
+            if editor.update(cx, |editor, cx| {
+                editor.on_wheel(event, over, line_height, cx)
+            }) {
+                cx.stop_propagation();
+            }
+        });
+        let hovered = hovered_block(&blocks, window);
+        let now = cx.background_executor().now();
+        let scrolls = &self.editor.read(cx).scrolls;
+        let bars: Vec<PaintQuad> = blocks
+            .iter()
+            .filter(|block| {
+                hovered == Some(block.index)
+                    || scrolls
+                        .scrolled_at(block.start)
+                        .is_some_and(|at| now.duration_since(at) < BAR_LINGER)
+            })
+            .filter_map(|block| layout.scroll_bar(block.index))
+            .map(|bar| {
+                fill(
+                    bar + prepaint.text.origin,
+                    layout.theme().colors.text_placeholder,
+                )
+                .corner_radii(theme::CODE_BLOCK_BAR_RADIUS)
+            })
+            .collect();
+        #[cfg(test)]
+        PAINTED_BARS.with(|painted| {
+            *painted.borrow_mut() = bars.iter().map(|bar| bar.bounds).collect();
+        });
+        let entity = self.editor.entity_id();
+        // The hover has no event of its own: `is_hovered` is read at paint (div.rs:2689 does the same).
+        if !blocks.is_empty() {
+            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && hovered_block(&blocks, window) != hovered {
+                    cx.notify(entity);
+                }
+            });
+        }
+        let quads = quads.with_bars(bars);
+        // The shifted bounds, not the parameter: hit tests and the IME read them until the next paint.
+        text_input::paint(&self.editor, layout, quads, prepaint.text, window, cx);
+    }
+}
+
+pub(super) struct EditorPrepaint {
+    painted: Prepainted,
+    /// Shifted by the offset prepaint resolved, so paint places the text where the next frame will.
+    text: Bounds<Pixels>,
+    /// Every wheel event over the text feeds the gesture filter, prose included.
+    text_hitbox: Hitbox,
+    blocks: Vec<BlockHitbox>,
+}
+
+/// A scrollable block on screen, with what `on_wheel` needs to scroll it.
+struct BlockHitbox {
+    hitbox: Hitbox,
+    index: usize,
+    start: ByteOffset,
+    max: Pixels,
+}
+
+/// The scrollable block under the pointer, by its index in the layout.
+fn hovered_block(blocks: &[BlockHitbox], window: &Window) -> Option<usize> {
+    blocks
+        .iter()
+        .find(|block| block.hitbox.is_hovered(window))
+        .map(|block| block.index)
+}
+
+/// The width to lay out at, if the pass gave one, and the width to report.
+fn widths(
+    known: Option<Pixels>,
+    available: AvailableSpace,
+    widest: Pixels,
+) -> (Option<Pixels>, Pixels) {
+    // The sizing pass hands `known` unclamped by max_size; only the
+    // layout pass clamps, so the widest width is reapplied here.
+    let definite = known
+        .or(match available {
+            AvailableSpace::Definite(width) => Some(width),
+            _ => None,
+        })
+        .map(|width| width.min(widest));
+
+    // Wrapped text has no minimum width; reporting a width here
+    // would become the flex item's automatic minimum and push it past a narrower pane.
+    let reported = match (known, available) {
+        (None, AvailableSpace::MinContent) => px(0.),
+        _ => definite.unwrap_or(widest),
+    };
+    (definite, reported)
+}
+
+pub(super) fn column_width(style: &TextStyle, window: &mut Window) -> Pixels {
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let font = window.text_system().resolve_font(&style.font());
+    let ch = window
+        .text_system()
+        .ch_advance(font, font_size)
+        .unwrap_or(font_size / 2.);
+    ch * theme::BODY_COLUMN_CHARS
+}
+
+/// The widest opening heading marker, `#` × n and a space, over every heading level.
+pub(super) fn margin_width(style: &TextStyle, theme: &Theme, window: &mut Window) -> Pixels {
+    HEADING_LEVELS
+        .into_iter()
+        .map(|level| {
+            let marker = format!("{} ", "#".repeat(level as usize));
+            let run = theme::markdown_style(style, Styles::heading(level) | Styles::MARKER, theme)
+                .to_run(marker.len());
+            let size = theme::heading_metrics(level).size;
+            window
+                .text_system()
+                .shape_line(marker.into(), size, &[run], None)
+                .width()
+        })
+        .fold(px(0.), Pixels::max)
+        // Whole pixels: the element's origin is snapped, so the text keeps the column's old x.
+        .ceil()
+}
+
+/// Where the text sits in the element (live-preview spec, D12, D13).
+#[derive(Clone, Copy)]
+pub(super) struct Inset {
+    column: Pixels,
+    /// The widest heading marker: the margin of a pane wide enough for it.
+    margin: Pixels,
+}
+
+impl Inset {
+    /// The parent centres the element, capped at `column + 2 × margin`; narrower, both margins
+    /// shrink together to `EDITOR_MARGIN_MIN`, then the text narrows between them.
+    fn place(self, element: Pixels) -> Place {
+        let margin = ((element - self.column) / 2.)
+            .floor()
+            .max(theme::EDITOR_MARGIN_MIN)
+            .min(self.margin);
+        Place {
+            margin,
+            width: self.column.min(element - margin * 2.).max(px(0.)),
+        }
+    }
+}
+
+/// The text's offset in the element and its width; a whole-pixel margin keeps the text's
+/// origin where the element's is snapped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Place {
+    pub(super) margin: Pixels,
+    pub(super) width: Pixels,
+}
+
+impl Place {
+    fn bounds(self, element: Bounds<Pixels>) -> Bounds<Pixels> {
+        Bounds::new(
+            point(element.origin.x + self.margin, element.origin.y),
+            size(self.width, element.size.height),
+        )
+    }
+}
+use std::collections::HashMap;
+
+use gpui::{Bounds, Pixels, Point, ShapedLine, SharedString, TextStyle, Window, point, px};
+use inkra_markdown::CodeBlock;
+use inkra_text::ByteOffset;
+
+use super::{DocumentLayout, LineLayout};
+use crate::theme::{self, Theme};
+
+#[cfg(test)]
+thread_local! {
+    static LABELS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Label texts shaped so far on this thread; a repeated language shapes once per layout.
+#[cfg(test)]
+pub(crate) fn label_shape_count() -> usize {
+    LABELS.with(std::cell::Cell::get)
+}
+
+/// What one code block paints (code blocks spec, C2-C3).
+pub(super) struct BlockLayout {
+    /// `CodeBlock.range.start`, which keys its scroll.
+    pub(super) start: ByteOffset,
+    /// How far its text scrolls: zero when every line fits.
+    pub(super) max: Pixels,
+    pub(super) background: Bounds<Pixels>,
+    pub(super) label: Option<(Point<Pixels>, ShapedLine)>,
+}
+
+/// Shaped label texts, each distinct one once per `shape_document` call.
+pub(super) struct Labels<'a> {
+    style: TextStyle,
+    shaped: HashMap<&'a str, ShapedLine>,
+}
+
+impl<'a> Labels<'a> {
+    /// `style` is the layout's body style; the label takes `text_muted`.
+    pub(super) fn new(style: &TextStyle, theme: &Theme) -> Self {
+        Self {
+            style: TextStyle {
+                color: theme.colors.text_muted.into(),
+                ..style.clone()
+            },
+            shaped: HashMap::new(),
+        }
+    }
+
+    /// Shapes each distinct text once per layout.
+    pub(super) fn shape(&mut self, text: &'a str, window: &mut Window) -> ShapedLine {
+        self.shaped
+            .entry(text)
+            .or_insert_with(|| {
+                #[cfg(test)]
+                LABELS.with(|labels| labels.set(labels.get() + 1));
+                window.text_system().shape_line(
+                    SharedString::from(text.to_owned()),
+                    theme::CODE_BLOCK_LABEL_SIZE,
+                    &[self.style.to_run(text.len())],
+                    None,
+                )
+            })
+            .clone()
+    }
+}
+
+/// Builds the blocks' layouts from the lines `shape_document` visits in order.
+pub(super) struct Blocks {
+    done: Vec<BlockLayout>,
+    open: Option<Building>,
+    column: Option<Pixels>,
+}
+
+struct Building {
+    start: ByteOffset,
+    label: Option<ShapedLine>,
+    top: Pixels,
+    left: Pixels,
+    widest: Pixels,
+    bottom: Pixels,
+}
+
+impl Blocks {
+    /// `column` is the wrap width, `None` off the editor: there the widest line stands in.
+    pub(super) fn new(column: Option<Pixels>) -> Self {
+        Self {
+            done: Vec::new(),
+            open: None,
+            column,
+        }
+    }
+
+    /// The index `block`'s layout takes in `finish`'s list, for the line it holds.
+    pub(super) fn index_of(&self, block: Option<&CodeBlock>) -> Option<usize> {
+        let block = block?;
+        let closes_first = self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.start != block.range.start);
+        Some(self.done.len() + usize::from(closes_first))
+    }
+
+    /// `block` holds `line`, from the cursor `line_metrics` reads; `bottom` is the line's last row's
+    /// bottom. `label` is read on the line that opens the block.
+    pub(super) fn line(
+        &mut self,
+        block: Option<&CodeBlock>,
+        label: Option<ShapedLine>,
+        line: &LineLayout,
+        bottom: Pixels,
+    ) {
+        if self
+            .open
+            .as_ref()
+            .is_some_and(|open| block.is_none_or(|block| block.range.start != open.start))
+        {
+            self.close();
+        }
+        if let Some(block) = block
+            && self.open.is_none()
+        {
+            self.open = Some(Building {
+                start: block.range.start,
+                label,
+                top: line.top,
+                left: DocumentLayout::content_x(line, 0, block.range.start)
+                    - theme::CODE_BLOCK_OUTSET,
+                widest: px(0.),
+                bottom,
+            });
+        }
+        if let Some(open) = &mut self.open {
+            open.widest = open.widest.max(line.indent() + line.shape.wrapped.width());
+            open.bottom = bottom;
+        }
+    }
+
+    /// Closes the block a note ends inside.
+    pub(super) fn finish(mut self) -> Vec<BlockLayout> {
+        self.close();
+        self.done
+    }
+
+    fn close(&mut self) {
+        if let Some(open) = self.open.take() {
+            let right = self.column.unwrap_or(open.widest) + theme::CODE_BLOCK_OUTSET;
+            let max = match self.column {
+                Some(column) if open.widest > column => {
+                    open.widest - column + theme::CODE_BLOCK_SCROLL_MARGIN
+                }
+                _ => px(0.),
+            };
+            self.done.push(BlockLayout {
+                start: open.start,
+                max,
+                background: Bounds::from_corners(
+                    point(open.left, open.top),
+                    point(right, open.bottom),
+                ),
+                label: open.label.map(|shaped| {
+                    let at = point(right - theme::CODE_BLOCK_OUTSET - shaped.width(), open.top);
+                    (at, shaped)
+                }),
+            });
+        }
+    }
+}
+//! Every pixel ↔ offset conversion, in rows: one `shape_text` call per line, so a
+//! keystroke does not re-shape the whole document.
+
+mod blocks;
+mod paint;
+mod prefix;
+mod rows;
+mod runs;
+mod scrolls;
+mod shape;
+
+#[cfg(test)]
+pub(crate) use blocks::label_shape_count;
+#[cfg(test)]
+pub(crate) use paint::{painted, painted_blocks, painted_clips};
+pub(crate) use scrolls::BlockScrolls;
+pub(crate) use shape::shape_document;
+#[cfg(test)]
+pub(crate) use shape::{line_shape_count, shape_count};
+
+use std::ops::{Range, RangeInclusive};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use blocks::BlockLayout;
+use gpui::{Bounds, PaintQuad, Pixels, Point, TextStyle, fill, point, px, size};
+use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
+use prefix::Prefix;
+use shape::{LineShape, reads_margin};
+
+use crate::theme::Theme;
+
+const NEWLINE_STUB: f32 = 0.25;
+const CARET_WIDTH: Pixels = px(2.);
+
+struct LineLayout {
+    shape: Rc<LineShape>,
+    range: Range<ByteOffset>,
+    display: DisplayLine,
+    first_row: usize,
+    rows: Vec<Row>,
+    top: Pixels,
+    row_height: Pixels,
+    /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
+    prefix: Option<Prefix>,
+    /// The index in `code_blocks` of the block holding this line.
+    block: Option<usize>,
+}
+
+impl LineLayout {
+    fn indent(&self) -> Pixels {
+        prefix::indent(self.prefix.as_ref())
+    }
+}
+
+/// A wrap offset belongs to the next row, never the earlier one's `caret_end`
+/// (Zed's rule, `wrap_map.rs:969-981`) — this is what lets the caret skip affinity.
+struct Row {
+    /// On a grapheme boundary, even where gpui broke inside a cluster.
+    start: ByteOffset,
+    caret_end: ByteOffset,
+    start_x: Pixels,
+}
+
+/// What a `DocumentLayout` is shaped from: `shape_document` takes it, `is_shaped_from` compares it.
+pub(crate) struct LayoutInputs<'a> {
+    pub(crate) buffer: &'a Buffer,
+    pub(crate) markdown: &'a Markdown,
+    pub(crate) selection: &'a Range<ByteOffset>,
+    pub(crate) marked: Option<&'a Range<ByteOffset>>,
+    pub(crate) style: &'a TextStyle,
+    pub(crate) wrap_width: Option<Pixels>,
+    /// The room left of the text: a revealed heading marker wider than it shows inline (D13).
+    pub(crate) margin: Pixels,
+    /// Block lines wrap at the column too, rather than scroll.
+    pub(crate) code_block_wrap: bool,
+    pub(crate) theme: &'a Arc<Theme>,
+    /// Read live, never compared: a scroll reshapes nothing.
+    pub(crate) scrolls: &'a BlockScrolls,
+}
+
+/// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
+/// lines, since a wrapped line paints on several.
+pub(crate) struct DocumentLayout {
+    lines: Vec<LineLayout>,
+    row_count: usize,
+    height: Pixels,
+    /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3),
+    /// in line order, so sorted by top.
+    bars: Vec<Bounds<Pixels>>,
+    /// One per code block, in document order, so sorted by top.
+    code_blocks: Vec<BlockLayout>,
+    body_row_height: Pixels,
+    /// What this was shaped with; outside a draw, `window.text_style()` is the default.
+    style: TextStyle,
+    wrap_width: Option<Pixels>,
+    margin: Pixels,
+    code_block_wrap: bool,
+    /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
+    theme: Arc<Theme>,
+    version: Version,
+    selection: Range<ByteOffset>,
+    marked: Option<Range<ByteOffset>>,
+    scrolls: BlockScrolls,
+}
+
+impl DocumentLayout {
+    pub(crate) fn style(&self) -> &TextStyle {
+        &self.style
+    }
+
+    pub(crate) fn wrap_width(&self) -> Option<Pixels> {
+        self.wrap_width
+    }
+
+    pub(crate) fn margin(&self) -> Pixels {
+        self.margin
+    }
+
+    pub(crate) fn theme(&self) -> &Arc<Theme> {
+        &self.theme
+    }
+
+    /// Whether `shape_document` would give this layout back. The selection counts only
+    /// through the elements it reveals, so a caret move within the same ones reuses it.
+    pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
+        self.version == inputs.buffer.version()
+            && self.wrap_width == inputs.wrap_width
+            && (self.margin == inputs.margin
+                || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
+            && self.code_block_wrap == inputs.code_block_wrap
+            && self.marked.as_ref() == inputs.marked
+            && self.style == *inputs.style
+            && Arc::ptr_eq(&self.theme, inputs.theme)
+            && touched(&inputs.markdown.conceals, &self.selection)
+                .eq(touched(&inputs.markdown.conceals, inputs.selection))
+    }
+
+    pub(crate) fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    pub(crate) fn row_height(&self, row: usize) -> Pixels {
+        self.locate(row).0.row_height
+    }
+
+    pub(crate) fn body_row_height(&self) -> Pixels {
+        self.body_row_height
+    }
+
+    /// The text line `line` was shaped from.
+    #[cfg(test)]
+    pub(crate) fn shown(&self, line: usize) -> &str {
+        &self.lines[line].shape.wrapped.text
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quote_bars(&self) -> &[Bounds<Pixels>] {
+        &self.bars
+    }
+
+    #[cfg(any(test, feature = "shot"))]
+    pub(crate) fn block_backgrounds(&self) -> Vec<Bounds<Pixels>> {
+        self.code_blocks
+            .iter()
+            .map(|block| block.background)
+            .collect()
+    }
+
+    /// Each block's label: where it stands and its text.
+    #[cfg(test)]
+    pub(crate) fn block_labels(&self) -> Vec<Option<(Point<Pixels>, String)>> {
+        self.code_blocks
+            .iter()
+            .map(|block| {
+                let (at, shaped) = block.label.as_ref()?;
+                Some((*at, shaped.text.to_string()))
+            })
+            .collect()
+    }
+
+    /// Whether line `line`'s prefix paints its source text.
+    #[cfg(test)]
+    pub(crate) fn prefix_painted(&self, line: usize) -> bool {
+        self.lines[line]
+            .prefix
+            .as_ref()
+            .and_then(Prefix::shown)
+            .is_some()
+    }
+
+    pub(crate) fn height(&self) -> Pixels {
+        self.height
+    }
+
+    /// `row_count` is one past the last row: its top is the document's bottom.
+    pub(crate) fn top_for_row(&self, row: usize) -> Pixels {
+        if row >= self.row_count {
+            return self.height;
+        }
+        let (line, within) = self.locate(row);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a count far below 2^24 converts to f32 exactly"
+        )]
+        let within = within as f32;
+        line.top + line.row_height * within
+    }
+
+    /// Clamped: the layout can briefly describe other text than the buffer's
+    /// (`NameField` shapes only in `prepaint`), so a stale caret beats an OOB index.
+    fn line_for_offset(&self, offset: ByteOffset) -> usize {
+        self.lines
+            .partition_point(|line| line.range.end < offset)
+            .min(self.lines.len() - 1)
+    }
+
+    pub(crate) fn row_for_offset(&self, offset: ByteOffset) -> usize {
+        let line = &self.lines[self.line_for_offset(offset)];
+        let within = line
+            .rows
+            .iter()
+            .rposition(|row| row.start <= offset)
+            .unwrap_or(0);
+        line.first_row + within
+    }
+
+    fn locate(&self, row: usize) -> (&LineLayout, usize) {
+        let row = row.min(self.row_count - 1);
+        let line = self.lines.partition_point(|line| line.first_row <= row) - 1;
+        let line = &self.lines[line];
+        (line, row - line.first_row)
+    }
+
+    /// Clamped: mouse listeners sit on the view's full-size `div`, so a click
+    /// below a short document arrives with `y` past the last row.
+    fn row_for_y(&self, y: Pixels) -> usize {
+        if y <= px(0.) {
+            return 0;
+        }
+        // `lines[0].top` is zero and `y` is positive, so at least one line qualifies.
+        let line = &self.lines[self.lines.partition_point(|line| line.top <= y) - 1];
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "`y >= line.top`, so the row quotient is non-negative and small"
+        )]
+        let within = ((y - line.top) / line.row_height) as usize;
+        line.first_row + within.min(line.rows.len() - 1)
+    }
+
+    /// Only row 0 holds the prefix.
+    fn prefix_on(line: &LineLayout, within: usize) -> Option<&Prefix> {
+        line.prefix.as_ref().filter(|_| within == 0)
+    }
+
+    /// `offset`'s x on the row as shaped, before any block scroll.
+    fn content_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
+        let offset = offset.clamp(line.range.start, line.range.end);
+        if let Some(x) = Self::prefix_x(line, within, offset) {
+            return x;
+        }
+        let index = line.display.to_display(offset).get();
+        line.indent() + line.shape.wrapped.unwrapped_layout.x_for_index(index)
+            - line.rows[within].start_x
+    }
+
+    /// `offset`'s x in the prefix, when the prefix paints it.
+    fn prefix_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Option<Pixels> {
+        let offset = offset.clamp(line.range.start, line.range.end);
+        Self::prefix_on(line, within)
+            .filter(|prefix| offset < prefix.range().end)
+            .and_then(|prefix| prefix.x_for_offset(offset))
+    }
+
+    /// `content_x` less the line's block scroll; the prefix never moves.
+    fn x_on_row(&self, line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
+        let x = Self::content_x(line, within, offset);
+        match line.block {
+            Some(block) if Self::prefix_x(line, within, offset).is_none() => {
+                x - self.block_scroll(block)
+            }
+            _ => x,
+        }
+    }
+
+    fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
+        line.rows
+            .get(within + 1)
+            .map_or(line.range.end, |next| next.start)
+    }
+
+    fn row_end_x(&self, line: &LineLayout, within: usize) -> Pixels {
+        self.x_on_row(line, within, Self::row_limit(line, within))
+    }
+
+    pub(crate) fn x_for_offset(&self, offset: ByteOffset) -> Pixels {
+        let (line, within) = self.locate(self.row_for_offset(offset));
+        self.x_on_row(line, within, offset)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn position_for_offset(&self, offset: ByteOffset) -> Point<Pixels> {
+        point(
+            self.x_for_offset(offset),
+            self.top_for_row(self.row_for_offset(offset)),
+        )
+    }
+
+    /// The caret at `offset`: as tall as its row, which a heading makes taller than body text.
+    pub(crate) fn caret_bounds(&self, offset: ByteOffset) -> Bounds<Pixels> {
+        let row = self.row_for_offset(offset);
+        Bounds::new(
+            point(self.x_for_offset(offset), self.top_for_row(row)),
+            size(CARET_WIDTH, self.row_height(row)),
+        )
+    }
+
+    pub(crate) fn offset_for_position(&self, position: Point<Pixels>) -> ByteOffset {
+        self.offset_on_row(self.row_for_y(position.y), position.x)
+    }
+
+    /// Clamped to the row's own range, so landing past its end stops on
+    /// `caret_end` rather than the next row's start.
+    pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
+        let (line, within) = self.locate(row);
+        let target = &line.rows[within];
+        // Row 0 splits at the text's start: left of it is the prefix's, and the text never maps into the prefix (D12).
+        let prefix = Self::prefix_on(line, within);
+        if let Some(prefix) = prefix.filter(|prefix| x < prefix.indent()) {
+            return prefix.offset_for_x(x).clamp(target.start, target.caret_end);
+        }
+        let layout = &line.shape.wrapped.unwrapped_layout;
+        let scroll = line.block.map_or(px(0.), |block| self.block_scroll(block));
+        let index = layout.closest_index_for_x(x + scroll - line.indent() + target.start_x);
+        // At or past the display end, land after a hidden suffix (live-preview spec, D5).
+        let bias = if index >= layout.len {
+            Bias::Right
+        } else {
+            Bias::Left
+        };
+        let offset = line
+            .display
+            .to_buffer(DisplayOffset::new(index), bias)
+            .clamp(target.start, target.caret_end);
+        prefix.map_or(offset, |prefix| offset.max(prefix.range().end))
+    }
+
+    pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
+        let (line, within) = self.locate(row);
+        let row = &line.rows[within];
+        row.start..=row.caret_end
+    }
+
+    /// False when this row's only position also belongs to the next: two wraps
+    /// in one cluster share a start, so vertical moves must step over it.
+    pub(crate) fn holds_caret(&self, row: usize) -> bool {
+        self.row_for_offset(*self.row_bounds(row).start()) == row
+    }
+
+    pub(crate) fn range_bounds(&self, range: &Range<ByteOffset>) -> Bounds<Pixels> {
+        let row = self.row_for_offset(range.start);
+        let (line, within) = self.locate(row);
+        // max(range.start): a stale layout can put range.start past the
+        // clamped row's end, which would otherwise return an inverted rect.
+        let end = range
+            .end
+            .min(Self::row_limit(line, within))
+            .max(range.start);
+        let top = self.top_for_row(row);
+        Bounds::from_corners(
+            point(self.x_on_row(line, within, range.start), top),
+            point(self.x_on_row(line, within, end), top + line.row_height),
+        )
+    }
+
+    /// One quad per row touched. Four cases: a one-row selection is both first
+    /// and last, and a row ending in a wrap gets no [`NEWLINE_STUB`] gap since a wrap isn't a character.
+    /// A scrollable block's rows stop at its background.
+    pub(crate) fn selection_quads(&self, selection: &Range<ByteOffset>) -> Vec<PaintQuad> {
+        let first = self.row_for_offset(selection.start);
+        let last = self.row_for_offset(selection.end);
+
+        (first..=last)
+            .filter_map(|row| {
+                let (line, within) = self.locate(row);
+                let left = if row == first {
+                    self.x_on_row(line, within, selection.start)
+                } else {
+                    self.x_on_row(line, within, line.rows[within].start)
+                };
+                let right = if row == last {
+                    self.x_on_row(line, within, selection.end)
+                } else if within + 1 == line.rows.len() {
+                    self.row_end_x(line, within) + line.row_height * NEWLINE_STUB
+                } else {
+                    self.row_end_x(line, within)
+                };
+                let (left, right) = match line.block.and_then(|block| self.block_clip(block)) {
+                    Some(clip) => clip.span(left, right, line.row_height)?,
+                    None => (left, right),
+                };
+                let top = self.top_for_row(row);
+                Some(fill(
+                    Bounds::from_corners(point(left, top), point(right, top + line.row_height)),
+                    self.theme.colors.selection,
+                ))
+            })
+            .collect()
+    }
+}
+use std::ops::Range;
+
+use gpui::{App, Bounds, ContentMask, Pixels, Point, TextAlign, Window, fill, point, px};
+
+use super::DocumentLayout;
+use super::prefix::Prefix;
+use crate::theme;
+
+#[cfg(test)]
+thread_local! {
+    static PAINTED: std::cell::RefCell<(Range<usize>, Range<usize>)> =
+        const { std::cell::RefCell::new((0..0, 0..0)) };
+    static PAINTED_BLOCKS: std::cell::RefCell<Range<usize>> =
+        const { std::cell::RefCell::new(0..0) };
+    static PAINTED_CLIPS: std::cell::RefCell<Vec<(Pixels, Bounds<Pixels>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The lines and bars the last paint on this thread walked.
+#[cfg(test)]
+pub(crate) fn painted() -> (Range<usize>, Range<usize>) {
+    PAINTED.with(|painted| painted.borrow().clone())
+}
+
+/// The code block backgrounds the last paint on this thread walked.
+#[cfg(test)]
+pub(crate) fn painted_blocks() -> Range<usize> {
+    PAINTED_BLOCKS.with(|painted| painted.borrow().clone())
+}
+
+/// Each clipped line the last paint on this thread drew: its text's window x, and its mask.
+#[cfg(test)]
+pub(crate) fn painted_clips() -> Vec<(Pixels, Bounds<Pixels>)> {
+    PAINTED_CLIPS.with(|painted| painted.borrow().clone())
+}
+
+impl DocumentLayout {
+    /// Every code block background in the content mask; runs before the selection, which paints over it.
+    pub(crate) fn paint_backgrounds(&self, origin: Point<Pixels>, window: &mut Window) {
+        let mask = window.content_mask().bounds;
+        let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
+        #[cfg(test)]
+        PAINTED_BLOCKS.with(|painted| *painted.borrow_mut() = blocks.clone());
+        for block in &self.code_blocks[blocks] {
+            window.paint_quad(
+                fill(
+                    block.background + origin,
+                    self.theme.colors.md_code_block_background,
+                )
+                .corner_radii(theme::CODE_BLOCK_RADIUS),
+            );
+        }
+    }
+
+    /// One `WrappedLine::paint` per line in the content mask; gpui steps rows down at each wrap. A
+    /// failed line is skipped and logged, not fatal, so one bad glyph run doesn't blank the page.
+    pub(crate) fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        let mask = window.content_mask().bounds;
+        let lines = self.visible_lines(mask.top() - origin.y, mask.bottom() - origin.y);
+        let bars = self.bars_of(&lines);
+        #[cfg(test)]
+        PAINTED.with(|painted| *painted.borrow_mut() = (lines.clone(), bars.clone()));
+        #[cfg(test)]
+        PAINTED_CLIPS.with(|painted| painted.borrow_mut().clear());
+        for bar in &self.bars[bars] {
+            window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
+        }
+        for index in lines {
+            let line = &self.lines[index];
+            let line_origin = origin + point(px(0.), line.top);
+            let clip = line
+                .block
+                .and_then(|block| Some((self.block_clip(block)?, self.block_scroll(block))));
+            let (x, mask) = match clip {
+                // Horizontal only: the mask keeps the current top and bottom.
+                Some((clip, scroll)) => {
+                    let mask = window.content_mask().bounds;
+                    let left = clip.left.map_or(mask.left(), |left| origin.x + left);
+                    let bounds = Bounds::from_corners(
+                        point(left, mask.top()),
+                        point(origin.x + clip.right, mask.bottom()),
+                    );
+                    (line.indent() - scroll, Some(ContentMask { bounds }))
+                }
+                None => (line.indent(), None),
+            };
+            #[cfg(test)]
+            if let Some(mask) = &mask {
+                PAINTED_CLIPS.with(|painted| {
+                    painted.borrow_mut().push((
+                        line_origin.x + x,
+                        window.content_mask().bounds.intersect(&mask.bounds),
+                    ));
+                });
+            }
+            let painted = window.with_content_mask(mask, |window| {
+                line.shape.wrapped.paint(
+                    line_origin + point(x, px(0.)),
+                    line.row_height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                )
+            });
+            if let Err(err) = painted {
+                log::warn!("failed to paint line {index}: {err}");
+            }
+            if let Some((shaped, x)) = line.prefix.as_ref().and_then(Prefix::shown)
+                && let Err(err) = shaped.paint(
+                    line_origin + point(x, px(0.)),
+                    line.row_height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                )
+            {
+                log::warn!("failed to paint the prefix of line {index}: {err}");
+            }
+        }
+        let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
+        for block in &self.code_blocks[blocks] {
+            if let Some((at, shaped)) = &block.label
+                && let Err(err) = shaped.paint(
+                    origin + *at,
+                    self.body_row_height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                )
+            {
+                log::warn!("failed to paint a code block label: {err}");
+            }
+        }
+    }
+
+    /// The lines reaching `top..bottom` in layout space, one more each side: a glyph can overhang its row.
+    fn visible_lines(&self, top: Pixels, bottom: Pixels) -> Range<usize> {
+        let start = self
+            .lines
+            .partition_point(|line| line.top <= top)
+            .saturating_sub(2);
+        let end = (self.lines.partition_point(|line| line.top < bottom) + 1).min(self.lines.len());
+        start..end.max(start)
+    }
+
+    /// The blocks reaching `top..bottom` in layout space; `code_blocks` is sorted by top and never overlaps.
+    pub(super) fn blocks_in(&self, top: Pixels, bottom: Pixels) -> Range<usize> {
+        let start = self
+            .code_blocks
+            .partition_point(|block| block.background.bottom() <= top);
+        let end = self
+            .code_blocks
+            .partition_point(|block| block.background.top() < bottom);
+        start..end.max(start)
+    }
+
+    /// The bars starting within `lines`' span; `bars` is sorted by top.
+    fn bars_of(&self, lines: &Range<usize>) -> Range<usize> {
+        let from = self.lines[lines.start].top;
+        let to = self
+            .lines
+            .get(lines.end)
+            .map_or(self.height, |line| line.top);
+        self.bars.partition_point(|bar| bar.origin.y < from)
+            ..self.bars.partition_point(|bar| bar.origin.y < to)
+    }
+}
+//! What sits left of a line's text: a heading's hanging marker (live-preview spec, D12) or a
+//! quote's gutter (markdown blocks spec, D3).
+
+use std::collections::HashMap;
+use std::ops::Range;
+use std::rc::Rc;
+
+use gpui::{Pixels, ShapedLine, px};
+use inkra_markdown::Gutter;
+use inkra_text::ByteOffset;
+
+pub(super) enum Prefix {
+    /// A heading's opening marker, left of the column.
+    Margin(Hanging),
+    /// A quote prefix; the line's text starts at its width on every row.
+    Gutter(GutterLayout),
+}
+
+impl Prefix {
+    pub(super) fn range(&self) -> &Range<ByteOffset> {
+        match self {
+            Self::Margin(hanging) => &hanging.range,
+            Self::Gutter(gutter) => &gutter.range,
+        }
+    }
+
+    /// Where the text starts: a margin hangs left of it, a gutter pushes it right.
+    pub(super) fn indent(&self) -> Pixels {
+        match self {
+            Self::Margin(_) => px(0.),
+            Self::Gutter(gutter) => gutter.geometry.width,
+        }
+    }
+
+    /// Row 0's `x` for an offset before `range().end`; `None` while concealed.
+    pub(super) fn x_for_offset(&self, offset: ByteOffset) -> Option<Pixels> {
+        match self {
+            Self::Margin(hanging) => hanging.x_for_offset(offset),
+            Self::Gutter(gutter) => gutter
+                .shaped
+                .as_ref()
+                .map(|shaped| shaped.x_for_index(offset - gutter.range.start)),
+        }
+    }
+
+    /// Row 0's offset for an `x` left of `indent()`.
+    pub(super) fn offset_for_x(&self, x: Pixels) -> ByteOffset {
+        match self {
+            Self::Margin(hanging) => hanging.offset_for_x(x),
+            Self::Gutter(gutter) => gutter.offset_for_x(x),
+        }
+    }
+
+    /// Only a gutter draws bars (spec D3).
+    pub(super) fn bars(&self) -> &[Pixels] {
+        match self {
+            Self::Margin(_) => &[],
+            Self::Gutter(gutter) => &gutter.geometry.bars,
+        }
+    }
+
+    /// What paints outside the text, and at which `x`; `None` while concealed.
+    pub(super) fn shown(&self) -> Option<(&ShapedLine, Pixels)> {
+        match self {
+            Self::Margin(hanging) => hanging
+                .shaped
+                .as_ref()
+                .map(|shaped| (shaped, -shaped.width())),
+            Self::Gutter(gutter) => gutter.shaped.as_ref().map(|shaped| (shaped, px(0.))),
+        }
+    }
+}
+
+pub(super) struct Hanging {
+    pub(super) range: Range<ByteOffset>,
+    /// `Some` only while revealed; painted left of the text and right-aligned to it.
+    pub(super) shaped: Option<ShapedLine>,
+}
+
+impl Hanging {
+    /// Negative, since the text starts at 0; `None` while concealed.
+    pub(super) fn x_for_offset(&self, offset: ByteOffset) -> Option<Pixels> {
+        let shaped = self.shaped.as_ref()?;
+        Some(shaped.x_for_index(offset - self.range.start) - shaped.width())
+    }
+
+    /// A concealed marker shows no glyph, so its whole margin lands on its start.
+    pub(super) fn offset_for_x(&self, x: Pixels) -> ByteOffset {
+        let index = self
+            .shaped
+            .as_ref()
+            .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()));
+        self.range.start + index
+    }
+}
+
+/// Where a line's text starts.
+pub(super) fn indent(prefix: Option<&Prefix>) -> Pixels {
+    prefix.map_or(px(0.), Prefix::indent)
+}
+
+pub(super) struct GutterLayout {
+    pub(super) range: Range<ByteOffset>,
+    /// `Some` only while revealed (a caret touches a `>`, spec D2): the gutter's own text at the
+    /// body size, painted at `x = 0`.
+    pub(super) shaped: Option<ShapedLine>,
+    pub(super) geometry: Geometry,
+}
+
+impl GutterLayout {
+    /// A revealed gutter maps `x` through its shape (as D12's margin); a concealed one lands on the text's start.
+    fn offset_for_x(&self, x: Pixels) -> ByteOffset {
+        self.shaped.as_ref().map_or(self.range.end, |shaped| {
+            self.range.start + shaped.closest_index_for_x(x)
+        })
+    }
+}
+
+/// A gutter's text start and bars, carried to lazy lines (spec D3).
+#[derive(Clone, Default)]
+pub(super) struct Geometry {
+    width: Pixels,
+    /// Each `>`'s `x`, outermost first.
+    bars: Rc<[Pixels]>,
+}
+
+/// What gutters share within one `shape_document`: the geometry the last one holding all its `>`
+/// measured, carried to lazy lines, and each distinct gutter text's geometry, measured once.
+pub(super) struct GutterCarry<'a> {
+    carried: Geometry,
+    /// Geometry depends only on the gutter's text at the body size (spec D3); most are `> ` or `> > `.
+    measured: HashMap<&'a str, Geometry>,
+    body_size: Pixels,
+}
+
+impl<'a> GutterCarry<'a> {
+    pub(super) fn new(body_size: Pixels) -> Self {
+        Self {
+            carried: Geometry::default(),
+            measured: HashMap::new(),
+            body_size,
+        }
+    }
+
+    /// `source` is the gutter's text. A gutter holding all its `>` measures itself; a lazy one takes
+    /// the last measured geometry. Only a revealed gutter keeps a shape, to paint it.
+    pub(super) fn layout(
+        &mut self,
+        gutter: &Gutter,
+        source: &'a str,
+        revealed: bool,
+        mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
+    ) -> GutterLayout {
+        let body_size = self.body_size;
+        let shaped = revealed.then(|| shape(&gutter.range, body_size));
+        if gutter.quotes.len() == gutter.depth {
+            self.carried = if let Some(geometry) = self.measured.get(source) {
+                geometry.clone()
+            } else {
+                let geometry = match &shaped {
+                    Some(shaped) => Geometry::measure(gutter, shaped),
+                    None => Geometry::measure(gutter, &shape(&gutter.range, body_size)),
+                };
+                self.measured.insert(source, geometry.clone());
+                geometry
+            };
+        }
+        GutterLayout {
+            range: gutter.range.clone(),
+            shaped,
+            geometry: self.carried.clone(),
+        }
+    }
+}
+
+impl Geometry {
+    fn measure(gutter: &Gutter, shaped: &ShapedLine) -> Self {
+        let start = gutter.range.start;
+        Self {
+            width: shaped.width(),
+            bars: gutter
+                .quotes
+                .iter()
+                .map(|quote| shaped.x_for_index(*quote - start))
+                .collect(),
+        }
+    }
+}
+use std::ops::Range;
+
+use gpui::{WrappedLine, px};
+use inkra_markdown::{DisplayLine, DisplayOffset};
+use inkra_text::{Bias, ByteOffset};
+use unicode_segmentation::GraphemeCursor;
+
+use super::Row;
+
+/// One row per gpui row. Each wrap point snaps forward to the next grapheme
+/// boundary of `shown`, so no caret lands inside a cluster (the glyphs before the snap still paint on the new row).
+pub(super) fn rows(
+    shown: &str,
+    wrapped: &WrappedLine,
+    range: &Range<ByteOffset>,
+    display: &DisplayLine,
+) -> Vec<Row> {
+    let layout = &wrapped.unwrapped_layout;
+    let at = |index: usize| display.to_buffer(DisplayOffset::new(index), Bias::Left);
+
+    let mut starts = vec![(0, px(0.))];
+    for boundary in wrapped.wrap_boundaries() {
+        let glyph = &layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix];
+        let snapped = grapheme_at_or_after(shown, glyph.index);
+        // Monotonic: two wraps snapping to one cluster end must not collide.
+        let previous = starts.last().map_or(0, |(start, _)| *start);
+        starts.push((snapped.max(previous), glyph.position.x));
+    }
+
+    let ends = starts
+        .iter()
+        .skip(1)
+        .map(|(next, _)| Some(*next))
+        .chain([None]);
+    starts
+        .iter()
+        .zip(ends)
+        .map(|(&(start, start_x), next)| Row {
+            start: at(start),
+            // The last row ends at the line's true end, past any hidden suffix (live-preview spec, D5).
+            caret_end: next.map_or(
+                range.end,
+                |next| at(grapheme_before(shown, next).max(start)),
+            ),
+            start_x,
+        })
+        .collect()
+}
+
+fn grapheme_at_or_after(text: &str, index: usize) -> usize {
+    let mut cursor = GraphemeCursor::new(index, text.len(), true);
+    if cursor.is_boundary(text, 0).unwrap_or(true) {
+        return index;
+    }
+    cursor
+        .next_boundary(text, 0)
+        .ok()
+        .flatten()
+        .unwrap_or(text.len())
+}
+
+fn grapheme_before(text: &str, index: usize) -> usize {
+    GraphemeCursor::new(index, text.len(), true)
+        .prev_boundary(text, 0)
+        .ok()
+        .flatten()
+        .unwrap_or(0)
+}
+use std::collections::HashMap;
+use std::ops::Range;
+
+use gpui::{HighlightStyle, TextRun, TextStyle, UnderlineStyle, px};
+use inkra_markdown::{DisplayLine, Span, Styles};
+use inkra_text::ByteOffset;
+
+use crate::theme::{self, Theme};
+
+/// Resolves each `(Styles, composing)` once per `shape_document` call: that
+/// runs every frame, and a `TextStyle` clone per run would be per-frame waste.
+pub(super) struct RunStyles<'a> {
+    base: &'a TextStyle,
+    theme: &'a Theme,
+    resolved: HashMap<(Styles, bool), TextStyle>,
+}
+
+impl<'a> RunStyles<'a> {
+    pub(super) fn new(base: &'a TextStyle, theme: &'a Theme) -> Self {
+        Self {
+            base,
+            theme,
+            resolved: HashMap::new(),
+        }
+    }
+
+    fn run(&mut self, styles: Styles, composing: bool, len: usize) -> TextRun {
+        let (base, theme) = (self.base, self.theme);
+        self.resolved
+            .entry((styles, composing))
+            .or_insert_with(|| {
+                let style = theme::markdown_style(base, styles, theme);
+                if composing { underlined(style) } else { style }
+            })
+            .to_run(len)
+    }
+}
+
+fn underlined(style: TextStyle) -> TextStyle {
+    let color = style.color;
+    style.highlight(HighlightStyle {
+        underline: Some(UnderlineStyle {
+            color: Some(color),
+            thickness: px(1.0),
+            wavy: false,
+        }),
+        ..HighlightStyle::default()
+    })
+}
+
+/// Runs indexed from zero within the line's shown text. Every range is clamped to the line,
+/// so a stale span mis-colours one frame instead of breaking the run lengths.
+pub(super) fn line_runs(
+    line: &Range<ByteOffset>,
+    spans: &[Span],
+    marked: Option<&Range<ByteOffset>>,
+    display: &DisplayLine,
+    styles: &mut RunStyles<'_>,
+) -> Vec<TextRun> {
+    let clamp = |offset: ByteOffset| offset.clamp(line.start, line.end);
+
+    let mut cuts = vec![line.start, line.end];
+    for span in spans {
+        cuts.extend([clamp(span.range.start), clamp(span.range.end)]);
+    }
+    if let Some(marked) = marked {
+        cuts.extend([clamp(marked.start), clamp(marked.end)]);
+    }
+    for hidden in display.hidden() {
+        cuts.extend([hidden.start, hidden.end]);
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+
+    let mut spans = spans.iter().peekable();
+    let mut runs = Vec::with_capacity(cuts.len());
+    for pair in cuts.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        let len = display.to_display(end).get() - display.to_display(start).get();
+        if len == 0 {
+            continue;
+        }
+        while spans.next_if(|span| span.range.end <= start).is_some() {}
+        let span_styles = spans
+            .peek()
+            .filter(|span| span.range.start <= start)
+            .map_or(Styles::NONE, |span| span.styles);
+        let composing = marked.is_some_and(|marked| marked.start <= start && start < marked.end);
+        runs.push(styles.run(span_styles, composing, len));
+    }
+    if runs.is_empty() {
+        runs.push(styles.run(Styles::NONE, false, 0));
+    }
+    runs
+}
+
+#[cfg(test)]
+mod tests;
+use std::ops::Range;
+
+use gpui::{FontWeight, Hsla, TextStyle};
+use inkra_markdown::{DisplayLine, parse};
+use inkra_text::ByteOffset;
+
+use super::{RunStyles, line_runs};
+use crate::theme::builtin::dark;
+
+fn range(start: usize, end: usize) -> Range<ByteOffset> {
+    ByteOffset::new(start)..ByteOffset::new(end)
+}
+
+fn lens(runs: &[gpui::TextRun]) -> Vec<usize> {
+    runs.iter().map(|run| run.len).collect()
+}
+
+#[test]
+fn runs_follow_the_spans_and_cover_the_line() {
+    let text = "a **b** c";
+    let spans = parse(text).spans;
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark());
+
+    let line = range(0, text.len());
+    let display = DisplayLine::new(line.clone(), []);
+
+    let runs = line_runs(&line, &spans, None, &display, &mut styles);
+
+    assert_eq!(lens(&runs), vec![2, 2, 1, 2, 2]);
+    assert_eq!(runs[0].font.weight, base.font_weight);
+    assert_eq!(runs[1].color, Hsla::from(dark().colors.md_marker));
+    assert_eq!(runs[2].font.weight, FontWeight::BOLD);
+    assert!(runs.iter().all(|run| run.underline.is_none()));
+}
+
+#[test]
+fn a_composition_inside_bold_stays_bold_and_gains_the_underline() {
+    let text = "a **b** c";
+    let spans = parse(text).spans;
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark());
+
+    let line = range(0, text.len());
+    let display = DisplayLine::new(line.clone(), []);
+
+    let runs = line_runs(&line, &spans, Some(&range(3, 6)), &display, &mut styles);
+
+    assert_eq!(lens(&runs), vec![2, 1, 1, 1, 1, 1, 2]);
+    let underlined: Vec<bool> = runs.iter().map(|run| run.underline.is_some()).collect();
+    assert_eq!(
+        underlined,
+        vec![false, false, true, true, true, false, false]
+    );
+    assert_eq!(runs[3].font.weight, FontWeight::BOLD);
+}
+
+#[test]
+fn runs_are_indexed_from_the_line_start() {
+    let text = "ab\n**c**";
+    let spans = parse(text).spans;
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark());
+
+    let line = range(3, 8);
+    let display = DisplayLine::new(line.clone(), []);
+
+    let runs = line_runs(&line, &spans[..], None, &display, &mut styles);
+
+    assert_eq!(lens(&runs), vec![2, 1, 2]);
+}
+
+#[test]
+fn a_plain_line_is_one_run_and_an_empty_line_one_empty_run() {
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark());
+
+    for (line, expected) in [(range(0, 5), vec![5]), (range(4, 4), vec![0])] {
+        let display = DisplayLine::new(line.clone(), []);
+        assert_eq!(
+            lens(&line_runs(&line, &[], None, &display, &mut styles)),
+            expected
+        );
+    }
+}
+
+#[test]
+fn a_stale_span_past_the_line_is_clipped_not_fatal() {
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark());
+    let spans = parse("**long bold text**").spans;
+
+    let line = range(0, 4);
+    let display = DisplayLine::new(line.clone(), []);
+
+    let runs = line_runs(&line, &spans, None, &display, &mut styles);
+
+    assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 4);
+}
+//! Each code block's horizontal scroll (code block scroll spec, D1): one table the editor writes and
+//! every layout it shapes reads, so a wheel tick changes the paint without a reshape.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Instant;
+
+use gpui::{Bounds, Pixels, point, px, size};
+use inkra_text::{Anchor, Bias, Buffer, ByteOffset};
+
+use super::{DocumentLayout, NEWLINE_STUB};
+use crate::theme;
+
+#[derive(Clone, Default)]
+pub(crate) struct BlockScrolls(Rc<RefCell<Vec<BlockScroll>>>);
+
+struct BlockScroll {
+    /// `Bias::Right`: a line typed at the block's start keeps the anchor on the fence.
+    anchor: Anchor,
+    /// `anchor` resolved at the last `sync`; sorted by it.
+    start: ByteOffset,
+    x: Pixels,
+    /// The last time `x` changed by a scroll: the bar lingers from it.
+    scrolled_at: Instant,
+}
+
+impl BlockScrolls {
+    /// The block starting at `start`; zero for a block never scrolled.
+    pub(crate) fn x(&self, start: ByteOffset) -> Pixels {
+        let scrolls = self.0.borrow();
+        scrolls
+            .binary_search_by_key(&start, |scroll| scroll.start)
+            .map_or(px(0.), |index| scrolls[index].x)
+    }
+
+    /// When block `start` last scrolled; `None` for a block never scrolled.
+    pub(crate) fn scrolled_at(&self, start: ByteOffset) -> Option<Instant> {
+        let scrolls = self.0.borrow();
+        scrolls
+            .binary_search_by_key(&start, |scroll| scroll.start)
+            .ok()
+            .map(|index| scrolls[index].scrolled_at)
+    }
+
+    /// An entry set to zero stays, keeping its anchor; a missing one is added only for a nonzero `x`.
+    /// Stamps `now`: every caller passes a changed `x`.
+    pub(crate) fn set(&self, start: ByteOffset, x: Pixels, now: Instant, buffer: &mut Buffer) {
+        let mut scrolls = self.0.borrow_mut();
+        match scrolls.binary_search_by_key(&start, |scroll| scroll.start) {
+            Ok(index) => {
+                scrolls[index].x = x;
+                scrolls[index].scrolled_at = now;
+            }
+            Err(index) if x != px(0.) => {
+                let anchor = buffer.anchor(start, Bias::Right);
+                let scroll = BlockScroll {
+                    anchor,
+                    start,
+                    x,
+                    scrolled_at: now,
+                };
+                scrolls.insert(index, scroll);
+            }
+            _ => {}
+        }
+    }
+
+    /// Re-reads each start, keeping only block starts and the first entry per start; returns the
+    /// dropped anchors for the caller to forget.
+    pub(crate) fn sync(
+        &self,
+        buffer: &Buffer,
+        is_start: impl Fn(ByteOffset) -> bool,
+    ) -> Vec<Anchor> {
+        let mut scrolls = self.0.borrow_mut();
+        for scroll in scrolls.iter_mut() {
+            scroll.start = buffer.resolve(scroll.anchor);
+        }
+        scrolls.sort_by_key(|scroll| scroll.start);
+        let mut dropped = Vec::new();
+        let mut kept = None;
+        scrolls.retain(|scroll| {
+            let keep = kept != Some(scroll.start) && is_start(scroll.start);
+            if keep {
+                kept = Some(scroll.start);
+            } else {
+                dropped.push(scroll.anchor);
+            }
+            keep
+        });
+        dropped
+    }
+
+    pub(crate) fn forget_all(&self, buffer: &mut Buffer) {
+        for scroll in self.0.borrow_mut().drain(..) {
+            buffer.forget(scroll.anchor);
+        }
+    }
+
+    /// Every scrolled block, as plain offsets for a `ViewState`.
+    pub(crate) fn entries(&self) -> Vec<(ByteOffset, Pixels)> {
+        self.0
+            .borrow()
+            .iter()
+            .filter(|scroll| scroll.x != px(0.))
+            .map(|scroll| (scroll.start, scroll.x))
+            .collect()
+    }
+
+    /// Onto an empty table: an entry left from another view would leak its anchor.
+    pub(crate) fn anchor_all(
+        &self,
+        entries: &[(ByteOffset, Pixels)],
+        now: Instant,
+        buffer: &mut Buffer,
+    ) {
+        debug_assert!(self.is_empty(), "anchoring over a live table");
+        for &(start, x) in entries {
+            self.set(start, x, now, buffer);
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.borrow().is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn anchors(&self) -> Vec<Anchor> {
+        self.0.borrow().iter().map(|scroll| scroll.anchor).collect()
+    }
+}
+
+/// Where a scrollable block's text is cut, in layout coordinates: left only once it scrolled.
+pub(super) struct Clip {
+    pub(super) left: Option<Pixels>,
+    pub(super) right: Pixels,
+}
+
+impl Clip {
+    /// A quad's span on a clipped row: left of the background it becomes a stub at its edge, so a
+    /// selected blank line still shows; right of it, nothing.
+    pub(super) fn span(
+        &self,
+        left: Pixels,
+        right: Pixels,
+        row_height: Pixels,
+    ) -> Option<(Pixels, Pixels)> {
+        if let Some(edge) = self.left
+            && right <= edge
+        {
+            return Some((edge, edge + row_height * NEWLINE_STUB));
+        }
+        if left >= self.right {
+            return None;
+        }
+        let left = self.left.map_or(left, |edge| left.max(edge));
+        Some((left, right.min(self.right)))
+    }
+}
+
+/// A caret's block, in layout coordinates before its scroll (code block scroll spec, D5).
+pub(crate) struct BlockSpan {
+    pub(crate) start: ByteOffset,
+    /// The caret's content x.
+    pub(crate) caret: Pixels,
+    /// The text's left edge.
+    pub(crate) left: Pixels,
+    /// The text's width inside the background.
+    pub(crate) visible: Pixels,
+    pub(crate) max: Pixels,
+}
+
+impl DocumentLayout {
+    /// The scrollable block holding `offset`; `None` outside a block or in one that fits.
+    pub(crate) fn block_span(&self, offset: ByteOffset) -> Option<BlockSpan> {
+        let (line, within) = self.locate(self.row_for_offset(offset));
+        let block = &self.code_blocks[line.block?];
+        (block.max > px(0.)).then(|| BlockSpan {
+            start: block.start,
+            caret: Self::content_x(line, within, offset),
+            left: block.background.left() + theme::CODE_BLOCK_OUTSET,
+            visible: block.background.size.width - theme::CODE_BLOCK_OUTSET * 2.,
+            max: block.max,
+        })
+    }
+
+    /// Block `index`'s scroll, clamped to its current `max`: an edit or a resize can shrink it.
+    pub(crate) fn block_scroll(&self, index: usize) -> Pixels {
+        let block = &self.code_blocks[index];
+        self.scrolls.x(block.start).max(px(0.)).min(block.max)
+    }
+
+    /// Block `index`'s position bar inside its background's bottom edge; `None` when it fits.
+    pub(crate) fn scroll_bar(&self, index: usize) -> Option<Bounds<Pixels>> {
+        let block = &self.code_blocks[index];
+        (block.max > px(0.)).then(|| {
+            let visible = block.background.size.width - theme::CODE_BLOCK_OUTSET * 2.;
+            let total = visible + block.max;
+            let left = block.background.left()
+                + theme::CODE_BLOCK_OUTSET
+                + self.block_scroll(index) * (visible / total);
+            let top = block.background.bottom()
+                - theme::CODE_BLOCK_BAR_INSET
+                - theme::CODE_BLOCK_BAR_HEIGHT;
+            Bounds::new(
+                point(left, top),
+                size(visible * (visible / total), theme::CODE_BLOCK_BAR_HEIGHT),
+            )
+        })
+    }
+
+    pub(super) fn block_clip(&self, index: usize) -> Option<Clip> {
+        let block = &self.code_blocks[index];
+        (block.max > px(0.)).then(|| Clip {
+            left: (self.block_scroll(index) > px(0.)).then_some(block.background.left()),
+            right: block.background.right(),
+        })
+    }
+
+    /// Each block in `top..bottom` that can scroll: its index, start, `max` and background.
+    pub(crate) fn scrollable_blocks(
+        &self,
+        top: Pixels,
+        bottom: Pixels,
+    ) -> impl Iterator<Item = (usize, ByteOffset, Pixels, Bounds<Pixels>)> + '_ {
+        let range = self.blocks_in(top, bottom);
+        self.code_blocks[range.clone()]
+            .iter()
+            .zip(range)
+            .filter(|(block, _)| block.max > px(0.))
+            .map(|(block, index)| (index, block.start, block.max, block.background))
+    }
+
+    /// False when the caret at `offset` lies outside its scrolled block's background.
+    pub(crate) fn caret_visible(&self, offset: ByteOffset) -> bool {
+        let line = &self.lines[self.line_for_offset(offset)];
+        let Some(clip) = line.block.and_then(|block| self.block_clip(block)) else {
+            return true;
+        };
+        let x = self.caret_bounds(offset).left();
+        !(clip.left.is_some_and(|left| x < left) || x >= clip.right)
+    }
+}
+
+#[cfg(test)]
+mod tests;
+use std::time::Instant;
+
+use gpui::px;
+use inkra_text::{Buffer, ByteOffset};
+
+use super::BlockScrolls;
+
+fn starts(scrolls: &BlockScrolls) -> Vec<usize> {
+    scrolls
+        .0
+        .borrow()
+        .iter()
+        .map(|scroll| scroll.start.get())
+        .collect()
+}
+
+#[test]
+fn a_zero_for_a_missing_block_stores_nothing() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(4), px(0.), Instant::now(), &mut buffer);
+    assert!(starts(&scrolls).is_empty());
+}
+
+#[test]
+fn a_zero_for_a_stored_block_keeps_its_entry() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(4), px(30.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(4), px(0.), Instant::now(), &mut buffer);
+    assert_eq!(starts(&scrolls), [4]);
+    assert_eq!(scrolls.x(ByteOffset::new(4)), px(0.));
+}
+
+#[test]
+fn entries_stay_sorted_by_start() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(9), px(10.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(2), px(20.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(5), px(30.), Instant::now(), &mut buffer);
+    assert_eq!(starts(&scrolls), [2, 5, 9]);
+    assert_eq!(scrolls.x(ByteOffset::new(5)), px(30.));
+    assert_eq!(scrolls.x(ByteOffset::new(3)), px(0.));
+}
+
+#[test]
+fn sync_follows_an_edit_and_keeps_the_first_of_two_converging_entries() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(2), px(20.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(5), px(50.), Instant::now(), &mut buffer);
+    let anchors = scrolls.anchors();
+    buffer.transact(|buffer| buffer.delete(ByteOffset::new(2)..ByteOffset::new(5)));
+
+    let dropped = scrolls.sync(&buffer, |_| true);
+
+    assert_eq!(dropped, [anchors[1]]);
+    assert_eq!(starts(&scrolls), [2]);
+    assert_eq!(scrolls.x(ByteOffset::new(2)), px(20.));
+}
+
+#[test]
+fn sync_drops_an_entry_that_is_no_longer_a_block_start() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(2), px(20.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(5), px(50.), Instant::now(), &mut buffer);
+    let anchors = scrolls.anchors();
+    buffer.transact(|buffer| buffer.insert(ByteOffset::new(0), "ab"));
+
+    let dropped = scrolls.sync(&buffer, |start| start == ByteOffset::new(7));
+
+    assert_eq!(dropped, [anchors[0]]);
+    assert_eq!(scrolls.entries(), [(ByteOffset::new(7), px(50.))]);
+}
+
+#[test]
+fn entries_omit_a_block_scrolled_back_to_zero() {
+    let scrolls = BlockScrolls::default();
+    let mut buffer = Buffer::new("0123456789");
+    scrolls.set(ByteOffset::new(2), px(20.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(5), px(50.), Instant::now(), &mut buffer);
+    scrolls.set(ByteOffset::new(2), px(0.), Instant::now(), &mut buffer);
+
+    assert_eq!(scrolls.entries(), [(ByteOffset::new(5), px(50.))]);
+    assert_eq!(scrolls.anchors().len(), 2);
+    assert!(!scrolls.is_empty());
+    scrolls.forget_all(&mut buffer);
+    assert!(scrolls.is_empty());
+}
+use std::ops::Range;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px};
+use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Markdown, Span, is_active};
+use inkra_text::{Buffer, ByteOffset};
+
+use super::blocks::{Blocks, Labels};
+use super::prefix::{GutterCarry, Hanging, Prefix, indent};
+use super::runs::{RunStyles, line_runs};
+use super::{DocumentLayout, LayoutInputs, LineLayout, rows::rows};
+use crate::theme;
+
+#[cfg(test)]
+thread_local! {
+    static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Whole-document shapes so far on this thread; a keystroke's budget is one.
+#[cfg(test)]
+pub(crate) fn shape_count() -> usize {
+    SHAPES.with(std::cell::Cell::get)
+}
+
+/// Lines handed to `shape_text` so far on this thread.
+#[cfg(test)]
+pub(crate) fn line_shape_count() -> usize {
+    LINES.with(std::cell::Cell::get)
+}
+
+/// One line's `shape_text` output and every argument it took; a later layout reuses it only when all match.
+pub(super) struct LineShape {
+    pub(super) wrapped: WrappedLine,
+    text: SharedString,
+    font_size: Pixels,
+    runs: Vec<TextRun>,
+    wrap: Option<Pixels>,
+}
+
+impl LineShape {
+    fn new(
+        text: &str,
+        font_size: Pixels,
+        runs: Vec<TextRun>,
+        wrap: Option<Pixels>,
+        start: ByteOffset,
+        window: &mut Window,
+    ) -> Self {
+        #[cfg(test)]
+        LINES.with(|lines| lines.set(lines.get() + 1));
+        let text = SharedString::from(text.to_owned());
+        let wrapped = window
+            .text_system()
+            .shape_text(text.clone(), font_size, &runs, wrap, None)
+            .map_err(|err| log::warn!("failed to shape line at {start}: {err}"))
+            .ok()
+            .and_then(|mut shaped| shaped.pop())
+            .unwrap_or_default();
+        Self {
+            wrapped,
+            text,
+            font_size,
+            runs,
+            wrap,
+        }
+    }
+
+    fn shaped_from(
+        &self,
+        text: &str,
+        font_size: Pixels,
+        runs: &[TextRun],
+        wrap: Option<Pixels>,
+    ) -> bool {
+        self.font_size == font_size
+            && self.wrap == wrap
+            && self.text.as_ref() == text
+            && self.runs == runs
+    }
+}
+
+/// Takes `style` explicitly since the editor also shapes outside any draw,
+/// where `window.text_style()` doesn't apply. `wrap_width: None` never wraps.
+/// A line carries a shape from `previous` when every `shape_text` argument matches.
+pub(crate) fn shape_document(
+    inputs: &LayoutInputs<'_>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    #[cfg(test)]
+    SHAPES.with(|shapes| shapes.set(shapes.get() + 1));
+    let &LayoutInputs {
+        buffer,
+        markdown,
+        selection,
+        marked,
+        style,
+        wrap_width,
+        code_block_wrap,
+        theme,
+        scrolls,
+        ..
+    } = inputs;
+    let mut styles = RunStyles::new(style, theme);
+    let body_size = style.font_size.to_pixels(window.rem_size());
+    let body_height = style.line_height_in_pixels(window.rem_size());
+
+    let mut row_count = 0;
+    let mut top = px(0.);
+    let mut bars = Vec::new();
+    let mut blocks = Blocks::new(wrap_width);
+    let mut labels = Labels::new(style, theme);
+    // Spans, markers and gutters never cross a `\n`, so each line's are the next ones in order.
+    let mut rest = markdown.spans.as_slice();
+    let mut conceals = markdown.conceals.as_slice();
+    let mut gutters = markdown.gutters.as_slice();
+    let mut headings = markdown.headings.as_slice();
+    let mut code_blocks = markdown.code_blocks.as_slice();
+    let mut carry = GutterCarry::new(body_size);
+    let lines = buffer
+        .lines()
+        .enumerate()
+        .map(|(index, (start, text))| {
+            let range = start..start + text.len();
+            let heading = line_holder(&mut headings, &range, |heading| &heading.range);
+            let block = line_holder(&mut code_blocks, &range, |block| &block.range);
+            let (font_size, row_height) = line_metrics(heading, block, (body_size, body_height));
+            let line_spans = line_items(&mut rest, |span| span.range.start <= range.end);
+            let line_conceals =
+                line_items(&mut conceals, |conceal| conceal.marker.start <= range.end);
+            let line_gutters = line_items(&mut gutters, |gutter| gutter.range.start <= range.end);
+            let gutter = line_gutters
+                .first()
+                .map(|gutter| (gutter, &text[..gutter.range.end - start]));
+            let label = label_text(block, &range, text, line_conceals, selection)
+                .map(|label| labels.shape(label, window));
+            let (prefix, text_conceals) = line_prefix(
+                gutter,
+                &mut carry,
+                heading_opening(heading, &range, font_size, inputs.margin),
+                line_conceals,
+                selection,
+                |range, size| show(range, text, line_spans, marked, size, &mut styles, window),
+            );
+            let display = display_line(
+                &range,
+                text_conceals,
+                prefix.as_ref().map(Prefix::range),
+                selection,
+            );
+            let shown = display.text(text);
+            let runs = line_runs(&range, line_spans, marked, &display, &mut styles);
+            let wrap = line_wrap(wrap_width, block, code_block_wrap, prefix.as_ref());
+            let near = candidates(previous, index, start, buffer.len());
+            let shape = carry_or_shape(near, &shown, font_size, runs, wrap, start, window);
+            let rows = rows(&shown, &shape.wrapped, &range, &display);
+            let line = LineLayout {
+                shape,
+                range,
+                display,
+                first_row: row_count,
+                rows,
+                top,
+                row_height,
+                prefix,
+                block: blocks.index_of(block),
+            };
+            row_count += line.rows.len();
+            top += rows_height(line.rows.len(), row_height);
+            bars.extend(line_bars(line.prefix.as_ref(), line.top, top));
+            blocks.line(block, label, &line, top);
+            line
+        })
+        .collect();
+
+    DocumentLayout {
+        lines,
+        row_count,
+        height: top,
+        bars,
+        code_blocks: blocks.finish(),
+        body_row_height: body_height,
+        style: style.clone(),
+        wrap_width,
+        margin: inputs.margin,
+        code_block_wrap,
+        theme: Arc::clone(theme),
+        version: buffer.version(),
+        selection: selection.clone(),
+        marked: marked.cloned(),
+        scrolls: scrolls.clone(),
+    }
+}
+
+/// The first candidate's shape that took exactly these `shape_text` arguments, else a new one.
+fn carry_or_shape<'p>(
+    candidates: impl Iterator<Item = &'p LineLayout>,
+    text: &str,
+    font_size: Pixels,
+    runs: Vec<TextRun>,
+    wrap: Option<Pixels>,
+    start: ByteOffset,
+    window: &mut Window,
+) -> Rc<LineShape> {
+    let mut shapes = candidates.map(|line| &line.shape);
+    match shapes.find(|shape| shape.shaped_from(text, font_size, &runs, wrap)) {
+        Some(shape) => Rc::clone(shape),
+        None => Rc::new(LineShape::new(text, font_size, runs, wrap, start, window)),
+    }
+}
+
+/// A heading's marker that opens its line, at the heading's size, with the room left of the text.
+struct Opening {
+    range: Range<ByteOffset>,
+    font_size: Pixels,
+    margin: Pixels,
+}
+
+/// The marker that opens the line as a margin. Inside a container it keeps its inline conceal:
+/// no margin exists there.
+fn heading_opening(
+    heading: Option<&Heading>,
+    range: &Range<ByteOffset>,
+    font_size: Pixels,
+    margin: Pixels,
+) -> Option<Opening> {
+    heading
+        .and_then(|heading| heading.marker.clone())
+        .filter(|marker| marker.start == range.start)
+        .map(|range| Opening {
+            range,
+            font_size,
+            margin,
+        })
+}
+
+/// Whether a revealed heading marker opens its line, so `margin` decides whether it hangs (D13).
+/// Only touched conceals reach the heading lookup, and a selection touches few.
+pub(super) fn reads_margin(
+    buffer: &Buffer,
+    markdown: &Markdown,
+    selection: &Range<ByteOffset>,
+) -> bool {
+    let text = buffer.text().as_bytes();
+    markdown
+        .conceals
+        .iter()
+        .filter(|conceal| !is_active(conceal, selection))
+        .filter(|conceal| {
+            let start = conceal.marker.start.get();
+            start == 0 || text[start - 1] == b'\n'
+        })
+        .any(|conceal| {
+            markdown
+                .headings
+                .iter()
+                .any(|heading| heading.marker.as_ref() == Some(&conceal.marker))
+        })
+}
+
+/// A heading line takes its level's size and row height; a block line the code size in the body's
+/// row; any other line the body's. A line never holds both.
+fn line_metrics(
+    heading: Option<&Heading>,
+    block: Option<&CodeBlock>,
+    body: (Pixels, Pixels),
+) -> (Pixels, Pixels) {
+    if let Some(heading) = heading {
+        let metrics = theme::heading_metrics(heading.level);
+        (metrics.size, metrics.line_height)
+    } else if block.is_some() {
+        (theme::CODE_BLOCK_TEXT_SIZE, body.1)
+    } else {
+        body
+    }
+}
+
+/// The language a block's label shows: it has one, the block opens on this line, and its opening
+/// fence is concealed. `text` is the line's own text.
+fn label_text<'t>(
+    block: Option<&CodeBlock>,
+    line: &Range<ByteOffset>,
+    text: &'t str,
+    conceals: &[Conceal],
+    selection: &Range<ByteOffset>,
+) -> Option<&'t str> {
+    let block = block.filter(|block| block.range.start >= line.start)?;
+    let language = block.language.as_ref()?;
+    conceals
+        .iter()
+        .any(|conceal| conceal.element == block.range && is_active(conceal, selection))
+        .then(|| &text[language.start - line.start..language.end - line.start])
+}
+
+/// The previous layout's line at `index`, then the one the edit moved to `start`, as reuse candidates.
+/// After one contiguous edit, the lines below it start `previous length - len` bytes from where they started.
+fn candidates(
+    previous: Option<&DocumentLayout>,
+    index: usize,
+    start: ByteOffset,
+    len: ByteOffset,
+) -> impl Iterator<Item = &LineLayout> {
+    previous.into_iter().flat_map(move |previous| {
+        let moved = previous
+            .lines
+            .last()
+            .and_then(|last| (start.get() + last.range.end.get()).checked_sub(len.get()))
+            .and_then(|target| {
+                previous
+                    .lines
+                    .binary_search_by_key(&ByteOffset::new(target), |line| line.range.start)
+                    .ok()
+            });
+        [Some(index), moved]
+            .into_iter()
+            .flatten()
+            .filter_map(|index| previous.lines.get(index))
+    })
+}
+
+/// A block line never wraps unless `code_block_wrap` (code block scroll spec, D2); any other wraps at the column less its indent.
+fn line_wrap(
+    wrap_width: Option<Pixels>,
+    block: Option<&CodeBlock>,
+    code_block_wrap: bool,
+    prefix: Option<&Prefix>,
+) -> Option<Pixels> {
+    wrap_width
+        .filter(|_| block.is_none() || code_block_wrap)
+        .map(|width| (width - indent(prefix)).max(px(0.)))
+}
+
+fn rows_height(rows: usize, row_height: Pixels) -> Pixels {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count far below 2^24 converts to f32 exactly"
+    )]
+    let rows = rows as f32;
+    row_height * rows
+}
+
+/// The item of a sorted cursor that holds the line at `range`; `rest` moves past the items before
+/// it. A setext heading spans lines, and so does a block: it stays first until a line starts past
+/// its end.
+fn line_holder<'a, T>(
+    rest: &mut &'a [T],
+    range: &Range<ByteOffset>,
+    of: impl Fn(&T) -> &Range<ByteOffset>,
+) -> Option<&'a T> {
+    while rest.first().is_some_and(|item| of(item).end < range.start) {
+        *rest = &rest[1..];
+    }
+    rest.first().filter(|item| of(item).start <= range.end)
+}
+
+/// One bar per quote level, from the line's top to the next line's, so a quote's bars meet.
+fn line_bars(
+    prefix: Option<&Prefix>,
+    top: Pixels,
+    bottom: Pixels,
+) -> impl Iterator<Item = Bounds<Pixels>> + '_ {
+    prefix.map_or(&[][..], Prefix::bars).iter().map(move |&x| {
+        Bounds::from_corners(point(x, top), point(x + theme::QUOTE_BAR_WIDTH, bottom))
+    })
+}
+
+/// The items of a sorted cursor that start on this line; `rest` moves past them. The next line's
+/// start at `range.end + 1` at the earliest, so `start <= range.end` holds for an empty item too.
+fn line_items<'a, T>(rest: &mut &'a [T], on_line: impl Fn(&T) -> bool) -> &'a [T] {
+    let own = rest.iter().take_while(|item| on_line(item)).count();
+    let (line, next) = rest.split_at(own);
+    *rest = next;
+    line
+}
+
+/// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
+/// prefix and the conceals left for the text. A revealed marker wider than `margin` gets no prefix
+/// and leaves its conceal to the text, so it shows inline (live-preview spec, D13).
+fn line_prefix<'a, 'c>(
+    gutter: Option<(&Gutter, &'a str)>,
+    carry: &mut GutterCarry<'a>,
+    opening: Option<Opening>,
+    conceals: &'c [Conceal],
+    selection: &Range<ByteOffset>,
+    mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
+) -> (Option<Prefix>, &'c [Conceal]) {
+    let own = gutter
+        .map(|(gutter, _)| &gutter.range)
+        .or(opening.as_ref().map(|opening| &opening.range))
+        .map_or(0, |prefix| {
+            conceals.partition_point(|conceal| conceal.marker.start < prefix.end)
+        });
+    let (own, rest) = conceals.split_at(own);
+    // A gap conceal skips a line's leading `[ \t>]*` and a heading's own marker is the only conceal
+    // before `opening.end`, so every conceal before the prefix's end is the prefix's own.
+    debug_assert!(match gutter {
+        Some((gutter, _)) => own.len() == gutter.quotes.len(),
+        None =>
+            own.len() <= 1
+                && own
+                    .iter()
+                    .all(|conceal| Some(&conceal.marker) == opening.as_ref().map(|o| &o.range)),
+    });
+    let revealed = own.iter().any(|conceal| !is_active(conceal, selection));
+    if let Some((gutter, source)) = gutter {
+        let layout = carry.layout(gutter, source, revealed, &mut shape);
+        return (Some(Prefix::Gutter(layout)), rest);
+    }
+    let Some(Opening {
+        range,
+        font_size,
+        margin,
+    }) = opening
+    else {
+        return (None, rest);
+    };
+    let shaped = revealed.then(|| shape(&range, font_size));
+    if shaped
+        .as_ref()
+        .is_some_and(|shaped| shaped.width() > margin)
+    {
+        return (None, conceals);
+    }
+    (Some(Prefix::Margin(Hanging { range, shaped })), rest)
+}
+
+/// The prefix never enters the shaped text, so no reveal can re-wrap its line.
+fn display_line(
+    range: &Range<ByteOffset>,
+    conceals: &[Conceal],
+    prefix: Option<&Range<ByteOffset>>,
+    selection: &Range<ByteOffset>,
+) -> DisplayLine {
+    // A lazy line's gutter hides nothing.
+    let hidden = prefix
+        .filter(|prefix| !prefix.is_empty())
+        .map(|prefix| (prefix.clone(), ""));
+    let active = conceals
+        .iter()
+        .filter(|conceal| is_active(conceal, selection))
+        .map(|conceal| (conceal.marker.clone(), conceal.replacement));
+    DisplayLine::new(range.clone(), hidden.into_iter().chain(active))
+}
+
+/// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
+/// `range` starts the line, so its text is a prefix of `line`.
+fn show(
+    range: &Range<ByteOffset>,
+    line: &str,
+    spans: &[Span],
+    marked: Option<&Range<ByteOffset>>,
+    font_size: Pixels,
+    styles: &mut RunStyles<'_>,
+    window: &mut Window,
+) -> ShapedLine {
+    let identity = DisplayLine::new(range.clone(), []);
+    let runs = line_runs(range, spans, marked, &identity, styles);
+    let text = SharedString::from(line[..range.end - range.start].to_owned());
+    window
+        .text_system()
+        .shape_line(text, font_size, &runs, None)
+}
+pub(crate) mod actions;
+mod block_scroll;
+mod element;
+pub(crate) mod layout;
+mod motion;
+mod mouse;
+mod parked;
+mod parses;
+mod reload;
+#[cfg(test)]
+mod tests;
+mod viewport;
+
+use std::ops::Range;
+use std::rc::Rc;
+
+#[cfg(test)]
+use gpui::Bounds;
+use gpui::{
+    App, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    MouseButton, ParentElement, Pixels, Point, Render, StatefulInteractiveElement, Styled,
+    Subscription, TextStyle, Window, div,
+};
+use inkra_editor::{ParkedSelection, Selection};
+use inkra_markdown::{Link, Markdown, touched};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
+
+use crate::open::Open;
+use crate::text_input::{self, InputHost, Mode, TextInput};
+use crate::theme;
+use element::TextElement;
+use viewport::{Reveal, ScrollTo, Viewport};
+
+pub(crate) use parked::ParkedView;
+pub(crate) use viewport::TopLine;
+
+/// A link the user asked to follow: ⌘-click or ⌘↵ here, ⌘⇧-click or ⌘⇧↵ in a new tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinkFollowed {
+    pub(crate) link: Link,
+    pub(crate) open: Open,
+}
+
+impl EventEmitter<LinkFollowed> for EditorView {}
+
+/// What a tab puts back on its note: the selection and the text on top (tabs spec, A2).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ViewState {
+    pub(crate) selection: Selection,
+    pub(crate) top: TopLine,
+    /// Each scrolled block's start and offset; never saved to disk.
+    pub(crate) scrolls: Vec<(ByteOffset, Pixels)>,
+}
+
+impl ViewState {
+    /// Onto `buffer`'s graphemes, tail then head, so direction and goal survive.
+    fn clipped(self, buffer: &Buffer) -> Self {
+        let clip = |offset| buffer.clip_grapheme(offset, Bias::Left);
+        let mut selection = Selection::at(clip(self.selection.tail()));
+        selection.set_head(clip(self.selection.head()), self.selection.goal());
+        Self {
+            selection,
+            top: self.top.clipped(buffer),
+            scrolls: self.scrolls,
+        }
+    }
+}
+
+pub(crate) struct EditorView {
+    input: TextInput,
+    markdown: Rc<Markdown>,
+    /// The `Buffer::version()` `markdown` was parsed from (live-preview spec, D10).
+    parsed_at: Option<Version>,
+    /// An inactive editor's selection, kept as anchors and re-read on every buffer version.
+    pinned: Option<ParkedSelection>,
+    is_selecting: bool,
+    viewport: Viewport,
+    /// Where prepaint last put the text: a reused layout can keep an older margin (D13).
+    place: Option<element::Place>,
+    /// Every layout holds a clone: never replaced, or a drawn layout would read a stale table.
+    scrolls: layout::BlockScrolls,
+    /// The pointer's gesture, not the note's: `open_buffer` keeps it.
+    gesture: block_scroll::Gesture,
+    /// Repaints once when a bar's linger ends (code block scroll spec, S3).
+    bar_expiry: Option<gpui::Task<()>>,
+    /// Held for its `Drop`: losing it stops the view repainting on buffer changes, with
+    /// no test failure short of a two-view test, and leaves a reload's caret on the old text.
+    _buffer: [Subscription; 2],
+}
+
+impl EditorView {
+    pub(crate) fn new(buffer: Entity<Buffer>, cx: &mut Context<Self>) -> Self {
+        let end = buffer.read(cx).len();
+        let subscriptions = Self::watch_buffer(&buffer, cx);
+
+        let mut view = Self {
+            input: TextInput::new(buffer, Selection::at(end), Mode::Multiline, cx),
+            markdown: Rc::default(),
+            parsed_at: None,
+            pinned: None,
+            is_selecting: false,
+            viewport: Viewport::default(),
+            place: None,
+            scrolls: layout::BlockScrolls::default(),
+            gesture: block_scroll::Gesture::default(),
+            bar_expiry: None,
+            _buffer: subscriptions,
+        };
+        // The buffer outlives the view, so its anchors would only add to the count.
+        cx.on_release(|view, cx| view.forget_scrolls(cx)).detach();
+        view.refresh(cx);
+        view
+    }
+
+    /// The only gate that may rebind the buffer: through `edit_buffer` instead,
+    /// the new note's text would land on the *previous* note's undo stack.
+    #[expect(
+        clippy::used_underscore_binding,
+        reason = "resubscribing is the point of the gate"
+    )]
+    pub(crate) fn open_buffer(
+        &mut self,
+        buffer: Entity<Buffer>,
+        view: Option<ViewState>,
+        cx: &mut Context<Self>,
+    ) {
+        let view = view.map(|view| view.clipped(buffer.read(cx)));
+        // Rebuilt: the old `Subscription`s would observe the closed note.
+        self._buffer = Self::watch_buffer(&buffer, cx);
+        let (selection, top, scrolls) = view.map_or(
+            (Selection::at(ByteOffset::new(0)), None, Vec::new()),
+            |view| (view.selection, Some(view.top), view.scrolls),
+        );
+        // Before the rebind: the anchors resolve only in the buffer they were set in.
+        let pinned = self.drop_pin(cx);
+        self.forget_scrolls(cx);
+        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.input.rebind(buffer, selection);
+        if pinned {
+            self.pinned = Some(self.park_selection(cx));
+        }
+        self.anchor_scrolls(&scrolls, cx);
+        // Reset, not compared: versions are per buffer, so two notes can share one.
+        self.parsed_at = None;
+        self.refresh(cx);
+
+        self.is_selecting = false;
+        self.viewport = Viewport::default();
+        // Never a reveal: the restored top line is where the reader left it.
+        if let Some(top) = top {
+            self.viewport.request(ScrollTo::Top(top));
+        }
+
+        cx.notify();
+    }
+
+    fn watch_buffer(buffer: &Entity<Buffer>, cx: &mut Context<Self>) -> [Subscription; 2] {
+        [
+            cx.observe(buffer, Self::on_buffer_changed),
+            cx.subscribe(buffer, Self::on_buffer_reloaded),
+        ]
+    }
+
+    fn markdown(&self) -> &Markdown {
+        &self.markdown
+    }
+
+    /// Parses only when the buffer moved since the last parse; the block scrolls sync on every
+    /// call, so never inside a buffer update.
+    fn refresh(&mut self, cx: &mut App) {
+        let version = self.input.buffer().read(cx).version();
+        if self.parsed_at != Some(version) {
+            self.markdown = parses::parsed(self.input.buffer(), cx);
+            self.parsed_at = Some(version);
+            if let Some(pinned) = &self.pinned {
+                let peeked = pinned.peek(self.input.buffer().read(cx));
+                // Unfocused, so no composition to lose.
+                if &peeked != self.input.state().selection() {
+                    self.input.reset_state(peeked);
+                }
+            }
+        }
+        let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
+            self.is_block_start(offset)
+        });
+        if !dropped.is_empty() {
+            self.input.buffer().update(cx, |buffer, _| {
+                for anchor in dropped {
+                    buffer.forget(anchor);
+                }
+            });
+        }
+    }
+
+    /// Seals the undo group even with no edit, as `capture` does, and parks the selection.
+    pub(crate) fn pin(&mut self, cx: &mut Context<Self>) {
+        if self.pinned.is_some() {
+            return;
+        }
+        let selection = self.input.state().selection();
+        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
+        let pinned = self.input.buffer().update(cx, |buffer, _| {
+            buffer.finalize_transaction();
+            ParkedSelection::park(selection, buffer)
+        });
+        self.pinned = Some(pinned);
+    }
+
+    pub(crate) fn unpin(&mut self, cx: &mut Context<Self>) {
+        self.drop_pin(cx);
+    }
+
+    pub(crate) fn is_pinned(&self) -> bool {
+        self.pinned.is_some()
+    }
+
+    /// Forgets the anchors unread: every buffer version already reset the selection to them.
+    fn drop_pin(&mut self, cx: &mut App) -> bool {
+        let Some(pinned) = self.pinned.take() else {
+            return false;
+        };
+        let _ = self
+            .input
+            .buffer()
+            .update(cx, |buffer, _| pinned.unpark(buffer));
+        true
+    }
+
+    /// The selection as anchors in the bound buffer, unsealed: the pin it replaces already sealed.
+    fn park_selection(&self, cx: &mut App) -> ParkedSelection {
+        let selection = self.input.state().selection();
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| ParkedSelection::park(selection, buffer))
+    }
+
+    /// Covers writes that bypass `edit_buffer`; tests make them today.
+    fn on_buffer_changed(&mut self, _: Entity<Buffer>, cx: &mut Context<Self>) {
+        self.refresh(cx);
+        cx.notify();
+    }
+
+    fn reshape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // First: the observer only runs when effects flush, after this reshape.
+        self.refresh(cx);
+        let Some(last) = self.input.last_layout().cloned() else {
+            return;
+        };
+        let margin = self.place.map_or(last.margin(), |place| place.margin);
+        let layout = self.layout_at(last.style(), last.wrap_width(), margin, window, cx);
+        if !Rc::ptr_eq(&layout, &last) {
+            self.input.set_layout(layout);
+        }
+    }
+
+    /// The last layout when it still fits these inputs, else a whole-document shape.
+    fn layout_at(
+        &self,
+        style: &TextStyle,
+        wrap_width: Option<Pixels>,
+        margin: Pixels,
+        window: &mut Window,
+        cx: &App,
+    ) -> Rc<layout::DocumentLayout> {
+        let state = self.input.state();
+        let (selection, marked) = (state.selection().range(), state.marked_range());
+        let inputs = layout::LayoutInputs {
+            buffer: self.input.buffer().read(cx),
+            markdown: self.markdown(),
+            selection: &selection,
+            marked: marked.as_ref(),
+            style,
+            wrap_width,
+            margin,
+            code_block_wrap: theme::code_block_wrap(cx),
+            theme: theme::current(cx),
+            scrolls: &self.scrolls,
+        };
+        let previous = self.input.last_layout();
+        match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
+            Some(last) => Rc::clone(last),
+            None => Rc::new(layout::shape_document(
+                &inputs,
+                previous.map(Rc::as_ref),
+                window,
+            )),
+        }
+    }
+
+    pub(crate) fn cursor(&self) -> ByteOffset {
+        self.input.cursor()
+    }
+
+    pub(crate) fn caret_point(&self) -> Option<Point<Pixels>> {
+        self.input.caret_point()
+    }
+
+    /// Seals the undo group even with no edit, so typing on both sides of a tab switch undoes in two steps.
+    pub(crate) fn capture(&self, cx: &mut App) -> ViewState {
+        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
+        self.input
+            .buffer()
+            .update(cx, |buffer, _| buffer.finalize_transaction());
+        self.view_state()
+    }
+
+    /// A view back onto the bound buffer: no resubscribe and no reparse, unlike `open_buffer`.
+    pub(crate) fn restore(&mut self, view: ViewState, cx: &mut Context<Self>) {
+        let view = view.clipped(self.input.buffer().read(cx));
+        let pinned = self.drop_pin(cx);
+        self.input.reset_state(view.selection);
+        if pinned {
+            self.pinned = Some(self.park_selection(cx));
+        }
+        self.forget_scrolls(cx);
+        self.anchor_scrolls(&view.scrolls, cx);
+        self.is_selecting = false;
+        self.viewport = Viewport::default();
+        self.viewport.request(ScrollTo::Top(view.top));
+        cx.notify();
+    }
+
+    /// Reads a waiting scroll request before the drawn frame, so two switches in one frame keep it.
+    pub(crate) fn view_state(&self) -> ViewState {

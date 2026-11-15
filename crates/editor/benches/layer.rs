@@ -14,19 +14,22 @@ const BLOCK: &str = "```rust\nfn block() -> usize {\n    let x = 1;\n    x + 1\n
 fn layered() -> (Buffer, Layer<u8>) {
     let buffer = Buffer::new(BLOCK.repeat(BLOCKS));
     let mut layer = Layer::new(buffer.edit_mark());
-    for block in 0..BLOCKS {
-        let start = block * BLOCK.len();
-        let marks = ["fn", "let"]
-            .into_iter()
-            .map(|word| {
-                let at = start + BLOCK.find(word).unwrap_or(0);
-                (ByteOffset::new(at)..ByteOffset::new(at + word.len()), 1)
-            })
-            .collect();
-        let chunk = ByteOffset::new(start)..ByteOffset::new(start + BLOCK.len());
-        let published = layer.publish(&buffer, chunk, marks, buffer.edit_mark());
-        assert_eq!(published, Ok(true));
-    }
+    let chunks = (0..BLOCKS)
+        .map(|block| {
+            let start = block * BLOCK.len();
+            let marks = ["fn", "let"]
+                .into_iter()
+                .map(|word| {
+                    let at = start + BLOCK.find(word).unwrap_or(0);
+                    (ByteOffset::new(at)..ByteOffset::new(at + word.len()), 1)
+                })
+                .collect();
+            let chunk = ByteOffset::new(start)..ByteOffset::new(start + BLOCK.len());
+            (chunk, 0, marks)
+        })
+        .collect();
+    let published = layer.publish(&buffer, Vec::new(), chunks, buffer.edit_mark());
+    assert_eq!(published, Ok(true));
     (buffer, layer)
 }
 

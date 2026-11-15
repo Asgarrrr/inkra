@@ -1,12 +1,5 @@
 //! Styled ranges features publish over a buffer, one layer per declared `LayerDecl`, drawn by
 //! every view of that buffer (decoration layer spec).
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only the test feature listens and publishes until a feature does"
-    )
-)]
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -24,7 +17,7 @@ mod open;
 
 use listen::{Heard, Listener, Seed};
 pub(crate) use listen::{TextChange, listen};
-#[cfg(test)]
+use open::Chunk;
 pub(crate) use open::Opened;
 pub(crate) use open::{OpenFn, openers, run_openers, seed};
 
@@ -169,16 +162,16 @@ fn entry<'a>(
     })
 }
 
-/// As `Layer::publish`, on `layer` over `buffer`; redraws every window when the marks change. A
-/// lost layer's listener hears `Lost` at the next sync, and publishes it all again.
+/// As `Layer::publish`, on `layer` over `buffer`; redraws every window once when the marks change.
+/// A lost layer's listener hears `Lost` at the next sync, and publishes it all again.
 ///
 /// # Panics
 /// If `layer` is not declared, or as `Layer::publish`.
 pub(crate) fn publish(
     layer: LayerId,
     buffer: &WeakEntity<Buffer>,
-    chunk: Range<ByteOffset>,
-    marks: Vec<(Range<ByteOffset>, MarkStyle)>,
+    removed: Vec<Range<ByteOffset>>,
+    chunks: Vec<Chunk>,
     at: EditMark,
     cx: &mut App,
 ) {
@@ -194,7 +187,7 @@ pub(crate) fn publish(
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
         let text = buffer.read(cx);
-        let published = entry.layers[rank].publish(text, chunk, marks, at);
+        let published = entry.layers[rank].publish(text, removed, chunks, at);
         if published.is_err() && matches!(entry.heard[rank], Heard::At(_)) {
             entry.heard[rank] = Heard::Lost;
         }
@@ -209,6 +202,26 @@ pub(crate) fn publish(
     if changed {
         cx.refresh_windows();
     }
+}
+
+/// The chunks `layer` holds over `buffer`, each with its tag, sorted (code highlighting spec, D9
+/// and deviations 6 and 7).
+///
+/// # Panics
+/// If `layer` is not declared.
+pub(crate) fn chunks(
+    layer: LayerId,
+    buffer: &Entity<Buffer>,
+    cx: &App,
+) -> Vec<(Range<ByteOffset>, Option<u64>)> {
+    let rank = rank(layer, cx);
+    let Some(entry) = cx.global::<Decorations>().entries.get(&buffer.entity_id()) else {
+        return Vec::new();
+    };
+    let layer = &entry.layers[rank];
+    // Offsets behind the buffer's would mis-plan without a sign.
+    debug_assert!(layer.is_empty() || layer.at() == buffer.read(cx).edit_mark());
+    layer.chunks().collect()
 }
 
 /// Brings every layer of `buffer` to its edit mark. A non-empty layer behind it draws something

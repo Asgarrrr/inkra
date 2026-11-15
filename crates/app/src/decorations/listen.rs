@@ -13,10 +13,6 @@ use crate::feature::over_budget;
 /// What a layer's open function hands its listener (D8).
 pub(crate) type Seed = Box<dyn Any + Send>;
 
-#[expect(
-    dead_code,
-    reason = "no listener reads the splices or the seed until highlighting does"
-)]
 pub(crate) enum TextChange {
     /// The listener has not heard of the buffer before.
     Opened(Option<Seed>),

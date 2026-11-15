@@ -51,6 +51,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
   After changing `vault` logic, run the diff command with
   `-p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
+  After changing `highlight` logic, run the diff command with
+  `-p inkra-highlight --test-package inkra-highlight -f 'crates/highlight/src/**/*.rs'`.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
@@ -66,11 +68,14 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
   `inkra-tabs` and `inkra-layout` depend on no workspace crate; `app` depends on both.
-- `text`, `editor`, `vault`, `markdown`, `index`, `tabs` and `layout` have no gpui dependency; `check.sh`
+  `inkra-highlight` depends on `inkra-text` only, plus `inkra-editor` and `inkra-markdown`
+  as dev-dependencies for its model test and benches; `app` depends on it.
+- `text`, `editor`, `vault`, `markdown`, `index`, `tabs`, `layout` and `highlight` have no gpui dependency; `check.sh`
   enforces it for every workspace member except `inkra-app`.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
+  - lexing code into token classes → `highlight`; never a colour
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
   - which tab is active, what a close activates, which place back and forward reach, what `⌘⇧T`
@@ -131,8 +136,9 @@ Read the spec before changing its area:
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
 - `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's
   horizontal scroll; replaces decision 5 of the code-blocks spec
-- `docs/superpowers/specs/2026-11-11-code-highlighting-design.md` — highlighting
-  in code blocks: the library choice, token classes, the per-block cache
+- `docs/superpowers/specs/2026-11-14-code-highlighting-design.md` — highlighting
+  in code blocks: our own lexers in `inkra-highlight`, token classes, the `syntax` layer,
+  large blocks; `2026-11-11-code-highlighting-design.md` is the superseded tree-sitter pick
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
