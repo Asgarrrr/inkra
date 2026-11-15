@@ -126,7 +126,7 @@ exclude_re = [
     "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
     "^crates/app/src/editor/layout/mod\\.rs:[0-9]+:58: replace - with (\\+|/) in DocumentLayout::row_for_y$",
     "^crates/app/src/bench\\.rs:",
-    "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:(19: replace < with <= in Carry<'p>::was|27: replace < with <= in Carry<'p>::flips)$",
+    "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:17: replace < with <= in Carry<'p>::was$",
     "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:51: replace < with <= in Carry<'p>::flips$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in <impl Fs for RealFs>::rename$",

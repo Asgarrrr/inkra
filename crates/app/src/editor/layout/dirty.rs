@@ -113,7 +113,7 @@ impl<'p> Carry<'p> {
         {
             return None;
         }
-        let was = self.was(at);
+        let was = self.was(at, at);
         while self.old[self.next_old].start < was {
             self.next_old += 1;
         }
@@ -123,9 +123,10 @@ impl<'p> Carry<'p> {
         Some(&old.line)
     }
 
-    /// Where a clean line's `offset` stood in the previous text.
-    fn was(&self, offset: ByteOffset) -> ByteOffset {
-        if offset < self.edit.at {
+    /// Where `offset` stood in the previous text, for an item at `side` on a clean line: the edit
+    /// moved it only if the item is past the edit's start.
+    fn was(&self, side: ByteOffset, offset: ByteOffset) -> ByteOffset {
+        if side < self.edit.at {
             offset
         } else {
             offset + self.edit.removed_len - self.edit.inserted_len
@@ -147,15 +148,9 @@ impl<'p> Carry<'p> {
             if dirty.peek().is_some_and(|dirty| dirty.start <= marker) {
                 return false;
             }
-            let was = |offset| {
-                if marker < self.edit.at {
-                    offset
-                } else {
-                    offset + self.edit.removed_len - self.edit.inserted_len
-                }
-            };
+            let element = &conceal.element;
             let old = Conceal {
-                element: was(conceal.element.start)..was(conceal.element.end),
+                element: self.was(marker, element.start)..self.was(marker, element.end),
                 ..conceal.clone()
             };
             is_active(&old, before) != is_active(conceal, after)
