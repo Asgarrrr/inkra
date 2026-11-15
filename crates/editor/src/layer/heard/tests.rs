@@ -28,7 +28,7 @@ fn a_failed_publish_after_hearing_is_heard_lost_once() {
     let mut layer = HeardLayer::<char>::new(buffer.edit_mark());
     layer.hear(&buffer);
 
-    assert!(layer.publish(&buffer, Vec::new(), marked(), old));
+    assert_eq!(layer.publish(&buffer, Vec::new(), marked(), old), Err(Lost));
 
     assert_eq!(layer.hear(&buffer), Some(TextChange::Lost));
     assert_eq!(layer.hear(&buffer), None);
@@ -42,7 +42,7 @@ fn a_stale_late_publish_before_the_first_hearing_makes_the_open_stale() {
     let mut layer = HeardLayer::new(buffer.edit_mark());
     layer.land(&buffer, marked());
 
-    layer.publish(&buffer, Vec::new(), marked(), old);
+    assert_eq!(layer.publish(&buffer, Vec::new(), marked(), old), Err(Lost));
 
     assert!(layer.layer().is_empty());
     assert_eq!(
@@ -95,12 +95,24 @@ fn catch_up_reports_a_non_empty_layer_behind_the_buffer() {
     let mut buffer = Buffer::new("abc");
     let mut layer = HeardLayer::new(buffer.edit_mark());
     buffer.transact(|buffer| buffer.insert(at(3), "d"));
-    assert!(!layer.catch_up(&buffer), "empty");
+    assert_eq!(layer.catch_up(&buffer), Ok(false), "empty");
     layer.land(&buffer, marked());
-    assert!(!layer.catch_up(&buffer), "at the edit mark");
+    assert_eq!(layer.catch_up(&buffer), Ok(false), "at the edit mark");
 
     buffer.transact(|buffer| buffer.insert(at(3), "e"));
 
-    assert!(layer.catch_up(&buffer));
+    assert_eq!(layer.catch_up(&buffer), Ok(true));
     assert_eq!(layer.layer().at(), buffer.edit_mark());
+}
+
+#[test]
+fn catch_up_past_the_log_is_lost_and_clears_the_layer() {
+    let mut buffer = Buffer::new("abc");
+    let mut layer = HeardLayer::new(buffer.edit_mark());
+    layer.land(&buffer, marked());
+    overflow(&mut buffer);
+
+    assert_eq!(layer.catch_up(&buffer), Err(Lost));
+    assert!(layer.layer().is_empty());
+    assert_eq!(layer.catch_up(&buffer), Ok(false));
 }

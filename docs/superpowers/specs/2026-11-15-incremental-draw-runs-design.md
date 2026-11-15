@@ -695,6 +695,57 @@ S1a deviations from this spec:
 9. The count tests live in `editor/tests/carry.rs`, since `shapes.rs` would
    pass 400 lines. The colours variant of the keystroke test is S1b's.
 
+S1b, release, M5 Pro. Before is draw-s1a, after is S1b, both measured in one
+sitting. Bytes are gpui's bench report, "allocated bytes per iteration".
+
+| Case | Before | After | Allocated before | Allocated after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose, colours | 11.29 ms | 0.60 ms | 30.57 MB | 1.32 MB |
+| One block, type in prose, colours | 9.84 ms | 0.44 ms | 29.29 MB | 1.03 MB |
+| One block, type in the block, colours | 10.09 ms | 7.28 ms | 29.28 MB | 20.58 MB |
+| 1000 blocks, type in prose, plain | 0.62 ms | 0.63 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, plain | 0.45 ms | 0.46 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, plain | 2.47 ms | 2.48 ms | 5.59 MB | 5.59 MB |
+
+Typing in the block still rebuilds the whole block, as without colours: the
+coarse parse diff dirties it (S2), and so does the publish's range (S3). Its
+lines cost more with colours: `colors_in` and about twice the runs.
+
+The decoration log keeps the last 64 bumps. The oracle drives the real
+`decorations` module: publishes at any edit mark seen, with cleared ranges and
+chunks; seeds; switching the layer on and off; losing the splice log; and a
+splice laid out before its `sync`. With the decoration ranges dropped from the
+dirty set, the oracle fails within a few cases from an empty regressions file,
+three runs out of three. It also checks D8's `Shift` claim on every step.
+
+S1b deviations from this spec:
+
+1. `Moved` and the log, `RevisionLog`, live in `inkra-editor`, not `app` (D12).
+   They take offsets and an `EditMark` and return offsets, and need no
+   `Window`, so they get `#[test]` and a proptest there. `app`'s `Entry` holds
+   one, and `Drawn` reads it.
+2. A publish logs `Range` from S1b on, not `Whole` until S3. The range spans
+   the publish's cleared ranges and chunks, at its edit mark. `replace` changes
+   marks only inside those ranges once mapped, so the span holds every
+   recoloured byte. S3 narrows it to the marks that differ. Without it, a
+   recolour of one block rebuilds the whole note, and typing in a block with
+   colours could not carry.
+3. `HeardLayer::publish` returns `Result<bool, Lost>`, like `catch_up`. The
+   publish site logs `Whole` for a lost layer and the range for a recolour; a
+   `bool` merged the two. S3 still turns the `bool` into the range.
+4. `Drawn::revision` is `Option<u64>`: `None` while a layer with marks trails
+   the buffer's edit mark. `colors_in` draws no such layer, and the `sync` that
+   brings it back logs only a `Shift`. So a layout drawn without its colours
+   would carry uncoloured lines after the `sync`, and a layout drawn with them
+   would carry coloured lines into a frame that draws none. A `None` on either
+   side rebuilds the whole note, and `is_shaped_from` never reuses a layout
+   while the inputs hold `None`: two `None`s compare equal, yet another layer
+   may have recoloured in between. `EditorView::refresh` syncs before every
+   layout, so production never pays it. The oracle fails without it.
+5. `sync` logs `Whole` for a lost layer even when it held no marks. A layer
+   catches up on every `sync` while it is on, so only a layer switched on after
+   more than 256 splices is lost there, once.
+
 ## Unverified
 
 - The expected gain after S4 (D11), and the cost of the placement pass's block

@@ -46,16 +46,18 @@ struct Model {
 }
 
 impl Model {
-    /// Brings the layer to `now`; past the log, it is cleared, so a heard listener hears it lost
-    /// and an unheard one's open is no longer fresh.
-    fn catch_up(&mut self, since: usize) {
-        if self.now - self.layer_at.min(since) > KEPT {
+    /// Brings the layer to `now`; past the log, it is cleared and `true` returned, so a heard
+    /// listener hears it lost and an unheard one's open is no longer fresh.
+    fn catch_up(&mut self, since: usize) -> bool {
+        let lost = self.now - self.layer_at.min(since) > KEPT;
+        if lost {
             self.heard = match self.heard {
                 Heard::Unheard { .. } => Heard::Unheard { opened: None },
                 Heard::Lost | Heard::At(_) => Heard::Lost,
             };
         }
         self.layer_at = self.now;
+        lost
     }
 
     /// The change heard, with an edit's splices counted.
@@ -93,8 +95,7 @@ proptest! {
         for step in steps {
             match step {
                 Step::Land => {
-                    let lost = model.now - model.layer_at > KEPT;
-                    model.catch_up(model.now);
+                    let lost = model.catch_up(model.now);
                     if let (false, Heard::Unheard { opened }) = (lost, &mut model.heard) {
                         *opened = Some(model.now);
                     }
@@ -112,12 +113,13 @@ proptest! {
                 }
                 Step::Publish(pick) => {
                     let (at, since) = marks[pick % marks.len()];
-                    model.catch_up(since);
-                    layer.publish(&buffer, Vec::new(), Vec::new(), at);
+                    let lost = model.catch_up(since);
+                    let published = layer.publish(&buffer, Vec::new(), Vec::new(), at);
+                    prop_assert_eq!(published.is_err(), lost);
                 }
                 Step::CatchUp => {
-                    model.catch_up(model.now);
-                    layer.catch_up(&buffer);
+                    let lost = model.catch_up(model.now);
+                    prop_assert_eq!(layer.catch_up(&buffer).is_err(), lost);
                 }
                 Step::Hear => prop_assert_eq!(layer.hear(&buffer), model.hear()),
                 Step::Switch(on) => {

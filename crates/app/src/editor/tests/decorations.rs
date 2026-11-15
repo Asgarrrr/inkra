@@ -102,8 +102,8 @@ fn a_batch_lands_every_change_and_moves_the_revision_once(cx: &mut TestAppContex
     cx.update(fakes::declare_todo);
     publish_warning(&buffer, 5..6, cx);
     let revision =
-        |cx: &mut TestAppContext| cx.update(|cx| decorations::drawn(&buffer, cx).revision);
-    let before = revision(cx);
+        |cx: &mut TestAppContext| cx.update(|cx| decorations::drawn(&buffer, cx).revision());
+    let before = revision(cx).unwrap();
 
     cx.update(|cx| {
         let warning = MarkStyle {
@@ -128,7 +128,7 @@ fn a_batch_lands_every_change_and_moves_the_revision_once(cx: &mut TestAppContex
     });
     cx.run_until_parked();
 
-    assert_eq!(revision(cx), before + 1);
+    assert_eq!(revision(cx), Some(before + 1));
     assert_eq!(
         warning_runs(window, cx),
         [(4, true), (3, false), (4, true), (2, false)]

@@ -3,12 +3,12 @@
 use std::rc::Rc;
 
 use gpui::{TextStyle, Window, px};
-use inkra_editor::HeardLayer;
+use inkra_editor::{HeardLayer, Lost, Moved, RevisionLog};
 use inkra_highlight::{Batch, batch};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
-use crate::decorations::{Drawn, MarkStyle};
+use crate::decorations::{Drawn, MarkStyle, recolour};
 use crate::editor::layout::{BlockScrolls, DocumentLayout, LayoutInputs, shape_document};
 use crate::highlighting::styled;
 use crate::theme::builtin;
@@ -19,8 +19,8 @@ pub struct Typing {
     markdown: Rc<Markdown>,
     /// Empty and never published to without colours.
     syntax: [HeardLayer<MarkStyle>; 1],
-    /// Moves when the colours move, as `decorations::sync` and `publish` bump it.
-    revision: u64,
+    /// Bumped when the colours move, as `decorations::sync` and `publish` bump it.
+    log: RevisionLog,
     colours: bool,
     style: TextStyle,
     scrolls: BlockScrolls,
@@ -49,7 +49,7 @@ impl Typing {
             buffer,
             markdown,
             syntax,
-            revision: 0,
+            log: RevisionLog::new(),
             colours,
             style: window.text_style(),
             scrolls: BlockScrolls::default(),
@@ -72,12 +72,27 @@ impl Typing {
             return;
         }
         let [syntax] = &mut self.syntax;
-        let moved = syntax.catch_up(&self.buffer);
+        let caught = match syntax.catch_up(&self.buffer) {
+            Ok(false) => None,
+            Ok(true) => Some(Moved::Shift),
+            Err(Lost) => Some(Moved::Whole),
+        };
+        if let Some(moved) = caught {
+            self.log.bump(self.log.revision() + 1, moved);
+        }
         let held: Vec<_> = syntax.layer().chunks().collect();
         let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
-        let lexed = lexed.into_iter().map(styled).collect();
-        let published = syntax.publish(&self.buffer, clear, lexed, self.buffer.edit_mark());
-        self.revision += u64::from(moved || published);
+        let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
+        let at = self.buffer.edit_mark();
+        let recoloured = recolour(&clear, &lexed, at);
+        let published = match syntax.publish(&self.buffer, clear, lexed, at) {
+            Ok(false) => None,
+            Ok(true) => Some(recoloured),
+            Err(Lost) => Some(Moved::Whole),
+        };
+        if let Some(moved) = published {
+            self.log.bump(self.log.revision() + 1, moved);
+        }
     }
 
     /// Lays the note out from the previous layout, as a keystroke's frame does; from scratch at first.
@@ -88,8 +103,7 @@ impl Typing {
 
     fn shape_from(&self, previous: Option<&DocumentLayout>, window: &mut Window) -> DocumentLayout {
         let selection = self.caret..self.caret;
-        let mut decorations = Drawn::for_tests(&self.syntax, self.buffer.edit_mark());
-        decorations.revision = self.revision;
+        let decorations = Drawn::for_tests(&self.syntax, &self.log, self.buffer.edit_mark());
         let inputs = LayoutInputs {
             buffer: &self.buffer,
             markdown: &self.markdown,
