@@ -274,6 +274,34 @@ fn more_than_256_splices_past_a_mark_is_none() {
 }
 
 #[test]
+fn every_buffer_has_its_own_id_and_keeps_it_through_edits() {
+    let mut buffer = Buffer::new("abc");
+    let other = Buffer::new("abc");
+    let id = buffer.id();
+    assert_ne!(id, other.id());
+
+    buffer.transact(|buffer| buffer.insert(at(3), "x"));
+    buffer.undo();
+
+    assert_eq!(buffer.id(), id);
+}
+
+#[test]
+fn a_splice_maps_an_offset_by_where_it_falls() {
+    let splice = Splice {
+        at: at(2),
+        removed_len: 3,
+        inserted_len: 1,
+    };
+
+    assert_eq!(splice.map(at(1), Bias::Right), at(1));
+    assert_eq!(splice.map(at(3), Bias::Left), at(2));
+    assert_eq!(splice.map(at(3), Bias::Right), at(3));
+    assert_eq!(splice.map(at(5), Bias::Left), at(3));
+    assert_eq!(splice.map(at(9), Bias::Left), at(7));
+}
+
+#[test]
 #[should_panic(expected = "is past")]
 fn a_mark_from_the_future_panics() {
     let mut edited = Buffer::new("");

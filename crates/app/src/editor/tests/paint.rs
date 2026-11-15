@@ -3,7 +3,7 @@
 use gpui::{TestAppContext, px};
 
 use super::{TALL, at, dispatching, tall_document};
-use crate::editor::layout::painted;
+use crate::editor::layout::{painted, painted_tops};
 use crate::text_input::painted_selection;
 
 #[gpui::test]
@@ -33,6 +33,20 @@ fn a_frame_paints_only_the_lines_in_view(cx: &mut TestAppContext) {
     let (lines, _) = painted();
     assert!(lines.start > 0, "{lines:?}");
     assert_eq!(lines.end, TALL + 1);
+}
+
+#[gpui::test]
+fn each_line_paints_at_its_own_top(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "# Title\n\nbody\n");
+    cx.run_until_parked();
+
+    let tops = painted_tops();
+    window
+        .update(&mut cx, |view, _, _| {
+            let painted: Vec<_> = tops.iter().map(|top| *top - tops[0]).collect();
+            assert_eq!(painted, view.input.last_layout().unwrap().line_tops());
+        })
+        .unwrap();
 }
 
 #[gpui::test]

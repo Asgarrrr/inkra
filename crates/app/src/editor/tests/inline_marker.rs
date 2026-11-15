@@ -68,6 +68,19 @@ fn a_marker_hangs_only_where_it_fits(cx: &mut TestAppContext) {
     assert_eq!(caret(window, &mut cx), at(9));
 }
 
+#[gpui::test]
+fn a_marker_as_wide_as_the_margin_hangs(cx: &mut TestAppContext) {
+    let (window, mut cx) = with_margin(cx, "#### T\nbody", 60.);
+    cx.simulate_keystrokes("cmd-up");
+    window
+        .update(&mut cx, |view, _, _| {
+            let layout = view.input.last_layout().unwrap();
+            assert_eq!(layout.margin(), px(60.));
+            assert!(layout.prefix_painted(0));
+        })
+        .unwrap();
+}
+
 /// Back on the line the marker is concealed, so `x = 0` lands after it.
 #[gpui::test]
 fn home_down_up_on_an_inline_heading_lands_after_the_marker(cx: &mut TestAppContext) {

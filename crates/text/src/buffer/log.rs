@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use crate::anchor::{Bias, transform};
 use crate::offset::ByteOffset;
 
 /// How many splices a buffer keeps: a mark further behind gets `None` from `edits_since`.
@@ -15,6 +16,15 @@ pub struct Splice {
     pub at: ByteOffset,
     pub removed_len: usize,
     pub inserted_len: usize,
+}
+
+impl Splice {
+    /// Where `offset`, in the text before the splice, lands after it; `bias` picks an end of the
+    /// inserted bytes for an offset at `at` or inside the removed ones.
+    #[must_use]
+    pub fn map(self, offset: ByteOffset, bias: Bias) -> ByteOffset {
+        transform(offset, bias, self.at, self.removed_len, self.inserted_len)
+    }
 }
 
 #[derive(Default)]

@@ -1,5 +1,7 @@
 //! A note typed into, as the editor sees it, for `benches/layout.rs` (incremental layout spec, D11).
 
+use std::rc::Rc;
+
 use gpui::{TextStyle, Window, px};
 use inkra_editor::HeardLayer;
 use inkra_highlight::{Batch, batch};
@@ -14,9 +16,11 @@ use crate::theme::builtin;
 /// A note with its layout shaped, its code blocks coloured or not, and a caret that types `x`.
 pub struct Typing {
     buffer: Buffer,
-    markdown: Markdown,
+    markdown: Rc<Markdown>,
     /// Empty and never published to without colours.
     syntax: [HeardLayer<MarkStyle>; 1],
+    /// Moves when the colours move, as `decorations::sync` and `publish` bump it.
+    revision: u64,
     colours: bool,
     style: TextStyle,
     scrolls: BlockScrolls,
@@ -35,7 +39,7 @@ impl Typing {
     #[must_use]
     pub fn new(text: String, caret: usize, colours: bool, window: &mut Window) -> Self {
         let buffer = Buffer::new(text);
-        let markdown = parse(buffer.text());
+        let markdown = Rc::new(parse(buffer.text()));
         let mut syntax = [HeardLayer::new(buffer.edit_mark())];
         if colours {
             let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
@@ -45,6 +49,7 @@ impl Typing {
             buffer,
             markdown,
             syntax,
+            revision: 0,
             colours,
             style: window.text_style(),
             scrolls: BlockScrolls::default(),
@@ -62,16 +67,17 @@ impl Typing {
         let caret = self.caret;
         self.buffer.transact(|txn| txn.insert(caret, "x"));
         self.caret = caret + 1;
-        self.markdown = parse(self.buffer.text());
+        self.markdown = Rc::new(parse(self.buffer.text()));
         if !self.colours {
             return;
         }
         let [syntax] = &mut self.syntax;
-        syntax.catch_up(&self.buffer);
+        let moved = syntax.catch_up(&self.buffer);
         let held: Vec<_> = syntax.layer().chunks().collect();
         let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
         let lexed = lexed.into_iter().map(styled).collect();
-        syntax.publish(&self.buffer, clear, lexed, self.buffer.edit_mark());
+        let published = syntax.publish(&self.buffer, clear, lexed, self.buffer.edit_mark());
+        self.revision += u64::from(moved || published);
     }
 
     /// Lays the note out from the previous layout, as a keystroke's frame does; from scratch at first.
@@ -82,6 +88,8 @@ impl Typing {
 
     fn shape_from(&self, previous: Option<&DocumentLayout>, window: &mut Window) -> DocumentLayout {
         let selection = self.caret..self.caret;
+        let mut decorations = Drawn::for_tests(&self.syntax, self.buffer.edit_mark());
+        decorations.revision = self.revision;
         let inputs = LayoutInputs {
             buffer: &self.buffer,
             markdown: &self.markdown,
@@ -93,7 +101,7 @@ impl Typing {
             code_block_wrap: false,
             theme: builtin::dark(),
             scrolls: &self.scrolls,
-            decorations: Drawn::for_tests(&self.syntax, self.buffer.edit_mark()),
+            decorations,
         };
         shape_document(&inputs, previous, window)
     }

@@ -23,25 +23,26 @@ impl DocumentLayout {
 
         rows.filter_map(|row| {
             let (line, within) = self.locate(row);
+            let row_height = line.line.row_height;
             let left = if row == first {
                 self.x_on_row(line, within, selection.start)
             } else {
-                self.x_on_row(line, within, line.rows[within].start)
+                self.x_on_row(line, within, line.start + line.line.rows[within].start)
             };
             let right = if row == last {
                 self.x_on_row(line, within, selection.end)
-            } else if within + 1 == line.rows.len() {
-                self.row_end_x(line, within) + line.row_height * NEWLINE_STUB
+            } else if within + 1 == line.line.rows.len() {
+                self.row_end_x(line, within) + row_height * NEWLINE_STUB
             } else {
                 self.row_end_x(line, within)
             };
             let (left, right) = match line.block.and_then(|block| self.block_clip(block)) {
-                Some(clip) => clip.span(left, right, line.row_height)?,
+                Some(clip) => clip.span(left, right, row_height)?,
                 None => (left, right),
             };
             let top = self.top_for_row(row);
             Some(fill(
-                Bounds::from_corners(point(left, top), point(right, top + line.row_height)),
+                Bounds::from_corners(point(left, top), point(right, top + row_height)),
                 self.theme.colors.selection,
             ))
         })

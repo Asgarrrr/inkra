@@ -1,3 +1,4 @@
+mod changed;
 mod cmark;
 mod content_lines;
 mod display;
@@ -10,6 +11,7 @@ mod reveal;
 mod spans;
 mod styles;
 
+pub use changed::changed;
 pub use content_lines::content_lines;
 pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
