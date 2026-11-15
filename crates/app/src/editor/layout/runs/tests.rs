@@ -164,6 +164,27 @@ fn marked_text_wins_over_a_layer() {
     );
 }
 
+/// A seed can re-split a mark without changing a colour, and logs nothing; the line it carries
+/// must still match a fresh one.
+#[test]
+fn adjacent_marks_of_one_colour_make_one_run() {
+    let buffer = Buffer::new("abcdef");
+    let warning = colored(ColorToken::Warning);
+    let layers = [layer(
+        &buffer,
+        vec![(range(0, 1), warning), (range(1, 5), warning)],
+    )];
+    let log = RevisionLog::new();
+    let drawn = Drawn::for_tests(&layers, &log, buffer.edit_mark());
+    let base = TextStyle::default();
+    let mut styles = RunStyles::new(&base, dark(), &drawn);
+    let display = DisplayLine::new(range(0, 6), []);
+
+    let runs = line_runs(&range(0, 6), &[], None, &display, &mut styles);
+
+    assert_eq!(lens(&runs), vec![5, 1]);
+}
+
 #[test]
 fn a_layer_without_a_colour_leaves_the_one_below() {
     let text = "a b c";

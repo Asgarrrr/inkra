@@ -14,8 +14,10 @@ pub(super) struct RunStyles<'a> {
     base: &'a TextStyle,
     theme: &'a Theme,
     decorations: Drawn<'a>,
-    resolved: HashMap<(Styles, bool, Option<ColorToken>), TextStyle>,
+    resolved: HashMap<RunKey, TextStyle>,
 }
+
+type RunKey = (Styles, bool, Option<ColorToken>);
 
 impl<'a> RunStyles<'a> {
     pub(super) fn new(base: &'a TextStyle, theme: &'a Theme, decorations: &Drawn<'a>) -> Self {
@@ -27,19 +29,19 @@ impl<'a> RunStyles<'a> {
         }
     }
 
-    fn run(
-        &mut self,
-        styles: Styles,
-        composing: bool,
-        color: Option<ColorToken>,
-        len: usize,
-    ) -> TextRun {
-        // Revealed syntax and marked text win over every layer (decoration layer spec, D7).
+    /// What a run's style depends on. Revealed syntax and marked text win over every layer
+    /// (decoration layer spec, D7).
+    fn key(styles: Styles, composing: bool, color: Option<ColorToken>) -> RunKey {
         let color = color.filter(|_| !composing && !styles.contains(Styles::MARKER));
+        (styles, composing, color)
+    }
+
+    fn run(&mut self, key: RunKey, len: usize) -> TextRun {
         let (base, theme) = (self.base, self.theme);
         self.resolved
-            .entry((styles, composing, color))
+            .entry(key)
             .or_insert_with(|| {
+                let (styles, composing, color) = key;
                 let mut style = theme::markdown_style(base, styles, theme);
                 if let Some(token) = color {
                     style.color = theme.colors.color(token).into();
@@ -64,7 +66,8 @@ fn underlined(style: TextStyle) -> TextStyle {
 
 /// Runs indexed from zero within the line's shown text; `display` is over the line's own offsets.
 /// Every range is clamped to the line, so a stale span mis-colours one frame instead of breaking
-/// the run lengths.
+/// the run lengths. No two neighbours share a style, so the runs depend on the line's styles alone,
+/// not on where marks happen to split.
 pub(super) fn line_runs(
     line: &Range<ByteOffset>,
     spans: &[Span],
@@ -105,7 +108,8 @@ pub(super) fn line_runs(
     }
 
     let mut spans = spans.iter().peekable();
-    let mut runs = Vec::with_capacity(cuts.len());
+    let mut runs: Vec<TextRun> = Vec::with_capacity(cuts.len());
+    let mut last = None;
     for (ix, pair) in cuts.windows(2).enumerate() {
         let color = colors.get(ix).copied().flatten();
         let (start, end) = (pair[0], pair[1]);
@@ -120,10 +124,15 @@ pub(super) fn line_runs(
             .filter(|span| span.range.start <= start)
             .map_or(Styles::NONE, |span| span.styles);
         let composing = marked.is_some_and(|marked| marked.start <= start && start < marked.end);
-        runs.push(styles.run(span_styles, composing, color, len));
+        let key = RunStyles::key(span_styles, composing, color);
+        match runs.last_mut() {
+            Some(run) if last == Some(key) => run.len += len,
+            _ => runs.push(styles.run(key, len)),
+        }
+        last = Some(key);
     }
     if runs.is_empty() {
-        runs.push(styles.run(Styles::NONE, false, None, 0));
+        runs.push(styles.run(RunStyles::key(Styles::NONE, false, None), 0));
     }
     runs
 }
