@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{Modifiers, RenderImage, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, Modifiers, RenderImage, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
@@ -15,6 +15,7 @@ use super::{
 use super::{tab_files, view_of};
 use crate::images::{Slot, png};
 use crate::test_support::entry_id;
+use crate::vault::NoteStore;
 
 const PHOTO: &str = "/vault/photo.png";
 const PDF: &str = "/vault/report.pdf";
@@ -24,6 +25,7 @@ const PDF_ROW: f32 = 2.;
 
 struct Vault {
     fs: Arc<MemFs>,
+    notes: Entity<NoteStore>,
     window: WindowHandle<AppShell>,
     cx: VisualTestContext,
     a: EntryId,
@@ -42,6 +44,7 @@ fn vault(cx: &mut TestAppContext, photo: Vec<u8>) -> Vault {
     open(&window, &mut cx, a);
     Vault {
         fs,
+        notes,
         window,
         cx,
         a,
@@ -106,6 +109,12 @@ impl Vault {
 
     fn check(&mut self) {
         check(&self.window, &mut self.cx);
+    }
+
+    fn rename_photo(&mut self, name: &str) -> gpui::Task<bool> {
+        let photo = self.photo;
+        self.notes
+            .update(&mut self.cx, |notes, cx| notes.rename(photo, name, cx))
     }
 
     /// An outside rename: the same file under `to`, so it keeps its id.
@@ -395,5 +404,43 @@ fn a_png_renamed_to_a_note_under_its_tab_still_shows_the_image_once_shown_again(
     assert!(still_drawn);
     assert_eq!(vault.image_shown(), Some(vault.photo));
     assert!(vault.drawn("image-view"));
+    vault.check();
+}
+
+/// The read follows the rename's move, not the vault's stale path, so the image still draws once the rescan lands.
+#[gpui::test]
+fn an_image_opened_before_its_rename_rescan_lands_is_drawn(cx: &mut TestAppContext) {
+    let mut vault = vault(cx, png(40, 30));
+    let gate = vault.fs.block_read_dir("/vault");
+    let _renamed = vault.rename_photo("shot.png");
+    vault.cx.run_until_parked();
+
+    vault.click_photo();
+    gate.release();
+    vault.cx.run_until_parked();
+
+    assert_eq!(vault.image_shown(), Some(vault.photo));
+    assert!(vault.drawn("image-view"));
+    assert!(!vault.drawn("image-failed"));
+    vault.check();
+}
+
+/// Opened while `Fs::rename` runs: no path is safe yet, so the read waits behind the rename.
+#[gpui::test]
+fn an_image_opened_while_its_rename_runs_is_drawn(cx: &mut TestAppContext) {
+    let mut vault = vault(cx, png(40, 30));
+    let rescan = vault.fs.block_read_dir("/vault");
+    let rename = vault.fs.block_after_rename(PHOTO);
+    let _renamed = vault.rename_photo("shot.png");
+    vault.cx.run_until_parked();
+
+    vault.click_photo();
+    rename.release();
+    rescan.release();
+    vault.cx.run_until_parked();
+
+    assert_eq!(vault.image_shown(), Some(vault.photo));
+    assert!(vault.drawn("image-view"));
+    assert!(!vault.drawn("image-failed"));
     vault.check();
 }

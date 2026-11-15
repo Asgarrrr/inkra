@@ -251,6 +251,7 @@ One change makes it usable: the chain moves off `OpenNote` and into
 writes, renames and trashes all append to it. `Writer` stays exactly as it is,
 for the one caller that cannot chain — the quit flush, which `App::shutdown`
 polls while the foreground session is blocked (`gpui/src/app.rs:1310`).
+Every path read of an entry, image loads included, goes through the `moves` overlay, inside its chain.
 
 Two consequences to close explicitly:
 

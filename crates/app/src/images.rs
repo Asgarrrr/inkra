@@ -5,9 +5,9 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui::{Context, RenderImage, Task, prelude::*};
+use gpui::{App, Context, RenderImage, Task, prelude::*};
 use image::ImageFormat;
-use inkra_vault::{EntryId, Fs};
+use inkra_vault::EntryId;
 
 use decode::decode;
 
@@ -18,8 +18,8 @@ mod tests;
 const MAX_IMAGE_BYTES: u64 = 64 << 20;
 
 /// The images tabs show, by file: the image twin of `NoteStore`'s buffers.
+#[derive(Default)]
 pub(crate) struct Images {
-    fs: Arc<dyn Fs>,
     slots: HashMap<EntryId, Slot>,
 }
 
@@ -33,40 +33,40 @@ pub(crate) enum Slot {
 }
 
 impl Images {
-    pub(crate) fn new(fs: Arc<dyn Fs>) -> Self {
-        Self {
-            fs,
-            slots: HashMap::new(),
-        }
-    }
-
-    /// Starts a load unless `id` has a slot; the read and the decode run off the foreground.
-    pub(crate) fn want(&mut self, id: EntryId, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    /// Starts a load unless `id` has a slot: `read`, given the byte cap, reads the file; the
+    /// decode runs off the foreground.
+    pub(crate) fn want(
+        &mut self,
+        id: EntryId,
+        read: impl FnOnce(u64, &mut App) -> Task<Option<(PathBuf, inkra_vault::Result<Vec<u8>>)>>,
+        cx: &mut Context<Self>,
+    ) {
         if self.slots.contains_key(&id) {
             return;
         }
-        let Some(path) = path else {
-            self.slots.insert(id, Slot::Failed);
-            return;
-        };
-        let fs = Arc::clone(&self.fs);
+        let read = read(MAX_IMAGE_BYTES, cx);
         let task = cx.spawn(async move |this, cx| {
-            let (path, decoded) = cx
-                .background_spawn(async move {
-                    let decoded = load(fs.as_ref(), &path).await;
-                    (path, decoded)
-                })
-                .await;
+            let landed = match read.await {
+                Some((path, read)) => Some(
+                    cx.background_spawn(async move {
+                        let decoded = load(read, &path);
+                        (path, decoded)
+                    })
+                    .await,
+                ),
+                None => None,
+            };
             let _ = this.update(cx, |this, cx| {
                 let Some(slot @ Slot::Loading { .. }) = this.slots.get_mut(&id) else {
                     return;
                 };
-                *slot = match decoded {
-                    Ok(image) => Slot::Ready(Arc::new(image)),
-                    Err(error) => {
+                *slot = match landed {
+                    Some((_, Ok(image))) => Slot::Ready(Arc::new(image)),
+                    Some((path, Err(error))) => {
                         log::warn!("image {}: {error}", path.display());
                         Slot::Failed
                     }
+                    None => Slot::Failed,
                 };
                 cx.notify();
             });
@@ -99,9 +99,11 @@ impl Images {
     }
 }
 
-async fn load(fs: &dyn Fs, path: &Path) -> Result<RenderImage, Box<dyn Error + Send + Sync>> {
-    let bytes = fs.read_bytes(path, MAX_IMAGE_BYTES).await?;
-    Ok(decode(&bytes, ImageFormat::from_path(path).ok())?)
+fn load(
+    read: inkra_vault::Result<Vec<u8>>,
+    path: &Path,
+) -> Result<RenderImage, Box<dyn Error + Send + Sync>> {
+    Ok(decode(&read?, ImageFormat::from_path(path).ok())?)
 }
 
 /// A gradient, so a drawn image shows its orientation and its fit.

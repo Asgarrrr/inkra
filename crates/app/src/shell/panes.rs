@@ -40,8 +40,7 @@ impl VaultPanes {
     ) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(notes.clone(), vault.clone(), cx));
         let links = cx.new(|cx| IndexSync::new(notes, vault.clone(), cache, cx));
-        let fs = notes.read(cx).fs();
-        let images = cx.new(|_| Images::new(fs));
+        let images = cx.new(|_| Images::default());
         let subscriptions = [
             cx.subscribe(&sidebar, |shell, _, event: &FileActivated, cx| {
                 shell.open(event.file, None, event.open, cx);

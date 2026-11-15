@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{Entity, TestAppContext, prelude::*};
+use gpui::{Entity, Task, TestAppContext, prelude::*};
 use image::codecs::gif::GifEncoder;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{Frame, ImageBuffer, ImageEncoder, ImageFormat, Rgba, RgbaImage};
@@ -13,6 +13,7 @@ use inkra_vault::mem_fs::MemFs;
 use super::decode::decode;
 use super::{Images, MAX_IMAGE_BYTES, Slot, png};
 use crate::test_support::{entry_id, scan_notes};
+use crate::vault::NoteStore;
 
 #[test]
 fn an_image_wider_than_the_texture_limit_is_refused() {
@@ -97,11 +98,15 @@ fn pixels_are_swapped_to_bgra() {
     assert_eq!(image.as_bytes(0), Some(&[0, 0, 255, 255][..]));
 }
 
+struct Store {
+    fs: Arc<MemFs>,
+    notes: Entity<NoteStore>,
+    images: Entity<Images>,
+    ids: Vec<EntryId>,
+}
+
 /// `files` are `(name, bytes)` in `/vault`; the ids come back in the same order.
-fn images(
-    cx: &mut TestAppContext,
-    files: &[(&str, Vec<u8>)],
-) -> (Arc<MemFs>, Entity<Images>, Vec<EntryId>) {
+fn images(cx: &mut TestAppContext, files: &[(&str, Vec<u8>)]) -> Store {
     let fs = Arc::new(MemFs::new());
     for (name, bytes) in files {
         fs.insert_bytes(format!("/vault/{name}"), bytes.clone());
@@ -111,14 +116,27 @@ fn images(
         .iter()
         .map(|(name, _)| entry_id(&notes, cx, name))
         .collect();
-    let images = cx.update(|cx| cx.new(|_| Images::new(fs.clone())));
-    (fs, images, ids)
+    let images = cx.update(|cx| cx.new(|_| Images::default()));
+    Store {
+        fs,
+        notes,
+        images,
+        ids,
+    }
 }
 
-fn want(images: &Entity<Images>, id: EntryId, path: Option<&str>, cx: &mut TestAppContext) {
-    images.update(cx, |images, cx| {
-        images.want(id, path.map(PathBuf::from), cx);
-    });
+impl Store {
+    /// Reads through the store, as the shell does.
+    fn want(&self, id: EntryId, cx: &mut TestAppContext) {
+        let notes = self.notes.clone();
+        self.images.update(cx, |images, cx| {
+            images.want(
+                id,
+                |cap, cx| notes.update(cx, |notes, cx| notes.read_bytes(id, cap, cx)),
+                cx,
+            );
+        });
+    }
 }
 
 fn slot(images: &Entity<Images>, id: EntryId, cx: &mut TestAppContext) -> Option<&'static str> {
@@ -133,26 +151,26 @@ fn slot(images: &Entity<Images>, id: EntryId, cx: &mut TestAppContext) -> Option
 
 #[gpui::test]
 fn an_image_is_loading_until_its_decode_lands(cx: &mut TestAppContext) {
-    let (_fs, images, ids) = images(cx, &[("photo.png", png(4, 3))]);
+    let store = images(cx, &[("photo.png", png(4, 3))]);
 
-    want(&images, ids[0], Some("/vault/photo.png"), cx);
-    let before = slot(&images, ids[0], cx);
+    store.want(store.ids[0], cx);
+    let before = slot(&store.images, store.ids[0], cx);
     cx.run_until_parked();
 
     assert_eq!(before, Some("loading"));
-    assert_eq!(slot(&images, ids[0], cx), Some("ready"));
+    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
 }
 
 #[gpui::test]
 fn an_image_wanted_twice_is_read_once(cx: &mut TestAppContext) {
-    let (fs, images, ids) = images(cx, &[("photo.png", png(4, 3))]);
+    let store = images(cx, &[("photo.png", png(4, 3))]);
 
-    want(&images, ids[0], Some("/vault/photo.png"), cx);
+    store.want(store.ids[0], cx);
     cx.run_until_parked();
-    want(&images, ids[0], Some("/vault/photo.png"), cx);
+    store.want(store.ids[0], cx);
     cx.run_until_parked();
 
-    assert_eq!(fs.reads(Path::new("/vault/photo.png")), 1);
+    assert_eq!(store.fs.reads(Path::new("/vault/photo.png")), 1);
 }
 
 /// TGA has no magic bytes, so only its extension names its format.
@@ -162,31 +180,34 @@ fn a_tga_image_decodes_by_its_extension(cx: &mut TestAppContext) {
     RgbaImage::new(2, 2)
         .write_to(&mut Cursor::new(&mut tga), ImageFormat::Tga)
         .expect("encode");
-    let (_fs, images, ids) = images(cx, &[("photo.tga", tga)]);
+    let store = images(cx, &[("photo.tga", tga)]);
 
-    want(&images, ids[0], Some("/vault/photo.tga"), cx);
+    store.want(store.ids[0], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&images, ids[0], cx), Some("ready"));
+    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
 }
 
 #[gpui::test]
 fn an_image_with_no_path_fails(cx: &mut TestAppContext) {
-    let (_fs, images, ids) = images(cx, &[("photo.png", png(4, 3))]);
+    let store = images(cx, &[("photo.png", png(4, 3))]);
 
-    want(&images, ids[0], None, cx);
+    store.images.update(cx, |images, cx| {
+        images.want(store.ids[0], |_, _| Task::ready(None), cx);
+    });
+    cx.run_until_parked();
 
-    assert_eq!(slot(&images, ids[0], cx), Some("failed"));
+    assert_eq!(slot(&store.images, store.ids[0], cx), Some("failed"));
 }
 
 #[gpui::test]
 fn an_image_that_is_no_image_fails(cx: &mut TestAppContext) {
-    let (_fs, images, ids) = images(cx, &[("photo.png", b"not an image".to_vec())]);
+    let store = images(cx, &[("photo.png", b"not an image".to_vec())]);
 
-    want(&images, ids[0], Some("/vault/photo.png"), cx);
+    store.want(store.ids[0], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&images, ids[0], cx), Some("failed"));
+    assert_eq!(slot(&store.images, store.ids[0], cx), Some("failed"));
 }
 
 #[gpui::test]
@@ -196,46 +217,48 @@ fn an_image_one_byte_over_the_read_cap_fails(cx: &mut TestAppContext) {
     at_cap.resize(cap, 0);
     let mut over = at_cap.clone();
     over.push(0);
-    let (_fs, images, ids) = images(cx, &[("at.png", at_cap), ("over.png", over)]);
+    let store = images(cx, &[("at.png", at_cap), ("over.png", over)]);
 
-    want(&images, ids[0], Some("/vault/at.png"), cx);
-    want(&images, ids[1], Some("/vault/over.png"), cx);
+    store.want(store.ids[0], cx);
+    store.want(store.ids[1], cx);
     cx.run_until_parked();
 
-    assert_eq!(slot(&images, ids[0], cx), Some("ready"));
-    assert_eq!(slot(&images, ids[1], cx), Some("failed"));
+    assert_eq!(slot(&store.images, store.ids[0], cx), Some("ready"));
+    assert_eq!(slot(&store.images, store.ids[1], cx), Some("failed"));
 }
 
 #[gpui::test]
 fn retain_drops_every_image_not_kept(cx: &mut TestAppContext) {
-    let (_fs, images, ids) = images(cx, &[("a.png", png(4, 3)), ("b.png", png(3, 4))]);
-    want(&images, ids[0], Some("/vault/a.png"), cx);
-    want(&images, ids[1], Some("/vault/b.png"), cx);
+    let store = images(cx, &[("a.png", png(4, 3)), ("b.png", png(3, 4))]);
+    store.want(store.ids[0], cx);
+    store.want(store.ids[1], cx);
     cx.run_until_parked();
 
-    images.update(cx, |images, cx| {
-        images.retain(&HashSet::from([ids[1]]), cx);
+    store.images.update(cx, |images, cx| {
+        images.retain(&HashSet::from([store.ids[1]]), cx);
     });
 
     assert_eq!(
-        images.read_with(cx, |images, _| images.ids()),
-        HashSet::from([ids[1]])
+        store.images.read_with(cx, |images, _| images.ids()),
+        HashSet::from([store.ids[1]])
     );
-    assert_eq!(slot(&images, ids[1], cx), Some("ready"));
+    assert_eq!(slot(&store.images, store.ids[1], cx), Some("ready"));
 }
 
 #[gpui::test]
 fn a_load_dropped_before_it_lands_never_lands(cx: &mut TestAppContext) {
-    let (fs, images, ids) = images(cx, &[("photo.png", png(4, 3))]);
-    let gate = fs.block_read_bytes("/vault/photo.png");
-    want(&images, ids[0], Some("/vault/photo.png"), cx);
+    let store = images(cx, &[("photo.png", png(4, 3))]);
+    let gate = store.fs.block_read_bytes("/vault/photo.png");
+    store.want(store.ids[0], cx);
     cx.run_until_parked();
-    let before = slot(&images, ids[0], cx);
+    let before = slot(&store.images, store.ids[0], cx);
 
-    images.update(cx, |images, cx| images.retain(&HashSet::new(), cx));
+    store
+        .images
+        .update(cx, |images, cx| images.retain(&HashSet::new(), cx));
     gate.release();
     cx.run_until_parked();
 
     assert_eq!(before, Some("loading"));
-    assert_eq!(slot(&images, ids[0], cx), None);
+    assert_eq!(slot(&store.images, store.ids[0], cx), None);
 }

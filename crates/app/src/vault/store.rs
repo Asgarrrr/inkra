@@ -8,7 +8,7 @@ use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault, VaultError};
 
 use super::OpenFailed;
-use super::session::{Lifecycle, Location, OpenNote, Sessions};
+use super::session::{Lifecycle, Location, OpenNote, PendingSave, Sessions};
 use crate::decorations;
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
@@ -220,6 +220,27 @@ impl NoteStore {
             })
             .ok()
             .flatten()
+        })
+    }
+
+    /// `id`'s bytes at its path when the read runs, behind every operation on its chain; `None`
+    /// when no path is safe.
+    pub(crate) fn read_bytes(
+        &mut self,
+        id: EntryId,
+        max_len: u64,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<(PathBuf, inkra_vault::Result<Vec<u8>>)>> {
+        let fs = Arc::clone(&self.fs);
+        self.queue(id, PendingSave::Keep, cx, async move |this, cx| {
+            let path = this.update(cx, |this, cx| this.path_of(id, cx)).ok()??;
+            let read = cx
+                .background_spawn({
+                    let path = path.clone();
+                    async move { fs.read_bytes(&path, max_len).await }
+                })
+                .await;
+            Some((path, read))
         })
     }
 

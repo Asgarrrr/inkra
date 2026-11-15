@@ -135,10 +135,14 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if let Some(panes) = &self.panes {
-            let path = panes.vault.read(cx).absolute(id);
-            panes
-                .images
-                .update(cx, |images, cx| images.want(id, path, cx));
+            let notes = self.notes.clone();
+            panes.images.update(cx, |images, cx| {
+                images.want(
+                    id,
+                    |cap, cx| notes.update(cx, |notes, cx| notes.read_bytes(id, cap, cx)),
+                    cx,
+                );
+            });
         }
         self.set_shown(group, Shown::Image(id), since, cx);
     }
