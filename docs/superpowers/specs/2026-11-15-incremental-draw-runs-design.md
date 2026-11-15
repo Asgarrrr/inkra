@@ -784,17 +784,31 @@ the line, plus the heading and block that hold it. Each value is relative to
 the line's start, and an item that reaches past the line shows only its part
 on the line. A conceal also shows whether its element equals the block's range,
 which `label_text` reads. The proptest fails when the tie's membership range is
-dropped, or when the walk drops an unpaired item on either side. A synthetic
-`#[test]` covers a tie where the old item reaches further than the new one,
-since parsed text seldom makes one.
+dropped, or when the walk drops an unpaired item on either side. Parsed text
+seldom makes some cases, so synthetic `#[test]`s cover them:
 
-The oracle fails 3 runs out of 3 from the committed regressions file when an
+- a heading tie where the old heading reaches further than the new one;
+- a code block tie with no conceals, where the old end reaches past the new
+  one, which pins the opening line;
+- a span over an insertion that keeps its length, which pins the prefix bound;
+- a span that lands elsewhere after a deletion, which pins the suffix shift;
+- a conceal added before a closing marker whose element starts earlier, which
+  pins the conceal's sort key.
+
+The oracle lays its notes out at a 14 px body, off `CODE_BLOCK_TEXT_SIZE`, so a
+line that joins or leaves a block changes its shape. Every run below starts
+from the committed regressions file. The oracle fails 3 runs out of 3 when an
 unpaired old item's reach is not mapped through the edit. It also fails 3 out
 of 3 when `flips` does not map the old markers, and when it maps the new
 element back by its marker's side, as S1a did. With the tie's membership range
-dropped, it fails 1 run out of 3. The `changed` proptest and
-`closing_a_block_rebuilds_its_opening_and_the_lines_it_releases` fail on every
-run.
+dropped, it fails 6 runs out of 6. At a 16 px body it failed 1 run out of 3.
+
+Two mutants are excluded in `.cargo/mutants.toml` as equivalent. `<=` in
+`Carry::was` is one, since no clean line starts at `edit.at`. Deleting the `!`
+in `Carry::revealed` is the other, since `flips` then compares the complements
+of the same two sets. `deleting_a_revealed_conceal_at_a_line_end_rebuilds_only_its_line`
+pins the dirty lookup in `revealed`: a deleted marker maps onto the end of the
+dirty line, and that is not a clean line.
 
 The count tests are `typing_in_a_large_block_rebuilds_one_line` (without
 colours; the colours form is S3's), `a_setext_underline_restyles_the_line_above`
