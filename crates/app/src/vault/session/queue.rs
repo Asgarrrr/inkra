@@ -83,16 +83,17 @@ impl Queue {
 
 impl NoteStore {
     /// Runs `op` after every operation already queued on the note's chain, `pending` applied first,
-    /// and resolves to its result.
-    pub(in crate::vault) fn queue<Op>(
+    /// and resolves to its result, or `T::default()` if the store drops it first.
+    pub(in crate::vault) fn queue<T, Op>(
         &mut self,
         id: EntryId,
         pending: PendingSave,
         cx: &mut Context<Self>,
         op: Op,
-    ) -> Task<bool>
+    ) -> Task<T>
     where
-        Op: AsyncFnOnce(WeakEntity<Self>, &mut AsyncApp) -> bool + 'static,
+        T: Default + 'static,
+        Op: AsyncFnOnce(WeakEntity<Self>, &mut AsyncApp) -> T + 'static,
     {
         match pending {
             // Preempted, not cancelled: cancelling would trash or move the note with
@@ -109,7 +110,7 @@ impl NoteStore {
             let _ = done.send(op(this, cx).await);
         });
         cx.foreground_executor()
-            .spawn(async move { wait.await == Ok(true) })
+            .spawn(async move { wait.await.unwrap_or_default() })
     }
 
     /// Appends `body` to the note's chain; `body` awaits the link before it, handed in.

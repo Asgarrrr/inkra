@@ -2,12 +2,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::TestAppContext;
-use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
+use inkra_vault::{Fs, New};
 
 use crate::test_support::{edit, entry_id, opened, scan_notes, two_notes};
-use crate::vault::NoteStore;
 use crate::vault::store::AUTOSAVE_DELAY;
+use crate::vault::{Created, NoteStore};
 
 #[gpui::test]
 async fn an_autosave_after_a_rename_lands_before_its_rescan(cx: &mut TestAppContext) {
@@ -222,5 +222,29 @@ async fn a_change_whose_walk_ran_before_a_rename_reloads_from_the_new_name(
     assert_eq!(
         buffer.read_with(cx, |buffer, _| buffer.text().to_owned()),
         "theirs"
+    );
+}
+
+#[gpui::test]
+async fn a_note_created_in_a_folder_renamed_before_its_rescan_lands_in_the_new_folder(
+    cx: &mut TestAppContext,
+) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/sub/c.md", "gamma");
+    let store = scan_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let sub = entry_id(&store, cx, "sub");
+    let gate = fs.block_read_dir("/vault");
+
+    let renamed = store.update(cx, |store, cx| store.rename(sub, "dir", cx));
+    cx.run_until_parked();
+    let created = store.update(cx, |store, cx| store.create(Some(sub), New::Note, "d", cx));
+    cx.run_until_parked();
+    gate.release();
+
+    assert!(renamed.await);
+    assert!(matches!(created.await, Ok(Created::Listed(_))));
+    assert_eq!(
+        fs.read_to_string(Path::new("/vault/dir/d.md")).as_deref(),
+        Some("")
     );
 }

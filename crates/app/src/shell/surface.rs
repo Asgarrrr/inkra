@@ -134,13 +134,37 @@ impl AppShell {
         since: Cursor,
         cx: &mut Context<Self>,
     ) {
-        if let Some(panes) = &self.panes {
-            let path = panes.vault.read(cx).absolute(id);
-            panes
-                .images
-                .update(cx, |images, cx| images.want(id, path, cx));
-        }
+        self.want_image(id, cx);
         self.set_shown(group, Shown::Image(id), since, cx);
+    }
+
+    fn want_image(&self, id: EntryId, cx: &mut Context<Self>) {
+        if let Some(panes) = &self.panes {
+            let notes = self.notes.clone();
+            panes.images.update(cx, |images, cx| {
+                images.want(
+                    id,
+                    |cap, cx| notes.update(cx, |notes, cx| notes.read_bytes(id, cap, cx)),
+                    cx,
+                );
+            });
+        }
+    }
+
+    /// Reads again each shown image that failed at a path its id no longer has, after a folder's
+    /// rename.
+    pub(super) fn retry_failed_images(&self, cx: &mut Context<Self>) {
+        let Some(panes) = &self.panes else {
+            return;
+        };
+        let notes = self.notes.clone();
+        panes.images.update(cx, |images, cx| {
+            let notes = notes.read(cx);
+            images.forget_moved(|id| notes.path_of(id, cx));
+        });
+        for id in self.shown_images() {
+            self.want_image(id, cx);
+        }
     }
 
     /// The bare group area while the image loads.
@@ -155,7 +179,7 @@ impl AppShell {
                 .size_full()
                 .debug_selector(|| "image-view".into())
                 .into_any_element(),
-            Some(Slot::Failed) => div()
+            Some(Slot::Failed(_)) => div()
                 .size_full()
                 .flex()
                 .items_center()
@@ -182,17 +206,20 @@ impl AppShell {
         let Some(panes) = &self.panes else {
             return;
         };
-        let keep: HashSet<EntryId> = self
-            .layout
+        let keep = self.shown_images();
+        panes
+            .images
+            .update(cx, |images, cx| images.retain(&keep, cx));
+    }
+
+    fn shown_images(&self) -> HashSet<EntryId> {
+        self.layout
             .center_groups()
             .into_iter()
             .filter_map(|group| match self.group(group).shown {
                 Shown::Image(id) => Some(id),
                 Shown::Empty | Shown::Bound(_) | Shown::Trashing(_) | Shown::View(_) => None,
             })
-            .collect();
-        panes
-            .images
-            .update(cx, |images, cx| images.retain(&keep, cx));
+            .collect()
     }
 }
