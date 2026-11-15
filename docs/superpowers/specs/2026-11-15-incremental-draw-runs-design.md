@@ -703,9 +703,10 @@ S1a deviations from this spec:
 9. The count tests live in `editor/tests/carry.rs`, since `shapes.rs` would
    pass 400 lines. The colours variant of the keystroke test is S1b's.
 
-Architecture run 5 replaces deviation 3: `Splice::compose` in `inkra-text` composes the splices
-into the hull, and `inkra_highlight::dirty` is gone. It derives the removed length from the
-splices' net length delta, where `carry` read the old length from the previous layout's last line.
+Architecture run 5 replaces deviation 3: `Splice::compose` in `inkra-text`
+composes the splices into the hull, and `inkra_highlight::dirty` is gone. It
+derives the removed length from the splices' net length delta, where `carry`
+read the old length from the previous layout's last line.
 
 S1b, release, M5 Pro. Before is draw-s1a, after is S1b, both measured in one
 sitting. Bytes are gpui's bench report, "allocated bytes per iteration".
