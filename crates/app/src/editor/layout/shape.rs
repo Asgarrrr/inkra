@@ -91,6 +91,8 @@ pub(crate) fn shape_document(
             .and_then(|carry| carry.clean(start));
         above_built = clean.is_none();
         let len = clean.map_or_else(|| line_len(text, at), |line| line.len);
+        // A carried length ends where the line does, or every line after it misplaces (spec, Risks).
+        debug_assert!(matches!(text.as_bytes().get(at + len), None | Some(b'\n')));
         let range = start..start + len;
         let block = line_holder(&mut code_blocks, &range, |block| &block.range);
         let line = match clean {
