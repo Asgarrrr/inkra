@@ -10,8 +10,8 @@ use std::ops::Range;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use inkra_editor::Layer;
-use inkra_highlight::{Language, MAIN_THREAD_BUDGET, Plan, TokenClass, highlight, plan};
-use inkra_markdown::{CodeBlock, Markdown, Span, content_lines, parse};
+use inkra_highlight::{MAIN_THREAD_BUDGET, Plan, TokenClass, block_tokens, plan};
+use inkra_markdown::{Markdown, content_lines, parse};
 use inkra_text::{Buffer, ByteOffset};
 
 const TEXT: &str = include_str!("fixtures/rust-5000.txt");
@@ -22,19 +22,6 @@ const BLOCKS: usize = 1000;
 fn code(bytes: usize) -> &'static str {
     let end = TEXT[bytes..].find('\n').map_or(TEXT.len(), |at| bytes + at);
     &TEXT[..end]
-}
-
-fn tokens(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffset>, TokenClass)> {
-    let mut tokens = Vec::new();
-    let language = block
-        .language
-        .clone()
-        .map(|word| &text[word.start.get()..word.end.get()])
-        .and_then(Language::from_info);
-    if let Some(language) = language {
-        highlight(language, content_lines(text, spans, block), &mut tokens);
-    }
-    tokens
 }
 
 /// The listener's pure part: catch up, read the chunks, plan, then one batch of clears and lexed
@@ -57,7 +44,8 @@ fn call(
         .iter()
         .map(|&index| {
             let block = &markdown.code_blocks[index];
-            let marks = tokens(buffer.text(), &markdown.spans, block);
+            let lines = content_lines(buffer.text(), &markdown.spans, block);
+            let marks = block_tokens(buffer.text(), block.language.clone(), lines);
             (block.range.clone(), block.shape, marks)
         })
         .collect();

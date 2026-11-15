@@ -4,8 +4,8 @@
 use std::ops::Range;
 
 use inkra_editor::Layer;
-use inkra_highlight::{Language, Plan, TokenClass, dirty, highlight, plan};
-use inkra_markdown::{CodeBlock, Span, content_lines, parse};
+use inkra_highlight::{Plan, TokenClass, block_tokens, dirty, plan};
+use inkra_markdown::{content_lines, parse};
 use inkra_text::{Buffer, ByteOffset, EditMark};
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -171,20 +171,6 @@ fn whole(buffer: &Buffer) -> Range<ByteOffset> {
     ByteOffset::new(0)..buffer.len()
 }
 
-/// `block`'s fresh tokens, none when its info word names no known language.
-fn tokens(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffset>, TokenClass)> {
-    let mut tokens = Vec::new();
-    let language = block
-        .language
-        .clone()
-        .map(|word| &text[word.start.get()..word.end.get()])
-        .and_then(Language::from_info);
-    if let Some(language) = language {
-        highlight(language, content_lines(text, spans, block), &mut tokens);
-    }
-    tokens
-}
-
 /// The app's listener, in its order: catch up, read the chunks, plan, then one batch of clears and
 /// lexed blocks.
 fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestCaseError> {
@@ -211,7 +197,8 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
         .into_iter()
         .map(|index| {
             let block = &markdown.code_blocks[index];
-            let marks = tokens(buffer.text(), &markdown.spans, block);
+            let lines = content_lines(buffer.text(), &markdown.spans, block);
+            let marks = block_tokens(buffer.text(), block.language.clone(), lines);
             (block.range.clone(), block.shape, marks)
         })
         .collect();
@@ -264,7 +251,8 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
             let seed = blocks[..k % (blocks.len() + 1)]
                 .iter()
                 .map(|block| {
-                    let marks = tokens(buffer.text(), &markdown.spans, block);
+                    let lines = content_lines(buffer.text(), &markdown.spans, block);
+                    let marks = block_tokens(buffer.text(), block.language.clone(), lines);
                     (block.range.clone(), block.shape, marks)
                 })
                 .collect();
@@ -291,7 +279,10 @@ proptest! {
             let fresh: Vec<_> = markdown
                 .code_blocks
                 .iter()
-                .flat_map(|block| tokens(text, &markdown.spans, block))
+                .flat_map(|block| {
+                    let lines = content_lines(text, &markdown.spans, block);
+                    block_tokens(text, block.language.clone(), lines)
+                })
                 .collect();
             let marks: Vec<_> = model
                 .layer

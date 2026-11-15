@@ -59,5 +59,22 @@ pub fn highlight<'a>(
     });
 }
 
+/// A code block's tokens over its content `lines`, in the language of its info word at `info` in
+/// `text`; none without a word or for an unknown one.
+#[must_use]
+pub fn block_tokens<'a>(
+    text: &str,
+    info: Option<Range<ByteOffset>>,
+    lines: impl Iterator<Item = (ByteOffset, &'a str)>,
+) -> Vec<(Range<ByteOffset>, TokenClass)> {
+    let mut tokens = Vec::new();
+    let language =
+        info.and_then(|word| Language::from_info(&text[word.start.get()..word.end.get()]));
+    if let Some(language) = language {
+        highlight(language, lines, &mut tokens);
+    }
+    tokens
+}
+
 #[cfg(test)]
 mod tests;

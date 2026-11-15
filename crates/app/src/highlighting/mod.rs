@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use gpui::{App, Entity};
-use inkra_highlight::{Language, Plan, TokenClass, dirty, highlight, plan};
+use inkra_highlight::{Plan, TokenClass, block_tokens, dirty, plan};
 use inkra_markdown::{CodeBlock, Span, content_lines};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -70,17 +70,8 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
 
 /// `block`'s marks, none when its info word names no known language.
 fn colour(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffset>, MarkStyle)> {
-    let language = block
-        .language
-        .clone()
-        .map(|word| &text[word.start.get()..word.end.get()])
-        .and_then(Language::from_info);
-    let Some(language) = language else {
-        return Vec::new();
-    };
-    let mut tokens = Vec::new();
-    highlight(language, content_lines(text, spans, block), &mut tokens);
-    tokens
+    let lines = content_lines(text, spans, block);
+    block_tokens(text, block.language.clone(), lines)
         .into_iter()
         .map(|(range, class)| {
             let color = Some(token(class));

@@ -2,7 +2,7 @@ use proptest::prelude::*;
 
 use inkra_text::ByteOffset;
 
-use super::{Language, highlight};
+use super::{Language, TokenClass, block_tokens, highlight};
 
 #[test]
 fn a_rust_info_word_resolves_in_any_case() {
@@ -16,6 +16,22 @@ fn an_unknown_info_word_resolves_to_none() {
     for word in ["nope", "", "rusty", "rust "] {
         assert_eq!(Language::from_info(word), None, "{word:?}");
     }
+}
+
+#[test]
+fn a_block_lexes_by_its_info_word_and_not_without_a_known_one() {
+    let at = ByteOffset::new;
+    let lines = || [(at(8), "let")].into_iter();
+    let keyword = [(at(8)..at(11), TokenClass::Keyword)];
+    assert_eq!(
+        block_tokens("```xrs\nlet\n```", Some(at(4)..at(6)), lines()),
+        keyword
+    );
+    assert_eq!(
+        block_tokens("```rsx\nlet\n```", Some(at(3)..at(6)), lines()),
+        []
+    );
+    assert_eq!(block_tokens("```rs\n\nlet\n```", None, lines()), []);
 }
 
 static FRAGMENTS: &[&str] = &[
