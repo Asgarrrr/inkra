@@ -372,6 +372,67 @@ fn a_chunk_keeps_its_tag_until_a_splice_changes_its_bytes() {
 }
 
 #[test]
+fn a_stored_mark_takes_twelve_bytes() {
+    assert!(size_of::<Mark<u8>>() <= 12);
+}
+
+fn widest() -> usize {
+    usize::try_from(u32::MAX).unwrap_or(usize::MAX)
+}
+
+fn chunk_marks(chunk: &Chunk<char>) -> Vec<(Range<ByteOffset>, char)> {
+    chunk
+        .marks_in(at(0)..chunk.end())
+        .map(|(mark, &style)| (mark, style))
+        .collect()
+}
+
+#[test]
+fn a_mark_ending_past_u32_from_its_chunk_start_drops_every_mark_and_the_tag() {
+    for (end, kept) in [(widest(), true), (widest() + 1, false)] {
+        let marks = [(span(1..2), 'a'), (span(end - 1..end), 'b')];
+        let chunk = Chunk::new(
+            at(0)..at(widest() + 1),
+            EditMark::default(),
+            Some(7),
+            marks.clone(),
+        );
+
+        let marks = if kept { marks.to_vec() } else { vec![] };
+        assert_eq!(chunk_marks(&chunk), marks, "{end}");
+        assert_eq!(chunk.tag, kept.then_some(7), "{end}");
+    }
+}
+
+#[test]
+fn a_splice_pushing_a_mark_past_u32_from_its_chunk_start_drops_every_mark() {
+    for (inserted_len, kept) in [(1, true), (2, false)] {
+        let last = widest() - 2..widest() - 1;
+        let chunk = Chunk::new(
+            at(0)..at(widest() - 1),
+            EditMark::default(),
+            None,
+            [(span(1..2), 'a'), (span(last.clone()), 'b')],
+        );
+        let splice = Splice {
+            at: at(10),
+            removed_len: 0,
+            inserted_len,
+        };
+
+        let grown =
+            map_chunk(chunk, splice).unwrap_or_else(|| panic!("a splice inside keeps the chunk"));
+
+        let marks = if kept {
+            vec![(span(1..2), 'a'), (span(last.start + 1..last.end + 1), 'b')]
+        } else {
+            vec![]
+        };
+        assert_eq!(chunk_marks(&grown), marks, "{inserted_len}");
+    }
+}
+
+#[test]
 fn a_piece_cut_from_a_chunk_drops_its_tag() {
     let buffer = twenty();
     let mut layer = Layer::<char>::new(buffer.edit_mark());

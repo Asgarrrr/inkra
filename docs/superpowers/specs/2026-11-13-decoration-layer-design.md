@@ -447,6 +447,13 @@ number.
     splice, not once for all of them. A keystroke is one splice, so it costs one
     walk; a transaction of many splices, such as `apply_diff`, costs one walk
     per splice (D5).
+17. **A mark's bounds are `u32`.** A chunk stores each mark as two `u32`
+    offsets from its start and the style, in a boxed slice with no spare
+    capacity: 12 bytes a mark for a one-byte style. A load is capped at
+    `MAX_TEXT_BYTES`, but a paste grows a buffer with no cap. So when one
+    bound lies more than `u32::MAX` bytes past the chunk's start, the chunk
+    holds no mark and no tag, as a cleared chunk its feature republishes
+    (`Chunk::new`, D5).
 
 ## Deferred
 
