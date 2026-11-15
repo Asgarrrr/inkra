@@ -47,6 +47,8 @@ enum Step {
     Compose(Edit),
     /// `unmark_text`, or a restore's `reset_state`: both drop the composition.
     Unmark,
+    /// A selection between two points, in either order; a caret when they meet.
+    Select(Index, Index),
     Wrap(Option<f32>),
     Margin,
     CodeBlockWrap,
@@ -62,6 +64,7 @@ fn step() -> impl Strategy<Value = Step> {
         1 => Just(Step::Redo),
         2 => edit().prop_map(Step::Compose),
         1 => Just(Step::Unmark),
+        3 => (any::<Index>(), any::<Index>()).prop_map(|(a, b)| Step::Select(a, b)),
         1 => prop::sample::select(vec![None, Some(120.), Some(300.)]).prop_map(Step::Wrap),
         1 => Just(Step::Margin),
         1 => Just(Step::CodeBlockWrap),
@@ -69,18 +72,21 @@ fn step() -> impl Strategy<Value = Step> {
     ]
 }
 
+/// `offset`, clamped to `text` and moved back to a char boundary.
+fn floor(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
 /// The edit as a byte range and its text, on char boundaries of `text`.
 fn resolve(
     text: &str,
     (start, line_start, removed, inserted): &Edit,
 ) -> (Range<ByteOffset>, String) {
-    let floor = |mut offset: usize| {
-        offset = offset.min(text.len());
-        while !text.is_char_boundary(offset) {
-            offset -= 1;
-        }
-        offset
-    };
+    let floor = |offset| floor(text, offset);
     let mut start = floor(start.index(text.len() + 1));
     if *line_start {
         start = text[..start].rfind('\n').map_or(0, |newline| newline + 1);
@@ -108,6 +114,7 @@ fn resolve_all(text: &str, edits: &[Edit]) -> (Vec<(Range<ByteOffset>, String)>,
 
 /// Every layout input a step can change, beside the buffer.
 struct Inputs {
+    selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
     wrap_width: Option<Pixels>,
     margin: Pixels,
@@ -153,6 +160,12 @@ impl Inputs {
                 self.marked = (!inserted.is_empty()).then_some(start..start + inserted.len());
             }
             Step::Unmark => self.marked = None,
+            Step::Select(a, b) => {
+                let text = buffer.text();
+                let [a, b] =
+                    [a, b].map(|at| ByteOffset::new(floor(text, at.index(text.len() + 1))));
+                self.selection = a.min(b)..a.max(b);
+            }
             Step::Wrap(width) => self.wrap_width = width.map(px),
             Step::Margin => {
                 self.margin = if self.margin == px(76.) {
@@ -171,6 +184,9 @@ impl Inputs {
                 };
             }
         }
+        let text = buffer.text();
+        let clamp = |at: ByteOffset| ByteOffset::new(floor(text, at.get()));
+        self.selection = clamp(self.selection.start)..clamp(self.selection.end);
     }
 
     fn layout(
@@ -184,7 +200,7 @@ impl Inputs {
         let inputs = LayoutInputs {
             buffer,
             markdown: &markdown,
-            selection: &(ByteOffset::default()..ByteOffset::default()),
+            selection: &self.selection,
             marked: self.marked.as_ref(),
             style: &style,
             wrap_width: self.wrap_width,
@@ -262,6 +278,7 @@ fn assert_same(carried: &DocumentLayout, fresh: &DocumentLayout) -> Result<(), T
 fn check(text: &str, steps: &[Step], window: &mut Window) -> Result<(), TestCaseError> {
     let mut buffer = Buffer::new(text);
     let mut inputs = Inputs {
+        selection: ByteOffset::default()..ByteOffset::default(),
         marked: None,
         wrap_width: None,
         margin: px(76.),
