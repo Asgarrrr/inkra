@@ -154,6 +154,11 @@ impl DocumentLayout {
     }
 
     #[cfg(test)]
+    pub(crate) fn line_tops(&self) -> Vec<Pixels> {
+        self.lines.iter().map(|line| line.top).collect()
+    }
+
+    #[cfg(test)]
     pub(crate) fn quote_bars(&self) -> &[Bounds<Pixels>] {
         &self.bars
     }

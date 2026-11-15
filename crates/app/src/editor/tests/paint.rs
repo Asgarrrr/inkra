@@ -43,11 +43,8 @@ fn each_line_paints_at_its_own_top(cx: &mut TestAppContext) {
     let tops = painted_tops();
     window
         .update(&mut cx, |view, _, _| {
-            let layout = view.input.last_layout().unwrap();
-            assert_eq!(tops.len(), layout.row_count());
-            for (row, top) in tops.iter().enumerate() {
-                assert_eq!(*top - tops[0], layout.top_for_row(row), "line {row}");
-            }
+            let painted: Vec<_> = tops.iter().map(|top| *top - tops[0]).collect();
+            assert_eq!(painted, view.input.last_layout().unwrap().line_tops());
         })
         .unwrap();
 }
