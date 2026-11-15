@@ -113,6 +113,7 @@ impl<P: Place> History<P> {
         self.forward.clear();
     }
 
+    /// Drops `file` from both stacks.
     pub(crate) fn forget(&mut self, file: P::File) {
         self.back.forget(file);
         self.forward.forget(file);
