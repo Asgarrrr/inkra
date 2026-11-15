@@ -8,9 +8,9 @@ use crate::theme;
 #[derive(Clone, Copy)]
 pub(crate) enum Elevation {
     /// A tooltip.
-    Hover,
+    Low,
     /// A menu or a picker, in the shell's modal layer.
-    Modal,
+    High,
 }
 
 /// The elevated background, a 1 px border, the elevated radius and `elevation`'s shadow.
@@ -22,7 +22,7 @@ pub(crate) fn elevated<E: Styled>(surface: E, elevation: Elevation, cx: &App) ->
         .border_color(colors.border)
         .rounded(theme::ELEVATED_RADIUS);
     match elevation {
-        Elevation::Hover => surface.shadow_md(),
-        Elevation::Modal => surface.shadow_lg(),
+        Elevation::Low => surface.shadow_md(),
+        Elevation::High => surface.shadow_lg(),
     }
 }

@@ -76,11 +76,11 @@ impl AppShell {
             Side::Left => strip.left_0(),
             Side::Right => strip.right_0(),
         };
-        let name = name(side);
+        let side_name = name(side);
         Some(
             inward_border(strip, side, theme::DROP_EDGE)
                 .w(DROP_STRIP_WIDTH)
-                .debug_selector(move || format!("dock-drop-{name}"))
+                .debug_selector(move || format!("dock-drop-{side_name}"))
                 .group_drag_over::<DraggedView>(SHELL_GROUP, move |style| {
                     style.border_color(colors.border)
                 })

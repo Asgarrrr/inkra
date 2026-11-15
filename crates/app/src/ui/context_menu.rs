@@ -111,7 +111,7 @@ impl Render for ContextMenu {
             .debug_selector(|| "context-menu".into())
             .min_w(MENU_MIN_WIDTH)
             .p(theme::MENU_INSET);
-        elevated(menu, Elevation::Modal, cx).children(self.entries.iter().enumerate().map(
+        elevated(menu, Elevation::High, cx).children(self.entries.iter().enumerate().map(
             |(ix, entry)| {
                 let selected = self.selected == Some(ix);
                 let action = entry.action();

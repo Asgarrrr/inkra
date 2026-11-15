@@ -29,7 +29,7 @@ impl Render for Tooltip {
             .pl_2()
             .pt_2p5()
             .child(
-                elevated(div().px_2().py_1(), Elevation::Hover, cx)
+                elevated(div().px_2().py_1(), Elevation::Low, cx)
                     .child(Label::new(self.text.clone()).size(LabelSize::Small)),
             )
     }

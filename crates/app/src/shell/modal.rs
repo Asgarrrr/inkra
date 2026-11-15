@@ -196,7 +196,7 @@ impl AppShell {
                     .flex()
                     .justify_center()
                     .child(
-                        elevated(div().occlude().w(MODAL_WIDTH), Elevation::Modal, cx)
+                        elevated(div().occlude().w(MODAL_WIDTH), Elevation::High, cx)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(modal.view.clone()),
                     ),
