@@ -738,7 +738,9 @@ S1b deviations from this spec:
    brings it back logs only a `Shift`. So a layout drawn without its colours
    would carry uncoloured lines after the `sync`, and a layout drawn with them
    would carry coloured lines into a frame that draws none. A `None` on either
-   side rebuilds the whole note. `EditorView::refresh` syncs before every
+   side rebuilds the whole note, and `is_shaped_from` never reuses a layout
+   while the inputs hold `None`: two `None`s compare equal, yet another layer
+   may have recoloured in between. `EditorView::refresh` syncs before every
    layout, so production never pays it. The oracle fails without it.
 5. `sync` logs `Whole` for a lost layer even when it held no marks. A layer
    catches up on every `sync` while it is on, so only a layer switched on after

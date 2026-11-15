@@ -9,11 +9,11 @@ use inkra_text::{Buffer, ByteOffset};
 
 use super::shapes::{layout_of, reshape, shape};
 use super::{at, dispatching, window_on, with_editor};
-use crate::decorations::{self, Drawn, MarkStyle};
+use crate::decorations::{self, Drawn, LayerDecl, LayerId, MarkStyle};
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document,
 };
-use crate::feature::fakes::{self, TODO_LAYER};
+use crate::feature::fakes::{self, TODO_DECL, TODO_FAKE, TODO_LAYER};
 use crate::theme::{ColorToken, builtin};
 
 /// The lines `f` builds rather than carries.
@@ -38,6 +38,19 @@ fn with_caret(
     previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
+    with_inputs(buffer, caret, decorations, window, |inputs, window| {
+        shape_document(inputs, previous, window)
+    })
+}
+
+/// `f` on `buffer`'s layout inputs with the caret at byte `caret`.
+fn with_inputs<R>(
+    buffer: &Buffer,
+    caret: usize,
+    decorations: Drawn<'_>,
+    window: &mut Window,
+    f: impl FnOnce(&LayoutInputs<'_>, &mut Window) -> R,
+) -> R {
     let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
     let style = window.text_style();
     let inputs = LayoutInputs {
@@ -53,7 +66,7 @@ fn with_caret(
         scrolls: &BlockScrolls::default(),
         decorations,
     };
-    shape_document(&inputs, previous, window)
+    f(&inputs, window)
 }
 
 /// `buffer`'s layout in its colours, the caret at its start, carried from `previous`.
@@ -67,20 +80,20 @@ fn coloured(
     with_caret(buffer.read(cx), 0, drawn, previous, window)
 }
 
-/// One chunk over `chunk`, its first three bytes in `token`, published at the buffer's edit mark.
-fn recolour(buffer: &Entity<Buffer>, chunk: &Range<ByteOffset>, token: ColorToken, cx: &mut App) {
+/// One chunk of `layer` over `chunk`, its first three bytes in `token`, published at the buffer's
+/// edit mark.
+fn recolour(
+    layer: LayerId,
+    buffer: &Entity<Buffer>,
+    chunk: &Range<ByteOffset>,
+    token: ColorToken,
+    cx: &mut App,
+) {
     let style = MarkStyle { color: Some(token) };
     let marks = vec![(chunk.start..chunk.start + 3, style)];
     let mark = buffer.read(cx).edit_mark();
     let chunks = vec![(chunk.clone(), 0, marks)];
-    decorations::publish(
-        TODO_LAYER,
-        &buffer.downgrade(),
-        Vec::new(),
-        chunks,
-        mark,
-        cx,
-    );
+    decorations::publish(layer, &buffer.downgrade(), Vec::new(), chunks, mark, cx);
 }
 
 const TWO_BLOCKS: &str = "top\n\n```rust\nlet a = 1;\n```\n\nmid\n\n```rust\nlet b = 2;\n```\n";
@@ -98,7 +111,7 @@ fn two_coloured_blocks(cx: &mut TestAppContext) -> (Entity<Buffer>, Vec<Range<By
     cx.update(|cx| {
         fakes::declare_todo(cx);
         for block in &blocks {
-            recolour(&buffer, block, ColorToken::Accent, cx);
+            recolour(TODO_LAYER, &buffer, block, ColorToken::Accent, cx);
         }
     });
     cx.run_until_parked();
@@ -171,7 +184,7 @@ fn a_recolour_of_one_block_rebuilds_only_its_lines(cx: &mut TestAppContext) {
     let window = cx.add_empty_window();
     window.update(|window, cx| {
         let previous = coloured(&buffer, None, window, cx);
-        recolour(&buffer, &blocks[1], ColorToken::Warning, cx);
+        recolour(TODO_LAYER, &buffer, &blocks[1], ColorToken::Warning, cx);
         let (layout, built) = builds(|| coloured(&buffer, Some(&previous), window, cx));
         assert_eq!(built, 3, "the block's fences and its one line");
         let fresh = coloured(&buffer, None, window, cx);
@@ -182,6 +195,52 @@ fn a_recolour_of_one_block_rebuilds_only_its_lines(cx: &mut TestAppContext) {
                 "line {line}"
             );
         }
+    });
+}
+
+/// A layer trailing the buffer draws none of its marks, so no layout drawn then is reused, even
+/// when the buffer has not moved since (S1b deviation 4).
+#[gpui::test]
+fn a_layout_drawn_while_a_layer_trails_is_never_reused(cx: &mut TestAppContext) {
+    static LATER: LayerDecl = LayerDecl {
+        id: LayerId::new(TODO_FAKE.id, "later"),
+        open: None,
+    };
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new("aaaa\nbbbb\n")));
+    let window = cx.add_empty_window();
+    window.update(|window, cx| {
+        decorations::declare([&TODO_DECL, &LATER], cx);
+        decorations::enable([TODO_FAKE.id], cx);
+        recolour(
+            TODO_LAYER,
+            &buffer,
+            &(at(0)..at(4)),
+            ColorToken::Warning,
+            cx,
+        );
+        recolour(LATER.id, &buffer, &(at(5)..at(9)), ColorToken::Accent, cx);
+        // No sync: the first layer trails the buffer from here on.
+        buffer.update(cx, |buffer, _| {
+            buffer.transact(|txn| txn.insert(at(10), "c"));
+        });
+        recolour(LATER.id, &buffer, &(at(5)..at(9)), ColorToken::Warning, cx);
+        let first = coloured(&buffer, None, window, cx);
+
+        recolour(
+            LATER.id,
+            &buffer,
+            &(at(5)..at(9)),
+            ColorToken::SyntaxKeyword,
+            cx,
+        );
+
+        let drawn = decorations::drawn(&buffer, cx);
+        let reused = with_inputs(buffer.read(cx), 0, drawn, window, |inputs, _| {
+            first.is_shaped_from(inputs)
+        });
+        assert!(!reused);
+        let fresh = coloured(&buffer, None, window, cx);
+        assert_ne!(first.run_colors(1), fresh.run_colors(1));
     });
 }
 

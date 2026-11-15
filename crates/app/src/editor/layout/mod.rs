@@ -108,9 +108,12 @@ impl DocumentLayout {
     }
 
     /// Whether `shape_document` would give this layout back. The selection counts only
-    /// through the elements it reveals, so a caret move within the same ones reuses it.
+    /// through the elements it reveals, so a caret move within the same ones reuses it. A layer
+    /// trailing the buffer has no revision to compare, so nothing is reused then.
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
-        self.shaped_at == (inputs.buffer.version(), inputs.decorations.revision())
+        let revision = inputs.decorations.revision();
+        revision.is_some()
+            && self.shaped_at == (inputs.buffer.version(), revision)
             && self.wrap_width == inputs.wrap_width
             && (self.margin == inputs.margin
                 || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
