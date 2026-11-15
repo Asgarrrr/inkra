@@ -40,6 +40,47 @@ fn word_end(bytes: &[u8], at: usize) -> usize {
         .map_or(bytes.len(), |len| at + len)
 }
 
+fn skip_spaces(bytes: &[u8], at: usize) -> usize {
+    bytes[at..]
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .map_or(bytes.len(), |len| at + len)
+}
+
+/// Whether `(` follows `at` on the line, past spaces and a turbofish `::<…>`.
+fn is_call(bytes: &[u8], at: usize) -> bool {
+    let mut at = skip_spaces(bytes, at);
+    if bytes[at..].starts_with(b"::") {
+        let open = skip_spaces(bytes, at + 2);
+        match generic_end(bytes, open) {
+            Some(end) => at = skip_spaces(bytes, end),
+            None => return false,
+        }
+    }
+    bytes.get(at) == Some(&b'(')
+}
+
+/// The end of the generic list whose `<` is at `open`, if it closes on the line; `->` closes none.
+fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
+    if bytes.get(open) != Some(&b'<') {
+        return None;
+    }
+    let mut depth = 0_usize;
+    for at in open..bytes.len() {
+        match bytes[at] {
+            b'<' => depth += 1,
+            b'>' if bytes[at - 1] != b'-' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// `true`, `false`, or two or more of `[A-Z0-9_]` from an ASCII uppercase letter.
 fn is_constant(name: &str) -> bool {
     let bytes = name.as_bytes();
@@ -153,10 +194,7 @@ impl Tokens<'_> {
         let bytes = self.line.as_bytes();
         let word = &self.line[name.start..name.end];
         let keyword = token == name.start && KEYWORDS.contains(&word);
-        let call = bytes[name.end..]
-            .iter()
-            .find(|byte| !byte.is_ascii_whitespace())
-            == Some(&b'(');
+        let call = is_call(bytes, name.end);
         let (end, class) = if self.state.attribute.is_some() {
             (name.end, Some(TokenClass::Attribute))
         } else if keyword {

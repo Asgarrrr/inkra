@@ -150,7 +150,7 @@ significant token) and a small bracket stack. That covers:
 | `String` | the language's string syntax, escapes included; raw strings, template strings, heredocs |
 | `Constant` | numbers; `true`, `false`, `null`, `None`, `undefined` and the like; an all-caps identifier |
 | `Keyword` | the language's keyword list |
-| `Function` | an identifier followed by `(` on the same line; an identifier after a definition keyword (`fn`, `def`, `function`); a Rust macro name before `!` |
+| `Function` | an identifier followed by `(` on the same line, past a Rust turbofish `::<…>` that closes on that line; an identifier after a definition keyword (`fn`, `def`, `function`); a Rust macro name before `!` |
 | `Type` | an identifier after a type keyword (`struct`, `enum`, `trait`, `type`, `class`, `interface`, `impl`); a capitalised identifier in Rust, TypeScript and Python; a built-in type (`i32`, `str`, `number`, `string`); an identifier inside a generic list |
 | `Property` | an identifier after `.` and not followed by `(`; a JSON object key; a CSS property name |
 | `Attribute` | a Rust `#[…]`, a Python `@decorator`, an HTML attribute name |

@@ -304,6 +304,71 @@ fn a_name_before_a_paren_on_its_line_is_a_function() {
 }
 
 #[test]
+fn a_name_before_a_turbofish_and_a_paren_is_a_function() {
+    let p = Punctuation;
+    check(&[
+        (
+            "size_of::<T>()",
+            &[
+                (0, 7, Function),
+                (7, 9, p),
+                (9, 10, p),
+                (10, 11, Type),
+                (11, 12, p),
+                (12, 13, p),
+                (13, 14, p),
+            ],
+        ),
+        (
+            "x.collect::<Vec<_>>()",
+            &[
+                (1, 2, Operator),
+                (2, 9, Function),
+                (9, 11, p),
+                (11, 12, p),
+                (12, 15, Type),
+                (15, 16, p),
+                (16, 17, Type),
+                (17, 18, p),
+                (18, 19, p),
+                (19, 20, p),
+                (20, 21, p),
+            ],
+        ),
+        (
+            "f::<fn() -> u8> ()",
+            &[
+                (0, 1, Function),
+                (1, 3, p),
+                (3, 4, p),
+                (4, 6, Keyword),
+                (6, 7, p),
+                (7, 8, p),
+                (9, 11, Operator),
+                (12, 14, Type),
+                (14, 15, p),
+                (16, 17, p),
+                (17, 18, p),
+            ],
+        ),
+        ("f::<T>", &[(1, 3, p), (3, 4, p), (4, 5, Type), (5, 6, p)]),
+        ("f::<T (", &[(1, 3, p), (3, 4, p), (4, 5, Type), (6, 7, p)]),
+        (
+            "f :: <T>()",
+            &[
+                (0, 1, Function),
+                (2, 4, p),
+                (5, 6, p),
+                (6, 7, Type),
+                (7, 8, p),
+                (8, 9, p),
+                (9, 10, p),
+            ],
+        ),
+    ]);
+}
+
+#[test]
 fn a_raw_prefix_without_a_name_is_no_token() {
     check(&[(
         "r#( fn r# struct r# x.r#",
