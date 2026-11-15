@@ -100,6 +100,7 @@ impl<P> History<P> {
         }
     }
 
+    /// Whether neither stack holds a place.
     pub(crate) fn is_empty(&self) -> bool {
         self.back.0.is_empty() && self.forward.0.is_empty()
     }
