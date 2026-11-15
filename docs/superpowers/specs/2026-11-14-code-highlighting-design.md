@@ -285,8 +285,8 @@ layer's chunks, each with its tag (deviation 7): the shape it was published
 with, or `None` once a splice changed its bytes or a publish cut it.
 `Plan` holds two sorted lists:
 
-1. **clear**: each held chunk with marks whose range is no block's range. It
-   clears a block that a removed or typed fence turned into prose, or that
+1. **clear**: each held chunk whose range is no block's range, marks or not
+   (deviation 6); the listener removes it. It clears a block that a removed or typed fence turned into prose, or that
    merged with a neighbour.
 2. **lex**: each block that no held chunk has exactly, or that the dirty
    range meets. A chunk has a block exactly when its range is the block's
