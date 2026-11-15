@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use gpui::{FontWeight, Hsla, TextStyle};
-use inkra_editor::{HeardLayer, RevisionLog};
+use inkra_editor::{HeardLayer, Moved, RevisionLog};
 use inkra_markdown::{DisplayLine, parse};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -106,7 +106,7 @@ fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> HeardLaye
     let mut layer = HeardLayer::new(text.edit_mark());
     let chunk = (ByteOffset::new(0)..text.len(), 0, marks);
     let published = layer.publish(text, Vec::new(), vec![chunk], text.edit_mark());
-    assert!(matches!(published, Ok(Some(_))));
+    assert!(matches!(published, Some(Moved::Range(..))));
     layer
 }
 

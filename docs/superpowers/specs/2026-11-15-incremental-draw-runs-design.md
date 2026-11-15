@@ -961,6 +961,14 @@ S4 deviations from this spec:
    becomes `a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_its_line`.
    It counts the edited line and the conceal's line, 2, not the whole note.
 
+Deviation after S4, from architecture run 5:
+
+1. `HeardLayer::catch_up` returns `Option<Moved>`, not `Result<bool, Lost>`
+   (D8): `None`, `Shift`, or `Whole` when the layer was lost.
+   `HeardLayer::publish` returns `Option<Moved>` too: `Range` at the buffer's
+   edit mark, or `Whole` when the layer was lost. The sites bump what they
+   get, and `sync` still lets `Whole` win over `Shift`.
+
 ## Unverified
 
 - The cost of the placement pass's block and bar arithmetic, alone: the bench
