@@ -53,6 +53,9 @@ enum Step {
     Unmark,
     /// A selection between two points, in either order; a caret when they meet.
     Select(Index, Index),
+    Caret(Index),
+    /// The selection's end moves to a point and its start stays, as a drag does.
+    Drag(Index),
     Wrap(Option<f32>),
     Margin,
     CodeBlockWrap,
@@ -72,6 +75,8 @@ fn step() -> impl Strategy<Value = Step> {
         2 => edit().prop_map(Step::Compose),
         1 => Just(Step::Unmark),
         3 => (any::<Index>(), any::<Index>()).prop_map(|(a, b)| Step::Select(a, b)),
+        2 => any::<Index>().prop_map(Step::Caret),
+        2 => any::<Index>().prop_map(Step::Drag),
         1 => prop::sample::select(vec![None, Some(120.), Some(300.)]).prop_map(Step::Wrap),
         1 => Just(Step::Margin),
         1 => Just(Step::CodeBlockWrap),
@@ -86,6 +91,12 @@ fn floor(text: &str, mut offset: usize) -> usize {
         offset -= 1;
     }
     offset
+}
+
+/// A char boundary of `buffer`'s text, picked by `at`.
+fn point(buffer: &Buffer, at: Index) -> ByteOffset {
+    let text = buffer.text();
+    ByteOffset::new(floor(text, at.index(text.len() + 1)))
 }
 
 /// The edit as a byte range and its text, on char boundaries of `text`.
@@ -168,10 +179,16 @@ impl Inputs {
             }
             Step::Unmark => self.marked = None,
             Step::Select(a, b) => {
-                let text = buffer.text();
-                let [a, b] =
-                    [a, b].map(|at| ByteOffset::new(floor(text, at.index(text.len() + 1))));
+                let [a, b] = [*a, *b].map(|at| point(buffer, at));
                 self.selection = a.min(b)..a.max(b);
+            }
+            Step::Caret(at) => {
+                let at = point(buffer, *at);
+                self.selection = at..at;
+            }
+            Step::Drag(head) => {
+                let (anchor, head) = (self.selection.start, point(buffer, *head));
+                self.selection = anchor.min(head)..anchor.max(head);
             }
             Step::Wrap(width) => self.wrap_width = width.map(px),
             Step::Margin => {

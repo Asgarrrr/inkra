@@ -84,7 +84,8 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 #
 # Matched by column. Equivalent. Clean lines hold the same conceals at the same markers in both
 # parses (`changed`), so the markers each selection reveals there agree exactly when the markers it
-# leaves concealed do: without the `!`, `flips` compares the complements of the same two sets.
+# leaves concealed do: without the `!`, `flipped` takes the symmetric difference of the complements of
+# the same two sets, which is the same difference.
 #
 # The vault runs with `cargo mutants -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
 # `-f` is needed because `examine_globs` leaves the vault out. Its suite (~3 s) uses a

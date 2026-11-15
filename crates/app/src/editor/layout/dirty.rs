@@ -1,5 +1,6 @@
 //! Which lines of the previous layout a new one carries (incremental layout spec, D5).
 
+use std::cmp::Ordering;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -22,6 +23,8 @@ pub(super) struct Carry<'p> {
 }
 
 /// `None` when a source cannot answer, or an input every line reads changed: the whole note is dirty.
+/// A selection change dirties the lines of the conceals it flips, after the other sources, since a
+/// flip on a dirty line needs nothing more.
 pub(super) fn carry<'p>(
     inputs: &LayoutInputs<'_>,
     previous: &'p DocumentLayout,
@@ -66,6 +69,30 @@ pub(super) fn carry<'p>(
             .chain(recoloured)
             .map(|range| whole_lines(text, &range))
             .collect();
+    merge(&mut dirty);
+    let mut carry = Carry {
+        old: &previous.lines,
+        edit,
+        dirty,
+        next_dirty: 0,
+        next_old: 0,
+    };
+    let flipped = carry.flipped(
+        (&previous.markdown.conceals, &previous.selection),
+        (&inputs.markdown.conceals, inputs.selection),
+    );
+    if !flipped.is_empty() {
+        let lines = flipped
+            .iter()
+            .map(|&marker| whole_lines(text, &(marker..marker)));
+        carry.dirty.extend(lines);
+        merge(&mut carry.dirty);
+    }
+    Some(carry)
+}
+
+/// Sorts `dirty` and merges the ranges that meet.
+fn merge(dirty: &mut Vec<Range<ByteOffset>>) {
     dirty.sort_unstable_by_key(|range| range.start);
     dirty.dedup_by(|next, kept| {
         let meets = next.start <= kept.end;
@@ -74,18 +101,6 @@ pub(super) fn carry<'p>(
         }
         meets
     });
-    let carry = Carry {
-        old: &previous.lines,
-        edit,
-        dirty,
-        next_dirty: 0,
-        next_old: 0,
-    };
-    let flips = carry.flips(
-        (&previous.markdown.conceals, &previous.selection),
-        (&inputs.markdown.conceals, inputs.selection),
-    );
-    (!flips).then_some(carry)
 }
 
 /// From the start of `range.start`'s line to the end of `range.end`'s, without its `\n`.
@@ -135,18 +150,37 @@ impl<'p> Carry<'p> {
         }
     }
 
-    /// Whether a conceal on a clean line reveals under one selection and not the other. Clean
-    /// lines hold the same conceals, at the same markers, in both parses (`changed`), so the two
-    /// agree iff they reveal the same markers there. An element can still span the edit, so each
-    /// side reads its own parse.
-    fn flips(
+    /// The markers, in the new text, of the conceals on clean lines that reveal under one
+    /// selection and not the other (D9). Clean lines hold the same conceals, at the same markers,
+    /// in both parses (`changed`), so a marker revealed on one side only is a flip. An element can
+    /// still span the edit, so each side reads its own parse.
+    fn flipped(
         &self,
         (old, before): (&[Conceal], &Range<ByteOffset>),
         (new, after): (&[Conceal], &Range<ByteOffset>),
-    ) -> bool {
-        let was = self.revealed(old, before, |marker| self.edit.map(marker, Bias::Left));
-        let is = self.revealed(new, after, |marker| marker);
-        was.ne(is)
+    ) -> Vec<ByteOffset> {
+        let mut was = self
+            .revealed(old, before, |marker| self.edit.map(marker, Bias::Left))
+            .peekable();
+        let mut is = self.revealed(new, after, |marker| marker).peekable();
+        let mut flipped = Vec::new();
+        // Both are sorted: conceals are, and mapping through one splice keeps their order.
+        loop {
+            let order = match (was.peek(), is.peek()) {
+                (Some(was), Some(is)) => was.cmp(is),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => return flipped,
+            };
+            match order {
+                Ordering::Less => flipped.extend(was.next()),
+                Ordering::Greater => flipped.extend(is.next()),
+                Ordering::Equal => {
+                    was.next();
+                    is.next();
+                }
+            }
+        }
     }
 
     /// The markers, placed in the new text by `place`, of the conceals on clean lines that

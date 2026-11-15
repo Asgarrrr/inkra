@@ -432,8 +432,15 @@ section here.
 
 Expected after S4: `shape_document` per keystroke under 0.5 ms (parse diff,
 placement pass, a few dirty lines), and under 1 MB requested. That is a gain of
-about 17–21 ms and 130–240 MB per keystroke. The estimate is unverified until
-S1a's bench. The parse, 1.4–2 ms, becomes the largest cost of a keystroke.
+about 17–21 ms and 130–240 MB per keystroke. The parse, 1.4–2 ms, becomes the
+largest cost of a keystroke.
+
+Measured after S4 (see "As built"): a keystroke costs 0.38–0.61 ms in a quiet
+sitting (S3's table; S4 does not change a keystroke's work) and allocates
+1.01–1.32 MB. A caret move into or out of the 300 KB block costs 0.35–0.51 ms
+and allocates 1.02 MB. So the one-block cases meet 0.5 ms, the 1000-block note
+misses it by about 0.1 ms, and every case allocates slightly over 1 MB. Against
+the baseline table, the gain is about 16–21 ms and 128–237 MB per keystroke.
 
 ### D12. Crate ownership
 
@@ -577,6 +584,7 @@ not on the synthetic one.
    line anyway. Check the other `DisplayLine` users in S1a first.
 4. *The parse becomes the floor at 1.4–2 ms.* **Recommend** leaving it out of
    scope. Add a roadmap row, "incremental parse", triggered by the S4 bench.
+   Done in S4: the row's trigger is a real-note profile, not the bench.
 5. *The oracle's text system.* **Recommend** `NoopTextSystem` for the proptest,
    plus one `#[ignore]` test on CoreText for bold widths.
 6. *Where buffer identity lives.* An id on `Buffer`, recorded by
@@ -890,11 +898,74 @@ S3 deviations from this spec:
    fence's line alone rebuilds. The new test recolours two lines of a
    five-line block in one chunk and counts two.
 
+S4, release, M5 Pro. Before is the bench commit on draw-s3's logic, after is
+S4, in two rounds in one sitting: before then after, then after then before.
+Bytes are gpui's bench report, "allocated bytes per iteration". Other builds
+ran on the machine, at a load average of 16–18. The keystroke times therefore
+swing by 10–40 % between rounds, in both directions, against S3's quiet table.
+
+| Case | Before | After | Allocated before | Allocated after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose, colours | 0.88, 1.12 ms | 0.96, 1.04 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, colours | 0.78, 0.68 ms | 0.66, 0.56 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, colours | 0.62, 0.59 ms | 0.67, 0.55 ms | 1.02 MB | 1.02 MB |
+| One block, caret in and out of the block, colours | 11.78, 11.81 ms | 0.41, 0.35 ms | 29.28 MB | 1.02 MB |
+| 1000 blocks, type in prose, plain | 0.99, 0.80 ms | 1.00, 0.95 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, plain | 0.67, 0.67 ms | 0.67, 0.75 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, plain | 0.64, 0.46 ms | 0.90, 0.52 ms | 1.01 MB | 1.01 MB |
+| One block, caret in and out of the block, plain | 6.51, 6.38 ms | 0.39, 0.51 ms | 14.28 MB | 1.02 MB |
+
+The six keystroke cases allocate the same bytes before and after, and S4 adds
+no work to a keystroke whose selection flips nothing: the revealed markers were
+walked before too. Their times show no direction that both rounds share. The
+caret case rebuilt the whole note before, and now rebuilds the block's two
+fence lines.
+
+`flipped` walks the markers each selection reveals on clean lines, the old ones
+mapped through the edit. Both walks are sorted, so one merge gives the markers
+revealed on one side only. Their lines join the dirty set after the other
+sources merge, since a flip on a dirty line needs nothing more. The equivalent
+mutant on `revealed`'s `!` stays excluded: the symmetric difference of the two
+complements is the same difference.
+
+The oracle gains a caret step and a drag step. A drag holds the selection's
+start and moves its end. Every run below starts from the committed regressions
+file, which gains one case: a caret leaving a quote marker. The oracle fails
+3 runs out of 3 with each of these bugs:
+
+- the markers revealed only by the old selection are not dirtied;
+- the markers revealed only by the new selection are not dirtied;
+- the lines of both selections are dirtied instead of the flipped markers' lines;
+- the old markers are not mapped through the edit;
+- the flipped lines join the dirty set unsorted.
+
+Dirtying the markers that both selections reveal fails it too, through the
+check that a second layout with the same inputs builds no line.
+
+The count tests are `moving_the_caret_into_a_block_rebuilds_only_its_fence_lines`,
+which also moves the caret back out, `a_drag_rebuilds_only_its_moving_edge`,
+which grows the drag by one line and shrinks it back, and
+`a_caret_move_that_flips_no_conceal_rebuilds_nothing`.
+
+S4 deviations from this spec:
+
+1. `is_shaped_from` is unchanged. Its touched clause decides only whether a
+   layout is reused whole. The full rebuild on a flip was `carry`'s since S1a
+   (S1a deviation 7), and S4 removes it there. When the clause fails,
+   `shape_document` now carries every line the selection leaves unflipped.
+2. The bench gains a fourth case, `one-block-caret`, with and without colours.
+   Its caret moves between the prose at 20 % of the one-block note and the
+   block at 70 %, so each iteration enters or leaves the block. Like the other
+   cases, it times `shape_document` alone, not `is_shaped_from`.
+3. S2's `a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_the_whole_note`
+   becomes `a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_its_line`.
+   It counts the edited line and the conceal's line, 2, not the whole note.
+
 ## Unverified
 
-- The expected gain after S4 (D11), and the cost of the placement pass's block
-  and bar arithmetic. S0 and S1a measure them. The placed collect was measured
-  at 32 B, not 48 B.
+- The cost of the placement pass's block and bar arithmetic, alone: the bench
+  measures it only inside a whole `shape_document`. The placed collect was
+  measured at 32 B, not 48 B.
 - The number of `DisplayLine` users outside `editor/layout/` (open question 3).
 - The split of the 8–11 ms not attributed above.
 - That `catch_up` never changes colour off a spliced line (D8). This comes

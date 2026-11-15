@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc f74d4a954e10bb91dd03a92a17dfe9ac4f40a15e3f0ce0ea01626b26fa6c8c88 # shrinks to ("", [Diff([(Index(0), false, 0, ""), (Index(0), false, 0, "> \t> ")])])
 cc b119209113b170de7c152ff9ef6e2b953a70ad7de1dfd9a781b15b5aa7260c7f # shrinks to ("> ```a```aaword -   > \n\n[l](u)  >   > ```rust## [[>[[- [ ] ## > > - [ ] `", [Splice((Index(0), false, 1, "a**")), Paint(Publish(Index(0), [], [(Index(10968334314097571232), Index(4985606506407986924), [(Index(0), Index(17708874310761169552), 1)])])), Paint(Seed([(Index(8009770453058094781), Index(5339846968705396521), [(Index(16909515400900422315), Index(0), 1)])]))])
+cc f50b94f46733fa49d4fe9b567cbc14644d7618ac861982d7eb4d853ca30df210 # shrinks to ("> \n[l](u)", [Select(Index(3689348814741910324), Index(3689348814741910324))])

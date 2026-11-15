@@ -38,15 +38,26 @@ fn with_caret(
     previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
-    with_inputs(buffer, caret, decorations, window, |inputs, window| {
+    selecting(buffer, caret..caret, decorations, previous, window)
+}
+
+/// `buffer`'s layout with bytes `selection` selected, carried from `previous`.
+fn selecting(
+    buffer: &Buffer,
+    selection: Range<usize>,
+    decorations: Drawn<'_>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    with_inputs(buffer, selection, decorations, window, |inputs, window| {
         shape_document(inputs, previous, window)
     })
 }
 
-/// `f` on `buffer`'s layout inputs with the caret at byte `caret`.
+/// `f` on `buffer`'s layout inputs with bytes `selection` selected.
 fn with_inputs<R>(
     buffer: &Buffer,
-    caret: usize,
+    selection: Range<usize>,
     decorations: Drawn<'_>,
     window: &mut Window,
     f: impl FnOnce(&LayoutInputs<'_>, &mut Window) -> R,
@@ -56,7 +67,7 @@ fn with_inputs<R>(
     let inputs = LayoutInputs {
         buffer,
         markdown: &markdown,
-        selection: &(at(caret)..at(caret)),
+        selection: &(at(selection.start)..at(selection.end)),
         marked: None,
         style: &style,
         wrap_width: None,
@@ -266,7 +277,7 @@ fn a_layout_drawn_while_a_layer_trails_is_never_reused(cx: &mut TestAppContext) 
         );
 
         let drawn = decorations::drawn(&buffer, cx);
-        let reused = with_inputs(buffer.read(cx), 0, drawn, window, |inputs, _| {
+        let reused = with_inputs(buffer.read(cx), 0..0, drawn, window, |inputs, _| {
             first.is_shaped_from(inputs)
         });
         assert!(!reused);
@@ -403,14 +414,59 @@ fn a_whole_gutter_below_an_edit_carries(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_the_whole_note(cx: &mut TestAppContext) {
+fn a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_its_line(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
         let mut buffer = Buffer::new("one\n\nsome *b* here");
         let revealed = with_caret(&buffer, 11, Drawn::default(), None, window);
         buffer.transact(|txn| txn.insert(at(0), "x"));
         let (_, built) =
             builds(|| with_caret(&buffer, 1, Drawn::default(), Some(&revealed), window));
-        assert_eq!(built, 3);
+        assert_eq!(built, 2, "the edited line and the conceal's");
+    });
+}
+
+#[gpui::test]
+fn moving_the_caret_into_a_block_rebuilds_only_its_fence_lines(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let buffer = Buffer::new("top\n\n```rust\nlet a = 1;\nlet b = 2;\n```\n\nend");
+        let inside = buffer.text().find("b =").unwrap();
+        let outside = with_caret(&buffer, 0, Drawn::default(), None, window);
+        let (entered, built) =
+            builds(|| with_caret(&buffer, inside, Drawn::default(), Some(&outside), window));
+        assert_eq!(built, 2, "the two fences");
+        let fresh = with_caret(&buffer, inside, Drawn::default(), None, window);
+        assert_eq!(entered.block_labels(), fresh.block_labels());
+
+        let (left, built) =
+            builds(|| with_caret(&buffer, 0, Drawn::default(), Some(&entered), window));
+        assert_eq!(built, 2, "the two fences again");
+        assert_eq!(left.block_labels(), outside.block_labels());
+    });
+}
+
+#[gpui::test]
+fn a_drag_rebuilds_only_its_moving_edge(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let buffer = Buffer::new("*a* one\n*b* two\n*c* three\n*d* four");
+        let [b, c] = ["b*", "c*"].map(|letter| buffer.text().find(letter).unwrap());
+        let two_lines = selecting(&buffer, 1..b, Drawn::default(), None, window);
+        let (three_lines, built) =
+            builds(|| selecting(&buffer, 1..c, Drawn::default(), Some(&two_lines), window));
+        assert_eq!(built, 1, "the line the head reached");
+        let (_, built) =
+            builds(|| selecting(&buffer, 1..b, Drawn::default(), Some(&three_lines), window));
+        assert_eq!(built, 1, "the line the head left");
+    });
+}
+
+#[gpui::test]
+fn a_caret_move_that_flips_no_conceal_rebuilds_nothing(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let buffer = Buffer::new("one\n\nsome *b* here\n\ntwo");
+        let revealed = with_caret(&buffer, 11, Drawn::default(), None, window);
+        let (_, built) =
+            builds(|| with_caret(&buffer, 12, Drawn::default(), Some(&revealed), window));
+        assert_eq!(built, 0);
     });
 }
 
