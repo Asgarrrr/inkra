@@ -24,6 +24,14 @@ pub(super) fn name(side: Side) -> &'static str {
     }
 }
 
+/// A border on `side`'s edge that faces the centre.
+pub(super) fn inward_border<E: Styled>(element: E, side: Side, width: Pixels) -> E {
+    match side {
+        Side::Left => element.border_r(width),
+        Side::Right => element.border_l(width),
+    }
+}
+
 fn column_selector(side: Side) -> &'static str {
     match side {
         Side::Left => "dock-left",
@@ -87,10 +95,7 @@ impl AppShell {
                     shell.append(dragged.decl.id, side, window, cx);
                 }),
             );
-        let column = match side {
-            Side::Left => column.border_r(theme::RULE_WIDTH),
-            Side::Right => column.border_l(theme::RULE_WIDTH),
-        };
+        let column = inward_border(column, side, theme::RULE_WIDTH);
         Some(column.child(self.render_member(root, Slot::ROOT, &path, &top, &mut 0, cx)))
     }
 

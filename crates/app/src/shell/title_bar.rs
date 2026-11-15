@@ -8,7 +8,7 @@ use gpui::{
 use inkra_layout::{GroupId, Side, Surface};
 
 use super::AppShell;
-use super::dock_chrome::{name, width};
+use super::dock_chrome::{inward_border, name, width};
 use super::geometry::{EndPiece, Ends, lights_width};
 use super::group::selector;
 use crate::theme;
@@ -175,12 +175,9 @@ impl AppShell {
             .flex_none()
             .w(width(side))
             .h_full();
-        match side {
-            Side::Left => ruled.border_r(theme::RULE_WIDTH),
-            Side::Right => ruled.border_l(theme::RULE_WIDTH),
-        }
-        .border_color(colors.border_variant)
-        .children(segments)
+        inward_border(ruled, side, theme::RULE_WIDTH)
+            .border_color(colors.border_variant)
+            .children(segments)
     }
 
     /// A press arms the move; the root starts it on the next move, wherever the pointer is by then.

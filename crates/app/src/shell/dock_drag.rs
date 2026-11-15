@@ -8,6 +8,7 @@ use gpui::{
 use inkra_layout::{GroupId, Side};
 
 use super::AppShell;
+use super::dock_chrome::{inward_border, name};
 use super::drop_marker;
 use crate::pane::PaneDecl;
 use crate::theme;
@@ -71,12 +72,13 @@ impl AppShell {
         }
         let colors = theme::current(cx).colors;
         let strip = div().absolute().top_0().bottom_0();
-        let (strip, name) = match side {
-            Side::Left => (strip.left_0().border_r(theme::DROP_EDGE), "left"),
-            Side::Right => (strip.right_0().border_l(theme::DROP_EDGE), "right"),
+        let strip = match side {
+            Side::Left => strip.left_0(),
+            Side::Right => strip.right_0(),
         };
+        let name = name(side);
         Some(
-            strip
+            inward_border(strip, side, theme::DROP_EDGE)
                 .w(DROP_STRIP_WIDTH)
                 .debug_selector(move || format!("dock-drop-{name}"))
                 .group_drag_over::<DraggedView>(SHELL_GROUP, move |style| {
