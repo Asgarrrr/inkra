@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use inkra_text::{ByteOffset, Splice};
 
-/// Block bytes one listener call lexes on the main thread; a call at this size takes at most 0.5 ms (D10).
+/// The block bytes a listener call lexes within 0.5 ms (D10); until S2, no call is capped at it.
 pub const MAIN_THREAD_BUDGET: usize = 65_536;
 
 #[derive(Debug, Default, PartialEq, Eq)]

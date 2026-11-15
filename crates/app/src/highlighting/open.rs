@@ -5,7 +5,7 @@ use std::time::Instant;
 use super::colour;
 use crate::decorations::Opened;
 
-/// Above this many bytes, a parse would take more than half the landing deadline (D8).
+/// The longest text, in bytes, the open function parses; a longer one lands no chunk (D8).
 pub(super) const OPEN_PARSE_LIMIT: usize = 500_000;
 
 pub(super) fn open(text: &str, deadline: Instant) -> Opened {
