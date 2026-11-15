@@ -57,7 +57,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
-  `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
+  `-p inkra-markdown` for `parse`, `-p inkra-app --features bench --bench layout` for one
+  keystroke's `shape_document` — before/after comparison, not a gate.
 - gpui is a git dependency pinned by `rev`; cargo fetches it. `vendor/zed-reference`
   is gitignored, for reading only: `./scripts/vendor-gpui.sh` checks out the rev in `Cargo.lock`.
 
@@ -234,6 +235,8 @@ Read the spec before changing its area:
   batches: opaque offsets, positions vs lengths, typed UTF-16 ranges at the protocol boundary
 - `docs/superpowers/specs/2026-11-02-perf-batch-design.md` — performance batch 2: the
   baseline, carried shaped lines, painting inside the content mask
+- `docs/superpowers/specs/2026-11-15-incremental-draw-runs-design.md` — a keystroke carries
+  clean lines: `Placed`, line-relative `LineLayout`, the dirty set, `Moved`, the oracle, the layout bench
 - Dropped candidates, not to be proposed again unchanged:
   `2026-09-30-note-index-read-interface-design.md`, `2026-09-30-own-save-echo-design.md`
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity
