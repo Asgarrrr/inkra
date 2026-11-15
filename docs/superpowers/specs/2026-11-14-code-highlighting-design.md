@@ -541,6 +541,8 @@ light. The look is tuned after it ships, as for code blocks.
   fence between two blocks clears both old chunks and lexes the merged block;
   deleting a line right before a block's opening fence lexes the block;
   a chunk on a block's range with another tag, or none, is lexed over.
+- `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
+  deadline, none past it, none over `OPEN_PARSE_LIMIT`, all at the limit.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
@@ -549,7 +551,7 @@ light. The look is tuned after it ships, as for code blocks.
 - `app`, headless `#[gpui::test]` against `MemFs`:
   - a block's runs carry the token colours; a revealed fence stays
     `md_marker`;
-  - a keystroke in prose lexes nothing, counted by a test-only counter;
+  - a keystroke in prose lexes nothing: every block keeps its planted marks;
   - a keystroke in one block lexes that block only;
   - a typed fence, a deleted fence and a changed info word recolour the right
     blocks, and leave no mark on prose;

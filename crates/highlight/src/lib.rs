@@ -4,9 +4,11 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
+pub use open::{OPEN_PARSE_LIMIT, open_chunks};
 pub use plan::{MAIN_THREAD_BUDGET, Plan, dirty, plan};
 use state::LineState;
 
+mod open;
 mod plan;
 mod rust;
 mod state;
