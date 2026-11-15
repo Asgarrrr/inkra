@@ -34,10 +34,12 @@ pub(super) fn carry<'p>(
         || previous.wrap_width != inputs.wrap_width
         || previous.margin != inputs.margin
         || previous.code_block_wrap != inputs.code_block_wrap
-        || previous.shaped_at.1 != inputs.decorations.revision
     {
         return None;
     }
+    let recoloured = inputs
+        .decorations
+        .changed_since(previous.shaped_at.1, buffer)?;
     let hull = inkra_highlight::dirty(buffer.edits_since(previous.at)?);
     let old_len = previous.lines.last()?.end().get();
     let edit = hull.as_ref().map_or(
@@ -60,6 +62,7 @@ pub(super) fn carry<'p>(
                 edit.map(marked.start, Bias::Left)..edit.map(marked.end, Bias::Right)
             }))
             .chain(inputs.marked.cloned())
+            .chain(recoloured)
             .map(|range| whole_lines(text, &range))
             .collect();
     dirty.sort_unstable_by_key(|range| range.start);

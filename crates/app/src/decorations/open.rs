@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use gpui::{App, BorrowAppContext, Entity};
+use inkra_editor::Moved;
 use inkra_text::{Buffer, ByteOffset};
 
 use super::listen::timed;
@@ -77,7 +78,7 @@ pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Vec<Chunk>)>, 
             landed |= entry.layers[rank].land(text, chunks);
         }
         if landed {
-            entry.bump(&mut decorations.revisions);
+            entry.bump(&mut decorations.revisions, Moved::Whole);
         }
     });
 }

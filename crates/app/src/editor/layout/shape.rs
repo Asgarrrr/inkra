@@ -131,7 +131,7 @@ pub(crate) fn shape_document(
         margin: inputs.margin,
         code_block_wrap,
         theme: Arc::clone(theme),
-        shaped_at: (buffer.version(), inputs.decorations.revision),
+        shaped_at: (buffer.version(), inputs.decorations.revision()),
         buffer: buffer.id(),
         at: buffer.edit_mark(),
         markdown: Rc::clone(markdown),

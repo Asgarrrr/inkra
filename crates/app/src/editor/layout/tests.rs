@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Pixels, TestAppContext, Window, px};
+use gpui::{App, AppContext, Entity, Pixels, TestAppContext, Window, px};
 use inkra_text::{Buffer, ByteOffset};
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -13,8 +13,10 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
 use super::line::Placed;
 use super::{BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document};
-use crate::decorations::Drawn;
+use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
+
+mod layer;
 
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",
@@ -37,6 +39,8 @@ fn edit() -> impl Strategy<Value = Edit> {
 #[derive(Debug, Clone)]
 enum Step {
     Splice(Edit),
+    /// A splice laid out before `decorations::sync` brings the layer to it.
+    Unsynced(Edit),
     /// Several hunks reach the buffer as one `apply_diff`, as a reload does.
     Diff(Vec<Edit>),
     /// Several splices in one transaction, so its undo or redo is a batch.
@@ -53,11 +57,14 @@ enum Step {
     Margin,
     CodeBlockWrap,
     Theme,
+    Paint(layer::Paint),
 }
 
 fn step() -> impl Strategy<Value = Step> {
     prop_oneof![
         6 => edit().prop_map(Step::Splice),
+        1 => edit().prop_map(Step::Unsynced),
+        4 => layer::paint().prop_map(Step::Paint),
         2 => prop::collection::vec(edit(), 2..5).prop_map(Step::Diff),
         2 => prop::collection::vec(edit(), 2..5).prop_map(Step::Group),
         2 => Just(Step::Undo),
@@ -125,7 +132,7 @@ struct Inputs {
 impl Inputs {
     fn apply(&mut self, buffer: &mut Buffer, step: &Step) {
         match step {
-            Step::Splice(edit) => {
+            Step::Splice(edit) | Step::Unsynced(edit) => {
                 let (range, inserted) = resolve(buffer.text(), edit);
                 buffer.transact(|txn| txn.replace(range, &inserted));
                 self.marked = None;
@@ -183,6 +190,7 @@ impl Inputs {
                     light
                 };
             }
+            Step::Paint(_) => {}
         }
         let text = buffer.text();
         let clamp = |at: ByteOffset| ByteOffset::new(floor(text, at.get()));
@@ -191,10 +199,13 @@ impl Inputs {
 
     fn layout(
         &self,
-        buffer: &Buffer,
+        buffer: &Entity<Buffer>,
         previous: Option<&DocumentLayout>,
         window: &mut Window,
+        cx: &App,
     ) -> DocumentLayout {
+        let decorations = decorations::drawn(buffer, cx);
+        let buffer = buffer.read(cx);
         let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
         let style = window.text_style();
         let inputs = LayoutInputs {
@@ -208,7 +219,7 @@ impl Inputs {
             code_block_wrap: self.code_block_wrap,
             theme: self.theme,
             scrolls: &BlockScrolls::default(),
-            decorations: Drawn::default(),
+            decorations,
         };
         shape_document(&inputs, previous, window)
     }
@@ -275,8 +286,15 @@ fn assert_same(carried: &DocumentLayout, fresh: &DocumentLayout) -> Result<(), T
     Ok(())
 }
 
-fn check(text: &str, steps: &[Step], window: &mut Window) -> Result<(), TestCaseError> {
-    let mut buffer = Buffer::new(text);
+fn check(
+    text: &str,
+    steps: &[Step],
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<(), TestCaseError> {
+    layer::declare(cx);
+    let buffer = cx.new(|_| Buffer::new(text));
+    let mut seen = layer::Seen::new(buffer.read(cx));
     let mut inputs = Inputs {
         selection: ByteOffset::default()..ByteOffset::default(),
         marked: None,
@@ -285,15 +303,24 @@ fn check(text: &str, steps: &[Step], window: &mut Window) -> Result<(), TestCase
         code_block_wrap: false,
         theme: builtin::dark(),
     };
-    let mut layout = inputs.layout(&buffer, None, window);
+    let mut layout = inputs.layout(&buffer, None, window, cx);
     for step in steps {
-        inputs.apply(&mut buffer, step);
-        layout = inputs.layout(&buffer, Some(&layout), window);
-        assert_same(&layout, &inputs.layout(&buffer, None, window))?;
-        // Nothing changed since, so every line carries, after a flip too.
+        if let Step::Paint(paint) = step {
+            layer::apply(paint, &buffer, &seen, cx);
+        }
+        buffer.update(cx, |buffer, _| inputs.apply(buffer, step));
+        let synced = !matches!(step, Step::Unsynced(_));
+        if synced {
+            decorations::sync(&buffer, cx);
+        }
+        seen.note(buffer.read(cx));
+        layout = inputs.layout(&buffer, Some(&layout), window, cx);
+        assert_same(&layout, &inputs.layout(&buffer, None, window, cx))?;
+        // Nothing changed since, so every line carries, after a flip too; a layer trailing the
+        // buffer, drawn by neither, still rebuilds.
         let before = line_build_count();
-        let again = inputs.layout(&buffer, Some(&layout), window);
-        if inputs.marked.is_none() {
+        let again = inputs.layout(&buffer, Some(&layout), window, cx);
+        if inputs.marked.is_none() && synced {
             prop_assert_eq!(line_build_count() - before, 0, "after {:?}", step);
         }
         assert_same(&again, &layout)?;
@@ -304,8 +331,8 @@ fn check(text: &str, steps: &[Step], window: &mut Window) -> Result<(), TestCase
 #[gpui::test]
 fn a_carried_layout_matches_a_fresh_one(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
-    cx.update(|window, _| {
-        let window = RefCell::new(window);
+    cx.update(|window, cx| {
+        let state = RefCell::new((window, cx));
         let config = Config {
             cases: 2048,
             source_file: Some(file!()),
@@ -313,7 +340,8 @@ fn a_carried_layout_matches_a_fresh_one(cx: &mut TestAppContext) {
         };
         let strategy = (markdown(48), prop::collection::vec(step(), 1..10));
         let result = TestRunner::new(config).run(&strategy, |(text, steps)| {
-            check(&text, &steps, &mut window.borrow_mut())
+            let (window, cx) = &mut *state.borrow_mut();
+            check(&text, &steps, window, cx)
         });
         if let Err(failure) = result {
             panic!("{failure}");

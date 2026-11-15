@@ -47,16 +47,22 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
         &self.layer
     }
 
-    /// As `Layer::catch_up`; `true` when the layer held marks behind `text`, which now draw
-    /// elsewhere or not at all.
-    pub fn catch_up(&mut self, text: &Buffer) -> bool {
+    /// As `Layer::catch_up`; `Ok(true)` when the layer held marks behind `text`, which now draw
+    /// elsewhere.
+    ///
+    /// # Errors
+    /// As `Layer::catch_up`.
+    pub fn catch_up(&mut self, text: &Buffer) -> Result<bool, Lost> {
         let moved = !self.layer.is_empty() && self.layer.at() != text.edit_mark();
         let caught = self.layer.catch_up(text);
         self.track(&caught);
-        moved
+        caught.map(|()| moved)
     }
 
-    /// As `Layer::publish`; `true` when the marks changed, a lost layer's included.
+    /// As `Layer::publish`.
+    ///
+    /// # Errors
+    /// As `Layer::publish`.
     ///
     /// # Panics
     /// As `Layer::publish`.
@@ -66,10 +72,10 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
         removed: Vec<Range<ByteOffset>>,
         chunks: Vec<Published<S>>,
         at: EditMark,
-    ) -> bool {
+    ) -> Result<bool, Lost> {
         let published = self.layer.publish(text, removed, chunks, at);
         self.track(&published);
-        published != Ok(false)
+        published
     }
 
     /// Publishes an open's `chunks` at `text`'s edit mark, which a first hearing then compares.

@@ -1,17 +1,20 @@
 //! A layout carries every line an edit leaves clean (incremental layout spec, D5 and D7).
 
+use std::ops::Range;
 use std::rc::Rc;
+use std::time::Instant;
 
-use gpui::{TestAppContext, Window, px};
-use inkra_text::Buffer;
+use gpui::{App, Entity, TestAppContext, Window, prelude::*, px};
+use inkra_text::{Buffer, ByteOffset};
 
 use super::shapes::{layout_of, reshape, shape};
-use super::{at, dispatching, with_editor};
-use crate::decorations::Drawn;
+use super::{at, dispatching, window_on, with_editor};
+use crate::decorations::{self, Drawn, MarkStyle};
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document,
 };
-use crate::theme::builtin;
+use crate::feature::fakes::{self, TODO_LAYER};
+use crate::theme::{ColorToken, builtin};
 
 /// The lines `f` builds rather than carries.
 fn builds<R>(f: impl FnOnce() -> R) -> (R, usize) {
@@ -31,6 +34,7 @@ fn carried(before: &str, after: &str, window: &mut Window) -> (DocumentLayout, u
 fn with_caret(
     buffer: &Buffer,
     caret: usize,
+    decorations: Drawn<'_>,
     previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
@@ -47,9 +51,58 @@ fn with_caret(
         code_block_wrap: false,
         theme: builtin::dark(),
         scrolls: &BlockScrolls::default(),
-        decorations: Drawn::default(),
+        decorations,
     };
     shape_document(&inputs, previous, window)
+}
+
+/// `buffer`'s layout in its colours, the caret at its start, carried from `previous`.
+fn coloured(
+    buffer: &Entity<Buffer>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+    cx: &App,
+) -> DocumentLayout {
+    let drawn = decorations::drawn(buffer, cx);
+    with_caret(buffer.read(cx), 0, drawn, previous, window)
+}
+
+/// One chunk over `chunk`, its first three bytes in `token`, published at the buffer's edit mark.
+fn recolour(buffer: &Entity<Buffer>, chunk: &Range<ByteOffset>, token: ColorToken, cx: &mut App) {
+    let style = MarkStyle { color: Some(token) };
+    let marks = vec![(chunk.start..chunk.start + 3, style)];
+    let mark = buffer.read(cx).edit_mark();
+    let chunks = vec![(chunk.clone(), 0, marks)];
+    decorations::publish(
+        TODO_LAYER,
+        &buffer.downgrade(),
+        Vec::new(),
+        chunks,
+        mark,
+        cx,
+    );
+}
+
+const TWO_BLOCKS: &str = "top\n\n```rust\nlet a = 1;\n```\n\nmid\n\n```rust\nlet b = 2;\n```\n";
+
+/// `TWO_BLOCKS` in a window, both blocks coloured, and each block's range.
+fn two_coloured_blocks(cx: &mut TestAppContext) -> (Entity<Buffer>, Vec<Range<ByteOffset>>) {
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(TWO_BLOCKS)));
+    window_on(cx, buffer.clone());
+    let markdown = inkra_markdown::parse(TWO_BLOCKS);
+    let blocks: Vec<_> = markdown
+        .code_blocks
+        .iter()
+        .map(|block| block.range.clone())
+        .collect();
+    cx.update(|cx| {
+        fakes::declare_todo(cx);
+        for block in &blocks {
+            recolour(&buffer, block, ColorToken::Accent, cx);
+        }
+    });
+    cx.run_until_parked();
+    (buffer, blocks)
 }
 
 /// Every caret position and every line's code block match a fresh layout of `text`.
@@ -82,6 +135,83 @@ fn a_keystroke_rebuilds_only_its_line(cx: &mut TestAppContext) {
         cx.run_until_parked();
     });
     assert_eq!(built, 1);
+}
+
+#[gpui::test]
+fn a_keystroke_with_colours_rebuilds_only_its_line(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "# Title\n\nsome *text* here\n\nmore TODO prose\n");
+    let buffer = window
+        .update(&mut cx, |view, _, _| view.input.buffer().clone())
+        .unwrap();
+    let _listening = cx.update(|_, cx| {
+        fakes::declare_todo(cx);
+        decorations::listen(TODO_LAYER, Rc::new(fakes::todo_listener), cx)
+    });
+    cx.simulate_keystrokes("cmd-up down down right right");
+    cx.run_until_parked();
+    let drawn = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| {
+            let len = buffer.read(cx).len();
+            decorations::drawn(&buffer, cx).colors_in(at(0)..len).len()
+        })
+    };
+    assert_eq!(drawn(&mut cx), 1, "the marker is coloured");
+
+    let ((), built) = builds(|| {
+        cx.simulate_input("x");
+        cx.run_until_parked();
+    });
+    assert_eq!(built, 1);
+    assert_eq!(drawn(&mut cx), 1);
+}
+
+#[gpui::test]
+fn a_recolour_of_one_block_rebuilds_only_its_lines(cx: &mut TestAppContext) {
+    let (buffer, blocks) = two_coloured_blocks(cx);
+    let window = cx.add_empty_window();
+    window.update(|window, cx| {
+        let previous = coloured(&buffer, None, window, cx);
+        recolour(&buffer, &blocks[1], ColorToken::Warning, cx);
+        let (layout, built) = builds(|| coloured(&buffer, Some(&previous), window, cx));
+        assert_eq!(built, 3, "the block's fences and its one line");
+        let fresh = coloured(&buffer, None, window, cx);
+        for line in 0..TWO_BLOCKS.split('\n').count() {
+            assert_eq!(
+                layout.run_colors(line),
+                fresh.run_colors(line),
+                "line {line}"
+            );
+        }
+    });
+}
+
+#[gpui::test]
+fn landing_a_seed_rebuilds_the_whole_note(cx: &mut TestAppContext) {
+    let (buffer, _) = two_coloured_blocks(cx);
+    let window = cx.add_empty_window();
+    window.update(|window, cx| {
+        let previous = coloured(&buffer, None, window, cx);
+        let opened = decorations::run_openers(
+            TWO_BLOCKS,
+            &[(TODO_LAYER, fakes::open_todo)],
+            Instant::now(),
+        );
+        decorations::seed(&buffer, opened, cx);
+        let (_, built) = builds(|| coloured(&buffer, Some(&previous), window, cx));
+        assert_eq!(built, TWO_BLOCKS.split('\n').count());
+    });
+}
+
+#[gpui::test]
+fn switching_a_layer_rebuilds_the_whole_note(cx: &mut TestAppContext) {
+    let (buffer, _) = two_coloured_blocks(cx);
+    let window = cx.add_empty_window();
+    window.update(|window, cx| {
+        let previous = coloured(&buffer, None, window, cx);
+        decorations::enable([], cx);
+        let (_, built) = builds(|| coloured(&buffer, Some(&previous), window, cx));
+        assert_eq!(built, TWO_BLOCKS.split('\n').count());
+    });
 }
 
 #[gpui::test]
@@ -152,9 +282,10 @@ fn a_whole_gutter_below_an_edit_carries(cx: &mut TestAppContext) {
 fn a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_the_whole_note(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
         let mut buffer = Buffer::new("one\n\nsome *b* here");
-        let revealed = with_caret(&buffer, 11, None, window);
+        let revealed = with_caret(&buffer, 11, Drawn::default(), None, window);
         buffer.transact(|txn| txn.insert(at(0), "x"));
-        let (_, built) = builds(|| with_caret(&buffer, 1, Some(&revealed), window));
+        let (_, built) =
+            builds(|| with_caret(&buffer, 1, Drawn::default(), Some(&revealed), window));
         assert_eq!(built, 3);
     });
 }
@@ -163,9 +294,10 @@ fn a_conceal_below_an_edit_that_the_caret_leaves_rebuilds_the_whole_note(cx: &mu
 fn a_conceal_below_an_edit_that_stays_revealed_carries(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
         let mut buffer = Buffer::new("one\n\nsome *b* here");
-        let revealed = with_caret(&buffer, 11, None, window);
+        let revealed = with_caret(&buffer, 11, Drawn::default(), None, window);
         buffer.transact(|txn| txn.insert(at(0), "x"));
-        let (_, built) = builds(|| with_caret(&buffer, 12, Some(&revealed), window));
+        let (_, built) =
+            builds(|| with_caret(&buffer, 12, Drawn::default(), Some(&revealed), window));
         assert_eq!(built, 1);
     });
 }

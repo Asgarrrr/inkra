@@ -6,8 +6,8 @@ use std::ops::Range;
 use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
-use inkra_editor::HeardLayer;
 pub(crate) use inkra_editor::TextChange;
+use inkra_editor::{HeardLayer, Lost, Moved, RevisionLog};
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
@@ -67,16 +67,16 @@ struct Declared {
 struct Entry {
     /// Removes the entry when its buffer is released.
     _released: Subscription,
-    /// Moves on every change a view must draw.
-    revision: u64,
+    /// Its revision moves on every change a view must draw, and logs what moved.
+    log: RevisionLog,
     /// One per declared layer, by rank.
     layers: Vec<HeardLayer<MarkStyle>>,
 }
 
 impl Entry {
-    fn bump(&mut self, revisions: &mut u64) {
+    fn bump(&mut self, revisions: &mut u64, moved: Moved) {
         *revisions += 1;
-        self.revision = *revisions;
+        self.log.bump(*revisions, moved);
     }
 }
 
@@ -123,7 +123,7 @@ pub(crate) fn enable(features: impl IntoIterator<Item = FeatureId>, cx: &mut App
         switched = true;
         for entry in entries.values_mut() {
             if entry.layers[rank].switch(on) {
-                entry.bump(revisions);
+                entry.bump(revisions, Moved::Whole);
             }
         }
     }
@@ -164,7 +164,7 @@ fn entry<'a>(
         _released: cx.observe_release(buffer, move |_, cx| {
             cx.global_mut::<Decorations>().entries.remove(&id);
         }),
-        revision: 0,
+        log: RevisionLog::new(),
         layers: (0..declared)
             .map(|_| HeardLayer::new(buffer.read(cx).edit_mark()))
             .collect(),
@@ -195,15 +195,29 @@ pub(crate) fn publish(
     let changed = cx.update_global(|decorations: &mut Decorations, cx| {
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
-        let changed = entry.layers[rank].publish(buffer.read(cx), removed, chunks, at);
-        if changed {
-            entry.bump(&mut decorations.revisions);
-        }
-        changed
+        let recoloured = recolour(&removed, &chunks, at);
+        let moved = match entry.layers[rank].publish(buffer.read(cx), removed, chunks, at) {
+            Ok(false) => return false,
+            Ok(true) => recoloured,
+            Err(Lost) => Moved::Whole,
+        };
+        entry.bump(&mut decorations.revisions, moved);
+        true
     });
     if changed {
         cx.refresh_windows();
     }
+}
+
+/// What a publish that changed the marks moved: only marks inside its ranges, mapped from `at`.
+pub(crate) fn recolour(removed: &[Range<ByteOffset>], chunks: &[Chunk], at: EditMark) -> Moved {
+    let ranges = removed
+        .iter()
+        .chain(chunks.iter().map(|(range, _, _)| range));
+    let span = ranges
+        .cloned()
+        .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end));
+    span.map_or(Moved::Whole, |span| Moved::Range(at, span))
 }
 
 /// The chunks `layer` holds over `buffer`, each with its tag, sorted (code highlighting spec, D9
@@ -228,6 +242,7 @@ pub(crate) fn chunks(
 
 /// Brings every layer of `buffer` to its edit mark. A non-empty layer behind it draws something
 /// else after, moved or lost, so the entry's revision moves: undo can bring back a shaped version.
+/// A lost layer logs `Whole`, an empty one too, which is rare; a shifted one logs `Shift`.
 /// Then each listener hears what it has not, once the global is released.
 pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
     if cx
@@ -244,7 +259,7 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
             cx,
         );
         let text = buffer.read(cx);
-        let mut moved = false;
+        let mut moved = None;
         let mut unheard = Vec::new();
         let enabled = entry
             .layers
@@ -252,15 +267,19 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
             .zip(&decorations.declared)
             .filter(|(_, declared)| declared.enabled);
         for (layer, declared) in enabled {
-            moved |= layer.catch_up(text);
+            match layer.catch_up(text) {
+                Ok(false) => {}
+                Ok(true) => moved = moved.or(Some(Moved::Shift)),
+                Err(Lost) => moved = Some(Moved::Whole),
+            }
             if let Some(listener) = declared.listener.as_ref().and_then(Weak::upgrade)
                 && let Some(change) = layer.hear(text)
             {
                 unheard.push((listener, declared.decl.id, change));
             }
         }
-        if moved {
-            entry.bump(&mut decorations.revisions);
+        if let Some(moved) = moved {
+            entry.bump(&mut decorations.revisions, moved);
         }
         unheard
     });
@@ -273,13 +292,26 @@ pub(crate) fn tracked(cx: &App) -> usize {
         .map_or(0, |decorations| decorations.entries.len())
 }
 
+/// The log of a buffer no feature published to.
+static NO_LOG: RevisionLog = RevisionLog::new();
+
 /// What a view draws of a buffer's layers.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub(crate) struct Drawn<'a> {
-    pub(crate) revision: u64,
+    log: &'a RevisionLog,
     layers: &'a [HeardLayer<MarkStyle>],
     /// The buffer's edit mark: a layer at another one is stale and not drawn.
     at: EditMark,
+}
+
+impl Default for Drawn<'_> {
+    fn default() -> Self {
+        Self {
+            log: &NO_LOG,
+            layers: &[],
+            at: EditMark::default(),
+        }
+    }
 }
 
 /// Allocates nothing: a buffer no feature published to draws `Drawn::default()`.
@@ -291,7 +323,7 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
         return Drawn::default();
     };
     Drawn {
-        revision: entry.revision,
+        log: &entry.log,
         layers: &entry.layers,
         at: buffer.read(cx).edit_mark(),
     }
@@ -299,16 +331,38 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
 
 #[cfg(any(test, feature = "bench"))]
 impl<'a> Drawn<'a> {
-    pub(crate) fn for_tests(layers: &'a [HeardLayer<MarkStyle>], at: EditMark) -> Self {
-        Self {
-            revision: 0,
-            layers,
-            at,
-        }
+    pub(crate) fn for_tests(
+        layers: &'a [HeardLayer<MarkStyle>],
+        log: &'a RevisionLog,
+        at: EditMark,
+    ) -> Self {
+        Self { log, layers, at }
     }
 }
 
 impl Drawn<'_> {
+    /// What a layout records, `None` while a layer with marks trails the buffer: it draws none
+    /// of them, and the `sync` that brings it back logs only a `Shift`.
+    pub(crate) fn revision(&self) -> Option<u64> {
+        let stale = self
+            .layers
+            .iter()
+            .map(HeardLayer::layer)
+            .any(|layer| !layer.is_empty() && layer.at() != self.at);
+        (!stale).then(|| self.log.revision())
+    }
+
+    /// The ranges of `buffer`'s text whose colours may differ from those drawn at `revision`, as
+    /// `RevisionLog::changed_since`; `None` too when either revision is `None`.
+    pub(crate) fn changed_since(
+        &self,
+        revision: Option<u64>,
+        buffer: &Buffer,
+    ) -> Option<Vec<Range<ByteOffset>>> {
+        self.revision()?;
+        self.log.changed_since(revision?, buffer)
+    }
+
     /// The fresh layers' colours over `line`, clipped to it, by rank: a later one paints over.
     pub(crate) fn colors_in(
         &self,
