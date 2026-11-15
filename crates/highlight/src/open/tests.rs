@@ -39,3 +39,18 @@ fn a_text_at_the_parse_limit_is_coloured() {
 
     assert_eq!(chunks, ['a']);
 }
+
+#[test]
+fn open_stops_at_the_chunk_its_deadline_passes() {
+    let mut calls = 0;
+    let chunks = open_chunks(
+        2,
+        || ['a', 'b'],
+        || {
+            calls += 1;
+            calls == 1
+        },
+    );
+
+    assert_eq!(chunks, ['a']);
+}
