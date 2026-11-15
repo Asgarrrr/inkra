@@ -134,6 +134,11 @@ impl AppShell {
         since: Cursor,
         cx: &mut Context<Self>,
     ) {
+        self.want_image(id, cx);
+        self.set_shown(group, Shown::Image(id), since, cx);
+    }
+
+    fn want_image(&self, id: EntryId, cx: &mut Context<Self>) {
         if let Some(panes) = &self.panes {
             let notes = self.notes.clone();
             panes.images.update(cx, |images, cx| {
@@ -144,7 +149,17 @@ impl AppShell {
                 );
             });
         }
-        self.set_shown(group, Shown::Image(id), since, cx);
+    }
+
+    /// A load failed against an older vault may find its file in this one, after a folder's rename.
+    pub(super) fn retry_failed_images(&self, cx: &mut Context<Self>) {
+        let Some(panes) = &self.panes else {
+            return;
+        };
+        panes.images.update(cx, |images, _| images.forget_failed());
+        for id in self.shown_images() {
+            self.want_image(id, cx);
+        }
     }
 
     /// The bare group area while the image loads.
@@ -186,17 +201,20 @@ impl AppShell {
         let Some(panes) = &self.panes else {
             return;
         };
-        let keep: HashSet<EntryId> = self
-            .layout
+        let keep = self.shown_images();
+        panes
+            .images
+            .update(cx, |images, cx| images.retain(&keep, cx));
+    }
+
+    fn shown_images(&self) -> HashSet<EntryId> {
+        self.layout
             .center_groups()
             .into_iter()
             .filter_map(|group| match self.group(group).shown {
                 Shown::Image(id) => Some(id),
                 Shown::Empty | Shown::Bound(_) | Shown::Trashing(_) | Shown::View(_) => None,
             })
-            .collect();
-        panes
-            .images
-            .update(cx, |images, cx| images.retain(&keep, cx));
+            .collect()
     }
 }

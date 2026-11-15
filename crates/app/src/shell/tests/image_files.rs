@@ -1,13 +1,17 @@
 //! An image whose file is deleted or renamed: its tab, and the path its read follows.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{Modifiers, Task, TestAppContext};
 use inkra_vault::EntryId;
+use inkra_vault::mem_fs::MemFs;
 
 use super::images::{PDF, PHOTO, Vault, vault};
-use super::{click_row, keys, showing, tab_files};
+use super::{click_row, image_shown, keys, shell_focused, showing, tab_files};
+use crate::file_kind::FileKind;
 use crate::images::png;
+use crate::test_support::entry_id;
 
 impl Vault {
     fn rename_photo(&mut self, name: &str) -> Task<bool> {
@@ -156,4 +160,32 @@ fn an_image_opened_while_its_rename_runs_is_drawn(cx: &mut TestAppContext) {
     assert!(vault.drawn("image-view"));
     assert!(!vault.drawn("image-failed"));
     vault.check();
+}
+
+/// The move is the folder's, so the photo's read misses; the rescan's vault retries it.
+#[gpui::test]
+fn an_image_opened_before_its_folder_rename_rescan_lands_is_drawn(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_bytes("/vault/pics/photo.png", png(40, 30));
+    let (window, notes, mut cx) = shell_focused(cx, &fs);
+    let pics = entry_id(&notes, &mut cx, "pics");
+    let photo = entry_id(&notes, &mut cx, "photo.png");
+    let gate = fs.block_read_dir("/vault");
+    let _renamed = notes.update(&mut cx, |notes, cx| notes.rename(pics, "img", cx));
+    cx.run_until_parked();
+
+    window
+        .update(&mut cx, |shell, _, cx| {
+            shell.open_file(photo, FileKind::Image, None, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(image_shown(&window, &mut cx), Some(photo));
+    assert!(cx.debug_bounds("image-view").is_some());
+    assert!(cx.debug_bounds("image-failed").is_none());
+    super::check(&window, &mut cx);
 }

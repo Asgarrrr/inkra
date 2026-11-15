@@ -176,6 +176,11 @@ enum Shown { Empty, Bound(Bound), Image(EntryId), Trashing(EntryId), View(View) 
   background executor, K5); the landing notifies. A second miss on the same id
   joins the running load. Dropping the entry cancels the decode, not a read
   already queued on the chain.
+- A failed entry does not outlive the vault it failed against. Each vault swap
+  drops the failed entries and loads again every image a group shows. `moves`
+  holds a folder's rename for the folder only, so an image inside it reads its
+  old path until the rescan lands; the swap retries it. A file that is no image
+  fails again at each swap.
 - Eviction: an entry lives while some group shows it. When no `Shown::Image`
   holds the id, the entry drops and gpui's image cache entry is removed (the
   plan names the call after reading `platform.rs:2989`). Going back to an

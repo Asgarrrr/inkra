@@ -72,6 +72,11 @@ impl Images {
         self.slots.insert(id, Slot::Loading { _load: task });
     }
 
+    /// Drops every failed slot, so the next `want` of its id reads again.
+    pub(crate) fn forget_failed(&mut self) {
+        self.slots.retain(|_, slot| !matches!(slot, Slot::Failed));
+    }
+
     pub(crate) fn slot(&self, id: EntryId) -> Option<&Slot> {
         self.slots.get(&id)
     }

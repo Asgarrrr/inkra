@@ -47,6 +47,7 @@ impl VaultPanes {
             }),
             cx.observe_in(&vault, window, |shell, _, window, cx| {
                 shell.close_gone_files(window, cx);
+                shell.retry_failed_images(cx);
                 shell.save_session_later(cx);
                 shell.try_restore(cx);
                 cx.notify();
