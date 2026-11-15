@@ -1,15 +1,9 @@
 use inkra_markdown::parse;
 
 use super::*;
+use crate::fixtures::{TWO_BLOCKS, r};
 
-fn r(a: usize, b: usize) -> Range<ByteOffset> {
-    ByteOffset::new(a)..ByteOffset::new(b)
-}
-
-/// Two blocks with different shapes: `let` is a keyword at 8..11, `mut` one at 23..26.
-const TWO_BLOCKS: &str = "```rust\nlet\n```\n\n```rs\nmut x\n```\n";
-
-/// Each block of `text` held exactly, with its range and shape.
+/// Each block of `markdown` held exactly, with its range and shape.
 fn exact(markdown: &Markdown) -> Vec<(Range<ByteOffset>, Option<u64>)> {
     markdown
         .code_blocks

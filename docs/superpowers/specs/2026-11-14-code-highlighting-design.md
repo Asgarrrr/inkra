@@ -65,17 +65,18 @@ Out of scope:
 
 It holds the lexers, D7's `plan` and the listener's pure part (deviation 9).
 It depends on `inkra-text`, for `ByteOffset`, and on `inkra-markdown`, for the
-parse D3 reads the content lines from; `inkra-app` depends on it. It has no
-gpui dependency, no clock and no external dependency. Its tests also use
-`inkra-editor`, as a dev-dependency (D12).
+parse, which gives D3 its content lines; `inkra-app` depends on it. It has no
+gpui dependency, no clock and no external dependency of its own. Its tests
+also use `inkra-editor`, as a dev-dependency (D12).
 
 `inkra-markdown` would compile every lexer into `inkra-index` and its benches,
 against "one role per crate". `inkra-app` would put a `Window`-free algorithm
 where its tests need gpui. Both objections still hold with the edge to
-`inkra-markdown`: it runs from `inkra-highlight`, so neither
-`inkra-markdown` nor `inkra-index` compiles a lexer. The build adds the crate to `CLAUDE.md`
-(Architecture and the mutants line), to `allowed_edges` in `scripts/check.sh`,
-and to `examine_globs` and `test_package` in `.cargo/mutants.toml`.
+`inkra-markdown`: the edge points from `inkra-highlight`, so neither
+`inkra-markdown` nor `inkra-index` compiles a lexer. The build adds the crate
+to `CLAUDE.md` (Architecture and the mutants line), to `allowed_edges` in
+`scripts/check.sh`, and to `examine_globs` and `test_package` in
+`.cargo/mutants.toml`.
 
 ### D2. The output is tokens on content lines
 
@@ -258,10 +259,11 @@ On each `TextChange`, the listener computes a dirty range:
 - `Lost`, and `Opened(None)` (D8): the whole text;
 - `Opened(Some(_))` (D8): no range.
 
-It then calls one pure function, in `inkra-highlight` (`plan.rs`):
+It then calls `batch` (deviation 9), which calls one pure function, in
+`inkra-highlight` (`plan.rs`):
 
 ```rust
-pub fn plan(
+pub(crate) fn plan(
     blocks: &[(Range<ByteOffset>, u64)],
     held: &[(Range<ByteOffset>, Option<u64>)],
     dirty: Option<Range<ByteOffset>>,
@@ -750,5 +752,5 @@ number.
    check before each block. `plan` is crate-private: `batch` is its one
    caller. The app keeps the dirty range of D7, the map from `TokenClass` to
    `ColorToken` and the publish. D3 already read the content lines from the
-   parse, so the edge to `inkra-markdown` adds no new reach; D1's objections
-   still hold.
+   parse, and `inkra-app` already depends on `inkra-markdown`, so the edge
+   adds no crate to the app's build. D1's objections still hold.

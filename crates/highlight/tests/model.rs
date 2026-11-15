@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use inkra_editor::Layer;
-use inkra_highlight::{Batch, TokenClass, batch, block_marks, dirty};
+use inkra_highlight::{Batch, TokenClass, batch, block_marks, dirty, open_chunks};
 use inkra_markdown::parse;
 use inkra_text::{Buffer, ByteOffset, EditMark};
 use proptest::prelude::*;
@@ -231,15 +231,12 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
         Step::Reopen(k) => {
             let Model { buffer, layer, .. } = model;
             *layer = Layer::new(buffer.edit_mark());
-            let markdown = parse(buffer.text());
-            let blocks = &markdown.code_blocks;
-            let seed = blocks[..k % (blocks.len() + 1)]
-                .iter()
-                .map(|block| {
-                    let marks = block_marks(buffer.text(), &markdown.spans, block);
-                    (block.range.clone(), block.shape, marks)
-                })
-                .collect();
+            let count = k % (parse(buffer.text()).code_blocks.len() + 1);
+            let mut calls = 0;
+            let seed = open_chunks(buffer.text(), || {
+                calls += 1;
+                calls <= count
+            });
             let seeded = layer.publish(buffer, Vec::new(), seed, buffer.edit_mark());
             prop_assert!(seeded.is_ok(), "{:?}", seeded);
             hear(model, None)

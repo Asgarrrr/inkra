@@ -10,6 +10,8 @@ pub use plan::{MAIN_THREAD_BUDGET, dirty};
 use state::LineState;
 
 mod batch;
+#[cfg(test)]
+mod fixtures;
 mod open;
 mod plan;
 mod rust;
@@ -66,7 +68,7 @@ pub fn highlight<'a>(
 /// A code block's tokens over its content `lines`, in the language of its info word at `info` in
 /// `text`; none without a word or for an unknown one.
 #[must_use]
-pub fn block_tokens<'a>(
+pub(crate) fn block_tokens<'a>(
     text: &str,
     info: Option<Range<ByteOffset>>,
     lines: impl Iterator<Item = (ByteOffset, &'a str)>,

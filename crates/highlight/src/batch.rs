@@ -12,7 +12,7 @@ use crate::{TokenClass, block_tokens};
 /// A code block's range, its shape and its tokens: one block chunk of the syntax layer.
 pub type BlockChunk = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, TokenClass)>);
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Batch {
     /// Each held chunk that is no block's range, in order (deviation 6).
     pub clear: Vec<Range<ByteOffset>>,

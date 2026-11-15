@@ -4,13 +4,11 @@ use inkra_text::ByteOffset;
 
 use super::*;
 use crate::TokenClass;
+use crate::fixtures::{TWO_BLOCKS, r};
 
-fn r(a: usize, b: usize) -> Range<ByteOffset> {
-    ByteOffset::new(a)..ByteOffset::new(b)
+fn made_past_the_deadline(_: char) -> char {
+    panic!("an item made past the deadline")
 }
-
-/// `let` is a keyword at 8..11, `mut` one at 23..26.
-const TWO_BLOCKS: &str = "```rust\nlet\n```\n\n```rs\nmut x\n```\n";
 
 fn ranges(chunks: &[BlockChunk]) -> Vec<Range<ByteOffset>> {
     chunks.iter().map(|(range, _, _)| range.clone()).collect()
@@ -63,12 +61,28 @@ fn a_text_at_the_parse_limit_is_coloured() {
 }
 
 #[test]
-fn open_stops_at_the_chunk_its_deadline_passes() {
-    let mut calls = 0;
-    let chunks = open_chunks(TWO_BLOCKS, || {
-        calls += 1;
-        calls == 1
-    });
+fn no_item_is_made_past_the_deadline() {
+    let items = before(['a', 'b'].into_iter().map(made_past_the_deadline), || false);
 
-    assert_eq!(ranges(&chunks), [r(0, 15)]);
+    assert_eq!(items, []);
+}
+
+#[test]
+fn before_stops_at_the_item_its_deadline_passes() {
+    let mut calls = 0;
+    let items = before(
+        ['a', 'b'].into_iter().map(|item| {
+            if item == 'b' {
+                made_past_the_deadline(item)
+            } else {
+                item
+            }
+        }),
+        || {
+            calls += 1;
+            calls == 1
+        },
+    );
+
+    assert_eq!(items, ['a']);
 }
