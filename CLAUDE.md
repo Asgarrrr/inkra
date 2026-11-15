@@ -68,7 +68,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
   `inkra-tabs` and `inkra-layout` depend on no workspace crate; `app` depends on both.
-  `inkra-highlight` depends on `inkra-text` only; `app` depends on it.
+  `inkra-highlight` depends on `inkra-text` only, plus `inkra-editor` and `inkra-markdown`
+  as dev-dependencies for its model test and benches; `app` depends on it.
 - `text`, `editor`, `vault`, `markdown`, `index`, `tabs`, `layout` and `highlight` have no gpui dependency; `check.sh`
   enforces it for every workspace member except `inkra-app`.
 - Where code goes:

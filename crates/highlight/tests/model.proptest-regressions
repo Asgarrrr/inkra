@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3bee32f66bd5ca1b4aaac04680990f0918d6abb1f29b151b7fb01f510812fa3c # shrinks to steps = [Edit([Delete(Index(3035540164028154064), 1)])]

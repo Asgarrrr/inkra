@@ -49,6 +49,8 @@ inkra-index inkra-vault
 inkra-index inkra-markdown
 inkra-index inkra-text
 inkra-highlight inkra-text
+inkra-highlight inkra-editor
+inkra-highlight inkra-markdown
 inkra-app inkra-text
 inkra-app inkra-editor
 inkra-app inkra-vault

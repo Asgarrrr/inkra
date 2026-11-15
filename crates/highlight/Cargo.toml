@@ -16,6 +16,8 @@ inkra-text = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+inkra-editor = { workspace = true }
+inkra-markdown = { workspace = true }
 
 [lints]
 workspace = true

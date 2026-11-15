@@ -7,15 +7,13 @@ use std::ops::Range;
 
 use gpui::{App, Entity};
 use inkra_highlight::{Language, Plan, TokenClass, dirty, highlight, plan};
-use inkra_markdown::{CodeBlock, Span};
+use inkra_markdown::{CodeBlock, Span, content_lines};
 use inkra_text::{Buffer, ByteOffset};
 
 use crate::decorations::{self, LayerDecl, LayerId, MarkStyle, TextChange};
 use crate::editor::parses::parsed;
 use crate::feature::{FeatureId, Manifest};
 use crate::theme::ColorToken;
-
-mod lines;
 
 const FEATURE: FeatureId = FeatureId::new("highlighting");
 
@@ -87,11 +85,7 @@ fn colour(text: &str, spans: &[Span], block: &CodeBlock) -> Vec<(Range<ByteOffse
         return Vec::new();
     };
     let mut tokens = Vec::new();
-    highlight(
-        language,
-        lines::content_lines(text, spans, block),
-        &mut tokens,
-    );
+    highlight(language, content_lines(text, spans, block), &mut tokens);
     tokens
         .into_iter()
         .map(|(range, class)| {

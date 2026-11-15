@@ -1,11 +1,12 @@
-//! A code block's content lines, from the markdown parse (code highlighting spec, D3).
+//! A code block's content lines, from the parse (code highlighting spec, D3).
 
-use inkra_markdown::{CodeBlock, Span, Styles};
 use inkra_text::ByteOffset;
+
+use crate::{CodeBlock, Span, Styles};
 
 /// Each physical line of `block`, in order: its code span, or an empty line at its end when it
 /// has none, as a fence line has.
-pub(super) fn content_lines<'a>(
+pub fn content_lines<'a>(
     text: &'a str,
     spans: &'a [Span],
     block: &CodeBlock,
@@ -33,3 +34,6 @@ pub(super) fn content_lines<'a>(
             content
         })
 }
+
+#[cfg(test)]
+mod tests;

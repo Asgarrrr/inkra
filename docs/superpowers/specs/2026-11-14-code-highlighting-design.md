@@ -636,3 +636,11 @@ number.
    way, and mutants reach the fold. A pure deletion folds to an empty range at
    its offset; `plan`'s meets counts touching, so it still relexes a block it
    touches.
+3. **`content_lines` lives in `inkra-markdown`, not in `app`.** The model test
+   (D12) and the listener then read the same content lines from one function.
+   A copy in the test could drift from the app's.
+4. **The model test emulates the core's `Heard`.** `Lost` is a clear and a
+   whole dirty range, because the splice log drops edits only past a bound a
+   short run never reaches. `Opened(None)` is edits, then a whole dirty range.
+   `Opened(Some(_))` is a fresh layer seeded with the first k blocks, then no
+   dirty range.
