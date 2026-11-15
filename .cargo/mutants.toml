@@ -100,7 +100,7 @@ exclude_re = [
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::marks_in$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::shift$",
-    "^crates/editor/src/layer\\.rs:[0-9]+:64: replace < with <= in Layer<S>::publish$",
+    "^crates/editor/src/layer\\.rs:[0-9]+:64: replace < with <= in Layer<S>::replace$",
     "^crates/markdown/src/content_lines\\.rs:[0-9]+:37: replace < with <= in content_lines$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",
