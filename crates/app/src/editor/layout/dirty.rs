@@ -65,7 +65,9 @@ pub(super) fn carry<'p>(
     dirty.sort_unstable_by_key(|range| range.start);
     dirty.dedup_by(|next, kept| {
         let meets = next.start <= kept.end;
-        kept.end = kept.end.max(next.end);
+        if meets {
+            kept.end = kept.end.max(next.end);
+        }
         meets
     });
     let carry = Carry {

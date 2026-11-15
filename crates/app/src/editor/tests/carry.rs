@@ -118,6 +118,17 @@ fn unmarking_rebuilds_the_marked_line(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn moving_the_marked_text_keeps_the_lines_between(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let buffer = Buffer::new("zero\none\ntwo\nthree\nfour");
+        let marked = layout_of(&buffer, Some(&(at(19)..at(23))), None, None, window);
+        let next = at(0)..at(4);
+        let (_, built) = builds(|| layout_of(&buffer, Some(&next), None, Some(&marked), window));
+        assert_eq!(built, 2, "the line left and the line marked");
+    });
+}
+
+#[gpui::test]
 fn a_layout_from_another_buffer_rebuilds_the_whole_note(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
         let text = "zero\none\ntwo";
