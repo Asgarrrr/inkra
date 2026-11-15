@@ -58,6 +58,7 @@ pub(super) fn carry<'p>(
     let mut dirty: Vec<_> =
         hull.map(|_| changed(&previous.markdown, inputs.markdown, edit))
             .into_iter()
+            .flatten()
             .chain(previous.marked.as_ref().map(|marked| {
                 edit.map(marked.start, Bias::Left)..edit.map(marked.end, Bias::Right)
             }))
@@ -81,9 +82,8 @@ pub(super) fn carry<'p>(
         next_old: 0,
     };
     let flips = carry.flips(
-        &inputs.markdown.conceals,
-        &previous.selection,
-        inputs.selection,
+        (&previous.markdown.conceals, &previous.selection),
+        (&inputs.markdown.conceals, inputs.selection),
     );
     (!flips).then_some(carry)
 }
@@ -116,7 +116,7 @@ impl<'p> Carry<'p> {
         {
             return None;
         }
-        let was = self.was(at, at);
+        let was = self.was(at);
         while self.old[self.next_old].start < was {
             self.next_old += 1;
         }
@@ -126,37 +126,46 @@ impl<'p> Carry<'p> {
         Some(&old.line)
     }
 
-    /// Where `offset` stood in the previous text, for an item at `side` on a clean line: the edit
-    /// moved it only if the item is past the edit's start.
-    fn was(&self, side: ByteOffset, offset: ByteOffset) -> ByteOffset {
-        if side < self.edit.at {
+    /// Where `offset`, on a clean line, stood in the previous text.
+    fn was(&self, offset: ByteOffset) -> ByteOffset {
+        if offset < self.edit.at {
             offset
         } else {
             offset + self.edit.removed_len - self.edit.inserted_len
         }
     }
 
-    /// Whether a conceal on a clean line reveals under one selection and not the other. Every such
-    /// conceal is one the previous parse held, before the edit or after it.
+    /// Whether a conceal on a clean line reveals under one selection and not the other. Clean
+    /// lines hold the same conceals, at the same markers, in both parses (`changed`), so the two
+    /// agree iff they reveal the same markers there. An element can still span the edit, so each
+    /// side reads its own parse.
     fn flips(
         &self,
-        conceals: &[Conceal],
-        before: &Range<ByteOffset>,
-        after: &Range<ByteOffset>,
+        (old, before): (&[Conceal], &Range<ByteOffset>),
+        (new, after): (&[Conceal], &Range<ByteOffset>),
     ) -> bool {
-        let mut dirty = self.dirty.iter().peekable();
-        conceals.iter().any(|conceal| {
-            let marker = conceal.marker.start;
-            while dirty.next_if(|dirty| dirty.end < marker).is_some() {}
-            if dirty.peek().is_some_and(|dirty| dirty.start <= marker) {
-                return false;
-            }
-            let element = &conceal.element;
-            let old = Conceal {
-                element: self.was(marker, element.start)..self.was(marker, element.end),
-                ..conceal.clone()
-            };
-            is_active(&old, before) != is_active(conceal, after)
-        })
+        let was = self.revealed(old, before, |marker| self.edit.map(marker, Bias::Left));
+        let is = self.revealed(new, after, |marker| marker);
+        was.ne(is)
+    }
+
+    /// The markers, placed in the new text by `place`, of the conceals on clean lines that
+    /// `selection` reveals. A selection touches few elements, so few reach the dirty lookup.
+    fn revealed<'c>(
+        &'c self,
+        conceals: &'c [Conceal],
+        selection: &'c Range<ByteOffset>,
+        place: impl Fn(ByteOffset) -> ByteOffset + 'c,
+    ) -> impl Iterator<Item = ByteOffset> + 'c {
+        conceals
+            .iter()
+            .filter(|conceal| !is_active(conceal, selection))
+            .map(move |conceal| place(conceal.marker.start))
+            .filter(|&marker| {
+                let next = self.dirty.partition_point(|dirty| dirty.end < marker);
+                self.dirty
+                    .get(next)
+                    .is_none_or(|dirty| dirty.start > marker)
+            })
     }
 }

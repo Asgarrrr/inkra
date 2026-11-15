@@ -746,6 +746,92 @@ S1b deviations from this spec:
    catches up on every `sync` while it is on, so only a layer switched on after
    more than 256 splices is lost there, once.
 
+S2, release, M5 Pro. Before is draw-s1b, after is S2, both measured in one
+sitting. Bytes are gpui's bench report, "allocated bytes per iteration".
+`--quick` varies by about 5–15 % between runs. In two earlier rounds,
+`one-block-prose/colours` on draw-s1b measured 426–441 µs; the 647.76 µs
+below rests on 2 samples.
+
+| Case | Before | After | Allocated before | Allocated after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose, colours | 0.56 ms | 0.57 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, colours | 0.65 ms | 0.43 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, colours | 6.96 ms | 0.38 ms | 20.58 MB | 2.24 MB |
+| 1000 blocks, type in prose, plain | 0.58 ms | 0.60 ms | 1.32 MB | 1.32 MB |
+| One block, type in prose, plain | 0.45 ms | 0.46 ms | 1.03 MB | 1.03 MB |
+| One block, type in the block, plain | 2.47 ms | 0.38 ms | 5.59 MB | 1.01 MB |
+
+Typing in the block without colours rebuilds one line. With colours, the
+per-sample bytes range from 1.08 MB to 20.58 MB. A keystroke whose publish
+changes no mark logs only a `Shift` and rebuilds one line. A keystroke whose
+publish recolours logs its whole chunk. The 20.58 MB sample equals draw-s1b's
+rebuild of the whole block, so the block's lines probably all rebuild there,
+until S3 narrows the range. S3 is still needed for that case.
+
+The middle walk pairs items in order. It compares an old item, mapped, with the
+next new item. If they differ, it advances the side whose sort key comes first:
+`marker.start` for a conceal, `range.start` for every other item. Pairs that
+match keep their order, so each clean line keeps its items in order. A range
+maps its start with `Bias::Right` and its end with `Bias::Left`, so an edit
+strictly inside it grows it, as `map_chunk` does. An unpaired item dirties its
+reach. Two blocks with the same mapped start dirty the opening line and the
+text between their two ends: only the opening line reads the start and the
+language, and every other line reads only whether a block holds it.
+
+The `changed` proptest compares, per line outside the answer, what
+`layout/shape.rs` reads. That is the spans, conceals and gutters that start on
+the line, plus the heading and block that hold it. Each value is relative to
+the line's start, and an item that reaches past the line shows only its part
+on the line. A conceal also shows whether its element equals the block's range,
+which `label_text` reads. The proptest fails when the tie's membership range is
+dropped, or when the walk drops an unpaired item on either side. Parsed text
+seldom makes some cases, so synthetic `#[test]`s cover them:
+
+- a heading tie where the old heading reaches further than the new one;
+- a code block tie with no conceals, where the old end reaches past the new
+  one, which pins the opening line;
+- a span over an insertion that keeps its length, which pins the prefix bound;
+- a span that lands elsewhere after a deletion, which pins the suffix shift;
+- a conceal added before a closing marker whose element starts earlier, which
+  pins the conceal's sort key.
+
+The oracle lays its notes out at a 14 px body, off `CODE_BLOCK_TEXT_SIZE`, so a
+line that joins or leaves a block changes its shape. Every run below starts
+from the committed regressions file. The oracle fails 3 runs out of 3 when an
+unpaired old item's reach is not mapped through the edit. It also fails 3 out
+of 3 when `flips` does not map the old markers, and when it maps the new
+element back by its marker's side, as S1a did. With the tie's membership range
+dropped, it fails 6 runs out of 6. At a 16 px body it failed 1 run out of 3.
+
+Two mutants are excluded in `.cargo/mutants.toml` as equivalent. `<=` in
+`Carry::was` is one, since no clean line starts at `edit.at`. Deleting the `!`
+in `Carry::revealed` is the other, since `flips` then compares the complements
+of the same two sets. `deleting_a_revealed_conceal_at_a_line_end_rebuilds_only_its_line`
+pins the dirty lookup in `revealed`: a deleted marker maps onto the end of the
+dirty line, and that is not a clean line.
+
+The count tests are `typing_in_a_large_block_rebuilds_one_line` (without
+colours; the colours form is S3's), `a_setext_underline_restyles_the_line_above`
+and `closing_a_block_rebuilds_its_opening_and_the_lines_it_releases`.
+`a_fence_typed_above_moves_every_block_index` and
+`opening_a_fence_rebuilds_every_line_after_it` shipped in S1a.
+
+S2 deviations from this spec:
+
+1. A selection flip reads each parse's own conceals. It compares the markers
+   that each selection reveals on clean lines, the old ones mapped through the
+   edit. S1a mapped the new element back by its marker's side (S1a deviation
+   7). With the mapped diff, a fence conceal's marker line stays clean while
+   its element spans the edit, so that mapping gave a wrong element and could
+   underflow. The oracle fails 3 out of 3 with it. Each parse holds the same
+   conceals at the same markers on clean lines, so the revealed markers agree
+   iff no conceal flips. A selection touches few elements, so the check costs
+   what S1a's did. Reading every conceal of both parses cost 30–40 µs per
+   keystroke on the 1000-block note.
+2. S2 changes no code in `inkra-text` and adds no proptest there.
+   `Splice::map` shipped in S1a (S1a deviation 2), and the `transform` unit
+   tests cover it.
+
 ## Unverified
 
 - The expected gain after S4 (D11), and the cost of the placement pass's block

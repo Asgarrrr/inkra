@@ -5,10 +5,11 @@ use inkra_text::{ByteOffset, Splice};
 use proptest::prelude::*;
 
 use super::changed;
-use crate::{Conceal, Heading, HeadingLevel, Markdown, parse};
+use crate::{CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, parse};
 
-/// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it.
-fn region(old: &str, at: usize, removed: usize, inserted: &str) -> Range<usize> {
+/// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it,
+/// sorted and merged.
+fn answered(old: &str, at: usize, removed: usize, inserted: &str) -> Vec<(usize, usize)> {
     let mut new = old.to_owned();
     new.replace_range(at..at + removed, inserted);
     let edit = Splice {
@@ -16,76 +17,171 @@ fn region(old: &str, at: usize, removed: usize, inserted: &str) -> Range<usize> 
         removed_len: removed,
         inserted_len: inserted.len(),
     };
-    let region = changed(&parse(old), &parse(&new), edit);
-    region.start.get()..region.end.get()
+    merged(changed(&parse(old), &parse(&new), edit))
+}
+
+/// Each answered range as its start and end, sorted and merged.
+fn merged(ranges: Vec<Range<ByteOffset>>) -> Vec<(usize, usize)> {
+    let mut ranges: Vec<_> = ranges
+        .into_iter()
+        .map(|range| (range.start.get(), range.end.get()))
+        .collect();
+    ranges.sort_unstable();
+    ranges.dedup_by(|next, kept| {
+        let meets = next.0 <= kept.1;
+        if meets {
+            kept.1 = kept.1.max(next.1);
+        }
+        meets
+    });
+    ranges
 }
 
 #[test]
 fn typing_in_plain_prose_changes_only_the_edit() {
     let text = "# Head\n\nsome prose\n\n> quote\n";
 
-    assert_eq!(region(text, 12, 0, "x"), 12..13);
-    assert_eq!(region(text, 12, 1, "B"), 12..13);
+    assert_eq!(answered(text, 12, 0, "x"), [(12, 13)]);
+    assert_eq!(answered(text, 12, 1, "B"), [(12, 13)]);
 }
 
 #[test]
 fn typing_after_bold_leaves_the_bold_out() {
-    assert_eq!(region("**a** b\n\nc", 5, 0, "x"), 5..6);
+    assert_eq!(answered("**a** b\n\nc", 5, 0, "x"), [(5, 6)]);
 }
 
 #[test]
-fn typing_inside_a_block_changes_the_whole_block() {
+fn typing_inside_a_block_changes_only_the_edit() {
     let text = "a\n\n```\nlet x;\n```\n\nb";
 
-    assert_eq!(region(text, 9, 0, "y"), 3..18);
+    assert_eq!(answered(text, 9, 0, "y"), [(9, 10)]);
+}
+
+#[test]
+fn closing_a_block_leaves_its_kept_lines_out() {
+    let answer = answered("```\na\nb\n``\nc", 10, 0, "`");
+
+    assert!(
+        answer.iter().all(|&(start, end)| end < 4 || 7 < start),
+        "{answer:?}"
+    );
+    assert!(answer.iter().any(|&(start, _)| start == 0), "{answer:?}");
 }
 
 #[test]
 fn a_setext_underline_reaches_the_line_above() {
-    assert_eq!(region("a\n\nTitle\nx\n\nb", 9, 1, "="), 3..10);
+    assert_eq!(answered("a\n\nTitle\nx\n\nb", 9, 1, "="), [(3, 8), (9, 10)]);
 }
 
 #[test]
 fn a_heading_level_change_is_a_change() {
-    assert_eq!(region("# a\n\nb", 0, 0, "#"), 0..4);
+    assert_eq!(answered("# a\n\nb", 0, 0, "#"), [(0, 4)]);
 }
 
 #[test]
 fn a_gutter_gaining_a_quote_is_a_change() {
-    assert_eq!(region("> a\n> b\n\nc", 4, 0, ">"), 4..7);
+    assert_eq!(answered("> a\n> b\n\nc", 4, 0, ">"), [(4, 7)]);
 }
 
 #[test]
 fn a_link_losing_its_target_reaches_its_old_markers() {
-    assert_eq!(region("a [t](u) b\n\nc", 5, 3, ""), 2..5);
-}
-
-#[test]
-fn moving_a_code_language_is_a_change() {
-    let text = "```rs\nx\n```\n\nb";
-
-    assert_eq!(region(text, 3, 0, " "), 0..12);
+    assert_eq!(answered("a [t](u) b\n\nc", 5, 3, ""), [(2, 5)]);
 }
 
 #[test]
 fn an_unchanged_code_block_on_either_side_stays_out() {
-    assert_eq!(region("```rs\nx\n```\n\nab", 14, 0, "y"), 14..15);
-    assert_eq!(region("ab\n\n```rs\nx\n```", 1, 0, "y"), 1..2);
+    assert_eq!(answered("```rs\nx\n```\n\nab", 14, 0, "y"), [(14, 15)]);
+    assert_eq!(answered("ab\n\n```rs\nx\n```", 1, 0, "y"), [(1, 2)]);
 }
 
 fn offsets(range: Range<usize>) -> Range<ByteOffset> {
     ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }
 
-/// What `changed` answers for one byte typed at 20, past every item of `old` and `new`.
-fn typed_after(old: &Markdown, new: &Markdown) -> Range<usize> {
+/// What `changed` answers for `old` and `new` around `removed` bytes at `at` replaced by
+/// `inserted` ones, sorted and merged.
+fn answered_between(
+    old: &Markdown,
+    new: &Markdown,
+    at: usize,
+    removed: usize,
+    inserted: usize,
+) -> Vec<(usize, usize)> {
     let edit = Splice {
-        at: ByteOffset::new(20),
-        removed_len: 0,
-        inserted_len: 1,
+        at: ByteOffset::new(at),
+        removed_len: removed,
+        inserted_len: inserted,
     };
-    let region = changed(old, new, edit);
-    region.start.get()..region.end.get()
+    merged(changed(old, new, edit))
+}
+
+/// What `changed` answers for one byte typed at 20, past every item of `old` and `new`.
+fn typed_after(old: &Markdown, new: &Markdown) -> Vec<(usize, usize)> {
+    answered_between(old, new, 20, 0, 1)
+}
+
+fn spans(range: Range<usize>) -> Markdown {
+    Markdown {
+        spans: vec![Span {
+            range: offsets(range),
+            styles: Styles::NONE,
+        }],
+        ..Markdown::default()
+    }
+}
+
+#[test]
+fn an_item_over_an_insertion_that_keeps_its_length_is_a_change() {
+    assert_eq!(
+        answered_between(&spans(0..5), &spans(0..5), 2, 0, 1),
+        [(0, 6)]
+    );
+}
+
+#[test]
+fn an_item_past_a_deletion_that_lands_elsewhere_is_a_change() {
+    assert_eq!(
+        answered_between(&spans(10..12), &spans(12..14), 2, 2, 0),
+        [(2, 2), (8, 10), (12, 14)]
+    );
+}
+
+#[test]
+fn a_conceal_added_before_another_leaves_it_out() {
+    let conceal = |element, marker| Conceal {
+        element: offsets(element),
+        marker: offsets(marker),
+        replacement: "",
+    };
+    // A closing marker: its element starts before the new conceal's.
+    let closing = conceal(0..14, 10..11);
+    let old = Markdown {
+        conceals: vec![closing.clone()],
+        ..Markdown::default()
+    };
+    let new = Markdown {
+        conceals: vec![conceal(2..6, 2..3), closing],
+        ..Markdown::default()
+    };
+
+    assert_eq!(typed_after(&old, &new), [(2, 3), (20, 21)]);
+}
+
+#[test]
+fn a_block_that_ends_sooner_reaches_its_opening_line_and_the_lines_it_releases() {
+    let block = |end| Markdown {
+        code_blocks: vec![CodeBlock {
+            range: offsets(0..end),
+            language: None,
+            shape: 0,
+        }],
+        ..Markdown::default()
+    };
+
+    assert_eq!(
+        typed_after(&block(15), &block(8)),
+        [(0, 0), (8, 15), (20, 21)]
+    );
 }
 
 #[test]
@@ -109,7 +205,33 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
             ..Markdown::default()
         };
 
-        assert_eq!(typed_after(&old, &new).start, 2, "{new:?}");
+        assert_eq!(typed_after(&old, &new)[0].0, 2, "{new:?}");
+    }
+}
+
+#[test]
+fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
+    let gutter = |end, quotes: &[usize], depth| Gutter {
+        range: offsets(0..end),
+        quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
+        depth,
+    };
+    let old = Markdown {
+        gutters: vec![gutter(4, &[0, 2], 2)],
+        ..Markdown::default()
+    };
+    for new in [
+        gutter(2, &[0, 2], 2),
+        gutter(4, &[0, 1], 2),
+        gutter(4, &[0], 2),
+        gutter(4, &[0, 2], 3),
+    ] {
+        let new = Markdown {
+            gutters: vec![new],
+            ..Markdown::default()
+        };
+
+        assert_eq!(typed_after(&old, &new)[0].0, 0, "{new:?}");
     }
 }
 
@@ -126,45 +248,83 @@ fn a_heading_before_the_edit_that_changes_level_is_a_change() {
 
     assert_eq!(
         typed_after(&heading(HeadingLevel::H1), &heading(HeadingLevel::H2)),
-        0..21
+        [(0, 5), (20, 21)]
     );
 }
 
-/// Each item that touches `line`, its offsets relative to the line's start.
+#[test]
+fn a_heading_that_loses_lines_reaches_them() {
+    let heading = |end| Markdown {
+        headings: vec![Heading {
+            range: offsets(0..end),
+            level: HeadingLevel::H1,
+            marker: None,
+        }],
+        ..Markdown::default()
+    };
+
+    assert_eq!(typed_after(&heading(10), &heading(4)), [(0, 10), (20, 21)]);
+}
+
+/// What the layout reads on `line` (`app`'s `layout/shape.rs`), offsets relative to the line's start:
+/// the spans, conceals and gutters that start on it, the heading and block that hold it, and their
+/// marker and language when on it. An item reaching past the line shows only its part on the line,
+/// and which ends it crosses.
 fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
-    let touches =
+    let starts = |offset: ByteOffset| line.start <= offset.get() && offset.get() <= line.end;
+    let holds =
         |range: &Range<ByteOffset>| range.start.get() <= line.end && line.start <= range.end.get();
     let rel = |offset: ByteOffset| offset.get().cast_signed() - line.start.cast_signed();
     let span = |range: &Range<ByteOffset>| rel(range.start)..rel(range.end);
+    let clip = |range: &Range<ByteOffset>| {
+        let (start, end) = (range.start.get(), range.end.get());
+        (
+            start.max(line.start) - line.start..end.min(line.end) - line.start,
+            start < line.start,
+            end > line.end,
+        )
+    };
+    let block = markdown
+        .code_blocks
+        .iter()
+        .find(|block| holds(&block.range));
     let mut items = Vec::new();
     let mut push = |item: &dyn Debug| items.push(format!("{item:?}"));
-    for item in markdown.spans.iter().filter(|item| touches(&item.range)) {
+    for item in markdown
+        .spans
+        .iter()
+        .filter(|item| starts(item.range.start))
+    {
         push(&(span(&item.range), item.styles));
     }
     for item in markdown
         .conceals
         .iter()
-        .filter(|item| touches(&item.marker))
+        .filter(|item| starts(item.marker.start))
     {
-        push(&(span(&item.element), span(&item.marker), item.replacement));
-    }
-    for item in markdown.gutters.iter().filter(|item| touches(&item.range)) {
-        let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
-        push(&(span(&item.range), quotes, item.depth));
-    }
-    for item in markdown.headings.iter().filter(|item| touches(&item.range)) {
+        let labels = block.is_some_and(|block| block.range == item.element);
         push(&(
-            span(&item.range),
-            item.level,
-            item.marker.as_ref().map(span),
+            span(&item.marker),
+            item.replacement,
+            clip(&item.element),
+            labels,
         ));
     }
     for item in markdown
-        .code_blocks
+        .gutters
         .iter()
-        .filter(|item| touches(&item.range))
+        .filter(|item| starts(item.range.start))
     {
-        push(&(span(&item.range), item.language.as_ref().map(span)));
+        let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
+        push(&(span(&item.range), quotes, item.depth));
+    }
+    if let Some(item) = markdown.headings.iter().find(|item| holds(&item.range)) {
+        let marker = item.marker.as_ref().filter(|marker| starts(marker.start));
+        push(&(clip(&item.range), item.level, marker.map(span)));
+    }
+    if let Some(item) = block {
+        let language = item.language.as_ref().filter(|_| starts(item.range.start));
+        push(&(clip(&item.range), language.map(span)));
     }
     items
 }
@@ -225,16 +385,19 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
 
     #[test]
-    fn every_line_outside_the_region_reads_what_it_read_before(
+    fn every_line_outside_the_answer_reads_what_it_read_before(
         (old, at, removed, inserted) in edited()
     ) {
         let mut new = old.clone();
         new.replace_range(at..at + removed, &inserted);
-        let region = region(&old, at, removed, &inserted);
-        prop_assert!(region.start <= at && at + inserted.len() <= region.end);
+        let answer = answered(&old, at, removed, &inserted);
+        prop_assert!(
+            answer.iter().any(|&(start, end)| start <= at && at + inserted.len() <= end),
+            "{:?} misses the edit", answer
+        );
         let (before, after) = (parse(&old), parse(&new));
         for line in lines(&new) {
-            if line.start <= region.end && region.start <= line.end {
+            if answer.iter().any(|&(start, end)| line.start <= end && start <= line.end) {
                 continue;
             }
             let was = if line.end < at {
