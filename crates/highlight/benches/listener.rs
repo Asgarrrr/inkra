@@ -76,11 +76,18 @@ fn bench_many_blocks(c: &mut Criterion) {
     let markdown = parse(buffer.text());
     let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
     assert_eq!(lexed.len(), BLOCKS);
-    // Every block but the first `n` held exactly, so a call lexes those `n` (deviation 10).
+    // The first `n` blocks hold their own marks under another tag, as after a renamed info word:
+    // a call lexes them, and each publish compares equal marks in full (deviation 10).
     let held = |n: usize| {
         let mut layer = Layer::new(buffer.edit_mark());
+        let (stale, exact) = lexed.split_at(n);
+        let chunks = stale
+            .iter()
+            .map(|(range, shape, marks)| (range.clone(), shape ^ 1, marks.clone()))
+            .chain(exact.iter().cloned())
+            .collect();
         layer
-            .publish(&buffer, Vec::new(), lexed[n..].to_vec(), buffer.edit_mark())
+            .publish(&buffer, Vec::new(), chunks, buffer.edit_mark())
             .expect("the blocks land");
         layer
     };
