@@ -43,6 +43,34 @@ plain text
 >     ```rust
 >     let z = 3;
 >     ```
+
+- a
+  - b
+
+    c
+
+d
+
+    ```rust
+    let
+    ```
+
+- ```
+  z
+  - b
+foo
+
+    ```rust
+    let
+    ```
+
+- a
+
+  b
+
+    ```rust
+    let
+    ```
 ";
 
 const FRAGMENTS: &[&str] = &[
@@ -174,7 +202,7 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
-        .map(|b| (b.range.clone(), b.reach))
+        .map(|b| (b.range.clone(), b.shape))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();
@@ -185,7 +213,7 @@ fn hear(model: &mut Model, dirty: Option<Range<ByteOffset>>) -> Result<(), TestC
     for index in lex {
         let block = &markdown.code_blocks[index];
         let marks = tokens(buffer.text(), &markdown.spans, block);
-        let lexed = layer.publish(buffer, block.range.clone(), marks, at);
+        let lexed = layer.publish(buffer, block.range.clone(), block.shape, marks, at);
         prop_assert!(lexed.is_ok(), "{:?}", lexed);
     }
     *heard = at;
@@ -234,7 +262,13 @@ fn step(model: &mut Model, step: Step) -> Result<(), TestCaseError> {
             let blocks = &markdown.code_blocks;
             for block in &blocks[..k % (blocks.len() + 1)] {
                 let marks = tokens(buffer.text(), &markdown.spans, block);
-                let seeded = layer.publish(buffer, block.range.clone(), marks, buffer.edit_mark());
+                let seeded = layer.publish(
+                    buffer,
+                    block.range.clone(),
+                    block.shape,
+                    marks,
+                    buffer.edit_mark(),
+                );
                 prop_assert!(seeded.is_ok(), "{:?}", seeded);
             }
             hear(model, None)
@@ -266,7 +300,7 @@ proptest! {
                 .map(|(range, class)| (range, *class))
                 .collect();
             prop_assert_eq!(marks, fresh, "{:?}", text);
-            let chunks: Vec<_> = model.layer.chunks().collect();
+            let chunks: Vec<_> = model.layer.chunks().map(|(range, _)| range).collect();
             let blocks: Vec<_> = markdown
                 .code_blocks
                 .iter()

@@ -170,12 +170,13 @@ pub(crate) fn publish(
     layer: LayerId,
     buffer: &WeakEntity<Buffer>,
     chunk: Range<ByteOffset>,
+    tag: u64,
     marks: Vec<(Range<ByteOffset>, MarkStyle)>,
     at: EditMark,
     cx: &mut App,
 ) {
     change(layer, buffer, cx, |layer, text| {
-        layer.publish(text, chunk, marks, at)
+        layer.publish(text, chunk, tag, marks, at)
     });
 }
 
@@ -231,11 +232,16 @@ fn change(
     }
 }
 
-/// The chunks `layer` holds over `buffer`, sorted (code highlighting spec, D9 and deviation 6).
+/// The chunks `layer` holds over `buffer`, each with its tag, sorted (code highlighting spec, D9
+/// and deviations 6 and 7).
 ///
 /// # Panics
 /// If `layer` is not declared.
-pub(crate) fn chunks(layer: LayerId, buffer: &Entity<Buffer>, cx: &App) -> Vec<Range<ByteOffset>> {
+pub(crate) fn chunks(
+    layer: LayerId,
+    buffer: &Entity<Buffer>,
+    cx: &App,
+) -> Vec<(Range<ByteOffset>, Option<u64>)> {
     let rank = rank(layer, cx);
     let Some(entry) = cx.global::<Decorations>().entries.get(&buffer.entity_id()) else {
         return Vec::new();

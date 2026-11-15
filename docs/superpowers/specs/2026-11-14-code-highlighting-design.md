@@ -259,37 +259,40 @@ It then calls one pure function, in `inkra-highlight` (`plan.rs`):
 
 ```rust
 pub fn plan(
-    blocks: &[(Range<ByteOffset>, ByteOffset)],
-    held: &[(Range<ByteOffset>, bool)],
+    blocks: &[(Range<ByteOffset>, u64)],
+    held: &[(Range<ByteOffset>, Option<u64>)],
     dirty: Option<Range<ByteOffset>>,
 ) -> Plan;
 ```
 
 `blocks` are the current text's code blocks, from
-`parses::parsed(buffer).code_blocks`. Each comes with its reach start
-(`CodeBlock::reach`): the start of its opening fence's line. A block's range
-starts after the fence's indent and after any quote prefix
-(`parse/tests/code_blocks.rs:21`). An edit there changes how much indent each
-content line loses, so it changes the code. Two blocks reach further back,
-because a line before the fence decides their kind: a block in a list item
-reaches the line of the outermost item's marker (a deleted `- ` turns the
-fence into indented code), and an indented block reaches the line of the block
-before it (a paragraph there makes the indent a continuation). With no block
-before it, the line above is blank or a container's prefix, and text typed or
-deleted there still decides the block's kind (a deleted lone `-` turns its
-fence into indented code), so the block reaches that line. The parse is cached per version and the draw needs it too, so this adds
-no parse. `held` are the layer's chunks and whether each has marks (D9).
+`parses::parsed(buffer).code_blocks`. Each comes with its shape
+(`CodeBlock::shape`): a hash of what the lex reads besides the block's bytes.
+That is the range of its language word and of each content span, both relative
+to the block's start. A container can turn a block from fenced into indented
+code, or back, and leave its range as it was. The line that decides it can lie
+far above the block: the outermost item's marker, a fence that swallows an
+inner marker, or a line between the inner marker and the block that ends both
+items. No run of lines before the block catches every case, so the plan
+compares what the lex reads instead. The parse computes each shape after
+`cut`, from the spans inside the block, and scans no text. The parse is cached
+per version and the draw needs it too, so this adds no parse. `held` are the
+layer's chunks, each with its tag (deviation 7): the shape it was published
+with, or `None` once a splice changed its bytes or a publish cut it.
 `Plan` holds two sorted lists:
 
 1. **clear**: each held chunk with marks whose range is no block's range. It
    clears a block that a removed or typed fence turned into prose, or that
    merged with a neighbour.
-2. **lex**: each block that no held chunk has exactly, or whose reach meets
-   the dirty range. The reach runs from the reach start to the block's end.
-   Meets counts touching: `dirty.start <= block.end && reach_start <=
-   dirty.end`. So a deletion in the fence's indent, in its quote prefix, or
-   right before its line relexes the block, even when the core mapped an old
-   chunk onto exactly the block's range.
+2. **lex**: each block that no held chunk has exactly, or that the dirty
+   range meets. A chunk has a block exactly when its range is the block's
+   range and its tag is the block's shape. A chunk on the block's range with
+   another tag stays, and the lexed block replaces it. Meets counts touching:
+   `dirty.start <= block.end && block.start <= dirty.end`. So a deletion
+   right before the fence's line relexes the block, even when the core mapped
+   an old chunk onto exactly the block's range. A deletion in the fence's
+   indent or quote prefix that leaves each content line's code where it was
+   changes neither the range nor the shape, and no colour.
 
 The listener publishes every clear range empty first, then the lexed blocks.
 At one edit mark the later publish wins (`layer.rs`, `publish`), so a lexed
@@ -300,7 +303,7 @@ A changed info word and a typed or deleted fence are caught too: the fence
 line lies inside the block chunk, so the splice meets the block. The plan is
 one merge of three sorted lists and reads no text: its cost grows with the
 number of blocks and chunks, not with the text. A keystroke in prose lexes
-nothing.
+nothing, in a list item too.
 
 The listener lexes the blocks of **lex** on the main thread, in order, while
 their total size stays within `MAIN_THREAD_BUDGET` bytes (D10). The rest goes
@@ -537,7 +540,7 @@ light. The look is tuned after it ships, as for code blocks.
 - `inkra-highlight`, `#[test]` on `plan`, one per case: deleting the closing
   fence between two blocks clears both old chunks and lexes the merged block;
   deleting a line right before a block's opening fence lexes the block;
-  deleting a space of an indented fence's indent lexes the block; a chunk with
+  a chunk on a block's range with another tag, or none, is lexed over; a chunk with
   no marks on prose is not cleared again.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
@@ -698,3 +701,17 @@ number.
    the listener, the chunks are exactly the blocks' ranges, and an empty one
    means "lexed, nothing to colour". D9's read and `plan` take bare ranges: no
    caller reads whether a chunk holds a mark any more.
+7. **Each chunk carries an opaque tag, and D9's read returns it.** D7's first
+   build gave each block a reach start, the first line whose bytes could
+   change its kind, and lexed the block when the dirty range met that line. In
+   a list item the reach went back to the outermost item's marker, so a
+   keystroke in nested prose relexed every later block of the item. A
+   narrower reach missed cases: a line between the inner marker and the block
+   that ends both items, or a fence above that swallows the inner marker. So
+   `Layer::publish` takes a `u64` tag and keeps it with the chunk, and
+   `Layer::chunks` and `decorations::chunks` return it beside the range. The
+   layer reads nothing in it. It drops the tag to `None` when a splice removes
+   one of the chunk's bytes or inserts strictly inside it, and when a publish
+   cuts the chunk to a piece. The syntax layer passes `CodeBlock::shape`;
+   other layers pass 0. `Opened.chunks` carries the tag too, so D7 matches a
+   seeded chunk the same way.

@@ -53,7 +53,7 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
-        .map(|block| (block.range.clone(), block.reach))
+        .map(|block| (block.range.clone(), block.shape))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     #[cfg(test)]
@@ -64,6 +64,7 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
             let block = &markdown.code_blocks[index];
             (
                 block.range.clone(),
+                block.shape,
                 colour(text.text(), &markdown.spans, block),
             )
         })
@@ -73,8 +74,8 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     for chunk in clear {
         decorations::remove(SYNTAX, &buffer, chunk, at, cx);
     }
-    for (chunk, marks) in lexed {
-        decorations::publish(SYNTAX, &buffer, chunk, marks, at, cx);
+    for (chunk, shape, marks) in lexed {
+        decorations::publish(SYNTAX, &buffer, chunk, shape, marks, at, cx);
     }
 }
 

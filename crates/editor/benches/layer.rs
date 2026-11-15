@@ -24,7 +24,7 @@ fn layered() -> (Buffer, Layer<u8>) {
             })
             .collect();
         let chunk = ByteOffset::new(start)..ByteOffset::new(start + BLOCK.len());
-        let published = layer.publish(&buffer, chunk, marks, buffer.edit_mark());
+        let published = layer.publish(&buffer, chunk, 0, marks, buffer.edit_mark());
         assert_eq!(published, Ok(true));
     }
     (buffer, layer)

@@ -10,8 +10,8 @@ use inkra_text::{Buffer, ByteOffset};
 use super::listen::{Seed, timed};
 use super::{Decorations, LayerId, MarkStyle, entry, rank};
 
-/// A chunk's range and the marks inside it, as `publish` takes them.
-pub(crate) type Chunk = (Range<ByteOffset>, Vec<(Range<ByteOffset>, MarkStyle)>);
+/// A chunk's range, tag and the marks inside it, as `publish` takes them.
+pub(crate) type Chunk = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, MarkStyle)>);
 
 /// What an open function did before its deadline.
 pub(crate) struct Opened {
@@ -81,8 +81,8 @@ pub(crate) fn seed(buffer: &Entity<Buffer>, opened: Vec<(LayerId, Opened)>, cx: 
             .into_iter()
             .filter(|&(rank, _)| decorations.enabled[rank]);
         for (rank, Opened { chunks, seed }) in enabled {
-            for (chunk, marks) in chunks {
-                landed |= entry.layers[rank].publish(text, chunk, marks, at) == Ok(true);
+            for (chunk, tag, marks) in chunks {
+                landed |= entry.layers[rank].publish(text, chunk, tag, marks, at) == Ok(true);
             }
             entry.seeds[rank] = seed.map(|seed| (at, seed));
         }

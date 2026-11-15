@@ -35,7 +35,7 @@ fn publish(
         .iter()
         .map(|(range, style)| (span(range.clone()), *style))
         .collect();
-    layer.publish(buffer, span(chunk), marks, buffer.edit_mark())
+    layer.publish(buffer, span(chunk), 0, marks, buffer.edit_mark())
 }
 
 fn twenty() -> Buffer {
@@ -186,7 +186,7 @@ fn a_publish_past_the_ring_is_lost() {
     let mut layer = Layer::new(buffer.edit_mark());
     publish(&mut layer, &buffer, 0..10, &[(2..4, 'a')]).unwrap();
 
-    let published = layer.publish(&buffer, span(0..10), vec![(span(6..8), 'b')], old);
+    let published = layer.publish(&buffer, span(0..10), 0, vec![(span(6..8), 'b')], old);
 
     assert_eq!(published, Err(Lost));
     assert!(layer.is_empty());
@@ -200,7 +200,7 @@ fn an_older_publish_beside_a_newer_chunk_lands() {
     let mut layer = Layer::new(buffer.edit_mark());
     publish(&mut layer, &buffer, 10..21, &[(12..15, 'b')]).unwrap();
 
-    let published = layer.publish(&buffer, span(0..10), vec![(span(2..4), 'a')], old);
+    let published = layer.publish(&buffer, span(0..10), 0, vec![(span(2..4), 'a')], old);
 
     assert_eq!(published, Ok(true));
     assert_eq!(marks(&layer, 0..21), [(2..4, 'a'), (12..15, 'b')]);
@@ -215,7 +215,7 @@ fn an_older_publish_over_a_newer_chunk_fills_around_it() {
     publish(&mut layer, &buffer, 8..12, &[(9..10, 'n')]).unwrap();
 
     let marks_at_old = vec![(span(2..4), 'a'), (span(7..11), 'b'), (span(14..16), 'c')];
-    let published = layer.publish(&buffer, span(0..20), marks_at_old, old);
+    let published = layer.publish(&buffer, span(0..20), 0, marks_at_old, old);
 
     assert_eq!(published, Ok(true));
     assert_eq!(chunks(&layer), [0..8, 8..12, 12..20]);
@@ -242,7 +242,7 @@ fn chunks_follow_edits() {
     publish(&mut layer, &buffer, 8..12, &[]).unwrap();
     assert_eq!(
         layer.chunks().collect::<Vec<_>>(),
-        [span(2..6), span(8..12)]
+        [(span(2..6), Some(0)), (span(8..12), Some(0))]
     );
 
     buffer.transact(|buffer| buffer.insert(at(0), "xyz"));
@@ -250,7 +250,7 @@ fn chunks_follow_edits() {
 
     assert_eq!(
         layer.chunks().collect::<Vec<_>>(),
-        [span(5..9), span(11..15)]
+        [(span(5..9), Some(0)), (span(11..15), Some(0))]
     );
 }
 
@@ -299,4 +299,59 @@ fn a_late_removal_lands_where_its_range_moved_and_keeps_a_newer_chunk() {
 
     assert_eq!(chunks(&layer), [5..9, 14..16]);
     assert_eq!(marks(&layer, 0..23), [(6..7, 'a'), (14..15, 'n')]);
+}
+
+fn tags(layer: &Layer<char>) -> Vec<(Range<usize>, Option<u64>)> {
+    layer
+        .chunks()
+        .map(|(range, tag)| (range.start.get()..range.end.get(), tag))
+        .collect()
+}
+
+#[test]
+fn a_chunk_keeps_its_tag_until_a_splice_changes_its_bytes() {
+    for late in [false, true] {
+        for (removed, inserted, kept) in [
+            (0..1, "", true),
+            (18..19, "", true),
+            (5..5, "x", true),
+            (15..15, "x", true),
+            (4..5, "", true),
+            (15..16, "", true),
+            (6..6, "x", false),
+            (14..14, "x", false),
+            (4..6, "", false),
+            (14..16, "", false),
+            (7..8, "y", false),
+        ] {
+            let mut buffer = twenty();
+            let old = buffer.edit_mark();
+            let mut layer = Layer::<char>::new(old);
+            if !late {
+                layer.publish(&buffer, span(5..15), 7, vec![], old).unwrap();
+            }
+
+            buffer.transact(|buffer| buffer.replace(span(removed.clone()), inserted));
+            if late {
+                layer.publish(&buffer, span(5..15), 7, vec![], old).unwrap();
+            } else {
+                layer.catch_up(&buffer).unwrap();
+            }
+
+            let tag = layer.chunks().next().unwrap().1;
+            assert_eq!(tag, kept.then_some(7), "{late} {removed:?} {inserted:?}");
+        }
+    }
+}
+
+#[test]
+fn a_piece_cut_from_a_chunk_drops_its_tag() {
+    let buffer = twenty();
+    let mut layer = Layer::<char>::new(buffer.edit_mark());
+    let at = buffer.edit_mark();
+    layer.publish(&buffer, span(0..10), 1, vec![], at).unwrap();
+
+    layer.publish(&buffer, span(5..20), 2, vec![], at).unwrap();
+
+    assert_eq!(tags(&layer), [(0..5, None), (5..20, Some(2))]);
 }

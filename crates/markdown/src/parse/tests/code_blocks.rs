@@ -150,29 +150,35 @@ fn the_language_is_the_info_strings_first_word() {
     assert_eq!(language("    code"), None);
 }
 
-fn reaches(text: &str) -> Vec<usize> {
-    parse(text)
-        .code_blocks
-        .iter()
-        .map(|block| block.reach.get())
-        .collect()
+fn shape(text: &str) -> u64 {
+    parse(text).code_blocks[0].shape
 }
 
 #[test]
-fn reach_starts_at_the_line_that_can_change_the_block() {
-    assert_eq!(reaches("a\n\n  ```\n  x\n  ```"), [3]);
-    assert_eq!(reaches("a\n\n- b\n\n  ```\n  x\n  ```"), [3]);
-    assert_eq!(reaches("a\n\n- b\n\n  - c\n\n    ```\n    x\n    ```"), [3]);
-    assert_eq!(reaches("a\n\n    code"), [0]);
-    assert_eq!(reaches("a\n\nb\n\n    code"), [3]);
-    assert_eq!(reaches("    code"), [0]);
+fn the_shape_holds_where_the_block_moves_or_only_its_fences_change() {
+    for other in [
+        "prose\n\n```rust\nlet\n```",
+        "> a\n\n```rust\nlet\n```",
+        "```rust\nlet\n````",
+        "~~~rust\nlet\n~~~",
+    ] {
+        assert_eq!(shape("```rust\nlet\n```"), shape(other), "{other:?}");
+    }
 }
 
-/// With no block before it, the line before an indented block is blank or a container's prefix;
-/// text typed there makes the block a paragraph's continuation.
+/// Each pair differs in its language word or its content lines.
 #[test]
-fn an_indented_block_with_no_block_before_it_reaches_the_line_before() {
-    assert_eq!(reaches("\n    ```rust\n    let\n    ```\n"), [0]);
-    assert_eq!(reaches("\n\n    code"), [1]);
-    assert_eq!(reaches("a\n\n>\n>     code"), [3]);
+fn the_shape_changes_with_the_language_or_the_content_lines() {
+    for (one, other) in [
+        ("```rust\nlet\n```", "```rus \nlet\n```"),
+        ("```rust\nlet\n```", "```    \nlet\n```"),
+        ("```\nlet\n```", "```\n let\n```"),
+        ("    let\n    x", "    let\n     x"),
+        (
+            "- a\n\n  ```rust\n  let\n  ```",
+            "- a\n\n      ```rust\n      let\n      ```",
+        ),
+    ] {
+        assert_ne!(shape(one), shape(other), "{one:?}");
+    }
 }

@@ -70,7 +70,7 @@ fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
 fn held(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<Range<usize>> {
     cx.update(|cx| decorations::chunks(SYNTAX, buffer, cx))
         .into_iter()
-        .map(|range| range.start.get()..range.end.get())
+        .map(|(range, _)| range.start.get()..range.end.get())
         .collect()
 }
 
@@ -133,7 +133,10 @@ fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
     let markdown = inkra_markdown::parse(&text);
     let chunks = markdown.code_blocks[..count]
         .iter()
-        .map(|block| (block.range.clone(), colour(&text, &markdown.spans, block)))
+        .map(|block| {
+            let marks = colour(&text, &markdown.spans, block);
+            (block.range.clone(), block.shape, marks)
+        })
         .collect();
     let opened = decorations::Opened {
         chunks,
@@ -281,8 +284,12 @@ fn open_colours_every_block_before_its_deadline() {
     assert_eq!(
         opened.chunks,
         [
-            (a.range.clone(), colour(PROSE_RUST_NOPE, &markdown.spans, a)),
-            (b.range.clone(), Vec::new()),
+            (
+                a.range.clone(),
+                a.shape,
+                colour(PROSE_RUST_NOPE, &markdown.spans, a)
+            ),
+            (b.range.clone(), b.shape, Vec::new()),
         ]
     );
     assert!(opened.seed.is_some());
@@ -310,7 +317,7 @@ fn a_text_over_the_parse_limit_lands_only_the_seed() {
 fn a_text_at_the_parse_limit_is_coloured() {
     let opened = open::open(&padded(open::OPEN_PARSE_LIMIT), far());
 
-    let [(_, marks)] = &opened.chunks[..] else {
+    let [(_, _, marks)] = &opened.chunks[..] else {
         panic!("{} chunks", opened.chunks.len());
     };
     assert_ne!(marks, &[]);
@@ -450,4 +457,56 @@ fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut Tes
     assert_eq!(lexed() - before, 0);
     assert_eq!(marks(cx, &buffer), fresh(PROSE_RUST_NOPE));
     drop(listening);
+}
+
+/// One top-level bullet, nested prose, then rust blocks: the outline note of the spec's D7.
+const OUTLINE: &str = "- Project\n  - a long line of prose about the plan\n  ```rust\n  let a = 1;\n  ```\n  - more prose\n  ```rust\n  let b = 2;\n  ```\n";
+
+#[gpui::test]
+fn a_keystroke_in_nested_prose_lexes_no_block(cx: &mut TestAppContext) {
+    let (buffer, _listening) = shown(cx, OUTLINE);
+    let before = lexed();
+
+    edit(cx, &buffer, |t| t.insert(at(20), "x"));
+
+    assert_eq!(lexed() - before, 0);
+    assert_eq!(marks(cx, &buffer), fresh(&text(cx, &buffer)));
+}
+
+/// Each edit lies outside the block, which keeps its range while a container above turns it from
+/// fenced into indented code or back.
+#[gpui::test]
+fn a_block_whose_container_changes_on_the_same_range_is_recoloured(cx: &mut TestAppContext) {
+    for (note, removed, inserted) in [
+        // The deleted lines ended both items: the block joins the inner one.
+        (
+            "- a\n  - b\n\n    c\n\nd\n\n    ```rust\n    let\n    ```\n",
+            16..19,
+            "",
+        ),
+        // The fence two lines above the inner marker swallowed it.
+        (
+            "- ```\n  z\n  - b\nfoo\n\n    ```rust\n    let\n    ```\n",
+            2..5,
+            "a",
+        ),
+        // The marker sits above the block before this one.
+        ("- a\n\n  b\n\n    ```rust\n    let\n    ```\n", 0..2, ""),
+        (
+            "- a\n  z\n  - b\nfoo\n\n    ```rust\n    let\n    ```\n",
+            2..3,
+            "```",
+        ),
+    ] {
+        let (buffer, _listening) = shown(cx, note);
+        let before = marks(cx, &buffer);
+
+        edit(cx, &buffer, |t| {
+            t.replace(at(removed.start)..at(removed.end), inserted);
+        });
+
+        let text = text(cx, &buffer);
+        assert_ne!(fresh(&text), before, "{note:?}");
+        assert_eq!(marks(cx, &buffer), fresh(&text), "{note:?}");
+    }
 }

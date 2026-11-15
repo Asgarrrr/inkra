@@ -4,6 +4,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
 use crate::cmark::options;
+use crate::content_lines::shape;
 use crate::gutters::{cut, gutters, quote_conceals};
 use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::{Conceal, Gutter, Styles};
@@ -42,10 +43,10 @@ pub struct CodeBlock {
     pub range: Range<ByteOffset>,
     /// The info string's first word; `None` without one, and for an indented block.
     pub language: Option<Range<ByteOffset>>,
-    /// The start of the first line whose bytes can change this block's kind or indent: the line of
-    /// its outermost list item's marker; for an indented block that of the block before it, or with
-    /// none the line above; else its own line.
-    pub reach: ByteOffset,
+    /// A fingerprint of what colours the block besides its bytes: its language word and the ranges
+    /// of its content lines, relative to its start. A container that turns it from fenced into
+    /// indented code, or back, changes it (code highlighting spec, D7).
+    pub shape: u64,
 }
 
 /// One pass over pulldown-cmark's events. A byte inside an element that no
@@ -63,8 +64,6 @@ pub fn parse(text: &str) -> Markdown {
     let mut headings = Vec::new();
     let mut quotes = Vec::new();
     let mut code_blocks = Vec::new();
-    // The start of the last top-level block that ended.
-    let mut last_root = None;
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let current = open.last().cloned();
@@ -84,21 +83,10 @@ pub fn parse(text: &str) -> Markdown {
                     });
                 }
                 if let Tag::CodeBlock(kind) = &tag {
-                    let before = open.last().map_or(last_root, |parent| parent.last_child);
-                    // The line ending of the line above, which decides whether indented code is code.
-                    let above = text[..range.start].rfind('\n').unwrap_or(0);
-                    let indented =
-                        matches!(kind, CodeBlockKind::Indented).then(|| before.unwrap_or(above));
-                    let reach = open
-                        .iter()
-                        .find_map(|open| open.item)
-                        .or(indented)
-                        .unwrap_or(range.start);
-                    code_blocks.push(CodeBlock {
-                        range: to_offsets(without_line_ending(text, &range)),
-                        language: language(text, &range, kind).map(to_offsets),
-                        reach: ByteOffset::new(text[..reach].rfind('\n').map_or(0, |at| at + 1)),
-                    });
+                    code_blocks.push((
+                        to_offsets(without_line_ending(text, &range)),
+                        language(text, &range, kind).map(to_offsets),
+                    ));
                 }
                 let entered = Open::enter(text, &tag, &range, current.as_ref());
                 if entered.leading {
@@ -109,10 +97,6 @@ pub fn parse(text: &str) -> Markdown {
             Event::End(_) => {
                 out.markers_until(range.end, current.as_ref());
                 open.pop();
-                match open.last_mut() {
-                    Some(parent) => parent.last_child = Some(range.start),
-                    None => last_root = Some(range.start),
-                }
             }
             Event::Text(_) | Event::Html(_) | Event::InlineHtml(_) => {
                 out.markers_until(range.start, current.as_ref());
@@ -137,6 +121,14 @@ pub fn parse(text: &str) -> Markdown {
     }
     let gutters = gutters(text, &quotes);
     cut(text, &mut out.spans, &gutters);
+    let code_blocks = code_blocks
+        .into_iter()
+        .map(|(range, language)| CodeBlock {
+            shape: shape(&out.spans, &range, language.as_ref()),
+            range,
+            language,
+        })
+        .collect();
     let mut conceals = out.conceals;
     conceals.extend(quote_conceals(&gutters));
     // Two sorted runs: the stable sort merges them in one linear pass.
@@ -252,10 +244,6 @@ struct Open {
     element: Option<Range<usize>>,
     /// A quote whose ancestors are all quotes.
     leading: bool,
-    /// Where this element starts when it is a list item.
-    item: Option<usize>,
-    /// Where the last child that ended starts.
-    last_child: Option<usize>,
 }
 
 impl Open {
@@ -274,8 +262,6 @@ impl Open {
             element: concealable(text, tag, range),
             // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
             leading: matches!(tag, Tag::BlockQuote(_)) && parent.is_none_or(|open| open.leading),
-            item: matches!(tag, Tag::Item).then_some(range.start),
-            last_child: None,
         }
     }
 
@@ -288,8 +274,6 @@ impl Open {
             end: range.end,
             element: Some(range.clone()),
             leading: false,
-            item: None,
-            last_child: None,
         }
     }
 }

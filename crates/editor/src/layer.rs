@@ -18,6 +18,9 @@ struct Chunk<S> {
     len: usize,
     /// The edit mark its marks were computed at: an older publish never replaces them.
     published: EditMark,
+    /// What its publisher passed, opaque here; `None` once a splice changed its bytes or a publish
+    /// cut it.
+    tag: Option<u64>,
     /// Relative to `start`: sorted, disjoint, non-empty and inside `0..len`.
     marks: Vec<(Range<usize>, S)>,
 }
@@ -65,9 +68,11 @@ impl<S: Clone + PartialEq> Layer<S> {
             .flat_map(move |chunk| chunk.marks_in(range.clone()))
     }
 
-    /// Each chunk's range, in order.
-    pub fn chunks(&self) -> impl Iterator<Item = Range<ByteOffset>> + '_ {
-        self.chunks.iter().map(|chunk| chunk.start..chunk.end())
+    /// Each chunk's range and tag, in order.
+    pub fn chunks(&self) -> impl Iterator<Item = (Range<ByteOffset>, Option<u64>)> + '_ {
+        self.chunks
+            .iter()
+            .map(|chunk| (chunk.start..chunk.end(), chunk.tag))
     }
 
     /// Brings the layer to `buffer`'s edit mark, shifting its marks through every splice since.
@@ -108,7 +113,8 @@ impl<S: Clone + PartialEq> Layer<S> {
 
     /// Replaces everything inside `chunk` with `marks`, both computed at the edit mark `at` and
     /// mapped through the edits since (D6), except where a chunk computed later lies: that one
-    /// stays. `Ok(true)` when the marks inside the mapped chunk changed.
+    /// stays. The chunk holds `tag` while it stays whole and its bytes unchanged. `Ok(true)` when
+    /// the marks inside the mapped chunk changed.
     ///
     /// # Errors
     /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
@@ -121,10 +127,11 @@ impl<S: Clone + PartialEq> Layer<S> {
         &mut self,
         buffer: &Buffer,
         chunk: Range<ByteOffset>,
+        tag: u64,
         marks: Vec<(Range<ByteOffset>, S)>,
         at: EditMark,
     ) -> Result<bool, Lost> {
-        self.replace(buffer, chunk, Some(marks), at)
+        self.replace(buffer, chunk, Some(tag), Some(marks), at)
     }
 
     /// As `publish`, except that no chunk takes the place of what it removes from inside `chunk`.
@@ -140,7 +147,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         chunk: Range<ByteOffset>,
         at: EditMark,
     ) -> Result<bool, Lost> {
-        self.replace(buffer, chunk, None, at)
+        self.replace(buffer, chunk, None, None, at)
     }
 
     /// `publish` with `Some(marks)`, `remove` with `None`.
@@ -148,6 +155,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         &mut self,
         buffer: &Buffer,
         chunk: Range<ByteOffset>,
+        tag: Option<u64>,
         marks: Option<Vec<(Range<ByteOffset>, S)>>,
         at: EditMark,
     ) -> Result<bool, Lost> {
@@ -160,7 +168,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         let fills = marks.is_some();
         let Some(new) = splices
             .try_fold(
-                Chunk::new(chunk, at, marks.into_iter().flatten()),
+                Chunk::new(chunk, at, tag, marks.into_iter().flatten()),
                 map_chunk,
             )
             .filter(|new| new.len != 0)
@@ -201,6 +209,7 @@ impl<S: Clone> Chunk<S> {
     fn new(
         range: Range<ByteOffset>,
         published: EditMark,
+        tag: Option<u64>,
         marks: impl IntoIterator<Item = (Range<ByteOffset>, S)>,
     ) -> Self {
         let start = range.start;
@@ -208,6 +217,7 @@ impl<S: Clone> Chunk<S> {
             start,
             len: range.end - start,
             published,
+            tag,
             marks: marks
                 .into_iter()
                 .filter(|(mark, _)| !mark.is_empty())
@@ -232,13 +242,14 @@ impl<S: Clone> Chunk<S> {
             .map(move |(mark, style)| (mark.start.max(range.start)..mark.end.min(range.end), style))
     }
 
-    /// The part of the chunk inside `range`, `None` when empty.
+    /// The part of the chunk inside `range`, `None` when empty; only the whole chunk keeps its tag.
     fn piece(&self, range: Range<ByteOffset>) -> Option<Self> {
         (range.start < range.end).then(|| {
             let marks = self
                 .marks_in(range.clone())
                 .map(|(mark, style)| (mark, style.clone()));
-            Self::new(range, self.published, marks)
+            let tag = self.tag.filter(|_| range == (self.start..self.end()));
+            Self::new(range, self.published, tag, marks)
         })
     }
 
@@ -281,9 +292,13 @@ fn map_mark(
 }
 
 /// As `map_mark` on the chunk's range, except that a splice strictly inside it grows it (decoration
-/// layer spec, deviation 5). Either way at most one piece is left, and its marks follow `map_mark`.
+/// layer spec, deviation 5). Either way at most one piece is left, and its marks follow `map_mark`;
+/// it keeps its tag unless the splice removed one of its bytes or inserted strictly inside it.
 fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
     let (start, end) = (chunk.start, chunk.end());
+    let tag = chunk
+        .tag
+        .filter(|_| !(start < splice.at + splice.removed_len && splice.at < end));
     let range = if start < splice.at && splice.at + splice.removed_len < end {
         start..end - splice.removed_len + splice.inserted_len
     } else {
@@ -297,7 +312,7 @@ fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
             .flatten()
             .map(move |piece| (piece, style.clone()))
     });
-    Some(Chunk::new(range, chunk.published, marks))
+    Some(Chunk::new(range, chunk.published, tag, marks))
 }
 
 /// What holds of a publish at any edit mark; the bounds are checked once mapped (`Chunk::check`).

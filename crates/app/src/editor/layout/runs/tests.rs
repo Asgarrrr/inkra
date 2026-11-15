@@ -107,6 +107,7 @@ fn layer(text: &Buffer, marks: Vec<(Range<ByteOffset>, MarkStyle)>) -> Layer<Mar
     let published = layer.publish(
         text,
         ByteOffset::new(0)..text.len(),
+        0,
         marks,
         text.edit_mark(),
     );

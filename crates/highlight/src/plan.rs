@@ -16,32 +16,35 @@ pub struct Plan {
     pub lex: Vec<usize>,
 }
 
-/// One merge of `blocks`, each with its reach start, and the `held` chunks; both sorted, disjoint
-/// and non-empty.
+/// One merge of `blocks`, each with its shape, and the `held` chunks, each with its tag; both sorted,
+/// disjoint and non-empty. A chunk on a block's range is kept, and lexed over unless its tag is the
+/// block's shape and the dirty range misses the block.
 #[must_use]
 pub fn plan(
-    blocks: &[(Range<ByteOffset>, ByteOffset)],
-    held: &[Range<ByteOffset>],
+    blocks: &[(Range<ByteOffset>, u64)],
+    held: &[(Range<ByteOffset>, Option<u64>)],
     dirty: Option<Range<ByteOffset>>,
 ) -> Plan {
-    // A dirty range that only touches a reach meets it.
+    // A dirty range that only touches a block meets it: an empty one is a deletion there.
     let dirty = dirty.map(|Range { start, end }| start..=end);
     let mut clear = Vec::new();
     let mut lex = Vec::new();
     let mut held = held.iter().peekable();
-    for (index, (block, reach_start)) in blocks.iter().enumerate() {
-        while let Some(chunk) = held.next_if(|chunk| chunk.start < block.start) {
+    for (index, (block, shape)) in blocks.iter().enumerate() {
+        while let Some((chunk, _)) = held.next_if(|(chunk, _)| chunk.start < block.start) {
             clear.push(chunk.clone());
         }
-        let exact = held.next_if_eq(&block).is_some();
+        let exact = held
+            .next_if(|(chunk, _)| chunk == block)
+            .is_some_and(|&(_, tag)| tag == Some(*shape));
         let meets = dirty
             .as_ref()
-            .is_some_and(|dirty| *dirty.start() <= block.end && reach_start <= dirty.end());
+            .is_some_and(|dirty| *dirty.start() <= block.end && block.start <= *dirty.end());
         if !exact || meets {
             lex.push(index);
         }
     }
-    clear.extend(held.cloned());
+    clear.extend(held.map(|(chunk, _)| chunk.clone()));
     Plan { clear, lex }
 }
 

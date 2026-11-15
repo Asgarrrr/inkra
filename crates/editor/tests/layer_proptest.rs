@@ -109,7 +109,7 @@ impl Publish {
     }
 
     fn deliver(self, layer: &mut Layer<u8>, buffer: &Buffer) -> Result<bool, Lost> {
-        layer.publish(buffer, span(self.chunk), self.marks, self.at)
+        layer.publish(buffer, span(self.chunk), 0, self.marks, self.at)
     }
 }
 
@@ -219,7 +219,7 @@ proptest! {
                     prop_assert_eq!(layer.catch_up(&buffer), Ok(()));
                 }
             }
-            let chunks: Vec<_> = layer.chunks().collect();
+            let chunks: Vec<_> = layer.chunks().map(|(range, _)| range).collect();
             let mut floor = ByteOffset::new(0);
             for range in &chunks {
                 prop_assert!(floor <= range.start && range.start < range.end, "{:?} after {}", range, floor);

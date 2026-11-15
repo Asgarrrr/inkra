@@ -42,7 +42,7 @@ pub(super) fn todo_marks(stage: &mut Stage) -> WindowHandle<AppShell> {
             .collect();
         let (len, at) = (buffer.read(cx).len(), buffer.read(cx).edit_mark());
         let chunk = ByteOffset::new(0)..len;
-        decorations::publish(TODO_MARKS.id, &buffer.downgrade(), chunk, marks, at, cx);
+        decorations::publish(TODO_MARKS.id, &buffer.downgrade(), chunk, 0, marks, at, cx);
         Some(())
     });
     window

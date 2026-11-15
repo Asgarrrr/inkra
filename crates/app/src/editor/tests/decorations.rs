@@ -30,7 +30,15 @@ fn publish_color(
         let style = MarkStyle { color: Some(token) };
         let (at_mark, len) = (buffer.read(cx).edit_mark(), buffer.read(cx).len());
         let marks = vec![(at(mark.start)..at(mark.end), style)];
-        decorations::publish(layer, &buffer.downgrade(), at(0)..len, marks, at_mark, cx);
+        decorations::publish(
+            layer,
+            &buffer.downgrade(),
+            at(0)..len,
+            0,
+            marks,
+            at_mark,
+            cx,
+        );
     });
     cx.run_until_parked();
 }
@@ -271,6 +279,7 @@ fn a_publish_to_an_undeclared_layer_panics(cx: &mut TestAppContext) {
             TODO_LAYER,
             &buffer.downgrade(),
             at(0)..at(4),
+            0,
             Vec::new(),
             mark,
             cx,
@@ -286,7 +295,7 @@ fn an_open_past_its_deadline_returns_early_and_the_rest_publishes_after_landing(
     let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     let opened = decorations::run_openers(text, &[(TODO_LAYER, fakes::open_todo)], past);
     let (_, early) = &opened[0];
-    assert!(early.chunks.iter().all(|(_, marks)| marks.is_empty()));
+    assert!(early.chunks.iter().all(|(_, _, marks)| marks.is_empty()));
     let stop = early
         .seed
         .as_ref()

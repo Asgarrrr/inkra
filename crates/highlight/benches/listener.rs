@@ -49,7 +49,7 @@ fn call(
     let blocks: Vec<_> = markdown
         .code_blocks
         .iter()
-        .map(|b| (b.range.clone(), buffer.line_at(b.range.start).start))
+        .map(|b| (b.range.clone(), b.shape))
         .collect();
     let Plan { clear, lex } = plan(&blocks, &held, dirty);
     let at = buffer.edit_mark();
@@ -60,7 +60,7 @@ fn call(
         let block = &markdown.code_blocks[index];
         let marks = tokens(buffer.text(), &markdown.spans, block);
         layer
-            .publish(buffer, block.range.clone(), marks, at)
+            .publish(buffer, block.range.clone(), block.shape, marks, at)
             .expect("a block lands");
     }
     lex.len()

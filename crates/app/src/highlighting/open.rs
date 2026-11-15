@@ -17,7 +17,10 @@ pub(super) fn open(text: &str, deadline: Instant) -> Opened {
             .code_blocks
             .iter()
             .take_while(|_| Instant::now() < deadline)
-            .map(|block| (block.range.clone(), colour(text, &markdown.spans, block)))
+            .map(|block| {
+                let marks = colour(text, &markdown.spans, block);
+                (block.range.clone(), block.shape, marks)
+            })
             .collect()
     };
     Opened {
