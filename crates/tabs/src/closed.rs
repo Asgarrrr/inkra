@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::history::{HISTORY, Stack};
+use crate::history::{HISTORY, History};
 use crate::{Place, Tab, TabId, Tabs};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,14 +20,13 @@ pub struct Closed<P, Q = P> {
 pub(crate) struct ClosedTab<P> {
     pub(crate) place: P,
     pub(crate) index: usize,
-    pub(crate) back: Stack<P>,
-    pub(crate) forward: Stack<P>,
+    pub(crate) history: History<P>,
 }
 
 impl<P: Place> ClosedTab<P> {
     /// Nothing to reopen: no file and no history (invariant 7).
     pub(crate) fn is_blank(&self) -> bool {
-        self.place.file().is_none() && self.back.0.is_empty() && self.forward.0.is_empty()
+        self.place.file().is_none() && self.history.is_empty()
     }
 }
 
@@ -74,8 +73,7 @@ impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
         self.remember(ClosedTab {
             place: place.clone(),
             index,
-            back: tab.back,
-            forward: tab.forward,
+            history: tab.history,
         });
         if self.list.is_empty() {
             let fresh = self.fresh_id();
@@ -102,8 +100,7 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
             return false;
         }
         let (tab, left) = self.leave_active(capture);
-        tab.back.push(left);
-        tab.forward.clear();
+        tab.history.leave(left);
         true
     }
 
@@ -112,7 +109,7 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
     pub fn reopen(&mut self, park: impl FnOnce() -> Q) -> Option<P> {
         let entry = self.closed.pop_back()?;
         self.insert(entry.index, park);
-        self.set_active_history(entry.back, entry.forward);
+        self.set_active_history(entry.history);
         Some(entry.place)
     }
 

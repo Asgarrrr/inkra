@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
-use super::{Closed, Direction, HISTORY, Place, Stack, TabId, Tabs};
+use super::history::{History, Stack};
+use super::{Closed, Direction, HISTORY, Place, TabId, Tabs, Way};
 use harness::Harness;
 
 mod closed;
@@ -42,6 +43,11 @@ fn entries(stack: &Stack<Fake>) -> Vec<Fake> {
     stack.0.iter().cloned().collect()
 }
 
+/// Back then forward.
+fn histories(history: &History<Fake>) -> [Vec<Fake>; 2] {
+    [Way::Back, Way::Forward].map(|way| entries(history.stack(way)))
+}
+
 /// H1's adjacency, H2, H3.
 fn check_stack<P: Place>(stack: &Stack<P>) {
     let stack = &stack.0;
@@ -62,19 +68,19 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
         assert!(!self.list.is_empty(), "at least one tab");
         for tab in &self.list {
             assert_eq!(tab.place.is_none(), tab.id == self.active, "H8");
-            check_stack(&tab.back);
-            check_stack(&tab.forward);
+            check_stack(tab.history.stack(Way::Back));
+            check_stack(tab.history.stack(Way::Forward));
         }
         assert!(self.closed.len() <= HISTORY, "C3");
         for entry in &self.closed {
             assert!(
                 entry.place.file().is_some()
-                    || !entry.back.0.is_empty()
-                    || !entry.forward.0.is_empty(),
+                    || !entry.history.stack(Way::Back).0.is_empty()
+                    || !entry.history.stack(Way::Forward).0.is_empty(),
                 "C1: no closed entry without a note or history"
             );
-            check_stack(&entry.back);
-            check_stack(&entry.forward);
+            check_stack(entry.history.stack(Way::Back));
+            check_stack(entry.history.stack(Way::Forward));
         }
         let ids: Vec<TabId> = self.list.iter().map(|tab| tab.id).collect();
         let unique: HashSet<TabId> = ids.iter().copied().collect();
@@ -245,8 +251,8 @@ impl Harness {
         );
         let tab = self.tabs.iter().find(|tab| tab.id == id).expect("a tab");
         assert_eq!(
-            [entries(&tab.back), entries(&tab.forward)],
-            [entries(&entry.back), entries(&entry.forward)],
+            histories(&tab.history),
+            histories(&entry.history),
             "C4: the entry's history"
         );
         shadow.insert(active, left.expect("a reopen leaves the active tab"));
