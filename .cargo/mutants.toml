@@ -73,6 +73,18 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 #
 # Equivalent. `MD` and `FRAGMENT` are disjoint bits, so `^` and `|` build the same byte.
 #
+# Matched by column. Equivalent. Lines are contiguous, so a `y` inside a line's band is on one of its
+# rows; past the last line, both callers clamp the row again, `locate` and `selection_quads`.
+#
+# Unobservable. The `bench` feature gates `bench.rs`, and no test builds it.
+#
+# Matched by column. Equivalent. The region `changed` returns holds `edit.at`, so the line holding it
+# is dirty: no clean line starts there, and no conceal on a clean line has its marker there. With no
+# edit, `removed_len` and `inserted_len` are both 0, so both branches give the same offset.
+#
+# Matched by column. Equivalent. A dirty region ends at a line's end, and a conceal's marker is
+# non-empty and inside one line, so no marker starts where a dirty region ends.
+#
 # The vault runs with `cargo mutants -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
 # `-f` is needed because `examine_globs` leaves the vault out. Its suite (~3 s) uses a
 # real disk and a watcher, too slow to run against every other crate's mutants.
@@ -112,6 +124,10 @@ exclude_re = [
     "^crates/app/src/editor/element\\.rs:[0-9]+:22: replace != with == in <impl Element for TextElement>::paint$",
     "^crates/app/src/editor/element\\.rs:[0-9]+:26: replace == with != in <impl Element for TextElement>::paint$",
     "^crates/app/src/images/decode\\.rs:[0-9]+:[0-9]+: replace > with >= in decode$",
+    "^crates/app/src/editor/layout/mod\\.rs:[0-9]+:58: replace - with (\\+|/) in DocumentLayout::row_for_y$",
+    "^crates/app/src/bench\\.rs:",
+    "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:(19: replace < with <= in Carry<'p>::was|27: replace < with <= in Carry<'p>::flips)$",
+    "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:51: replace < with <= in Carry<'p>::flips$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in <impl Fs for RealFs>::rename$",
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace trash_method with \\(\\)$",
