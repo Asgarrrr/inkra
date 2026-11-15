@@ -193,6 +193,18 @@ fn an_edit_in_one_block_lexes_that_block(cx: &mut TestAppContext) {
     assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0]));
 }
 
+/// The deletion touches the chunk without removing its bytes, so the chunk stays exact (deviation 10).
+#[gpui::test]
+fn a_line_deleted_right_before_a_fence_keeps_the_blocks_planted_marks(cx: &mut TestAppContext) {
+    let (buffer, _listening) = seeded(cx, "prose\n\n```rust\nlet\n```\n");
+
+    edit(cx, &buffer, |t| t.delete(at(0)..at(7)));
+
+    let text = text(cx, &buffer);
+    assert_eq!(text, "```rust\nlet\n```\n");
+    assert_eq!(marks(cx, &buffer), kept(&text, &[]));
+}
+
 #[gpui::test]
 fn deleting_a_fence_indent_space_relexes_the_block(cx: &mut TestAppContext) {
     let (buffer, _listening) = seeded(cx, "  ```rust\n  let\n  ```\n\n```rust\nmut\n```\n");
@@ -247,8 +259,9 @@ fn a_partly_seeded_open_lexes_only_the_rest(cx: &mut TestAppContext) {
     assert_eq!(marks(cx, &buffer), kept(TWO_BLOCKS, &[1]));
 }
 
+/// The core mapped the landed chunks through the edit, so only the edited block is inexact (D8).
 #[gpui::test]
-fn an_edit_before_the_first_hearing_relexes_every_block(cx: &mut TestAppContext) {
+fn an_edit_before_the_first_hearing_relexes_only_the_edited_block(cx: &mut TestAppContext) {
     let (buffer, _listening) = opened(cx, TWO_BLOCKS, |buffer, cx| {
         seed(buffer, 2, cx);
         buffer.update(cx, |buffer, cx| {
@@ -257,7 +270,7 @@ fn an_edit_before_the_first_hearing_relexes_every_block(cx: &mut TestAppContext)
         });
     });
 
-    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0, 1]));
+    assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0]));
 }
 
 #[gpui::test]

@@ -74,12 +74,15 @@ pub(crate) fn block_tokens<'a>(
     lines: impl Iterator<Item = (ByteOffset, &'a str)>,
 ) -> Vec<(Range<ByteOffset>, TokenClass)> {
     let mut tokens = Vec::new();
-    let language =
-        info.and_then(|word| Language::from_info(&text[word.start.get()..word.end.get()]));
-    if let Some(language) = language {
+    if let Some(language) = info_language(text, info) {
         highlight(language, lines, &mut tokens);
     }
     tokens
+}
+
+/// The language of the info word at `info` in `text`; `None` without a word or for an unknown one.
+pub(crate) fn info_language(text: &str, info: Option<Range<ByteOffset>>) -> Option<Language> {
+    info.and_then(|word| Language::from_info(&text[word.start.get()..word.end.get()]))
 }
 
 #[cfg(test)]
