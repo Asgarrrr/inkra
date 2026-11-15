@@ -628,6 +628,58 @@ gpui's `bench-support` turns on criterion's default features (plotters,
 rayon), against `docs/tooling.md`; only under the `bench` feature. The
 tooling doc records the exception.
 
+S1a, release, M5 Pro, the `plain` cases. Before is draw-s0, after is S1a, both
+measured in one sitting.
+
+| Case | Before | After | Requested before | Requested after |
+|---|---|---|---|---|
+| 1000 blocks, type in prose | 8.95 ms | 0.96 ms | 32.6 MB | 7.5 MB |
+| One block, type in prose | 5.83 ms | 0.53 ms | 16.5 MB | 1.0 MB |
+| One block, type in the block | 5.65 ms | 2.60 ms | 16.5 MB | 5.6 MB |
+
+Typing in the block rebuilds the whole block: the coarse diff dirties every
+line whose `CodeBlock` range changed, until S2. The colours-on cases still
+rebuild the whole note on each keystroke, since the decorations revision
+moves (S1b): 12.98 ms, 10.69 ms and 10.17 ms after, against 12.82 ms,
+11.58 ms and 11.24 ms before.
+
+S1a deviations from this spec:
+
+1. `changed(old, new, edit)` takes one `Splice`, the hull of every splice since
+   the previous layout, and never answers `None`. The coarse form reads only
+   the edit's start, the end of the removed bytes and the shift after them,
+   and the hull gives all three.
+2. `Splice::map(offset, bias)` ships in S1a, not S2. The old marked range must
+   map into the new text (D5.4), and the hull is a `Splice`.
+3. The splices compose into the hull through `inkra_highlight::dirty`, which
+   already composes them. The dirty lines are the hull's lines; growing each
+   splice separately would give the same lines or fewer, for more code.
+4. A margin change rebuilds the whole note, even where `is_shaped_from` keeps
+   the layout because no line reads the margin. Carrying across it would need
+   the per-line reads that `reads_margin` scans for, for a resize-only gain.
+5. The line types moved to `layout/line.rs` and the prefix build to
+   `layout/prefix.rs`. `shape.rs` and `mod.rs` would otherwise pass their line
+   ceilings.
+6. The bench's `Typing` moves `Drawn.revision` when the colours move, as
+   `decorations::sync` does. With the revision fixed at 0, a carry would keep
+   stale colours and the colours-on cases would time the wrong work.
+7. A selection change rebuilds the whole note only when a conceal on a clean
+   line flips activity, where S1a said any touched-conceal change does.
+   Comparing the touched sets through the hull is unsound: an old selection
+   inside the removed bytes maps onto the hull's edge, and two elements
+   collapse into one. A flip on a dirty line costs nothing, since the line is
+   rebuilt.
+8. A line with no gutter passes no geometry on, which replaces D7's seed. The
+   oracle found a lazy line after a line with no gutter: `gutter()` counts only
+   spaces before an inner `>`, so `> \t> ` reads as depth 2 with one `>`. The
+   seed's parser property is false, its debug assertion fired, and a lazy line
+   could read a gutter far above whose rebuild it did not follow. With the
+   reset, a lazy line reads only the line above, so D7's stop rule is enough.
+   A fresh layout differs from draw-s0's only on such a line below an earlier
+   quote, where draw-s0 drew that quote's bars.
+9. The count tests live in `editor/tests/carry.rs`, since `shapes.rs` would
+   pass 400 lines. The colours variant of the keystroke test is S1b's.
+
 ## Unverified
 
 - The expected gain after S4 (D11), and the cost of the placement pass's block
@@ -637,7 +689,4 @@ tooling doc records the exception.
 - The split of the 8–11 ms not attributed above.
 - That `catch_up` never changes colour off a spliced line (D8). This comes
   from reading `map_mark`; the oracle checks it.
-- That no lazy gutter line follows a line with no gutter (D7). This comes from
-  CommonMark's blockquote rules, not from reading the parser; a debug
-  assertion and the oracle check it.
 - The content of Xi's rope science part 6, cited from the review, not read.
