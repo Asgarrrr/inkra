@@ -62,8 +62,8 @@ fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
     markdown
         .code_blocks
         .iter()
-        .flat_map(|block| colour(text, &markdown.spans, block))
-        .filter_map(|(range, style)| Some((range.start.get(), range.end.get(), style.color?)))
+        .flat_map(|block| inkra_highlight::block_marks(text, &markdown.spans, block))
+        .map(|(range, class)| (range.start.get(), range.end.get(), token(class)))
         .collect()
 }
 
@@ -163,8 +163,8 @@ fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
     let chunks = markdown.code_blocks[..count]
         .iter()
         .map(|block| {
-            let marks = colour(&text, &markdown.spans, block);
-            (block.range.clone(), block.shape, marks)
+            let marks = inkra_highlight::block_marks(&text, &markdown.spans, block);
+            styled((block.range.clone(), block.shape, marks))
         })
         .collect();
     let mut opened = decorations::Opened {

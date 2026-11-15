@@ -63,14 +63,17 @@ Out of scope:
 
 ### D1. A new crate, `inkra-highlight`, holds the lexers
 
-It holds the lexers and D7's `plan`. It depends on `inkra-text` only, for
-`ByteOffset`; `inkra-app` depends on it. It has no gpui dependency, no clock
-and no external dependency. Its tests also use `inkra-editor` and
-`inkra-markdown`, as dev-dependencies (D12).
+It holds the lexers, D7's `plan` and the listener's pure part (deviation 9).
+It depends on `inkra-text`, for `ByteOffset`, and on `inkra-markdown`, for the
+parse D3 reads the content lines from; `inkra-app` depends on it. It has no
+gpui dependency, no clock and no external dependency. Its tests also use
+`inkra-editor`, as a dev-dependency (D12).
 
 `inkra-markdown` would compile every lexer into `inkra-index` and its benches,
 against "one role per crate". `inkra-app` would put a `Window`-free algorithm
-where its tests need gpui. The build adds the crate to `CLAUDE.md`
+where its tests need gpui. Both objections still hold with the edge to
+`inkra-markdown`: it runs from `inkra-highlight`, so neither
+`inkra-markdown` nor `inkra-index` compiles a lexer. The build adds the crate to `CLAUDE.md`
 (Architecture and the mutants line), to `allowed_edges` in `scripts/check.sh`,
 and to `examine_globs` and `test_package` in `.cargo/mutants.toml`.
 
@@ -449,10 +452,10 @@ a `Buffer`, a `Layer` and `inkra_markdown::parse` through random edits on a
 note with several blocks. The edits favour backticks, newlines, fence lines,
 fence indents, info words, quote prefixes and undo. After each edit, it runs D7 and publishes
 the plan. Then the layer's marks must equal a fresh colouring of the current
-text. The test needs `inkra-editor` and `inkra-markdown` as
-dev-dependencies of `inkra-highlight`. Both edges join `allowed_edges` in
-`scripts/check.sh`, which counts every dependency kind, and CLAUDE.md's
-Architecture.
+text. The test needs `inkra-editor` as a dev-dependency of
+`inkra-highlight`; `inkra-markdown` is a dependency (D1, deviation 9). Both
+edges join `allowed_edges` in `scripts/check.sh`, which counts every
+dependency kind, and CLAUDE.md's Architecture.
 
 `cargo mutants` on `inkra-highlight`: zero missed.
 
@@ -736,3 +739,16 @@ number.
    the batch moved marks, the later ones skip the before-and-after comparison.
    A loss drops the whole batch. The seed lands each layer's chunks as one
    batch too.
+9. **The listener's pure part lives in `inkra-highlight`, which depends on
+   `inkra-markdown`.** The listener, the model test (D12) and the listener
+   bench each built the block list, called `plan`, read the content lines and
+   lexed the blocks, in three copies. So the model test and the bench did not
+   run the code that ships. `batch(text, &Markdown, held, dirty)` now returns
+   the clears and the lexed block chunks, and `block_marks` lexes one block
+   over its content lines. `open_chunks` takes the text and the deadline, and
+   parses inside, with the same `OPEN_PARSE_LIMIT` check and the same deadline
+   check before each block. `plan` is crate-private: `batch` is its one
+   caller. The app keeps the dirty range of D7, the map from `TokenClass` to
+   `ColorToken` and the publish. D3 already read the content lines from the
+   parse, so the edge to `inkra-markdown` adds no new reach; D1's objections
+   still hold.

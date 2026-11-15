@@ -9,18 +9,18 @@ use inkra_text::{ByteOffset, Splice};
 pub const MAIN_THREAD_BUDGET: usize = 65_536;
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Plan {
+pub(crate) struct Plan {
     /// Each held chunk that is no block's range, in order (spec deviation 6).
-    pub clear: Vec<Range<ByteOffset>>,
+    pub(crate) clear: Vec<Range<ByteOffset>>,
     /// The index in `blocks` of each block to lex, in order (spec deviation 1).
-    pub lex: Vec<usize>,
+    pub(crate) lex: Vec<usize>,
 }
 
 /// One merge of `blocks`, each with its shape, and the `held` chunks, each with its tag; both sorted,
 /// disjoint and non-empty. A chunk on a block's range is kept, and lexed over unless its tag is the
 /// block's shape and the dirty range misses the block.
 #[must_use]
-pub fn plan(
+pub(crate) fn plan(
     blocks: &[(Range<ByteOffset>, u64)],
     held: &[(Range<ByteOffset>, Option<u64>)],
     dirty: Option<Range<ByteOffset>>,

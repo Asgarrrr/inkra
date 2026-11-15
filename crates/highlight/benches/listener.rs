@@ -10,8 +10,8 @@ use std::ops::Range;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use inkra_editor::Layer;
-use inkra_highlight::{MAIN_THREAD_BUDGET, Plan, TokenClass, block_tokens, plan};
-use inkra_markdown::{Markdown, content_lines, parse};
+use inkra_highlight::{Batch, MAIN_THREAD_BUDGET, TokenClass, batch};
+use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
 const TEXT: &str = include_str!("fixtures/rust-5000.txt");
@@ -24,8 +24,7 @@ fn code(bytes: usize) -> &'static str {
     &TEXT[..end]
 }
 
-/// The listener's pure part: catch up, read the chunks, plan, then one batch of clears and lexed
-/// blocks.
+/// The listener's pure part: catch up, read the chunks, then publish the batch.
 fn call(
     buffer: &Buffer,
     layer: &mut Layer<TokenClass>,
@@ -34,25 +33,12 @@ fn call(
 ) -> usize {
     layer.catch_up(buffer).expect("the log holds the edits");
     let held: Vec<_> = layer.chunks().collect();
-    let blocks: Vec<_> = markdown
-        .code_blocks
-        .iter()
-        .map(|b| (b.range.clone(), b.shape))
-        .collect();
-    let Plan { clear, lex } = plan(&blocks, &held, dirty);
-    let lexed: Vec<_> = lex
-        .iter()
-        .map(|&index| {
-            let block = &markdown.code_blocks[index];
-            let lines = content_lines(buffer.text(), &markdown.spans, block);
-            let marks = block_tokens(buffer.text(), block.language.clone(), lines);
-            (block.range.clone(), block.shape, marks)
-        })
-        .collect();
+    let Batch { clear, lexed } = batch(buffer.text(), markdown, &held, dirty);
+    let count = lexed.len();
     layer
         .publish(buffer, clear, lexed, buffer.edit_mark())
         .expect("the batch lands");
-    lex.len()
+    count
 }
 
 fn sizes() -> Vec<usize> {

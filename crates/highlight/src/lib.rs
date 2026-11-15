@@ -4,10 +4,12 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
+pub use batch::{Batch, BlockChunk, batch, block_marks};
 pub use open::{OPEN_PARSE_LIMIT, open_chunks};
-pub use plan::{MAIN_THREAD_BUDGET, Plan, dirty, plan};
+pub use plan::{MAIN_THREAD_BUDGET, dirty};
 use state::LineState;
 
+mod batch;
 mod open;
 mod plan;
 mod rust;
