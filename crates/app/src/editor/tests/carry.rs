@@ -395,6 +395,19 @@ fn a_conceal_below_an_edit_that_stays_revealed_carries(cx: &mut TestAppContext) 
     });
 }
 
+/// The deleted markers map onto the end of the dirty line, which is not a clean line.
+#[gpui::test]
+fn deleting_a_revealed_conceal_at_a_line_end_rebuilds_only_its_line(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let mut buffer = Buffer::new("one\n\nab*c*");
+        let revealed = with_caret(&buffer, 8, Drawn::default(), None, window);
+        buffer.transact(|txn| txn.delete(at(7)..at(10)));
+        let (_, built) =
+            builds(|| with_caret(&buffer, 7, Drawn::default(), Some(&revealed), window));
+        assert_eq!(built, 1);
+    });
+}
+
 #[gpui::test]
 fn unmarking_rebuilds_the_marked_line(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
