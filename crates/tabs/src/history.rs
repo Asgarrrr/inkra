@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::iter::successors;
 use std::num::NonZeroUsize;
 
-use crate::{Place, Tab, Tabs};
+use crate::{Place, Tabs};
 
 /// Each back, forward and closed stack keeps at most this many entries (invariant 6).
 pub(crate) const HISTORY: usize = 1024;
@@ -16,24 +16,6 @@ pub enum Way {
     Back,
     /// Toward newer places: pops the forward stack.
     Forward,
-}
-
-impl Way {
-    /// The stack a walk pops from, then the stack it pushes the place left on.
-    fn stacks<P, Q>(self, tab: &mut Tab<P, Q>) -> (&mut Stack<P>, &mut Stack<P>) {
-        match self {
-            Self::Back => (&mut tab.back, &mut tab.forward),
-            Self::Forward => (&mut tab.forward, &mut tab.back),
-        }
-    }
-
-    /// The stack a walk pops from.
-    fn from<P, Q>(self, tab: &Tab<P, Q>) -> &Stack<P> {
-        match self {
-            Self::Back => &tab.back,
-            Self::Forward => &tab.forward,
-        }
-    }
 }
 
 /// Where `steps` successive walks `way` arrive: a place on `file`.
@@ -85,12 +67,64 @@ impl<P: Place> Stack<P> {
     }
 }
 
-/// The files on `back` then `forward`.
-fn stacked<'a, P: Place>(
-    back: &'a Stack<P>,
-    forward: &'a Stack<P>,
-) -> impl Iterator<Item = P::File> + 'a {
-    back.0.iter().chain(&forward.0).filter_map(Place::file)
+/// A tab's history: back toward older places, forward toward newer ones.
+#[derive(Debug, Clone)]
+pub(crate) struct History<P> {
+    back: Stack<P>,
+    forward: Stack<P>,
+}
+
+impl<P> Default for History<P> {
+    fn default() -> Self {
+        Self {
+            back: Stack::default(),
+            forward: Stack::default(),
+        }
+    }
+}
+
+impl<P> History<P> {
+    /// The stack a walk `way` pops from.
+    pub(crate) fn stack(&self, way: Way) -> &Stack<P> {
+        match way {
+            Way::Back => &self.back,
+            Way::Forward => &self.forward,
+        }
+    }
+
+    /// The stack a walk `way` pops from, then the stack it pushes the place left on.
+    fn stacks(&mut self, way: Way) -> (&mut Stack<P>, &mut Stack<P>) {
+        match way {
+            Way::Back => (&mut self.back, &mut self.forward),
+            Way::Forward => (&mut self.forward, &mut self.back),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.back.0.is_empty() && self.forward.0.is_empty()
+    }
+}
+
+impl<P: Place> History<P> {
+    /// A leave by an open: `place` goes on back and forward clears.
+    pub(crate) fn leave(&mut self, place: P) {
+        self.back.push(place);
+        self.forward.clear();
+    }
+
+    pub(crate) fn forget(&mut self, file: P::File) {
+        self.back.forget(file);
+        self.forward.forget(file);
+    }
+
+    /// The files on back then forward.
+    pub(crate) fn files(&self) -> impl Iterator<Item = P::File> + '_ {
+        self.back
+            .0
+            .iter()
+            .chain(&self.forward.0)
+            .filter_map(Place::file)
+    }
 }
 
 impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
@@ -123,7 +157,9 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
         way: Way,
         showing: Option<P::File>,
     ) -> impl Iterator<Item = Stop<P::File>> + '_ {
-        way.from(&self.list[self.active_index()])
+        self.list[self.active_index()]
+            .history
+            .stack(way)
             .0
             .iter()
             .rev()
@@ -155,15 +191,13 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
             {
                 *place = Q::default();
             }
-            tab.back.forget(file);
-            tab.forward.forget(file);
+            tab.history.forget(file);
         }
         for entry in &mut self.closed {
             if entry.place.file() == Some(file) {
                 entry.place = P::default();
             }
-            entry.back.forget(file);
-            entry.forward.forget(file);
+            entry.history.forget(file);
         }
         self.closed.retain(|entry| !entry.is_blank());
     }
@@ -172,13 +206,11 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
     pub fn files(&self) -> impl Iterator<Item = P::File> + '_ {
         let tabs = self.list.iter().flat_map(|tab| {
             let place = tab.place.as_ref().and_then(Place::file);
-            place.into_iter().chain(stacked(&tab.back, &tab.forward))
+            place.into_iter().chain(tab.history.files())
         });
         let closed = self.closed.iter().flat_map(|entry| {
             let place = entry.place.file();
-            place
-                .into_iter()
-                .chain(stacked(&entry.back, &entry.forward))
+            place.into_iter().chain(entry.history.files())
         });
         tabs.chain(closed)
     }
@@ -192,7 +224,7 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
         capture: impl FnOnce() -> P,
     ) -> Option<P> {
         let index = self.active_index();
-        let (from, _) = way.stacks(&mut self.list[index]);
+        let (from, _) = self.list[index].history.stacks(way);
         let mut arriving = from.pop(showing)?;
         // H1: past the first pop, `pop_back` is the pop the next walk would make.
         let passed: Vec<P> = std::iter::from_fn(|| from.0.pop_back())
@@ -200,7 +232,7 @@ impl<P: Place, Q: Place<File = P::File>> Tabs<P, Q> {
             .map(|next| std::mem::replace(&mut arriving, next))
             .collect();
         let (tab, left) = self.leave_active(capture);
-        let (_, to) = way.stacks(tab);
+        let (_, to) = tab.history.stacks(way);
         to.push(left);
         for place in passed {
             to.push(place);

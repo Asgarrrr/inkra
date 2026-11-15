@@ -11,7 +11,7 @@ pub use closed::{Closed, ClosedTabs};
 pub use detached::Detached;
 #[cfg(test)]
 use history::HISTORY;
-use history::Stack;
+use history::History;
 pub use history::{Stop, Way};
 
 /// What a tab shows, as far as history needs it.
@@ -30,8 +30,7 @@ pub struct Tab<P, Q = P> {
     id: TabId,
     /// `None` exactly for the active tab (H8): its place is on screen, not here.
     place: Option<Q>,
-    back: Stack<P>,
-    forward: Stack<P>,
+    history: History<P>,
 }
 
 impl<P, Q> Tab<P, Q> {
@@ -39,8 +38,7 @@ impl<P, Q> Tab<P, Q> {
         Self {
             id,
             place: None,
-            back: Stack::default(),
-            forward: Stack::default(),
+            history: History::default(),
         }
     }
 
@@ -172,12 +170,10 @@ impl<P, Q> Tabs<P, Q> {
         Some((index, tab))
     }
 
-    /// Gives the active tab the stacks of the tab it stands for.
-    fn set_active_history(&mut self, back: Stack<P>, forward: Stack<P>) {
+    /// Gives the active tab the history of the tab it stands for.
+    fn set_active_history(&mut self, history: History<P>) {
         let index = self.active_index();
-        let tab = &mut self.list[index];
-        tab.back = back;
-        tab.forward = forward;
+        self.list[index].history = history;
     }
 
     /// After the active tab left: the MRU's first takes over, and its slot is the place to show.
