@@ -179,16 +179,47 @@ fn a_keystroke_with_colours_rebuilds_only_its_line(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_recolour_of_one_block_rebuilds_only_its_lines(cx: &mut TestAppContext) {
-    let (buffer, blocks) = two_coloured_blocks(cx);
+fn a_publish_rebuilds_only_the_lines_it_recolours(cx: &mut TestAppContext) {
+    let text = "top\n\n```rust\nlet a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;\nlet e = 5;\n```\n";
+    let buffer = cx.update(|cx| cx.new(|_| Buffer::new(text)));
+    let block = inkra_markdown::parse(text).code_blocks[0].range.clone();
+    let lets: Vec<_> = text
+        .match_indices("let")
+        .map(|(start, word)| at(start)..at(start + word.len()))
+        .collect();
+    // The whole block in one chunk, each `let` in `Accent` but those of the lines in `recoloured`.
+    let paint = |recoloured: &[usize], cx: &mut App| {
+        let marks = lets.iter().enumerate().map(|(line, mark)| {
+            let token = if recoloured.contains(&line) {
+                ColorToken::Warning
+            } else {
+                ColorToken::Accent
+            };
+            (mark.clone(), MarkStyle { color: Some(token) })
+        });
+        let chunks = vec![(block.clone(), 0, marks.collect())];
+        let mark = buffer.read(cx).edit_mark();
+        decorations::publish(
+            TODO_LAYER,
+            &buffer.downgrade(),
+            Vec::new(),
+            chunks,
+            mark,
+            cx,
+        );
+    };
     let window = cx.add_empty_window();
     window.update(|window, cx| {
+        fakes::declare_todo(cx);
+        paint(&[], cx);
         let previous = coloured(&buffer, None, window, cx);
-        recolour(TODO_LAYER, &buffer, &blocks[1], ColorToken::Warning, cx);
+
+        paint(&[1, 2], cx);
+
         let (layout, built) = builds(|| coloured(&buffer, Some(&previous), window, cx));
-        assert_eq!(built, 3, "the block's fences and its one line");
+        assert_eq!(built, 2, "the two recoloured lines of the block");
         let fresh = coloured(&buffer, None, window, cx);
-        for line in 0..TWO_BLOCKS.split('\n').count() {
+        for line in 0..text.split('\n').count() {
             assert_eq!(
                 layout.run_colors(line),
                 fresh.run_colors(line),
