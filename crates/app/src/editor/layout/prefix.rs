@@ -64,9 +64,9 @@ impl Prefix {
         match self {
             Self::Margin(hanging) => hanging
                 .shaped
-                .as_ref()
+                .as_deref()
                 .map(|shaped| (shaped, -shaped.width())),
-            Self::Gutter(gutter) => gutter.shaped.as_ref().map(|shaped| (shaped, px(0.))),
+            Self::Gutter(gutter) => gutter.shaped.as_deref().map(|shaped| (shaped, px(0.))),
         }
     }
 }
@@ -74,7 +74,7 @@ impl Prefix {
 pub(super) struct Hanging {
     pub(super) range: Range<ByteOffset>,
     /// `Some` only while revealed; painted left of the text and right-aligned to it.
-    pub(super) shaped: Option<ShapedLine>,
+    pub(super) shaped: Option<Box<ShapedLine>>,
 }
 
 impl Hanging {
@@ -103,7 +103,7 @@ pub(super) struct GutterLayout {
     pub(super) range: Range<ByteOffset>,
     /// `Some` only while revealed (a caret touches a `>`, spec D2): the gutter's own text at the
     /// body size, painted at `x = 0`.
-    pub(super) shaped: Option<ShapedLine>,
+    pub(super) shaped: Option<Box<ShapedLine>>,
     pub(super) geometry: Geometry,
 }
 
@@ -152,7 +152,7 @@ impl<'a> GutterCarry<'a> {
         mut shape: impl FnMut(&Range<ByteOffset>, Pixels) -> ShapedLine,
     ) -> GutterLayout {
         let body_size = self.body_size;
-        let shaped = revealed.then(|| shape(&gutter.range, body_size));
+        let shaped = revealed.then(|| Box::new(shape(&gutter.range, body_size)));
         if gutter.quotes.len() == gutter.depth {
             self.carried = if let Some(geometry) = self.measured.get(source) {
                 geometry.clone()
