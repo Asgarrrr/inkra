@@ -1,7 +1,6 @@
 //! A code block's content lines, from the parse (code highlighting spec, D3).
 
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
@@ -37,25 +36,18 @@ pub fn content_lines<'a>(
         })
 }
 
-/// `CodeBlock::shape` of the block over `range`: the content spans `content_lines` reads and the
-/// language word, relative to the block's start, hashed.
-pub(crate) fn shape(
-    spans: &[Span],
-    range: &Range<ByteOffset>,
-    language: Option<&Range<ByteOffset>>,
-) -> u64 {
-    let relative = |at: ByteOffset| at - range.start;
+/// `CodeBlock::shape` of `block`: its language word and the code lines `content_lines` yields,
+/// relative to its start, hashed.
+pub(crate) fn shape(text: &str, spans: &[Span], block: &CodeBlock) -> u64 {
+    let relative = |at: ByteOffset| at - block.range.start;
     let mut hasher = DefaultHasher::new();
-    language
+    block
+        .language
+        .as_ref()
         .map(|word| relative(word.start)..relative(word.end))
         .hash(&mut hasher);
-    let first = spans.partition_point(|span| span.range.end <= range.start);
-    for span in spans[first..]
-        .iter()
-        .take_while(|span| span.range.start < range.end)
-        .filter(|span| is_content(span))
-    {
-        (relative(span.range.start)..relative(span.range.end)).hash(&mut hasher);
+    for (start, line) in content_lines(text, spans, block).filter(|(_, line)| !line.is_empty()) {
+        (relative(start), line.len()).hash(&mut hasher);
     }
     hasher.finish()
 }

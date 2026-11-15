@@ -123,10 +123,14 @@ pub fn parse(text: &str) -> Markdown {
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
-        .map(|(range, language)| CodeBlock {
-            shape: shape(&out.spans, &range, language.as_ref()),
-            range,
-            language,
+        .map(|(range, language)| {
+            let mut block = CodeBlock {
+                range,
+                language,
+                shape: 0,
+            };
+            block.shape = shape(text, &out.spans, &block);
+            block
         })
         .collect();
     let mut conceals = out.conceals;
