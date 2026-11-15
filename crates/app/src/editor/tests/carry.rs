@@ -308,6 +308,40 @@ fn opening_a_fence_rebuilds_every_line_after_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn typing_in_a_large_block_rebuilds_one_line(cx: &mut TestAppContext) {
+    let text = format!("a\n\n```rust\n{}```\n\nb\n", "let x = 1;\n".repeat(50));
+    let (_window, mut cx) = dispatching(cx, &text);
+    cx.simulate_keystrokes("cmd-up down down down down right");
+    cx.run_until_parked();
+
+    let ((), built) = builds(|| {
+        cx.simulate_input("y");
+        cx.run_until_parked();
+    });
+    assert_eq!(built, 1);
+}
+
+#[gpui::test]
+fn a_setext_underline_restyles_the_line_above(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let after = "a\n\nTitle\n=\n\nb\n";
+        let (layout, built) = carried("a\n\nTitle\nx\n\nb\n", after, window);
+        assert_eq!(built, 2, "the title and its underline");
+        assert_fresh(&layout, after, window);
+    });
+}
+
+#[gpui::test]
+fn closing_a_block_rebuilds_its_opening_and_the_lines_it_releases(cx: &mut TestAppContext) {
+    with_editor(cx, "", |_, window, _| {
+        let after = "```\na\nb\n```\nc\nd";
+        let (layout, built) = carried("```\na\nb\n``\nc\nd", after, window);
+        assert_eq!(built, 4, "the two fences, c and d");
+        assert_fresh(&layout, after, window);
+    });
+}
+
+#[gpui::test]
 fn a_lazy_quote_line_follows_its_gutter(cx: &mut TestAppContext) {
     with_editor(cx, "", |_, window, _| {
         let after = "> > a\nlazy\n\nafter\n";
