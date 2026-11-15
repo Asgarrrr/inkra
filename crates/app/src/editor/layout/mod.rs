@@ -50,6 +50,9 @@ struct LineLayout {
     block: Option<usize>,
 }
 
+// Every keystroke collects one per line, so an inline prefix shape cost milliseconds (incremental layout spec, D4).
+const _: () = assert!(size_of::<LineLayout>() < 256);
+
 impl LineLayout {
     fn indent(&self) -> Pixels {
         prefix::indent(self.prefix.as_ref())

@@ -46,7 +46,7 @@ fn listener(buffer: &Entity<Buffer>, _: TextChange, cx: &mut App) {
 }
 
 /// A block chunk with each token class as its theme colour.
-fn styled((range, shape, tokens): BlockChunk) -> Chunk {
+pub(crate) fn styled((range, shape, tokens): BlockChunk) -> Chunk {
     let marks = tokens
         .into_iter()
         .map(|(range, class)| {

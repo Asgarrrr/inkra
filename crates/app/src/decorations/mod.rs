@@ -297,7 +297,7 @@ pub(crate) fn drawn<'a>(buffer: &Entity<Buffer>, cx: &'a App) -> Drawn<'a> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 impl<'a> Drawn<'a> {
     pub(crate) fn for_tests(layers: &'a [HeardLayer<MarkStyle>], at: EditMark) -> Self {
         Self {

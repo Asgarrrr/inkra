@@ -416,7 +416,7 @@ fn line_prefix<'a, 'c>(
     else {
         return (None, rest);
     };
-    let shaped = revealed.then(|| shape(&range, font_size));
+    let shaped = revealed.then(|| Box::new(shape(&range, font_size)));
     if shaped
         .as_ref()
         .is_some_and(|shaped| shaped.width() > margin)
