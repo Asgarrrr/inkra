@@ -635,7 +635,8 @@ light. The look is tuned after it ships, as for code blocks.
   `TASK_BYTES`; a first block over it still goes; `lex_backlog` gives the
   marks `block_marks` gives on the same blocks.
 - `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
-  deadline, none past it, none over `OPEN_PARSE_LIMIT`, all at the limit.
+  deadline; past it, only the empty chunks of unknown-language blocks
+  (deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
@@ -705,11 +706,15 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
    hears with no dirty range (D12), the gate of deviation 10. Deviation 11:
    `BLOCK_LIMIT`, the empty chunks outside the budget, in `batch` and in
    `open_chunks`, and their tests. An `app` test pins that a line deleted
-   right before a fence leaves the block's planted marks.
+   right before a fence leaves the block's planted marks. The dirty range
+   leaves `plan`, `batch`, the listener, the model test and the listener
+   bench (deviation 10); the bench's many-blocks case holds every block but
+   the first `n` exactly, so those `n` are inexact.
    - Gate: if the model test fails with no dirty range, stop; deviation 10
      goes, and the touching rule of D7 stays.
 4. **S2b, the backlog.** Deviation 12 in `Layer::replace` and its
-   `proptest`. `Batch.pending`, `backlog`, `lex_backlog` and their tests. The
+   `proptest`. `Batch.pending`, with the dirty range back in `batch` and the
+   listener for D10's split; `backlog`, `lex_backlog` and their tests. The
    model test's late landings and bounded drain (D12). The landing bench: set
    `TASK_BYTES`, check `BLOCK_LIMIT` at 4 ms; the listener bench gains the
    copy. The app's listener still lexes every pending block on the main
@@ -874,7 +879,7 @@ number.
    parse, and `inkra-app` already depends on `inkra-markdown`, so the edge
    adds no crate to the app's build. D1's objections still hold.
 10. **`lex` holds the blocks no held chunk has exactly; the dirty range only
-    orders them.** D7 also lexed a block the dirty range met, touching
+    picks, in `batch`, which of them the main thread lexes first.** D7 also lexed a block the dirty range met, touching
     included, even when a chunk had it exactly. A chunk keeps its tag only
     while no splice removed one of its bytes or inserted strictly inside it,
     and no publish cut it. So a chunk exact on a block holds marks lexed from
@@ -884,13 +889,19 @@ number.
     buffer no view shows, or a layer `declare` reset, hears no splice at all.
     The dirty range now picks which inexact blocks the main thread lexes
     first (D10). Deviation 2's touching rule survives only in that choice.
+    `plan` takes no dirty range, and its `lex` stays in document order. In
+    S2a nothing reads the dirty range, so it leaves `batch` and the listener
+    too; S2b brings it back into `batch` with `Batch.pending`.
     D12's model test is the gate: every hearing runs with no dirty range, and
     late landings interleave with the edits.
 11. **A block with nothing to lex gets its empty chunk outside every budget.**
     D6 gave such a block an empty chunk, and D10 counted block bytes against
     the budget. A block with no known language, or over `BLOCK_LIMIT`, now
     gets its empty chunk from `batch` at once, whatever the dirty range and
-    the budget, and from `open_chunks` too. Left pending, a block over
+    the budget, and from `open_chunks` too, past its deadline included. A
+    block over `BLOCK_LIMIT` cannot reach `open_chunks`, since
+    `OPEN_PARSE_LIMIT` is lower, so `open_chunks` checks the language only.
+    Left pending, a block over
     `BLOCK_LIMIT` would never become exact, and each landing would spawn a
     task for it, forever.
 12. **A late publish maps a chunk only through the splices that reach it.**
