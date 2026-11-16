@@ -121,8 +121,8 @@ fn starts_operand(byte: Option<&u8>) -> bool {
 /// The look-behind past a keyword; a modifier starts a key, after a decorator too.
 fn after_keyword(keyword: &str) -> Prev {
     match keyword {
-        "abstract" | "async" | "declare" | "override" | "private" | "protected" | "public"
-        | "readonly" | "static" => Prev::KeyStart,
+        "abstract" | "async" | "declare" | "get" | "override" | "private" | "protected"
+        | "public" | "readonly" | "set" | "static" => Prev::KeyStart,
         "function" => Prev::Fn,
         "class" | "enum" | "extends" | "implements" | "interface" | "namespace" | "new"
         | "type" => Prev::TypeKeyword,
@@ -146,7 +146,7 @@ impl Tokens<'_> {
     fn value_end(&self) -> bool {
         matches!(
             self.state.prev,
-            Prev::ValueEnd | Prev::Type | Prev::TypePosition | Prev::FnName
+            Prev::ValueEnd | Prev::Type | Prev::TypePosition | Prev::FnName | Prev::Returns
         )
     }
 
@@ -379,8 +379,15 @@ pub(crate) fn lex_dialect(
     drive(line.len(), at, |at| {
         (tokens.state.open == Open::Nothing).then(|| tokens.step(at))
     });
-    if matches!(tokens.state.top(), Some(Nest::Alias | Nest::ReturnType)) {
+    let returns = tokens.state.top() == Some(Nest::ReturnType);
+    if returns || tokens.state.top() == Some(Nest::Alias) {
         tokens.state.pop();
+    }
+    // Each line of a type body starts a member; past a cut return type, a `{` opens the body.
+    if tokens.state.top() == Some(Nest::TypeBody) {
+        tokens.state.prev = Prev::KeyStart;
+    } else if returns {
+        tokens.state.prev = Prev::ValueEnd;
     }
     tokens.state
 }

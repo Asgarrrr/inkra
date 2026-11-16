@@ -945,6 +945,49 @@ fn a_generic_function_and_a_method_annotate_their_return_types() {
     );
 }
 
+/// The class of the token at the first `needle` in `text`, if one starts there.
+fn class_at(text: &str, needle: &str) -> Option<TokenClass> {
+    let at = text.find(needle).unwrap();
+    tokens(TypeScript, text)
+        .into_iter()
+        .find(|&(start, _, _)| start == at)
+        .map(|(_, _, class)| class)
+}
+
+#[test]
+fn return_types_end_where_their_body_or_member_starts() {
+    // `label` is a `Type` only as an annotation; each case pins one way a return type ends.
+    for text in [
+        "function k(): { a: label } {}",
+        "interface I {\n  a(): A\n  b: label\n}",
+        "type T = { a(): A, b: label };",
+        "interface I { a(): A; b: label }",
+        "function f<\n  T,\n>(x: T): label {}",
+        "const g = function (): label {};",
+        "class C {\n  a(): A {\n  }\n  b(): label {}\n}",
+        "class D { a() {} b(): label {} }",
+        "class E { get name(): label { return n; } }",
+    ] {
+        assert_eq!(class_at(text, "label"), Some(Type), "{text:?}");
+    }
+}
+
+#[test]
+fn a_return_type_closed_or_cut_leaves_values_after_it() {
+    for text in [
+        "type T = { m(): T }\nlabel: value;",
+        "function f(): T\n{\n  label: value;\n}",
+    ] {
+        assert_eq!(class_at(text, "value"), None, "{text:?}");
+    }
+    for text in [
+        "function f(): T\n{\n  total(a) / count(b) / 2;\n}",
+        "namespace N {\n  foo(x) / 2 / 3;\n}",
+    ] {
+        assert_eq!(class_at(text, "/"), Some(Operator), "{text:?}");
+    }
+}
+
 #[test]
 fn a_ternary_a_call_and_a_constructor_keep_their_values() {
     // A `)` that closes no parameter list: `b` stays plain and `/` divides.

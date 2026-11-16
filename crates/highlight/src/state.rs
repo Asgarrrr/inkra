@@ -87,10 +87,11 @@ pub(crate) enum Nest {
     /// A TypeScript generic list opened after a declared function's name: its `>` leaves the name
     /// (S4 deviation 20).
     FnGeneric,
-    /// TypeScript's `(` after a declared function's or a method's name: its `)` leaves `Returns`.
+    /// TypeScript's `(` after `function`, a declared function's name or a method's: its `)` leaves
+    /// `Returns`.
     Params,
-    /// A TypeScript return type, from its `:` to the body's `{`, a `;` or a `,`; it crosses a line
-    /// only under a nesting opened after it.
+    /// A TypeScript return type, from its `:` to the body's `{`, a `;`, a `,` or a closer; it
+    /// crosses a line only under a nesting opened after it.
     ReturnType,
     Attribute,
     /// Bash's `((` or `$((`.
@@ -138,7 +139,7 @@ pub(crate) enum Prev {
     /// An identifier just classed `Type` in a type position, or a `TypeGeneric`'s `>`: in
     /// TypeScript, a `<` opens a generic list that may close on a later line (S4 deviation 18).
     TypePosition,
-    /// The identifier right after `fn`.
+    /// The identifier right after `fn`; in JavaScript, after `function`, or a method's name.
     FnName,
     /// `::`.
     PathSep,

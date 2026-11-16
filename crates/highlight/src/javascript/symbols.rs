@@ -91,7 +91,10 @@ impl Tokens<'_> {
             [b'{', ..] => {
                 self.drop_generics();
                 // Right after its `:`, a return type's `{` opens an object type; else the body.
-                let body_start = prev != Prev::Annotation && self.end_return_type();
+                let mut body_start = false;
+                if prev != Prev::Annotation {
+                    body_start = self.end_return_type();
+                }
                 let body = !body_start
                     && self.dialect.types
                     && matches!(prev, Prev::TypePosition | Prev::Annotation);
@@ -112,7 +115,9 @@ impl Tokens<'_> {
             }
             [b'}', ..] => {
                 self.close(Nest::Brace);
-                (1, Some(Punctuation), Prev::Other)
+                let member = self.state.top() == Some(Nest::TypeBody);
+                let next = if member { Prev::KeyStart } else { Prev::Other };
+                (1, Some(Punctuation), next)
             }
             [b';', ..] => {
                 self.drop_generics();
