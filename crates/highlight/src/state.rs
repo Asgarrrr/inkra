@@ -92,6 +92,9 @@ pub(crate) enum Nest {
     },
     /// JavaScript's `(` right after `if`, `while`, `for` or `with`: its `)` ends no value.
     Condition,
+    /// TypeScript's `{` in a type position: an interface, class or type literal body, whose
+    /// members' `:` start a type (S4 deviation 19).
+    TypeBody,
     /// A TypeScript type alias from `type` to its `=`; it crosses a line only under a nesting
     /// opened after it.
     Alias,

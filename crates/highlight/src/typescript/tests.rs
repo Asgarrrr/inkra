@@ -744,3 +744,107 @@ fn outside_a_type_position_a_list_must_close_on_its_line() {
         );
     }
 }
+
+#[test]
+fn an_interface_member_annotation_spans_lines() {
+    check(
+        "interface Store<T> {\n  items: Map<\n    K,\n    V\n  >;\n  name: label;\n}\nlet a = 2;",
+        &[
+            ("interface", Keyword),
+            ("Store", Type),
+            ("<", Punctuation),
+            ("T", Type),
+            (">", Punctuation),
+            ("{", Punctuation),
+            ("items", Property),
+            (":", Punctuation),
+            ("Map", Type),
+            ("<", Punctuation),
+            ("K", Type),
+            (",", Punctuation),
+            ("V", Type),
+            (">", Punctuation),
+            (";", Punctuation),
+            ("name", Property),
+            (":", Punctuation),
+            ("label", Type),
+            (";", Punctuation),
+            ("}", Punctuation),
+        ]
+        .into_iter()
+        .chain(NEXT_LINE)
+        .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn a_type_literal_and_a_class_body_annotate_their_members() {
+    check(
+        "type P = { id: ident };\nlet q: { at: spot } = x;",
+        &[
+            ("type", Keyword),
+            ("P", Type),
+            ("=", Operator),
+            ("{", Punctuation),
+            ("id", Property),
+            (":", Punctuation),
+            ("ident", Type),
+            ("}", Punctuation),
+            (";", Punctuation),
+            ("let", Keyword),
+            (":", Punctuation),
+            ("{", Punctuation),
+            ("at", Property),
+            (":", Punctuation),
+            ("spot", Type),
+            ("}", Punctuation),
+            ("=", Operator),
+            (";", Punctuation),
+        ],
+    );
+    check(
+        "class A extends B {\n  m: Map<\n    K\n  >;\n  render() { return { key: value }; }\n}",
+        &[
+            ("class", Keyword),
+            ("A", Type),
+            ("extends", Keyword),
+            ("B", Type),
+            ("{", Punctuation),
+            ("m", Property),
+            (":", Punctuation),
+            ("Map", Type),
+            ("<", Punctuation),
+            ("K", Type),
+            (">", Punctuation),
+            (";", Punctuation),
+            ("render", Function),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("{", Punctuation),
+            ("return", Keyword),
+            ("{", Punctuation),
+            ("key", Property),
+            (":", Punctuation),
+            ("}", Punctuation),
+            (";", Punctuation),
+            ("}", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn an_object_literal_and_a_function_body_are_no_type_body() {
+    for text in [
+        "const o = { key: value };",
+        "function f(): Foo { return { key: value }; }",
+        "function g(): string { label: value; }",
+    ] {
+        let tokens = tokens(TypeScript, text);
+        let value = text.find("value").unwrap();
+        assert!(
+            tokens.iter().all(|&(start, _, _)| start != value),
+            "{text:?}: {tokens:?}"
+        );
+    }
+}

@@ -280,16 +280,16 @@ impl Tokens<'_> {
             "this" | "super" => (None, Prev::ValueEnd),
             _ if self.keyword(word, after) => (Some(Keyword), after_keyword(word)),
             "constructor" if call => (Some(Type), Prev::ValueEnd),
-            _ if colon && prev == Prev::KeyStart && top == Some(Nest::Brace) => {
+            _ if colon
+                && prev == Prev::KeyStart
+                && matches!(top, Some(Nest::Brace | Nest::TypeBody)) =>
+            {
                 // `?:` cannot follow an object literal's key, so it marks a member's type.
-                let optional = types && bytes[after..].starts_with(b"?:");
+                let member =
+                    top == Some(Nest::TypeBody) || (types && bytes[after..].starts_with(b"?:"));
                 (
                     Some(Property),
-                    if optional {
-                        Prev::Param
-                    } else {
-                        Prev::ValueEnd
-                    },
+                    if member { Prev::Param } else { Prev::ValueEnd },
                 )
             }
             _ if types

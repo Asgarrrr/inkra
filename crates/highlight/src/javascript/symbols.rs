@@ -81,7 +81,10 @@ impl Tokens<'_> {
             [b'[', ..] => self.open(Nest::Bracket, Prev::Other),
             [b'{', ..] => {
                 self.drop_generics();
-                self.open(Nest::Brace, Prev::KeyStart)
+                let body =
+                    self.dialect.types && matches!(prev, Prev::TypePosition | Prev::Annotation);
+                let entry = if body { Nest::TypeBody } else { Nest::Brace };
+                self.open(entry, Prev::KeyStart)
             }
             [b')', ..] => {
                 let condition = self.close(Nest::Paren) == Some(Nest::Condition);
@@ -119,7 +122,7 @@ impl Tokens<'_> {
             [b'.', ..] => (1, Some(Punctuation), Prev::Dot),
             [b'>', ..] if self.state.top() == Some(Nest::Generic) => {
                 self.state.pop();
-                (1, Some(Punctuation), Prev::ValueEnd)
+                (1, Some(Punctuation), Prev::TypePosition)
             }
             _ => match OPERATORS.iter().find(|op| rest.starts_with(op.as_bytes())) {
                 // A postfix `++` or `--` ends a value; a prefix one starts an expression.
@@ -143,12 +146,13 @@ impl Tokens<'_> {
     }
 
     /// Pops what `closer` closes, if the top is that, after any generic list: the entry it
-    /// popped. A `)` closes a `Condition` too.
+    /// popped. A `)` closes a `Condition` too, and a `}` a `TypeBody`.
     fn close(&mut self, closer: Nest) -> Option<Nest> {
         self.drop_generics();
         let top = self.state.top();
         let pops = match top {
             Some(Nest::Condition) => closer == Nest::Paren,
+            Some(Nest::TypeBody) => closer == Nest::Brace,
             Some(top) => top == closer,
             None => true,
         };
