@@ -127,7 +127,7 @@ impl<'a> Generics<'a> {
             return None;
         }
         self.look_ahead(open)
-            .unwrap_or_else(|| self.paired_end(open))
+            .unwrap_or_else(|Undecided| self.paired_end(open))
     }
 
     /// `end` from the whole line's pairing; kept out of line, since only long lists reach it.
@@ -139,8 +139,8 @@ impl<'a> Generics<'a> {
         Some(ends[index].1)
     }
 
-    /// `end` within `LOOK_AHEAD` bytes of `open`, or `None` when those bytes do not decide it.
-    fn look_ahead(&self, open: usize) -> Option<Option<usize>> {
+    /// `end` from the `LOOK_AHEAD` bytes from `open`, when they decide it.
+    fn look_ahead(&self, open: usize) -> Result<Option<usize>, Undecided> {
         let mut depth = 0_usize;
         let limit = open + LOOK_AHEAD;
         for at in open..self.bytes.len().min(limit) {
@@ -149,16 +149,23 @@ impl<'a> Generics<'a> {
                 Angle::Close => {
                     depth -= 1;
                     if depth == 0 {
-                        return Some(Some(at + 1));
+                        return Ok(Some(at + 1));
                     }
                 }
-                Angle::Stop => return Some(None),
+                Angle::Stop => return Ok(None),
                 Angle::Other => {}
             }
         }
-        (self.bytes.len() <= limit).then_some(None)
+        if self.bytes.len() <= limit {
+            Ok(None)
+        } else {
+            Err(Undecided)
+        }
     }
 }
+
+/// The look-ahead reached its limit with the list still open.
+struct Undecided;
 
 /// What the byte at `at` does to the generic lists open before it.
 enum Angle {
