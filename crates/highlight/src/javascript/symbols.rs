@@ -6,7 +6,7 @@ use crate::TokenClass::{self, Operator, Punctuation};
 use crate::scan::{end_while, is_ident_start, skip_spaces};
 use crate::state::{Nest, Prev};
 
-use super::{Tokens, is_ident};
+use super::{Tokens, is_ident, is_list};
 
 /// Longest first, so the first that matches is the longest.
 const OPERATORS: [&str; 46] = [
@@ -44,7 +44,12 @@ impl Tokens<'_> {
             && generic
             && (self.generics.end(at).is_some() || self.continues_on_next_line(at))
         {
-            self.state.push(Nest::Generic);
+            let list = if self.state.prev == Prev::TypePosition {
+                Nest::TypeGeneric
+            } else {
+                Nest::Generic
+            };
+            self.state.push(list);
             self.sink.push(at..at + 1, Punctuation);
             self.state.prev = Prev::Other;
             return at + 1;
@@ -81,7 +86,10 @@ impl Tokens<'_> {
             [b'[', ..] => self.open(Nest::Bracket, Prev::Other),
             [b'{', ..] => {
                 self.drop_generics();
-                self.open(Nest::Brace, Prev::KeyStart)
+                let body =
+                    self.dialect.types && matches!(prev, Prev::TypePosition | Prev::Annotation);
+                let entry = if body { Nest::TypeBody } else { Nest::Brace };
+                self.open(entry, Prev::KeyStart)
             }
             [b')', ..] => {
                 let condition = self.close(Nest::Paren) == Some(Nest::Condition);
@@ -117,9 +125,15 @@ impl Tokens<'_> {
             [b'?', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Param),
             [b'.', b'.', b'.', ..] => (3, Some(Operator), Prev::Other),
             [b'.', ..] => (1, Some(Punctuation), Prev::Dot),
-            [b'>', ..] if self.state.top() == Some(Nest::Generic) => {
+            [b'>', ..] if is_list(self.state.top()) => {
+                let position = self.state.top() == Some(Nest::TypeGeneric);
                 self.state.pop();
-                (1, Some(Punctuation), Prev::ValueEnd)
+                let next = if position {
+                    Prev::TypePosition
+                } else {
+                    Prev::ValueEnd
+                };
+                (1, Some(Punctuation), next)
             }
             _ => match OPERATORS.iter().find(|op| rest.starts_with(op.as_bytes())) {
                 // A postfix `++` or `--` ends a value; a prefix one starts an expression.
@@ -143,12 +157,13 @@ impl Tokens<'_> {
     }
 
     /// Pops what `closer` closes, if the top is that, after any generic list: the entry it
-    /// popped. A `)` closes a `Condition` too.
+    /// popped. A `)` closes a `Condition` too, and a `}` a `TypeBody`.
     fn close(&mut self, closer: Nest) -> Option<Nest> {
         self.drop_generics();
         let top = self.state.top();
         let pops = match top {
             Some(Nest::Condition) => closer == Nest::Paren,
+            Some(Nest::TypeBody) => closer == Nest::Brace,
             Some(top) => top == closer,
             None => true,
         };
@@ -159,7 +174,7 @@ impl Tokens<'_> {
     }
 
     fn drop_generics(&mut self) {
-        while self.state.top() == Some(Nest::Generic) {
+        while is_list(self.state.top()) {
             self.state.pop();
         }
     }

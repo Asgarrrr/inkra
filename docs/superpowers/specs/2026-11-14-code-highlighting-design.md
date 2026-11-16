@@ -1259,9 +1259,10 @@ Zed's `highlights.scm` for its language, as in S3.
    deviation 18's case, a generic list opens only where it closes on its line
    (`Generics::end`), so `Count < limit` compares. A name before such a list
    and `(` is a `Function` in TypeScript.
-5. **A TypeScript annotation is lit in three places only.** After a
-   parameter, after a name that `let`, `const` or `var` declares, and after a
-   member's `?:`, the next name is a `Type`. An object key's value and a
+5. **A TypeScript annotation is lit in four places only.** After a
+   parameter, after a name that `let`, `const` or `var` declares, after a
+   member's `?:`, and after a member's `:` in a type body (deviation 19), the
+   next name is a `Type`. An object key's value and a
    return type after `)` keep the general rules. A capitalised name or a
    built-in type is a `Type` anywhere in TypeScript, which covers most return
    types.
@@ -1366,9 +1367,9 @@ Zed's `highlights.scm` for its language, as in S3.
     - Elsewhere the same-line rule holds. An expression's `f<\n T>(x)`, a
       return type after `)`, a name after `|` or `&`, and a name after `as`
       or `satisfies` are not type positions. A `<` after a value can compare,
-      and an `as` type has no end the lexer sees. An interface member's plain
-      `:` is no annotation (deviation 5), so `a: Map<` in an interface keeps
-      the same-line rule while `b?: Map<` spans lines.
+      and an `as` type has no end the lexer sees. A member's plain `:` in a
+      type body is an annotation (deviation 19), so `a: Map<` spans lines
+      there.
     - `type Name<` at a line end leaves `Alias` under the list, so the
       alias's `=` on a later line still starts a type. A `{` in the list
       leaves it under a `Brace`; the line end pops it once it is on top.
@@ -1378,3 +1379,29 @@ Zed's `highlights.scm` for its language, as in S3.
       `lex_javascript` −1.1% to −1.3%, the long and nested line groups −2.7%
       to +2.4%. An A/A run of the same code moved the short groups ±0.5% and
       the line groups up to +7.5%, so no change is measurable.
+19. **A TypeScript type body annotates its members.** A `{` after a type
+    position, or right after an annotation's `:` or an alias's `=`, pushes
+    `Nest::TypeBody` in place of `Brace`. Examples: `interface I {`,
+    `class A extends B {`, `let p: {` and `type T = {`. A `}` closes it as it
+    closes a `Brace`.
+    - Inside it, a member's `:` starts a type, as `?:` does anywhere. So
+      `items: Map<` spans lines as in deviation 18, and `name: label` lights
+      `label` as a `Type`.
+    - A list opened after a type position pushes `Nest::TypeGeneric`, and
+      its `>` leaves `TypePosition`, so `interface I<T> {` opens a type body.
+      Any other list's `>` leaves `ValueEnd`, as before. A field on `Generic`
+      would have touched Rust's lexer, which compares `Generic` by value.
+    - An object literal, a block and a function body stay a `Brace`. Their
+      `{` follows `=`, `(`, `)`, `return`, a return type's name, or the `>`
+      of a list that opened after none of these. So `<Options>{ key: value }`,
+      `(): Promise<T> {` and `as Box<T> < limit` read as before; a review
+      caught all three when every `>` left `TypePosition`.
+    - A `namespace` or `enum` body is a type body too, its name being a type
+      position. A label at its top level is then read as a member; `enum`
+      members take no `:`.
+    - A heritage list's later name, as in `implements A, B {`, is no type
+      position, since `,` starts a key. Such a class body stays a `Brace`,
+      as before.
+    - Measured beside main on 2026-11-16: `lex_typescript` −4.7% to +0.7%,
+      the line groups −3.7% to −0.9%, `lex_javascript` −2.2% to −6.3%
+      through no code of its own; inside deviation 18's A/A noise.
