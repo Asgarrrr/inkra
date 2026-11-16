@@ -18,6 +18,7 @@ fn every_info_word_of_the_languages_table_resolves_in_any_case() {
         (Language::TypeScript, &["typescript", "ts"]),
         (Language::Tsx, &["tsx"]),
         (Language::Css, &["css"]),
+        (Language::Html, &["html", "htm"]),
     ];
     for (language, words) in table {
         for word in words {
@@ -162,6 +163,7 @@ proptest! {
             Language::TypeScript,
             Language::Tsx,
             Language::Css,
+            Language::Html,
         ] {
             let mut out = Vec::new();
             let offsets = lines.iter().map(|&(start, line)| (ByteOffset::new(start), line));

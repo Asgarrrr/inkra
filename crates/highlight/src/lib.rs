@@ -16,6 +16,7 @@ mod batch;
 mod css;
 #[cfg(test)]
 mod fixtures;
+mod html;
 mod javascript;
 mod json;
 mod open;
@@ -36,10 +37,11 @@ pub enum Language {
     TypeScript,
     Tsx,
     Css,
+    Html,
 }
 
 /// Each language's info words and lexer (Languages, D13).
-const LANGUAGES: [(Language, &[&str], Lexer); 8] = [
+const LANGUAGES: [(Language, &[&str], Lexer); 9] = [
     (Language::Rust, &["rust", "rs"], rust::lex),
     (Language::Python, &["python", "py"], python::lex),
     (Language::Json, &["json", "jsonc"], json::lex),
@@ -52,6 +54,7 @@ const LANGUAGES: [(Language, &[&str], Lexer); 8] = [
     (Language::TypeScript, &["typescript", "ts"], typescript::lex),
     (Language::Tsx, &["tsx"], typescript::lex_tsx),
     (Language::Css, &["css"], css::lex),
+    (Language::Html, &["html", "htm"], html::lex),
 ];
 
 impl Language {

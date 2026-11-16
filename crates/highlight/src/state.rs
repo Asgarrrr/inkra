@@ -100,6 +100,10 @@ pub(crate) enum Nest {
     JsxClosingTag,
     /// A JSX element's children, from its opening tag's `>` to its closing tag's `</`.
     JsxText,
+    /// HTML's `<script>` content, lexed by JavaScript; always the bottom entry.
+    Script,
+    /// HTML's `<style>` content, lexed by CSS; always the bottom entry.
+    Style,
 }
 
 /// The previous significant token, D4's one-token look-behind; whitespace and comments leave it.
@@ -151,4 +155,10 @@ pub(crate) enum Prev {
     Declaration,
     /// CSS, past an at-rule's keyword, up to its `{` or `;`.
     AtRule,
+    /// HTML, inside a tag.
+    HtmlTag,
+    /// HTML, inside a `<script>` opening tag: its `>` opens JavaScript.
+    HtmlScript,
+    /// HTML, inside a `<style>` opening tag: its `>` opens CSS.
+    HtmlStyle,
 }
