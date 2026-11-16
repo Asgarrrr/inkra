@@ -212,7 +212,7 @@ fn literals_all_caps_names_and_the_ellipsis_are_constants() {
             ("MAX_SIZE", Constant),
             ("_PRIVATE_KEY", Constant),
             ("...", Constant),
-            ("X", Type),
+            ("X", Constant),
         ],
     );
 }
@@ -237,6 +237,30 @@ fn a_name_after_def_is_a_function_and_after_class_a_type() {
             ("lower", Type),
             ("(", Punctuation),
             ("Base", Type),
+            (")", Punctuation),
+            (":", Punctuation),
+        ],
+    );
+    check(
+        "def Handler(): ...",
+        &[
+            ("def", Keyword),
+            ("Handler", Function),
+            ("(", Punctuation),
+            (")", Punctuation),
+            (":", Punctuation),
+            ("...", Constant),
+        ],
+    );
+    check(
+        "def first[T](items):",
+        &[
+            ("def", Keyword),
+            ("first", Function),
+            ("[", Punctuation),
+            ("T", Constant),
+            ("]", Punctuation),
+            ("(", Punctuation),
             (")", Punctuation),
             (":", Punctuation),
         ],
@@ -314,10 +338,10 @@ fn after_a_dot_a_call_is_a_function_and_else_a_property() {
 #[test]
 fn a_decorator_at_a_line_start_is_an_attribute_with_its_dotted_name() {
     check(
-        "@property\n@app.route('/x')\n    @wraps(f)",
+        "@property\n@v1.route('/x')\n    @wraps(f)",
         &[
             ("@property", Attribute),
-            ("@app.route", Attribute),
+            ("@v1.route", Attribute),
             ("(", Punctuation),
             ("'/x'", String),
             (")", Punctuation),

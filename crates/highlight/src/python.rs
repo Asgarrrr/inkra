@@ -58,15 +58,11 @@ struct Tokens<'a> {
 }
 
 impl Tokens<'_> {
-    /// Continues the triple-quoted string open at the line start: where lexing goes on.
+    /// Continues the string open at the line start, which only a triple quote leaves: where
+    /// lexing goes on.
     fn resume(&mut self) -> usize {
-        if let Open::Quoted {
-            quote,
-            triple: true,
-            ..
-        } = self.state.open
-        {
-            self.string(0, 0, quote, true)
+        if let Open::Quoted { quote, triple, .. } = self.state.open {
+            self.string(0, 0, quote, triple)
         } else {
             self.state.open = Open::Nothing;
             0
@@ -182,7 +178,7 @@ impl Tokens<'_> {
             Some(Function)
         } else if self.state.prev == Prev::TypeKeyword {
             Some(Type)
-        } else if is_all_caps(bare) {
+        } else if is_all_caps(bare) || matches!(bare.as_bytes(), [b'A'..=b'Z']) {
             Some(Constant)
         } else if bare.starts_with(|char: char| char.is_ascii_uppercase())
             || BUILTIN_TYPES.contains(&word)
