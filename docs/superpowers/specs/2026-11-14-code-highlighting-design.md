@@ -1402,3 +1402,6 @@ Zed's `highlights.scm` for its language, as in S3.
     - A heritage list's later name, as in `implements A, B {`, is no type
       position, since `,` starts a key. Such a class body stays a `Brace`,
       as before.
+    - Measured beside main on 2026-11-16: `lex_typescript` −4.7% to +0.7%,
+      the line groups −3.7% to −0.9%, `lex_javascript` −2.2% to −6.3%
+      through no code of its own; inside deviation 18's A/A noise.
