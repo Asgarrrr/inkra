@@ -11,6 +11,7 @@ use inkra_vault::EntryId;
 
 use super::features::NoteShown;
 use super::group::Group;
+use super::parked::Parked;
 use super::surface::Landing;
 use super::tabs::{Place, capture};
 use super::{AppShell, Bound, Shown, remember};
@@ -27,13 +28,34 @@ pub(super) struct Origin {
     pub(super) since: Cursor,
 }
 
+/// How a landing enters the tabs; either way only while the tab active at the start still is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Commit {
+    /// Into that tab, its place pushed onto its history.
+    Here,
+    /// As a new tab after it, which parks it.
+    NewTab,
+}
+
 impl AppShell {
-    /// Commits into the tab active when it started, or nowhere; no `await` from bind to `set_current`.
+    /// Commits into the tab active when it started, or nowhere.
     pub(super) fn open_file(
         &mut self,
         id: EntryId,
         kind: FileKind,
         at: Option<Range<ByteOffset>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.spawn_open(id, kind, at, Commit::Here, cx);
+    }
+
+    /// The group's one pending open; no `await` from bind to `set_current`.
+    pub(super) fn spawn_open(
+        &mut self,
+        id: EntryId,
+        kind: FileKind,
+        at: Option<Range<ByteOffset>>,
+        commit: Commit,
         cx: &mut Context<Self>,
     ) {
         let origin = Origin {
@@ -50,10 +72,22 @@ impl AppShell {
             let _ = shell.update_in(cx, |shell, window, cx| {
                 let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
-                if !tabs.commit(tab, || capture(shown, cx)) {
+                let committed = match commit {
+                    Commit::Here => tabs.commit(tab, || capture(shown, cx)),
+                    Commit::NewTab if tabs.active() == tab => {
+                        tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
+                        true
+                    }
+                    Commit::NewTab => false,
+                };
+                if !committed {
                     return;
                 }
                 shell.land(origin, id, landing, at, window, cx);
+                if commit == Commit::NewTab {
+                    shell.keep_active_tab_visible(origin.group);
+                    cx.notify();
+                }
             });
         }));
     }

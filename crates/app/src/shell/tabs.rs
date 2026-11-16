@@ -8,7 +8,7 @@ use inkra_tabs::{Closed, Direction, TabId, Way};
 use inkra_text::ByteOffset;
 use inkra_vault::EntryId;
 
-use super::activation::Origin;
+use super::activation::Commit;
 use super::group::Group;
 use super::nav::Walk;
 use super::parked::Parked;
@@ -96,28 +96,7 @@ impl AppShell {
         at: Option<Range<ByteOffset>>,
         cx: &mut Context<Self>,
     ) {
-        let origin = Origin {
-            group: self.layout.last_center(),
-            since: self.tree_cursor(cx),
-        };
-        let source = self.group(origin.group).tabs.active();
-        let opening = self.opening(id, kind, cx);
-        self.group_mut(origin.group).activation = Some(cx.spawn(async move |shell, cx| {
-            let Some(landing) = opening.landed().await else {
-                return;
-            };
-            let _ = shell.update_in(cx, |shell, window, cx| {
-                let Group { tabs, shown, .. } = shell.group_mut(origin.group);
-                // T4: `show` drops `activation` on every other change to what the active tab shows.
-                if tabs.active() != source {
-                    return;
-                }
-                tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
-                shell.land(origin, id, landing, at, window, cx);
-                shell.keep_active_tab_visible(origin.group);
-                cx.notify();
-            });
-        }));
+        self.spawn_open(id, kind, at, Commit::NewTab, cx);
     }
 
     pub(super) fn close_active_tab(

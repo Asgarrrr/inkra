@@ -58,6 +58,35 @@ fn dragging_a_tab_onto_another_group_moves_it(cx: &mut TestAppContext) {
     close(&mut cx);
 }
 
+/// T4: the move displays the tab left behind without `show`, so only the active-tab check stops the open.
+#[gpui::test]
+fn moving_the_active_tab_away_drops_a_pending_new_tab_open(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, [a, b, c, d]) = four_notes(cx);
+    open(&window, &mut cx, a);
+    keys(&mut cx, "cmd-t");
+    open(&window, &mut cx, b);
+    split(&mut cx);
+    keys(&mut cx, "cmd-t");
+    open(&window, &mut cx, c);
+    let gate = fs.block_load("/vault/d.md");
+    window
+        .update(&mut cx, |shell, _, cx| {
+            shell.open(d, None, Open::NewTab, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    drag(&mut cx, "tab-1-1", "tab-0");
+    gate.release();
+    cx.run_until_parked();
+
+    assert_eq!(tabs_in(&window, &mut cx, 0), [Some(c), Some(a), Some(b)]);
+    assert_eq!(tabs_in(&window, &mut cx, 1), [Some(b)]);
+    assert_eq!(shown_in(&window, &mut cx, 1), Some(b));
+    check_layout(&window, &mut cx);
+    close(&mut cx);
+}
+
 #[gpui::test]
 fn a_moved_tab_keeps_its_history(cx: &mut TestAppContext) {
     let (_fs, window, mut cx, [a, b, c, _]) = four_notes(cx);
