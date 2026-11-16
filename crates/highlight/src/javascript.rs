@@ -215,10 +215,19 @@ impl Tokens<'_> {
     }
 
     fn word(&mut self, at: usize) -> usize {
-        let end = end_while(self.line.as_bytes(), at, is_ident);
-        let (class, prev) = self.classify(&self.line[at..end], end);
+        let bytes = self.line.as_bytes();
+        let end = end_while(bytes, at, is_ident);
+        let word = &self.line[at..end];
+        let (class, prev) = self.classify(word, end);
         if let Some(class) = class {
             self.sink.push(at..end, class);
+        }
+        let alias = bytes
+            .get(skip_spaces(bytes, end))
+            .copied()
+            .is_some_and(is_ident_start);
+        if class == Some(Keyword) && word == "type" && alias {
+            self.state.push(Nest::Alias);
         }
         self.state.prev = prev;
         end
@@ -354,6 +363,9 @@ pub(crate) fn lex_dialect(
     drive(line.len(), at, |at| {
         (tokens.state.open == Open::Nothing).then(|| tokens.step(at))
     });
+    if tokens.state.top() == Some(Nest::Alias) {
+        tokens.state.pop();
+    }
     tokens.state
 }
 

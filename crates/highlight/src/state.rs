@@ -92,6 +92,8 @@ pub(crate) enum Nest {
     },
     /// JavaScript's `(` right after `if`, `while`, `for` or `with`: its `)` ends no value.
     Condition,
+    /// A TypeScript type alias from `type` to its `=`; it never crosses a line.
+    Alias,
     /// A JavaScript template string's text; a `${` above it pushes a `Brace`.
     Template,
     /// A JSX opening tag, from its `<` to its `>` or `/>`.

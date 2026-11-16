@@ -3,10 +3,10 @@
 //! spec, D2 and D4).
 
 use crate::TokenClass::{self, Operator, Punctuation};
-use crate::scan::is_ident_start;
+use crate::scan::{end_while, generic_end, is_ident_start, skip_spaces};
 use crate::state::{Nest, Prev};
 
-use super::Tokens;
+use super::{Tokens, is_ident};
 
 /// Longest first, so the first that matches is the longest.
 const OPERATORS: [&str; 46] = [
@@ -25,18 +25,33 @@ impl Tokens<'_> {
         let room = self.state.room();
         let generic = if self.value_end() {
             matches!(self.state.prev, Prev::Type | Prev::FnName)
-        } else if self.dialect.jsx && room && (letter || next == Some(b'>')) {
+        } else if self.state.prev == Prev::Annotation {
+            letter
+        } else if self.dialect.jsx
+            && room
+            && (letter || next == Some(b'>'))
+            && !self.type_parameters(at)
+        {
             return self.jsx_open(at);
         } else {
             letter
         };
-        if self.dialect.types && room && generic {
+        if self.dialect.types && room && generic && generic_end(bytes, at).is_some() {
             self.state.push(Nest::Generic);
             self.sink.push(at..at + 1, Punctuation);
             self.state.prev = Prev::Other;
             return at + 1;
         }
         self.symbol(at)
+    }
+
+    /// Whether the `<` at `at` opens TypeScript type parameters, which JSX would read as a tag:
+    /// `<T,` or `<T extends`.
+    fn type_parameters(&self, at: usize) -> bool {
+        let bytes = self.line.as_bytes();
+        let after = skip_spaces(bytes, end_while(bytes, at + 1, is_ident));
+        self.dialect.types
+            && (bytes.get(after) == Some(&b',') || bytes[after..].starts_with(b"extends "))
     }
 
     /// The punctuation or operator at `at`, a byte that starts no comment, literal, word,
@@ -74,6 +89,10 @@ impl Tokens<'_> {
                 (1, Some(Punctuation), Prev::KeyStart)
             }
             [b',', ..] => (1, Some(Punctuation), Prev::KeyStart),
+            [b'=', ..] if self.state.top() == Some(Nest::Alias) => {
+                self.state.pop();
+                (1, Some(Operator), Prev::Annotation)
+            }
             [b':', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Annotation),
             [b':', ..] => (1, Some(Punctuation), Prev::Other),
             [b'?', b'.', after, ..] if !after.is_ascii_digit() => (2, Some(Punctuation), Prev::Dot),

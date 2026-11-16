@@ -1,6 +1,7 @@
 use crate::Language::{JavaScript, Tsx, TypeScript};
 use crate::TokenClass::{
-    self, Constant, Function, Keyword, Operator, Property, Punctuation, Tag, Type,
+    self, Attribute, Constant, Function, Keyword, Operator, Property, Punctuation, String, Tag,
+    Type,
 };
 use crate::fixtures::{expect, tokens};
 use crate::scan::GENERIC_LIMIT;
@@ -297,4 +298,167 @@ fn a_generic_list_does_not_close_past_a_semicolon_or_a_brace() {
         let text = format!("a < b {stop} c > (d)");
         assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
     }
+}
+
+/// The tokens of `let a = 2;`, a line after the one a test is about.
+const NEXT_LINE: [(&str, TokenClass); 4] = [
+    ("let", Keyword),
+    ("=", Operator),
+    ("2", Constant),
+    (";", Punctuation),
+];
+
+#[track_caller]
+fn check_tsx_then_next_line(line: &str, expected: &[(&str, TokenClass)]) {
+    let wanted: Vec<_> = expected.iter().chain(&NEXT_LINE).copied().collect();
+    expect(Tsx, &format!("{line}\nlet a = 2;"), &wanted);
+}
+
+#[test]
+fn tsx_reads_a_trailing_comma_or_extends_as_type_parameters_not_a_tag() {
+    let arrow = [
+        ("(", Punctuation),
+        (":", Punctuation),
+        ("T", Type),
+        (")", Punctuation),
+        ("=>", Operator),
+        (";", Punctuation),
+    ];
+    let comma = [
+        ("const", Keyword),
+        ("=", Operator),
+        ("<", Punctuation),
+        ("T", Type),
+        (",", Punctuation),
+        (">", Punctuation),
+    ];
+    check_tsx_then_next_line(
+        "const id = <T,>(x: T) => x;",
+        &[&comma[..], &arrow].concat(),
+    );
+    let extends = [
+        ("const", Keyword),
+        ("=", Operator),
+        ("<", Punctuation),
+        ("T", Type),
+        ("extends", Keyword),
+        ("object", Type),
+        (">", Punctuation),
+    ];
+    check_tsx_then_next_line(
+        "const f = <T extends object>(x: T) => x;",
+        &[&extends[..], &arrow].concat(),
+    );
+    let asynchronous = [
+        ("const", Keyword),
+        ("=", Operator),
+        ("async", Keyword),
+        ("<", Punctuation),
+        ("T", Type),
+        (",", Punctuation),
+        (">", Punctuation),
+    ];
+    check_tsx_then_next_line(
+        "const f = async <T,>(x: T) => x;",
+        &[&asynchronous[..], &arrow].concat(),
+    );
+}
+
+#[test]
+fn a_type_alias_value_is_a_type_where_a_less_than_opens_type_parameters() {
+    check_tsx_then_next_line(
+        "type F = <T>(x: T) => T;",
+        &[
+            ("type", Keyword),
+            ("F", Type),
+            ("=", Operator),
+            ("<", Punctuation),
+            ("T", Type),
+            (">", Punctuation),
+            ("(", Punctuation),
+            (":", Punctuation),
+            ("T", Type),
+            (")", Punctuation),
+            ("=>", Operator),
+            ("T", Type),
+            (";", Punctuation),
+        ],
+    );
+    // `type` with no `=` on its line leaves the next line's `=` an assignment.
+    expect(
+        Tsx,
+        "import type Foo from \"./foo\"\nconst el = <b />;",
+        &[
+            ("import", Keyword),
+            ("type", Keyword),
+            ("Foo", Type),
+            ("from", Keyword),
+            ("\"./foo\"", String),
+            ("const", Keyword),
+            ("=", Operator),
+            ("<", Punctuation),
+            ("b", Tag),
+            ("/>", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+    // `type {` names no alias, so the `=` after it on the line is an assignment.
+    check_tsx_then_next_line(
+        "export type { F }; x = <b />;",
+        &[
+            ("export", Keyword),
+            ("type", Keyword),
+            ("{", Punctuation),
+            ("F", Type),
+            ("}", Punctuation),
+            (";", Punctuation),
+            ("=", Operator),
+            ("<", Punctuation),
+            ("b", Tag),
+            ("/>", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+    // An initialiser after an annotation is an expression: `<` opens a tag there.
+    check_tsx_then_next_line(
+        "const el: F = <b />;",
+        &[
+            ("const", Keyword),
+            (":", Punctuation),
+            ("F", Type),
+            ("=", Operator),
+            ("<", Punctuation),
+            ("b", Tag),
+            ("/>", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_less_than_after_a_type_compares_when_no_list_closes_on_the_line() {
+    check(
+        "const ok = Count < limit;",
+        &[
+            ("const", Keyword),
+            ("=", Operator),
+            ("Count", Type),
+            ("<", Operator),
+            (";", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn javascript_reads_a_jsx_attribute_named_extends_as_an_attribute() {
+    expect(
+        JavaScript,
+        "<Tip extends />",
+        &[
+            ("<", Punctuation),
+            ("Tip", Tag),
+            ("extends", Attribute),
+            ("/>", Punctuation),
+        ],
+    );
 }
