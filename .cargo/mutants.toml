@@ -93,6 +93,9 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # Unobservable. `Carried::assert_held` checks a debug invariant that only a second bug breaks;
 # without it, that bug still fails the `highlighting` tests' `settle`, only later.
 #
+# Matched by column. Unobservable. Every lexer step advances, so `next > at` and `next >= at`
+# agree on every run; the assert fires only on a second bug, a step that stalls.
+#
 # The vault runs with `cargo mutants -p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
 # `-f` is needed because `examine_globs` leaves the vault out. Its suite (~3 s) uses a
 # real disk and a watcher, too slow to run against every other crate's mutants.
@@ -139,6 +142,7 @@ exclude_re = [
     "^crates/app/src/editor/layout/dirty\\.rs:[0-9]+:31: delete ! in Carry<'p>::revealed$",
     "^crates/app/src/highlighting/task\\.rs:[0-9]+:[0-9]+: replace Carried::assert_held with \\(\\)$",
     "^crates/index/src/persist/notes\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in link_flags$",
+    "^crates/highlight/src/scan\\.rs:[0-9]+:22: replace > with >= in drive$",
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace match guard error\\.kind\\(\\) == io::ErrorKind::AlreadyExists with false in <impl Fs for RealFs>::rename$",
     "^crates/vault/src/real_fs\\.rs:[0-9]+:[0-9]+: replace trash_method with \\(\\)$",
     "^crates/vault/src/mem_fs\\.rs:[0-9]+:[0-9]+: replace \\+ with (-|\\*) in MemFs::tick$",

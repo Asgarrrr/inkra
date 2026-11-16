@@ -1154,6 +1154,9 @@ mapped to D5's classes by the 2026-11-11 spec's capture table.
    there, since two or three lexers need each. Rust's escaped string now calls
    the shared `quoted`; its raw string and nested block comment stay its own.
    `Open::Quoted` carries a quoted string across lines for Python and Bash.
+   Every lexer runs its steps through `scan::drive`, which asserts that each
+   step advances: a stalled step would hang the lexing task, so it panics
+   at once instead.
 3. **A heredoc also records whether its body expands.** D2's entry holds the
    tag's hash and the `<<-` flag. An unquoted tag's body lights its `$`
    parameters, as in a double-quoted string; a quoted tag's body is one
@@ -1172,10 +1175,14 @@ mapped to D5's classes by the 2026-11-11 spec's capture table.
    `String`. Inside `[` and `[[`, `-f` and the like are `Keyword`, and `==`,
    `!=`, `=~`, `=` and `!` are `Operator`. A parameter's `$`, `${` and `}` are
    `Punctuation` and its name is plain, as Zed's `variable` is. An
-   assignment's name is plain and its `=` an `Operator`. `$(` and a backtick
-   open a command, `$((` and `((` arithmetic, whose names are plain. The
-   look-behind holds the parse position: `Prev` gains Bash's states, and the
-   nesting stack gains `Arith` and `Backtick`.
+   assignment's name is plain and its `=` an `Operator`; a `[…]` subscript
+   before it has `Punctuation` brackets and lit parameters. A `(` right after
+   the `=` opens an array, whose words are arguments up to its own `)`, across
+   lines. `for NAME` takes `do` with no `in`, on its line or the next. `$(`
+   and a backtick open a command, `$((` and `((` arithmetic, whose names are
+   plain. The look-behind holds the parse position: `Prev` gains Bash's
+   states, and the nesting stack gains `Arith`, `Backtick` and `Array`, and a
+   `Paren` for each `$(`, so an array closes on its own `)`.
 6. **Bash strings light simple parameters only.** In a double-quoted string
    and an unquoted heredoc body, `$name`, `${…}`, `$1` and the special
    parameters are lit; `$(…)`, `$((…))` and backticks stay `String`. A
@@ -1186,7 +1193,8 @@ mapped to D5's classes by the 2026-11-11 spec's capture table.
    `print` and `exec` are builtins, not keywords; `self` is plain. A built-in
    type is `Type` everywhere, not only in a type or a call. Leading
    underscores do not count for the all-caps and capitalised rules, as in
-   Zed's regexes. `.` is `Punctuation`, as in Zed, where Rust has `Operator`;
+   Zed's regexes. A lone capital, such as `T`, is a `Constant`: Zed's constant
+   regex takes one letter, where Rust's needs two. `.` is `Punctuation`, as in Zed, where Rust has `Operator`;
    both have one colour. `...` is a `Constant`. A decorator, `@` and its dotted
    name, is `Attribute` (D4) where Zed has `function.decorator`; an `@` that
    starts no line, or no name, is the matrix-product `Operator`.
