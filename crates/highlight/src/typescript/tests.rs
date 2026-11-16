@@ -560,3 +560,132 @@ fn an_object_literal_value_is_no_annotation() {
         ],
     );
 }
+
+#[test]
+fn a_generic_list_in_a_type_position_spans_lines() {
+    check(
+        "type Handler = Map<\n  string,\n  Array<Request>\n>;\nlet a = 2;",
+        &[
+            ("type", Keyword),
+            ("Handler", Type),
+            ("=", Operator),
+            ("Map", Type),
+            ("<", Punctuation),
+            ("string", Type),
+            (",", Punctuation),
+            ("Array", Type),
+            ("<", Punctuation),
+            ("Request", Type),
+            (">", Punctuation),
+            (">", Punctuation),
+            (";", Punctuation),
+        ]
+        .into_iter()
+        .chain(NEXT_LINE)
+        .collect::<Vec<_>>(),
+    );
+    check(
+        "function f(x: Record<\n  K,\n  V\n>) {}",
+        &[
+            ("function", Keyword),
+            ("f", Function),
+            ("(", Punctuation),
+            (":", Punctuation),
+            ("Record", Type),
+            ("<", Punctuation),
+            ("K", Type),
+            (",", Punctuation),
+            ("V", Type),
+            (">", Punctuation),
+            (")", Punctuation),
+            ("{", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn type_parameters_across_lines_keep_the_alias_and_the_class_body() {
+    check(
+        "type Pair<\n  A,\n  B,\n> = [A, B];",
+        &[
+            ("type", Keyword),
+            ("Pair", Type),
+            ("<", Punctuation),
+            ("A", Type),
+            (",", Punctuation),
+            ("B", Type),
+            (",", Punctuation),
+            (">", Punctuation),
+            ("=", Operator),
+            ("[", Punctuation),
+            ("A", Type),
+            (",", Punctuation),
+            ("B", Type),
+            ("]", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+    check(
+        "class Store<\n  T,\n> extends Base<T> {\n  items: T;\n}",
+        &[
+            ("class", Keyword),
+            ("Store", Type),
+            ("<", Punctuation),
+            ("T", Type),
+            (",", Punctuation),
+            (">", Punctuation),
+            ("extends", Keyword),
+            ("Base", Type),
+            ("<", Punctuation),
+            ("T", Type),
+            (">", Punctuation),
+            ("{", Punctuation),
+            ("items", Property),
+            (":", Punctuation),
+            ("T", Type),
+            (";", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_brace_ends_a_list_left_open_across_lines() {
+    check(
+        "let m: Map<\n}\nlet a = 2;",
+        &[
+            ("let", Keyword),
+            (":", Punctuation),
+            ("Map", Type),
+            ("<", Punctuation),
+            ("}", Punctuation),
+        ]
+        .into_iter()
+        .chain(NEXT_LINE)
+        .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn outside_a_type_position_a_list_must_close_on_its_line() {
+    // An expression, a union member, an `as` type and a return type.
+    for text in [
+        "f<\n  T>(x)",
+        "let u: A | B<\n  T>(x)",
+        "y = x as B<\n  T>(x)",
+        "function g(): B<\n  T>(x)",
+    ] {
+        let tokens = tokens(TypeScript, text);
+        let angle = text.find('<').unwrap();
+        assert!(
+            tokens.contains(&(angle, angle + 1, Operator)),
+            "{text:?}: {tokens:?}"
+        );
+        let close = text.find('>').unwrap();
+        assert!(
+            tokens.contains(&(close, close + 1, Operator)),
+            "{text:?}: {tokens:?}"
+        );
+    }
+}

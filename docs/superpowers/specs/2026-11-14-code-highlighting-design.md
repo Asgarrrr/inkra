@@ -767,6 +767,7 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
 | A per-language colour override in vault themes | Asked for after the eleven tokens ship |
 | Persisting marks across launches | Opening a note with much code measures over one frame later than today |
 | Pending blocks in view first, in place of document order | A large note's visible block colours measurably later than a block above it |
+| Rust generic lists across lines (`impl<`, a split `where` list) | A rustfmt-formatted block shows an unlit split list (S4 deviation 18) |
 | A rope snapshot in place of the backlog's copy (`docs/buffer-model.md`, Rope) | The rope lands for its own trigger; the copy is bounded by `TASK_BYTES` and never triggers it alone |
 
 ## Open questions
@@ -1254,10 +1255,10 @@ Zed's `highlights.scm` for its language, as in S3.
    `<T extends ` as type parameters, as TypeScript does in `.tsx` files. A
    type alias's `=` and an annotation's `:` start a type, where `<` opens type
    parameters in both dialects: `Alias` marks `type Name` up to its `=` and
-   never crosses a line. A generic list opens only where it closes on its
-   line (`Generics::end`), so `Count < limit` compares and a list split across
-   lines is not lit. A name before such a list and `(` is a `Function` in
-   TypeScript.
+   crosses a line only under an open generic list (deviation 18). Outside a
+   type position, a generic list opens only where it closes on its line
+   (`Generics::end`), so `Count < limit` compares. A name before such a list
+   and `(` is a `Function` in TypeScript.
 5. **A TypeScript annotation is lit in three places only.** After a
    parameter, after a name that `let`, `const` or `var` declares, and after a
    member's `?:`, the next name is a `Type`. An object key's value and a
@@ -1342,3 +1343,25 @@ Zed's `highlights.scm` for its language, as in S3.
     and a `/` not followed by `>` ends no tag. A child tag past the nesting
     room stays text: the stack could not store it, so its attributes would
     lex as code.
+18. **A TypeScript generic list in a type position spans lines.** A name
+    classed `Type` in a type position leaves `Prev::TypePosition`, not
+    `Prev::Type`. A type position is the name right after an annotation's
+    `:`, a type alias's `=`, or a type keyword (`class`, `interface`,
+    `extends`, `implements`, `type`, `new`…), and every name inside an open
+    generic list. A `<` after such a name opens a list with no
+    `Generics::end` check, so `Map<` at a line end stays open on the
+    stack, and the lines below lex as types until its `>`.
+    - `LineState` gains no field: the nesting stack already carries a
+      `Generic` across lines, and its 16 entries bound the depth. It stays
+      56 B.
+    - A wrong guess stays bounded: a `;`, `{` or `}` drops every open list,
+      as on one line. So `Promise<{` lights its `<` as `Punctuation`, and the
+      `>` after the object type's `}` stays an `Operator`.
+    - Elsewhere the same-line rule holds. An expression's `f<\n T>(x)`, a
+      return type after `)`, a name after `|` or `&`, and a name after `as`
+      or `satisfies` are not type positions. A `<` after a value can compare,
+      and an `as` type has no end the lexer sees.
+    - `type Name<` at a line end leaves `Alias` under the list, so the
+      alias's `=` on a later line still starts a type.
+    - Rust's lexer is unchanged: rustfmt splits `impl<` and `where` lists
+      rarely, and `Deferred` records it.

@@ -24,7 +24,10 @@ impl Tokens<'_> {
         let letter = next.is_some_and(is_ident_start);
         let room = self.state.room();
         let generic = if self.value_end() {
-            matches!(self.state.prev, Prev::Type | Prev::FnName)
+            matches!(
+                self.state.prev,
+                Prev::Type | Prev::TypePosition | Prev::FnName
+            )
         } else if self.state.prev == Prev::Annotation {
             letter
         } else if self.dialect.jsx
@@ -36,7 +39,9 @@ impl Tokens<'_> {
         } else {
             letter
         };
-        if self.dialect.types && room && generic && self.generics.end(at).is_some() {
+        let spans_lines = self.state.prev == Prev::TypePosition;
+        if self.dialect.types && room && generic && (spans_lines || self.generics.end(at).is_some())
+        {
             self.state.push(Nest::Generic);
             self.sink.push(at..at + 1, Punctuation);
             self.state.prev = Prev::Other;

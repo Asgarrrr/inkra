@@ -136,7 +136,10 @@ struct Tokens<'a> {
 impl Tokens<'_> {
     /// Whether the look-behind ends a value, so `/` divides and `<` compares (D4).
     fn value_end(&self) -> bool {
-        matches!(self.state.prev, Prev::ValueEnd | Prev::Type | Prev::FnName)
+        matches!(
+            self.state.prev,
+            Prev::ValueEnd | Prev::Type | Prev::TypePosition | Prev::FnName
+        )
     }
 
     /// Lexes what starts at `at`, with nothing open there, by the innermost nesting: its end.
@@ -265,7 +268,7 @@ impl Tokens<'_> {
             return match word {
                 _ if literal => (Some(Constant), Prev::ValueEnd),
                 _ if self.keyword(word, after) => (Some(Keyword), Prev::Other),
-                _ => (Some(Type), Prev::Type),
+                _ => (Some(Type), Prev::TypePosition),
             };
         }
         if prev == Prev::Dot {
@@ -300,7 +303,7 @@ impl Tokens<'_> {
             _ if (prev == Prev::TypeKeyword && bytes.get(after) != Some(&b'.'))
                 || prev == Prev::Annotation =>
             {
-                (Some(Type), Prev::Type)
+                (Some(Type), Prev::TypePosition)
             }
             // A lone capital is a constant, as in Zed, but in TypeScript a type parameter.
             _ if is_all_caps(bare) || (!types && matches!(bare.as_bytes(), [b'A'..=b'Z'])) => {

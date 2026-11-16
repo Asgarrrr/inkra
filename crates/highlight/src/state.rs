@@ -120,6 +120,9 @@ pub(crate) enum Prev {
     TypeKeyword,
     /// An identifier just classed `Type`.
     Type,
+    /// An identifier just classed `Type` in a type position: in TypeScript, its `<` opens a
+    /// generic list that may close on a later line (S4 deviation 18).
+    TypePosition,
     /// The identifier right after `fn`.
     FnName,
     /// `::`.
