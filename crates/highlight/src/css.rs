@@ -71,8 +71,9 @@ fn number(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
 }
 
 /// Whether the item at `at` is a declaration, not a selector: the first `{`, `;` or `}` after it
-/// on its line is no `{`; with none, its name is followed by `:` and a space or the line end.
-fn declaration_ahead(bytes: &[u8], at: usize) -> bool {
+/// on its line is no `{`; with none, its name is followed by `:` and a space or the line end, or,
+/// `nested` in a rule, by `:` on a line that no `,` ends.
+fn declaration_ahead(bytes: &[u8], at: usize, nested: bool) -> bool {
     let mut scan = at;
     while let Some(&byte) = bytes.get(scan) {
         match byte {
@@ -85,7 +86,9 @@ fn declaration_ahead(bytes: &[u8], at: usize) -> bool {
         }
     }
     let colon = skip_spaces(bytes, end_while(bytes, at, is_name));
-    bytes.get(colon) == Some(&b':') && bytes.get(colon + 1).is_none_or(u8::is_ascii_whitespace)
+    bytes.get(colon) == Some(&b':')
+        && (bytes.get(colon + 1).is_none_or(u8::is_ascii_whitespace)
+            || nested && bytes.trim_ascii_end().last() != Some(&b','))
 }
 
 /// One line's tokens.
@@ -153,7 +156,9 @@ impl Tokens<'_> {
                 Prev::Declaration => self.value(at),
                 Prev::AtRule => self.at_rule(at),
                 Prev::Selector => self.selector(at),
-                _ if starts_name(bytes, at) && declaration_ahead(bytes, at) => {
+                _ if starts_name(bytes, at)
+                    && declaration_ahead(bytes, at, self.state.top() == Some(Nest::Brace)) =>
+                {
                     let end = end_while(bytes, at, is_name);
                     if !bytes[at..].starts_with(b"--") {
                         self.sink.push(at..end, Property);

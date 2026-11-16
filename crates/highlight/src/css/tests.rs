@@ -250,3 +250,25 @@ fn a_string_skips_escapes() {
         ],
     );
 }
+
+#[test]
+fn a_nested_declaration_needs_no_space_after_its_colon_unless_a_comma_ends_its_line() {
+    check(
+        "a {\n  margin:0\n}\na {\n  b:hover,\n  i {",
+        &[
+            ("a", Tag),
+            ("{", Punctuation),
+            ("margin", Property),
+            (":", Punctuation),
+            ("0", Constant),
+            ("}", Punctuation),
+            ("a", Tag),
+            ("{", Punctuation),
+            ("b", Tag),
+            (":", Punctuation),
+            (",", Punctuation),
+            ("i", Tag),
+            ("{", Punctuation),
+        ],
+    );
+}
