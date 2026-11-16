@@ -217,6 +217,7 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
         range: offsets(0..end),
         quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
         depth,
+        quote_end: ByteOffset::new(4),
         task: task.map(|(checkbox, checked)| Task {
             checkbox: offsets(checkbox),
             checked,

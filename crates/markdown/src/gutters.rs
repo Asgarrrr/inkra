@@ -18,6 +18,9 @@ pub struct Gutter {
     pub quotes: Vec<ByteOffset>,
     /// The leading quotes that contain the line, `>` or not; 0 on a task line outside a quote.
     pub depth: usize,
+    /// The quote part's end, past its last `>` and the one space or tab after it; where a task
+    /// part starts, and `range.end` with no task.
+    pub quote_end: ByteOffset,
     /// Set only on a line that holds all its `>`.
     pub task: Option<Task>,
 }
@@ -164,6 +167,7 @@ fn gutter_at(start: usize, depth: usize) -> Gutter {
         range: to_offsets(start..start),
         quotes: Vec::new(),
         depth,
+        quote_end: ByteOffset::new(start),
         task: None,
     }
 }
@@ -190,29 +194,15 @@ fn gutter(text: &str, line: Range<usize>, depth: usize) -> Gutter {
         end += usize::from(matches!(bytes.get(end), Some(b' ' | b'\t')));
     }
     gutter.range.end = ByteOffset::new(line.start + end);
+    gutter.quote_end = gutter.range.end;
     gutter
-}
-
-/// The quote part's end: past the last `>` and the one space or tab after it.
-fn quote_end(text: &str, gutter: &Gutter) -> ByteOffset {
-    gutter.quotes.last().map_or(gutter.range.start, |&last| {
-        let after = last + 1;
-        after
-            + usize::from(matches!(
-                text.as_bytes().get(after.get()),
-                Some(b' ' | b'\t')
-            ))
-    })
 }
 
 /// One conceal per `>`, all with the element from the gutter's start through its last `>`, so a
 /// line's `>`s reveal together and a caret after the last one's space reveals none. A task's
 /// conceal follows, its element and marker the task part, so the two parts reveal apart (D2).
-pub(crate) fn gutter_conceals<'a>(
-    text: &'a str,
-    gutters: &'a [Gutter],
-) -> impl Iterator<Item = Conceal> + 'a {
-    gutters.iter().flat_map(move |gutter| {
+pub(crate) fn gutter_conceals(gutters: &[Gutter]) -> impl Iterator<Item = Conceal> + '_ {
+    gutters.iter().flat_map(|gutter| {
         let last = gutter
             .quotes
             .last()
@@ -224,7 +214,7 @@ pub(crate) fn gutter_conceals<'a>(
             replacement: "",
         });
         let task = gutter.task.as_ref().map(|task| {
-            let part = quote_end(text, gutter)..task.checkbox.end;
+            let part = gutter.quote_end..task.checkbox.end;
             Conceal {
                 element: part.clone(),
                 marker: part,
@@ -249,7 +239,7 @@ pub(crate) fn cut(text: &str, spans: &mut Vec<Span>, gutters: &[Gutter]) {
     // A lazy line or a task outside a quote has no quote part; a note with none keeps its spans.
     let mut gutters = gutters
         .iter()
-        .map(|gutter| gutter.range.start.get()..quote_end(text, gutter).get())
+        .map(|gutter| gutter.range.start.get()..gutter.quote_end.get())
         .filter(|part| !part.is_empty())
         .peekable();
     if gutters.peek().is_none() {

@@ -135,7 +135,7 @@ pub fn parse(text: &str) -> Markdown {
         .collect();
     let mut conceals = out.conceals;
     conceals.append(&mut bullets);
-    conceals.extend(gutter_conceals(text, &gutters));
+    conceals.extend(gutter_conceals(&gutters));
     // A few sorted runs: the stable sort merges them in near-linear time.
     conceals.sort_by_key(|conceal| conceal.marker.start);
     Markdown {

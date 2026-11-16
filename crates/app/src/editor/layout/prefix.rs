@@ -171,9 +171,7 @@ pub(super) fn line_prefix<'a, 'c>(
         let reveal = Reveal {
             quote: revealed(quotes),
             task: revealed(task),
-            split: task
-                .first()
-                .map_or(source.len(), |task| task.marker.start - gutter.range.start),
+            split: gutter.quote_end - gutter.range.start,
         };
         let layout = carry.layout(gutter, source, reveal, &mut shape);
         return (Some(Prefix::Gutter(layout)), rest);
