@@ -91,15 +91,15 @@ at its right edge (markdown-blocks D3, as built in S1). A revealed part paints
 inside it, so no reveal moves text.
 
 **The prefix in pieces.** Markdown-blocks' "The prefix in pieces" holds, with
-today's locations: `line_prefix` is in `layout/prefix.rs:133-181`,
-`GutterCarry::layout` at 242-269, `Geometry` at 206-211, `measure` at
-272-284. A revealed part shapes the whole gutter text once and splits it with
+today's locations: `line_prefix` is in `layout/prefix.rs:104-159`;
+`GutterCarry::layout` is in `layout/prefix/gutter.rs:133-169`, `Geometry` at
+93-101, `measure` at 187-202. A revealed part shapes the whole gutter text once and splits it with
 `ShapedLine::split_at` (`vendor/zed-reference/crates/gpui/src/text_system/line.rs:196`).
-The `debug_assert!` at `prefix.rs:151-158` admits the task conceal as the last
+The `debug_assert!` at `prefix.rs:122-129` admits the task conceal as the last
 own conceal.
 
 **(C) A toggle never changes the width.** The body font is proportional, and
-`GutterCarry` measures each distinct gutter text (`prefix.rs:252-262`), so
+`GutterCarry` measures each distinct gutter text (`prefix/gutter.rs:142-155`), so
 `- [ ] ` and `- [x] ` would differ by a few pixels and could rewrap the line.
 The gutter is measured on its text with the checkbox's middle byte replaced
 by `X`. Every state shares one measure and one width. Amended 2026-11-16
@@ -110,14 +110,15 @@ gutter.
 
 **`Geometry` gains the checkbox's `x` span** and the quote part's width. Both
 come from the same measure. `GutterLayout` holds `Geometry` by value
-(`prefix/gutter.rs`), so every gutter line gains a `Pixels` and an
+(`prefix/gutter.rs:15-23`), so every gutter line gains a `Pixels` and an
 `Option<Range<Pixels>>`. `GutterLayout` also gains `boxed: Option<bool>`: the
 line's own `checked`, set only while its task part is concealed. The 256-byte
 assertion on `LineLayout` (`line.rs:95`) stays the check, and a breach boxes
 the new fields.
 
-**(D) A lazy line carries the quote part only.** A lazy line copies the
-whole `Geometry` today (`prefix.rs:233-238, 264-268`). Under `> - [ ] a\n  b`,
+**(D) A lazy line carries the quote part only.** `GutterCarry::pass` carries
+`Geometry::quote_part`, never the whole `Geometry` (`prefix/gutter.rs:124-129,
+204-211`), and `layout` gives it to a lazy line (156-158). Under `> - [ ] a\n  b`,
 line `b` takes the quote part's width and paints no box. A box is painted from
 the line's own `task`, never from carried geometry.
 

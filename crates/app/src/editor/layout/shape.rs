@@ -207,7 +207,6 @@ impl Build<'_, '_> {
         let styles = &mut self.styles;
         let (prefix, text_conceals) = line_prefix(
             gutter,
-            range.start,
             &mut self.gutter_carry,
             heading_opening(heading, range, text, font_size, margin),
             line_conceals,

@@ -6,8 +6,9 @@ use gpui::{Pixels, ShapedLine};
 use inkra_markdown::Heading;
 use inkra_text::ByteOffset;
 
+/// Only a marker at its line's start hangs (`heading_opening`), so it spans `0..len`.
 pub(in crate::editor::layout) struct Hanging {
-    pub(super) range: Range<usize>,
+    pub(super) len: usize,
     /// `Some` only while revealed; painted left of the text and right-aligned to it.
     pub(super) shaped: Option<Box<ShapedLine>>,
 }
@@ -16,16 +17,14 @@ impl Hanging {
     /// Negative, since the text starts at 0; `None` while concealed.
     pub(super) fn x_for_offset(&self, offset: usize) -> Option<Pixels> {
         let shaped = self.shaped.as_ref()?;
-        Some(shaped.x_for_index(offset - self.range.start) - shaped.width())
+        Some(shaped.x_for_index(offset) - shaped.width())
     }
 
     /// A concealed marker shows no glyph, so its whole margin lands on its start.
     pub(super) fn offset_for_x(&self, x: Pixels) -> usize {
-        let index = self
-            .shaped
+        self.shaped
             .as_ref()
-            .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()));
-        self.range.start + index
+            .map_or(0, |shaped| shaped.closest_index_for_x(x + shaped.width()))
     }
 }
 

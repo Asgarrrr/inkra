@@ -27,7 +27,7 @@ pub(super) enum Prefix {
 impl Prefix {
     pub(super) fn range(&self) -> Range<usize> {
         match self {
-            Self::Margin(hanging) => hanging.range.clone(),
+            Self::Margin(hanging) => 0..hanging.len,
             Self::Gutter(gutter) => 0..gutter.len,
         }
     }
@@ -98,12 +98,11 @@ impl Prefix {
 }
 
 /// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
-/// prefix, relative to `start`, the line's, and the conceals left for the text. A revealed marker
+/// prefix, relative to the line's start, and the conceals left for the text. A revealed marker
 /// wider than `margin` gets no prefix and leaves its conceal to the text, so it shows inline
 /// (live-preview spec, D13). `shape` shapes a range from the text it is given, of the range's length.
 pub(super) fn line_prefix<'a, 'c>(
     gutter: Option<(&Gutter, &'a str)>,
-    start: ByteOffset,
     carry: &mut GutterCarry<'a>,
     opening: Option<Opening<'_>>,
     conceals: &'c [Conceal],
@@ -155,8 +154,8 @@ pub(super) fn line_prefix<'a, 'c>(
     {
         return (None, conceals);
     }
-    let range = range.start - start..range.end - start;
-    (Some(Prefix::Margin(Hanging { range, shaped })), rest)
+    let len = range.end - range.start;
+    (Some(Prefix::Margin(Hanging { len, shaped })), rest)
 }
 
 /// Where a line's text starts.

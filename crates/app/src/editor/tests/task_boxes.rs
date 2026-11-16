@@ -3,10 +3,10 @@
 
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, WindowHandle, px, size};
 
+use super::geometry::LINE_HEIGHT;
+use super::{assert_x, at, dispatching};
 use crate::editor::EditorView;
-use crate::editor::layout::paint::painted_boxes;
-use crate::editor::tests::geometry::LINE_HEIGHT;
-use crate::editor::tests::{assert_x, at, dispatching};
+use crate::editor::layout::painted_boxes;
 use crate::theme::TASK_BOX_SIZE;
 
 const GLYPH: f32 = 0.6 * 18.;
@@ -30,7 +30,7 @@ fn boxes(
 fn assert_box(bounds: Bounds<Pixels>, x: f32, top: f32) {
     assert_eq!(bounds.size, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
     assert_x(bounds.center().x, x);
-    assert_x(bounds.center().y, top + LINE_HEIGHT / 2.);
+    assert_eq!(bounds.center().y, px(top + LINE_HEIGHT / 2.));
 }
 
 /// The box centres on the checkbox's middle glyph, the `X` it is measured with, on row 0 of a
@@ -42,6 +42,12 @@ fn a_concealed_checkbox_paints_one_box_per_state(cx: &mut TestAppContext) {
         let (window, mut cx) = dispatching(cx, &format!("{text}{wrapped}\nbody"));
         cx.simulate_keystrokes("cmd-down");
         let boxes = boxes(&window, &mut cx);
+        let rows = window
+            .update(&mut cx, |view, _, _| {
+                view.input.last_layout().unwrap().row_count()
+            })
+            .unwrap();
+        assert!(rows > 2, "the task line wraps: {rows} rows with `body`");
         assert_eq!(boxes.len(), 1, "{text}");
         let (bounds, painted) = boxes[0];
         assert_eq!(painted, checked, "{text}");
