@@ -10,7 +10,8 @@ use crate::TokenClass::{
     Type,
 };
 use crate::scan::{
-    Sink, drive, is_all_caps, is_ident_start, is_word, number, quoted, skip_spaces, word_end,
+    Sink, dotted_end, drive, is_all_caps, is_ident_start, is_word, number, quoted, skip_spaces,
+    word_end,
 };
 use crate::state::{LineState, Open, Prev};
 
@@ -127,13 +128,7 @@ impl Tokens<'_> {
 
     /// `@` and the dotted name after it.
     fn decorator(&mut self, at: usize) -> usize {
-        let bytes = self.line.as_bytes();
-        let mut end = word_end(bytes, at + 1);
-        while bytes.get(end) == Some(&b'.')
-            && bytes.get(end + 1).copied().is_some_and(is_ident_start)
-        {
-            end = word_end(bytes, end + 1);
-        }
+        let end = dotted_end(self.line.as_bytes(), at + 1);
         self.sink.push(at..end, Attribute);
         self.state.prev = Prev::Other;
         end

@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
-use crate::scan::{Sink, drive, is_all_caps, is_word, number, skip_spaces, word_end};
+use crate::scan::{Sink, drive, generic_end, is_all_caps, is_word, number, skip_spaces, word_end};
 use crate::state::{LineState, Nest, Open, Prev};
 
 mod literals;
@@ -36,27 +36,6 @@ fn is_call(bytes: &[u8], at: usize) -> bool {
         }
     }
     bytes.get(at) == Some(&b'(')
-}
-
-/// The end of the generic list whose `<` is at `open`, if it closes on the line; `->` closes none.
-fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
-    if bytes.get(open) != Some(&b'<') {
-        return None;
-    }
-    let mut depth = 0_usize;
-    for at in open..bytes.len() {
-        match bytes[at] {
-            b'<' => depth += 1,
-            b'>' if bytes[at - 1] != b'-' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at + 1);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// `true`, `false`, or an all-caps name.

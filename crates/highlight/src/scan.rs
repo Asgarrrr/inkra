@@ -6,6 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
+use crate::state::Open;
 
 /// A word byte is ASCII alphanumeric, `_` or non-ASCII, so a word ends on a char boundary.
 pub(crate) fn is_word(byte: u8) -> bool {
@@ -87,6 +88,66 @@ pub(crate) fn quoted(
         }
     }
     None
+}
+
+/// The end of `word(.word)*` from the word at `at`.
+pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
+    let mut end = word_end(bytes, at);
+    while bytes.get(end) == Some(&b'.') && bytes.get(end + 1).copied().is_some_and(is_ident_start) {
+        end = word_end(bytes, end + 1);
+    }
+    end
+}
+
+/// The end of the generic list whose `<` is at `open`, if it closes on the line; the `>` of `->`
+/// and `=>` closes none.
+pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
+    if bytes.get(open) != Some(&b'<') {
+        return None;
+    }
+    let mut depth = 0_usize;
+    for at in open..bytes.len() {
+        match bytes[at] {
+            b'<' => depth += 1,
+            b'>' if !matches!(bytes[at - 1], b'-' | b'=') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Scans a `/* */` comment, which does not nest, from `at` as one `Comment` from `token`: its end
+/// on the line, and what stays open there.
+pub(crate) fn block_comment(
+    sink: &mut Sink,
+    bytes: &[u8],
+    token: usize,
+    at: usize,
+) -> (usize, Open) {
+    let close = bytes[at..]
+        .windows(2)
+        .position(|pair| pair == b"*/")
+        .map(|len| at + len + 2);
+    sink.push(token..close.unwrap_or(bytes.len()), TokenClass::Comment);
+    match close {
+        Some(end) => (end, Open::Nothing),
+        None => (bytes.len(), Open::BlockComment { depth: 1 }),
+    }
+}
+
+/// The end of the character reference at the `&` at `at`, `&name;` or `&#…;`, if one is there.
+pub(crate) fn entity_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let body = at + 1 + usize::from(bytes.get(at + 1) == Some(&b'#'));
+    let len = bytes[body..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric())
+        .count();
+    (len > 0 && bytes.get(body + len) == Some(&b';')).then_some(body + len + 1)
 }
 
 /// Runs `step` from `at` to the line end, or until it returns `None` because something stays

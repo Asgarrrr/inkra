@@ -6,16 +6,8 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass::{self, Comment, Constant, Property, Punctuation, String};
-use crate::scan::{Sink, drive, is_word, number, quoted, skip_spaces, word_end};
+use crate::scan::{Sink, block_comment, drive, is_word, number, quoted, skip_spaces, word_end};
 use crate::state::{LineState, Open};
-
-/// The end of the block comment open at `at`: past its `*/`, or `None` at the line end.
-fn block_comment_end(bytes: &[u8], at: usize) -> Option<usize> {
-    bytes[at..]
-        .windows(2)
-        .position(|pair| pair == b"*/")
-        .map(|len| at + len + 2)
-}
 
 /// One line's tokens.
 struct Tokens<'a> {
@@ -27,14 +19,8 @@ struct Tokens<'a> {
 impl Tokens<'_> {
     /// Scans a block comment from `at` as one token from `token`: its end on the line.
     fn block_comment(&mut self, token: usize, at: usize) -> usize {
-        let bytes = self.line.as_bytes();
-        let end = block_comment_end(bytes, at);
-        self.open = match end {
-            Some(_) => Open::Nothing,
-            None => Open::BlockComment { depth: 1 },
-        };
-        let end = end.unwrap_or(bytes.len());
-        self.sink.push(token..end, Comment);
+        let end;
+        (end, self.open) = block_comment(&mut self.sink, self.line.as_bytes(), token, at);
         end
     }
 

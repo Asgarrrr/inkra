@@ -15,6 +15,7 @@ mod bash;
 mod batch;
 #[cfg(test)]
 mod fixtures;
+mod javascript;
 mod json;
 mod open;
 mod plan;
@@ -22,6 +23,7 @@ mod python;
 mod rust;
 mod scan;
 mod state;
+mod typescript;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
@@ -29,14 +31,24 @@ pub enum Language {
     Python,
     Json,
     Bash,
+    JavaScript,
+    TypeScript,
+    Tsx,
 }
 
 /// Each language's info words and lexer (Languages, D13).
-const LANGUAGES: [(Language, &[&str], Lexer); 4] = [
+const LANGUAGES: [(Language, &[&str], Lexer); 7] = [
     (Language::Rust, &["rust", "rs"], rust::lex),
     (Language::Python, &["python", "py"], python::lex),
     (Language::Json, &["json", "jsonc"], json::lex),
     (Language::Bash, &["bash", "sh", "shell", "zsh"], bash::lex),
+    (
+        Language::JavaScript,
+        &["javascript", "js", "mjs", "cjs", "jsx"],
+        javascript::lex,
+    ),
+    (Language::TypeScript, &["typescript", "ts"], typescript::lex),
+    (Language::Tsx, &["tsx"], typescript::lex_tsx),
 ];
 
 impl Language {
@@ -59,6 +71,7 @@ pub enum TokenClass {
     Function,
     Type,
     Property,
+    Tag,
     Attribute,
     Punctuation,
     Operator,
