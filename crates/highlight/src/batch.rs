@@ -11,7 +11,12 @@ use crate::{TokenClass, block_tokens, info_language};
 
 /// The longest block, in bytes, fences included, that `batch` lexes; a longer one gets an empty chunk
 /// (D10, deviation 11).
-pub const BLOCK_LIMIT: usize = 524_288;
+pub const BLOCK_LIMIT: usize = 262_144;
+
+const _: () = assert!(
+    MAIN_THREAD_BUDGET <= BLOCK_LIMIT,
+    "a block the main thread may lex"
+);
 
 /// A code block's range, its shape and its tokens: one block chunk of the syntax layer.
 pub type BlockChunk = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, TokenClass)>);
@@ -53,7 +58,7 @@ pub fn batch(
     for index in lex {
         let block = &markdown.code_blocks[index];
         let len = block.range.end - block.range.start;
-        if len > BLOCK_LIMIT || info_language(text, block.language.clone()).is_none() {
+        if unlexed(text, block) {
             lexed.push((block.range.clone(), block.shape, Vec::new()));
         } else if len <= budget && meets(&block.range) {
             budget -= len;
@@ -86,6 +91,13 @@ pub fn block_marks(
 pub(crate) fn block_chunk(text: &str, spans: &[Span], block: &CodeBlock) -> BlockChunk {
     let marks = block_marks(text, spans, block);
     (block.range.clone(), block.shape, marks)
+}
+
+/// Whether `block` gets an empty chunk with no lex: its info word names no known language, or it
+/// is over `BLOCK_LIMIT` (deviation 11).
+pub(crate) fn unlexed(text: &str, block: &CodeBlock) -> bool {
+    block.range.end - block.range.start > BLOCK_LIMIT
+        || info_language(text, block.language.clone()).is_none()
 }
 
 #[cfg(test)]

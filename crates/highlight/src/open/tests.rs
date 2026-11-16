@@ -3,8 +3,8 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use super::*;
-use crate::TokenClass;
 use crate::fixtures::{TWO_BLOCKS, r};
+use crate::{BLOCK_LIMIT, TokenClass};
 
 fn ranges(chunks: &[BlockChunk]) -> Vec<Range<ByteOffset>> {
     chunks.iter().map(|(range, _, _)| range.clone()).collect()
@@ -103,4 +103,20 @@ fn open_asks_no_deadline_once_it_passed() {
     });
 
     assert_eq!(ranges(&chunks), [r(0, 15)]);
+}
+
+#[test]
+fn past_its_deadline_open_lands_the_empty_chunk_of_a_block_over_the_block_limit() {
+    let fences = "```rust\nlet \n```".len();
+    let over = format!(
+        "```rust\nlet {}\n```\n",
+        "x".repeat(BLOCK_LIMIT + 1 - fences)
+    );
+    let text = format!("{over}\n```rust\nlet\n```\n");
+    let block = &parse(&text).code_blocks[0];
+    assert_eq!(block.range.end - block.range.start, BLOCK_LIMIT + 1);
+
+    let chunks = open_chunks(&text, || false);
+
+    assert_eq!(chunks, [(block.range.clone(), block.shape, vec![])]);
 }
