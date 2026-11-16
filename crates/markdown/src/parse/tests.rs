@@ -527,7 +527,7 @@ fn unordered_bullets_become_dots_and_numbers_stay() {
     );
     assert_eq!(concealed("* a"), vec![("*", "*", "•")]);
     assert_eq!(concealed("1. a"), vec![]);
-    assert_eq!(concealed("- [ ] t"), vec![("-", "-", "•")]);
+    assert_eq!(concealed("- [ ] t"), vec![("- [ ]", "- [ ]", "")]);
     assert_eq!(concealed("> - a"), vec![(">", ">", ""), ("-", "-", "•")]);
     assert_eq!(
         concealed("- a\n  - b"),
@@ -744,6 +744,8 @@ fn syntax_fragment() -> impl Strategy<Value = String> {
         Just("- ".to_string()),
         Just("  - ".to_string()),
         Just("1. ".to_string()),
+        Just("[ ] ".to_string()),
+        Just("[x]".to_string()),
         Just("---\n".to_string()),
         Just("| a | b |\n|---|---|\n".to_string()),
         Just("**".to_string()),
@@ -781,3 +783,4 @@ proptest! {
 mod code_blocks;
 mod gutters;
 mod headings;
+mod tasks;

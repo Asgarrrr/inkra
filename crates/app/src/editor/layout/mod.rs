@@ -193,14 +193,14 @@ impl DocumentLayout {
     /// Whether line `line`'s prefix paints its source text.
     #[cfg(test)]
     pub(crate) fn prefix_painted(&self, line: usize) -> bool {
-        self.prefix_paint_x(line).is_some()
+        self.prefix_shown(line).is_some()
     }
 
-    /// The `x` line `line`'s prefix paints its source text at, relative to the text.
+    /// The source text line `line`'s prefix paints, and its `x` relative to the text.
     #[cfg(test)]
-    pub(crate) fn prefix_paint_x(&self, line: usize) -> Option<Pixels> {
+    pub(crate) fn prefix_shown(&self, line: usize) -> Option<(&str, Pixels)> {
         let prefix = self.lines[line].line.prefix.as_ref()?;
-        prefix.shown().map(|(_, x)| x)
+        prefix.shown().map(|(shaped, x)| (shaped.text.as_ref(), x))
     }
 
     pub(crate) fn height(&self) -> Pixels {

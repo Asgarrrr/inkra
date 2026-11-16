@@ -5,7 +5,9 @@ use inkra_text::{ByteOffset, Splice};
 use proptest::prelude::*;
 
 use super::changed;
-use crate::{CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, parse};
+use crate::{
+    CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, Task, parse,
+};
 
 /// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it,
 /// sorted and merged.
@@ -211,20 +213,27 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
 
 #[test]
 fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
-    let gutter = |end, quotes: &[usize], depth| Gutter {
+    let gutter = |end, quotes: &[usize], depth, task: Option<(Range<usize>, bool)>| Gutter {
         range: offsets(0..end),
         quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
         depth,
+        task: task.map(|(checkbox, checked)| Task {
+            checkbox: offsets(checkbox),
+            checked,
+        }),
     };
     let old = Markdown {
-        gutters: vec![gutter(4, &[0, 2], 2)],
+        gutters: vec![gutter(12, &[0, 2], 2, Some((6..9, false)))],
         ..Markdown::default()
     };
     for new in [
-        gutter(2, &[0, 2], 2),
-        gutter(4, &[0, 1], 2),
-        gutter(4, &[0], 2),
-        gutter(4, &[0, 2], 3),
+        gutter(10, &[0, 2], 2, Some((6..9, false))),
+        gutter(12, &[0, 1], 2, Some((6..9, false))),
+        gutter(12, &[0], 2, Some((6..9, false))),
+        gutter(12, &[0, 2], 3, Some((6..9, false))),
+        gutter(12, &[0, 2], 2, Some((6..9, true))),
+        gutter(12, &[0, 2], 2, Some((7..10, false))),
+        gutter(12, &[0, 2], 2, None),
     ] {
         let new = Markdown {
             gutters: vec![new],
@@ -316,7 +325,11 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
         .filter(|item| starts(item.range.start))
     {
         let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
-        push(&(span(&item.range), quotes, item.depth));
+        let task = item
+            .task
+            .as_ref()
+            .map(|task| (span(&task.checkbox), task.checked));
+        push(&(span(&item.range), quotes, item.depth, task));
     }
     if let Some(item) = markdown.headings.iter().find(|item| holds(&item.range)) {
         let marker = item.marker.as_ref().filter(|marker| starts(marker.start));
@@ -351,6 +364,7 @@ fn fragment() -> impl Strategy<Value = String> {
         Just("> > ".to_string()),
         Just("- ".to_string()),
         Just("- [ ] ".to_string()),
+        Just("- [x] ".to_string()),
         Just("===\n".to_string()),
         Just("---\n".to_string()),
         Just("**".to_string()),

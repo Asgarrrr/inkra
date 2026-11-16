@@ -4,7 +4,7 @@ use proptest::prelude::*;
 
 use super::super::parse;
 use super::{concealed, styled, syntax_fragment};
-use crate::Styles;
+use crate::{Conceal, Gutter, Styles, Task};
 
 /// Each gutter as its text, its `>` offsets and its depth.
 fn gutters(text: &str) -> Vec<(&str, Vec<usize>, usize)> {
@@ -225,8 +225,15 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             "{gutter:?} in {text:?}"
         );
         prop_assert!(start <= end && end <= line_end, "{gutter:?} in {text:?}");
-        prop_assert!(1 <= gutter.depth && gutter.quotes.len() <= gutter.depth);
-        prop_assert_eq!(gutter.quotes.is_empty(), start == end);
+        prop_assert!(
+            1 <= gutter.depth || gutter.task.is_some(),
+            "{gutter:?} in {text:?}"
+        );
+        prop_assert!(gutter.quotes.len() <= gutter.depth);
+        prop_assert_eq!(
+            gutter.quotes.is_empty() && gutter.task.is_none(),
+            start == end
+        );
         for quote in &gutter.quotes {
             prop_assert!(gutter.range.contains(quote));
             prop_assert_eq!(text.as_bytes()[quote.get()], b'>');
@@ -235,17 +242,61 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             });
             prop_assert!(marker, "{quote:?} is no quote marker in {text:?}");
         }
-        let inside: Vec<_> = markdown
+        let mut inside: Vec<_> = markdown
             .conceals
             .iter()
             .filter(|conceal| gutter.range.contains(&conceal.marker.start))
-            .map(|conceal| {
-                prop_assert_eq!(conceal.marker.end.get(), conceal.marker.start.get() + 1);
-                Ok(conceal.marker.start)
-            })
-            .collect::<Result<_, TestCaseError>>()?;
-        prop_assert_eq!(&inside, &gutter.quotes);
+            .collect();
+        if let Some(task) = &gutter.task {
+            task_is_well_formed(text, gutter, task, inside.pop())?;
+        }
+        for (conceal, quote) in inside.iter().zip(&gutter.quotes) {
+            prop_assert_eq!(conceal.marker.clone(), *quote..*quote + 1);
+        }
+        prop_assert_eq!(inside.len(), gutter.quotes.len());
         previous = Some(start);
     }
+    Ok(())
+}
+
+/// G5: a task gutter holds all its `>`, then only spaces before its marker, its checkbox, and at
+/// most one space or tab after it; its last conceal is the task part, from the quote part's end.
+fn task_is_well_formed(
+    text: &str,
+    gutter: &Gutter,
+    task: &Task,
+    conceal: Option<&Conceal>,
+) -> Result<(), TestCaseError> {
+    let (start, end) = (task.checkbox.start.get(), task.checkbox.end.get());
+    prop_assert_eq!(gutter.quotes.len(), gutter.depth);
+    let checkbox: &[&str] = if task.checked {
+        &["[x]", "[X]"]
+    } else {
+        &["[ ]"]
+    };
+    prop_assert!(
+        checkbox.contains(&&text[start..end]),
+        "{task:?} in {text:?}"
+    );
+    let tail = &text[end..gutter.range.end.get()];
+    prop_assert!(["", " ", "\t"].contains(&tail), "{gutter:?} in {text:?}");
+    let conceal = conceal.ok_or_else(|| TestCaseError::fail("no task conceal"))?;
+    prop_assert_eq!(&conceal.element, &conceal.marker);
+    prop_assert_eq!(conceal.marker.end, task.checkbox.end);
+    let part = &text[conceal.marker.start.get()..start];
+    let quote_end = gutter
+        .quotes
+        .last()
+        .map_or(gutter.range.start.get(), |q| q.get() + 1);
+    let lead = &text[quote_end..conceal.marker.start.get()];
+    prop_assert!(
+        lead.is_empty() || lead == " " || lead == "\t",
+        "{gutter:?} in {text:?}"
+    );
+    let marker = part.trim_start_matches([' ', '\t']);
+    prop_assert!(
+        marker.starts_with(['-', '*', '+']) || marker.starts_with(|c: char| c.is_ascii_digit()),
+        "{gutter:?} in {text:?}"
+    );
     Ok(())
 }
