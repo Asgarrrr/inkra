@@ -19,10 +19,10 @@ pub(super) enum Prefix {
 }
 
 impl Prefix {
-    pub(super) fn range(&self) -> &Range<usize> {
+    pub(super) fn range(&self) -> Range<usize> {
         match self {
-            Self::Margin(hanging) => &hanging.range,
-            Self::Gutter(gutter) => &gutter.range,
+            Self::Margin(hanging) => hanging.range.clone(),
+            Self::Gutter(gutter) => 0..gutter.len,
         }
     }
 
@@ -41,7 +41,7 @@ impl Prefix {
             Self::Gutter(gutter) => gutter
                 .shown
                 .as_ref()
-                .and_then(|shown| shown.x_for_index(offset - gutter.range.start)),
+                .and_then(|shown| shown.x_for_index(offset)),
         }
     }
 
@@ -175,7 +175,7 @@ pub(super) fn line_prefix<'a, 'c>(
                 .first()
                 .map_or(source.len(), |task| task.marker.start - gutter.range.start),
         };
-        let layout = carry.layout(gutter, source, start, reveal, &mut shape);
+        let layout = carry.layout(gutter, source, reveal, &mut shape);
         return (Some(Prefix::Gutter(layout)), rest);
     }
     let Some(Opening {
@@ -204,7 +204,8 @@ pub(super) fn indent(prefix: Option<&Prefix>) -> Pixels {
 }
 
 pub(super) struct GutterLayout {
-    pub(super) range: Range<usize>,
+    /// From the line's start, where a gutter starts.
+    pub(super) len: usize,
     /// `Some` only while a part is revealed (a caret touches a `>` or the task part, spec D2).
     pub(super) shown: Option<Box<Shown>>,
     pub(super) geometry: Geometry,
@@ -214,7 +215,7 @@ impl GutterLayout {
     /// A revealed part maps `x` through its shape (as D12's margin); a concealed one lands on the text's start.
     fn offset_for_x(&self, x: Pixels) -> usize {
         let index = self.shown.as_ref().and_then(|shown| shown.index_for_x(x));
-        self.range.start + index.unwrap_or(self.range.len())
+        index.unwrap_or(self.len)
     }
 }
 
@@ -268,10 +269,11 @@ impl Shown {
         (within < self.shaped.len()).then(|| self.x + self.shaped.x_for_index(within))
     }
 
-    /// Left of the column lands as on the first glyph, as before the split; past the shown part, `None`.
+    /// Left of the column lands as on the first glyph, as before the split; left of the shown part,
+    /// or at its end, `None`, as `x_for_index` reads it.
     fn index_for_x(&self, x: Pixels) -> Option<usize> {
-        let inside = self.x <= x.max(px(0.)) && x < self.x + self.shaped.width();
-        inside.then(|| self.from + self.shaped.closest_index_for_x(x - self.x))
+        let within = self.shaped.closest_index_for_x(x - self.x);
+        (self.x <= x.max(px(0.)) && within < self.shaped.len()).then_some(self.from + within)
     }
 }
 
@@ -313,13 +315,12 @@ impl<'a> GutterCarry<'a> {
             .unwrap_or_default();
     }
 
-    /// `source` is the gutter's text, and `start` its line's. A gutter holding all its `>` measures
+    /// `source` is the gutter's text. A gutter holding all its `>` measures
     /// itself; a lazy one takes the carried geometry. Only a revealed part keeps a shape, to paint it.
     pub(super) fn layout(
         &mut self,
         gutter: &Gutter,
         source: &'a str,
-        start: ByteOffset,
         reveal: Reveal,
         mut shape: impl FnMut(&Range<ByteOffset>, &str, Pixels) -> ShapedLine,
     ) -> GutterLayout {
@@ -343,24 +344,24 @@ impl<'a> GutterCarry<'a> {
             self.carried.clone()
         };
         GutterLayout {
-            range: gutter.range.start - start..gutter.range.end - start,
+            len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
             geometry,
         }
     }
 }
 
-/// What a gutter measures: its text with a checked box's middle byte a space, so a toggle never
-/// changes its width in a proportional font (task boxes spec, D3, C).
+/// What a gutter measures: its text with its box's middle byte an `X`, the widest state, so every
+/// state paints inside one width and a toggle never changes it (task boxes spec, D3, C).
 fn measured_text<'s>(source: &'s str, gutter: &Gutter) -> Cow<'s, str> {
     match &gutter.task {
-        Some(task) if task.checked => {
+        Some(task) => {
             let middle = task.checkbox.start - gutter.range.start + 1;
             let mut text = source.to_owned();
-            text.replace_range(middle..=middle, " ");
+            text.replace_range(middle..=middle, "X");
             Cow::Owned(text)
         }
-        _ => Cow::Borrowed(source),
+        None => Cow::Borrowed(source),
     }
 }
 

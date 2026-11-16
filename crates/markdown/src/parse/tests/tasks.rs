@@ -98,6 +98,14 @@ fn a_task_after_another_items_bullet_keeps_its_dot_and_no_gutter() {
 }
 
 #[test]
+fn a_quoted_line_keeps_its_quote_gutter_under_a_task_that_does_not_lead() {
+    let gutters = parse("> - - [ ] a").gutters;
+    assert_eq!(gutters.len(), 1);
+    assert_eq!(gutters[0].range, ByteOffset::new(0)..ByteOffset::new(2));
+    assert_eq!((gutters[0].depth, gutters[0].task.clone()), (1, None));
+}
+
+#[test]
 fn a_nested_task_on_its_own_line_has_a_gutter() {
     assert_eq!(tasks("- a\n  - [ ] b"), vec![("  - [ ] ", "[ ]", false)]);
     assert_eq!(

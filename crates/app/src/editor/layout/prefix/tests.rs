@@ -12,9 +12,9 @@ fn measured(text: &str) -> String {
 }
 
 #[test]
-fn a_checked_box_measures_as_an_unchecked_one() {
-    assert_eq!(measured("- [x] a"), "- [ ] ");
-    assert_eq!(measured("> 1. [X] a"), "> 1. [ ] ");
-    assert_eq!(measured("- [ ] a"), "- [ ] ");
+fn every_box_state_measures_as_the_widest() {
+    assert_eq!(measured("- [ ] a"), "- [X] ");
+    assert_eq!(measured("- [x] a"), "- [X] ");
+    assert_eq!(measured("> 1. [X] a"), "> 1. [X] ");
     assert_eq!(measured("> a"), "> ");
 }

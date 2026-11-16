@@ -30,23 +30,24 @@ pub struct Task {
 }
 
 /// Each list item's marker, decided at the item's first event that is not one `Start(Paragraph)`
-/// (markdown blocks spec, S3 correction 7): a task, or else a bullet's `•`.
+/// (markdown blocks spec, S3 correction 7): a task, or else a bullet's `•`. No paragraph opens
+/// right inside another, so skipping every `Start(Paragraph)` skips one.
 #[derive(Default)]
 pub(crate) struct Items {
-    /// The open item's start, and whether its one `Start(Paragraph)` has passed.
-    pending: Option<(usize, bool)>,
+    /// The open item's start.
+    pending: Option<usize>,
     /// Each task item's marker start, in document order.
     tasks: Vec<(usize, Task)>,
-    pub(crate) bullets: Vec<Conceal>,
+    bullets: Vec<Conceal>,
 }
 
 impl Items {
     /// Called with every event, in order.
     pub(crate) fn event(&mut self, text: &str, event: &Event<'_>, range: &Range<usize>) {
-        if let Some((item, paragraph)) = self.pending.take() {
+        if let Some(item) = self.pending.take() {
             let marker = marker_start(text, item);
             match event {
-                Event::Start(Tag::Paragraph) if !paragraph => self.pending = Some((item, true)),
+                Event::Start(Tag::Paragraph) => self.pending = Some(item),
                 // The range may start with spaces; the checkbox is its last three bytes.
                 Event::TaskListMarker(checked) => self.tasks.push((
                     marker,
@@ -59,17 +60,24 @@ impl Items {
             }
         }
         if let Event::Start(Tag::Item) = event {
-            self.pending = Some((range.start, false));
+            self.pending = Some(range.start);
         }
     }
 
-    /// Merges the tasks into the quote gutters in line order. A task gets a gutter when its marker
-    /// leads its line (S3 correction 13): before it, only the line's `>`s and spaces; any other keeps
-    /// its `•`.
-    pub(crate) fn gutters(&mut self, text: &str, quotes: &[Range<usize>]) -> Vec<Gutter> {
+    /// The gutters, the tasks merged into the quote gutters in line order, and the bullets' conceals.
+    /// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
+    /// line's `>`s and spaces; any other keeps its `•`.
+    pub(crate) fn gutters(
+        self,
+        text: &str,
+        quotes: &[Range<usize>],
+    ) -> (Vec<Gutter>, Vec<Conceal>) {
+        let Self {
+            tasks, mut bullets, ..
+        } = self;
         let mut quote_gutters = gutters(text, quotes).into_iter().peekable();
-        let mut out = Vec::with_capacity(quote_gutters.len() + self.tasks.len());
-        for (marker, task) in std::mem::take(&mut self.tasks) {
+        let mut out = Vec::with_capacity(quote_gutters.len() + tasks.len());
+        for (marker, task) in tasks {
             let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
             out.extend(std::iter::from_fn(|| {
                 quote_gutters.next_if(|gutter| gutter.range.start.get() < line)
@@ -89,14 +97,14 @@ impl Items {
                 gutter.range.end = ByteOffset::new(end + usize::from(blank));
                 gutter.task = Some(task);
             } else {
-                self.bullets.extend(bullet(text, marker));
+                bullets.extend(bullet(text, marker));
             }
             if gutter.depth > 0 || gutter.task.is_some() {
                 out.push(gutter);
             }
         }
         out.extend(quote_gutters);
-        out
+        (out, bullets)
     }
 }
 
@@ -231,9 +239,6 @@ pub(crate) fn gutter_conceals<'a>(
 /// element emitted it. A leading quote's styles are `QUOTE`, its ancestors being quotes. A task
 /// part keeps its gap style; no inline element crosses an item's start (S3 correction 11).
 pub(crate) fn cut(text: &str, spans: &mut Vec<Span>, gutters: &[Gutter]) {
-    if gutters.is_empty() {
-        return;
-    }
     // A gutter span must stay on one line, as every span does.
     debug_assert!(
         gutters
@@ -241,11 +246,16 @@ pub(crate) fn cut(text: &str, spans: &mut Vec<Span>, gutters: &[Gutter]) {
             .all(|gutter| !text[gutter.range.start.get()..gutter.range.end.get()].contains('\n')),
         "a gutter crosses a line"
     );
-    let marker = Styles::QUOTE | Styles::MARKER;
+    // A lazy line or a task outside a quote has no quote part; a note with none keeps its spans.
     let mut gutters = gutters
         .iter()
         .map(|gutter| gutter.range.start.get()..quote_end(text, gutter).get())
+        .filter(|part| !part.is_empty())
         .peekable();
+    if gutters.peek().is_none() {
+        return;
+    }
+    let marker = Styles::QUOTE | Styles::MARKER;
     // Everything before this byte is a gutter's or already re-emitted.
     let mut cut = 0;
     for span in std::mem::take(spans) {

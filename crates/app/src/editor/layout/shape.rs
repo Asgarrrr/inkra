@@ -406,7 +406,7 @@ fn line_items<'a, T>(
 fn display_line(
     range: &Range<ByteOffset>,
     conceals: &[Conceal],
-    prefix: Option<&Range<usize>>,
+    prefix: Option<Range<usize>>,
     selection: &Range<ByteOffset>,
 ) -> DisplayLine {
     let within = |offset: ByteOffset| ByteOffset::new(offset - range.start);

@@ -66,6 +66,12 @@ fn toggling_a_task_keeps_its_gutter_width(cx: &mut TestAppContext) {
         .unwrap();
     assert_eq!(text, "- [x] a\nbody");
     assert_eq!(shown, None);
+    let line = window
+        .update(&mut cx, |view, _, _| {
+            view.input.last_layout().unwrap().shown(0).to_owned()
+        })
+        .unwrap();
+    assert_eq!(line, "a", "the marker stays in the gutter, out of the text");
     assert_x(unchecked[0], 6. * GLYPH);
     assert_eq!(checked, unchecked);
 }
@@ -108,6 +114,50 @@ fn a_click_lands_through_the_revealed_part_only(cx: &mut TestAppContext) {
         .unwrap();
     for (x, expected) in [(4.2 * GLYPH, 4), (0.5 * GLYPH, 8)] {
         cx.simulate_keystrokes("cmd-up right right");
+        cx.simulate_click(text.origin + point(px(x), px(10.)), Modifiers::none());
+        let caret = window.update(&mut cx, |view, _, _| view.cursor()).unwrap();
+        assert_eq!(caret, at(expected), "x = {x}");
+    }
+}
+
+/// A shown part maps its own offsets, at their `x` in the whole gutter; an offset in a concealed part
+/// maps to the text's start.
+#[gpui::test]
+fn a_shown_part_maps_its_offsets_where_they_stand(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "> - [ ] a\nbody");
+    cx.run_until_parked();
+    let xs = |cx: &mut VisualTestContext| {
+        window
+            .update(cx, |view, _, _| {
+                let layout = view.input.last_layout().unwrap();
+                (
+                    layout.caret_bounds(view.cursor()).origin.x,
+                    layout.x_for_offset(at(2)),
+                )
+            })
+            .unwrap()
+    };
+    cx.simulate_keystrokes("cmd-up");
+    let (caret, task_start) = xs(&mut cx);
+    assert_x(caret, 0.);
+    assert_x(task_start, 8. * GLYPH);
+    cx.simulate_keystrokes("right right right");
+    let (caret, task_start) = xs(&mut cx);
+    assert_x(caret, 3. * GLYPH);
+    assert_x(task_start, 2. * GLYPH);
+}
+
+/// With the quote part shown: left of the column lands on the `>`, past its space's start on the
+/// text, not on the concealed task part.
+#[gpui::test]
+fn a_click_on_a_shown_quote_part_stays_out_of_the_task_part(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "> - [ ] a\nbody");
+    cx.run_until_parked();
+    let text = window
+        .update(&mut cx, |view, _, _| view.text_bounds().unwrap())
+        .unwrap();
+    for (x, expected) in [(-5., 0), (1.7 * GLYPH, 8)] {
+        cx.simulate_keystrokes("cmd-up");
         cx.simulate_click(text.origin + point(px(x), px(10.)), Modifiers::none());
         let caret = window.update(&mut cx, |view, _, _| view.cursor()).unwrap();
         assert_eq!(caret, at(expected), "x = {x}");
