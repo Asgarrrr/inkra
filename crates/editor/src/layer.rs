@@ -168,6 +168,9 @@ impl<S: Clone + PartialEq> Layer<S> {
             self.clear();
             return Err(Lost);
         };
+        if removed.is_empty() && chunks.is_empty() {
+            return Ok(None);
+        }
         let splices: Vec<_> = splices.collect();
         let removed = removed
             .into_iter()

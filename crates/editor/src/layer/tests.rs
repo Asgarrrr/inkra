@@ -76,6 +76,27 @@ fn an_identical_publish_changes_nothing() {
     assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(None));
 }
 
+/// The syntax listener publishes an empty batch on every keystroke in prose.
+#[test]
+fn an_empty_publish_moves_no_chunk() {
+    let mut buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 2..6, &[(3..4, 'a')]).unwrap();
+    publish(&mut layer, &buffer, 8..12, &[]).unwrap();
+    let old = buffer.edit_mark();
+    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+    let held = layer.chunks.as_ptr();
+
+    assert_eq!(
+        layer.publish(&buffer, Vec::new(), Vec::new(), old),
+        Ok(None)
+    );
+
+    assert_eq!(layer.chunks.as_ptr(), held);
+    assert_eq!(chunks(&layer), [3..7, 9..13]);
+    assert_eq!(layer.at(), buffer.edit_mark());
+}
+
 #[test]
 fn a_publish_spans_only_the_marks_that_differ() {
     let first = [(1..3, 'a'), (5..7, 'b'), (9..11, 'c'), (13..15, 'd')];
