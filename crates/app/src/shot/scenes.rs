@@ -466,35 +466,10 @@ const CATALOGUE: &[Scene] = &[
         shows: "three TODOs in the warning colour from a decoration layer, one inside **bold** with the caret in it: its revealed `**` stay dimmed",
         open: decorations::todo_marks,
     },
-    Scene {
-        name: "code-highlighting",
-        shows: "caret in the first paragraph, every fence concealed: every Rust token class coloured in the rust block",
-        open: code_highlighting::code_highlighting,
-    },
-    Scene {
-        name: "code-highlighting-python",
-        shows: "the python block: comment, decorator, class and def names, docstring across lines, constants, f and r strings, keywords",
-        open: code_highlighting::python,
-    },
-    Scene {
-        name: "code-highlighting-json",
-        shows: "the jsonc block: a comment, keys as properties against string values, numbers, true, false and null",
-        open: code_highlighting::json,
-    },
-    Scene {
-        name: "code-highlighting-bash",
-        shows: "the bash block: shebang comment, commands as functions, flags and numbers as constants, $ expansions, keywords, a heredoc body",
-        open: code_highlighting::bash,
-    },
-    Scene {
-        name: "code-highlighting-plain",
-        shows: "the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
-        open: code_highlighting::code_highlighting_plain,
-    },
 ];
 
-pub(crate) fn catalogue() -> &'static [Scene] {
-    CATALOGUE
+pub(crate) fn catalogue() -> impl Iterator<Item = &'static Scene> {
+    CATALOGUE.iter().chain(&code_highlighting::SCENES)
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {

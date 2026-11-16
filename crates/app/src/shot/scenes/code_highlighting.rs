@@ -1,5 +1,6 @@
 use gpui::WindowHandle;
 
+use super::Scene;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -69,7 +70,7 @@ fn open_blocks(stage: &mut Stage, text: &str) -> WindowHandle<AppShell> {
     window
 }
 
-pub(super) fn code_highlighting(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn code_highlighting(stage: &mut Stage) -> WindowHandle<AppShell> {
     open_blocks(
         stage,
         &format!("A prose line before the block.\n\n```rust\n{RUST}\n```\n"),
@@ -84,19 +85,19 @@ fn one_block(stage: &mut Stage, info: &str, code: &str) -> WindowHandle<AppShell
     )
 }
 
-pub(super) fn python(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn python(stage: &mut Stage) -> WindowHandle<AppShell> {
     one_block(stage, "python", PYTHON)
 }
 
-pub(super) fn json(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn json(stage: &mut Stage) -> WindowHandle<AppShell> {
     one_block(stage, "jsonc", JSON)
 }
 
-pub(super) fn bash(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn bash(stage: &mut Stage) -> WindowHandle<AppShell> {
     one_block(stage, "bash", BASH)
 }
 
-pub(super) fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
     open_blocks(
         stage,
         &format!(
@@ -104,3 +105,31 @@ pub(super) fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShel
         ),
     )
 }
+
+pub(super) const SCENES: [Scene; 5] = [
+    Scene {
+        name: "code-highlighting",
+        shows: "caret in the first paragraph, every fence concealed: every Rust token class coloured in the rust block",
+        open: code_highlighting,
+    },
+    Scene {
+        name: "code-highlighting-python",
+        shows: "the python block: comment, decorator, class and def names, docstring across lines, constants, f and r strings, keywords",
+        open: python,
+    },
+    Scene {
+        name: "code-highlighting-json",
+        shows: "the jsonc block: a comment, keys as properties against string values, numbers, true, false and null",
+        open: json,
+    },
+    Scene {
+        name: "code-highlighting-bash",
+        shows: "the bash block: shebang comment, commands as functions, flags and numbers as constants, $ expansions, keywords, a heredoc body",
+        open: bash,
+    },
+    Scene {
+        name: "code-highlighting-plain",
+        shows: "the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
+        open: code_highlighting_plain,
+    },
+];

@@ -1208,3 +1208,7 @@ mapped to D5's classes by the 2026-11-11 spec's capture table.
     exactness, which holds for any lexer that reads only its block's bytes.
     The shared `proptest` runs all four lexers on fragments that add triple
     quotes, decorators, heredoc operators, expansions and case words.
+12. **The code-highlighting scenes list in their own module.** The three new
+    scenes would push `shot/scenes.rs` past its line ceiling, which only
+    lowers. So `code_highlighting::SCENES` holds all five, and `catalogue()`
+    chains it after the rest, in the same order as before.
