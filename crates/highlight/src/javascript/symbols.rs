@@ -44,10 +44,10 @@ impl Tokens<'_> {
             && generic
             && (self.generics.end(at).is_some() || self.continues_on_next_line(at))
         {
-            let list = if self.state.prev == Prev::TypePosition {
-                Nest::TypeGeneric
-            } else {
-                Nest::Generic
+            let list = match self.state.prev {
+                Prev::TypePosition => Nest::TypeGeneric,
+                Prev::FnName => Nest::FnGeneric,
+                _ => Nest::Generic,
             };
             self.state.push(list);
             self.sink.push(at..at + 1, Punctuation);
@@ -57,11 +57,12 @@ impl Tokens<'_> {
         self.symbol(at)
     }
 
-    /// Whether the `<` at `at`, after a type position, opens a list its line leaves open: the line
-    /// ends on `<` or `,` with no `;`, `{` or `}` past it (S4 deviation 18).
+    /// Whether the `<` at `at`, after a type position or a declared function's name, opens a list
+    /// its line leaves open: the line ends on `<` or `,` with no `;`, `{` or `}` past it (S4
+    /// deviation 18).
     fn continues_on_next_line(&self, at: usize) -> bool {
         let rest = self.line[at..].trim_ascii_end().as_bytes();
-        self.state.prev == Prev::TypePosition
+        matches!(self.state.prev, Prev::TypePosition | Prev::FnName)
             && matches!(rest.last(), Some(b'<' | b','))
             && !rest.iter().any(|byte| matches!(byte, b';' | b'{' | b'}'))
     }
@@ -82,21 +83,29 @@ impl Tokens<'_> {
         let prev = self.state.prev;
         let (len, class, next) = match rest {
             [b'(', ..] if prev == Prev::Condition => self.open(Nest::Condition, Prev::Other),
+            [b'(', ..] if self.dialect.types && matches!(prev, Prev::Fn | Prev::FnName) => {
+                self.open(Nest::Params, Prev::KeyStart)
+            }
             [b'(', ..] => self.open(Nest::Paren, Prev::KeyStart),
             [b'[', ..] => self.open(Nest::Bracket, Prev::Other),
             [b'{', ..] => {
                 self.drop_generics();
-                let body =
-                    self.dialect.types && matches!(prev, Prev::TypePosition | Prev::Annotation);
+                // Right after its `:`, a return type's `{` opens an object type; else the body.
+                let mut body_start = false;
+                if prev != Prev::Annotation {
+                    body_start = self.end_return_type();
+                }
+                let body = !body_start
+                    && self.dialect.types
+                    && matches!(prev, Prev::TypePosition | Prev::Annotation);
                 let entry = if body { Nest::TypeBody } else { Nest::Brace };
                 self.open(entry, Prev::KeyStart)
             }
             [b')', ..] => {
-                let condition = self.close(Nest::Paren) == Some(Nest::Condition);
-                let next = if condition {
-                    Prev::Other
-                } else {
-                    Prev::ValueEnd
+                let next = match self.close(Nest::Paren) {
+                    Some(Nest::Condition) => Prev::Other,
+                    Some(Nest::Params) => Prev::Returns,
+                    _ => Prev::ValueEnd,
                 };
                 (1, Some(Punctuation), next)
             }
@@ -106,18 +115,25 @@ impl Tokens<'_> {
             }
             [b'}', ..] => {
                 self.close(Nest::Brace);
-                (1, Some(Punctuation), Prev::Other)
+                let member = self.state.top() == Some(Nest::TypeBody);
+                let next = if member { Prev::KeyStart } else { Prev::Other };
+                (1, Some(Punctuation), next)
             }
             [b';', ..] => {
                 self.drop_generics();
+                self.end_return_type();
                 (1, Some(Punctuation), Prev::KeyStart)
             }
-            [b',', ..] => (1, Some(Punctuation), Prev::KeyStart),
+            [b',', ..] => {
+                self.end_return_type();
+                (1, Some(Punctuation), Prev::KeyStart)
+            }
             [b'=', ..] if self.state.top() == Some(Nest::Alias) => {
                 self.state.pop();
                 (1, Some(Operator), Prev::Annotation)
             }
             [b':', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Annotation),
+            [b':', ..] if prev == Prev::Returns => self.open(Nest::ReturnType, Prev::Annotation),
             [b':', ..] => (1, Some(Punctuation), Prev::Other),
             [b'?', b'.', after @ ..] if !after.first().is_some_and(u8::is_ascii_digit) => {
                 (2, Some(Punctuation), Prev::Dot)
@@ -126,13 +142,12 @@ impl Tokens<'_> {
             [b'.', b'.', b'.', ..] => (3, Some(Operator), Prev::Other),
             [b'.', ..] => (1, Some(Punctuation), Prev::Dot),
             [b'>', ..] if is_list(self.state.top()) => {
-                let position = self.state.top() == Some(Nest::TypeGeneric);
-                self.state.pop();
-                let next = if position {
-                    Prev::TypePosition
-                } else {
-                    Prev::ValueEnd
+                let next = match self.state.top() {
+                    Some(Nest::TypeGeneric) => Prev::TypePosition,
+                    Some(Nest::FnGeneric) => Prev::FnName,
+                    _ => Prev::ValueEnd,
                 };
+                self.state.pop();
                 (1, Some(Punctuation), next)
             }
             _ => match OPERATORS.iter().find(|op| rest.starts_with(op.as_bytes())) {
@@ -157,12 +172,13 @@ impl Tokens<'_> {
     }
 
     /// Pops what `closer` closes, if the top is that, after any generic list: the entry it
-    /// popped. A `)` closes a `Condition` too, and a `}` a `TypeBody`.
+    /// popped. A `)` closes a `Condition` or `Params` too, and a `}` a `TypeBody`.
     fn close(&mut self, closer: Nest) -> Option<Nest> {
         self.drop_generics();
+        self.end_return_type();
         let top = self.state.top();
         let pops = match top {
-            Some(Nest::Condition) => closer == Nest::Paren,
+            Some(Nest::Condition | Nest::Params) => closer == Nest::Paren,
             Some(Nest::TypeBody) => closer == Nest::Brace,
             Some(top) => top == closer,
             None => true,
@@ -177,5 +193,14 @@ impl Tokens<'_> {
         while is_list(self.state.top()) {
             self.state.pop();
         }
+    }
+
+    /// Pops a `ReturnType` on top: whether there was one.
+    fn end_return_type(&mut self) -> bool {
+        let open = self.state.top() == Some(Nest::ReturnType);
+        if open {
+            self.state.pop();
+        }
+        open
     }
 }

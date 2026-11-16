@@ -724,12 +724,12 @@ fn a_comparison_after_new_without_semicolons_stays_on_its_line() {
 
 #[test]
 fn outside_a_type_position_a_list_must_close_on_its_line() {
-    // An expression, a union member, an `as` type and a return type.
+    // An expression, a union member, an `as` type and an arrow's return type.
     for text in [
         "f<\n  T>(x)",
         "let u: A | B<\n  T>(x)",
         "y = x as B<\n  T>(x)",
-        "function g(): B<\n  T>(x)",
+        "g = (): B<\n  T>(x)",
     ] {
         let tokens = tokens(TypeScript, text);
         let angle = text.find('<').unwrap();
@@ -855,12 +855,160 @@ fn an_object_literal_and_a_function_body_are_no_type_body() {
         // Lists opened after no type position: an assertion and a return type.
         "const o = <Options>{ key: value };",
         "function h(): Promise<T> { label: value; }",
+        // A return type's object type, then the body.
+        "function k(): { a: A } { label: value; }",
+        "class C {\n  load(): Promise<\n    Data\n  > { return { key: value }; }\n}",
     ] {
         let tokens = tokens(TypeScript, text);
         let value = text.find("value").unwrap();
         assert!(
             tokens.iter().all(|&(start, _, _)| start != value),
             "{text:?}: {tokens:?}"
+        );
+    }
+}
+
+#[test]
+fn a_return_type_spans_lines() {
+    check(
+        "function load(id: Id): Promise<\n  Map<K, V>\n> {\n  return x;\n}\nlet a = 2;",
+        &[
+            ("function", Keyword),
+            ("load", Function),
+            ("(", Punctuation),
+            (":", Punctuation),
+            ("Id", Type),
+            (")", Punctuation),
+            (":", Punctuation),
+            ("Promise", Type),
+            ("<", Punctuation),
+            ("Map", Type),
+            ("<", Punctuation),
+            ("K", Type),
+            (",", Punctuation),
+            ("V", Type),
+            (">", Punctuation),
+            (">", Punctuation),
+            ("{", Punctuation),
+            ("return", Keyword),
+            (";", Punctuation),
+            ("}", Punctuation),
+        ]
+        .into_iter()
+        .chain(NEXT_LINE)
+        .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn a_generic_function_and_a_method_annotate_their_return_types() {
+    check(
+        "function pick<T>(x: T): label {}",
+        &[
+            ("function", Keyword),
+            ("pick", Function),
+            ("<", Punctuation),
+            ("T", Type),
+            (">", Punctuation),
+            ("(", Punctuation),
+            (":", Punctuation),
+            ("T", Type),
+            (")", Punctuation),
+            (":", Punctuation),
+            ("label", Type),
+            ("{", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+    check(
+        "interface I {\n  get(): label;\n  set(v: V): void;\n}",
+        &[
+            ("interface", Keyword),
+            ("I", Type),
+            ("{", Punctuation),
+            ("get", Function),
+            ("(", Punctuation),
+            (")", Punctuation),
+            (":", Punctuation),
+            ("label", Type),
+            (";", Punctuation),
+            ("set", Function),
+            ("(", Punctuation),
+            (":", Punctuation),
+            ("V", Type),
+            (")", Punctuation),
+            (":", Punctuation),
+            ("void", Keyword),
+            (";", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+/// The class of the token at the first `needle` in `text`, if one starts there.
+fn class_at(text: &str, needle: &str) -> Option<TokenClass> {
+    let at = text.find(needle).unwrap();
+    tokens(TypeScript, text)
+        .into_iter()
+        .find(|&(start, _, _)| start == at)
+        .map(|(_, _, class)| class)
+}
+
+#[test]
+fn return_types_end_where_their_body_or_member_starts() {
+    // `label` is a `Type` only as an annotation; each case pins one way a return type ends.
+    for text in [
+        "function k(): { a: label } {}",
+        "interface I {\n  a(): A\n  b: label\n}",
+        "type T = { a(): A, b: label };",
+        "interface I { a(): A; b: label }",
+        "function f<\n  T,\n>(x: T): label {}",
+        "const g = function (): label {};",
+        "class C {\n  a(): A {\n  }\n  b(): label {}\n}",
+        "class D { a() {} b(): label {} }",
+        "class E { get name(): label { return n; } }",
+    ] {
+        assert_eq!(class_at(text, "label"), Some(Type), "{text:?}");
+    }
+}
+
+#[test]
+fn a_return_type_closed_or_cut_leaves_values_after_it() {
+    for text in [
+        "type T = { m(): T }\nlabel: value;",
+        "function f(): T\n{\n  label: value;\n}",
+    ] {
+        assert_eq!(class_at(text, "value"), None, "{text:?}");
+    }
+    for text in [
+        "function f(): T\n{\n  total(a) / count(b) / 2;\n}",
+        "namespace N {\n  foo(x) / 2 / 3;\n}",
+    ] {
+        assert_eq!(class_at(text, "/"), Some(Operator), "{text:?}");
+    }
+}
+
+#[test]
+fn a_ternary_a_call_and_a_constructor_keep_their_values() {
+    // A `)` that closes no parameter list: `b` stays plain and `/` divides.
+    let tokens_of = |text: &str| tokens(TypeScript, text);
+    let ternary = "x = c ? (a) : b;";
+    let b = ternary.find('b').unwrap();
+    assert!(
+        tokens_of(ternary).iter().all(|&(start, _, _)| start != b),
+        "{:?}",
+        tokens_of(ternary)
+    );
+    for text in [
+        "y = foo(1) / 2 / 3;",
+        "z = f<T>(x) / 2 / 3;",
+        "w = new Date() / 1000 / 3;",
+    ] {
+        let slash = text.find('/').unwrap();
+        assert!(
+            tokens_of(text).contains(&(slash, slash + 1, Operator)),
+            "{text:?}: {:?}",
+            tokens_of(text)
         );
     }
 }
