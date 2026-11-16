@@ -27,14 +27,13 @@ impl Tokens<'_> {
         let rest = &bytes[at..];
         let top = self.state.top();
         let (len, class) = match rest[0] {
-            byte if byte.is_ascii_whitespace() => (1, None),
             b')' if top == Some(Nest::Arith) && rest.starts_with(b"))") => {
                 self.state.pop();
                 self.state.prev = Prev::Command;
                 (2, Some(Punctuation))
             }
             b')' => {
-                if top != Some(Nest::Arith) && self.state.depth > 0 {
+                if top != Some(Nest::Arith) {
                     self.state.pop();
                 }
                 (1, Some(Punctuation))

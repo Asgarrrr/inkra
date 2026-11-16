@@ -34,6 +34,22 @@ fn an_ansi_c_string_takes_escapes() {
         r"echo $'a\'b' c",
         &[("echo", Function), (r"$'a\'b'", String), ("c", String)],
     );
+    check(
+        r"echo $'it\'s' x",
+        &[("echo", Function), (r"$'it\'s'", String), ("x", String)],
+    );
+}
+
+#[test]
+fn a_locale_string_is_one_string_with_its_dollar() {
+    check(
+        r#"echo $"a" "b c""#,
+        &[
+            ("echo", Function),
+            (r#"$"a""#, String),
+            (r#""b c""#, String),
+        ],
+    );
 }
 
 #[test]

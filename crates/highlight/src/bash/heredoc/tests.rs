@@ -216,3 +216,35 @@ fn highlight_carries_the_queue_to_the_next_lines_at_their_offsets() {
         ]
     );
 }
+
+#[test]
+fn a_quoted_tag_ends_at_its_closing_quote_and_the_command_goes_on() {
+    check(
+        "cat <<'EOF' > out\n$x\nEOF\necho",
+        &[
+            ("cat", Function),
+            ("<<", Operator),
+            ("'EOF'", String),
+            (">", Operator),
+            ("out", String),
+            ("$x", String),
+            ("EOF", String),
+            ("echo", Function),
+        ],
+    );
+}
+
+#[test]
+fn a_body_line_that_is_another_word_does_not_end_the_body() {
+    check(
+        "cat <<EOF\ndone\nEOF\nls",
+        &[
+            ("cat", Function),
+            ("<<", Operator),
+            ("EOF", String),
+            ("done", String),
+            ("EOF", String),
+            ("ls", Function),
+        ],
+    );
+}

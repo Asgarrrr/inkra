@@ -26,6 +26,14 @@ fn a_command_name_is_a_function_and_its_arguments_strings_flags_and_numbers_cons
 }
 
 #[test]
+fn a_backslash_escapes_one_byte_of_a_word() {
+    check(
+        r#"echo \"hi a\ b"#,
+        &[("echo", Function), (r#"\"hi"#, String), (r"a\ b", String)],
+    );
+}
+
+#[test]
 fn a_separator_starts_a_command_again() {
     check(
         "a | b && c; d & e || f |& g",
@@ -209,6 +217,23 @@ fn a_case_takes_its_subject_in_and_patterns_up_to_their_paren() {
             ("echo", Function),
             ("other", String),
             (";&", Punctuation),
+            ("esac", Keyword),
+        ],
+    );
+    check(
+        "case x in a) b ;;& c) d ;; esac",
+        &[
+            ("case", Keyword),
+            ("x", String),
+            ("in", Keyword),
+            ("a", String),
+            (")", Punctuation),
+            ("b", Function),
+            (";;&", Punctuation),
+            ("c", String),
+            (")", Punctuation),
+            ("d", Function),
+            (";;", Punctuation),
             ("esac", Keyword),
         ],
     );
@@ -410,6 +435,24 @@ fn a_test_takes_its_operators_as_keywords_and_operators() {
             ("]", Punctuation),
             (";", Punctuation),
             ("fi", Keyword),
+        ],
+    );
+    check(
+        "[[ ( -f a ) && -d b ]]; [ - ]",
+        &[
+            ("[[", Punctuation),
+            ("(", Punctuation),
+            ("-f", Keyword),
+            ("a", String),
+            (")", Punctuation),
+            ("&&", Operator),
+            ("-d", Keyword),
+            ("b", String),
+            ("]]", Punctuation),
+            (";", Punctuation),
+            ("[", Punctuation),
+            ("-", Constant),
+            ("]", Punctuation),
         ],
     );
 }

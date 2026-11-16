@@ -1,5 +1,5 @@
 use crate::Language::Bash;
-use crate::TokenClass::{self, Constant, Function, Keyword, Operator, Punctuation};
+use crate::TokenClass::{self, Constant, Function, Keyword, Operator, Punctuation, String};
 use crate::fixtures::expect;
 
 #[track_caller]
@@ -39,6 +39,47 @@ fn arithmetic_keeps_names_plain_and_takes_no_heredoc() {
             ("))", Punctuation),
             (";", Punctuation),
             ("do", Keyword),
+        ],
+    );
+}
+
+#[test]
+fn arithmetic_lexes_a_quoted_string_whole() {
+    check(
+        "echo $(( \"a b\" + 'c d' ))",
+        &[
+            ("echo", Function),
+            ("$((", Punctuation),
+            ("\"a b\"", String),
+            ("+", Operator),
+            ("'c d'", String),
+            ("))", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn arithmetic_keeps_a_name_with_digits_plain_and_a_number_whole() {
+    check(
+        "(( x1 + 42 ))",
+        &[
+            ("((", Punctuation),
+            ("+", Operator),
+            ("42", Constant),
+            ("))", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn only_a_double_paren_closes_arithmetic() {
+    check(
+        "(( a ) + b ))",
+        &[
+            ("((", Punctuation),
+            (")", Punctuation),
+            ("+", Operator),
+            ("))", Punctuation),
         ],
     );
 }
