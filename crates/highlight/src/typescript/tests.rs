@@ -839,6 +839,8 @@ fn an_object_literal_and_a_function_body_are_no_type_body() {
         "const o = { key: value };",
         "function f(): Foo { return { key: value }; }",
         "function g(): string { label: value; }",
+        // The body's `}` closed it, so the label after it is no member.
+        "type T = { a: A };\nlabel: value;",
     ] {
         let tokens = tokens(TypeScript, text);
         let value = text.find("value").unwrap();
