@@ -1,6 +1,6 @@
 //! One landing's publish: a backlog's chunks at an older edit mark, with 200 splices since,
-//! scattered over the note; it sets `TASK_BYTES` and checks `BLOCK_LIMIT` (code highlighting spec,
-//! D10).
+//! scattered over the note or in a prose paragraph above its blocks, or with none; it sets
+//! `TASK_BYTES` and `BLOCK_LIMIT` (code highlighting spec, D10, S2b deviation 10).
 
 #![expect(
     clippy::expect_used,
@@ -18,6 +18,18 @@ const SPLICES: usize = 200;
 const BLOCK_BYTES: usize = 512;
 /// About one mark per byte: each char is its own punctuation token.
 const DENSE: &str = "(),;";
+/// The bytes of the prose paragraph `Splices::Above` edits, its blank line included.
+const PROSE: usize = 4096;
+
+/// Where the splices since the landing's edit mark lie.
+#[derive(Clone, Copy)]
+enum Splices {
+    /// Spread over the note, so they reach most blocks, which then land nothing (S2b deviation 1).
+    Scattered,
+    /// In a prose paragraph above the blocks, so they reach none.
+    Above,
+    None,
+}
 
 /// A rust block of dense code whose range is about `len` bytes, fences included.
 fn dense_block(len: usize) -> String {
@@ -57,9 +69,9 @@ fn chunks(buffer: &Buffer) -> Vec<BlockChunk> {
         .collect()
 }
 
-/// `SPLICES` one-byte replacements, evenly spaced over the text.
-fn scatter(buffer: &mut Buffer) {
-    let step = buffer.text().len() / (SPLICES + 1);
+/// `SPLICES` one-byte replacements, evenly spaced over the first `len` bytes of the text.
+fn scatter(buffer: &mut Buffer, len: usize) {
+    let step = len / (SPLICES + 1);
     for k in 1..=SPLICES {
         let at = ByteOffset::new(k * step);
         buffer.transact(|t| t.replace(at..at + 1, "x"));
@@ -81,13 +93,21 @@ fn held(base: &Buffer, buffer: &Buffer, chunks: &[BlockChunk]) -> Layer<TokenCla
     layer
 }
 
-fn bench_note(c: &mut Criterion, group: &str, id: BenchmarkId, note: &str) {
-    let (base, mut buffer) = (Buffer::new(note), Buffer::new(note));
+fn bench_note(c: &mut Criterion, group: &str, id: BenchmarkId, note: &str, splices: Splices) {
+    let note = match splices {
+        Splices::Above => format!("{}\n\n{note}", "p".repeat(PROSE - 2)),
+        Splices::Scattered | Splices::None => note.to_owned(),
+    };
+    let (base, mut buffer) = (Buffer::new(&note), Buffer::new(&note));
     let at = buffer.edit_mark();
     // A late publish would skip every block a splice reached, so `held` publishes on a twin.
     assert_eq!(base.edit_mark(), at);
     let chunks = chunks(&buffer);
-    scatter(&mut buffer);
+    match splices {
+        Splices::Scattered => scatter(&mut buffer, note.len()),
+        Splices::Above => scatter(&mut buffer, PROSE - 2),
+        Splices::None => {}
+    }
     c.benchmark_group(group).bench_function(id, |b| {
         b.iter_batched(
             || (held(&base, &buffer, &chunks), chunks.clone()),
@@ -102,29 +122,38 @@ fn bench_note(c: &mut Criterion, group: &str, id: BenchmarkId, note: &str) {
     });
 }
 
-fn bench_landing(c: &mut Criterion) {
-    let mut sizes = vec![
-        4 << 10,
-        8 << 10,
-        16 << 10,
-        32 << 10,
-        64 << 10,
-        128 << 10,
-        TASK_BYTES,
-    ];
+/// `sizes` with `also`, sorted and without repeats.
+fn with(mut sizes: Vec<usize>, also: usize) -> Vec<usize> {
+    sizes.push(also);
     sizes.sort_unstable();
     sizes.dedup();
-    for bytes in sizes {
+    sizes
+}
+
+fn bench_landing(c: &mut Criterion) {
+    let sizes = (2..=7).map(|shift| 1 << (10 + shift)).collect();
+    for bytes in with(sizes, TASK_BYTES) {
         for (case, note) in notes(bytes) {
-            let id = BenchmarkId::new(case, bytes);
-            bench_note(c, "landing", id, &note);
+            for (group, splices) in [
+                ("landing", Splices::Scattered),
+                ("landing_above", Splices::Above),
+            ] {
+                bench_note(c, group, BenchmarkId::new(case, bytes), &note, splices);
+            }
         }
     }
 }
 
+/// One block up to twice the bound, with no splice reaching it: a reached block lands nothing.
 fn bench_block_limit(c: &mut Criterion) {
-    let id = BenchmarkId::from_parameter(BLOCK_LIMIT);
-    bench_note(c, "landing_block_limit", id, &dense_block(BLOCK_LIMIT));
+    let sizes = (5..=9).map(|shift| 1 << (10 + shift)).collect();
+    for bytes in with(sizes, BLOCK_LIMIT) {
+        let note = dense_block(bytes);
+        for (case, splices) in [("above", Splices::Above), ("none", Splices::None)] {
+            let id = BenchmarkId::new(case, bytes);
+            bench_note(c, "landing_block_limit", id, &note, splices);
+        }
+    }
 }
 
 criterion_group!(benches, bench_landing, bench_block_limit);
