@@ -102,7 +102,11 @@ own conceal.
 `GutterCarry` measures each distinct gutter text (`prefix.rs:252-262`), so
 `- [ ] ` and `- [x] ` would differ by a few pixels and could rewrap the line.
 The gutter is measured on its text with the checkbox's middle byte replaced
-by a space. Both states share one measure and one width.
+by `X`. Every state shares one measure and one width. Amended 2026-11-16
+during T1a by the owner: with a space, a revealed `[x]` touched the text and
+`[X]` overlapped it, breaking "a revealed part paints inside it". `X` is the
+widest of the three bytes in the body font, at the cost of a few pixels of
+gutter.
 
 **`Geometry` gains the checkbox's `x` span** and the quote part's width. Both
 come from the same measure. `GutterLayout` holds `Geometry` by value
@@ -349,6 +353,10 @@ emits for every list item. T3 and T4a are independent of each other.
 - **From markdown-blocks S3.** The conceal covers the task part (B); width is
   state-independent (C); boxes are found per line, not from a vector (E); no
   `marks.rs` module and no new colour tokens; strike and key added.
+- **From this spec, in T1a.** `Geometry` gains the quote part's width in T1a
+  and the checkbox's `x` span in T1b, where paint first reads it: an unread
+  field fails clippy's `dead_code`. `prefix.rs` is near 400 lines after T1a;
+  T1b plans its split.
 
 ## Deferred
 
