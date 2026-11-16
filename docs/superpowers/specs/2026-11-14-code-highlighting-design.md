@@ -1436,3 +1436,6 @@ Zed's `highlights.scm` for its language, as in S3.
       Still unlit: `foo?(): T`, and a method whose type list spans lines.
     - A review found the line-end, `value_end` and `}` gaps above, and seven
       injected bugs that no test caught; each has a test now.
+    - Measured beside main on 2026-11-16: −5.5% to +5.3% across the
+      TypeScript and JavaScript groups. An A/A run in the same session moved
+      the short groups −6.9% to +4.5%, so no change is measurable.
