@@ -3,11 +3,13 @@ use std::ops::Range;
 
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 
+mod cursor;
 mod heard;
 mod map;
 
+use cursor::Cursor;
 pub use heard::{HeardLayer, TextChange};
-use map::{follow, map_chunk};
+use map::{follow_all, map_chunk};
 
 /// A layer could not follow the buffer's edits and holds nothing until it is published again.
 #[derive(Debug, PartialEq, Eq)]
@@ -135,10 +137,11 @@ impl<S: Clone + PartialEq> Layer<S> {
 
     /// Empties each range of `removed`, then replaces everything inside each chunk of `chunks`, a
     /// range with its tag and its marks. All are computed at the edit mark `at` and mapped through
-    /// the edits since (D6), except where a chunk computed later lies: that one stays. Inside the
-    /// batch, a later change wins over an earlier one. A chunk holds its tag while it stays whole
-    /// and its bytes unchanged. `Ok(Some(span))` when a change moved marks: in `buffer`'s text,
-    /// from the first to the last mark any change moved.
+    /// the edits since (D6), except where a chunk computed later lies: that one stays. A chunk an
+    /// edit since reached lands nothing, as its marks are stale (code highlighting spec, S2b
+    /// deviation 1). Inside the batch, a later change wins over an earlier one. A chunk holds its
+    /// tag while it stays whole and its bytes unchanged. `Ok(Some(span))` when a change moved
+    /// marks: in `buffer`'s text, from the first to the last mark any change moved.
     ///
     /// # Errors
     /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
@@ -172,57 +175,17 @@ impl<S: Clone + PartialEq> Layer<S> {
         let chunks = chunks
             .into_iter()
             .map(|(range, tag, marks)| (Chunk::new(range, at, Some(tag), marks), true));
-        Ok(removed
+        let mut cursor = Cursor::new(std::mem::take(&mut self.chunks));
+        let span = removed
             .chain(chunks)
-            .filter_map(|(new, fills)| self.replace(buffer, new, fills, &splices))
-            .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end)))
-    }
-
-    /// Maps `new` through `splices` and puts it in place of what its range holds; with `fills`
-    /// false, nothing takes that place. Returns the span of the marks that changed there.
-    fn replace(
-        &mut self,
-        buffer: &Buffer,
-        new: Chunk<S>,
-        fills: bool,
-        splices: &[Splice],
-    ) -> Option<Range<ByteOffset>> {
-        let at = new.published;
-        let new = splices
-            .iter()
-            .copied()
-            .try_fold(new, follow)
-            .filter(|new| new.len != 0)?;
-        new.check(buffer);
-        let chunk = new.start..new.end();
-        let new = fills.then_some(new);
-        let first = self.chunks.partition_point(|old| old.end() <= chunk.start);
-        let last = self.chunks.partition_point(|old| old.start < chunk.end);
-        let before = self.owned_marks(chunk.clone());
-        let mut pieces = Vec::new();
-        let mut tail = None;
-        let mut gap = chunk.start;
-        for old in self.chunks.drain(first..last) {
-            if old.published > at {
-                pieces.extend(new.as_ref().and_then(|new| new.piece(gap..old.start)));
-                gap = old.end();
-                pieces.push(old);
-            } else {
-                pieces.extend(old.piece(old.start..chunk.start));
-                tail = old.piece(chunk.end..old.end());
-            }
-        }
-        pieces.extend(new.as_ref().and_then(|new| new.piece(gap..chunk.end)));
-        pieces.extend(tail);
-        self.chunks.splice(first..first, pieces);
-        differing(&before, &self.owned_marks(chunk))
-    }
-
-    /// As `marks_in`, with each style cloned, so the marks outlive a `replace`.
-    fn owned_marks(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, S)> {
-        self.marks_in(range)
-            .map(|(mark, style)| (mark, style.clone()))
-            .collect()
+            .filter_map(|(new, fills)| {
+                let new = follow_all(new, &splices, fills)?;
+                new.check(buffer);
+                cursor.replace(new, fills)
+            })
+            .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end));
+        self.chunks = cursor.finish();
+        Ok(span)
     }
 }
 

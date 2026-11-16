@@ -372,7 +372,11 @@ proptest! {
         let published = computed.deliver(&mut late, &buffer);
 
         prop_assert!(published.is_ok(), "{:?}", published);
-        prop_assert_eq!(marks(&late, &buffer), marks(&early, &buffer));
+        // An edit that reached the chunk dropped its tag, and skips its late publish (code
+        // highlighting spec, S2b deviation 1).
+        let reached = tags(&early).iter().all(|(_, tag)| tag.is_none());
+        let expected = if reached { Vec::new() } else { marks(&early, &buffer) };
+        prop_assert_eq!(marks(&late, &buffer), expected);
     }
 
     /// Byte by byte, the newer publish wins inside its chunk and the older one fills the rest.

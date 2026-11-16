@@ -1,6 +1,7 @@
 use inkra_text::{Buffer, ByteOffset};
 use proptest::prelude::*;
 
+use super::map::follow;
 use super::*;
 
 fn at(offset: usize) -> ByteOffset {
@@ -452,8 +453,14 @@ fn a_chunk_keeps_its_tag_until_a_splice_changes_its_bytes() {
                 layer.catch_up(&buffer).unwrap();
             }
 
-            let tag = layer.chunks().next().unwrap().1;
-            assert_eq!(tag, kept.then_some(7), "{late} {removed:?} {inserted:?}");
+            // A late chunk an edit reached does not land (code highlighting spec, S2b deviation 1).
+            let tags: Vec<_> = layer.chunks().map(|(_, tag)| tag).collect();
+            let expected = if late && !kept {
+                vec![]
+            } else {
+                vec![kept.then_some(7)]
+            };
+            assert_eq!(tags, expected, "{late} {removed:?} {inserted:?}");
         }
     }
 }
