@@ -1,5 +1,6 @@
 //! One listener call's pure part, lex and publish together, by size; it sets `MAIN_THREAD_BUDGET`
-//! (code highlighting spec, D10 and deviation 5).
+//! (code highlighting spec, D10 and deviation 5). Past the budget the call lexes its backlogs too,
+//! as the app's does before the background task; the backlog's copy is measured on its own.
 
 #![expect(
     clippy::expect_used,
@@ -8,9 +9,11 @@
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use inkra_editor::Layer;
-use inkra_highlight::{Batch, MAIN_THREAD_BUDGET, TokenClass, batch};
+use inkra_highlight::{
+    Batch, MAIN_THREAD_BUDGET, TASK_BYTES, TokenClass, backlog, batch, lex_backlog,
+};
 use inkra_markdown::{Markdown, parse};
-use inkra_text::Buffer;
+use inkra_text::{Buffer, ByteOffset};
 
 const TEXT: &str = include_str!("fixtures/rust-5000.txt");
 const BLOCK_BYTES: usize = 512;
@@ -22,11 +25,24 @@ fn code(bytes: usize) -> &'static str {
     &TEXT[..end]
 }
 
-/// The listener's pure part: catch up, read the chunks, then publish the batch.
+/// The listener's pure part on a change over the whole text: catch up, read the chunks, lex the
+/// backlogs, then publish the batch.
 fn call(buffer: &Buffer, layer: &mut Layer<TokenClass>, markdown: &Markdown) -> usize {
     layer.catch_up(buffer).expect("the log holds the edits");
     let held: Vec<_> = layer.chunks().collect();
-    let Batch { clear, lexed } = batch(buffer.text(), markdown, &held);
+    let text = buffer.text();
+    let dirty = Some(ByteOffset::new(0)..buffer.len());
+    let Batch {
+        clear,
+        mut lexed,
+        pending,
+    } = batch(text, markdown, &held, dirty);
+    let mut rest = pending.as_slice();
+    while !rest.is_empty() {
+        let landed = lex_backlog(backlog(text, markdown, rest));
+        rest = &rest[landed.len()..];
+        lexed.extend(landed);
+    }
     let count = lexed.len();
     layer
         .publish(buffer, clear, lexed, buffer.edit_mark())
@@ -74,8 +90,9 @@ fn bench_many_blocks(c: &mut Criterion) {
     let block = format!("```rust\n{}\n```\n\n", code(BLOCK_BYTES));
     let buffer = Buffer::new(block.repeat(BLOCKS));
     let markdown = parse(buffer.text());
-    let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
-    assert_eq!(lexed.len(), BLOCKS);
+    let Batch { pending, .. } = batch(buffer.text(), &markdown, &[], None);
+    assert_eq!(pending.len(), BLOCKS);
+    let lexed = lex_backlog(backlog(buffer.text(), &markdown, &pending));
     // The first `n` blocks hold their own marks under another tag, as after a renamed info word:
     // a call lexes them, and each publish compares equal marks in full (deviation 10).
     let held = |n: usize| {
@@ -109,5 +126,26 @@ fn bench_many_blocks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_one_block, bench_many_blocks);
+/// `backlog` alone at `TASK_BYTES`: one block, and blocks of `BLOCK_BYTES`.
+fn bench_backlog_copy(c: &mut Criterion) {
+    let one = format!("```rust\n{}\n```\n", code(TASK_BYTES));
+    let block = format!("```rust\n{}\n```\n\n", code(BLOCK_BYTES));
+    let many = block.repeat(TASK_BYTES.div_ceil(block.len() - 2));
+    let mut group = c.benchmark_group("listener_backlog_copy");
+    for (case, text) in [("one_block", one), ("many_blocks", many)] {
+        let markdown = parse(&text);
+        let Batch { pending, .. } = batch(&text, &markdown, &[], None);
+        group.bench_function(BenchmarkId::new(case, TASK_BYTES), |b| {
+            b.iter(|| backlog(&text, &markdown, &pending));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_one_block,
+    bench_many_blocks,
+    bench_backlog_copy
+);
 criterion_main!(benches);

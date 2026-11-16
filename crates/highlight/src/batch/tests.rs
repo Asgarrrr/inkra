@@ -3,6 +3,11 @@ use inkra_markdown::parse;
 use super::*;
 use crate::fixtures::{TWO_BLOCKS, r};
 
+/// A dirty range over the whole of `text`.
+fn whole(text: &str) -> Range<ByteOffset> {
+    r(0, text.len())
+}
+
 /// Each block of `markdown` held exactly, with its range and shape.
 fn exact(markdown: &Markdown) -> Vec<(Range<ByteOffset>, Option<u64>)> {
     markdown
@@ -21,13 +26,14 @@ fn a_chunk_an_edit_left_untagged_is_lexed_over() {
     let mut held = exact(&markdown);
     held[1].1 = None;
 
-    let batch = batch(TWO_BLOCKS, &markdown, &held);
+    let batch = batch(TWO_BLOCKS, &markdown, &held, Some(whole(TWO_BLOCKS)));
 
     assert_eq!(
         batch,
         Batch {
             clear: vec![],
             lexed: vec![(r(17, 32), second, vec![(r(23, 26), TokenClass::Keyword)])],
+            pending: vec![],
         }
     );
 }
@@ -39,13 +45,14 @@ fn a_held_chunk_on_prose_is_cleared() {
     let mut held = vec![(r(0, 5), Some(markdown.code_blocks[0].shape))];
     held.extend(exact(&markdown));
 
-    let batch = batch(text, &markdown, &held);
+    let batch = batch(text, &markdown, &held, Some(whole(text)));
 
     assert_eq!(
         batch,
         Batch {
             clear: vec![r(0, 5)],
             lexed: vec![],
+            pending: vec![],
         }
     );
 }
@@ -55,7 +62,7 @@ fn only_the_blocks_no_chunk_matches_are_lexed() {
     let markdown = parse(TWO_BLOCKS);
     let held = &exact(&markdown)[..1];
 
-    let batch = batch(TWO_BLOCKS, &markdown, held);
+    let batch = batch(TWO_BLOCKS, &markdown, held, Some(whole(TWO_BLOCKS)));
 
     assert_eq!(
         batch,
@@ -66,6 +73,7 @@ fn only_the_blocks_no_chunk_matches_are_lexed() {
                 markdown.code_blocks[1].shape,
                 vec![(r(23, 26), TokenClass::Keyword)]
             )],
+            pending: vec![],
         }
     );
 }
@@ -75,7 +83,7 @@ fn an_unknown_language_block_gets_an_empty_chunk() {
     let text = "```nope\nlet\n```\n";
     let markdown = parse(text);
 
-    let batch = batch(text, &markdown, &[]);
+    let batch = batch(text, &markdown, &[], None);
 
     assert_eq!(
         batch.lexed,
@@ -94,7 +102,7 @@ fn a_block_over_the_block_limit_gets_an_empty_chunk() {
     let text = rust_block(BLOCK_LIMIT + 1);
     let markdown = parse(&text);
 
-    let batch = batch(&text, &markdown, &[]);
+    let batch = batch(&text, &markdown, &[], None);
 
     let range = r(0, BLOCK_LIMIT + 1);
     assert_eq!(
@@ -103,16 +111,15 @@ fn a_block_over_the_block_limit_gets_an_empty_chunk() {
     );
 }
 
+/// It is over the main thread's budget, so it waits for the backlog (D10).
 #[test]
-fn a_block_at_the_block_limit_is_lexed() {
+fn a_block_at_the_block_limit_goes_pending() {
     let text = rust_block(BLOCK_LIMIT);
     let markdown = parse(&text);
 
-    let batch = batch(&text, &markdown, &[]);
+    let batch = batch(&text, &markdown, &[], Some(whole(&text)));
 
-    let (range, _, marks) = &batch.lexed[0];
-    assert_eq!(*range, r(0, BLOCK_LIMIT));
-    assert_eq!(marks[0], (r(8, 11), TokenClass::Keyword));
+    assert_eq!((batch.lexed, batch.pending), (vec![], vec![0]));
 }
 
 /// The limit counts the block's own bytes, not its end offset.
@@ -121,7 +128,7 @@ fn a_small_block_ending_past_the_block_limit_is_lexed() {
     let text = format!("{}\n\n```rust\nlet\n```\n", "x".repeat(BLOCK_LIMIT));
     let markdown = parse(&text);
 
-    let batch = batch(&text, &markdown, &[]);
+    let batch = batch(&text, &markdown, &[], Some(whole(&text)));
 
     let (range, _, marks) = &batch.lexed[0];
     assert!(range.end.get() > BLOCK_LIMIT);
@@ -136,4 +143,68 @@ fn block_marks_are_the_tokens_of_its_content_lines() {
     let marks = block_marks(text, &markdown.spans, &markdown.code_blocks[0]);
 
     assert_eq!(marks, [(r(12, 15), TokenClass::Keyword)]);
+}
+
+/// Each block's range end in `text`, which holds them in order.
+fn ends(markdown: &Markdown) -> Vec<usize> {
+    markdown
+        .code_blocks
+        .iter()
+        .map(|block| block.range.end.get())
+        .collect()
+}
+
+#[test]
+fn a_block_with_nothing_to_lex_takes_no_budget() {
+    let unknown = rust_block(MAIN_THREAD_BUDGET).replacen("rust", "nope", 1);
+    let text = format!("{unknown}\n{}", rust_block(64));
+    let markdown = parse(&text);
+
+    let batch = batch(&text, &markdown, &[], Some(whole(&text)));
+
+    assert_eq!(batch.pending, Vec::<usize>::new());
+    assert_eq!(batch.lexed[0].2, vec![]);
+    assert_ne!(batch.lexed[1].2, vec![]);
+}
+
+#[test]
+fn dirty_blocks_fill_the_budget_in_order_past_one_that_does_not_fit() {
+    let half = MAIN_THREAD_BUDGET / 2;
+    let text = [rust_block(half), rust_block(half + 1), rust_block(half)].join("\n");
+    let markdown = parse(&text);
+
+    let batch = batch(&text, &markdown, &[], Some(whole(&text)));
+
+    let lexed: Vec<_> = batch
+        .lexed
+        .iter()
+        .map(|(range, ..)| range.end.get())
+        .collect();
+    let ends = ends(&markdown);
+    assert_eq!(lexed, [ends[0], ends[2]]);
+    assert_eq!(batch.pending, [1]);
+}
+
+#[test]
+fn an_inexact_block_the_dirty_range_misses_goes_pending() {
+    let markdown = parse(TWO_BLOCKS);
+
+    let batch = batch(TWO_BLOCKS, &markdown, &[], Some(r(17, 18)));
+
+    assert_eq!(batch.lexed.len(), 1);
+    assert_eq!(batch.lexed[0].0, r(17, 32));
+    assert_eq!(batch.pending, [0]);
+}
+
+/// A deletion right before the fence leaves an empty dirty range at the block's start (D7).
+#[test]
+fn a_dirty_range_touching_a_block_meets_it() {
+    let markdown = parse(TWO_BLOCKS);
+
+    for dirty in [r(16, 17), r(17, 17), r(32, 33)] {
+        let batch = batch(TWO_BLOCKS, &markdown, &[], Some(dirty.clone()));
+
+        assert_eq!(batch.lexed[0].0, r(17, 32), "{dirty:?}");
+        assert_eq!(batch.pending, [0], "{dirty:?}");
+    }
 }

@@ -1,8 +1,10 @@
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{App, Entity, Subscription, TestAppContext, prelude::*};
+use inkra_highlight::{MAIN_THREAD_BUDGET, TASK_BYTES};
 use inkra_text::{Buffer, ByteOffset, Txn};
 
 use super::*;
@@ -428,6 +430,31 @@ fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut Tes
 
     assert_eq!(marks(cx, &buffer), kept(PROSE_RUST_NOPE, &[]));
     drop(listening);
+}
+
+/// The main thread's budget leaves the rest pending, and that is more than one backlog (D10).
+#[gpui::test]
+fn pending_blocks_over_task_bytes_colour_in_one_listener_call(cx: &mut TestAppContext) {
+    let block = format!("```rust\n{}```\n\n", "let x = 1;\n".repeat(400));
+    let note = block.repeat((MAIN_THREAD_BUDGET + TASK_BYTES) / block.len() + 2);
+    let calls = Rc::new(Cell::new(0));
+    let buffer = cx.new(|_| Buffer::new(note.as_str()));
+    let counted = calls.clone();
+    let _listening = cx.update(|cx| {
+        decorations::declare(MANIFEST.layers, cx);
+        decorations::enable([FEATURE], cx);
+        let listener = move |buffer: &Entity<Buffer>, change, cx: &mut App| {
+            counted.set(counted.get() + 1);
+            listener(buffer, change, cx);
+        };
+        decorations::listen(SYNTAX, Rc::new(listener), cx)
+    });
+    let view = buffer.clone();
+    cx.add_window(|_, cx| EditorView::new(view, cx));
+    cx.run_until_parked();
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(marks(cx, &buffer), fresh(&note));
 }
 
 /// One top-level bullet, nested prose, then rust blocks: the outline note of the spec's D7.

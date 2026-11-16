@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{TextStyle, Window, px};
 use inkra_editor::{HeardLayer, RevisionLog};
-use inkra_highlight::{Batch, batch};
+use inkra_highlight::{Batch, BlockChunk, backlog, batch, lex_backlog};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -42,7 +42,8 @@ impl Typing {
         let markdown = Rc::new(parse(buffer.text()));
         let mut syntax = [HeardLayer::new(buffer.edit_mark())];
         if colours {
-            let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
+            let Batch { lexed, pending, .. } = batch(buffer.text(), &markdown, &[], None);
+            let lexed = drained(buffer.text(), &markdown, lexed, &pending);
             syntax[0].land(&buffer, lexed.into_iter().map(styled).collect());
         }
         let mut typing = Self {
@@ -76,7 +77,13 @@ impl Typing {
             self.log.bump(self.log.revision() + 1, moved);
         }
         let held: Vec<_> = syntax.layer().chunks().collect();
-        let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
+        let (text, dirty) = (self.buffer.text(), Some(caret..caret + 1));
+        let Batch {
+            clear,
+            lexed,
+            pending,
+        } = batch(text, &self.markdown, &held, dirty);
+        let lexed = drained(text, &self.markdown, lexed, &pending);
         let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
         let at = self.buffer.edit_mark();
         if let Some(moved) = syntax.publish(&self.buffer, clear, lexed, at) {
@@ -115,4 +122,20 @@ impl Typing {
         };
         shape_document(&inputs, previous, window)
     }
+}
+
+/// `lexed`, then the `pending` blocks, backlog after backlog, as the listener lexes them.
+fn drained(
+    text: &str,
+    markdown: &Markdown,
+    mut lexed: Vec<BlockChunk>,
+    pending: &[usize],
+) -> Vec<BlockChunk> {
+    let mut rest = pending;
+    while !rest.is_empty() {
+        let landed = lex_backlog(backlog(text, markdown, rest));
+        rest = &rest[landed.len()..];
+        lexed.extend(landed);
+    }
+    lexed
 }

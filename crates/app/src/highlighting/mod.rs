@@ -2,8 +2,8 @@
 //! spec, D6).
 
 use gpui::{App, Entity};
-use inkra_highlight::{Batch, BlockChunk, TokenClass, batch};
-use inkra_text::Buffer;
+use inkra_highlight::{Batch, BlockChunk, TokenClass, backlog, batch, lex_backlog};
+use inkra_text::{Buffer, ByteOffset, Splice};
 
 use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
 use crate::editor::parses::parsed;
@@ -33,12 +33,34 @@ pub(crate) static MANIFEST: Manifest = Manifest {
 };
 
 /// Removes each chunk no longer a block's, then lexes each block no chunk holds exactly, in one
-/// publish, whatever the change (D7, deviations 6, 8, 9 and 10).
-fn listener(buffer: &Entity<Buffer>, _: TextChange, cx: &mut App) {
+/// publish: those `change` meets within the main thread's budget, then the rest, backlog after
+/// backlog (D7, D10, deviations 6, 8, 9 and 10).
+fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let markdown = parsed(buffer, cx);
     let held = decorations::chunks(SYNTAX, buffer, cx);
     let text = buffer.read(cx);
-    let Batch { clear, lexed } = batch(text.text(), &markdown, &held);
+    let dirty = match change {
+        TextChange::Edited(splices) => {
+            Splice::compose(splices).map(|splice| splice.at..splice.at + splice.inserted_len)
+        }
+        TextChange::Lost | TextChange::Opened { fresh: false } => {
+            Some(ByteOffset::new(0)..text.len())
+        }
+        TextChange::Opened { fresh: true } => None,
+    };
+    let Batch {
+        clear,
+        mut lexed,
+        pending,
+    } = batch(text.text(), &markdown, &held, dirty);
+    // Until the background task (S2c), the main thread lexes the backlogs too; each lands one chunk
+    // per block it took.
+    let mut rest = pending.as_slice();
+    while !rest.is_empty() {
+        let landed = lex_backlog(backlog(text.text(), &markdown, rest));
+        rest = &rest[landed.len()..];
+        lexed.extend(landed);
+    }
     let lexed = lexed.into_iter().map(styled).collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
     // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.
