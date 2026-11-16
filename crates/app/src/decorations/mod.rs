@@ -7,7 +7,7 @@ use std::rc::Weak;
 
 use gpui::{App, BorrowAppContext, Entity, EntityId, Global, Subscription, WeakEntity};
 pub(crate) use inkra_editor::TextChange;
-use inkra_editor::{HeardLayer, Lost, Moved, RevisionLog};
+use inkra_editor::{HeardLayer, Moved, RevisionLog};
 use inkra_text::{Buffer, ByteOffset, EditMark};
 
 use crate::feature::FeatureId;
@@ -196,10 +196,8 @@ pub(crate) fn publish(
         let declared = decorations.declared.len();
         let entry = entry(&mut decorations.entries, declared, &buffer, cx);
         let text = buffer.read(cx);
-        let moved = match entry.layers[rank].publish(text, removed, chunks, at) {
-            Ok(None) => return false,
-            Ok(Some(range)) => Moved::Range(text.edit_mark(), range),
-            Err(Lost) => Moved::Whole,
+        let Some(moved) = entry.layers[rank].publish(text, removed, chunks, at) else {
+            return false;
         };
         entry.bump(&mut decorations.revisions, moved);
         true
@@ -225,7 +223,7 @@ pub(crate) fn chunks(
     };
     let layer = entry.layers[rank].layer();
     // Offsets behind the buffer's would mis-plan without a sign.
-    debug_assert!(layer.is_empty() || layer.at() == buffer.read(cx).edit_mark());
+    debug_assert!(!layer.trails(buffer.read(cx).edit_mark()));
     layer.chunks().collect()
 }
 
@@ -257,9 +255,8 @@ pub(crate) fn sync(buffer: &Entity<Buffer>, cx: &mut App) {
             .filter(|(_, declared)| declared.enabled);
         for (layer, declared) in enabled {
             match layer.catch_up(text) {
-                Ok(false) => {}
-                Ok(true) => moved = moved.or(Some(Moved::Shift)),
-                Err(Lost) => moved = Some(Moved::Whole),
+                Some(Moved::Whole) => moved = Some(Moved::Whole),
+                caught => moved = moved.or(caught),
             }
             if let Some(listener) = declared.listener.as_ref().and_then(Weak::upgrade)
                 && let Some(change) = layer.hear(text)
@@ -337,7 +334,7 @@ impl Drawn<'_> {
             .layers
             .iter()
             .map(HeardLayer::layer)
-            .any(|layer| !layer.is_empty() && layer.at() != self.at);
+            .any(|layer| layer.trails(self.at));
         (!stale).then(|| self.log.revision())
     }
 

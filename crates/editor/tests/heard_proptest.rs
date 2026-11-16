@@ -1,4 +1,4 @@
-use inkra_editor::{HeardLayer, TextChange};
+use inkra_editor::{HeardLayer, Moved, TextChange};
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 use proptest::prelude::*;
 
@@ -115,11 +115,11 @@ proptest! {
                     let (at, since) = marks[pick % marks.len()];
                     let lost = model.catch_up(since);
                     let published = layer.publish(&buffer, Vec::new(), Vec::new(), at);
-                    prop_assert_eq!(published.is_err(), lost);
+                    prop_assert_eq!(published, lost.then_some(Moved::Whole));
                 }
                 Step::CatchUp => {
                     let lost = model.catch_up(model.now);
-                    prop_assert_eq!(layer.catch_up(&buffer).is_err(), lost);
+                    prop_assert_eq!(layer.catch_up(&buffer), lost.then_some(Moved::Whole));
                 }
                 Step::Hear => prop_assert_eq!(layer.hear(&buffer), model.hear()),
                 Step::Switch(on) => {

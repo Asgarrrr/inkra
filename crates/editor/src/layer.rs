@@ -58,6 +58,12 @@ impl<S: Clone + PartialEq> Layer<S> {
         self.chunks.is_empty()
     }
 
+    /// Whether it holds chunks and stands at an edit mark other than `mark`.
+    #[must_use]
+    pub fn trails(&self, mark: EditMark) -> bool {
+        !self.is_empty() && self.at != mark
+    }
+
     pub fn clear(&mut self) {
         self.chunks.clear();
     }

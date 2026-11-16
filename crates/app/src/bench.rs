@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gpui::{TextStyle, Window, px};
-use inkra_editor::{HeardLayer, Lost, Moved, RevisionLog};
+use inkra_editor::{HeardLayer, RevisionLog};
 use inkra_highlight::{Batch, batch};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
@@ -72,24 +72,14 @@ impl Typing {
             return;
         }
         let [syntax] = &mut self.syntax;
-        let caught = match syntax.catch_up(&self.buffer) {
-            Ok(false) => None,
-            Ok(true) => Some(Moved::Shift),
-            Err(Lost) => Some(Moved::Whole),
-        };
-        if let Some(moved) = caught {
+        if let Some(moved) = syntax.catch_up(&self.buffer) {
             self.log.bump(self.log.revision() + 1, moved);
         }
         let held: Vec<_> = syntax.layer().chunks().collect();
         let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
         let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
         let at = self.buffer.edit_mark();
-        let published = match syntax.publish(&self.buffer, clear, lexed, at) {
-            Ok(None) => None,
-            Ok(Some(range)) => Some(Moved::Range(at, range)),
-            Err(Lost) => Some(Moved::Whole),
-        };
-        if let Some(moved) = published {
+        if let Some(moved) = syntax.publish(&self.buffer, clear, lexed, at) {
             self.log.bump(self.log.revision() + 1, moved);
         }
     }

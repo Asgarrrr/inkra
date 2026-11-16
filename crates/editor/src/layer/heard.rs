@@ -5,6 +5,7 @@ use std::ops::Range;
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 
 use super::{Layer, Lost, Published};
+use crate::Moved;
 
 /// What a layer's listener has not heard of a buffer yet.
 #[derive(Debug, PartialEq, Eq)]
@@ -47,35 +48,38 @@ impl<S: Clone + PartialEq> HeardLayer<S> {
         &self.layer
     }
 
-    /// As `Layer::catch_up`; `Ok(true)` when the layer held marks behind `text`, which now draw
-    /// elsewhere.
-    ///
-    /// # Errors
-    /// As `Layer::catch_up`.
-    pub fn catch_up(&mut self, text: &Buffer) -> Result<bool, Lost> {
-        let moved = !self.layer.is_empty() && self.layer.at() != text.edit_mark();
+    /// As `Layer::catch_up`; `Shift` when the layer held marks behind `text`, which now draw
+    /// elsewhere, `Whole` when it was lost.
+    #[must_use]
+    pub fn catch_up(&mut self, text: &Buffer) -> Option<Moved> {
+        let shifts = self.layer.trails(text.edit_mark());
         let caught = self.layer.catch_up(text);
         self.track(&caught);
-        caught.map(|()| moved)
+        match caught {
+            Ok(()) => shifts.then_some(Moved::Shift),
+            Err(Lost) => Some(Moved::Whole),
+        }
     }
 
-    /// As `Layer::publish`.
-    ///
-    /// # Errors
-    /// As `Layer::publish`.
+    /// As `Layer::publish`; its range at `text`'s edit mark, where the layer stands after, or
+    /// `Whole` when it was lost.
     ///
     /// # Panics
     /// As `Layer::publish`.
+    #[must_use]
     pub fn publish(
         &mut self,
         text: &Buffer,
         removed: Vec<Range<ByteOffset>>,
         chunks: Vec<Published<S>>,
         at: EditMark,
-    ) -> Result<Option<Range<ByteOffset>>, Lost> {
+    ) -> Option<Moved> {
         let published = self.layer.publish(text, removed, chunks, at);
         self.track(&published);
-        published
+        match published {
+            Ok(range) => range.map(|range| Moved::Range(text.edit_mark(), range)),
+            Err(Lost) => Some(Moved::Whole),
+        }
     }
 
     /// Publishes an open's `chunks` at `text`'s edit mark, which a first hearing then compares.
