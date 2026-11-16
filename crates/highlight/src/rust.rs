@@ -80,7 +80,7 @@ impl Tokens<'_> {
     fn literal(&mut self, open: Open, token: usize, at: usize) -> (usize, Open) {
         let bytes = self.line.as_bytes();
         let (end, open, class) = match open {
-            Open::Nothing => return (at, open),
+            Open::Nothing | Open::Quoted { .. } => return (at, Open::Nothing),
             Open::BlockComment { depth } => {
                 let (end, open) = literals::block_comment(bytes, at, depth);
                 (end, open, TokenClass::Comment)

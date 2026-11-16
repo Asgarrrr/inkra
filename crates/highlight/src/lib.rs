@@ -11,11 +11,14 @@ pub use plan::MAIN_THREAD_BUDGET;
 use state::LineState;
 
 mod backlog;
+mod bash;
 mod batch;
 #[cfg(test)]
 mod fixtures;
+mod json;
 mod open;
 mod plan;
+mod python;
 mod rust;
 mod scan;
 mod state;
@@ -23,16 +26,27 @@ mod state;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
     Rust,
+    Python,
+    Json,
+    Bash,
 }
+
+/// Each language's info words and lexer (Languages, D13).
+const LANGUAGES: [(Language, &[&str], Lexer); 4] = [
+    (Language::Rust, &["rust", "rs"], rust::lex),
+    (Language::Python, &["python", "py"], python::lex),
+    (Language::Json, &["json", "jsonc"], json::lex),
+    (Language::Bash, &["bash", "sh", "shell", "zsh"], bash::lex),
+];
 
 impl Language {
     /// The language a fence's info word names, in any case; `None` for an unknown word.
     #[must_use]
     pub fn from_info(word: &str) -> Option<Self> {
-        ["rust", "rs"]
+        LANGUAGES
             .iter()
-            .any(|name| name.eq_ignore_ascii_case(word))
-            .then_some(Self::Rust)
+            .find(|(_, names, _)| names.iter().any(|name| name.eq_ignore_ascii_case(word)))
+            .map(|&(language, _, _)| language)
     }
 }
 
@@ -60,8 +74,8 @@ pub fn highlight<'a>(
     lines: impl Iterator<Item = (ByteOffset, &'a str)>,
     out: &mut Vec<(Range<ByteOffset>, TokenClass)>,
 ) {
-    let lex: Lexer = match language {
-        Language::Rust => rust::lex,
+    let Some(&(_, _, lex)) = LANGUAGES.iter().find(|row| row.0 == language) else {
+        return;
     };
     lines.fold(LineState::default(), |state, (start, line)| {
         lex(state, line, start, out)
