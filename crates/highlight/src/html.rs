@@ -11,11 +11,10 @@ use crate::scan::{Sink, block_comment, drive, end_while, entity_end, quoted, ski
 use crate::state::{LineState, Nest, Open, Prev};
 use crate::{css, javascript};
 
-/// The embedded language open at the line state's bottom, if any.
+/// The embedded language open at the line state's bottom, if any; an empty stack holds only
+/// `Nest::default()`.
 fn embedded(state: &LineState) -> Option<Nest> {
-    (state.depth > 0)
-        .then_some(state.stack[0])
-        .filter(|bottom| matches!(bottom, Nest::Script | Nest::Style))
+    Some(state.stack[0]).filter(|bottom| matches!(bottom, Nest::Script | Nest::Style))
 }
 
 fn is_tag_name(byte: u8) -> bool {
@@ -62,14 +61,12 @@ impl Tokens<'_> {
             .windows(closer.len())
             .position(|window| window.eq_ignore_ascii_case(closer))
             .map_or(bytes.len(), |len| at + len);
-        if cut > at {
-            self.state = lex(
-                self.state,
-                &self.line[at..cut],
-                self.sink.start + at,
-                self.sink.out,
-            );
-        }
+        self.state = lex(
+            self.state,
+            &self.line[at..cut],
+            self.sink.start + at,
+            self.sink.out,
+        );
         if cut == bytes.len() {
             return cut;
         }
@@ -132,7 +129,6 @@ impl Tokens<'_> {
     fn tag(&mut self, at: usize) -> usize {
         let bytes = self.line.as_bytes();
         match bytes[at] {
-            byte if byte.is_ascii_whitespace() => at + 1,
             b'/' if bytes.get(at + 1) == Some(&b'>') => {
                 self.state.prev = Prev::Other;
                 self.sink.token(at..at + 2, Punctuation)
@@ -160,11 +156,11 @@ impl Tokens<'_> {
                 }
             }
             quote @ (b'"' | b'\'') => self.value(at, at + 1, quote),
-            _ => {
-                let end = end_while(bytes, at, is_attribute_name).max(at + 1);
-                self.sink.push(at..end, Attribute);
-                end
+            byte if is_attribute_name(byte) => {
+                let end = end_while(bytes, at, is_attribute_name);
+                self.sink.token(at..end, Attribute)
             }
+            _ => at + 1,
         }
     }
 

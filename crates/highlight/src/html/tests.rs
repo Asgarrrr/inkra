@@ -209,3 +209,39 @@ fn an_unquoted_value_runs_to_a_space_or_the_tag_end_through_slashes() {
         ],
     );
 }
+
+#[test]
+fn a_comment_after_text_and_an_unclosed_doctype() {
+    check(
+        "a <!--b--> <i>\n<!DOCTYPE html",
+        &[
+            ("<!--b-->", Comment),
+            ("<", Punctuation),
+            ("i", Tag),
+            (">", Punctuation),
+            ("<!", Punctuation),
+            ("DOCTYPE html", Tag),
+        ],
+    );
+}
+
+#[test]
+fn a_value_on_the_next_line_is_a_string_and_a_stray_slash_ends_no_tag() {
+    check(
+        "<a href=\n  \"x\" / b>",
+        &[
+            ("<", Punctuation),
+            ("a", Tag),
+            ("href", Attribute),
+            ("=", Punctuation),
+            ("\"x\"", String),
+            ("b", Attribute),
+            (">", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn an_ampersand_without_a_name_or_a_semicolon_is_text() {
+    check("&amp &; &#; &lt;", &[("&lt;", String)]);
+}
