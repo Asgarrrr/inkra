@@ -67,6 +67,14 @@ impl Prefix {
         }
     }
 
+    /// The box over a concealed checkbox: its `x` span on row 0, and whether it is checked.
+    pub(super) fn task_box(&self) -> Option<(Range<Pixels>, bool)> {
+        match self {
+            Self::Margin(_) => None,
+            Self::Gutter(gutter) => Some((gutter.geometry.checkbox.clone()?, gutter.boxed?)),
+        }
+    }
+
     fn geometry(&self) -> Option<&Geometry> {
         match self {
             Self::Margin(_) => None,

@@ -17,6 +17,7 @@ use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
 
 mod layer;
+mod task_boxes;
 
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",

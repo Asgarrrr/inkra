@@ -110,9 +110,11 @@ gutter.
 
 **`Geometry` gains the checkbox's `x` span** and the quote part's width. Both
 come from the same measure. `GutterLayout` holds `Geometry` by value
-(`prefix.rs:188-194`), so these are three `Pixels` added to every gutter line;
-the 256-byte assertion on `LineLayout` (`line.rs:95`) stays the check, and a
-breach boxes the new fields.
+(`prefix/gutter.rs`), so every gutter line gains a `Pixels` and an
+`Option<Range<Pixels>>`. `GutterLayout` also gains `boxed: Option<bool>`: the
+line's own `checked`, set only while its task part is concealed. The 256-byte
+assertion on `LineLayout` (`line.rs:95`) stays the check, and a breach boxes
+the new fields.
 
 **(D) A lazy line carries the quote part only.** A lazy line copies the
 whole `Geometry` today (`prefix.rs:233-238, 264-268`). Under `> - [ ] a\n  b`,
@@ -245,8 +247,11 @@ strike, so `⌘L` can never make a struck line without a box.
 No new colour token: `md_marker`, `accent` and `editor_background` exist
 (`crates/app/src/theme/colors.rs`). The token count test
 (`crates/app/src/theme/file/tests.rs:9`) stays at 41. `theme.rs` gains
-`TASK_BOX_SIZE` beside `QUOTE_BAR_WIDTH` (`theme.rs:292`). A distinct box
-colour waits for a theme that asks for one.
+`TASK_BOX_SIZE` (16 px), `TASK_BOX_RADIUS` (4 px), `TASK_BOX_BORDER` (1.5 px)
+and `TASK_CHECK_SIZE` (12 px) beside `QUOTE_BAR_WIDTH` (`theme.rs:292`). They
+come from mockup C: a 15 px box with a 4 px radius and a 1.5 px border at
+15 px text. At the 18 px body the box takes 16 px, the check 12 px. A
+distinct box colour waits for a theme that asks for one.
 
 ## D9. Incremental draw
 

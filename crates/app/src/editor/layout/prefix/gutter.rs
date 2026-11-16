@@ -18,6 +18,8 @@ pub(in crate::editor::layout) struct GutterLayout {
     /// `Some` only while a part is revealed (a caret touches a `>` or the task part, spec D2).
     pub(super) shown: Option<Box<Shown>>,
     pub(super) geometry: Geometry,
+    /// Whether the line's own task is checked, while its task part is concealed: a box paints.
+    pub(super) boxed: Option<bool>,
 }
 
 impl GutterLayout {
@@ -94,6 +96,8 @@ pub(super) struct Geometry {
     pub(super) bars: Rc<[Pixels]>,
     /// Where the task part starts; `width` with no task.
     quote_width: Pixels,
+    /// The checkbox's `x` span, measured as `width`; `None` with no task, and on a lazy line.
+    pub(super) checkbox: Option<Range<Pixels>>,
 }
 
 /// What gutters share within one `shape_document`: the geometry of the line above, built or
@@ -156,6 +160,11 @@ impl<'a> GutterCarry<'a> {
             len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
             geometry,
+            boxed: gutter
+                .task
+                .as_ref()
+                .filter(|_| !reveal.task)
+                .map(|task| task.checked),
         }
     }
 }
@@ -185,6 +194,10 @@ impl Geometry {
                 .map(|quote| shaped.x_for_index(*quote - start))
                 .collect(),
             quote_width: shaped.x_for_index(split),
+            checkbox: gutter.task.as_ref().map(|task| {
+                shaped.x_for_index(task.checkbox.start - start)
+                    ..shaped.x_for_index(task.checkbox.end - start)
+            }),
         }
     }
 
@@ -193,6 +206,7 @@ impl Geometry {
             width: self.quote_width,
             bars: Rc::clone(&self.bars),
             quote_width: self.quote_width,
+            checkbox: None,
         }
     }
 }

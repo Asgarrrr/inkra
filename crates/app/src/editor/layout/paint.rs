@@ -1,10 +1,14 @@
 use std::ops::Range;
 
-use gpui::{App, Bounds, ContentMask, Pixels, Point, TextAlign, Window, fill, point, px};
+use gpui::{
+    App, BorderStyle, Bounds, ContentMask, Pixels, Point, TextAlign, TransformationMatrix, Window,
+    fill, outline, point, px, size,
+};
 
 use super::DocumentLayout;
 use super::prefix::Prefix;
 use crate::theme;
+use crate::ui::IconName;
 
 #[cfg(test)]
 thread_local! {
@@ -15,6 +19,8 @@ thread_local! {
     static PAINTED_CLIPS: std::cell::RefCell<Vec<(Pixels, Bounds<Pixels>)>> =
         const { std::cell::RefCell::new(Vec::new()) };
     static PAINTED_TOPS: std::cell::RefCell<Vec<Pixels>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static PAINTED_BOXES: std::cell::RefCell<Vec<(Bounds<Pixels>, bool)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -40,6 +46,12 @@ pub(crate) fn painted_tops() -> Vec<Pixels> {
 #[cfg(test)]
 pub(crate) fn painted_clips() -> Vec<(Pixels, Bounds<Pixels>)> {
     PAINTED_CLIPS.with(|painted| painted.borrow().clone())
+}
+
+/// Each task box the last paint on this thread drew: its window bounds, and whether it drew checked.
+#[cfg(test)]
+pub(crate) fn painted_boxes() -> Vec<(Bounds<Pixels>, bool)> {
+    PAINTED_BOXES.with(|painted| painted.borrow().clone())
 }
 
 impl DocumentLayout {
@@ -72,6 +84,8 @@ impl DocumentLayout {
         PAINTED_CLIPS.with(|painted| painted.borrow_mut().clear());
         #[cfg(test)]
         PAINTED_TOPS.with(|painted| painted.borrow_mut().clear());
+        #[cfg(test)]
+        PAINTED_BOXES.with(|painted| painted.borrow_mut().clear());
         for bar in &self.bars[bars] {
             window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
         }
@@ -131,6 +145,10 @@ impl DocumentLayout {
             {
                 log::warn!("failed to paint the prefix of line {index}: {err}");
             }
+            if let Some((checkbox, checked)) = line.prefix.as_ref().and_then(Prefix::task_box) {
+                let centre = point((checkbox.start + checkbox.end) / 2., line.row_height / 2.);
+                self.paint_task_box(line_origin + centre, checked, window, cx);
+            }
         }
         let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
         for block in &self.code_blocks[blocks] {
@@ -147,6 +165,37 @@ impl DocumentLayout {
                 log::warn!("failed to paint a code block label: {err}");
             }
         }
+    }
+
+    /// A square centred on `centre`: an outline, or an accent fill with a check.
+    fn paint_task_box(&self, centre: Point<Pixels>, checked: bool, window: &mut Window, cx: &App) {
+        let colors = &self.theme.colors;
+        let bounds = Bounds::centered_at(centre, size(theme::TASK_BOX_SIZE, theme::TASK_BOX_SIZE));
+        if !checked {
+            window.paint_quad(
+                outline(bounds, colors.md_marker, BorderStyle::Solid)
+                    .border_widths(theme::TASK_BOX_BORDER)
+                    .corner_radii(theme::TASK_BOX_RADIUS),
+            );
+            #[cfg(test)]
+            PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, false)));
+            return;
+        }
+        window.paint_quad(fill(bounds, colors.accent).corner_radii(theme::TASK_BOX_RADIUS));
+        let check =
+            Bounds::centered_at(centre, size(theme::TASK_CHECK_SIZE, theme::TASK_CHECK_SIZE));
+        if let Err(err) = window.paint_svg(
+            check,
+            IconName::Check.path().into(),
+            None,
+            TransformationMatrix::unit(),
+            colors.editor_background.into(),
+            cx,
+        ) {
+            log::warn!("failed to paint a task's check: {err}");
+        }
+        #[cfg(test)]
+        PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, true)));
     }
 
     /// The lines reaching `top..bottom` in layout space, one more each side: a glyph can overhang its row.
