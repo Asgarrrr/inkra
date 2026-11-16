@@ -1374,3 +1374,7 @@ Zed's `highlights.scm` for its language, as in S3.
       leaves it under a `Brace`; the line end pops it once it is on top.
     - Rust's lexer is unchanged: rustfmt splits `impl<` and `where` lists
       rarely, and `Deferred` records it.
+    - Measured beside main on 2026-11-16: `lex_typescript` −1.3% to −3.0%,
+      `lex_javascript` −1.1% to −1.3%, the long and nested line groups −2.7%
+      to +2.4%. An A/A run of the same code moved the short groups ±0.5% and
+      the line groups up to +7.5%, so no change is measurable.
