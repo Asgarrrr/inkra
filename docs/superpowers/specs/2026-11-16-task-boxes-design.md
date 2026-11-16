@@ -363,6 +363,11 @@ emits for every list item. T3 and T4a are independent of each other.
   and the checkbox's `x` span in T1b, where paint first reads it: an unread
   field fails clippy's `dead_code`. `prefix.rs` is near 400 lines after T1a;
   T1b plans its split.
+- **From this spec, in T2.** `task_at` takes the buffer's version and answers
+  `None` on a mismatch, so the check (G) reads `shaped_at` where it lives;
+  `layout/mod.rs` is at its 400 lines and gains no accessor. The click passes
+  the version; a `GutterLayout`'s `Boxed` holds the checkbox from the line's
+  start, so a carried line stays line-relative.
 
 ## Deferred
 
