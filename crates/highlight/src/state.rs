@@ -86,6 +86,10 @@ pub(crate) enum Nest {
     Arith,
     /// Bash's opening `` ` ``.
     Backtick,
+    /// Bash's `(` right after an assignment's `=`; `declare` when the look-behind was `Declare`.
+    Array {
+        declare: bool,
+    },
 }
 
 /// The previous significant token, D4's one-token look-behind; whitespace and comments leave it.

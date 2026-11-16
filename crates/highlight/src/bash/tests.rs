@@ -135,6 +135,7 @@ fn a_reserved_word_is_a_keyword_only_where_a_command_starts() {
             ("out", String),
         ],
     );
+    check("in x", &[("in", Function), ("x", String)]);
 }
 
 #[test]
@@ -158,6 +159,30 @@ fn a_for_loop_names_its_variable_then_takes_in_and_its_words() {
     check(
         "select x\nin y",
         &[("select", Keyword), ("in", Keyword), ("y", String)],
+    );
+}
+
+#[test]
+fn a_for_loop_without_in_takes_do_on_its_line_or_the_next() {
+    check(
+        "for x\ndo echo; done",
+        &[
+            ("for", Keyword),
+            ("do", Keyword),
+            ("echo", Function),
+            (";", Punctuation),
+            ("done", Keyword),
+        ],
+    );
+    check(
+        "for x do :; done",
+        &[
+            ("for", Keyword),
+            ("do", Keyword),
+            (":", Function),
+            (";", Punctuation),
+            ("done", Keyword),
+        ],
     );
 }
 
@@ -236,6 +261,88 @@ fn an_assignment_keeps_its_name_plain_and_the_command_after_it() {
         ],
     );
     check("=x", &[("=x", Function)]);
+}
+
+#[test]
+fn an_array_takes_its_words_as_arguments_up_to_its_own_paren() {
+    check(
+        "files=(a \"b c\" $d 4 -x if) cmd",
+        &[
+            ("=", Operator),
+            ("(", Punctuation),
+            ("a", String),
+            ("\"b c\"", String),
+            ("$", Punctuation),
+            ("4", Constant),
+            ("-x", Constant),
+            ("if", String),
+            (")", Punctuation),
+            ("cmd", Function),
+        ],
+    );
+    check(
+        "files=($(ls) x) y",
+        &[
+            ("=", Operator),
+            ("(", Punctuation),
+            ("$(", Punctuation),
+            ("ls", Function),
+            (")", Punctuation),
+            ("x", String),
+            (")", Punctuation),
+            ("y", Function),
+        ],
+    );
+    check(
+        "declare -a arr=(x) -r",
+        &[
+            ("declare", Keyword),
+            ("-a", Constant),
+            ("=", Operator),
+            ("(", Punctuation),
+            ("x", String),
+            (")", Punctuation),
+            ("-r", Constant),
+        ],
+    );
+}
+
+#[test]
+fn an_array_spans_lines() {
+    check(
+        "files=(\n  one # first\n  two\n)\nls",
+        &[
+            ("=", Operator),
+            ("(", Punctuation),
+            ("one", String),
+            ("# first", Comment),
+            ("two", String),
+            (")", Punctuation),
+            ("ls", Function),
+        ],
+    );
+}
+
+#[test]
+fn an_assignment_takes_a_subscript_before_its_operator() {
+    check(
+        "arr[$i$j]=v map[${k[0]}]+=w x[1]y=z",
+        &[
+            ("[", Punctuation),
+            ("$", Punctuation),
+            ("$", Punctuation),
+            ("]", Punctuation),
+            ("=", Operator),
+            ("v", String),
+            ("[", Punctuation),
+            ("${", Punctuation),
+            ("}", Punctuation),
+            ("]", Punctuation),
+            ("+=", Operator),
+            ("w", String),
+            ("x[1]y=z", Function),
+        ],
+    );
 }
 
 #[test]

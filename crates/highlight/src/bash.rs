@@ -15,10 +15,11 @@ mod arith;
 mod expand;
 mod heredoc;
 
-/// Zed's reserved words; each is a keyword only where a command could start.
-const KEYWORDS: [&str; 19] = [
+/// Zed's reserved words but `in`; each is a keyword only where a command could start, and `in`
+/// only after `for NAME` or `case WORD` (S3 deviation 5).
+const KEYWORDS: [&str; 18] = [
     "case", "declare", "do", "done", "elif", "else", "esac", "export", "fi", "for", "function",
-    "if", "in", "local", "select", "then", "unset", "until", "while",
+    "if", "local", "select", "then", "unset", "until", "while",
 ];
 
 /// Bytes that end an unquoted word.
@@ -29,7 +30,7 @@ fn is_separator(byte: u8) -> bool {
 /// The look-behind past a keyword in a command position.
 fn after_keyword(keyword: &str) -> Prev {
     match keyword {
-        "fi" | "done" | "esac" | "in" => Prev::Command,
+        "fi" | "done" | "esac" => Prev::Command,
         "for" | "select" => Prev::For,
         "case" => Prev::Case,
         "function" => Prev::Fn,
@@ -51,21 +52,43 @@ fn whole(prev: Prev, word: &str) -> Option<(TokenClass, Prev)> {
         (Prev::Other, _) if KEYWORDS.contains(&word) => Some((Keyword, after_keyword(word))),
         (Prev::ForIn, "in") | (Prev::Pattern, "esac") => Some((Keyword, Prev::Command)),
         (Prev::CaseIn, "in") => Some((Keyword, Prev::Pattern)),
+        (Prev::ForIn, "do") => Some((Keyword, Prev::Other)),
         (Prev::Test, "!" | "=" | "==" | "!=" | "=~") => Some((Operator, Prev::Test)),
         (Prev::Test, _) if test_operator => Some((Keyword, Prev::Test)),
         _ => None,
     }
 }
 
-/// The ends of the name and of the `=` or `+=` of an assignment that starts `word`.
-fn assignment(word: &str) -> Option<(usize, usize)> {
+/// The ends of the name, of its `[…]` subscript if any, and of the `=` or `+=` of an assignment
+/// that starts `word`.
+fn assignment(word: &str) -> Option<(usize, usize, usize)> {
     let bytes = word.as_bytes();
     let name = bytes
         .iter()
         .position(|&byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))?;
-    let op = name + usize::from(bytes[name] == b'+');
-    (name > 0 && !bytes[0].is_ascii_digit() && bytes.get(op) == Some(&b'='))
-        .then_some((name, op + 1))
+    let mut op = name;
+    if bytes[name] == b'[' {
+        // Braces count too, so a `${…}` in the subscript closes inside it.
+        let mut depth = 0_i32;
+        let close = bytes[name..].iter().position(|&byte| {
+            depth += match byte {
+                b'[' | b'{' => 1,
+                b']' | b'}' => -1,
+                _ => 0,
+            };
+            depth == 0
+        })?;
+        if bytes[name + close] != b']' {
+            return None;
+        }
+        op = name + close + 1;
+    }
+    let eq = op + usize::from(bytes.get(op) == Some(&b'+'));
+    (name > 0 && !bytes[0].is_ascii_digit() && bytes.get(eq) == Some(&b'=')).then_some((
+        name,
+        op,
+        eq + 1,
+    ))
 }
 
 /// The class of an argument's unquoted text: a flag or a number is a constant.
@@ -128,6 +151,7 @@ impl Tokens<'_> {
             b'$' if rest.starts_with(b"$((") => self.open_arith(at, 3),
             b'$' if rest.starts_with(b"$(") => {
                 self.sink.push(at..at + 2, Punctuation);
+                self.state.push(Nest::Paren);
                 self.state.prev = Prev::Other;
                 at + 2
             }
@@ -176,15 +200,22 @@ impl Tokens<'_> {
                     },
                 )
             }
-            _ => (
-                1,
-                Punctuation,
-                match prev {
-                    Prev::Pattern => Prev::Other,
-                    Prev::Test => Prev::Test,
+            _ => {
+                let next = match (prev, self.state.top()) {
+                    (Prev::Pattern, _) => Prev::Other,
+                    (_, Some(Nest::Array { declare })) => {
+                        self.state.pop();
+                        if declare { Prev::Declare } else { Prev::Other }
+                    }
+                    (_, Some(Nest::Paren)) => {
+                        self.state.pop();
+                        Prev::Command
+                    }
+                    (Prev::Test, _) => Prev::Test,
                     _ => Prev::Command,
-                },
-            ),
+                };
+                (1, Punctuation, next)
+            }
         };
         self.sink.push(at..at + len, class);
         self.state.prev = next;
@@ -199,6 +230,9 @@ impl Tokens<'_> {
             .position(|&byte| is_separator(byte))
             .map_or(bytes.len(), |len| at + len);
         let word = &self.line[at..end];
+        if let Some(Nest::Array { .. }) = self.state.top() {
+            return self.segments(at, Some(argument(word)));
+        }
         let prev = self.state.prev;
         if let Some((class, next)) = whole(prev, word) {
             self.sink.push(at..end, class);
@@ -206,10 +240,18 @@ impl Tokens<'_> {
             return end;
         }
         if matches!(prev, Prev::Other | Prev::Declare)
-            && let Some((name, op)) = assignment(word)
+            && let Some((name, op, value)) = assignment(word)
         {
-            self.sink.push(at + name..at + op, Operator);
-            return self.segments(at + op, Some(argument(&word[op..])));
+            self.subscript(at + name..at + op);
+            self.sink.push(at + op..at + value, Operator);
+            if at + value == end && bytes.get(end) == Some(&b'(') {
+                self.sink.push(end..end + 1, Punctuation);
+                self.state.push(Nest::Array {
+                    declare: prev == Prev::Declare,
+                });
+                return end + 1;
+            }
+            return self.segments(at + value, Some(argument(&word[value..])));
         }
         let (class, next) = match prev {
             Prev::Other => (Some(Function), Prev::Command),
@@ -223,6 +265,24 @@ impl Tokens<'_> {
         };
         self.state.prev = next;
         self.segments(at, class)
+    }
+
+    /// An assignment's subscript at `range`, empty or `[…]`: brackets as punctuation, the
+    /// parameters inside lit.
+    fn subscript(&mut self, range: Range<usize>) {
+        if range.is_empty() {
+            return;
+        }
+        let bytes = self.line.as_bytes();
+        let inside = range.start + 1..range.end - 1;
+        self.sink.push(range.start..inside.start, Punctuation);
+        let mut lit = inside.start;
+        for at in inside.clone() {
+            if at >= lit && bytes[at] == b'$' && expand::is_parameter(bytes, at) {
+                lit = self.parameter(at);
+            }
+        }
+        self.sink.push(inside.end..range.end, Punctuation);
     }
 
     /// The pieces of the word at `at` up to its end or an open string: unquoted text in `class`,
