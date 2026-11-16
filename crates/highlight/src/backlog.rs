@@ -82,5 +82,18 @@ pub fn lex_backlog(backlog: Backlog) -> Vec<BlockChunk> {
         .collect()
 }
 
+/// The `pending` blocks' chunks, in order, backlog after backlog, as the app lexes them on the
+/// main thread before the background task (S2c).
+#[must_use]
+pub fn lex_pending(text: &str, markdown: &Markdown, mut pending: &[usize]) -> Vec<BlockChunk> {
+    let mut lexed = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let landed = lex_backlog(backlog(text, markdown, pending));
+        pending = &pending[landed.len()..];
+        lexed.extend(landed);
+    }
+    lexed
+}
+
 #[cfg(test)]
 mod tests;

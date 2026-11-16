@@ -2,7 +2,7 @@
 //! spec, D6).
 
 use gpui::{App, Entity};
-use inkra_highlight::{Batch, BlockChunk, TokenClass, backlog, batch, lex_backlog};
+use inkra_highlight::{Batch, BlockChunk, TokenClass, batch, lex_pending};
 use inkra_text::{Buffer, ByteOffset, Splice};
 
 use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
@@ -53,14 +53,7 @@ fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
         mut lexed,
         pending,
     } = batch(text.text(), &markdown, &held, dirty);
-    // Until the background task (S2c), the main thread lexes the backlogs too; each lands one chunk
-    // per block it took.
-    let mut rest = pending.as_slice();
-    while !rest.is_empty() {
-        let landed = lex_backlog(backlog(text.text(), &markdown, rest));
-        rest = &rest[landed.len()..];
-        lexed.extend(landed);
-    }
+    lexed.extend(lex_pending(text.text(), &markdown, &pending));
     let lexed = lexed.into_iter().map(styled).collect();
     let (at, buffer) = (text.edit_mark(), buffer.downgrade());
     // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.

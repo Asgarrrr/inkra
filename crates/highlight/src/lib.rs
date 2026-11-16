@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-pub use backlog::{Backlog, TASK_BYTES, backlog, lex_backlog};
+pub use backlog::{Backlog, TASK_BYTES, backlog, lex_backlog, lex_pending};
 pub use batch::{BLOCK_LIMIT, Batch, BlockChunk, batch, block_marks};
 pub use open::{OPEN_PARSE_LIMIT, open_chunks};
 pub use plan::MAIN_THREAD_BUDGET;

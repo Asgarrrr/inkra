@@ -10,7 +10,7 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use inkra_editor::Layer;
 use inkra_highlight::{
-    Batch, MAIN_THREAD_BUDGET, TASK_BYTES, TokenClass, backlog, batch, lex_backlog,
+    Batch, MAIN_THREAD_BUDGET, TASK_BYTES, TokenClass, backlog, batch, lex_pending,
 };
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
@@ -37,12 +37,7 @@ fn call(buffer: &Buffer, layer: &mut Layer<TokenClass>, markdown: &Markdown) -> 
         mut lexed,
         pending,
     } = batch(text, markdown, &held, dirty);
-    let mut rest = pending.as_slice();
-    while !rest.is_empty() {
-        let landed = lex_backlog(backlog(text, markdown, rest));
-        rest = &rest[landed.len()..];
-        lexed.extend(landed);
-    }
+    lexed.extend(lex_pending(text, markdown, &pending));
     let count = lexed.len();
     layer
         .publish(buffer, clear, lexed, buffer.edit_mark())
@@ -92,7 +87,7 @@ fn bench_many_blocks(c: &mut Criterion) {
     let markdown = parse(buffer.text());
     let Batch { pending, .. } = batch(buffer.text(), &markdown, &[], None);
     assert_eq!(pending.len(), BLOCKS);
-    let lexed = lex_backlog(backlog(buffer.text(), &markdown, &pending));
+    let lexed = lex_pending(buffer.text(), &markdown, &pending);
     // The first `n` blocks hold their own marks under another tag, as after a renamed info word:
     // a call lexes them, and each publish compares equal marks in full (deviation 10).
     let held = |n: usize| {
