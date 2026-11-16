@@ -221,10 +221,11 @@ fn a_late_publish_after_the_switch_off_draws_nothing(cx: &mut TestAppContext) {
     assert_eq!(colors, 0);
 }
 
-/// Pins that a publish from before an off/on switch needs no generation: it lands mapped through
-/// the edits made while off, and the republish on `Lost` then draws the current text (D6, D10).
+/// Pins that a publish from before an off/on switch needs no generation: the edits made while off
+/// reached its chunk, so it lands nothing (code highlighting spec, S2b deviation 1), and the
+/// republish on `Lost` then draws the current text (D10).
 #[gpui::test]
-fn a_late_publish_across_an_off_on_switch_lands_mapped(cx: &mut TestAppContext) {
+fn a_late_publish_across_an_off_on_switch_skips_the_chunk_an_edit_reached(cx: &mut TestAppContext) {
     fakes::set_delay(Some(DELAY));
     let (fs, window, mut visual) = opened(cx, TODO_CATALOG, "a TODO b TODO c\n");
     visual.executor().advance_clock(DELAY);
@@ -246,10 +247,7 @@ fn a_late_publish_across_an_off_on_switch_lands_mapped(cx: &mut TestAppContext) 
 
     visual.executor().advance_clock(DELAY / 2);
     visual.run_until_parked();
-    assert_eq!(
-        warning_runs(window, &mut visual),
-        [(8, false), (4, true), (5, false)]
-    );
+    assert_eq!(warning_runs(window, &mut visual), [(17, false)]);
 
     visual.executor().advance_clock(DELAY / 2);
     visual.run_until_parked();

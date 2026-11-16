@@ -37,7 +37,10 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # splice: `<=` hands it to `map_chunk`, whose `map_mark` moves it and its marks by
 # `inserted_len - removed_len` as the shift loop does.
 #
-# Equivalent. A chunk that starts where a publish ends is past it: `<=` drains it, and
+# Equivalent. A chunk that ends where a publish starts is before it: `>=` pops it off `done`,
+# and the next loop pushes it straight back.
+#
+# Equivalent. A chunk that starts where a publish ends is past it: `<=` takes it, and
 # either branch puts it back whole, as a newer chunk or as the tail of an older one.
 #
 # Equivalent. A content line ends at a `\n` or at the block's end, which is a `\n` or the
@@ -114,7 +117,8 @@ exclude_re = [
     "^crates/index/src/words/name_words\\.rs:[0-9]+:58: replace \\+ with \\* in NameWords::build$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::marks_in$",
     "^crates/editor/src/layer\\.rs:[0-9]+:50: replace < with <= in Layer<S>::shift$",
-    "^crates/editor/src/layer\\.rs:[0-9]+:64: replace < with <= in Layer<S>::replace$",
+    "^crates/editor/src/layer/cursor\\.rs:[0-9]+:67: replace > with >= in Cursor<S>::replace$",
+    "^crates/editor/src/layer/cursor\\.rs:[0-9]+:70: replace < with <= in Cursor<S>::replace$",
     "^crates/markdown/src/content_lines\\.rs:[0-9]+:37: replace < with <= in content_lines$",
     "^crates/app/src/index/loading\\.rs:[0-9]+:[0-9]+: replace < with <= in IndexSync::apply_landed$",
     "^crates/app/src/timeline\\.rs:[0-9]+:[0-9]+: replace && with \\|\\| in Timeline::mark$",

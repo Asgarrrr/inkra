@@ -2,11 +2,11 @@ use inkra_text::{Buffer, ByteOffset};
 
 use super::*;
 
-fn at(offset: usize) -> ByteOffset {
+pub(super) fn at(offset: usize) -> ByteOffset {
     ByteOffset::new(offset)
 }
 
-fn span(range: Range<usize>) -> Range<ByteOffset> {
+pub(super) fn span(range: Range<usize>) -> Range<ByteOffset> {
     at(range.start)..at(range.end)
 }
 
@@ -44,7 +44,7 @@ fn publish(
     published.map(|range| range.map(|range| range.start.get()..range.end.get()))
 }
 
-fn twenty() -> Buffer {
+pub(super) fn twenty() -> Buffer {
     Buffer::new("abcdefghijklmnopqrst")
 }
 
@@ -74,6 +74,27 @@ fn an_identical_publish_changes_nothing() {
     assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(Some(2..9)));
 
     assert_eq!(publish(&mut layer, &buffer, 0..10, &marks), Ok(None));
+}
+
+/// The syntax listener publishes an empty batch on every keystroke in prose.
+#[test]
+fn an_empty_publish_moves_no_chunk() {
+    let mut buffer = twenty();
+    let mut layer = Layer::new(buffer.edit_mark());
+    publish(&mut layer, &buffer, 2..6, &[(3..4, 'a')]).unwrap();
+    publish(&mut layer, &buffer, 8..12, &[]).unwrap();
+    let old = buffer.edit_mark();
+    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+    let held = layer.chunks.as_ptr();
+
+    assert_eq!(
+        layer.publish(&buffer, Vec::new(), Vec::new(), old),
+        Ok(None)
+    );
+
+    assert_eq!(layer.chunks.as_ptr(), held);
+    assert_eq!(chunks(&layer), [3..7, 9..13]);
+    assert_eq!(layer.at(), buffer.edit_mark());
 }
 
 #[test]
@@ -418,55 +439,15 @@ fn tags(layer: &Layer<char>) -> Vec<(Range<usize>, Option<u64>)> {
 }
 
 #[test]
-fn a_chunk_keeps_its_tag_until_a_splice_changes_its_bytes() {
-    for late in [false, true] {
-        for (removed, inserted, kept) in [
-            (0..1, "", true),
-            (18..19, "", true),
-            (5..5, "x", true),
-            (15..15, "x", true),
-            (4..5, "", true),
-            (15..16, "", true),
-            (6..6, "x", false),
-            (14..14, "x", false),
-            (4..6, "", false),
-            (14..16, "", false),
-            (7..8, "y", false),
-        ] {
-            let mut buffer = twenty();
-            let old = buffer.edit_mark();
-            let mut layer = Layer::<char>::new(old);
-            if !late {
-                layer
-                    .publish(&buffer, Vec::new(), vec![(span(5..15), 7, vec![])], old)
-                    .unwrap();
-            }
-
-            buffer.transact(|buffer| buffer.replace(span(removed.clone()), inserted));
-            if late {
-                layer
-                    .publish(&buffer, Vec::new(), vec![(span(5..15), 7, vec![])], old)
-                    .unwrap();
-            } else {
-                layer.catch_up(&buffer).unwrap();
-            }
-
-            let tag = layer.chunks().next().unwrap().1;
-            assert_eq!(tag, kept.then_some(7), "{late} {removed:?} {inserted:?}");
-        }
-    }
-}
-
-#[test]
 fn a_stored_mark_takes_twelve_bytes() {
     assert!(size_of::<Mark<u8>>() <= 12);
 }
 
-fn widest() -> usize {
+pub(super) fn widest() -> usize {
     usize::try_from(u32::MAX).unwrap_or(usize::MAX)
 }
 
-fn chunk_marks(chunk: &Chunk<char>) -> Vec<(Range<ByteOffset>, char)> {
+pub(super) fn chunk_marks(chunk: &Chunk<char>) -> Vec<(Range<ByteOffset>, char)> {
     chunk
         .marks_in(at(0)..chunk.end())
         .map(|(mark, &style)| (mark, style))
@@ -487,34 +468,6 @@ fn a_mark_ending_past_u32_from_its_chunk_start_drops_every_mark_and_the_tag() {
         let marks = if kept { marks.to_vec() } else { vec![] };
         assert_eq!(chunk_marks(&chunk), marks, "{end}");
         assert_eq!(chunk.tag, kept.then_some(7), "{end}");
-    }
-}
-
-#[test]
-fn a_splice_pushing_a_mark_past_u32_from_its_chunk_start_drops_every_mark() {
-    for (inserted_len, kept) in [(1, true), (2, false)] {
-        let last = widest() - 2..widest() - 1;
-        let chunk = Chunk::new(
-            at(0)..at(widest() - 1),
-            EditMark::default(),
-            None,
-            [(span(1..2), 'a'), (span(last.clone()), 'b')],
-        );
-        let splice = Splice {
-            at: at(10),
-            removed_len: 0,
-            inserted_len,
-        };
-
-        let grown =
-            map_chunk(chunk, splice).unwrap_or_else(|| panic!("a splice inside keeps the chunk"));
-
-        let marks = if kept {
-            vec![(span(1..2), 'a'), (span(last.start + 1..last.end + 1), 'b')]
-        } else {
-            vec![]
-        };
-        assert_eq!(chunk_marks(&grown), marks, "{inserted_len}");
     }
 }
 

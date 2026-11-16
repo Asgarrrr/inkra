@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{TextStyle, Window, px};
 use inkra_editor::{HeardLayer, RevisionLog};
-use inkra_highlight::{Batch, batch};
+use inkra_highlight::{Batch, batch, lex_pending};
 use inkra_markdown::{Markdown, parse};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -42,7 +42,10 @@ impl Typing {
         let markdown = Rc::new(parse(buffer.text()));
         let mut syntax = [HeardLayer::new(buffer.edit_mark())];
         if colours {
-            let Batch { lexed, .. } = batch(buffer.text(), &markdown, &[]);
+            let Batch {
+                mut lexed, pending, ..
+            } = batch(buffer.text(), &markdown, &[], None);
+            lexed.extend(lex_pending(buffer.text(), &markdown, &pending));
             syntax[0].land(&buffer, lexed.into_iter().map(styled).collect());
         }
         let mut typing = Self {
@@ -76,7 +79,13 @@ impl Typing {
             self.log.bump(self.log.revision() + 1, moved);
         }
         let held: Vec<_> = syntax.layer().chunks().collect();
-        let Batch { clear, lexed } = batch(self.buffer.text(), &self.markdown, &held);
+        let (text, dirty) = (self.buffer.text(), Some(caret..caret + 1));
+        let Batch {
+            clear,
+            mut lexed,
+            pending,
+        } = batch(text, &self.markdown, &held, dirty);
+        lexed.extend(lex_pending(text, &self.markdown, &pending));
         let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
         let at = self.buffer.edit_mark();
         if let Some(moved) = syntax.publish(&self.buffer, clear, lexed, at) {

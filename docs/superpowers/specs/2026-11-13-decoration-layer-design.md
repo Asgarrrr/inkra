@@ -157,6 +157,13 @@ The core maps a publish through `edits_since(at)`, by D3's rule. Text typed
 while a background task ran is therefore not coloured, and the colours around
 it land in the right place.
 
+Amended by the code highlighting spec, S2b deviation 1: a chunk that a splice
+since `at` reached lands nothing, since its marks were computed from bytes that
+changed. The layer keeps what it holds there. Only the chunks no splice reached
+land mapped. A publisher of one whole-text chunk that is slower than the
+typing interval therefore lands only once the edits stop: every publish meets
+a splice made during its run.
+
 `edits_since(at)` returns `None` once the ring dropped splices past `at`. The
 core then drops the publish, clears the layer for that note, and sends `Lost`.
 The same happens when a layer's own edit mark falls out of the ring, for
@@ -319,13 +326,15 @@ A note open:
 - a mark never covers a byte it did not cover before the edits;
 - a chunk untouched by the splices keeps its marks, shifted only;
 - a publish at an old mark lands equal to a publish at the current mark,
-  except on bytes inserted since.
+  except on bytes inserted since, unless an edit since reached its chunk: then
+  it lands nothing (code highlighting spec, S2b deviation 1).
 
 `app`, headless `#[gpui::test]` against `MemFs`, with the test feature:
 
 - a publish colours the runs of its range;
 - a keystroke shifts the colours after it, and the typed text is not coloured;
-- a late publish lands mapped;
+- a late publish lands mapped where no edit since reached its chunk, and
+  lands nothing where one did (code highlighting spec, S2b deviation 1);
 - an overflow sends `Lost`, and a full publish restores the colours;
 - switch off removes the colours on the next frame; switch on restores them;
 - a note opens coloured from its open function;
@@ -442,7 +451,10 @@ number.
     mark it was computed at. A publish leaves every chunk computed after it in
     place and lands only around them, so a byte shows the newest result that
     covers it. A whole-note recompute that finishes after the edit of one block
-    therefore colours the rest of the note (D5, D6).
+    therefore colours the rest of the note (D5, D6). Since the code
+    highlighting spec's S2b deviation 1, that holds per chunk: a whole-note
+    publish is one chunk, so the edit reaches it and it lands nothing. A
+    publisher in chunks still colours the chunks the edit missed.
 16. **Splices are mapped one at a time.** `catch_up` walks the chunks once per
     splice, not once for all of them. A keystroke is one splice, so it costs one
     walk; a transaction of many splices, such as `apply_diff`, costs one walk

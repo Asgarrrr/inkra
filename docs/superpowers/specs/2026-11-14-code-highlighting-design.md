@@ -233,7 +233,7 @@ a theme without these keys shows the built-in colours. The mapping from
 clears and recomputes by decoration layer D10.
 
 Every code block is one block chunk, coloured or not. A block with no
-language, an unknown one, or over 512 KiB (D10) gets an empty block chunk. A
+language, an unknown one, or over 256 KiB (D10) gets an empty block chunk. A
 chunk that no longer is a block is published empty (D7) and stays, with no
 marks; deviation 6 removes it instead. So after the listener, and once its background task lands, the layer
 holds:
@@ -488,18 +488,27 @@ the flight would leave. The splice log keeps 256 (`buffer/log.rs`). Three worse
 cases: one block of the size; blocks of 512 bytes, both of dense code at about
 one mark per byte, such as `(),;` repeated; and empty fenced blocks, the most
 chunks per byte. `TASK_BYTES` is the largest size where the worst of the three
-takes at most 0.5 ms. The listener bench gains the backlog's copy at
+takes at most 0.5 ms. Scattered splices reach most blocks, which then land
+nothing (S2b deviation 1), so as built each case also runs with the splices
+in a prose paragraph above the blocks, and the worst of the six counts (S2b
+deviation 10). The listener bench gains the backlog's copy at
 `TASK_BYTES`; like the rest of that bench, it measures the pure part only
 (deviation 5).
 
 A block over `TASK_BYTES` lands alone, as the first block of its backlog. The
 same bench measures one block at `BLOCK_LIMIT`; its landing must take at most
 4 ms, half a frame at 120 Hz. Otherwise `BLOCK_LIMIT` drops to the largest
-measured size within 4 ms, and this paragraph records it.
+measured size within 4 ms, and this paragraph records it. A block that a
+splice since reached lands nothing (S2b deviation 1), so the bound is measured
+with no splice reaching the block: 200 splices in a prose paragraph above it,
+or none (S2b deviation 10). One block landed in 3.31 ms at 256 KiB and in
+6.35 ms at 512 KiB, so `BLOCK_LIMIT` dropped to 256 KiB.
 
-**`BLOCK_LIMIT`.** A block over 524,288 bytes (512 KiB) is not lexed; it gets
-an empty block chunk (D6). The bound is the 2026-11-11 spec's, which Zed's
-highlight cache also uses (`highlight_cache.rs:14-16`). A mark is
+**`BLOCK_LIMIT`.** A block over 262,144 bytes (256 KiB) is not lexed; it gets
+an empty block chunk (D6). The 2026-11-11 spec's bound, 512 KiB, which Zed's
+highlight cache also uses (`highlight_cache.rs:14-16`), failed the 4 ms
+landing above. `MAIN_THREAD_BUDGET` must not pass it, and a `const` assertion
+in `batch.rs` checks that. A mark is
 `(Range<ByteOffset>, MarkStyle)`, 24 bytes, so marks cost about 3.4 times the
 block text.
 
@@ -639,15 +648,16 @@ light. The look is tuned after it ships, as for code blocks.
   `TASK_BYTES`; a first block over it still goes; `lex_backlog` gives the
   marks `block_marks` gives on the same blocks.
 - `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
-  deadline; past it, only the empty chunks of unknown-language blocks
-  (deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
+  deadline; past it, only the empty chunks of unknown-language blocks and of
+  blocks over `BLOCK_LIMIT` (deviation 11, S2b deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
   each with its tag, after random edits and publishes
   (`proptest`, beside the layer's own).
-- `inkra-editor`: a late publish maps each chunk as the fold of `map_chunk`
-  over every splice since did (deviation 12), after random edits
+- `inkra-editor`: `follow` maps a chunk as the fold of `map_chunk` over every
+  splice since (deviation 12), and a publish equals its changes placed one by
+  one with reached late chunks skipped (S2b deviation 1), after random edits
   (`proptest`).
 - `app`, headless `#[gpui::test]` against `MemFs`:
   - a block's runs carry the token colours; a revealed fence stays
@@ -903,9 +913,9 @@ number.
     D6 gave such a block an empty chunk, and D10 counted block bytes against
     the budget. A block with no known language, or over `BLOCK_LIMIT`, now
     gets its empty chunk from `batch` at once, whatever the dirty range and
-    the budget, and from `open_chunks` too, past its deadline included. A
-    block over `BLOCK_LIMIT` cannot reach `open_chunks`, since
-    `OPEN_PARSE_LIMIT` is lower, so `open_chunks` checks the language only.
+    the budget, and from `open_chunks` too, past its deadline included.
+    `BLOCK_LIMIT` is now lower than `OPEN_PARSE_LIMIT`, so `open_chunks`
+    checks both, through the same `unlexed` as `batch` (S2b deviation 11).
     Left pending, a block over
     `BLOCK_LIMIT` would never become exact, and each landing would spawn a
     task for it, forever.
@@ -917,3 +927,159 @@ number.
     nowhere strictly inside it now moves the chunk's start, or nothing when it
     lies after the chunk. The marks are relative to the start, so they stay,
     as `Layer::shift` already does for the chunks a splice does not reach.
+
+## As built (S2b)
+
+Code cites these as "S2b deviation N".
+
+1. **A late chunk that a splice since reached does not land.** `Layer::publish`
+   maps each chunk of a late publish through the splices since its edit mark
+   `at`. When one of them reaches the chunk, by deviation 12's rule (it
+   removes one of the chunk's bytes or inserts strictly inside it), the chunk
+   is dropped: its marks were lexed from bytes that changed. The layer keeps
+   what it holds there, the old marks the core already shifted. Where a
+   splice reached that held chunk too, its tag went at the catch-up. Where
+   none did, it still has the range or the tag that made the block pending.
+   Either way the next replan lexes the block again, unless a held chunk has
+   it exactly, and an exact chunk holds marks lexed from the same bytes
+   (deviation 10). A chunk that no splice reached still maps through
+   `follow`. With no
+   splice since `at`, everything lands as before. The returned span covers
+   only the changes that landed, so a dropped chunk moves no mark. Removals
+   still map through `follow`: dropping one would leave a chunk the publisher
+   meant to clear. The rule is the core's, so it holds for every layer, not
+   only `syntax`: the test feature's late whole-text chunk now lands nothing
+   once an edit reached it (`a_late_publish_across_an_off_on_switch_skips_the_chunk_an_edit_reached`).
+   Phase 1 of S2b mapped every reached chunk through the rest of the splices,
+   and the landing bench failed its gate (figures below).
+2. **One pass over the chunk list per publish.** The list-wide `replace`
+   drained and spliced the layer's whole `Vec` once per change. A `Cursor`
+   (`layer/cursor.rs`) now splits the list at a point: the chunks before it in
+   a `Vec`, the rest in a `VecDeque`. Each change seeks from where the last one
+   left the point and puts its pieces back in front of the rest. Changes in a
+   batch may overlap and come in any order, since a later change wins, so the
+   point may move back; in document order, as the listener and a landing
+   publish, each chunk moves a bounded number of times. `follow_all` maps one
+   change: it moves only the chunk's start until the first splice that reaches
+   it, then folds `follow` from there, or drops a fill chunk there (deviation
+   1). It is not one walk merged over the changes and the splices: that walk
+   needs sorted, disjoint changes, and `publish` accepts overlapping ones, so
+   it would be a second path. Per change the cost is one comparison per
+   splice, with no allocation and no mark rebuilt for a splice that does not
+   reach it. A reference `proptest` (`layer/cursor/tests.rs`) checks a publish
+   against the list-wide `replace` with `map_chunk` folded over every splice:
+   a dropped chunk keeps the old mapped marks, the others equal the fold.
+3. **The deviation-12 `proptest` sits in the unit tests of `layer/map.rs`**
+   (`layer/map/tests.rs`), not beside `tests/layer_proptest.rs`. Its
+   reference is the private `map_chunk`.
+4. **The drain is bounded per landing, not by the pending count at its
+   start.** D12 asked for at most one landing per block pending when the drain
+   starts. The model test requires instead that each landing copied at the
+   current edit mark leaves strictly fewer blocks pending, and that the drain
+   ends with none. A stale first landing can make an exact block inexact: a
+   pending block's range can map onto a block whose held chunk is exact, and
+   the landing replaces that chunk under the old shape's tag. Every landing
+   after the first shrinks the pending set, so the drain still ends.
+5. **The listener walks the backlog without replanning.** It advances through
+   `pending` by the number of chunks each `lex_backlog` returns, one per block
+   taken, instead of D10 step 5's replan. Within one call the edit mark does
+   not change, so a replan would find the same remainder.
+6. **`BLOCK_LIMIT` is `pub`.** The landing bench reads it instead of restating
+   it.
+7. **The listener bench lexes the backlogs past the budget.** Without that,
+   its sizes over 64 KiB would measure no lex, because `batch` now caps the
+   main thread's lex. The copy is timed on its own, in `listener_backlog_copy`.
+8. **`lex_pending` holds the backlog loop.** The listener, the layout bench's
+   `Typing` and the listener bench each lexed every pending block, backlog
+   after backlog, in three copies. `inkra_highlight::lex_pending` is that loop
+   once. D10's task lexes one backlog per flight, so it needs only
+   `lex_backlog`.
+9. **The landing bench holds its stale blocks on a twin buffer.** It held them
+   by a publish at the old edit mark, which deviation 1 now skips for every
+   block a splice reached. A second buffer with the same text, never edited,
+   takes that publish; the layer then catches up to the scattered buffer,
+   as the landing finds it.
+10. **The landing bench measures splices that reach no block.** Scattered
+    splices reach most blocks, and a reached block lands nothing (deviation
+    1), so D10's scattered cases mostly time a skip. `landing_above` puts the
+    200 splices in a 4 KiB prose paragraph above the blocks, so that none
+    reaches one, for the same three cases; `TASK_BYTES` takes the worst of
+    both. `landing_block_limit` measures one block from 32 KiB to 512 KiB
+    with the splices above it, and with none since: a landing with no edit
+    since lands every chunk whole.
+11. **`open_chunks` gives a block over `BLOCK_LIMIT` its empty chunk.** At
+    512 KiB the bound was over `OPEN_PARSE_LIMIT`, so the open function
+    never met such a block (deviation 11). At 256 KiB it can, and it lexed
+    it. `unlexed` in `batch.rs` now decides for both: no known language, or
+    over `BLOCK_LIMIT`. Such a block spends no deadline check.
+12. **An empty publish returns before it touches the chunk list.** The
+    syntax listener publishes an empty batch on every keystroke in prose,
+    and deviation 2's cursor moved the whole list for it. `Layer::publish`
+    still catches up and still reports `Lost`, then returns `Ok(None)`.
+
+The dirty range comes from `inkra_text::Splice::compose` over the heard
+splices; deviation 2's `inkra_highlight::dirty` is gone. A pure deletion
+composes to an empty range at its offset, which `batch` still meets, as
+touching counts.
+
+**`TASK_BYTES` is 32,768 (32 KiB); `BLOCK_LIMIT` is 262,144 (256 KiB).**
+`cargo bench -p inkra-highlight --bench landing` measured these medians on
+2026-11-16. With D10's 200 scattered splices since the landing's edit mark,
+which mostly time a skip (deviation 10):
+
+| Bytes   | One block | Dense blocks | Empty blocks |
+| ------- | --------- | ------------ | ------------ |
+| 4 KiB   | 11.4 us   | 13.4 us      | 39.3 us      |
+| 8 KiB   | 21.6 us   | 26.0 us      | 97.4 us      |
+| 16 KiB  | 41.3 us   | 53.0 us      | 198.4 us     |
+| 32 KiB  | 82.4 us   | 104.6 us     | 404.3 us     |
+| 64 KiB  | 161.2 us  | 214.1 us     | 806.1 us     |
+| 128 KiB | 341.3 us  | 671.1 us     | 1.64 ms      |
+
+With the 200 splices in a prose paragraph above the blocks, reaching none
+(`landing_above`):
+
+| Bytes   | One block | Dense blocks | Empty blocks |
+| ------- | --------- | ------------ | ------------ |
+| 4 KiB   | 38.7 us   | 46.6 us      | 53.2 us      |
+| 8 KiB   | 73.0 us   | 92.5 us      | 108.9 us     |
+| 16 KiB  | 142.7 us  | 188.9 us     | 212.5 us     |
+| 32 KiB  | 288.5 us  | 393.7 us     | 427.4 us     |
+| 64 KiB  | 571.6 us  | 756.4 us     | 853.0 us     |
+| 128 KiB | 1.20 ms   | 1.51 ms      | 1.71 ms      |
+
+The largest size where the worst of the six is at most 0.5 ms is 32 KiB, at
+427.4 us (empty blocks, splices above).
+
+One block, with no splice reaching it (`landing_block_limit`):
+
+| Bytes   | Splices above | No splice |
+| ------- | ------------- | --------- |
+| 32 KiB  | 286.6 us      | 284.4 us  |
+| 64 KiB  | 573.3 us      | 582.1 us  |
+| 128 KiB | 1.21 ms       | 1.23 ms   |
+| 256 KiB | 3.31 ms       | 3.28 ms   |
+| 512 KiB | 6.34 ms       | 6.35 ms   |
+
+The largest size within 4 ms is 256 KiB. With scattered splices, one block at
+512 KiB took 1.36 ms, because the splices reached it and it landed nothing.
+
+Before deviations 1 and 2, the scattered bench measured one block at 7.74 ms
+at 4 KiB and 248 ms at 128 KiB, empty blocks at 448 us at 4 KiB and 109.7 ms
+at 128 KiB, and one block at 512 KiB at 1.002 s.
+
+`cargo bench -p inkra-highlight --bench listener`, the same day, with
+`TASK_BYTES` at 32 KiB:
+
+| Bytes   | One block | Many blocks |
+| ------- | --------- | ----------- |
+| 4 KiB   | 19.2 us   | 26.0 us     |
+| 8 KiB   | 44.0 us   | 45.7 us     |
+| 16 KiB  | 89.8 us   | 85.0 us     |
+| 32 KiB  | 176.9 us  | 164.7 us    |
+| 64 KiB  | 368.4 us  | 327.6 us    |
+| 128 KiB | 730.0 us  | 658.4 us    |
+
+`MAIN_THREAD_BUDGET` stays 64 KiB, at 368.4 us. Past 64 KiB the call lexes
+its backlogs too (deviation 7). `listener_backlog_copy` copies one backlog at
+`TASK_BYTES` in 13.3 us as one block and in 12.8 us as blocks of 512 bytes.

@@ -5,7 +5,8 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-/// The block bytes a listener call lexes within 0.5 ms (D10); no call is capped at it before S2c.
+/// The block bytes a listener call lexes within 0.5 ms (D10); `batch` lexes no more, but the app
+/// lexes the backlog in the same call before S2c.
 pub const MAIN_THREAD_BUDGET: usize = 65_536;
 
 #[derive(Debug, Default, PartialEq, Eq)]

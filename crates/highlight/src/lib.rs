@@ -4,11 +4,13 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-pub use batch::{Batch, BlockChunk, batch, block_marks};
+pub use backlog::{Backlog, TASK_BYTES, backlog, lex_backlog, lex_pending};
+pub use batch::{BLOCK_LIMIT, Batch, BlockChunk, batch, block_marks};
 pub use open::{OPEN_PARSE_LIMIT, open_chunks};
 pub use plan::MAIN_THREAD_BUDGET;
 use state::LineState;
 
+mod backlog;
 mod batch;
 #[cfg(test)]
 mod fixtures;
