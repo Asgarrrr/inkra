@@ -13,6 +13,7 @@ use state::LineState;
 mod backlog;
 mod bash;
 mod batch;
+mod css;
 #[cfg(test)]
 mod fixtures;
 mod javascript;
@@ -34,10 +35,11 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Tsx,
+    Css,
 }
 
 /// Each language's info words and lexer (Languages, D13).
-const LANGUAGES: [(Language, &[&str], Lexer); 7] = [
+const LANGUAGES: [(Language, &[&str], Lexer); 8] = [
     (Language::Rust, &["rust", "rs"], rust::lex),
     (Language::Python, &["python", "py"], python::lex),
     (Language::Json, &["json", "jsonc"], json::lex),
@@ -49,6 +51,7 @@ const LANGUAGES: [(Language, &[&str], Lexer); 7] = [
     ),
     (Language::TypeScript, &["typescript", "ts"], typescript::lex),
     (Language::Tsx, &["tsx"], typescript::lex_tsx),
+    (Language::Css, &["css"], css::lex),
 ];
 
 impl Language {

@@ -145,4 +145,10 @@ pub(crate) enum Prev {
     Param,
     /// TypeScript, past a parameter's or a declared name's `:`: the next identifier is a type.
     Annotation,
+    /// CSS, inside a selector.
+    Selector,
+    /// CSS, past a property's name, up to its `;` or `}`.
+    Declaration,
+    /// CSS, past an at-rule's keyword, up to its `{` or `;`.
+    AtRule,
 }
