@@ -6,6 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
+use crate::scan::{Sink, drive, is_all_caps, is_word, number, skip_spaces, word_end};
 use crate::state::{LineState, Nest, Open, Prev};
 
 mod literals;
@@ -23,29 +24,6 @@ const BUILTIN_TYPES: [&str; 17] = [
     "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
     "i128", "isize", "f32", "f64",
 ];
-
-/// A word byte is ASCII alphanumeric, `_` or non-ASCII, so a word ends on a char boundary.
-fn is_word(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
-}
-
-fn is_ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_' || !byte.is_ascii()
-}
-
-fn word_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| !is_word(byte))
-        .map_or(bytes.len(), |len| at + len)
-}
-
-fn skip_spaces(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|byte| !byte.is_ascii_whitespace())
-        .map_or(bytes.len(), |len| at + len)
-}
 
 /// Whether `(` follows `at` on the line, past spaces and a turbofish `::<…>`.
 fn is_call(bytes: &[u8], at: usize) -> bool {
@@ -81,38 +59,28 @@ fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-/// `true`, `false`, or two or more of `[A-Z0-9_]` from an ASCII uppercase letter.
+/// `true`, `false`, or an all-caps name.
 fn is_constant(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    matches!(name, "true" | "false")
-        || bytes.len() >= 2
-            && bytes[0].is_ascii_uppercase()
-            && bytes
-                .iter()
-                .all(|&byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+    matches!(name, "true" | "false") || is_all_caps(name)
 }
 
 /// One line's tokens, pushed at the line's start offset.
 struct Tokens<'a> {
     line: &'a str,
-    start: ByteOffset,
-    out: &'a mut Vec<(Range<ByteOffset>, TokenClass)>,
+    sink: Sink<'a>,
     state: LineState,
 }
 
 impl Tokens<'_> {
     fn push(&mut self, range: Range<usize>, class: TokenClass) {
-        if !range.is_empty() {
-            self.out
-                .push((self.start + range.start..self.start + range.end, class));
-        }
+        self.sink.push(range, class);
     }
 
     /// Scans `open` from `at` to its closer or the line end, as one token from `token`.
     fn literal(&mut self, open: Open, token: usize, at: usize) -> (usize, Open) {
         let bytes = self.line.as_bytes();
         let (end, open, class) = match open {
-            Open::Nothing => return (at, open),
+            Open::Nothing | Open::Quoted { .. } => return (at, Open::Nothing),
             Open::BlockComment { depth } => {
                 let (end, open) = literals::block_comment(bytes, at, depth);
                 (end, open, TokenClass::Comment)
@@ -148,7 +116,7 @@ impl Tokens<'_> {
             b'"' => self.literal(Open::Str { raw_hashes: None }, at, at + 1),
             b'\'' => self.quote(at, at),
             byte if byte.is_ascii_digit() => {
-                let end = literals::number(bytes, at);
+                let end = number(bytes, at);
                 self.push(at..end, TokenClass::Constant);
                 self.state.prev = Prev::Other;
                 (end, Open::Nothing)
@@ -250,14 +218,17 @@ pub(crate) fn lex(
 ) -> LineState {
     let mut tokens = Tokens {
         line,
-        start,
-        out,
+        sink: Sink { start, out },
         state,
     };
-    let (mut at, mut open) = tokens.literal(state.open, 0, 0);
-    while open == Open::Nothing && at < line.len() {
-        (at, open) = tokens.step(at);
-    }
+    let (at, mut open) = tokens.literal(state.open, 0, 0);
+    drive(line.len(), at, |at| {
+        (open == Open::Nothing).then(|| {
+            let next;
+            (next, open) = tokens.step(at);
+            next
+        })
+    });
     LineState {
         open,
         ..tokens.state

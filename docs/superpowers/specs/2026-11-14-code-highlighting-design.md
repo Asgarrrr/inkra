@@ -621,8 +621,11 @@ light. The look is tuned after it ships, as for code blocks.
 
 | Figure | Expected | How it is checked |
 |---|---|---|
-| Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B | `stat -f %z` on the release binary, `main` against each slice |
+| Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B; S3 (Python, JSON, Bash): `main` 19,717,024 B, S3 19,752,496 B, difference +35,472 B | `stat -f %z` on the release binary, `main` against each slice |
 | Lex, Rust | S1a medians: 1.71 us for 20 lines (923 B), 54.7 us for 500 lines (16.1 KB), 646 us for 5,000 lines (169 KB) | `cargo bench -p inkra-highlight -- --quick`, the texts of the 2026-11-11 tree-sitter figures |
+| Lex, Python | S3 medians: 1.91 us for 20 lines (657 B), 49.7 us for 500 lines (16.1 KB), 505 us for 5,000 lines (162 KB) | `cargo bench -p inkra-highlight --bench lex -- --quick`, group `lex_python`: a sample repeated to the Rust texts' line counts (S3 deviation 10) |
+| Lex, JSON | S3 medians: 0.42 us for 20 lines (471 B), 10.5 us for 500 lines (11.8 KB), 105 us for 5,000 lines (118 KB) | the same, group `lex_json` |
+| Lex, Bash | S3 medians: 0.95 us for 20 lines (531 B), 24.1 us for 500 lines (13.3 KB), 241 us for 5,000 lines (133 KB) | the same, group `lex_bash` |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
@@ -1134,3 +1137,86 @@ Code cites these as "S2c deviation N".
 
 No figure changed: S2c moves work between threads and adds no lex. The
 landing bench and the listener bench measure the same pure parts as in S2b.
+
+## As built (S3)
+
+Code cites these as "S3 deviation N". Where D4 is silent, each lexer follows
+Zed's `highlights.scm` for its language (`vendor/zed-reference/crates/grammars/src/`),
+mapped to D5's classes by the 2026-11-11 spec's capture table.
+
+1. **Each new language has its own scene.** The viewport of a shot holds one
+   block of this size, so blocks added after the Rust one in
+   `code-highlighting` would not be seen. `code-highlighting-python`,
+   `code-highlighting-json` and `code-highlighting-bash` show one block each;
+   `code-highlighting` keeps its fixed Rust text for S6.
+2. **The lexers share `scan.rs`.** The Rust lexer's word, space, number and
+   all-caps scans, an escaped quoted string, and the line's token sink moved
+   there, since two or three lexers need each. Rust's escaped string now calls
+   the shared `quoted`; its raw string and nested block comment stay its own.
+   `Open::Quoted` carries a quoted string across lines for Python and Bash.
+   Every lexer runs its steps through `scan::drive`, which asserts that each
+   step advances: a stalled step would hang the lexing task, so it panics
+   at once instead.
+3. **A heredoc also records whether its body expands.** D2's entry holds the
+   tag's hash and the `<<-` flag. An unquoted tag's body lights its `$`
+   parameters, as in a double-quoted string; a quoted tag's body is one
+   `String`, as Zed shows both. The tag hash is FNV-1a over the tag without
+   quotes and backslashes, folded byte by byte, so a body line hashes the same
+   way. `<<<` is a here-string and queues nothing. A `<<` inside `((` or
+   `$((` is a shift.
+4. **A heredoc body starts on the line after its operator.** Bash starts it
+   after the logical line, so a `\` at that line's end delays it one more
+   line. The lexer does not: the case is rare, and it would cost a flag in the
+   line state.
+5. **Bash, by Zed.** A command's name is `Function`, its argument words are
+   `String`, and a word that starts with `-` or is all digits is `Constant`.
+   A reserved word is a `Keyword` only where a command could start, and `in`
+   only after `for NAME` or `case WORD`. A case pattern up to its `)` is
+   `String`. Inside `[` and `[[`, `-f` and the like are `Keyword`, and `==`,
+   `!=`, `=~`, `=` and `!` are `Operator`. A parameter's `$`, `${` and `}` are
+   `Punctuation` and its name is plain, as Zed's `variable` is. An
+   assignment's name is plain and its `=` an `Operator`; a `[…]` subscript
+   before it has `Punctuation` brackets and lit parameters. A `(` right after
+   the `=` opens an array, whose words are arguments up to its own `)`, across
+   lines. `for NAME` takes `do` with no `in`, on its line or the next. `$(`
+   and a backtick open a command, `$((` and `((` arithmetic, whose names are
+   plain. The look-behind holds the parse position: `Prev` gains Bash's
+   states, and the nesting stack gains `Arith`, `Backtick` and `Array`, and a
+   `Paren` for each `$(`, so an array closes on its own `)`.
+6. **Bash strings light simple parameters only.** In a double-quoted string
+   and an unquoted heredoc body, `$name`, `${…}`, `$1` and the special
+   parameters are lit; `$(…)`, `$((…))` and backticks stay `String`. A
+   shebang stays a `Comment`: Zed's `keyword.directive` needs the block's first
+   line, which the line state does not know.
+7. **Python, by Zed.** `match`, `case` and `type` are keywords only at a line's
+   first word, followed by a space and not by `=`, `.`, `:`, `,` or `)`.
+   `print` and `exec` are builtins, not keywords; `self` is plain. A built-in
+   type is `Type` everywhere, not only in a type or a call. Leading
+   underscores do not count for the all-caps and capitalised rules, as in
+   Zed's regexes. A lone capital, such as `T`, is a `Constant`: Zed's constant
+   regex takes one letter, where Rust's needs two. `.` is `Punctuation`, as in Zed, where Rust has `Operator`;
+   both have one colour. `...` is a `Constant`. A decorator, `@` and its dotted
+   name, is `Attribute` (D4) where Zed has `function.decorator`; an `@` that
+   starts no line, or no name, is the matrix-product `Operator`.
+8. **Python strings are one token per line.** An f-string's `{…}` stays
+   `String`; Zed lights it as embedded code. A string prefix is any of `r`,
+   `u`, `b`, `f`, `t` and their two-letter pairs, in any case. Only a
+   triple-quoted string spans lines; a single-quoted one ends at the line end,
+   a backslash continuation included.
+9. **JSON and JSONC are one language.** Both info words lex comments, as
+   tree-sitter-json does. A string is a key when a `:` follows it on its line;
+   a key whose `:` sits on the next line colours as a value. A block comment
+   does not nest, and a `-` belongs to the number after it.
+10. **The lex bench gains one group per language.** The repo has no Python,
+    JSON or Bash text of the Rust texts' sizes, so each group repeats a sample
+    of about 20 lines up to 20, 500 and 5,000 lines. The Rust group `lex` is
+    unchanged. Python lexes about as fast as Rust per byte; JSON and Bash run
+    faster, with fewer look-aheads.
+11. **The model test is unchanged.** It enumerates no languages: it checks
+    exactness, which holds for any lexer that reads only its block's bytes.
+    The shared `proptest` runs all four lexers on fragments that add triple
+    quotes, decorators, heredoc operators, expansions and case words.
+12. **The code-highlighting scenes list in their own module.** The three new
+    scenes would push `shot/scenes.rs` past its line ceiling, which only
+    lowers. So `code_highlighting::SCENES` holds all five, and `catalogue()`
+    chains it after the rest, in the same order as before.

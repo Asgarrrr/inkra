@@ -28,13 +28,13 @@ pub fn run() {
         .map(|argument| argument.to_string_lossy().into_owned());
 
     let wanted: Vec<&Scene> = match requested.as_deref() {
-        None => catalogue().iter().collect(),
+        None => catalogue().collect(),
         Some("--list") => {
             list();
             return;
         }
         Some(name) => {
-            let Some(scene) = catalogue().iter().find(|scene| scene.name == name) else {
+            let Some(scene) = catalogue().find(|scene| scene.name == name) else {
                 eprintln!("no scene named `{name}`");
                 list();
                 std::process::exit(2);

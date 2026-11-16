@@ -11,6 +11,8 @@ pub(crate) struct LineState {
     pub(crate) depth: u8,
     /// The depth of the open attribute's entry.
     pub(crate) attribute: Option<u8>,
+    /// Bash's pending heredocs in body order; the first one's body is read first.
+    pub(crate) heredocs: [Option<Heredoc>; 2],
 }
 
 impl LineState {
@@ -52,6 +54,23 @@ pub(crate) enum Open {
     Str {
         raw_hashes: Option<u8>,
     },
+    /// A string that closes on `quote`, thrice when `triple`; a `\\` skips a byte when `escapes`.
+    Quoted {
+        quote: u8,
+        triple: bool,
+        escapes: bool,
+    },
+}
+
+/// A Bash heredoc whose body has not ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Heredoc {
+    /// The tag's hash, quotes removed; `tag_hash` of the line that ends the body.
+    pub(crate) tag: u64,
+    /// `<<-`: leading tabs are stripped from each body line and from the closing tag.
+    pub(crate) strip_tabs: bool,
+    /// An unquoted tag: the body expands `$` parameters.
+    pub(crate) expands: bool,
 }
 
 /// What a nesting stack entry opened.
@@ -63,6 +82,14 @@ pub(crate) enum Nest {
     Brace,
     Generic,
     Attribute,
+    /// Bash's `((` or `$((`.
+    Arith,
+    /// Bash's opening `` ` ``.
+    Backtick,
+    /// Bash's `(` right after an assignment's `=`; `declare` when the look-behind was `Declare`.
+    Array {
+        declare: bool,
+    },
 }
 
 /// The previous significant token, D4's one-token look-behind; whitespace and comments leave it.
@@ -81,4 +108,20 @@ pub(crate) enum Prev {
     FnName,
     /// `::`.
     PathSep,
+    /// Bash, past a command's name: the next word is an argument. `Other` is a command position.
+    Command,
+    /// Bash, past `export`, `local`, `declare` or `unset`: names and assignments.
+    Declare,
+    /// Bash, past `for` or `select`: the loop variable.
+    For,
+    /// Bash, past the loop variable: `in`, or an argument.
+    ForIn,
+    /// Bash, past `case`: the subject.
+    Case,
+    /// Bash, past the subject: `in`, or an argument.
+    CaseIn,
+    /// Bash, a case item's pattern, up to its `)`.
+    Pattern,
+    /// Bash, inside `[` or `[[`.
+    Test,
 }

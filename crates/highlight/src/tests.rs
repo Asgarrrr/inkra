@@ -5,15 +5,26 @@ use inkra_text::ByteOffset;
 use super::{Language, TokenClass, block_tokens, highlight};
 
 #[test]
-fn a_rust_info_word_resolves_in_any_case() {
-    for word in ["rust", "rs", "RUST", "Rs"] {
-        assert_eq!(Language::from_info(word), Some(Language::Rust), "{word}");
+fn every_info_word_of_the_languages_table_resolves_in_any_case() {
+    let table = [
+        (Language::Rust, &["rust", "rs"][..]),
+        (Language::Python, &["python", "py"]),
+        (Language::Json, &["json", "jsonc"]),
+        (Language::Bash, &["bash", "sh", "shell", "zsh"]),
+    ];
+    for (language, words) in table {
+        for word in words {
+            let capitalised = word[..1].to_uppercase() + &word[1..];
+            for case in [*word, &word.to_uppercase(), &capitalised] {
+                assert_eq!(Language::from_info(case), Some(language), "{case}");
+            }
+        }
     }
 }
 
 #[test]
 fn an_unknown_info_word_resolves_to_none() {
-    for word in ["nope", "", "rusty", "rust "] {
+    for word in ["nope", "", "rusty", "rust ", "pyth", "jso", "bashh", "js"] {
         assert_eq!(Language::from_info(word), None, "{word:?}");
     }
 }
@@ -36,7 +47,9 @@ fn a_block_lexes_by_its_info_word_and_not_without_a_known_one() {
 
 static FRAGMENTS: &[&str] = &[
     "fn", "let", "r#", "r#\"", "\"#", "\"", "'", "\\", "/*", "*/", "//", "b'", "x", " ", "é", "中",
-    "🦀", "\n", "#", "<", ">", "(", ")", "{", "}", "[", "]", "!", ".", "1", "e", "-", ":",
+    "🦀", "\n", "#", "<", ">", "(", ")", "{", "}", "[", "]", "!", ".", "1", "e", "-", ":", "'''",
+    "\"\"\"", "@", "def ", "match ", "<<", "<<-", "EOF", "\t", "$", "${", "$(", "$((", "))", "`",
+    ";;", "case ", " in", "esac", "for ", "[[", "=", "|", "&", ";", "true",
 ];
 
 proptest! {
@@ -52,7 +65,7 @@ proptest! {
             lines.push((start, line));
             start += line.len() + gap;
         }
-        for language in [Language::Rust] {
+        for language in [Language::Rust, Language::Python, Language::Json, Language::Bash] {
             let mut out = Vec::new();
             let offsets = lines.iter().map(|&(start, line)| (ByteOffset::new(start), line));
             highlight(language, offsets, &mut out);
