@@ -917,3 +917,122 @@ number.
     nowhere strictly inside it now moves the chunk's start, or nothing when it
     lies after the chunk. The marks are relative to the start, so they stay,
     as `Layer::shift` already does for the chunks a splice does not reach.
+
+## As built (S2b)
+
+Code cites these as "S2b deviation N".
+
+1. **A late chunk that a splice since reached does not land.** `Layer::publish`
+   maps each chunk of a late publish through the splices since its edit mark
+   `at`. When one of them reaches the chunk, by deviation 12's rule (it
+   removes one of the chunk's bytes or inserts strictly inside it), the chunk
+   is dropped: its marks were lexed from bytes that changed. The layer keeps
+   what it holds there, the old marks the core already shifted. Their tag went
+   at the catch-up, so the next replan finds the block inexact and lexes it
+   again. A chunk that no splice reached still maps through `follow`. With no
+   splice since `at`, everything lands as before. The returned span covers
+   only the changes that landed, so a dropped chunk moves no mark. Removals
+   still map through `follow`: dropping one would leave a chunk the publisher
+   meant to clear. The rule is the core's, so it holds for every layer, not
+   only `syntax`: the test feature's late whole-text chunk now lands nothing
+   once an edit reached it (`a_late_publish_across_an_off_on_switch_skips_the_chunk_an_edit_reached`).
+   Phase 1 of S2b mapped every reached chunk through the rest of the splices,
+   and the landing bench failed its gate (figures below).
+2. **One pass over the chunk list per publish.** The list-wide `replace`
+   drained and spliced the layer's whole `Vec` once per change. A `Cursor`
+   (`layer/cursor.rs`) now splits the list at a point: the chunks before it in
+   a `Vec`, the rest in a `VecDeque`. Each change seeks from where the last one
+   left the point and puts its pieces back in front of the rest. Changes in a
+   batch may overlap and come in any order, since a later change wins, so the
+   point may move back; in document order, as the listener and a landing
+   publish, each chunk moves a bounded number of times. `follow_all` maps one
+   change: it moves only the chunk's start until the first splice that reaches
+   it, then folds `follow` from there, or drops a fill chunk there (deviation
+   1). It is not one walk merged over the changes and the splices: that walk
+   needs sorted, disjoint changes, and `publish` accepts overlapping ones, so
+   it would be a second path. Per change the cost is one comparison per
+   splice, with no allocation and no mark rebuilt for a splice that does not
+   reach it. A reference `proptest` (`layer/cursor/tests.rs`) checks a publish
+   against the list-wide `replace` with `map_chunk` folded over every splice:
+   a dropped chunk keeps the old mapped marks, the others equal the fold.
+3. **The deviation-12 `proptest` sits in the layer's unit tests**
+   (`layer/tests.rs`), not beside `tests/layer_proptest.rs`. Its reference is
+   the private `map_chunk`.
+4. **The drain is bounded per landing, not by the pending count at its
+   start.** D12 asked for at most one landing per block pending when the drain
+   starts. The model test requires instead that each landing copied at the
+   current edit mark leaves strictly fewer blocks pending, and that the drain
+   ends with none. A stale first landing can make an exact block inexact: a
+   pending block's range can map onto a block whose held chunk is exact, and
+   the landing replaces that chunk under the old shape's tag. Every landing
+   after the first shrinks the pending set, so the drain still ends.
+5. **The listener walks the backlog without replanning.** It advances through
+   `pending` by the number of chunks each `lex_backlog` returns, one per block
+   taken, instead of D10 step 5's replan. Within one call the edit mark does
+   not change, so a replan would find the same remainder.
+6. **`BLOCK_LIMIT` is `pub`.** The landing bench reads it instead of restating
+   524,288.
+7. **The listener bench lexes the backlogs past the budget.** Without that,
+   its sizes over 64 KiB would measure no lex, because `batch` now caps the
+   main thread's lex. The copy is timed on its own, in `listener_backlog_copy`.
+8. **`lex_pending` holds the backlog loop.** The listener, the layout bench's
+   `Typing` and the listener bench each lexed every pending block, backlog
+   after backlog, in three copies. `inkra_highlight::lex_pending` is that loop
+   once. D10's task lexes one backlog per flight, so it needs only
+   `lex_backlog`.
+9. **The landing bench holds its stale blocks on a twin buffer.** It held them
+   by a publish at the old edit mark, which deviation 1 now skips for every
+   block a splice reached. A second buffer with the same text, never edited,
+   takes that publish; the layer then catches up to the scattered buffer,
+   as the landing finds it.
+
+The dirty range comes from `inkra_text::Splice::compose` over the heard
+splices; deviation 2's `inkra_highlight::dirty` is gone. A pure deletion
+composes to an empty range at its offset, which `batch` still meets, as
+touching counts.
+
+**`TASK_BYTES` is 32,768 (32 KiB).** `cargo bench -p inkra-highlight --bench
+landing` measured these medians on 2026-11-16, with D10's 200 scattered
+splices since the landing's edit mark:
+
+| Bytes   | One block | Dense blocks | Empty blocks |
+| ------- | --------- | ------------ | ------------ |
+| 4 KiB   | 12.2 us   | 13.7 us      | 40.6 us      |
+| 8 KiB   | 21.5 us   | 26.8 us      | 94.3 us      |
+| 16 KiB  | 42.3 us   | 53.4 us      | 199.1 us     |
+| 32 KiB  | 82.6 us   | 110.9 us     | 418.5 us     |
+| 64 KiB  | 165.8 us  | 220.8 us     | 810.4 us     |
+| 128 KiB | 337.5 us  | 700.1 us     | 1.61 ms      |
+
+The largest size where the worst of the three is at most 0.5 ms is 32 KiB, at
+418.5 us. One block at `BLOCK_LIMIT` lands in 1.36 ms, within 4 ms, so
+`BLOCK_LIMIT` stays 524,288.
+
+Before deviations 1 and 2, the same bench measured one block at 7.74 ms at
+4 KiB and 248 ms at 128 KiB, empty blocks at 448 us at 4 KiB and 109.7 ms at
+128 KiB, and one block at `BLOCK_LIMIT` at 1.002 s.
+
+Scattered splices now reach most blocks, and a reached block lands nothing
+(deviation 1), so the one-block and dense cases mostly measure a skip. A
+variant run, not in the bench, put the 200 splices in a 4 KiB prose prefix,
+so that none reaches a block. In quick mode it measured 295.4 us, 389.8 us and
+444.7 us at 32 KiB, still within 0.5 ms. One block at `BLOCK_LIMIT` took
+6.18 ms in a full run, over the 4 ms check. A landing with no splice since
+probably costs the same, since every chunk then lands whole. The check as D10
+defines it passes; whether it should count the unreached case is open.
+
+`cargo bench -p inkra-highlight --bench listener`, the same day, with
+`TASK_BYTES` at 32 KiB:
+
+| Bytes   | One block | Many blocks |
+| ------- | --------- | ----------- |
+| 4 KiB   | 19.2 us   | 26.0 us     |
+| 8 KiB   | 44.0 us   | 45.7 us     |
+| 16 KiB  | 89.8 us   | 85.0 us     |
+| 32 KiB  | 176.9 us  | 164.7 us    |
+| 64 KiB  | 368.4 us  | 327.6 us    |
+| 128 KiB | 730.0 us  | 658.4 us    |
+
+`MAIN_THREAD_BUDGET` stays 64 KiB, at 368.4 us. Past 64 KiB the call lexes
+its backlogs too (deviation 7). `listener_backlog_copy` copies one backlog at
+`TASK_BYTES` in 13.3 us as one block and in 12.8 us as blocks of 512 bytes.

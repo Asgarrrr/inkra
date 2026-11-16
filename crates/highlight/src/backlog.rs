@@ -9,7 +9,7 @@ use inkra_text::ByteOffset;
 use crate::{BlockChunk, Language, highlight, info_language};
 
 /// The block bytes, fences included, one backlog holds past its first block (D10).
-pub const TASK_BYTES: usize = 65_536;
+pub const TASK_BYTES: usize = 32_768;
 
 /// Pending blocks' content lines, owned, each block with its range, shape and language.
 pub struct Backlog {
