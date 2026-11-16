@@ -1423,3 +1423,16 @@ Zed's `highlights.scm` for its language, as in S3.
       still divides; `FnName` means a declared name only.
     - An arrow's `(a): T =>` keeps the general rules: at its `(`, nothing
       tells it from a ternary's `c ? (a) : b`.
+    - `Returns` ends a value, so a `/` after a `Params`'s `)` divides. A
+      `function f<` at a line end carries its list, as a type position does
+      (deviation 18).
+    - A line end in a type body leaves `KeyStart`, so each line starts a
+      member: an interface written without `;` annotates every member, not
+      only its first. A `}` that returns to a type body leaves `KeyStart`
+      too, so the method after a method's body is a method. A line end that
+      pops a cut `ReturnType` leaves `ValueEnd`, so a body `{` on the next
+      line opens a `Brace`.
+    - `get` and `set` are modifiers, so a getter's return type is lit.
+      Still unlit: `foo?(): T`, and a method whose type list spans lines.
+    - A review found the line-end, `value_end` and `}` gaps above, and seven
+      injected bugs that no test caught; each has a test now.
