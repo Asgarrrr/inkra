@@ -55,16 +55,21 @@ pub(super) fn follow<S: Clone>(mut chunk: Chunk<S>, splice: Splice) -> Option<Ch
     if reaches(&chunk, splice) {
         map_chunk(chunk, splice)
     } else {
-        if splice.at + splice.removed_len <= chunk.start {
-            chunk.start = chunk.start + splice.inserted_len - splice.removed_len;
-        }
+        pass(&mut chunk, splice);
         Some(chunk)
     }
 }
 
 /// Whether `splice` removes one of the chunk's bytes or inserts strictly inside it.
-pub(super) fn reaches<S: Clone>(chunk: &Chunk<S>, splice: Splice) -> bool {
+fn reaches<S>(chunk: &Chunk<S>, splice: Splice) -> bool {
     chunk.start < splice.at + splice.removed_len && splice.at < chunk.end()
+}
+
+/// Moves the start of a chunk `splice` does not reach past what it did before the chunk.
+fn pass<S>(chunk: &mut Chunk<S>, splice: Splice) {
+    if splice.at + splice.removed_len <= chunk.start {
+        chunk.start = chunk.start + splice.inserted_len - splice.removed_len;
+    }
 }
 
 /// `new` mapped through `splices`, as `follow` maps it; `None` once nothing of it is left, or with
@@ -77,8 +82,8 @@ pub(super) fn follow_all<S: Clone>(
     // Moves only the start until a splice reaches the chunk: most of a landing's chunks never are.
     let reached = splices.iter().position(|&splice| {
         let reached = reaches(&new, splice);
-        if !reached && splice.at + splice.removed_len <= new.start {
-            new.start = new.start + splice.inserted_len - splice.removed_len;
+        if !reached {
+            pass(&mut new, splice);
         }
         reached
     });
@@ -89,3 +94,6 @@ pub(super) fn follow_all<S: Clone>(
     };
     (new.len != 0).then_some(new)
 }
+
+#[cfg(test)]
+mod tests;

@@ -211,6 +211,12 @@ fn differing<S: PartialEq>(
     Some(starts.map(|(mark, _)| mark.start).min()?..ends.map(|(mark, _)| mark.end).max()?)
 }
 
+impl<S> Chunk<S> {
+    fn end(&self) -> ByteOffset {
+        self.start + self.len
+    }
+}
+
 impl<S: Clone> Chunk<S> {
     fn new(
         range: Range<ByteOffset>,
@@ -234,10 +240,6 @@ impl<S: Clone> Chunk<S> {
             tag,
             marks,
         }
-    }
-
-    fn end(&self) -> ByteOffset {
-        self.start + self.len
     }
 
     /// As `Layer::marks_in`, for a non-empty `range`.

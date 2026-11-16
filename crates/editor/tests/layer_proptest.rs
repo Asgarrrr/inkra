@@ -353,7 +353,7 @@ proptest! {
     }
 
     #[test]
-    fn a_late_publish_equals_an_early_publish_shifted(
+    fn a_late_publish_equals_an_early_publish_shifted_or_lands_nothing_once_reached(
         parts in prop::collection::vec(text_strategy(), 1..12),
         chunk in chunk_strategy(),
         edits in prop::collection::vec(edits_strategy(), 0..8),
