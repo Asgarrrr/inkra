@@ -168,6 +168,21 @@ impl EditorState {
         }
     }
 
+    /// Ticks or clears the task whose checkbox is `checkbox`, as one step of its own, and puts the
+    /// caret at its text start (task boxes spec, D5). Edits nothing when those bytes are no checkbox.
+    pub fn toggle_task(&mut self, buffer: &mut Buffer, checkbox: Range<ByteOffset>) {
+        let middle = match buffer.slice(checkbox.clone()) {
+            "[ ]" => "x",
+            "[x]" | "[X]" => " ",
+            _ => return,
+        };
+        let at = checkbox.start + 1;
+        self.edit_ungrouped(buffer, at..at + 1, middle);
+        let spaced = buffer.text().as_bytes().get(checkbox.end.get());
+        let text_start = checkbox.end + usize::from(matches!(spaced, Some(b' ' | b'\t')));
+        self.selection.collapse_to(text_start, Goal::None);
+    }
+
     /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a
     /// whole-line item is always a whole line, even pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
@@ -324,3 +339,6 @@ mod tests;
 
 #[cfg(test)]
 mod map_tests;
+
+#[cfg(test)]
+mod task_tests;
