@@ -76,3 +76,28 @@ fn lex_backlog_gives_the_marks_block_marks_gives_on_the_pending_blocks() {
     assert_eq!(coloured.count(), 3);
     assert_eq!(lexed, expected);
 }
+
+#[test]
+fn lex_pending_lexes_every_pending_block_across_backlogs() {
+    let half = TASK_BYTES / 2;
+    let text = [
+        rust_block(half),
+        rust_block(half),
+        rust_block(half),
+        rust_block(64),
+    ]
+    .join("\n");
+    let markdown = parse(&text);
+    let pending = [0, 2, 3];
+    assert_eq!(taken(&text, &pending), 2);
+
+    let lexed = lex_pending(&text, &markdown, &pending);
+
+    let ranges: Vec<_> = lexed.iter().map(|(range, _, _)| range.clone()).collect();
+    let expected: Vec<_> = pending
+        .iter()
+        .map(|&index| markdown.code_blocks[index].range.clone())
+        .collect();
+    assert_eq!(ranges, expected);
+    assert!(lexed.iter().all(|(_, _, marks)| !marks.is_empty()));
+}

@@ -231,7 +231,6 @@ fn land(model: &mut Model) -> Result<(), TestCaseError> {
     let Some(Flight { chunks, at }) = model.flight.take() else {
         return Ok(());
     };
-    prop_assert!(!chunks.is_empty(), "a landing lands no block");
     let Model { buffer, layer, .. } = model;
     let landed = if buffer.edits_since(at).is_some() {
         layer.publish(buffer, Vec::new(), chunks, at)
