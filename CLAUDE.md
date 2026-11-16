@@ -62,7 +62,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
   `-p inkra-markdown` for `parse`, `-p inkra-app --features bench --bench layout` for one
-  keystroke's `shape_document` — before/after comparison, not a gate.
+  keystroke's or caret move's `shape_document` — before/after comparison, not a gate.
 - gpui is a git dependency pinned by `rev`; cargo fetches it. `vendor/zed-reference`
   is gitignored, for reading only: `./scripts/vendor-gpui.sh` checks out the rev in `Cargo.lock`.
 
