@@ -3,7 +3,7 @@
 
 use inkra_markdown::parse;
 
-use super::measured_text;
+use super::gutter::measured_text;
 
 fn measured(text: &str) -> String {
     let gutter = &parse(text).gutters[0];
