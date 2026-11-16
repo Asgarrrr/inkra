@@ -1,17 +1,40 @@
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::ops::Range;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use gpui::{App, Entity, Subscription, TestAppContext, prelude::*};
-use inkra_highlight::{MAIN_THREAD_BUDGET, TASK_BYTES};
 use inkra_text::{Buffer, ByteOffset, Txn};
 
 use super::*;
 use crate::editor::EditorView;
 
-fn at(offset: usize) -> ByteOffset {
+pub(super) fn at(offset: usize) -> ByteOffset {
     ByteOffset::new(offset)
+}
+
+/// The ticks one `settle` allows: far more than any test here takes to park.
+const SETTLE_TICKS: usize = 1_000;
+
+/// Runs tasks until none is runnable, as `run_until_parked` does, but fails instead of hanging
+/// when a background task respawns forever.
+pub(super) fn settle(cx: &TestAppContext) {
+    let executor = cx.executor();
+    for _ in 0..SETTLE_TICKS {
+        if !executor.tick() {
+            return;
+        }
+    }
+    panic!("tasks still runnable after {SETTLE_TICKS} ticks: one respawns forever");
+}
+
+/// The syntax listener with its own flights, as `activate` wires it; the test holds them weakly,
+/// so the subscription stays their one owner.
+pub(super) fn listen(cx: &mut App) -> (Subscription, Weak<RefCell<Flights>>) {
+    let flights = Rc::default();
+    let weak = Rc::downgrade(&flights);
+    let listening = decorations::listen(SYNTAX, Rc::new(listener(flights)), cx);
+    (listening, weak)
 }
 
 /// `text` in a buffer shown in an editor, with highlighting on.
@@ -29,13 +52,13 @@ fn opened(
     let listening = cx.update(|cx| {
         decorations::declare(MANIFEST.layers, cx);
         decorations::enable([FEATURE], cx);
-        let listening = decorations::listen(SYNTAX, Rc::new(listener), cx);
+        let (listening, _) = listen(cx);
         before(&buffer, cx);
         listening
     });
     let view = buffer.clone();
     cx.add_window(|_, cx| EditorView::new(view, cx));
-    cx.run_until_parked();
+    settle(cx);
     (buffer, listening)
 }
 
@@ -44,10 +67,13 @@ fn edit(cx: &mut TestAppContext, buffer: &Entity<Buffer>, change: impl FnOnce(&m
         buffer.transact(change);
         cx.notify();
     });
-    cx.run_until_parked();
+    settle(cx);
 }
 
-fn marks(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<(usize, usize, ColorToken)> {
+pub(super) fn marks(
+    cx: &mut TestAppContext,
+    buffer: &Entity<Buffer>,
+) -> Vec<(usize, usize, ColorToken)> {
     cx.update(|cx| {
         let len = buffer.read(cx).len();
         decorations::drawn(buffer, cx)
@@ -59,7 +85,7 @@ fn marks(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<(usize, usize,
 }
 
 /// The colours a whole lex of `text` gives.
-fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
+pub(super) fn fresh(text: &str) -> Vec<(usize, usize, ColorToken)> {
     let markdown = inkra_markdown::parse(text);
     markdown
         .code_blocks
@@ -77,7 +103,7 @@ fn held(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> Vec<Range<usize>> {
 }
 
 /// Each code block's range in `text`.
-fn blocks(text: &str) -> Vec<Range<usize>> {
+pub(super) fn blocks(text: &str) -> Vec<Range<usize>> {
     inkra_markdown::parse(text)
         .code_blocks
         .into_iter()
@@ -85,7 +111,7 @@ fn blocks(text: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
-fn text(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> String {
+pub(super) fn text(cx: &mut TestAppContext, buffer: &Entity<Buffer>) -> String {
     buffer.read_with(cx, |buffer, _| buffer.text().to_string())
 }
 
@@ -136,7 +162,7 @@ fn plant(chunks: &mut [Chunk]) {
 }
 
 /// The colours of `text` once the blocks at `relexed` are lexed and every other one is planted.
-fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
+pub(super) fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
     let markdown = inkra_markdown::parse(text);
     let fresh = fresh(text);
     assert!(fresh.iter().any(|&(_, _, token)| token != PLANTED));
@@ -158,7 +184,7 @@ fn kept(text: &str, relexed: &[usize]) -> Vec<(usize, usize, ColorToken)> {
 }
 
 /// Lands the first `count` blocks of `buffer`'s text, planted, as the open function would.
-fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
+pub(super) fn seed(buffer: &Entity<Buffer>, count: usize, cx: &mut App) {
     let mut calls = 0;
     let mut chunks: Vec<_> = inkra_highlight::open_chunks(buffer.read(cx).text(), || {
         calls += 1;
@@ -225,7 +251,7 @@ fn two_edits_in_one_hearing_relex_both_blocks(cx: &mut TestAppContext) {
         buffer.transact(|t| t.insert(at(8), "fn "));
         cx.notify();
     });
-    cx.run_until_parked();
+    settle(cx);
 
     assert_eq!(marks(cx, &buffer), kept(&text(cx, &buffer), &[0, 1]));
 }
@@ -346,7 +372,7 @@ fn undo(cx: &mut TestAppContext, buffer: &Entity<Buffer>) {
         buffer.undo();
         cx.notify();
     });
-    cx.run_until_parked();
+    settle(cx);
 }
 
 /// `<div>` opens an HTML block that swallows the fence under it.
@@ -422,39 +448,14 @@ fn the_declared_open_function_lands_colours_the_first_hearing_keeps(cx: &mut Tes
             plant(opened);
         }
         decorations::seed(&buffer, opened, cx);
-        decorations::listen(SYNTAX, Rc::new(listener), cx)
+        listen(cx).0
     });
     let view = buffer.clone();
     cx.add_window(|_, cx| EditorView::new(view, cx));
-    cx.run_until_parked();
+    settle(cx);
 
     assert_eq!(marks(cx, &buffer), kept(PROSE_RUST_NOPE, &[]));
     drop(listening);
-}
-
-/// The main thread's budget leaves the rest pending, and that is more than one backlog (D10).
-#[gpui::test]
-fn pending_blocks_over_task_bytes_colour_in_one_listener_call(cx: &mut TestAppContext) {
-    let block = format!("```rust\n{}```\n\n", "let x = 1;\n".repeat(400));
-    let note = block.repeat((MAIN_THREAD_BUDGET + TASK_BYTES) / block.len() + 2);
-    let calls = Rc::new(Cell::new(0));
-    let buffer = cx.new(|_| Buffer::new(note.as_str()));
-    let counted = calls.clone();
-    let _listening = cx.update(|cx| {
-        decorations::declare(MANIFEST.layers, cx);
-        decorations::enable([FEATURE], cx);
-        let listener = move |buffer: &Entity<Buffer>, change, cx: &mut App| {
-            counted.set(counted.get() + 1);
-            listener(buffer, change, cx);
-        };
-        decorations::listen(SYNTAX, Rc::new(listener), cx)
-    });
-    let view = buffer.clone();
-    cx.add_window(|_, cx| EditorView::new(view, cx));
-    cx.run_until_parked();
-
-    assert_eq!(calls.get(), 1);
-    assert_eq!(marks(cx, &buffer), fresh(&note));
 }
 
 /// One top-level bullet, nested prose, then rust blocks: the outline note of the spec's D7.

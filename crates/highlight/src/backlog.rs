@@ -29,8 +29,12 @@ struct Block {
 
 /// The `pending` blocks of `text`, parsed as `markdown`, in order, up to the one that would take the
 /// backlog past `TASK_BYTES` block bytes; the first always goes.
+///
+/// # Panics
+/// If `pending` is empty.
 #[must_use]
 pub fn backlog(text: &str, markdown: &Markdown, pending: &[usize]) -> Backlog {
+    assert!(!pending.is_empty(), "a backlog of no block");
     let mut backlog = Backlog {
         blocks: Vec::new(),
         lines: Vec::new(),
@@ -82,8 +86,8 @@ pub fn lex_backlog(backlog: Backlog) -> Vec<BlockChunk> {
         .collect()
 }
 
-/// The `pending` blocks' chunks, in order, backlog after backlog, as the app lexes them on the
-/// main thread before the background task (S2c).
+/// The `pending` blocks' chunks, in order, backlog after backlog, on the caller's thread: what the
+/// app's background task lands over its flights, drained at once for the benches.
 #[must_use]
 pub fn lex_pending(text: &str, markdown: &Markdown, mut pending: &[usize]) -> Vec<BlockChunk> {
     let mut lexed = Vec::with_capacity(pending.len());

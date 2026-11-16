@@ -132,6 +132,14 @@ pub(crate) fn enable(features: impl IntoIterator<Item = FeatureId>, cx: &mut App
     }
 }
 
+/// Whether `layer`'s feature is on.
+///
+/// # Panics
+/// If `layer` is not declared.
+pub(crate) fn enabled(layer: LayerId, cx: &App) -> bool {
+    cx.global::<Decorations>().declared[rank(layer, cx)].enabled
+}
+
 /// # Panics
 /// If `layer` is not declared.
 fn rank(layer: LayerId, cx: &App) -> usize {

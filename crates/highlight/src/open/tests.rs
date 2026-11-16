@@ -4,7 +4,7 @@ use inkra_text::ByteOffset;
 
 use super::*;
 use crate::fixtures::{TWO_BLOCKS, r};
-use crate::{BLOCK_LIMIT, TokenClass};
+use crate::{BLOCK_LIMIT, MAIN_THREAD_BUDGET, TokenClass};
 
 fn ranges(chunks: &[BlockChunk]) -> Vec<Range<ByteOffset>> {
     chunks.iter().map(|(range, _, _)| range.clone()).collect()
@@ -103,6 +103,43 @@ fn open_asks_no_deadline_once_it_passed() {
     });
 
     assert_eq!(ranges(&chunks), [r(0, 15)]);
+}
+
+/// The background task lexes it: the open function must not spend its deadline on it (D8).
+#[test]
+fn a_block_over_the_main_thread_budget_gets_no_chunk_and_spends_no_deadline_check() {
+    let fences = "```rust\nlet \n```".len();
+    let over = format!(
+        "```rust\nlet {}\n```\n",
+        "x".repeat(MAIN_THREAD_BUDGET + 1 - fences)
+    );
+    let text = format!("{over}\n```rust\nlet\n```\n");
+    let blocks = parse(&text).code_blocks;
+    assert_eq!(
+        blocks[0].range.end - blocks[0].range.start,
+        MAIN_THREAD_BUDGET + 1
+    );
+    let mut calls = 0;
+
+    let chunks = open_chunks(&text, || {
+        calls += 1;
+        calls == 1
+    });
+
+    assert_eq!(ranges(&chunks), [blocks[1].range.clone()]);
+}
+
+#[test]
+fn a_block_at_the_main_thread_budget_is_coloured_at_open() {
+    let fences = "```rust\nlet \n```".len();
+    let at = format!(
+        "```rust\nlet {}\n```\n",
+        "x".repeat(MAIN_THREAD_BUDGET - fences)
+    );
+
+    let chunks = open_chunks(&at, || true);
+
+    assert_eq!(ranges(&chunks), [r(0, MAIN_THREAD_BUDGET)]);
 }
 
 #[test]

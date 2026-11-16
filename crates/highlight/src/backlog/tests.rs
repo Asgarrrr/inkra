@@ -29,6 +29,15 @@ fn a_first_block_over_task_bytes_still_goes() {
     assert_eq!(taken(&text, &[0, 1]), 1);
 }
 
+/// A caller that spawns a task for nothing would respawn it after every landing.
+#[test]
+#[should_panic(expected = "a backlog of no block")]
+fn a_backlog_of_no_block_panics() {
+    let _ = backlog(TWO, &parse(TWO), &[]);
+}
+
+const TWO: &str = "```rust\nlet\n```\n";
+
 /// Blocks in a quote, in a list item, with empty lines, with no content, and one no backlog takes.
 const NOTE: &str = "> ```rust
 > let a = 1;

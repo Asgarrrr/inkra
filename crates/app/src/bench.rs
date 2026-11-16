@@ -64,7 +64,8 @@ impl Typing {
         typing
     }
 
-    /// Types `x` at the caret, then parses, and recolours when `colours`, as the editor's listeners do.
+    /// Types `x` at the caret, then parses, and recolours when `colours` as the syntax listener does
+    /// on the main thread; a pending block waits for a background task this never runs.
     pub fn keystroke(&mut self) {
         self.retired = None;
         let caret = self.caret;
@@ -80,12 +81,7 @@ impl Typing {
         }
         let held: Vec<_> = syntax.layer().chunks().collect();
         let (text, dirty) = (self.buffer.text(), Some(caret..caret + 1));
-        let Batch {
-            clear,
-            mut lexed,
-            pending,
-        } = batch(text, &self.markdown, &held, dirty);
-        lexed.extend(lex_pending(text, &self.markdown, &pending));
+        let Batch { clear, lexed, .. } = batch(text, &self.markdown, &held, dirty);
         let lexed: Vec<_> = lexed.into_iter().map(styled).collect();
         let at = self.buffer.edit_mark();
         if let Some(moved) = syntax.publish(&self.buffer, clear, lexed, at) {
