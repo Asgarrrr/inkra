@@ -500,3 +500,45 @@ fn operators_take_the_longest_match() {
         ],
     );
 }
+
+#[test]
+fn a_closing_brace_ends_no_value() {
+    check(
+        "if (x) {} /re/.test(y)\n({}) / 2",
+        &[
+            ("if", Keyword),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("{", Punctuation),
+            ("}", Punctuation),
+            ("/re/", String),
+            (".", Punctuation),
+            ("test", Function),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("(", Punctuation),
+            ("{", Punctuation),
+            ("}", Punctuation),
+            (")", Punctuation),
+            ("/", Operator),
+            ("2", Constant),
+        ],
+    );
+}
+
+#[test]
+fn a_tag_past_the_nesting_room_is_operators_and_the_next_line_still_colours() {
+    let room = crate::state::LineState::default().stack.len();
+    let text = format!("{}<div>\nconst a = 1;", "(".repeat(room));
+    let expected: Vec<_> = std::iter::repeat_n(("(", Punctuation), room)
+        .chain([
+            ("<", Operator),
+            (">", Operator),
+            ("const", Keyword),
+            ("=", Operator),
+            ("1", Constant),
+            (";", Punctuation),
+        ])
+        .collect();
+    check(&text, &expected);
+}

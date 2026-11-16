@@ -462,3 +462,24 @@ fn javascript_reads_a_jsx_attribute_named_extends_as_an_attribute() {
         ],
     );
 }
+
+#[test]
+fn a_generic_list_past_the_nesting_room_is_operators_and_the_next_line_still_colours() {
+    let room = crate::state::LineState::default().stack.len();
+    let text = format!("{}f<T>(x)\nconst a = 1;", "(".repeat(room));
+    let expected: Vec<_> = std::iter::repeat_n(("(", Punctuation), room)
+        .chain([
+            ("f", Function),
+            ("<", Operator),
+            ("T", Type),
+            (">", Operator),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("const", Keyword),
+            ("=", Operator),
+            ("1", Constant),
+            (";", Punctuation),
+        ])
+        .collect();
+    check(&text, &expected);
+}
