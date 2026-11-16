@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::State;
 use super::errors::io;
@@ -44,40 +45,22 @@ impl State {
             return Err(io(from, ErrorKind::NotFound));
         };
         self.dirs.insert(to.to_path_buf(), entry);
-
-        let moved: Vec<_> = self
-            .files
-            .keys()
-            .filter(|path| path.starts_with(from))
-            .cloned()
-            .collect();
-        for path in moved {
-            let Ok(relative) = path.strip_prefix(from) else {
-                continue;
-            };
-            let destination = to.join(relative);
-            if let Some(entry) = self.files.remove(&path) {
-                self.files.insert(destination, entry);
-            }
-        }
-        let moved: Vec<_> = self
-            .dirs
-            .keys()
-            .filter(|path| path.starts_with(from))
-            .cloned()
-            .collect();
-        for path in moved {
-            let Ok(relative) = path.strip_prefix(from) else {
-                continue;
-            };
-            let destination = to.join(relative);
-            if let Some(entry) = self.dirs.remove(&path) {
-                self.dirs.insert(destination, entry);
-            }
-        }
+        move_subtree(&mut self.files, from, to);
+        move_subtree(&mut self.dirs, from, to);
         // As FSEvents: the two names, not the subtree that moved with them.
         self.changed(from);
         self.changed(to);
         Ok(())
     }
+}
+
+/// Re-keys every entry under `from` to the same place under `to`.
+fn move_subtree<V>(entries: &mut BTreeMap<PathBuf, V>, from: &Path, to: &Path) {
+    *entries = std::mem::take(entries)
+        .into_iter()
+        .map(|(path, entry)| match path.strip_prefix(from) {
+            Ok(relative) => (to.join(relative), entry),
+            Err(_) => (path, entry),
+        })
+        .collect();
 }
