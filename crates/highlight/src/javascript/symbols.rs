@@ -39,8 +39,10 @@ impl Tokens<'_> {
         } else {
             letter
         };
-        let spans_lines = self.state.prev == Prev::TypePosition;
-        if self.dialect.types && room && generic && (spans_lines || self.generics.end(at).is_some())
+        if self.dialect.types
+            && room
+            && generic
+            && (self.generics.end(at).is_some() || self.continues_on_next_line(at))
         {
             self.state.push(Nest::Generic);
             self.sink.push(at..at + 1, Punctuation);
@@ -48,6 +50,15 @@ impl Tokens<'_> {
             return at + 1;
         }
         self.symbol(at)
+    }
+
+    /// Whether the `<` at `at`, after a type position, opens a list its line leaves open: the line
+    /// ends on `<` or `,` with no `;`, `{` or `}` past it (S4 deviation 18).
+    fn continues_on_next_line(&self, at: usize) -> bool {
+        let rest = self.line[at..].trim_ascii_end().as_bytes();
+        self.state.prev == Prev::TypePosition
+            && matches!(rest.last(), Some(b'<' | b','))
+            && !rest.iter().any(|byte| matches!(byte, b';' | b'{' | b'}'))
     }
 
     /// Whether the `<` at `at` opens TypeScript type parameters, which JSX would read as a tag:

@@ -1255,8 +1255,8 @@ Zed's `highlights.scm` for its language, as in S3.
    `<T extends ` as type parameters, as TypeScript does in `.tsx` files. A
    type alias's `=` and an annotation's `:` start a type, where `<` opens type
    parameters in both dialects: `Alias` marks `type Name` up to its `=` and
-   crosses a line only under an open generic list (deviation 18). Outside a
-   type position, a generic list opens only where it closes on its line
+   crosses a line only under a nesting opened after it (deviation 18). Outside
+   deviation 18's case, a generic list opens only where it closes on its line
    (`Generics::end`), so `Count < limit` compares. A name before such a list
    and `(` is a `Function` in TypeScript.
 5. **A TypeScript annotation is lit in three places only.** After a
@@ -1348,20 +1348,29 @@ Zed's `highlights.scm` for its language, as in S3.
     `Prev::Type`. A type position is the name right after an annotation's
     `:`, a type alias's `=`, or a type keyword (`class`, `interface`,
     `extends`, `implements`, `type`, `new`…), and every name inside an open
-    generic list. A `<` after such a name opens a list with no
-    `Generics::end` check, so `Map<` at a line end stays open on the
-    stack, and the lines below lex as types until its `>`.
+    generic list. A `<` after such a name opens a list that its line leaves
+    open when the line ends on `<` or `,` with no `;`, `{` or `}` past the
+    `<`: Prettier's `Map<` and a hand-written `Record<string,`. The list
+    stays open on the stack, and the lines below lex as types until its `>`.
     - `LineState` gains no field: the nesting stack already carries a
       `Generic` across lines, and its 16 entries bound the depth. It stays
       56 B.
-    - A wrong guess stays bounded: a `;`, `{` or `}` drops every open list,
-      as on one line. So `Promise<{` lights its `<` as `Punctuation`, and the
-      `>` after the object type's `}` stays an `Operator`.
+    - The line end bounds a wrong guess. `new Date < deadline` without a
+      semicolon keeps the same-line rule, since its line ends on a name; a
+      first cut that opened every such `<` lexed the lines below as types up
+      to the next `;`, `{` or `}`. A trailing comment after the `<` keeps the
+      same-line rule too.
+    - A carried list ends at a `;`, `{` or `}`, as on one line. So
+      `Promise<{` at a line end lights its `<` as `Punctuation`, and the `>`
+      after the object type's `}` stays an `Operator`.
     - Elsewhere the same-line rule holds. An expression's `f<\n T>(x)`, a
       return type after `)`, a name after `|` or `&`, and a name after `as`
       or `satisfies` are not type positions. A `<` after a value can compare,
-      and an `as` type has no end the lexer sees.
+      and an `as` type has no end the lexer sees. An interface member's plain
+      `:` is no annotation (deviation 5), so `a: Map<` in an interface keeps
+      the same-line rule while `b?: Map<` spans lines.
     - `type Name<` at a line end leaves `Alias` under the list, so the
-      alias's `=` on a later line still starts a type.
+      alias's `=` on a later line still starts a type. A `{` in the list
+      leaves it under a `Brace`; the line end pops it once it is on top.
     - Rust's lexer is unchanged: rustfmt splits `impl<` and `where` lists
       rarely, and `Deferred` records it.

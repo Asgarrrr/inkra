@@ -651,15 +651,70 @@ fn type_parameters_across_lines_keep_the_alias_and_the_class_body() {
 }
 
 #[test]
-fn a_brace_ends_a_list_left_open_across_lines() {
+fn nested_lists_and_a_trailing_comma_span_lines() {
     check(
-        "let m: Map<\n}\nlet a = 2;",
+        "type X = A<B<\n  C\n>>;\nlet a = 2;",
         &[
+            ("type", Keyword),
+            ("X", Type),
+            ("=", Operator),
+            ("A", Type),
+            ("<", Punctuation),
+            ("B", Type),
+            ("<", Punctuation),
+            ("C", Type),
+            (">", Punctuation),
+            (">", Punctuation),
+            (";", Punctuation),
+        ]
+        .into_iter()
+        .chain(NEXT_LINE)
+        .collect::<Vec<_>>(),
+    );
+    check(
+        "let r: Record<string,\n  V>;",
+        &[
+            ("let", Keyword),
+            (":", Punctuation),
+            ("Record", Type),
+            ("<", Punctuation),
+            ("string", Type),
+            (",", Punctuation),
+            ("V", Type),
+            (">", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_semicolon_or_a_brace_ends_a_list_left_open_across_lines() {
+    for (stop, line) in [("}", "}"), (";", "  K;")] {
+        let mut expected = vec![
             ("let", Keyword),
             (":", Punctuation),
             ("Map", Type),
             ("<", Punctuation),
-            ("}", Punctuation),
+        ];
+        if stop == ";" {
+            expected.push(("K", Type));
+        }
+        expected.push((stop, Punctuation));
+        expected.extend(NEXT_LINE);
+        check(&format!("let m: Map<\n{line}\nlet a = 2;"), &expected);
+    }
+}
+
+#[test]
+fn a_comparison_after_new_without_semicolons_stays_on_its_line() {
+    check(
+        "const late = new Date < deadline\nlet a = 2;",
+        &[
+            ("const", Keyword),
+            ("=", Operator),
+            ("new", Keyword),
+            ("Date", Type),
+            ("<", Operator),
         ]
         .into_iter()
         .chain(NEXT_LINE)
