@@ -621,11 +621,15 @@ light. The look is tuned after it ships, as for code blocks.
 
 | Figure | Expected | How it is checked |
 |---|---|---|
-| Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B; S3 (Python, JSON, Bash): `main` 19,717,024 B, S3 19,752,496 B, difference +35,472 B | `stat -f %z` on the release binary, `main` against each slice |
+| Binary size | a few hundred KB for eight lexers, mostly keyword tables; S1a (Rust only): `main` 19,364,544 B, S1a 19,360,464 B, difference -4,080 B; S3 (Python, JSON, Bash): `main` 19,717,024 B, S3 19,752,496 B, difference +35,472 B; S4 (JavaScript, TypeScript, TSX, CSS, HTML): `main` 19,751,424 B, S4 19,805,072 B, difference +53,648 B | `stat -f %z` on the release binary, `main` against each slice |
 | Lex, Rust | S1a medians: 1.71 us for 20 lines (923 B), 54.7 us for 500 lines (16.1 KB), 646 us for 5,000 lines (169 KB) | `cargo bench -p inkra-highlight -- --quick`, the texts of the 2026-11-11 tree-sitter figures |
 | Lex, Python | S3 medians: 1.91 us for 20 lines (657 B), 49.7 us for 500 lines (16.1 KB), 505 us for 5,000 lines (162 KB) | `cargo bench -p inkra-highlight --bench lex -- --quick`, group `lex_python`: a sample repeated to the Rust texts' line counts (S3 deviation 10) |
 | Lex, JSON | S3 medians: 0.42 us for 20 lines (471 B), 10.5 us for 500 lines (11.8 KB), 105 us for 5,000 lines (118 KB) | the same, group `lex_json` |
 | Lex, Bash | S3 medians: 0.95 us for 20 lines (531 B), 24.1 us for 500 lines (13.3 KB), 241 us for 5,000 lines (133 KB) | the same, group `lex_bash` |
+| Lex, JavaScript | S4 medians: 2.99 us for 20 lines (636 B), 68.4 us for 500 lines (14.7 KB), 686 us for 5,000 lines (146 KB) | the same, group `lex_javascript` (S4 deviation 13) |
+| Lex, TypeScript | S4 medians: 2.22 us for 20 lines (426 B), 62.4 us for 500 lines (11.2 KB), 624 us for 5,000 lines (111 KB) | the same, group `lex_typescript` |
+| Lex, CSS | S4 medians: 0.71 us for 20 lines (450 B), 17.6 us for 500 lines (11.3 KB), 177 us for 5,000 lines (113 KB) | the same, group `lex_css` |
+| Lex, HTML | S4 medians: 1.07 us for 20 lines (390 B), 26.6 us for 500 lines (9.8 KB), 268 us for 5,000 lines (98 KB) | the same, group `lex_html` |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
@@ -1220,3 +1224,89 @@ mapped to D5's classes by the 2026-11-11 spec's capture table.
     scenes would push `shot/scenes.rs` past its line ceiling, which only
     lowers. So `code_highlighting::SCENES` holds all five, and `catalogue()`
     chains it after the rest, in the same order as before.
+
+## As built (S4)
+
+Code cites these as "S4 deviation N". Where D4 is silent, each lexer follows
+Zed's `highlights.scm` for its language, as in S3.
+
+1. **TypeScript and TSX are a dialect of the JavaScript lexer.** `Dialect`
+   holds two flags, `jsx` and `types`. JavaScript sets `jsx`, TypeScript sets
+   `types`, and TSX sets both. `typescript.rs` holds TypeScript's soft
+   keywords and built-in types, and calls `javascript::lex_dialect`; no rule
+   is copied.
+2. **Templates, JSX and embedded languages live on the nesting stack.**
+   `Nest` gains `Condition`, `Template`, `JsxTag`, `JsxClosingTag`, `JsxText`,
+   `Script` and `Style`, all without data. The top entry picks the mode: a
+   template's text, a JSX tag, JSX children, or code. `${` and a JSX `{` push a
+   `Brace`, and its `}` returns to the mode below. `LineState` stays 56 B and
+   holds no heap. Past the stack's 16 entries, a line lexes as code.
+3. **`Prev` gains the parse positions these lexers need.** JavaScript adds
+   `ValueEnd`, `Condition`, `KeyStart`, `Param` and `Annotation`; CSS adds
+   `Selector`, `Declaration` and `AtRule`; HTML adds `HtmlTag`, `HtmlScript`
+   and `HtmlStyle`. A `}` is not a value end, so `}` then `/re/` opens a
+   regex.
+4. **D4's `<` rule, as built.** Where JSX is on, a `<` at an expression start
+   opens a tag when a letter or a `>` follows, so `<>` opens a fragment. In
+   TypeScript with JSX off, a `<` and a letter at an expression start open a
+   generic list, so `<T>(x: T) => x` is a generic arrow. A name before a
+   generic list that closes on its line and is followed by `(` is a
+   `Function` in TypeScript.
+5. **A TypeScript annotation is lit in three places only.** After a
+   parameter, after a name that `let`, `const` or `var` declares, and after a
+   member's `?:`, the next name is a `Type`. An object key's value and a
+   return type after `)` keep the general rules. A capitalised name or a
+   built-in type is a `Type` anywhere in TypeScript, which covers most return
+   types.
+6. **Soft keywords are keywords only before an operand.** `as`, `from`,
+   `get`, `of`, `set` and `static`, and TypeScript's sixteen, are keywords
+   when a name, a quote, a backtick, a `{`, a `[`, a `*` or a `#` follows. So `type = 1` and
+   `x.of` stay names. A modifier such as `readonly` or `private` keeps the
+   key position, so the member after it is a `Property`.
+7. **JavaScript and TypeScript, by Zed.** `this` and `super` are plain.
+   `true`, `false`, `null` and `undefined` are `Constant` (D4). A regex's
+   flags are `Keyword`, `${` and its `}` are `Punctuation`, a ternary `?` is
+   an `Operator`, and `?.` is `Punctuation`. In JavaScript, a capitalised name
+   is a `Type` only after `class`, `extends` or `new`, or as a built-in object
+   before `.`; a lone capital is a `Constant`. In TypeScript a lone capital is
+   a `Type`, the usual type parameter. `constructor` before `(` is a `Type`. A
+   decorator is an `Attribute` (D4), a `#private` name a `Property`, a tagged
+   template's name a `Function`, and a hashbang a `Comment`. A JSX component
+   name, dotted or not, is a `Tag`; a JSX entity is a `String`. `void` stays a
+   `Keyword` even in a return type.
+8. **JavaScript strings end at the line end.** A `\` continuation is not
+   followed, as for Python's single-quoted strings (S3 deviation 8).
+9. **CSS, by Zed.** In a selector, a tag name, `*` and `&` are `Tag`; a class,
+   an id and a pseudo-class are plain after their `Punctuation`, as Zed's
+   `selector.*` captures have no class. Combinators are `Operator`. A unit is
+   a `Type`, a hex colour a `String`, and a custom property plain. An unquoted
+   `url(…)` argument is one `Constant`. `from` and `to` in a keyframes block
+   are `Keyword`, and `!important` is a `Keyword`.
+10. **CSS tells a declaration from a nested rule on its line.** An item is a
+    declaration when the first `{`, `;` or `}` on its line is not a `{`. With
+    none of the three, it is a declaration when its name is followed by `:`
+    and then a space or the line end. The same rule applies at the top level,
+    so a `.jsx` style object or a lone declaration still colours.
+11. **HTML, as built.** `<!DOCTYPE html>` is a `Tag` between `Punctuation`.
+    A `</script` or `</style` closes the embedded language anywhere on the
+    line, in any case, even inside a string, as browsers do. An attribute
+    value stays a `String` even for `style` and `onclick`. An empty slice
+    before the closing tag is not handed to the embedded lexer. The closing
+    tag resets the line state, so a comment left open in a script ends there.
+12. **Each new language has its own scene,** as in S3 deviation 1:
+    `code-highlighting-javascript` (info word `jsx`), `-typescript`, `-tsx`,
+    `-css` and `-html`. Each line fits the block's width, so no line scrolls.
+13. **The lex bench gains four groups,** as in S3 deviation 10: a sample
+    repeated to 20, 500 and 5,000 lines. TSX has no group: it runs
+    TypeScript's code with one flag changed. On the S4 run, Rust's `lex` group
+    measured 756 us at 5,000 lines against 646 us at S1a, so the machine ran
+    about 15 % slower. JavaScript and TypeScript lex at about 4.7 and 5.6 us
+    per KB, against Rust's 4.5 at the same run. `MAIN_THREAD_BUDGET` was
+    measured with Rust text; TypeScript fills it about a quarter slower.
+14. **`TokenClass` gains `Tag`.** D5 names eleven classes, but S1a built ten,
+    as no lexer coloured a tag. `app` maps it to `syntax_tag`, which the theme
+    already holds.
+15. **`scan.rs` gains the scans two lexers share.** `generic_end` moves from
+    `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript and
+    CSS, and `dotted_end` from `python.rs` for decorators. `entity_end` serves
+    HTML and JSX.

@@ -231,10 +231,14 @@ impl Tokens<'_> {
     }
 
     fn keyword(&self, word: &str, after: usize) -> bool {
-        let types = self.dialect.types;
-        let soft =
-            SOFT_KEYWORDS.contains(&word) || (types && typescript::SOFT_KEYWORDS.contains(&word));
-        KEYWORDS.contains(&word) || (soft && starts_operand(self.line.as_bytes().get(after)))
+        let soft = || {
+            SOFT_KEYWORDS.contains(&word)
+                || (self.dialect.types && typescript::SOFT_KEYWORDS.contains(&word))
+        };
+        // Every keyword starts with a lower-case letter, so most names skip the lists.
+        word.starts_with(|char: char| char.is_ascii_lowercase())
+            && (KEYWORDS.contains(&word)
+                || (starts_operand(self.line.as_bytes().get(after)) && soft()))
     }
 
     /// The class of the identifier `word` that ends at `end`, and the look-behind past it.
@@ -306,7 +310,7 @@ impl Tokens<'_> {
             {
                 (Some(Type), Prev::Type)
             }
-            _ if BUILTIN_OBJECTS.contains(&word) && bytes.get(after) == Some(&b'.') => {
+            _ if bytes.get(after) == Some(&b'.') && BUILTIN_OBJECTS.contains(&word) => {
                 (Some(Type), Prev::Type)
             }
             _ if call => (Some(Function), past_call),

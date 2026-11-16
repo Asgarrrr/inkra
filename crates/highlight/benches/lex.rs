@@ -78,6 +78,97 @@ total=$(( COUNT * 2 ))
 printf '%s\n' "$total"
 "#;
 
+const JAVASCRIPT: &str = r#"// Fetch the notes and render them.
+import { useState } from "react";
+
+const PAGE_SIZE = 20;
+
+export async function fetchNotes(query, page = 0) {
+  const url = `/api/notes?q=${encodeURIComponent(query)}&p=${page}`;
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).filter((n) => /\.md$/i.test(n.path));
+}
+
+export function NoteList({ notes, onOpen }) {
+  const [open, setOpen] = useState(null);
+  return (
+    <ul className="notes">
+      {notes.map((note) => (
+        <li key={note.id} onClick={() => onOpen(note)}>{note.title}</li>
+      ))}
+    </ul>
+  );
+}
+"#;
+
+const TYPESCRIPT: &str = r"// A typed note store.
+export interface Note<T = string> {
+  readonly id: number;
+  title?: string;
+  body: T;
+}
+
+type Index = Map<string, Array<Note>>;
+
+export abstract class Store<T extends Note> implements Iterable<T> {
+  private notes: T[] = [];
+  static readonly MAX = 1_000;
+
+  constructor(private readonly index: Index) {}
+
+  find(id: number): T | undefined {
+    return this.notes.find((n) => n.id === id) as T;
+  }
+}
+
+const first = <T,>(xs: T[]): T => xs[0];
+";
+
+const CSS: &str = r#"/* Note cards, across
+   two lines. */
+@import url("theme.css") screen;
+:root { --accent: #3aa99f; }
+
+.card > h2:hover,
+a[href^="http"]::after {
+  color: var(--accent);
+  margin: 0 auto -1.5em;
+  font: 600 14px/1.4 "Inter", sans-serif !important;
+  background: url(img/bg.png) no-repeat;
+  width: calc(100% - 2rem);
+}
+
+@media (min-width: 600px) and (prefers-color-scheme: dark) {
+  .card { padding: 8px; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+}
+"#;
+
+const HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset=utf-8>
+  <!-- Styles for the card,
+       across lines -->
+  <style>
+    .card { color: #3aa99f; }
+  </style>
+</head>
+<body class="note"
+      data-id='7'>
+  <p>Fish &amp; chips &copy; 2026 <br/></p>
+  <script type="module">
+    const n = 1 / 2;
+    if (n < 1) { el.textContent = `a ${n}`; }
+  </script>
+  <p>after</p>
+</body>
+</html>
+"#;
+
 /// `sample`'s lines, repeated up to `lines` lines.
 fn text(sample: &str, lines: usize) -> String {
     let mut text: String = sample
@@ -125,6 +216,10 @@ fn bench_lex(c: &mut Criterion) {
         ("lex_python", Language::Python, PYTHON),
         ("lex_json", Language::Json, JSON),
         ("lex_bash", Language::Bash, BASH),
+        ("lex_javascript", Language::JavaScript, JAVASCRIPT),
+        ("lex_typescript", Language::TypeScript, TYPESCRIPT),
+        ("lex_css", Language::Css, CSS),
+        ("lex_html", Language::Html, HTML),
     ] {
         let texts = SIZES.map(|n| (n, text(sample, n)));
         bench_texts(c, group, language, &texts);

@@ -53,6 +53,86 @@ cat <<EOF > notes.txt
 Built $NAME on $(date)
 EOF"#;
 
+const JAVASCRIPT: &str = r#"// A line comment.
+import { useState } from "react";
+const PAGE = 20, re = /\.md$/i;
+export async function load(q, page = 0) {
+  const url = `/api?q=${q}&p=${page * PAGE}`;
+  const res = await fetch(url, { cache: 1 });
+  const list = await res.json();
+  return list.filter((n) => re.test(n.path));
+}
+export const List = ({ notes }) => (
+  <ul className="notes">
+    {notes.map((n) => <li key={n.id}>
+      {n.title} &mdash; {n.words / 250}
+    </li>)}
+  </ul>
+);"#;
+
+const TYPESCRIPT: &str = r"/* A typed note store. */
+export interface Note<T = string> {
+  readonly id: number;
+  title?: string;
+  body: T;
+}
+type Index = Map<string, Array<Note>>;
+export class Store<T extends Note>
+    implements Iterable<T> {
+  private notes: T[] = [];
+  find(id: number): T | undefined {
+    return this.notes.find(n => n.id === id);
+  }
+}
+const first = <T>(xs: T[]): T => xs[0];";
+
+const TSX: &str = r#"type Props = {
+  notes: Note[];
+  onOpen?: (id: number) => void;
+};
+function List({ notes, onOpen }: Props) {
+  const [id, setId] = useState<number>(-1);
+  return (
+    <ul className="notes">
+      {notes.map((note) => (
+        <li key={note.id}
+          onClick={() => onOpen?.(note.id)}>
+          {note.title}
+        </li>
+      ))}
+    </ul>
+  );
+}"#;
+
+const CSS: &str = r#"/* Note cards. */
+@import url("theme.css") screen;
+:root { --accent: #3aa99f; }
+.card > h2:hover,
+a[href^="http"]::after {
+  color: var(--accent);
+  margin: 0 auto -1.5em;
+  font: 14px/1.4 "Inter", serif !important;
+  width: calc(100% - 2rem);
+}
+@media screen and (min-width: 600px) {
+  .card { padding: 8px; }
+}"#;
+
+const HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset=utf-8>
+  <!-- The card's style. -->
+  <style>.card { color: #3aa99f; }</style>
+</head>
+<body class="note" data-id='7'>
+  <p>Fish &amp; chips &copy; 2026<br/></p>
+  <script type="module">
+    if (n < 1) el.textContent = `a ${n / 2}`;
+  </script>
+</body>
+</html>"#;
+
 const NOPE: &str = "```nope\nlet mut nope = 1;\n```";
 
 const NO_INFO: &str = "```\nlet mut plain = 1;\n```";
@@ -97,6 +177,26 @@ fn bash(stage: &mut Stage) -> WindowHandle<AppShell> {
     one_block(stage, "bash", BASH)
 }
 
+fn javascript(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "jsx", JAVASCRIPT)
+}
+
+fn typescript(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "ts", TYPESCRIPT)
+}
+
+fn tsx(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "tsx", TSX)
+}
+
+fn css(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "css", CSS)
+}
+
+fn html(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "html", HTML)
+}
+
 fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
     open_blocks(
         stage,
@@ -106,7 +206,7 @@ fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
     )
 }
 
-pub(super) const SCENES: [Scene; 5] = [
+pub(super) const SCENES: [Scene; 10] = [
     Scene {
         name: "code-highlighting",
         shows: "caret in the first paragraph, every fence concealed: every Rust token class coloured in the rust block",
@@ -126,6 +226,31 @@ pub(super) const SCENES: [Scene; 5] = [
         name: "code-highlighting-bash",
         shows: "the bash block: shebang comment, commands as functions, flags and numbers as constants, $ expansions, keywords, a heredoc body",
         open: bash,
+    },
+    Scene {
+        name: "code-highlighting-javascript",
+        shows: "the jsx block: a regex against a division, a template with substitutions, JSX tags, attributes and an entity, keys, calls, constants",
+        open: javascript,
+    },
+    Scene {
+        name: "code-highlighting-typescript",
+        shows: "the ts block: interface, class and type names, generic lists, annotations, optional members, modifiers, a generic arrow",
+        open: typescript,
+    },
+    Scene {
+        name: "code-highlighting-tsx",
+        shows: "the tsx block: a type literal, a generic call, JSX tags and attributes inside a typed component",
+        open: tsx,
+    },
+    Scene {
+        name: "code-highlighting-css",
+        shows: "the css block: an at-rule with a url, tags and combinators in selectors, properties, values, units, a colour, !important",
+        open: css,
+    },
+    Scene {
+        name: "code-highlighting-html",
+        shows: "the html block: doctype, tags, attributes and values, a comment, entities, a style block as CSS and a script block as JavaScript",
+        open: html,
     },
     Scene {
         name: "code-highlighting-plain",
