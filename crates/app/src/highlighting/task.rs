@@ -67,10 +67,19 @@ fn land(
     // Its own task: dropped after the borrow ends, and never seen by the replan below.
     let landing = flights.borrow_mut().tasks.remove(&buffer.entity_id());
     drop(landing);
+    // Off, the publish lands nothing and the replan would respawn this task forever (S2c deviation 8).
+    if !decorations::enabled(SYNTAX, cx) {
+        return;
+    }
     let Some(strong) = buffer.upgrade() else {
         return;
     };
     let text = strong.read(cx);
+    let lexed_at = at;
+    let carried: Vec<_> = chunks
+        .iter()
+        .map(|(range, shape, _)| (range.clone(), Some(*shape)))
+        .collect();
     let (chunks, at) = if text.edits_since(at).is_some() {
         (chunks.into_iter().map(styled).collect(), at)
     } else {
@@ -78,6 +87,17 @@ fn land(
         (Vec::new(), text.edit_mark())
     };
     decorations::publish(SYNTAX, buffer, Vec::new(), chunks, at, cx);
+    // Else the replan sends the same blocks again after every landing (S2b deviation 4).
+    debug_assert!(
+        strong.read(cx).edit_mark() != lexed_at || {
+            let held = decorations::chunks(SYNTAX, &strong, cx);
+            carried.iter().all(|(range, tag)| {
+                let at = held.partition_point(|(held, _)| held.start < range.start);
+                held.get(at) == Some(&(range.clone(), *tag))
+            })
+        },
+        "a landing at {lexed_at:?} with no edit since left a block it carried inexact"
+    );
     relex(&flights, &strong, None, cx);
 }
 

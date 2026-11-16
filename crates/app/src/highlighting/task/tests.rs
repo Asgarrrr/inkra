@@ -281,6 +281,19 @@ fn switching_the_feature_off_during_a_flight_leaves_no_mark(cx: &mut TestAppCont
     assert_eq!(marks(cx, &buffer), []);
 }
 
+/// Its landing publishes nothing, so a replan would find the same blocks pending, forever.
+#[gpui::test]
+fn a_layer_switched_off_under_its_live_listener_stops_at_the_landing(cx: &mut TestAppContext) {
+    let (buffer, _listening, flights) = heard(cx, &three_blocks(), |_, _| {});
+
+    cx.update(|cx| decorations::enable([], cx));
+    settle(cx);
+
+    assert!(!flying(&flights, &buffer));
+    assert_eq!(spawned(&flights), 1);
+    assert_eq!(marks(cx, &buffer), []);
+}
+
 #[gpui::test]
 fn switching_the_feature_off_and_on_during_a_flight_runs_one_new_task(cx: &mut TestAppContext) {
     let note = three_blocks();

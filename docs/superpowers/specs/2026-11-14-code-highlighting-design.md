@@ -1113,21 +1113,24 @@ Code cites these as "S2c deviation N".
    listener reads no file. Closing a note is releasing its buffer, a reload
    is `apply_diff`, and a layer lost in flight is 257 edits no frame heard.
    `task/tests.rs` holds the races; it shares `tests.rs`' helpers.
-5. **Every `highlighting` test settles in at most 1,000 executor ticks.** A
-   landing that never makes its blocks exact spawns the next task forever. An
-   injected bug that dropped every landed chunk hung `run_until_parked` in 19
-   tests; `settle` turns that livelock into a failure in under a second.
-6. **`lex_pending` serves the benches only.** The app no longer calls it. The
-   listener bench still drains every backlog (S2b deviation 7), and the
-   layout bench's `Typing` still lexes every pending block on each keystroke,
-   which the app now leaves to the task.
+5. **A livelock fails at once instead of hanging the suite.** A landing
+   that never makes its blocks exact spawns the next task forever, and
+   `run_until_parked` would never return. Two checks fail the first such
+   landing in a test build. `backlog` panics on an empty `pending`, so a
+   task is never spawned for nothing. A landing with no edit since `at`
+   asserts that every block it carried is now held exactly (S2b deviation
+   4). Every `highlighting` test also waits through `settle`, which panics
+   after 1,000 executor ticks.
+6. **`lex_pending` serves the benches only.** The app no longer calls it,
+   and the layout bench's keystroke leaves a pending block to the task, as
+   the listener does.
 7. **D8's skip spends no deadline check,** as an `unlexed` block does not.
    So one block over the budget cannot stop the blocks after it.
-8. **Step 1 assumes a feature switched off has dropped its map.** A layer
-   switched off while its listener lives makes every landing publish
-   nothing, and step 5 then finds the same blocks pending, forever. The
-   registry switches the layer off and drops the feature's handle in one
-   update (`apply_switches`), so no landing runs in between.
+8. **A landing on a layer switched off stops after step 2.** The publish
+   would land nothing, and step 5 would then find the same blocks pending,
+   forever. Step 1 alone does not cover it: a layer can be off while its
+   listener, and so its map, still lives. `decorations::enabled` reads the
+   switch; with the entry removed, a later switch-on spawns again.
 
 No figure changed: S2c moves work between threads and adds no lex. The
 landing bench and the listener bench measure the same pure parts as in S2b.

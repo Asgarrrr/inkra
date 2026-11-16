@@ -29,8 +29,12 @@ struct Block {
 
 /// The `pending` blocks of `text`, parsed as `markdown`, in order, up to the one that would take the
 /// backlog past `TASK_BYTES` block bytes; the first always goes.
+///
+/// # Panics
+/// If `pending` is empty.
 #[must_use]
 pub fn backlog(text: &str, markdown: &Markdown, pending: &[usize]) -> Backlog {
+    assert!(!pending.is_empty(), "a backlog of no block");
     let mut backlog = Backlog {
         blocks: Vec::new(),
         lines: Vec::new(),
