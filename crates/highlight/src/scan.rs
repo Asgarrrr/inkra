@@ -109,7 +109,7 @@ const LOOK_AHEAD: usize = 64;
 /// pairing of the whole line, made once, so the line lexes in linear time.
 pub(crate) struct Generics<'a> {
     bytes: &'a [u8],
-    ends: OnceCell<Vec<(usize, usize)>>,
+    ends: OnceCell<Vec<(usize, Option<usize>)>>,
 }
 
 impl<'a> Generics<'a> {
@@ -136,7 +136,7 @@ impl<'a> Generics<'a> {
     fn paired_end(&self, open: usize) -> Option<usize> {
         let ends = self.ends.get_or_init(|| pair(self.bytes));
         let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
-        Some(ends[index].1)
+        ends[index].1
     }
 
     /// `end` from the `LOOK_AHEAD` bytes from `open`, when they decide it.
@@ -191,23 +191,26 @@ fn angle(bytes: &[u8], at: usize) -> Angle {
     }
 }
 
-/// Every `<` with its closing `>`, as `(open, end)` sorted by `open`.
-fn pair(bytes: &[u8]) -> Vec<(usize, usize)> {
-    let mut opens = Vec::new();
+/// Every `<` with the end of its list if it closes, as `(open, end)` in the line's order.
+fn pair(bytes: &[u8]) -> Vec<(usize, Option<usize>)> {
     let mut ends = Vec::new();
+    // Indices into `ends` of the lists still open.
+    let mut opens = Vec::new();
     for at in 0..bytes.len() {
         match angle(bytes, at) {
-            Angle::Open => opens.push(at),
+            Angle::Open => {
+                opens.push(ends.len());
+                ends.push((at, None));
+            }
             Angle::Close => {
-                if let Some(open) = opens.pop() {
-                    ends.push((open, at + 1));
+                if let Some(index) = opens.pop() {
+                    ends[index].1 = Some(at + 1);
                 }
             }
             Angle::Stop => opens.clear(),
             Angle::Other => {}
         }
     }
-    ends.sort_unstable();
     ends
 }
 
@@ -273,3 +276,6 @@ impl Sink<'_> {
         end
     }
 }
+
+#[cfg(test)]
+mod tests;

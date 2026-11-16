@@ -1317,8 +1317,8 @@ Zed's `highlights.scm` for its language, as in S3.
 14. **`TokenClass` gains `Tag`.** D5 names eleven classes, but S1a built ten,
     as no lexer coloured a tag. `app` maps it to `syntax_tag`, which the theme
     already holds.
-15. **`scan.rs` gains the scans two lexers share.** `generic_end` moves from
-    `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript,
+15. **`scan.rs` gains the scans two lexers share.** `generic_end` (now
+    `Generics::end`, deviation 16) moves from `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript,
     CSS and, with its closer as a parameter, HTML's `<!--`, and `dotted_end`
     from `python.rs` for decorators. `entity_end` serves HTML and JSX.
     `end_while` is every name scan, and `Sink::token` pushes a token and
@@ -1327,9 +1327,10 @@ Zed's `highlights.scm` for its language, as in S3.
     `Generics::end`, one per line for TypeScript and Rust alike, finds where
     a `<` closes before a `;`, `{` or `}`. Rescanning to the line end for
     every name before a `<` lexed one long line in quadratic time. So it looks
-    ahead `LOOK_AHEAD` (64) bytes first, which decides every list written by
-    hand. A list those bytes leave open is found in a pairing of the whole
-    line: one pass with a stack of open `<`, made once and kept for the line.
+    ahead `LOOK_AHEAD` (64) bytes first, which decides almost every list
+    written by hand. A list those bytes leave open is found in a pairing of
+    the whole line: one pass with a stack of open `<`, made once and kept for
+    the line.
     The pairing is `#[cold]` and out of line: inlined, it slowed ordinary
     TypeScript by 5% and JavaScript, which shares the lexer, by 3%. A list
     holding an object type is not a generic call; its capitalised names stay
