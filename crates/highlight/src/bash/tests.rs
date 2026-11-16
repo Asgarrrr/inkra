@@ -368,6 +368,30 @@ fn an_assignment_takes_a_subscript_before_its_operator() {
             ("x[1]y=z", Function),
         ],
     );
+    check(
+        "arr[i]=v",
+        &[
+            ("[", Punctuation),
+            ("]", Punctuation),
+            ("=", Operator),
+            ("v", String),
+        ],
+    );
+}
+
+#[test]
+fn a_paren_at_a_command_start_opens_a_subshell_not_arithmetic() {
+    check(
+        "(cd x) && ls",
+        &[
+            ("(", Punctuation),
+            ("cd", Function),
+            ("x", String),
+            (")", Punctuation),
+            ("&&", Operator),
+            ("ls", Function),
+        ],
+    );
 }
 
 #[test]

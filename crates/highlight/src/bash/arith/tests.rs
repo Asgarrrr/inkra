@@ -83,3 +83,17 @@ fn only_a_double_paren_closes_arithmetic() {
         ],
     );
 }
+
+#[test]
+fn a_dollar_that_starts_no_parameter_stays_plain_in_arithmetic() {
+    check(
+        "echo $(( 1 + $ ))",
+        &[
+            ("echo", Function),
+            ("$((", Punctuation),
+            ("1", Constant),
+            ("+", Operator),
+            ("))", Punctuation),
+        ],
+    );
+}
