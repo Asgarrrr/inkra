@@ -1,8 +1,12 @@
 //! Code blocks coloured by token class, as a built-in feature with one layer (code highlighting
 //! spec, D6).
 
+use std::cell::RefCell;
+use std::ops::Range;
+use std::rc::Rc;
+
 use gpui::{App, Entity};
-use inkra_highlight::{Batch, BlockChunk, TokenClass, batch, lex_pending};
+use inkra_highlight::{Batch, BlockChunk, TokenClass, batch};
 use inkra_text::{Buffer, ByteOffset, Splice};
 
 use crate::decorations::{self, Chunk, LayerDecl, LayerId, MarkStyle, TextChange};
@@ -11,6 +15,9 @@ use crate::feature::{FeatureId, Manifest};
 use crate::theme::ColorToken;
 
 mod open;
+mod task;
+
+use task::Flights;
 
 const FEATURE: FeatureId = FeatureId::new("highlighting");
 
@@ -29,35 +36,50 @@ pub(crate) static MANIFEST: Manifest = Manifest {
     panes: &[],
     buttons: &[],
     layers: &[SYNTAX_DECL],
-    activate: |fcx| fcx.on_text_change(SYNTAX, listener),
+    activate: |fcx| fcx.on_text_change(SYNTAX, listener(Rc::default())),
 };
 
-/// Removes each chunk no longer a block's, then lexes each block no chunk holds exactly, in one
-/// publish: those `change` meets within the main thread's budget, then the rest, backlog after
-/// backlog (D7, D10, deviations 6, 8, 9 and 10).
-fn listener(buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
-    let markdown = parsed(buffer, cx);
-    let held = decorations::chunks(SYNTAX, buffer, cx);
-    let text = buffer.read(cx);
+/// The syntax layer's listener; it owns `flights`, each buffer's background task (D10).
+fn listener(flights: Rc<RefCell<Flights>>) -> impl Fn(&Entity<Buffer>, TextChange, &mut App) {
+    move |buffer, change, cx| hear(&flights, buffer, change, cx)
+}
+
+/// Replans `buffer` from what `change` says moved (D7, D10).
+fn hear(flights: &Rc<RefCell<Flights>>, buffer: &Entity<Buffer>, change: TextChange, cx: &mut App) {
     let dirty = match change {
         TextChange::Edited(splices) => {
             Splice::compose(splices).map(|splice| splice.at..splice.at + splice.inserted_len)
         }
         TextChange::Lost | TextChange::Opened { fresh: false } => {
-            Some(ByteOffset::new(0)..text.len())
+            Some(ByteOffset::new(0)..buffer.read(cx).len())
         }
         TextChange::Opened { fresh: true } => None,
     };
+    relex(flights, buffer, dirty, cx);
+}
+
+/// Removes each chunk no longer a block's, and lexes each block no chunk holds exactly: in one
+/// publish, those `dirty` meets within the main thread's budget; the rest in `buffer`'s background
+/// task (D7, D10, deviations 6, 8, 9 and 10).
+fn relex(
+    flights: &Rc<RefCell<Flights>>,
+    buffer: &Entity<Buffer>,
+    dirty: Option<Range<ByteOffset>>,
+    cx: &mut App,
+) {
+    let markdown = parsed(buffer, cx);
+    let held = decorations::chunks(SYNTAX, buffer, cx);
+    let text = buffer.read(cx);
     let Batch {
         clear,
-        mut lexed,
+        lexed,
         pending,
     } = batch(text.text(), &markdown, &held, dirty);
-    lexed.extend(lex_pending(text.text(), &markdown, &pending));
     let lexed = lexed.into_iter().map(styled).collect();
-    let (at, buffer) = (text.edit_mark(), buffer.downgrade());
+    let at = text.edit_mark();
     // Clears go first in the batch: a later change wins, and a lexed block may cover a clear.
-    decorations::publish(SYNTAX, &buffer, clear, lexed, at, cx);
+    decorations::publish(SYNTAX, &buffer.downgrade(), clear, lexed, at, cx);
+    task::spawn(flights, buffer, &markdown, &pending, cx);
 }
 
 /// A block chunk with each token class as its theme colour.
