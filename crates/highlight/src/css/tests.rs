@@ -272,3 +272,143 @@ fn a_nested_declaration_needs_no_space_after_its_colon_unless_a_comma_ends_its_l
         ],
     );
 }
+
+#[test]
+fn a_number_takes_an_exponent_with_its_sign_and_a_unit_after_it() {
+    check(
+        "a { x: 1e3; y: 2.5E-2em; z: 4e+1px; w: 1em }",
+        &[
+            ("a", Tag),
+            ("{", Punctuation),
+            ("x", Property),
+            (":", Punctuation),
+            ("1e3", Constant),
+            (";", Punctuation),
+            ("y", Property),
+            (":", Punctuation),
+            ("2.5E-2", Constant),
+            ("em", Type),
+            (";", Punctuation),
+            ("z", Property),
+            (":", Punctuation),
+            ("4e+1", Constant),
+            ("px", Type),
+            (";", Punctuation),
+            ("w", Property),
+            (":", Punctuation),
+            ("1", Constant),
+            ("em", Type),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_semicolon_or_a_brace_ends_a_declaration_and_a_quoted_brace_does_not_count() {
+    check(
+        "color:red;\na {\n  content: \"{\";\n}",
+        &[
+            ("color", Property),
+            (":", Punctuation),
+            ("red", Constant),
+            (";", Punctuation),
+            ("a", Tag),
+            ("{", Punctuation),
+            ("content", Property),
+            (":", Punctuation),
+            ("\"{\"", String),
+            (";", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_selector_continues_to_its_end_even_where_a_name_and_colon_follow() {
+    check(
+        "a {\n  & b:hover\n}",
+        &[
+            ("a", Tag),
+            ("{", Punctuation),
+            ("&", Tag),
+            ("b", Tag),
+            (":", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_bang_before_another_word_is_an_operator() {
+    check(
+        "a { x: y !z }",
+        &[
+            ("a", Tag),
+            ("{", Punctuation),
+            ("x", Property),
+            (":", Punctuation),
+            ("y", Constant),
+            ("!", Operator),
+            ("z", Constant),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn an_at_rule_takes_comparisons_functions_and_feature_values() {
+    check(
+        "@media (400px <= width) and (orientation: landscape) {",
+        &[
+            ("@media", Keyword),
+            ("(", Punctuation),
+            ("400", Constant),
+            ("px", Type),
+            ("<", Operator),
+            ("=", Operator),
+            ("width", Constant),
+            (")", Punctuation),
+            ("and", Keyword),
+            ("(", Punctuation),
+            ("orientation", Property),
+            (":", Punctuation),
+            ("landscape", Constant),
+            (")", Punctuation),
+            ("{", Punctuation),
+        ],
+    );
+    check(
+        "@import url(\"a.css\") screen;",
+        &[
+            ("@import", Keyword),
+            ("url", Function),
+            ("(", Punctuation),
+            ("\"a.css\"", String),
+            (")", Punctuation),
+            ("screen", Constant),
+            (";", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_pseudo_class_argument_nests_and_an_attribute_selector_takes_a_bare_equals() {
+    check(
+        "a:not(.b, .c) [type=text] {",
+        &[
+            ("a", Tag),
+            (":", Punctuation),
+            ("(", Punctuation),
+            (".", Punctuation),
+            (",", Punctuation),
+            (".", Punctuation),
+            (")", Punctuation),
+            ("[", Punctuation),
+            ("type", Attribute),
+            ("=", Operator),
+            ("text", String),
+            ("]", Punctuation),
+            ("{", Punctuation),
+        ],
+    );
+}

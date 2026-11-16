@@ -146,7 +146,7 @@ impl Tokens<'_> {
                 self.state.prev = Prev::Other;
                 self.punctuation(at)
             }
-            b'@' if starts_name(bytes, at + 1) => {
+            b'@' => {
                 let end = end_while(bytes, at + 1, is_name);
                 self.sink.push(at..end, Keyword);
                 self.state.prev = Prev::AtRule;
@@ -209,7 +209,7 @@ impl Tokens<'_> {
             return end;
         }
         match bytes[at] {
-            b'#' if bytes.get(at + 1).is_some_and(|&byte| is_word(byte)) => {
+            b'#' => {
                 let end = end_while(bytes, at + 1, is_name);
                 self.sink.push(at..end, String);
                 end
@@ -293,7 +293,7 @@ impl Tokens<'_> {
         }
         match bytes[at] {
             // Zed has no class for `selector.class`, `selector.id` or `selector.pseudo`.
-            b'.' | b'#' if starts_name(bytes, at + 1) => {
+            b'.' | b'#' => {
                 self.punctuation(at);
                 end_while(bytes, at + 1, is_name)
             }
