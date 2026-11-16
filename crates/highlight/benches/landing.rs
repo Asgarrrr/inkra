@@ -11,7 +11,7 @@ use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_ma
 use inkra_editor::Layer;
 use inkra_highlight::{BLOCK_LIMIT, BlockChunk, TASK_BYTES, TokenClass, block_marks};
 use inkra_markdown::parse;
-use inkra_text::{Buffer, ByteOffset, EditMark};
+use inkra_text::{Buffer, ByteOffset};
 
 /// What an `apply_diff` reload during the flight leaves; the splice log keeps 256.
 const SPLICES: usize = 200;
@@ -66,27 +66,31 @@ fn scatter(buffer: &mut Buffer) {
     }
 }
 
-/// The layer as the landing finds it: the same blocks held under another tag, caught up to `buffer`.
-fn held(buffer: &Buffer, chunks: &[BlockChunk], at: EditMark) -> Layer<TokenClass> {
-    let mut layer = Layer::new(at);
+/// The layer as the landing finds it: the same blocks held under another tag at `base`, the note
+/// before the scatter, then caught up to `buffer`.
+fn held(base: &Buffer, buffer: &Buffer, chunks: &[BlockChunk]) -> Layer<TokenClass> {
+    let mut layer = Layer::new(base.edit_mark());
     let stale = chunks
         .iter()
         .map(|(range, shape, marks)| (range.clone(), shape ^ 1, marks.clone()))
         .collect();
     layer
-        .publish(buffer, Vec::new(), stale, at)
+        .publish(base, Vec::new(), stale, base.edit_mark())
         .expect("the blocks land");
+    layer.catch_up(buffer).expect("the log holds the scatter");
     layer
 }
 
 fn bench_note(c: &mut Criterion, group: &str, id: BenchmarkId, note: &str) {
-    let mut buffer = Buffer::new(note);
+    let (base, mut buffer) = (Buffer::new(note), Buffer::new(note));
     let at = buffer.edit_mark();
+    // A late publish would skip every block a splice reached, so `held` publishes on a twin.
+    assert_eq!(base.edit_mark(), at);
     let chunks = chunks(&buffer);
     scatter(&mut buffer);
     c.benchmark_group(group).bench_function(id, |b| {
         b.iter_batched(
-            || (held(&buffer, &chunks, at), chunks.clone()),
+            || (held(&base, &buffer, &chunks), chunks.clone()),
             |(mut layer, chunks)| {
                 layer
                     .publish(&buffer, Vec::new(), chunks, at)
