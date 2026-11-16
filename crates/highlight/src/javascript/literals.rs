@@ -2,9 +2,10 @@
 //! literals with their classes and flags (code highlighting spec, D4).
 
 use crate::TokenClass::{Keyword, Punctuation, String};
+use crate::scan::end_while;
 use crate::state::{Nest, Prev};
 
-use super::{Tokens, ident_end};
+use super::{Tokens, is_ident};
 
 impl Tokens<'_> {
     /// A template's text from `at`, as one `String` from `token`, up to its closing backtick, a
@@ -62,7 +63,7 @@ impl Tokens<'_> {
             return bytes.len();
         };
         self.sink.push(at..close, String);
-        let flags = ident_end(bytes, close);
+        let flags = end_while(bytes, close, is_ident);
         self.sink.push(close..flags, Keyword);
         flags
     }

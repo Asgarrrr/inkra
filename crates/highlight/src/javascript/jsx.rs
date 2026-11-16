@@ -2,7 +2,7 @@
 //! spec, D4).
 
 use crate::TokenClass::{Attribute, Punctuation, String, Tag};
-use crate::scan::{entity_end, is_ident_start, quoted};
+use crate::scan::{end_while, entity_end, is_ident_start, quoted};
 use crate::state::{Nest, Prev};
 
 use super::{Tokens, is_ident};
@@ -10,13 +10,6 @@ use super::{Tokens, is_ident};
 /// A byte of a tag or attribute name: an identifier byte, `-` or `:`.
 fn is_name(byte: u8) -> bool {
     is_ident(byte) || byte == b'-' || byte == b':'
-}
-
-fn name_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| !is_name(byte))
-        .map_or(bytes.len(), |len| at + len)
 }
 
 impl Tokens<'_> {
@@ -31,7 +24,7 @@ impl Tokens<'_> {
     fn tag_name(&mut self, mut at: usize) -> usize {
         let bytes = self.line.as_bytes();
         loop {
-            let end = name_end(bytes, at);
+            let end = end_while(bytes, at, is_name);
             self.sink.push(at..end, Tag);
             if bytes.get(end) != Some(&b'.')
                 || !bytes.get(end + 1).copied().is_some_and(is_ident_start)
@@ -79,7 +72,7 @@ impl Tokens<'_> {
                 end
             }
             byte if is_ident_start(byte) => {
-                let end = name_end(bytes, at);
+                let end = end_while(bytes, at, is_name);
                 self.sink.push(at..end, Attribute);
                 end
             }

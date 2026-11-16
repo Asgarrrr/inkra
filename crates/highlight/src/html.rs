@@ -6,8 +6,8 @@ use std::ops::Range;
 
 use inkra_text::ByteOffset;
 
-use crate::TokenClass::{self, Attribute, Comment, Punctuation, String, Tag};
-use crate::scan::{Sink, drive, entity_end, quoted, skip_spaces};
+use crate::TokenClass::{self, Attribute, Punctuation, String, Tag};
+use crate::scan::{Sink, block_comment, drive, end_while, entity_end, quoted, skip_spaces};
 use crate::state::{LineState, Nest, Open, Prev};
 use crate::{css, javascript};
 
@@ -18,19 +18,18 @@ fn embedded(state: &LineState) -> Option<Nest> {
         .filter(|bottom| matches!(bottom, Nest::Script | Nest::Style))
 }
 
-fn name_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| !(byte.is_ascii_alphanumeric() || b"-:_.".contains(&byte)))
-        .map_or(bytes.len(), |len| at + len)
+fn is_tag_name(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"-:_.".contains(&byte)
 }
 
-/// An attribute name's end: anything but whitespace, a quote, `=`, `/`, `<` or `>`.
-fn attribute_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| byte.is_ascii_whitespace() || b"\"'=/<>".contains(&byte))
-        .map_or(bytes.len(), |len| at + len)
+/// An attribute name's byte: anything but whitespace, a quote, `=`, `/`, `<` or `>`.
+fn is_attribute_name(byte: u8) -> bool {
+    !(byte.is_ascii_whitespace() || b"\"'=/<>".contains(&byte))
+}
+
+/// An unquoted attribute value's byte: anything but whitespace or `>`.
+fn is_bare_value(byte: u8) -> bool {
+    !(byte.is_ascii_whitespace() || byte == b'>')
 }
 
 /// One line's tokens.
@@ -41,12 +40,6 @@ struct Tokens<'a> {
 }
 
 impl Tokens<'_> {
-    fn punctuation(&mut self, range: Range<usize>) -> usize {
-        let end = range.end;
-        self.sink.push(range, Punctuation);
-        end
-    }
-
     /// Lexes what starts at `at`, with nothing of HTML's own open there: its end.
     fn step(&mut self, at: usize) -> usize {
         match (embedded(&self.state), self.state.prev) {
@@ -92,26 +85,20 @@ impl Tokens<'_> {
         if rest.starts_with(b"<!--") {
             self.comment(at, at + 4)
         } else if rest.starts_with(b"<!") {
-            let end = bytes[at..]
-                .iter()
-                .position(|&byte| byte == b'>')
-                .map_or(bytes.len(), |len| at + len);
-            self.punctuation(at..at + 2);
+            let end = end_while(bytes, at + 2, |byte| byte != b'>');
+            self.sink.push(at..at + 2, Punctuation);
             self.sink.push(at + 2..end, Tag);
-            if end < bytes.len() {
-                self.punctuation(end..end + 1)
-            } else {
-                end
-            }
+            let close = end + usize::from(end < bytes.len());
+            self.sink.token(end..close, Punctuation)
         } else if rest.starts_with(b"</") && letter(at + 2) {
-            self.punctuation(at..at + 2);
-            let end = name_end(bytes, at + 2);
+            self.sink.push(at..at + 2, Punctuation);
+            let end = end_while(bytes, at + 2, is_tag_name);
             self.sink.push(at + 2..end, Tag);
             self.state.prev = Prev::HtmlTag;
             end
         } else if rest[0] == b'<' && letter(at + 1) {
-            self.punctuation(at..at + 1);
-            let end = name_end(bytes, at + 1);
+            self.sink.push(at..at + 1, Punctuation);
+            let end = end_while(bytes, at + 1, is_tag_name);
             let name = &self.line[at + 1..end];
             self.sink.push(at + 1..end, Tag);
             self.state.prev = if name.eq_ignore_ascii_case("script") {
@@ -135,17 +122,9 @@ impl Tokens<'_> {
 
     /// Scans a comment from `at` up to its `-->`, as one token from `token`: its end on the line.
     fn comment(&mut self, token: usize, at: usize) -> usize {
-        let bytes = self.line.as_bytes();
-        let close = bytes[at..]
-            .windows(3)
-            .position(|window| window == b"-->")
-            .map(|len| at + len + 3);
-        self.state.open = match close {
-            Some(_) => Open::Nothing,
-            None => Open::BlockComment { depth: 1 },
-        };
-        let end = close.unwrap_or(bytes.len());
-        self.sink.push(token..end, Comment);
+        let end;
+        (end, self.state.open) =
+            block_comment(&mut self.sink, self.line.as_bytes(), token, at, b"-->");
         end
     }
 
@@ -156,7 +135,7 @@ impl Tokens<'_> {
             byte if byte.is_ascii_whitespace() => at + 1,
             b'/' if bytes.get(at + 1) == Some(&b'>') => {
                 self.state.prev = Prev::Other;
-                self.punctuation(at..at + 2)
+                self.sink.token(at..at + 2, Punctuation)
             }
             b'>' => {
                 match self.state.prev {
@@ -165,16 +144,16 @@ impl Tokens<'_> {
                     _ => {}
                 }
                 self.state.prev = Prev::Other;
-                self.punctuation(at..at + 1)
+                self.sink.token(at..at + 1, Punctuation)
             }
             b'=' => {
-                self.punctuation(at..at + 1);
+                self.sink.push(at..at + 1, Punctuation);
                 let value = skip_spaces(bytes, at + 1);
                 match bytes.get(value) {
                     Some(&quote @ (b'"' | b'\'')) => self.value(value, value + 1, quote),
                     Some(b'>') | None => value,
                     Some(_) => {
-                        let end = attribute_end(bytes, value).max(value + 1);
+                        let end = end_while(bytes, value, is_bare_value);
                         self.sink.push(value..end, String);
                         end
                     }
@@ -182,7 +161,7 @@ impl Tokens<'_> {
             }
             quote @ (b'"' | b'\'') => self.value(at, at + 1, quote),
             _ => {
-                let end = attribute_end(bytes, at).max(at + 1);
+                let end = end_while(bytes, at, is_attribute_name).max(at + 1);
                 self.sink.push(at..end, Attribute);
                 end
             }

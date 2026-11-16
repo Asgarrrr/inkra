@@ -10,8 +10,8 @@ use crate::TokenClass::{
     self, Attribute, Comment, Constant, Function, Keyword, Property, String, Type,
 };
 use crate::scan::{
-    Sink, block_comment, dotted_end, drive, generic_end, is_all_caps, is_ident_start, is_word,
-    number, quoted, skip_spaces,
+    Sink, block_comment, dotted_end, drive, end_while, generic_end, is_all_caps, is_ident_start,
+    is_word, number, quoted, skip_spaces,
 };
 use crate::state::{LineState, Nest, Open, Prev};
 use crate::typescript;
@@ -105,13 +105,6 @@ fn is_ident(byte: u8) -> bool {
     is_word(byte) || byte == b'$'
 }
 
-fn ident_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| !is_ident(byte))
-        .map_or(bytes.len(), |len| at + len)
-}
-
 /// Whether `byte` can start what a soft keyword takes: a name, a literal, a pattern or `*`.
 fn starts_operand(byte: Option<&u8>) -> bool {
     byte.is_some_and(|&byte| is_ident_start(byte) || b"$\"'`{[*#".contains(&byte))
@@ -187,7 +180,7 @@ impl Tokens<'_> {
                 end
             }
             b'#' if next.is_some_and(is_ident_start) => {
-                let end = ident_end(bytes, at + 1);
+                let end = end_while(bytes, at + 1, is_ident);
                 let call = bytes.get(skip_spaces(bytes, end)) == Some(&b'(');
                 self.sink
                     .push(at..end, if call { Function } else { Property });
@@ -209,7 +202,8 @@ impl Tokens<'_> {
 
     fn block_comment(&mut self, token: usize, at: usize) -> usize {
         let end;
-        (end, self.state.open) = block_comment(&mut self.sink, self.line.as_bytes(), token, at);
+        (end, self.state.open) =
+            block_comment(&mut self.sink, self.line.as_bytes(), token, at, b"*/");
         end
     }
 
@@ -221,7 +215,7 @@ impl Tokens<'_> {
     }
 
     fn word(&mut self, at: usize) -> usize {
-        let end = ident_end(self.line.as_bytes(), at);
+        let end = end_while(self.line.as_bytes(), at, is_ident);
         let (class, prev) = self.classify(&self.line[at..end], end);
         if let Some(class) = class {
             self.sink.push(at..end, class);

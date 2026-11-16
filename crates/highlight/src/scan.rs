@@ -17,18 +17,20 @@ pub(crate) fn is_ident_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_' || !byte.is_ascii()
 }
 
-pub(crate) fn word_end(bytes: &[u8], at: usize) -> usize {
+/// The end of the run from `at` of bytes that `keep` accepts.
+pub(crate) fn end_while(bytes: &[u8], at: usize, keep: impl Fn(u8) -> bool) -> usize {
     bytes[at..]
         .iter()
-        .position(|&byte| !is_word(byte))
+        .position(|&byte| !keep(byte))
         .map_or(bytes.len(), |len| at + len)
 }
 
+pub(crate) fn word_end(bytes: &[u8], at: usize) -> usize {
+    end_while(bytes, at, is_word)
+}
+
 pub(crate) fn skip_spaces(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|byte| !byte.is_ascii_whitespace())
-        .map_or(bytes.len(), |len| at + len)
+    end_while(bytes, at, |byte| byte.is_ascii_whitespace())
 }
 
 /// Two or more of `[A-Z0-9_]` from an ASCII uppercase letter.
@@ -121,18 +123,19 @@ pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-/// Scans a `/* */` comment, which does not nest, from `at` as one `Comment` from `token`: its end
-/// on the line, and what stays open there.
+/// Scans a comment that ends at `closer` and does not nest, from `at` as one `Comment` from
+/// `token`: its end on the line, and what stays open there.
 pub(crate) fn block_comment(
     sink: &mut Sink,
     bytes: &[u8],
     token: usize,
     at: usize,
+    closer: &[u8],
 ) -> (usize, Open) {
     let close = bytes[at..]
-        .windows(2)
-        .position(|pair| pair == b"*/")
-        .map(|len| at + len + 2);
+        .windows(closer.len())
+        .position(|window| window == closer)
+        .map(|len| at + len + closer.len());
     sink.push(token..close.unwrap_or(bytes.len()), TokenClass::Comment);
     match close {
         Some(end) => (end, Open::Nothing),
@@ -173,5 +176,12 @@ impl Sink<'_> {
             self.out
                 .push((self.start + range.start..self.start + range.end, class));
         }
+    }
+
+    /// Pushes `range` as `push` does: its end.
+    pub(crate) fn token(&mut self, range: Range<usize>, class: TokenClass) -> usize {
+        let end = range.end;
+        self.push(range, class);
+        end
     }
 }

@@ -9,7 +9,9 @@ use crate::TokenClass::{
     self, Attribute, Constant, Function, Keyword, Operator, Property, Punctuation, String, Tag,
     Type,
 };
-use crate::scan::{Sink, block_comment, drive, is_ident_start, is_word, quoted, skip_spaces};
+use crate::scan::{
+    Sink, block_comment, drive, end_while, is_ident_start, is_word, quoted, skip_spaces,
+};
 use crate::state::{LineState, Nest, Open, Prev};
 
 /// Whether a name starts at `at`: a letter, `_` or non-ASCII, or a `-` before one or another `-`.
@@ -23,11 +25,9 @@ fn starts_name(bytes: &[u8], at: usize) -> bool {
     }
 }
 
-fn name_end(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|&byte| !(is_word(byte) || byte == b'-'))
-        .map_or(bytes.len(), |len| at + len)
+/// A byte of a name after its start: a word byte or `-`.
+fn is_name(byte: u8) -> bool {
+    is_word(byte) || byte == b'-'
 }
 
 /// The ends of the number at `at`, its sign included, and of its unit, `%` or letters; `None`
@@ -84,7 +84,7 @@ fn declaration_ahead(bytes: &[u8], at: usize) -> bool {
             _ => scan += 1,
         }
     }
-    let colon = skip_spaces(bytes, name_end(bytes, at));
+    let colon = skip_spaces(bytes, end_while(bytes, at, is_name));
     bytes.get(colon) == Some(&b':') && bytes.get(colon + 1).is_none_or(u8::is_ascii_whitespace)
 }
 
@@ -98,13 +98,13 @@ struct Tokens<'a> {
 impl Tokens<'_> {
     fn block_comment(&mut self, token: usize, at: usize) -> usize {
         let end;
-        (end, self.state.open) = block_comment(&mut self.sink, self.line.as_bytes(), token, at);
+        (end, self.state.open) =
+            block_comment(&mut self.sink, self.line.as_bytes(), token, at, b"*/");
         end
     }
 
     fn punctuation(&mut self, at: usize) -> usize {
-        self.sink.push(at..at + 1, Punctuation);
-        at + 1
+        self.sink.token(at..at + 1, Punctuation)
     }
 
     fn open(&mut self, at: usize, entry: Nest) -> usize {
@@ -144,7 +144,7 @@ impl Tokens<'_> {
                 self.punctuation(at)
             }
             b'@' if starts_name(bytes, at + 1) => {
-                let end = name_end(bytes, at + 1);
+                let end = end_while(bytes, at + 1, is_name);
                 self.sink.push(at..end, Keyword);
                 self.state.prev = Prev::AtRule;
                 end
@@ -154,7 +154,7 @@ impl Tokens<'_> {
                 Prev::AtRule => self.at_rule(at),
                 Prev::Selector => self.selector(at),
                 _ if starts_name(bytes, at) && declaration_ahead(bytes, at) => {
-                    let end = name_end(bytes, at);
+                    let end = end_while(bytes, at, is_name);
                     if !bytes[at..].starts_with(b"--") {
                         self.sink.push(at..end, Property);
                     }
@@ -205,13 +205,13 @@ impl Tokens<'_> {
         }
         match bytes[at] {
             b'#' if bytes.get(at + 1).is_some_and(|&byte| is_word(byte)) => {
-                let end = name_end(bytes, at + 1);
+                let end = end_while(bytes, at + 1, is_name);
                 self.sink.push(at..end, String);
                 end
             }
             b'!' => {
                 let word = skip_spaces(bytes, at + 1);
-                let end = name_end(bytes, word);
+                let end = end_while(bytes, word, is_name);
                 let important = self.line[word..end].eq_ignore_ascii_case("important");
                 let end = if important { end } else { at + 1 };
                 self.sink
@@ -222,7 +222,7 @@ impl Tokens<'_> {
             b')' => self.close(at, Nest::Paren),
             b',' | b':' => self.punctuation(at),
             _ if starts_name(bytes, at) => {
-                let end = name_end(bytes, at);
+                let end = end_while(bytes, at, is_name);
                 if bytes.get(end) == Some(&b'(') {
                     self.function(at, end)
                 } else {
@@ -252,7 +252,7 @@ impl Tokens<'_> {
             b')' => self.close(at, Nest::Paren),
             b',' | b':' => self.punctuation(at),
             _ if starts_name(bytes, at) => {
-                let end = name_end(bytes, at);
+                let end = end_while(bytes, at, is_name);
                 let word = &self.line[at..end];
                 let feature = self.state.top() == Some(Nest::Paren)
                     && bytes.get(skip_spaces(bytes, end)) == Some(&b':');
@@ -290,13 +290,13 @@ impl Tokens<'_> {
             // Zed has no class for `selector.class`, `selector.id` or `selector.pseudo`.
             b'.' | b'#' if starts_name(bytes, at + 1) => {
                 self.punctuation(at);
-                name_end(bytes, at + 1)
+                end_while(bytes, at + 1, is_name)
             }
             b':' => {
                 let colons = if next == Some(b':') { 2 } else { 1 };
                 self.sink.push(at..at + colons, Punctuation);
                 if starts_name(bytes, at + colons) {
-                    name_end(bytes, at + colons)
+                    end_while(bytes, at + colons, is_name)
                 } else {
                     at + colons
                 }
@@ -314,7 +314,7 @@ impl Tokens<'_> {
                 at + 1
             }
             _ if starts_name(bytes, at) => {
-                let end = name_end(bytes, at);
+                let end = end_while(bytes, at, is_name);
                 let keyframe = matches!(&self.line[at..end], "from" | "to");
                 self.sink
                     .push(at..end, if keyframe { Keyword } else { Tag });
@@ -328,7 +328,7 @@ impl Tokens<'_> {
     fn attribute_selector(&mut self, at: usize) -> usize {
         let bytes = self.line.as_bytes();
         if starts_name(bytes, at) {
-            let end = name_end(bytes, at);
+            let end = end_while(bytes, at, is_name);
             let before = bytes[..at]
                 .iter()
                 .rposition(|byte| !byte.is_ascii_whitespace());

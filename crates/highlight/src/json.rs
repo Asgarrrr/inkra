@@ -20,7 +20,7 @@ impl Tokens<'_> {
     /// Scans a block comment from `at` as one token from `token`: its end on the line.
     fn block_comment(&mut self, token: usize, at: usize) -> usize {
         let end;
-        (end, self.open) = block_comment(&mut self.sink, self.line.as_bytes(), token, at);
+        (end, self.open) = block_comment(&mut self.sink, self.line.as_bytes(), token, at, b"*/");
         end
     }
 

@@ -191,3 +191,21 @@ fn a_closing_script_tag_opens_no_javascript() {
         &[("</", Punctuation), ("script", Tag), (">", Punctuation)],
     );
 }
+
+#[test]
+fn an_unquoted_value_runs_to_a_space_or_the_tag_end_through_slashes() {
+    check(
+        "<a href=/about/team rel=x>",
+        &[
+            ("<", Punctuation),
+            ("a", Tag),
+            ("href", Attribute),
+            ("=", Punctuation),
+            ("/about/team", String),
+            ("rel", Attribute),
+            ("=", Punctuation),
+            ("x", String),
+            (">", Punctuation),
+        ],
+    );
+}
