@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{App, AppContext, Entity, Pixels, TestAppContext, Window, px};
+use inkra_editor::{EditorState, Selection};
 use inkra_text::{Buffer, ByteOffset};
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -56,6 +57,8 @@ enum Step {
     Caret(Index),
     /// The selection's end moves to a point and its start stays, as a drag does.
     Drag(Index),
+    /// A click on a task's box, picked among the text's tasks.
+    Toggle(Index),
     Wrap(Option<f32>),
     Margin,
     CodeBlockWrap,
@@ -77,6 +80,7 @@ fn step() -> impl Strategy<Value = Step> {
         3 => (any::<Index>(), any::<Index>()).prop_map(|(a, b)| Step::Select(a, b)),
         2 => any::<Index>().prop_map(Step::Caret),
         2 => any::<Index>().prop_map(Step::Drag),
+        3 => any::<Index>().prop_map(Step::Toggle),
         1 => prop::sample::select(vec![None, Some(120.), Some(300.)]).prop_map(Step::Wrap),
         1 => Just(Step::Margin),
         1 => Just(Step::CodeBlockWrap),
@@ -190,6 +194,20 @@ impl Inputs {
                 let (anchor, head) = (self.selection.start, point(buffer, *head));
                 self.selection = anchor.min(head)..anchor.max(head);
             }
+            Step::Toggle(pick) => {
+                let markdown = inkra_markdown::parse(buffer.text());
+                let tasks: Vec<_> = markdown
+                    .gutters
+                    .iter()
+                    .filter_map(|gutter| gutter.task.as_ref())
+                    .collect();
+                if !tasks.is_empty() {
+                    let mut state = EditorState::new(Selection::at(self.selection.start));
+                    state.toggle_task(buffer, tasks[pick.index(tasks.len())].checkbox.clone());
+                    self.selection = state.selection().range();
+                }
+                self.marked = None;
+            }
             Step::Wrap(width) => self.wrap_width = width.map(px),
             Step::Margin => {
                 self.margin = if self.margin == px(76.) {
@@ -278,6 +296,11 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
             )
         })
     };
+    let task_box = |line: &super::LineLayout| {
+        line.task_box()
+            .map(|(square, boxed)| (square, boxed.clone()))
+    };
+    prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);
     prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);
     let label = |line: &super::LineLayout| line.label.as_ref().map(|label| label.text.to_string());
     prop_assert_eq!(label(carried), label(fresh), "label at {}", at);

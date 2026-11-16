@@ -3,11 +3,12 @@
 
 use std::rc::Rc;
 
-use gpui::{Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine};
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, size};
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
-use super::prefix::{self, Prefix};
+use super::prefix::{self, Boxed, Prefix};
+use crate::theme::TASK_BOX_SIZE;
 
 #[cfg(test)]
 thread_local! {
@@ -97,6 +98,15 @@ const _: () = assert!(size_of::<LineLayout>() < 256);
 impl LineLayout {
     pub(super) fn indent(&self) -> Pixels {
         prefix::indent(self.prefix.as_ref())
+    }
+
+    /// The square a concealed task paints and a click hits, from the line's origin: centred on its
+    /// checkbox and on row 0 (task boxes spec, D4).
+    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &Boxed)> {
+        let (checkbox, boxed) = self.prefix.as_ref()?.task_box()?;
+        let centre = point((checkbox.start + checkbox.end) / 2., self.row_height / 2.);
+        let square = Bounds::centered_at(centre, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
+        Some((square, boxed))
     }
 }
 

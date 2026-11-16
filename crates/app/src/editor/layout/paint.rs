@@ -4,6 +4,8 @@ use gpui::{
     App, BorderStyle, Bounds, ContentMask, Pixels, Point, TextAlign, TransformationMatrix, Window,
     fill, outline, point, px, size,
 };
+use inkra_markdown::Task;
+use inkra_text::Version;
 
 use super::DocumentLayout;
 use super::prefix::Prefix;
@@ -145,9 +147,8 @@ impl DocumentLayout {
             {
                 log::warn!("failed to paint the prefix of line {index}: {err}");
             }
-            if let Some((checkbox, checked)) = line.prefix.as_ref().and_then(Prefix::task_box) {
-                let centre = point((checkbox.start + checkbox.end) / 2., line.row_height / 2.);
-                self.paint_task_box(line_origin + centre, checked, window, cx);
+            if let Some((square, boxed)) = line.task_box() {
+                self.paint_task_box(square + line_origin, boxed.checked, window, cx);
             }
         }
         let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
@@ -167,10 +168,9 @@ impl DocumentLayout {
         }
     }
 
-    /// A square centred on `centre`: an outline, or an accent fill with a check.
-    fn paint_task_box(&self, centre: Point<Pixels>, checked: bool, window: &mut Window, cx: &App) {
+    /// The square `bounds`: an outline, or an accent fill with a check.
+    fn paint_task_box(&self, bounds: Bounds<Pixels>, checked: bool, window: &mut Window, cx: &App) {
         let colors = &self.theme.colors;
-        let bounds = Bounds::centered_at(centre, size(theme::TASK_BOX_SIZE, theme::TASK_BOX_SIZE));
         if !checked {
             window.paint_quad(
                 outline(bounds, colors.md_marker, BorderStyle::Solid)
@@ -182,8 +182,10 @@ impl DocumentLayout {
             return;
         }
         window.paint_quad(fill(bounds, colors.accent).corner_radii(theme::TASK_BOX_RADIUS));
-        let check =
-            Bounds::centered_at(centre, size(theme::TASK_CHECK_SIZE, theme::TASK_CHECK_SIZE));
+        let check = Bounds::centered_at(
+            bounds.center(),
+            size(theme::TASK_CHECK_SIZE, theme::TASK_CHECK_SIZE),
+        );
         if let Err(err) = window.paint_svg(
             check,
             IconName::Check.path().into(),
@@ -196,6 +198,23 @@ impl DocumentLayout {
         }
         #[cfg(test)]
         PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, true)));
+    }
+
+    /// The task whose box holds `local`, on a layout shaped from `version`: a layout older than the
+    /// buffer describes other text, which matching bytes would not reveal (task boxes spec, D5, G).
+    pub(crate) fn task_at(&self, local: Point<Pixels>, version: Version) -> Option<Task> {
+        if self.shaped_at.0 != version {
+            return None;
+        }
+        // Clamped to the nearest line: below its first row, its square misses.
+        let (placed, _) = self.locate(self.row_for_y(local.y));
+        let (square, boxed) = placed.line.task_box()?;
+        square
+            .contains(&(local - point(px(0.), placed.top)))
+            .then(|| Task {
+                checkbox: placed.start + boxed.checkbox.start..placed.start + boxed.checkbox.end,
+                checked: boxed.checked,
+            })
     }
 
     /// The lines reaching `top..bottom` in layout space, one more each side: a glyph can overhang its row.
