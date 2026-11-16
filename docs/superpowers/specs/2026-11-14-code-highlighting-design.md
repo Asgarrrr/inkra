@@ -649,7 +649,8 @@ light. The look is tuned after it ships, as for code blocks.
   marks `block_marks` gives on the same blocks.
 - `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
   deadline; past it, only the empty chunks of unknown-language blocks and of
-  blocks over `BLOCK_LIMIT` (deviation 11, S2b deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
+  blocks over `BLOCK_LIMIT` (deviation 11, S2b deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit;
+  none for a block over `MAIN_THREAD_BUDGET`, which spends no deadline check, and one at the budget.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
@@ -805,6 +806,11 @@ Each slice is vertical and ends green on `./scripts/check.sh`.
   reparses incrementally because its buffers are whole files. A note's block
   is small; D10 sends the large ones to the background, as Zed's markdown
   highlights in a background task (`markdown.rs:1286`).
+- **No synchronous attempt before the background.** Zed's `Buffer::reparse`
+  blocks the main thread up to `sync_parse_timeout`, 1 ms, and spawns the
+  parse only past it (`buffer.rs:1177-1181`, `1967-1985`). A lex cannot
+  stop midway, so Inkra splits by bytes before it lexes (D10); a byte budget
+  also gives the same split in every test run.
 - **Colour computed in the open's background task.** Zed opens a buffer and
   parses it afterwards. Inkra already loads off the main thread, so the note
   lands coloured (D8).
@@ -1083,3 +1089,45 @@ at 128 KiB, and one block at 512 KiB at 1.002 s.
 `MAIN_THREAD_BUDGET` stays 64 KiB, at 368.4 us. Past 64 KiB the call lexes
 its backlogs too (deviation 7). `listener_backlog_copy` copies one backlog at
 `TASK_BYTES` in 13.3 us as one block and in 12.8 us as blocks of 512 bytes.
+
+## As built (S2c)
+
+Code cites these as "S2c deviation N".
+
+1. **The map is a `Flights` struct, not a bare `HashMap`.** It holds the map
+   D10 names, plus a spawn count compiled only in tests. The `app` tests read
+   that count to assert one task per buffer, and their `land` helper ticks
+   the executor until the task in flight has landed and no further. A test
+   that heard a buffer by calling `decorations::sync` keeps its task in
+   flight until it ticks, so each race runs in a fixed order.
+2. **The listener's replan and the landing's step 5 are one function,
+   `relex`.** The listener passes the dirty range of its `TextChange`; the
+   landing passes none. `listener(flights)` builds the closure, so
+   `activate` and the tests wire the same code with their own map.
+3. **The task is one foreground task that awaits one background lex.** The
+   map holds the foreground `Task`; dropping it drops the background `Task`
+   it awaits, which cancels both. The landing removes its own entry first
+   (step 2) and drops it once the `RefCell` borrow is released. Zed's
+   `Buffer::reparse` has the same shape (`buffer.rs:1987-2019`).
+4. **The `app` tests use plain `Buffer` entities, not `MemFs`.** The syntax
+   listener reads no file. Closing a note is releasing its buffer, a reload
+   is `apply_diff`, and a layer lost in flight is 257 edits no frame heard.
+   `task/tests.rs` holds the races; it shares `tests.rs`' helpers.
+5. **Every `highlighting` test settles in at most 1,000 executor ticks.** A
+   landing that never makes its blocks exact spawns the next task forever. An
+   injected bug that dropped every landed chunk hung `run_until_parked` in 19
+   tests; `settle` turns that livelock into a failure in under a second.
+6. **`lex_pending` serves the benches only.** The app no longer calls it. The
+   listener bench still drains every backlog (S2b deviation 7), and the
+   layout bench's `Typing` still lexes every pending block on each keystroke,
+   which the app now leaves to the task.
+7. **D8's skip spends no deadline check,** as an `unlexed` block does not.
+   So one block over the budget cannot stop the blocks after it.
+8. **Step 1 assumes a feature switched off has dropped its map.** A layer
+   switched off while its listener lives makes every landing publish
+   nothing, and step 5 then finds the same blocks pending, forever. The
+   registry switches the layer off and drops the feature's handle in one
+   update (`apply_switches`), so no landing runs in between.
+
+No figure changed: S2c moves work between threads and adds no lex. The
+landing bench and the listener bench measure the same pure parts as in S2b.
