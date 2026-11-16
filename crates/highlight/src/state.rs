@@ -92,7 +92,8 @@ pub(crate) enum Nest {
     },
     /// JavaScript's `(` right after `if`, `while`, `for` or `with`: its `)` ends no value.
     Condition,
-    /// A TypeScript type alias from `type` to its `=`; it never crosses a line.
+    /// A TypeScript type alias from `type` to its `=`; it crosses a line only under a nesting
+    /// opened after it.
     Alias,
     /// A JavaScript template string's text; a `${` above it pushes a `Brace`.
     Template,
@@ -120,6 +121,9 @@ pub(crate) enum Prev {
     TypeKeyword,
     /// An identifier just classed `Type`.
     Type,
+    /// An identifier just classed `Type` in a type position: in TypeScript, its `<` opens a
+    /// generic list that may close on a later line (S4 deviation 18).
+    TypePosition,
     /// The identifier right after `fn`.
     FnName,
     /// `::`.
