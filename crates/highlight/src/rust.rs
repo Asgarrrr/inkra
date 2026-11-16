@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
-use crate::scan::{Sink, is_all_caps, is_word, number, skip_spaces, word_end};
+use crate::scan::{Sink, drive, is_all_caps, is_word, number, skip_spaces, word_end};
 use crate::state::{LineState, Nest, Open, Prev};
 
 mod literals;
@@ -221,10 +221,14 @@ pub(crate) fn lex(
         sink: Sink { start, out },
         state,
     };
-    let (mut at, mut open) = tokens.literal(state.open, 0, 0);
-    while open == Open::Nothing && at < line.len() {
-        (at, open) = tokens.step(at);
-    }
+    let (at, mut open) = tokens.literal(state.open, 0, 0);
+    drive(line.len(), at, |at| {
+        (open == Open::Nothing).then(|| {
+            let next;
+            (next, open) = tokens.step(at);
+            next
+        })
+    });
     LineState {
         open,
         ..tokens.state

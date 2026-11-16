@@ -10,7 +10,7 @@ use crate::TokenClass::{
     Type,
 };
 use crate::scan::{
-    Sink, is_all_caps, is_ident_start, is_word, number, quoted, skip_spaces, word_end,
+    Sink, drive, is_all_caps, is_ident_start, is_word, number, quoted, skip_spaces, word_end,
 };
 use crate::state::{LineState, Open, Prev};
 
@@ -251,10 +251,10 @@ pub(crate) fn lex(
         sink: Sink { start, out },
         state,
     };
-    let mut at = tokens.resume();
-    while tokens.state.open == Open::Nothing && at < line.len() {
-        at = tokens.step(at);
-    }
+    let at = tokens.resume();
+    drive(line.len(), at, |at| {
+        (tokens.state.open == Open::Nothing).then(|| tokens.step(at))
+    });
     tokens.state
 }
 

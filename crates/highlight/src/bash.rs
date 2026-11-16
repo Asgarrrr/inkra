@@ -8,7 +8,7 @@ use inkra_text::ByteOffset;
 use crate::TokenClass::{
     self, Comment, Constant, Function, Keyword, Operator, Punctuation, String,
 };
-use crate::scan::{Sink, is_word, number, word_end};
+use crate::scan::{Sink, drive, is_word, number, skip_spaces, word_end};
 use crate::state::{LineState, Nest, Open, Prev};
 
 mod expand;
@@ -214,7 +214,7 @@ impl Tokens<'_> {
             [b'&', ..] => (1, Operator, Prev::Other),
             [b'<' | b'>', ..] => (1, Operator, prev),
             [b'(', ..] => {
-                let close = crate::scan::skip_spaces(bytes, at + 1);
+                let close = skip_spaces(bytes, at + 1);
                 if bytes.get(close) == Some(&b')') && !matches!(prev, Prev::Pattern | Prev::Test) {
                     self.sink.push(at..at + 1, Punctuation);
                     self.sink.push(close..close + 1, Punctuation);
@@ -345,10 +345,10 @@ pub(crate) fn lex(
         tokens.body(heredoc);
         return tokens.state;
     }
-    let mut at = tokens.resume();
-    while tokens.state.open == Open::Nothing && at < line.len() {
-        at = tokens.step(at);
-    }
+    let at = tokens.resume();
+    drive(line.len(), at, |at| {
+        (tokens.state.open == Open::Nothing).then(|| tokens.step(at))
+    });
     if tokens.state.open == Open::Nothing && (tokens.comment || !continues(line)) {
         tokens.state.prev = match tokens.state.prev {
             Prev::Command | Prev::Declare | Prev::Fn | Prev::Test => Prev::Other,

@@ -89,6 +89,16 @@ pub(crate) fn quoted(
     None
 }
 
+/// Runs `step` from `at` to the line end, or until it returns `None` because something stays
+/// open. A step that does not advance panics: a stuck lexer would hang its background task.
+pub(crate) fn drive(len: usize, mut at: usize, mut step: impl FnMut(usize) -> Option<usize>) {
+    while at < len {
+        let Some(next) = step(at) else { return };
+        assert!(next > at, "a lexer step went from {at} to {next}");
+        at = next;
+    }
+}
+
 /// One line's tokens, pushed at the line's start offset.
 pub(crate) struct Sink<'a> {
     pub(crate) start: ByteOffset,

@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass::{self, Comment, Constant, Property, Punctuation, String};
-use crate::scan::{Sink, is_word, number, quoted, skip_spaces, word_end};
+use crate::scan::{Sink, drive, is_word, number, quoted, skip_spaces, word_end};
 use crate::state::{LineState, Open};
 
 /// The end of the block comment open at `at`: past its `*/`, or `None` at the line end.
@@ -90,13 +90,13 @@ pub(crate) fn lex(
         sink: Sink { start, out },
         open: Open::Nothing,
     };
-    let mut at = match state.open {
+    let at = match state.open {
         Open::BlockComment { .. } => tokens.block_comment(0, 0),
         _ => 0,
     };
-    while tokens.open == Open::Nothing && at < line.len() {
-        at = tokens.step(at);
-    }
+    drive(line.len(), at, |at| {
+        (tokens.open == Open::Nothing).then(|| tokens.step(at))
+    });
     LineState {
         open: tokens.open,
         ..state
