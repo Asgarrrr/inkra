@@ -109,7 +109,7 @@ const LOOK_AHEAD: usize = 64;
 /// pairing of the whole line, made once, so the line lexes in linear time.
 pub(crate) struct Generics<'a> {
     bytes: &'a [u8],
-    ends: OnceCell<Vec<(usize, Option<usize>)>>,
+    ends: OnceCell<Vec<(usize, usize)>>,
 }
 
 impl<'a> Generics<'a> {
@@ -136,7 +136,7 @@ impl<'a> Generics<'a> {
     fn paired_end(&self, open: usize) -> Option<usize> {
         let ends = self.ends.get_or_init(|| pair(self.bytes));
         let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
-        ends[index].1
+        Some(ends[index].1)
     }
 
     /// `end` from the `LOOK_AHEAD` bytes from `open`, when they decide it.
@@ -191,8 +191,8 @@ fn angle(bytes: &[u8], at: usize) -> Angle {
     }
 }
 
-/// Every `<` with the end of its list if it closes, as `(open, end)` in the line's order.
-fn pair(bytes: &[u8]) -> Vec<(usize, Option<usize>)> {
+/// Every `<` whose list closes, with its end, as `(open, end)` in the line's order.
+fn pair(bytes: &[u8]) -> Vec<(usize, usize)> {
     let mut ends = Vec::new();
     // Indices into `ends` of the lists still open.
     let mut opens = Vec::new();
@@ -211,7 +211,10 @@ fn pair(bytes: &[u8]) -> Vec<(usize, Option<usize>)> {
             Angle::Other => {}
         }
     }
-    ends
+    // Open ones dropped, so a line of lists that never close searches an empty table.
+    ends.into_iter()
+        .filter_map(|(open, end)| Some((open, end?)))
+        .collect()
 }
 
 /// Scans a comment that ends at `closer` and does not nest, from `at` as one `Comment` from
