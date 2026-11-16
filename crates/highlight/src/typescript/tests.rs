@@ -288,10 +288,26 @@ fn a_generic_call_closes_at_any_distance_on_its_line() {
 
 #[test]
 fn a_generic_list_does_not_close_past_a_semicolon_or_a_brace() {
-    for stop in [";", "{", "}"] {
-        let text = format!("a < b {stop} c > (d)");
-        assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
+    // Near the `<` and past the look-ahead, where the line's pairing answers.
+    for pad in [0, 100] {
+        for stop in [";", "{", "}"] {
+            let text = format!("a < b{} {stop} c > (d)", " ".repeat(pad));
+            assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
+        }
     }
+}
+
+#[test]
+fn a_long_generic_list_closes_at_its_own_angle() {
+    // The inner list closes first, the outer one past the look-ahead.
+    let text = format!("f<A<B>{}>(x)", ", C".repeat(40));
+    let tokens = tokens(TypeScript, &text);
+    assert_eq!(tokens[0], (0, 1, Function));
+    let close = text.len() - 4;
+    assert!(
+        tokens.contains(&(close, close + 1, Punctuation)),
+        "{tokens:?}"
+    );
 }
 
 /// The tokens of `let a = 2;`, a line after the one a test is about.

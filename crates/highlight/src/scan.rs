@@ -126,11 +126,17 @@ impl<'a> Generics<'a> {
         if self.bytes.get(open) != Some(&b'<') {
             return None;
         }
-        self.look_ahead(open).unwrap_or_else(|| {
-            let ends = self.ends.get_or_init(|| pair(self.bytes));
-            let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
-            Some(ends[index].1)
-        })
+        self.look_ahead(open)
+            .unwrap_or_else(|| self.paired_end(open))
+    }
+
+    /// `end` from the whole line's pairing; kept out of line, since only long lists reach it.
+    #[cold]
+    #[inline(never)]
+    fn paired_end(&self, open: usize) -> Option<usize> {
+        let ends = self.ends.get_or_init(|| pair(self.bytes));
+        let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
+        Some(ends[index].1)
     }
 
     /// `end` within `LOOK_AHEAD` bytes of `open`, or `None` when those bytes do not decide it.
