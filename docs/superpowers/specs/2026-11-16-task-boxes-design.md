@@ -367,7 +367,10 @@ emits for every list item. T3 and T4a are independent of each other.
   `None` on a mismatch, so the check (G) reads `shaped_at` where it lives;
   `layout/mod.rs` is at its 400 lines and gains no accessor. The click passes
   the version; a `GutterLayout`'s `Boxed` holds the checkbox from the line's
-  start, so a carried line stays line-relative.
+  start, so a carried line stays line-relative. The hit test (F) is
+  containment in the painted square, which fits inside row 0
+  (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
+  has no separate row check.
 
 ## Deferred
 

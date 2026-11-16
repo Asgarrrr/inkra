@@ -68,6 +68,19 @@ fn a_click_on_a_box_toggles_it_and_puts_the_caret_on_its_text(cx: &mut TestAppCo
     assert_eq!(caret(&window, &mut cx), 6);
 }
 
+/// The caret lands where the parse ends the gutter, so the editor's text start and the
+/// markdown's agree: past one space or tab, and at the line's end with no text.
+#[gpui::test]
+fn a_toggle_puts_the_caret_at_the_gutter_end(cx: &mut TestAppContext) {
+    for note in ["- [ ]\t\ta\nbody", "- [ ]  a\nbody", "- [ ]\n\nbody", "- [ ] \n\nbody"] {
+        let (window, mut cx) = editor(cx, note);
+        click_box(&mut cx);
+        let toggled = text(&window, &mut cx);
+        let gutter = inkra_markdown::parse(&toggled).gutters[0].range.end;
+        assert_eq!(caret(&window, &mut cx), gutter.get(), "{note:?}");
+    }
+}
+
 #[gpui::test]
 fn a_click_clears_an_upper_case_tick(cx: &mut TestAppContext) {
     let (window, mut cx) = editor(cx, "- [X] a\nbody");
