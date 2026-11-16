@@ -70,15 +70,15 @@ fn a_toggle_is_one_step_that_merges_with_no_typing() {
     let mut state = EditorState::new(Selection::at(buffer.len()));
     let start = Instant::now();
 
-    state.insert(&mut buffer, start, "a");
+    state.insert(&mut buffer, start, "1");
     state.toggle_task(&mut buffer, at(2)..at(5));
-    state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
-    assert_eq!(buffer.text(), "- [x] ba");
+    state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "2");
+    assert_eq!(buffer.text(), "- [x] 21");
 
     assert!(state.undo(&mut buffer));
-    assert_eq!(buffer.text(), "- [x] a");
+    assert_eq!(buffer.text(), "- [x] 1");
     assert!(state.undo(&mut buffer));
-    assert_eq!(buffer.text(), "- [ ] a");
+    assert_eq!(buffer.text(), "- [ ] 1");
     assert!(state.undo(&mut buffer));
     assert_eq!(buffer.text(), "- [ ] ");
 }
