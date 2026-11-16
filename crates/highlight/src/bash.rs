@@ -8,9 +8,10 @@ use inkra_text::ByteOffset;
 use crate::TokenClass::{
     self, Comment, Constant, Function, Keyword, Operator, Punctuation, String,
 };
-use crate::scan::{Sink, drive, is_word, number, skip_spaces, word_end};
+use crate::scan::{Sink, drive, skip_spaces};
 use crate::state::{LineState, Nest, Open, Prev};
 
+mod arith;
 mod expand;
 mod heredoc;
 
@@ -19,9 +20,6 @@ const KEYWORDS: [&str; 19] = [
     "case", "declare", "do", "done", "elif", "else", "esac", "export", "fi", "for", "function",
     "if", "in", "local", "select", "then", "unset", "until", "while",
 ];
-
-/// Bytes an arithmetic operator run is made of.
-const ARITH_OPERATORS: &[u8] = b"+-*/%<>=!&|^~?:";
 
 /// Bytes that end an unquoted word.
 fn is_separator(byte: u8) -> bool {
@@ -101,11 +99,6 @@ impl Tokens<'_> {
         }
     }
 
-    fn in_arith(&self) -> bool {
-        let stored = usize::from(self.state.depth).min(self.state.stack.len());
-        self.state.stack[..stored].contains(&Nest::Arith)
-    }
-
     /// Lexes what starts at `at`, with nothing open there: its end.
     fn step(&mut self, at: usize) -> usize {
         if self.in_arith() {
@@ -146,54 +139,6 @@ impl Tokens<'_> {
             b'(' | b')' | b';' | b'|' | b'&' | b'<' | b'>' => self.symbol(at),
             _ => self.word(at),
         }
-    }
-
-    fn open_arith(&mut self, at: usize, len: usize) -> usize {
-        self.sink.push(at..at + len, Punctuation);
-        self.state.push(Nest::Arith);
-        at + len
-    }
-
-    /// Lexes what starts at `at` inside `((`: names are plain, `))` closes it.
-    fn arith(&mut self, at: usize) -> usize {
-        let bytes = self.line.as_bytes();
-        let rest = &bytes[at..];
-        let top = self.state.top();
-        let (len, class) = match rest[0] {
-            byte if byte.is_ascii_whitespace() => (1, None),
-            b')' if top == Some(Nest::Arith) && rest.starts_with(b"))") => {
-                self.state.pop();
-                self.state.prev = Prev::Command;
-                (2, Some(Punctuation))
-            }
-            b')' => {
-                if top != Some(Nest::Arith) && self.state.depth > 0 {
-                    self.state.pop();
-                }
-                (1, Some(Punctuation))
-            }
-            b'(' => {
-                self.state.push(Nest::Paren);
-                (1, Some(Punctuation))
-            }
-            b'$' if expand::is_parameter(bytes, at) => return self.parameter(at),
-            b'"' => return self.expanding(at, at + 1, Some(b'"')),
-            b'\'' => return self.single(at, at + 1, false),
-            byte if byte.is_ascii_digit() => (number(bytes, at) - at, Some(Constant)),
-            b',' | b';' => (1, Some(Punctuation)),
-            byte if ARITH_OPERATORS.contains(&byte) => (
-                rest.iter()
-                    .take_while(|byte| ARITH_OPERATORS.contains(byte))
-                    .count(),
-                Some(Operator),
-            ),
-            byte if is_word(byte) => (word_end(bytes, at) - at, None),
-            _ => (1, None),
-        };
-        if let Some(class) = class {
-            self.sink.push(at..at + len, class);
-        }
-        at + len
     }
 
     /// An operator or punctuation at `at`, a byte that `is_separator` and is no whitespace.

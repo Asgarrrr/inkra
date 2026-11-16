@@ -260,42 +260,6 @@ fn a_command_substitution_opens_a_command() {
 }
 
 #[test]
-fn arithmetic_keeps_names_plain_and_takes_no_heredoc() {
-    check(
-        "echo $(( (a + 1) << 2 ))\nnext",
-        &[
-            ("echo", Function),
-            ("$((", Punctuation),
-            ("(", Punctuation),
-            ("+", Operator),
-            ("1", Constant),
-            (")", Punctuation),
-            ("<<", Operator),
-            ("2", Constant),
-            ("))", Punctuation),
-            ("next", Function),
-        ],
-    );
-    check(
-        "for ((i = 0; i < $n; i++)); do",
-        &[
-            ("for", Keyword),
-            ("((", Punctuation),
-            ("=", Operator),
-            ("0", Constant),
-            (";", Punctuation),
-            ("<", Operator),
-            ("$", Punctuation),
-            (";", Punctuation),
-            ("++", Operator),
-            ("))", Punctuation),
-            (";", Punctuation),
-            ("do", Keyword),
-        ],
-    );
-}
-
-#[test]
 fn redirections_are_operators_and_a_descriptor_a_constant() {
     check(
         "cmd 2>&1 >> log < in &> all >| x",
