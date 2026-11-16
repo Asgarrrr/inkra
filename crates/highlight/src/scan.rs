@@ -102,8 +102,11 @@ pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
     end
 }
 
-/// Where a line's generic lists close, paired in one pass the first time one is asked for, so
-/// a line lexes in linear time however far apart its `<` and `>` sit.
+/// Longer than a generic list written by hand, so most lines never pair the whole line.
+const LOOK_AHEAD: usize = 64;
+
+/// Where a line's generic lists close. A list that a short look-ahead leaves open is found in a
+/// pairing of the whole line, made once, so the line lexes in linear time.
 pub(crate) struct Generics<'a> {
     bytes: &'a [u8],
     ends: OnceCell<Vec<(usize, usize)>>,
@@ -123,9 +126,55 @@ impl<'a> Generics<'a> {
         if self.bytes.get(open) != Some(&b'<') {
             return None;
         }
-        let ends = self.ends.get_or_init(|| pair(self.bytes));
-        let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
-        Some(ends[index].1)
+        self.look_ahead(open).unwrap_or_else(|| {
+            let ends = self.ends.get_or_init(|| pair(self.bytes));
+            let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
+            Some(ends[index].1)
+        })
+    }
+
+    /// `end` within `LOOK_AHEAD` bytes of `open`, or `None` when those bytes do not decide it.
+    fn look_ahead(&self, open: usize) -> Option<Option<usize>> {
+        let mut depth = 0_usize;
+        let limit = open + LOOK_AHEAD;
+        for at in open..self.bytes.len().min(limit) {
+            match angle(self.bytes, at) {
+                Angle::Open => depth += 1,
+                Angle::Close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(Some(at + 1));
+                    }
+                }
+                Angle::Stop => return Some(None),
+                Angle::Other => {}
+            }
+        }
+        (self.bytes.len() <= limit).then_some(None)
+    }
+}
+
+/// What the byte at `at` does to the generic lists open before it.
+enum Angle {
+    Open,
+    Close,
+    /// Closes none and ends them all: a `;`, `{` or `}`.
+    Stop,
+    Other,
+}
+
+fn angle(bytes: &[u8], at: usize) -> Angle {
+    match bytes[at] {
+        b'<' => Angle::Open,
+        b'>' if !matches!(
+            at.checked_sub(1).map(|before| bytes[before]),
+            Some(b'-' | b'=')
+        ) =>
+        {
+            Angle::Close
+        }
+        b';' | b'{' | b'}' => Angle::Stop,
+        _ => Angle::Other,
     }
 }
 
@@ -133,20 +182,16 @@ impl<'a> Generics<'a> {
 fn pair(bytes: &[u8]) -> Vec<(usize, usize)> {
     let mut opens = Vec::new();
     let mut ends = Vec::new();
-    for (at, &byte) in bytes.iter().enumerate() {
-        match byte {
-            b'<' => opens.push(at),
-            b'>' if !matches!(
-                at.checked_sub(1).map(|before| bytes[before]),
-                Some(b'-' | b'=')
-            ) =>
-            {
+    for at in 0..bytes.len() {
+        match angle(bytes, at) {
+            Angle::Open => opens.push(at),
+            Angle::Close => {
                 if let Some(open) = opens.pop() {
                     ends.push((open, at + 1));
                 }
             }
-            b';' | b'{' | b'}' => opens.clear(),
-            _ => {}
+            Angle::Stop => opens.clear(),
+            Angle::Other => {}
         }
     }
     ends.sort_unstable();
