@@ -90,6 +90,22 @@ pub(crate) enum Nest {
     Array {
         declare: bool,
     },
+    /// JavaScript's `(` right after `if`, `while`, `for` or `with`: its `)` ends no value.
+    Condition,
+    /// A TypeScript type alias from `type` to its `=`; it never crosses a line.
+    Alias,
+    /// A JavaScript template string's text; a `${` above it pushes a `Brace`.
+    Template,
+    /// A JSX opening tag, from its `<` to its `>` or `/>`.
+    JsxTag,
+    /// A JSX closing tag, from its `</` to its `>`.
+    JsxClosingTag,
+    /// A JSX element's children, from its opening tag's `>` to its closing tag's `</`.
+    JsxText,
+    /// HTML's `<script>` content, lexed by JavaScript; always the bottom entry.
+    Script,
+    /// HTML's `<style>` content, lexed by CSS; always the bottom entry.
+    Style,
 }
 
 /// The previous significant token, D4's one-token look-behind; whitespace and comments leave it.
@@ -110,7 +126,8 @@ pub(crate) enum Prev {
     PathSep,
     /// Bash, past a command's name: the next word is an argument. `Other` is a command position.
     Command,
-    /// Bash, past `export`, `local`, `declare` or `unset`: names and assignments.
+    /// Bash, past `export`, `local`, `declare` or `unset`: names and assignments. JavaScript, past
+    /// `let`, `const` or `var`.
     Declare,
     /// Bash, past `for` or `select`: the loop variable.
     For,
@@ -124,4 +141,26 @@ pub(crate) enum Prev {
     Pattern,
     /// Bash, inside `[` or `[[`.
     Test,
+    /// JavaScript, a value's end: a `/` divides and a `<` compares (D4's expression start).
+    ValueEnd,
+    /// JavaScript, past `if`, `while`, `for` or `with`: the next `(` opens a `Condition`.
+    Condition,
+    /// JavaScript, past `{`, `(`, `,` or `;`: an identifier before `:` is a key or a parameter.
+    KeyStart,
+    /// TypeScript, a parameter or a declared name before its `:` or `?:`.
+    Param,
+    /// TypeScript, past a parameter's or a declared name's `:`: the next identifier is a type.
+    Annotation,
+    /// CSS, inside a selector.
+    Selector,
+    /// CSS, past a property's name, up to its `;` or `}`.
+    Declaration,
+    /// CSS, past an at-rule's keyword, up to its `{` or `;`.
+    AtRule,
+    /// HTML, inside a tag.
+    HtmlTag,
+    /// HTML, inside a `<script>` opening tag: its `>` opens JavaScript.
+    HtmlScript,
+    /// HTML, inside a `<style>` opening tag: its `>` opens CSS.
+    HtmlStyle,
 }

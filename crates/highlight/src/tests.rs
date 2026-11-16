@@ -11,6 +11,14 @@ fn every_info_word_of_the_languages_table_resolves_in_any_case() {
         (Language::Python, &["python", "py"]),
         (Language::Json, &["json", "jsonc"]),
         (Language::Bash, &["bash", "sh", "shell", "zsh"]),
+        (
+            Language::JavaScript,
+            &["javascript", "js", "mjs", "cjs", "jsx"],
+        ),
+        (Language::TypeScript, &["typescript", "ts"]),
+        (Language::Tsx, &["tsx"]),
+        (Language::Css, &["css"]),
+        (Language::Html, &["html", "htm"]),
     ];
     for (language, words) in table {
         for word in words {
@@ -24,7 +32,9 @@ fn every_info_word_of_the_languages_table_resolves_in_any_case() {
 
 #[test]
 fn an_unknown_info_word_resolves_to_none() {
-    for word in ["nope", "", "rusty", "rust ", "pyth", "jso", "bashh", "js"] {
+    for word in [
+        "nope", "", "rusty", "rust ", "pyth", "jso", "bashh", "jsxx", "ts x",
+    ] {
         assert_eq!(Language::from_info(word), None, "{word:?}");
     }
 }
@@ -46,10 +56,89 @@ fn a_block_lexes_by_its_info_word_and_not_without_a_known_one() {
 }
 
 static FRAGMENTS: &[&str] = &[
-    "fn", "let", "r#", "r#\"", "\"#", "\"", "'", "\\", "/*", "*/", "//", "b'", "x", " ", "é", "中",
-    "🦀", "\n", "#", "<", ">", "(", ")", "{", "}", "[", "]", "!", ".", "1", "e", "-", ":", "'''",
-    "\"\"\"", "@", "def ", "match ", "<<", "<<-", "EOF", "\t", "$", "${", "$(", "$((", "))", "`",
-    ";;", "case ", " in", "esac", "for ", "[[", "=", "|", "&", ";", "true",
+    "fn",
+    "let",
+    "r#",
+    "r#\"",
+    "\"#",
+    "\"",
+    "'",
+    "\\",
+    "/*",
+    "*/",
+    "//",
+    "b'",
+    "x",
+    " ",
+    "é",
+    "中",
+    "🦀",
+    "\n",
+    "#",
+    "<",
+    ">",
+    "(",
+    ")",
+    "{",
+    "}",
+    "[",
+    "]",
+    "!",
+    ".",
+    "1",
+    "e",
+    "-",
+    ":",
+    "'''",
+    "\"\"\"",
+    "@",
+    "def ",
+    "match ",
+    "<<",
+    "<<-",
+    "EOF",
+    "\t",
+    "$",
+    "${",
+    "$(",
+    "$((",
+    "))",
+    "`",
+    ";;",
+    "case ",
+    " in",
+    "esac",
+    "for ",
+    "[[",
+    "=",
+    "|",
+    "&",
+    ";",
+    "true",
+    "/",
+    "return ",
+    "if (",
+    "<div",
+    "</",
+    "/>",
+    "<>",
+    "?.",
+    "=>",
+    "++",
+    "<T>",
+    ": ",
+    "type ",
+    "[a/]",
+    "&amp;",
+    "@media ",
+    "#fff",
+    "10px",
+    "-1.5em",
+    "!important",
+    "url(",
+    "a:hover",
+    "--x",
+    "^=",
 ];
 
 proptest! {
@@ -65,7 +154,17 @@ proptest! {
             lines.push((start, line));
             start += line.len() + gap;
         }
-        for language in [Language::Rust, Language::Python, Language::Json, Language::Bash] {
+        for language in [
+            Language::Rust,
+            Language::Python,
+            Language::Json,
+            Language::Bash,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Tsx,
+            Language::Css,
+            Language::Html,
+        ] {
             let mut out = Vec::new();
             let offsets = lines.iter().map(|&(start, line)| (ByteOffset::new(start), line));
             highlight(language, offsets, &mut out);

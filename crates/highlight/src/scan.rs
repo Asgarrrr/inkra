@@ -6,6 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
+use crate::state::Open;
 
 /// A word byte is ASCII alphanumeric, `_` or non-ASCII, so a word ends on a char boundary.
 pub(crate) fn is_word(byte: u8) -> bool {
@@ -16,18 +17,20 @@ pub(crate) fn is_ident_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_' || !byte.is_ascii()
 }
 
-pub(crate) fn word_end(bytes: &[u8], at: usize) -> usize {
+/// The end of the run from `at` of bytes that `keep` accepts.
+pub(crate) fn end_while(bytes: &[u8], at: usize, keep: impl Fn(u8) -> bool) -> usize {
     bytes[at..]
         .iter()
-        .position(|&byte| !is_word(byte))
+        .position(|&byte| !keep(byte))
         .map_or(bytes.len(), |len| at + len)
 }
 
+pub(crate) fn word_end(bytes: &[u8], at: usize) -> usize {
+    end_while(bytes, at, is_word)
+}
+
 pub(crate) fn skip_spaces(bytes: &[u8], at: usize) -> usize {
-    bytes[at..]
-        .iter()
-        .position(|byte| !byte.is_ascii_whitespace())
-        .map_or(bytes.len(), |len| at + len)
+    end_while(bytes, at, |byte| byte.is_ascii_whitespace())
 }
 
 /// Two or more of `[A-Z0-9_]` from an ASCII uppercase letter.
@@ -89,6 +92,71 @@ pub(crate) fn quoted(
     None
 }
 
+/// The end of `word(.word)*` from the word at `at`.
+pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
+    let mut end = word_end(bytes, at);
+    while bytes.get(end) == Some(&b'.') && bytes.get(end + 1).copied().is_some_and(is_ident_start) {
+        end = word_end(bytes, end + 1);
+    }
+    end
+}
+
+/// Longer than a generic list written by hand; it keeps a line's lex linear in its length.
+pub(crate) const GENERIC_LIMIT: usize = 64;
+
+/// The end of the generic list whose `<` is at `open`, if it closes on the line within
+/// `GENERIC_LIMIT` bytes and before a `;`, `{` or `}`; the `>` of `->` and `=>` closes none.
+pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
+    if bytes.get(open) != Some(&b'<') {
+        return None;
+    }
+    let mut depth = 0_usize;
+    for at in open..bytes.len().min(open + GENERIC_LIMIT) {
+        match bytes[at] {
+            b'<' => depth += 1,
+            b'>' if !matches!(bytes[at - 1], b'-' | b'=') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            b';' | b'{' | b'}' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Scans a comment that ends at `closer` and does not nest, from `at` as one `Comment` from
+/// `token`: its end on the line, and what stays open there.
+pub(crate) fn block_comment(
+    sink: &mut Sink,
+    bytes: &[u8],
+    token: usize,
+    at: usize,
+    closer: &[u8],
+) -> (usize, Open) {
+    let close = bytes[at..]
+        .windows(closer.len())
+        .position(|window| window == closer)
+        .map(|len| at + len + closer.len());
+    sink.push(token..close.unwrap_or(bytes.len()), TokenClass::Comment);
+    match close {
+        Some(end) => (end, Open::Nothing),
+        None => (bytes.len(), Open::BlockComment { depth: 1 }),
+    }
+}
+
+/// The end of the character reference at the `&` at `at`, `&name;` or `&#…;`, if one is there.
+pub(crate) fn entity_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let body = at + 1 + usize::from(bytes.get(at + 1) == Some(&b'#'));
+    let len = bytes[body..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric())
+        .count();
+    (len > 0 && bytes.get(body + len) == Some(&b';')).then_some(body + len + 1)
+}
+
 /// Runs `step` from `at` to the line end, or until it returns `None` because something stays
 /// open. A step that does not advance panics: a stuck lexer would hang its background task.
 pub(crate) fn drive(len: usize, mut at: usize, mut step: impl FnMut(usize) -> Option<usize>) {
@@ -112,5 +180,12 @@ impl Sink<'_> {
             self.out
                 .push((self.start + range.start..self.start + range.end, class));
         }
+    }
+
+    /// Pushes `range` as `push` does: its end.
+    pub(crate) fn token(&mut self, range: Range<usize>, class: TokenClass) -> usize {
+        let end = range.end;
+        self.push(range, class);
+        end
     }
 }
