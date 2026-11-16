@@ -224,6 +224,16 @@ fn bench_lex(c: &mut Criterion) {
         let texts = SIZES.map(|n| (n, text(sample, n)));
         bench_texts(c, group, language, &texts);
     }
+    // One line of unclosed generic lists, each a look-ahead to its limit; the parameter is KiB.
+    let typescript = [32, 64].map(|kib| (kib, "a<".repeat(kib * 512)));
+    bench_texts(
+        c,
+        "lex_typescript_long_line",
+        Language::TypeScript,
+        &typescript,
+    );
+    let rust = [32, 64].map(|kib| (kib, "a::<".repeat(kib * 256)));
+    bench_texts(c, "lex_rust_long_line", Language::Rust, &rust);
 }
 
 criterion_group!(benches, bench_lex);

@@ -2,7 +2,8 @@ use crate::Language::{JavaScript, Tsx, TypeScript};
 use crate::TokenClass::{
     self, Constant, Function, Keyword, Operator, Property, Punctuation, Tag, Type,
 };
-use crate::fixtures::expect;
+use crate::fixtures::{expect, tokens};
+use crate::scan::GENERIC_LIMIT;
 
 #[track_caller]
 fn check(text: &str, expected: &[(&str, TokenClass)]) {
@@ -274,4 +275,26 @@ fn a_member_after_its_modifiers_is_a_property_and_an_optional_one_annotates_its_
             ("}", Punctuation),
         ],
     );
+}
+
+#[test]
+fn a_generic_call_closes_within_the_look_ahead_limit() {
+    // `f<AAA…>(x)`, its list `len` bytes from `<` to `>`.
+    let call = |len: usize| format!("f<{}>(x)", "A".repeat(len - 2));
+    assert_eq!(
+        tokens(TypeScript, &call(GENERIC_LIMIT))[0],
+        (0, 1, Function)
+    );
+    assert_eq!(
+        tokens(TypeScript, &call(GENERIC_LIMIT + 1))[0],
+        (1, 2, Operator)
+    );
+}
+
+#[test]
+fn a_generic_list_does_not_close_past_a_semicolon_or_a_brace() {
+    for stop in [";", "{", "}"] {
+        let text = format!("a < b {stop} c > (d)");
+        assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
+    }
 }

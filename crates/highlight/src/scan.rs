@@ -101,14 +101,17 @@ pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
     end
 }
 
-/// The end of the generic list whose `<` is at `open`, if it closes on the line; the `>` of `->`
-/// and `=>` closes none.
+/// Longer than a generic list written by hand; it keeps a line's lex linear in its length.
+pub(crate) const GENERIC_LIMIT: usize = 64;
+
+/// The end of the generic list whose `<` is at `open`, if it closes on the line within
+/// `GENERIC_LIMIT` bytes and before a `;`, `{` or `}`; the `>` of `->` and `=>` closes none.
 pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
     if bytes.get(open) != Some(&b'<') {
         return None;
     }
     let mut depth = 0_usize;
-    for at in open..bytes.len() {
+    for at in open..bytes.len().min(open + GENERIC_LIMIT) {
         match bytes[at] {
             b'<' => depth += 1,
             b'>' if !matches!(bytes[at - 1], b'-' | b'=') => {
@@ -117,6 +120,7 @@ pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
                     return Some(at + 1);
                 }
             }
+            b';' | b'{' | b'}' => return None,
             _ => {}
         }
     }
