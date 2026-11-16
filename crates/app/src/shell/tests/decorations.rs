@@ -223,7 +223,7 @@ fn a_late_publish_after_the_switch_off_draws_nothing(cx: &mut TestAppContext) {
 
 /// Pins that a publish from before an off/on switch needs no generation: the edits made while off
 /// reached its chunk, so it lands nothing (code highlighting spec, S2b deviation 1), and the
-/// republish on `Lost` then draws the current text (D6, D10).
+/// republish on `Lost` then draws the current text (D10).
 #[gpui::test]
 fn a_late_publish_across_an_off_on_switch_skips_the_chunk_an_edit_reached(cx: &mut TestAppContext) {
     fakes::set_delay(Some(DELAY));
