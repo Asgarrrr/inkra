@@ -35,6 +35,8 @@ mod scroll;
 mod shapes;
 mod split;
 mod swap;
+mod task_boxes;
+mod task_gutter;
 mod wrap;
 
 pub(super) fn with_editor<R>(

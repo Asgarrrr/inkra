@@ -5,7 +5,7 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
 use crate::cmark::options;
 use crate::content_lines::shape;
-use crate::gutters::{cut, gutters, quote_conceals};
+use crate::gutters::{Items, cut, gutter_conceals};
 use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::{Conceal, Gutter, Styles};
 
@@ -17,7 +17,8 @@ pub struct Markdown {
     pub conceals: Vec<Conceal>,
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
-    /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included.
+    /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
+    /// starting a task item whose marker leads it.
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
@@ -63,17 +64,16 @@ pub fn parse(text: &str) -> Markdown {
     let mut open: Vec<Open> = Vec::new();
     let mut headings = Vec::new();
     let mut quotes = Vec::new();
+    let mut items = Items::default();
     let mut code_blocks = Vec::new();
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let current = open.last().cloned();
         let styles = current.as_ref().map_or(Styles::NONE, |open| open.styles);
+        items.event(text, &event, &range);
         match event {
             Event::Start(tag) => {
                 out.markers_until(range.start, current.as_ref());
-                if let Tag::Item = tag {
-                    out.bullet(range.start);
-                }
                 if let Tag::Heading { level, .. } = tag {
                     let heading = heading_text(text, &range);
                     headings.push(Heading {
@@ -119,7 +119,7 @@ pub fn parse(text: &str) -> Markdown {
             _ => {}
         }
     }
-    let gutters = gutters(text, &quotes);
+    let (gutters, mut bullets) = items.gutters(text, &quotes);
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
@@ -134,8 +134,9 @@ pub fn parse(text: &str) -> Markdown {
         })
         .collect();
     let mut conceals = out.conceals;
-    conceals.extend(quote_conceals(&gutters));
-    // Two sorted runs: the stable sort merges them in one linear pass.
+    conceals.append(&mut bullets);
+    conceals.extend(gutter_conceals(&gutters));
+    // A few sorted runs: the stable sort merges them in near-linear time.
     conceals.sort_by_key(|conceal| conceal.marker.start);
     Markdown {
         spans: out.spans,
@@ -327,26 +328,6 @@ impl Out<'_> {
             replacement: "",
         });
         Some(marker)
-    }
-
-    /// The element is the bullet byte alone, so a caret at the item's content does not reveal it.
-    fn bullet(&mut self, item_start: usize) {
-        // An indented top-level item's range starts at its indentation.
-        let indent = self.text.as_bytes()[item_start..]
-            .iter()
-            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
-            .count();
-        let start = item_start + indent;
-        // An ordered item's marker starts with a digit (CommonMark 5.2), so it keeps its number.
-        if !matches!(self.text.as_bytes().get(start), Some(b'-' | b'*' | b'+')) {
-            return;
-        }
-        let bullet = to_offsets(start..start + 1);
-        self.conceals.push(Conceal {
-            element: bullet.clone(),
-            marker: bullet,
-            replacement: "•",
-        });
     }
 
     fn leaf(&mut self, range: Range<usize>, styles: Styles) {

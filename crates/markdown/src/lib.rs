@@ -15,7 +15,7 @@ pub use changed::changed;
 pub use content_lines::content_lines;
 pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
-pub use gutters::Gutter;
+pub use gutters::{Gutter, Task};
 pub use links::{Link, LinkKind, link_at, links};
 pub use markup::markup;
 pub use parse::{CodeBlock, Heading, Markdown, Span, parse};

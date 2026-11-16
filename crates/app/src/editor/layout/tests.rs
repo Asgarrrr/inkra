@@ -271,7 +271,7 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
                 .shown()
                 .map(|(shaped, x)| (shaped.text.to_string(), x));
             (
-                prefix.range().clone(),
+                prefix.range(),
                 prefix.indent(),
                 prefix.bars().to_vec(),
                 shown,

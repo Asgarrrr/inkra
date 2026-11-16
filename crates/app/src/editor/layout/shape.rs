@@ -207,12 +207,11 @@ impl Build<'_, '_> {
         let styles = &mut self.styles;
         let (prefix, text_conceals) = line_prefix(
             gutter,
-            range.start,
             &mut self.gutter_carry,
-            heading_opening(heading, range, font_size, margin),
+            heading_opening(heading, range, text, font_size, margin),
             line_conceals,
             selection,
-            |range, size| show(range, text, line_spans, marked, size, styles, window),
+            |range, source, size| show(range, source, line_spans, marked, size, styles, window),
         );
         let display = display_line(
             range,
@@ -406,7 +405,7 @@ fn line_items<'a, T>(
 fn display_line(
     range: &Range<ByteOffset>,
     conceals: &[Conceal],
-    prefix: Option<&Range<usize>>,
+    prefix: Option<Range<usize>>,
     selection: &Range<ByteOffset>,
 ) -> DisplayLine {
     let within = |offset: ByteOffset| ByteOffset::new(offset - range.start);
@@ -433,10 +432,10 @@ fn display_line(
 }
 
 /// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
-/// `range` starts the line, so its text is a prefix of `line`.
+/// `source` is what `range` shows: its own bytes, or as many others.
 fn show(
     range: &Range<ByteOffset>,
-    line: &str,
+    source: &str,
     spans: &[Span],
     marked: Option<&Range<ByteOffset>>,
     font_size: Pixels,
@@ -446,7 +445,7 @@ fn show(
     let len = range.end - range.start;
     let identity = DisplayLine::new(ByteOffset::default()..ByteOffset::new(len), []);
     let runs = line_runs(range, spans, marked, &identity, styles);
-    let text = SharedString::from(line[..len].to_owned());
+    let text = SharedString::from(source.to_owned());
     window
         .text_system()
         .shape_line(text, font_size, &runs, None)

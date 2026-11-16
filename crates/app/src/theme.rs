@@ -291,5 +291,17 @@ pub(crate) const DROP_EDGE: Pixels = px(2.);
 
 pub(crate) const QUOTE_BAR_WIDTH: Pixels = px(2.);
 
+/// A task's box, a square a little under the body text's 18 px (task boxes spec, D8).
+pub(crate) const TASK_BOX_SIZE: Pixels = px(16.);
+
+/// A task box's corners, mockup C's.
+pub(crate) const TASK_BOX_RADIUS: Pixels = px(4.);
+
+/// An open task box's outline, mockup C's.
+pub(crate) const TASK_BOX_BORDER: Pixels = px(1.5);
+
+/// The check inside a done task's box.
+pub(crate) const TASK_CHECK_SIZE: Pixels = px(12.);
+
 #[cfg(test)]
 mod tests;

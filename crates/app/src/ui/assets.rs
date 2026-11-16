@@ -34,6 +34,7 @@ macro_rules! icons {
 icons! {
     ArrowLeft => "arrow-left",
     ArrowRight => "arrow-right",
+    Check => "check",
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
     File => "file",

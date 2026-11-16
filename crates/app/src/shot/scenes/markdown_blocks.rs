@@ -4,6 +4,7 @@ use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
 /// Checked against pulldown-cmark 0.13.4: the lazy line joins the nested quote, the heading and the list the outer one.
+/// The tasks' markers lead their lines, so each gets a gutter (task boxes spec, D1).
 const QUOTES: &str = "A paragraph before the quotes.\n\
                       > A quote over two lines,\n\
                       > the second one here.\n\
@@ -15,7 +16,17 @@ const QUOTES: &str = "A paragraph before the quotes.\n\
                       > # A heading in a quote\n\
                       > - a list in a quote\n\
                       \n\
-                      Body text after the quotes.";
+                      Body text after the quotes.\n\
+                      \n\
+                      - [ ] An open task\n\
+                      - [x] A done task\n\
+                      \x20\x20- [ ] A nested task\n\
+                      1. [ ] An ordered task\n\
+                      \n\
+                      > - [ ] A quoted task\n\
+                      with a lazy line at the quote's edge.\n\
+                      \n\
+                      - [x] A done task long enough to wrap: its second row starts at the gutter's edge, under its text and not under the hidden marker.";
 
 pub(super) fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(QUOTES);
