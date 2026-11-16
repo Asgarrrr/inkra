@@ -4,8 +4,10 @@ use std::ops::Range;
 use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
 
 mod heard;
+mod map;
 
 pub use heard::{HeardLayer, TextChange};
+use map::{follow, map_chunk};
 
 /// A layer could not follow the buffer's edits and holds nothing until it is published again.
 #[derive(Debug, PartialEq, Eq)]
@@ -189,7 +191,7 @@ impl<S: Clone + PartialEq> Layer<S> {
         let new = splices
             .iter()
             .copied()
-            .try_fold(new, map_chunk)
+            .try_fold(new, follow)
             .filter(|new| new.len != 0)?;
         new.check(buffer);
         let chunk = new.start..new.end();
@@ -330,49 +332,6 @@ impl<S> Mark<S> {
     fn range(&self, chunk: ByteOffset) -> Range<ByteOffset> {
         chunk + self.start as usize..chunk + self.end as usize
     }
-}
-
-/// D3: what is left of `mark` after `splice`, left and right of the inserted bytes, which it never
-/// covers. The two pieces are one when they touch.
-fn map_mark(
-    mark: Range<ByteOffset>,
-    splice: Splice,
-) -> (Option<Range<ByteOffset>>, Option<Range<ByteOffset>>) {
-    let removed_end = splice.at + splice.removed_len;
-    let left = (mark.start < splice.at).then(|| mark.start..mark.end.min(splice.at));
-    let kept = mark.start.max(removed_end);
-    let right = (kept < mark.end).then(|| {
-        kept - splice.removed_len + splice.inserted_len
-            ..mark.end - splice.removed_len + splice.inserted_len
-    });
-    match (left, right) {
-        (Some(left), Some(right)) if left.end == right.start => (Some(left.start..right.end), None),
-        pieces => pieces,
-    }
-}
-
-/// As `map_mark` on the chunk's range, except that a splice strictly inside it grows it (decoration
-/// layer spec, deviation 5). Either way at most one piece is left, and its marks follow `map_mark`;
-/// it keeps its tag unless the splice removed one of its bytes or inserted strictly inside it.
-fn map_chunk<S: Clone>(chunk: Chunk<S>, splice: Splice) -> Option<Chunk<S>> {
-    let (start, end) = (chunk.start, chunk.end());
-    let tag = chunk
-        .tag
-        .filter(|_| !(start < splice.at + splice.removed_len && splice.at < end));
-    let range = if start < splice.at && splice.at + splice.removed_len < end {
-        start..end - splice.removed_len + splice.inserted_len
-    } else {
-        let (left, right) = map_mark(start..end, splice);
-        left.or(right)?
-    };
-    let marks = chunk.marks.into_iter().flat_map(|mark| {
-        let (left, right) = map_mark(mark.range(start), splice);
-        [left, right]
-            .into_iter()
-            .flatten()
-            .map(move |piece| (piece, mark.style.clone()))
-    });
-    Some(Chunk::new(range, chunk.published, tag, marks))
 }
 
 /// What holds of a publish at any edit mark; the bounds are checked once mapped (`Chunk::check`).

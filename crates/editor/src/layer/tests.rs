@@ -1,4 +1,5 @@
 use inkra_text::{Buffer, ByteOffset};
+use proptest::prelude::*;
 
 use super::*;
 
@@ -532,4 +533,53 @@ fn a_piece_cut_from_a_chunk_drops_its_tag() {
         .unwrap();
 
     assert_eq!(tags(&layer), [(0..5, None), (5..20, Some(2))]);
+}
+
+/// A chunk's range, tag and marks once a fold put it in place.
+type Followed = (
+    Range<ByteOffset>,
+    Option<u64>,
+    Vec<(Range<ByteOffset>, char)>,
+);
+
+/// `None` when nothing of the chunk is left.
+fn followed(chunk: Option<Chunk<char>>) -> Option<Followed> {
+    chunk
+        .filter(|chunk| chunk.len != 0)
+        .map(|chunk| (chunk.start..chunk.end(), chunk.tag, chunk_marks(&chunk)))
+}
+
+proptest! {
+    /// Deviation 12 of the code highlighting spec: a late publish skips the splices that miss it.
+    #[test]
+    fn following_splices_maps_a_chunk_as_map_chunk_over_every_splice(
+        len in 0usize..48,
+        bounds in (any::<usize>(), any::<usize>()),
+        picks in prop::collection::vec(any::<usize>(), 0..8),
+        tag in prop::option::of(0u64..3),
+        edits in prop::collection::vec((any::<usize>(), 0usize..6, 0usize..6), 0..8),
+    ) {
+        let (a, b) = (bounds.0 % (len + 1), bounds.1 % (len + 1));
+        let range = a.min(b)..a.max(b);
+        let mut ends: Vec<_> = picks.iter().map(|pick| range.start + pick % (range.len() + 1)).collect();
+        ends.sort_unstable();
+        ends.dedup();
+        let marks: Vec<_> = ends.as_chunks().0.iter().map(|&[start, end]| (span(start..end), 'a')).collect();
+        let chunk = || Chunk::new(span(range.clone()), EditMark::default(), tag, marks.clone());
+        let mut text_len = len;
+        let splices: Vec<_> = edits
+            .into_iter()
+            .map(|(pick, removed, inserted_len)| {
+                let start = pick % (text_len + 1);
+                let removed_len = removed.min(text_len - start);
+                text_len = text_len - removed_len + inserted_len;
+                Splice { at: at(start), removed_len, inserted_len }
+            })
+            .collect();
+
+        let skipping = splices.iter().copied().try_fold(chunk(), follow);
+        let every = splices.iter().copied().try_fold(chunk(), map_chunk);
+
+        prop_assert_eq!(followed(skipping), followed(every));
+    }
 }
