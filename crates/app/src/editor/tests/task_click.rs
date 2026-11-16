@@ -72,7 +72,12 @@ fn a_click_on_a_box_toggles_it_and_puts_the_caret_on_its_text(cx: &mut TestAppCo
 /// markdown's agree: past one space or tab, and at the line's end with no text.
 #[gpui::test]
 fn a_toggle_puts_the_caret_at_the_gutter_end(cx: &mut TestAppContext) {
-    for note in ["- [ ]\t\ta\nbody", "- [ ]  a\nbody", "- [ ]\n\nbody", "- [ ] \n\nbody"] {
+    for note in [
+        "- [ ]\t\ta\nbody",
+        "- [ ]  a\nbody",
+        "- [ ]\n\nbody",
+        "- [ ] \n\nbody",
+    ] {
         let (window, mut cx) = editor(cx, note);
         click_box(&mut cx);
         let toggled = text(&window, &mut cx);
