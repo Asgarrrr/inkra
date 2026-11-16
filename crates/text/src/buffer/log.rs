@@ -25,6 +25,29 @@ impl Splice {
     pub fn map(self, offset: ByteOffset, bias: Bias) -> ByteOffset {
         transform(offset, bias, self.at, self.removed_len, self.inserted_len)
     }
+
+    /// `splices`, oldest first, as one from the text before the first to the text after the last;
+    /// `None` for none.
+    #[must_use]
+    pub fn compose(splices: impl IntoIterator<Item = Self>) -> Option<Self> {
+        let mut splices = splices.into_iter();
+        let first = splices.next()?;
+        let (mut start, mut end) = (first.at, first.at + first.inserted_len);
+        let (mut removed, mut inserted) = (first.removed_len, first.inserted_len);
+        for s in splices {
+            start = start.min(s.at);
+            end = end.max(s.at + s.removed_len) - s.removed_len + s.inserted_len;
+            removed += s.removed_len;
+            inserted += s.inserted_len;
+        }
+        // The text grew by `inserted - removed`, so the hull spanned that much less before.
+        let inserted_len = end - start;
+        Some(Self {
+            at: start,
+            inserted_len,
+            removed_len: inserted_len + removed - inserted,
+        })
+    }
 }
 
 #[derive(Default)]

@@ -3,7 +3,6 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use inkra_markdown::{Conceal, changed, is_active};
 use inkra_text::{Bias, ByteOffset, Splice};
@@ -32,34 +31,24 @@ pub(super) fn carry<'p>(
     let buffer = inputs.buffer;
     // First: a mark from another buffer panics in `edits_since`.
     if previous.buffer != buffer.id()
-        || previous.style != *inputs.style
-        || !Arc::ptr_eq(&previous.theme, inputs.theme)
-        || previous.wrap_width != inputs.wrap_width
+        || !previous.same_settings(inputs)
         || previous.margin != inputs.margin
-        || previous.code_block_wrap != inputs.code_block_wrap
     {
         return None;
     }
     let recoloured = inputs
         .decorations
         .changed_since(previous.shaped_at.1, buffer)?;
-    let hull = inkra_highlight::dirty(buffer.edits_since(previous.at)?);
-    let old_len = previous.lines.last()?.end().get();
-    let edit = hull.as_ref().map_or(
-        Splice {
-            at: ByteOffset::default(),
-            removed_len: 0,
-            inserted_len: 0,
-        },
-        |hull| Splice {
-            at: hull.start,
-            inserted_len: hull.end - hull.start,
-            removed_len: hull.end - hull.start + old_len - buffer.len().get(),
-        },
-    );
+    let spliced = Splice::compose(buffer.edits_since(previous.at)?);
+    let edit = spliced.unwrap_or(Splice {
+        at: ByteOffset::default(),
+        removed_len: 0,
+        inserted_len: 0,
+    });
     let text = buffer.text();
     let mut dirty: Vec<_> =
-        hull.map(|_| changed(&previous.markdown, inputs.markdown, edit))
+        spliced
+            .map(|edit| changed(&previous.markdown, inputs.markdown, edit))
             .into_iter()
             .flatten()
             .chain(previous.marked.as_ref().map(|marked| {

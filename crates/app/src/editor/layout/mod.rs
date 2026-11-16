@@ -114,15 +114,19 @@ impl DocumentLayout {
         let revision = inputs.decorations.revision();
         revision.is_some()
             && self.shaped_at == (inputs.buffer.version(), revision)
-            && self.wrap_width == inputs.wrap_width
+            && self.same_settings(inputs)
             && (self.margin == inputs.margin
                 || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
-            && self.code_block_wrap == inputs.code_block_wrap
             && self.marked.as_ref() == inputs.marked
-            && self.style == *inputs.style
-            && Arc::ptr_eq(&self.theme, inputs.theme)
             && touched(&inputs.markdown.conceals, &self.selection)
                 .eq(touched(&inputs.markdown.conceals, inputs.selection))
+    }
+
+    fn same_settings(&self, inputs: &LayoutInputs<'_>) -> bool {
+        self.style == *inputs.style
+            && Arc::ptr_eq(&self.theme, inputs.theme)
+            && self.wrap_width == inputs.wrap_width
+            && self.code_block_wrap == inputs.code_block_wrap
     }
 
     pub(crate) fn row_count(&self) -> usize {

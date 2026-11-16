@@ -107,23 +107,3 @@ fn a_chunk_on_the_blocks_range_with_another_tag_or_none_is_lexed_over() {
         );
     }
 }
-
-#[test]
-fn dirty_folds_the_splices_into_one_range_in_the_last_text() {
-    let splice = |at, removed_len, inserted_len| Splice {
-        at: ByteOffset::new(at),
-        removed_len,
-        inserted_len,
-    };
-    let range_10_20 = splice(10, 0, 10);
-    for (splices, folded) in [
-        (vec![], None),
-        (vec![splice(10, 0, 3)], Some(r(10, 13))),
-        (vec![splice(10, 4, 0)], Some(r(10, 10))),
-        (vec![splice(200, 0, 5), splice(0, 0, 100)], Some(r(0, 305))),
-        (vec![range_10_20, splice(15, 10, 0)], Some(r(10, 15))),
-        (vec![range_10_20, splice(5, 20, 3)], Some(r(5, 8))),
-    ] {
-        assert_eq!(dirty(splices.clone()), folded, "{splices:?}");
-    }
-}

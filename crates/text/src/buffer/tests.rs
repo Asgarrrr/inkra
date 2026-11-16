@@ -302,6 +302,35 @@ fn a_splice_maps_an_offset_by_where_it_falls() {
 }
 
 #[test]
+fn composing_splices_spans_only_the_bytes_they_touched() {
+    let splice = |at_: usize, removed_len, inserted_len| Splice {
+        at: at(at_),
+        removed_len,
+        inserted_len,
+    };
+    let insert_10_at_10 = splice(10, 0, 10);
+    for (splices, composed) in [
+        (vec![], None),
+        (vec![splice(10, 0, 3)], Some(splice(10, 0, 3))),
+        (vec![splice(10, 4, 0)], Some(splice(10, 4, 0))),
+        (
+            vec![splice(200, 0, 5), splice(0, 0, 100)],
+            Some(splice(0, 200, 305)),
+        ),
+        (
+            vec![insert_10_at_10, splice(15, 10, 0)],
+            Some(splice(10, 5, 5)),
+        ),
+        (
+            vec![insert_10_at_10, splice(5, 20, 3)],
+            Some(splice(5, 10, 3)),
+        ),
+    ] {
+        assert_eq!(Splice::compose(splices.clone()), composed, "{splices:?}");
+    }
+}
+
+#[test]
 #[should_panic(expected = "is past")]
 fn a_mark_from_the_future_panics() {
     let mut edited = Buffer::new("");

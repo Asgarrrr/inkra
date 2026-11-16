@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::{ByteOffset, Splice};
+use inkra_text::ByteOffset;
 
 /// The block bytes a listener call lexes within 0.5 ms (D10); no call is capped at it before S2c.
 pub const MAIN_THREAD_BUDGET: usize = 65_536;
@@ -40,19 +40,6 @@ pub(crate) fn plan(
     }
     clear.extend(held.map(|(chunk, _)| chunk.clone()));
     Plan { clear, lex }
-}
-
-/// The splices, in order, as one range in the text after the last; `None` for none.
-#[must_use]
-pub fn dirty(splices: impl IntoIterator<Item = Splice>) -> Option<Range<ByteOffset>> {
-    splices.into_iter().fold(None, |acc, s| {
-        Some(match acc {
-            None => s.at..s.at + s.inserted_len,
-            Some(r) => {
-                r.start.min(s.at)..r.end.max(s.at + s.removed_len) - s.removed_len + s.inserted_len
-            }
-        })
-    })
 }
 
 #[cfg(test)]

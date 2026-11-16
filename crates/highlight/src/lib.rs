@@ -6,7 +6,7 @@ use inkra_text::ByteOffset;
 
 pub use batch::{Batch, BlockChunk, batch, block_marks};
 pub use open::{OPEN_PARSE_LIMIT, open_chunks};
-pub use plan::{MAIN_THREAD_BUDGET, dirty};
+pub use plan::MAIN_THREAD_BUDGET;
 use state::LineState;
 
 mod batch;
