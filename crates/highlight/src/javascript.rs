@@ -107,7 +107,10 @@ fn is_ident(byte: u8) -> bool {
 
 /// Whether `top` is an open generic list.
 fn is_list(top: Option<Nest>) -> bool {
-    matches!(top, Some(Nest::Generic | Nest::TypeGeneric))
+    matches!(
+        top,
+        Some(Nest::Generic | Nest::TypeGeneric | Nest::FnGeneric)
+    )
 }
 
 /// Whether `byte` can start what a soft keyword takes: a name, a literal, a pattern or `*`.
@@ -260,8 +263,9 @@ impl Tokens<'_> {
                 .end(after)
                 .is_some_and(|close| bytes.get(skip_spaces(bytes, close)) == Some(&b'('));
         let call = matches!(bytes.get(after), Some(b'(' | b'`')) || generic_call;
+        // `Type` lets the call's `<` open its list; `FnName` is kept for declared names.
         let past_call = if generic_call {
-            Prev::FnName
+            Prev::Type
         } else {
             Prev::ValueEnd
         };
@@ -300,11 +304,15 @@ impl Tokens<'_> {
             _ if types
                 && colon
                 && (prev == Prev::Declare
-                    || (prev == Prev::KeyStart && top == Some(Nest::Paren))) =>
+                    || (prev == Prev::KeyStart
+                        && matches!(top, Some(Nest::Paren | Nest::Params)))) =>
             {
                 (None, Prev::Param)
             }
             _ if prev == Prev::Fn => (Some(Function), Prev::FnName),
+            _ if call && prev == Prev::KeyStart && top == Some(Nest::TypeBody) => {
+                (Some(Function), Prev::FnName)
+            }
             _ if (prev == Prev::TypeKeyword && bytes.get(after) != Some(&b'.'))
                 || prev == Prev::Annotation =>
             {
@@ -371,7 +379,7 @@ pub(crate) fn lex_dialect(
     drive(line.len(), at, |at| {
         (tokens.state.open == Open::Nothing).then(|| tokens.step(at))
     });
-    if tokens.state.top() == Some(Nest::Alias) {
+    if matches!(tokens.state.top(), Some(Nest::Alias | Nest::ReturnType)) {
         tokens.state.pop();
     }
     tokens.state

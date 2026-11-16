@@ -1259,11 +1259,12 @@ Zed's `highlights.scm` for its language, as in S3.
    deviation 18's case, a generic list opens only where it closes on its line
    (`Generics::end`), so `Count < limit` compares. A name before such a list
    and `(` is a `Function` in TypeScript.
-5. **A TypeScript annotation is lit in four places only.** After a
+5. **A TypeScript annotation is lit in five places only.** After a
    parameter, after a name that `let`, `const` or `var` declares, after a
-   member's `?:`, and after a member's `:` in a type body (deviation 19), the
-   next name is a `Type`. An object key's value and a
-   return type after `)` keep the general rules. A capitalised name or a
+   member's `?:`, after a member's `:` in a type body (deviation 19), and
+   after a function's or a method's `):` (deviation 20), the next name is a
+   `Type`. An object key's value and an arrow's return type keep the general
+   rules. A capitalised name or a
    built-in type is a `Type` anywhere in TypeScript, which covers most return
    types.
 6. **Soft keywords are keywords only before an operand.** `as`, `from`,
@@ -1364,8 +1365,8 @@ Zed's `highlights.scm` for its language, as in S3.
     - A carried list ends at a `;`, `{` or `}`, as on one line. So
       `Promise<{` at a line end lights its `<` as `Punctuation`, and the `>`
       after the object type's `}` stays an `Operator`.
-    - Elsewhere the same-line rule holds. An expression's `f<\n T>(x)`, a
-      return type after `)`, a name after `|` or `&`, and a name after `as`
+    - Elsewhere the same-line rule holds. An expression's `f<\n T>(x)`, an
+      arrow's return type, a name after `|` or `&`, and a name after `as`
       or `satisfies` are not type positions. A `<` after a value can compare,
       and an `as` type has no end the lexer sees. A member's plain `:` in a
       type body is an annotation (deviation 19), so `a: Map<` spans lines
@@ -1405,3 +1406,20 @@ Zed's `highlights.scm` for its language, as in S3.
     - Measured beside main on 2026-11-16: `lex_typescript` −4.7% to +0.7%,
       the line groups −3.7% to −0.9%, `lex_javascript` −2.2% to −6.3%
       through no code of its own; inside deviation 18's A/A noise.
+20. **A TypeScript function's or method's return type is a type position.**
+    So `): Promise<` at a line end spans lines, and `): label` lights `label`.
+    - A `(` after a declared function's name, or after `function`, pushes
+      `Nest::Params`. So does a `(` after a method's name: a name before `(`
+      at a member's start in a type body. A `)` closes `Params` as it closes
+      a `Paren`, and leaves `Prev::Returns`; a `:` after it pushes
+      `Nest::ReturnType` and leaves `Annotation`.
+    - `ReturnType` ends at the body's `{`, at a `;` or `,`, at a closer, and
+      at a line end where it is on top, as `Alias` does. A `{` right after
+      the `:` opens an object type, a `TypeBody` above it; any later `{` pops
+      it and opens the body as a `Brace`.
+    - `function f<T>(` keeps its parameter list: a list opened after a
+      declared name pushes `Nest::FnGeneric`, whose `>` leaves `FnName`. A
+      generic call's name now leaves `Type`, not `FnName`, so `f<T>(x) / 2`
+      still divides; `FnName` means a declared name only.
+    - An arrow's `(a): T =>` keeps the general rules: at its `(`, nothing
+      tells it from a ternary's `c ? (a) : b`.
