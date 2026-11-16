@@ -26,7 +26,7 @@ pub struct Typing {
     scrolls: BlockScrolls,
     caret: ByteOffset,
     layout: Option<DocumentLayout>,
-    /// The layout the last `shape` replaced, dropped by the next `keystroke`, outside the timing.
+    /// The layout the last `shape` replaced, dropped by the next `keystroke` or `move_caret`, outside the timing.
     retired: Option<DocumentLayout>,
 }
 

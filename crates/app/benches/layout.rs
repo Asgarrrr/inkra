@@ -135,8 +135,8 @@ fn cases() -> Vec<Case> {
         .collect()
 }
 
-#[gpui::bench(inputs = cases(), input_name = "case", group = "layout/keystroke", sample_size = 10)]
-fn keystroke(case: &Case, cx: &mut BenchAppContext) {
+#[gpui::bench(inputs = cases(), input_name = "case", group = "layout/frame", sample_size = 10)]
+fn frame(case: &Case, cx: &mut BenchAppContext) {
     let mut window = cx.add_empty_window();
     let typing =
         window.update(|window, _| Typing::new(case.text.clone(), case.caret, case.colours, window));
@@ -160,5 +160,5 @@ fn keystroke(case: &Case, cx: &mut BenchAppContext) {
     );
 }
 
-gpui::bench_group!(benches, keystroke);
+gpui::bench_group!(benches, frame);
 gpui::bench_main!(benches);
