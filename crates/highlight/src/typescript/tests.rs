@@ -746,6 +746,17 @@ fn outside_a_type_position_a_list_must_close_on_its_line() {
 }
 
 #[test]
+fn a_comparison_after_an_as_types_list_is_an_operator() {
+    let text = "ok = v as Box<T> < limit,\n  w";
+    let compare = text.find(" < ").unwrap() + 1;
+    let tokens = tokens(TypeScript, text);
+    assert!(
+        tokens.contains(&(compare, compare + 1, Operator)),
+        "{tokens:?}"
+    );
+}
+
+#[test]
 fn an_interface_member_annotation_spans_lines() {
     check(
         "interface Store<T> {\n  items: Map<\n    K,\n    V\n  >;\n  name: label;\n}\nlet a = 2;",
@@ -841,6 +852,9 @@ fn an_object_literal_and_a_function_body_are_no_type_body() {
         "function g(): string { label: value; }",
         // The body's `}` closed it, so the label after it is no member.
         "type T = { a: A };\nlabel: value;",
+        // Lists opened after no type position: an assertion and a return type.
+        "const o = <Options>{ key: value };",
+        "function h(): Promise<T> { label: value; }",
     ] {
         let tokens = tokens(TypeScript, text);
         let value = text.find("value").unwrap();

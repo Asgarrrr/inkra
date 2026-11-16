@@ -105,6 +105,11 @@ fn is_ident(byte: u8) -> bool {
     is_word(byte) || byte == b'$'
 }
 
+/// Whether `top` is an open generic list.
+fn is_list(top: Option<Nest>) -> bool {
+    matches!(top, Some(Nest::Generic | Nest::TypeGeneric))
+}
+
 /// Whether `byte` can start what a soft keyword takes: a name, a literal, a pattern or `*`.
 fn starts_operand(byte: Option<&u8>) -> bool {
     byte.is_some_and(|&byte| is_ident_start(byte) || b"$\"'`{[*#".contains(&byte))
@@ -264,7 +269,7 @@ impl Tokens<'_> {
         let colon = bytes.get(after) == Some(&b':') || bytes[after..].starts_with(b"?:");
         let prev = self.state.prev;
         let top = self.state.top();
-        if top == Some(Nest::Generic) {
+        if is_list(top) {
             return match word {
                 _ if literal => (Some(Constant), Prev::ValueEnd),
                 _ if self.keyword(word, after) => (Some(Keyword), Prev::Other),

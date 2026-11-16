@@ -6,7 +6,7 @@ use crate::TokenClass::{self, Operator, Punctuation};
 use crate::scan::{end_while, is_ident_start, skip_spaces};
 use crate::state::{Nest, Prev};
 
-use super::{Tokens, is_ident};
+use super::{Tokens, is_ident, is_list};
 
 /// Longest first, so the first that matches is the longest.
 const OPERATORS: [&str; 46] = [
@@ -44,7 +44,12 @@ impl Tokens<'_> {
             && generic
             && (self.generics.end(at).is_some() || self.continues_on_next_line(at))
         {
-            self.state.push(Nest::Generic);
+            let list = if self.state.prev == Prev::TypePosition {
+                Nest::TypeGeneric
+            } else {
+                Nest::Generic
+            };
+            self.state.push(list);
             self.sink.push(at..at + 1, Punctuation);
             self.state.prev = Prev::Other;
             return at + 1;
@@ -120,9 +125,15 @@ impl Tokens<'_> {
             [b'?', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Param),
             [b'.', b'.', b'.', ..] => (3, Some(Operator), Prev::Other),
             [b'.', ..] => (1, Some(Punctuation), Prev::Dot),
-            [b'>', ..] if self.state.top() == Some(Nest::Generic) => {
+            [b'>', ..] if is_list(self.state.top()) => {
+                let position = self.state.top() == Some(Nest::TypeGeneric);
                 self.state.pop();
-                (1, Some(Punctuation), Prev::TypePosition)
+                let next = if position {
+                    Prev::TypePosition
+                } else {
+                    Prev::ValueEnd
+                };
+                (1, Some(Punctuation), next)
             }
             _ => match OPERATORS.iter().find(|op| rest.starts_with(op.as_bytes())) {
                 // A postfix `++` or `--` ends a value; a prefix one starts an expression.
@@ -163,7 +174,7 @@ impl Tokens<'_> {
     }
 
     fn drop_generics(&mut self) {
-        while self.state.top() == Some(Nest::Generic) {
+        while is_list(self.state.top()) {
             self.state.pop();
         }
     }

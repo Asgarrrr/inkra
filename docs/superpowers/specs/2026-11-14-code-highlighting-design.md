@@ -1387,12 +1387,18 @@ Zed's `highlights.scm` for its language, as in S3.
     - Inside it, a member's `:` starts a type, as `?:` does anywhere. So
       `items: Map<` spans lines as in deviation 18, and `name: label` lights
       `label` as a `Type`.
-    - A `>` that closes a generic list leaves `TypePosition`, not `ValueEnd`, so
-      `interface I<T> {` opens a type body. `value_end` treats the two alike,
-      so `/` and `<` read as before.
+    - A list opened after a type position pushes `Nest::TypeGeneric`, and
+      its `>` leaves `TypePosition`, so `interface I<T> {` opens a type body.
+      Any other list's `>` leaves `ValueEnd`, as before. A field on `Generic`
+      would have touched Rust's lexer, which compares `Generic` by value.
     - An object literal, a block and a function body stay a `Brace`. Their
-      `{` follows `=`, `(`, `)`, `return`, or a return type's name, which
-      `:` after `)` does not make a type position (deviation 5).
+      `{` follows `=`, `(`, `)`, `return`, a return type's name, or the `>`
+      of a list that opened after none of these. So `<Options>{ key: value }`,
+      `(): Promise<T> {` and `as Box<T> < limit` read as before; a review
+      caught all three when every `>` left `TypePosition`.
+    - A `namespace` or `enum` body is a type body too, its name being a type
+      position. A label at its top level is then read as a member; `enum`
+      members take no `:`.
     - A heritage list's later name, as in `implements A, B {`, is no type
       position, since `,` starts a key. Such a class body stays a `Brace`,
       as before.
