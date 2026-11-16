@@ -472,6 +472,21 @@ const CATALOGUE: &[Scene] = &[
         open: code_highlighting::code_highlighting,
     },
     Scene {
+        name: "code-highlighting-python",
+        shows: "the python block: comment, decorator, class and def names, docstring across lines, constants, f and r strings, keywords",
+        open: code_highlighting::python,
+    },
+    Scene {
+        name: "code-highlighting-json",
+        shows: "the jsonc block: a comment, keys as properties against string values, numbers, true, false and null",
+        open: code_highlighting::json,
+    },
+    Scene {
+        name: "code-highlighting-bash",
+        shows: "the bash block: shebang comment, commands as functions, flags and numbers as constants, $ expansions, keywords, a heredoc body",
+        open: code_highlighting::bash,
+    },
+    Scene {
         name: "code-highlighting-plain",
         shows: "the nope, no-info and indented blocks plain md_code_block; the quoted rust block coloured, its > prefix not",
         open: code_highlighting::code_highlighting_plain,

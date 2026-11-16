@@ -18,6 +18,40 @@ impl<T: Copy> Point<T> {
     fn show(&self) { println!("{}", self.x.len()); }
 }"#;
 
+const PYTHON: &str = r#"# A line comment.
+@dataclass(frozen=True)
+class Point(Base):
+    """A docstring
+    across two lines."""
+    MAX: int = 1_000
+
+    def label(self, name: str) -> str:
+        return f"{name}!" if name else None
+
+async def main():
+    await run(Point(1.5, 0x1F), key=r'\d+')"#;
+
+const JSON: &str = r#"{
+  // A comment, as jsonc allows.
+  "name": "inkra",
+  "ratio": -1.5e3,
+  "tags": ["notes", "rust"],
+  "draft": false,
+  "parent": null
+}"#;
+
+const BASH: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
+NAME="inkra-$VERSION"
+for file in target/*.dmg; do
+  if [[ -f "$file" && $COUNT -gt 0 ]]; then
+    cp -v "$file" "${DEST:-/tmp}" 2>&1 | tee x
+  fi
+done
+cat <<EOF > notes.txt
+Built $NAME on $(date)
+EOF"#;
+
 const NOPE: &str = "```nope\nlet mut nope = 1;\n```";
 
 const NO_INFO: &str = "```\nlet mut plain = 1;\n```";
@@ -40,6 +74,26 @@ pub(super) fn code_highlighting(stage: &mut Stage) -> WindowHandle<AppShell> {
         stage,
         &format!("A prose line before the block.\n\n```rust\n{RUST}\n```\n"),
     )
+}
+
+/// One block per scene: the viewport holds one block of this size, not three.
+fn one_block(stage: &mut Stage, info: &str, code: &str) -> WindowHandle<AppShell> {
+    open_blocks(
+        stage,
+        &format!("A prose line before the block.\n\n```{info}\n{code}\n```\n"),
+    )
+}
+
+pub(super) fn python(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "python", PYTHON)
+}
+
+pub(super) fn json(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "jsonc", JSON)
+}
+
+pub(super) fn bash(stage: &mut Stage) -> WindowHandle<AppShell> {
+    one_block(stage, "bash", BASH)
 }
 
 pub(super) fn code_highlighting_plain(stage: &mut Stage) -> WindowHandle<AppShell> {
