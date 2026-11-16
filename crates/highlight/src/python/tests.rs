@@ -80,6 +80,10 @@ fn a_soft_keyword_is_a_keyword_only_where_it_starts_a_statement() {
     );
     check("match", &[]);
     check(
+        "if type in kinds:",
+        &[("if", Keyword), ("in", Keyword), (":", Punctuation)],
+    );
+    check(
         "x = type(y)",
         &[
             ("=", Operator),
