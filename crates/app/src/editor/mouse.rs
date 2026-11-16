@@ -49,8 +49,8 @@ impl EditorView {
             return;
         };
         // Before `is_selecting`, as a ⌘-click: a toggle starts no drag selection. `⌘` and `⇧` skip
-        // the box, to follow a link and extend the selection.
-        if !(event.modifiers.platform || event.modifiers.shift)
+        // the box, to follow a link and extend the selection; a window's first click only activates it.
+        if !(event.modifiers.platform || event.modifiers.shift || event.first_mouse)
             && let Some(task) = self.task_under(event.position, cx)
         {
             self.edit_buffer(window, cx, |state, buffer| {

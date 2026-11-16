@@ -155,6 +155,26 @@ fn a_command_or_shift_click_on_a_box_does_not_toggle(cx: &mut TestAppContext) {
     }
 }
 
+/// The click that activates an inactive window only activates it, as Electron's default does.
+#[gpui::test]
+fn a_window_activating_click_on_a_box_does_not_toggle(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "- [ ] a\nbody");
+    let centre = only_box(&mut cx).center();
+    window
+        .update(&mut cx, |view, window, cx| {
+            let press = MouseDownEvent {
+                position: centre,
+                modifiers: Modifiers::none(),
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: true,
+            };
+            view.on_mouse_down(&press, window, cx);
+        })
+        .unwrap();
+    assert_eq!(text(&window, &mut cx), "- [ ] a\nbody");
+}
+
 /// A point left of, right of or below the square, still on the line's first row.
 #[gpui::test]
 fn a_click_just_outside_the_box_does_not_toggle(cx: &mut TestAppContext) {

@@ -156,6 +156,9 @@ after focusing and before the `⌘`-click link branch (46-59).
   it starts no drag selection.
 - A click with `⌘` or `⇧` held skips the box: `⌘`-click keeps following
   links, `⇧`-click keeps extending the selection.
+- The click that activates an inactive window skips the box too
+  (`first_mouse`). It only activates the window, as Electron's default does.
+  Added 2026-11-17 by the owner after the T2 review.
 - **(G)** Before it edits, the click checks that the layout's version
   (`shaped_at`, `layout/mod.rs:81-82`) equals the buffer's. After a reload,
   the last layout describes the old text until the next render
