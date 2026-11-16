@@ -630,7 +630,7 @@ light. The look is tuned after it ships, as for code blocks.
 | Lex, TypeScript | S4 medians: 2.12 us for 20 lines (426 B), 59.0 us for 500 lines (11.2 KB), 592 us for 5,000 lines (111 KB) | the same, group `lex_typescript` |
 | Lex, CSS | S4 medians: 0.85 us for 20 lines (450 B), 21.2 us for 500 lines (11.3 KB), 211 us for 5,000 lines (113 KB) | the same, group `lex_css` |
 | Lex, HTML | S4 medians: 1.04 us for 20 lines (390 B), 26.0 us for 500 lines (9.8 KB), 260 us for 5,000 lines (98 KB) | the same, group `lex_html` |
-| Lex, one long line | linear in its length: S4 medians for unclosed generic lists, TypeScript `a<` 2.07 ms at 32 KiB and 4.18 ms at 64 KiB, Rust `a::<` 0.49 ms and 1.10 ms | the same, groups `lex_typescript_long_line` and `lex_rust_long_line` (S4 deviation 16) |
+| Lex, one long line | linear in its length: S4 medians for unclosed generic lists, TypeScript `a<` 2.07 ms at 32 KiB and 4.18 ms at 64 KiB, Rust `a::<` 0.49 ms and 1.10 ms. With the line's pairing (deviation 16), measured beside main on 2026-11-16: TypeScript `a<` 4.32 ms at 64 KiB against main's 4.20 ms, Rust `a::<` 1.14 ms against 1.01 ms, and nested closed lists, TypeScript `a<…>`, 1.62 ms at 32 KiB and 3.25 ms at 64 KiB | the same, groups `lex_typescript_long_line`, `lex_typescript_nested_line` and `lex_rust_long_line` (S4 deviation 16) |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
@@ -1255,7 +1255,7 @@ Zed's `highlights.scm` for its language, as in S3.
    type alias's `=` and an annotation's `:` start a type, where `<` opens type
    parameters in both dialects: `Alias` marks `type Name` up to its `=` and
    never crosses a line. A generic list opens only where it closes on its
-   line (`generic_end`), so `Count < limit` compares and a list split across
+   line (`Generics::end`), so `Count < limit` compares and a list split across
    lines is not lit. A name before such a list and `(` is a `Function` in
    TypeScript.
 5. **A TypeScript annotation is lit in three places only.** After a
@@ -1317,20 +1317,27 @@ Zed's `highlights.scm` for its language, as in S3.
 14. **`TokenClass` gains `Tag`.** D5 names eleven classes, but S1a built ten,
     as no lexer coloured a tag. `app` maps it to `syntax_tag`, which the theme
     already holds.
-15. **`scan.rs` gains the scans two lexers share.** `generic_end` moves from
-    `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript,
+15. **`scan.rs` gains the scans two lexers share.** `generic_end` (now
+    `Generics::end`, deviation 16) moves from `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript,
     CSS and, with its closer as a parameter, HTML's `<!--`, and `dotted_end`
     from `python.rs` for decorators. `entity_end` serves HTML and JSX.
     `end_while` is every name scan, and `Sink::token` pushes a token and
     returns its end.
-16. **A generic list's look-ahead is bounded.** `generic_end` stops after
-    `GENERIC_LIMIT` (64) bytes and at a `;`, `{` or `}`, for TypeScript and
-    Rust alike. Unbounded, it scanned to the line end for every name before a
-    `<`, so one long line lexed in quadratic time. A longer list, or one
-    holding an object type, is not a generic call; its capitalised names stay
+16. **A generic list closes at any distance on its line, in linear time.**
+    `Generics::end`, one per line for TypeScript and Rust alike, finds where
+    a `<` closes before a `;`, `{` or `}`. Rescanning to the line end for
+    every name before a `<` lexed one long line in quadratic time. So it looks
+    ahead `LOOK_AHEAD` (64) bytes first, which decides almost every list
+    written by hand. A list those bytes leave open is found in a pairing of
+    the whole line: one pass with a stack of open `<`, made once and kept for
+    the line.
+    The pairing is `#[cold]` and out of line: inlined, it slowed ordinary
+    TypeScript by 5% and JavaScript, which shares the lexer, by 3%. A list
+    holding an object type is not a generic call; its capitalised names stay
     `Type`. A 64 KiB line of `a<` lexes in about twice the time of a 32 KiB
     one (Cost). Its cost per byte is still about 15 times prose's: every `<`
-    walks the operator table.
+    walks the operator table. A first cut, 2026-11-16, stopped at 64 bytes,
+    so a longer list was not lit.
 17. **JSX tag edges.** A self-closing `/ >` with spaces is one `Punctuation`,
     and a `/` not followed by `>` ends no tag. A child tag past the nesting
     room stays text: the stack could not store it, so its attributes would

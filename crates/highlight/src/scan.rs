@@ -1,6 +1,7 @@
 //! Byte scanning every lexer shares: words, spaces, numbers, quoted strings, and the line's token
 //! sink. Every byte a scan stops on is ASCII, so every end is a char boundary.
 
+use std::cell::OnceCell;
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -101,30 +102,119 @@ pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
     end
 }
 
-/// Longer than a generic list written by hand; it keeps a line's lex linear in its length.
-pub(crate) const GENERIC_LIMIT: usize = 64;
+/// Longer than a generic list written by hand, so most lines never pair the whole line.
+const LOOK_AHEAD: usize = 64;
 
-/// The end of the generic list whose `<` is at `open`, if it closes on the line within
-/// `GENERIC_LIMIT` bytes and before a `;`, `{` or `}`; the `>` of `->` and `=>` closes none.
-pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
-    if bytes.get(open) != Some(&b'<') {
-        return None;
-    }
-    let mut depth = 0_usize;
-    for at in open..bytes.len().min(open + GENERIC_LIMIT) {
-        match bytes[at] {
-            b'<' => depth += 1,
-            b'>' if !matches!(bytes[at - 1], b'-' | b'=') => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at + 1);
-                }
-            }
-            b';' | b'{' | b'}' => return None,
-            _ => {}
+/// Where a line's generic lists close. A list that a short look-ahead leaves open is found in a
+/// pairing of the whole line, made once, so the line lexes in linear time.
+pub(crate) struct Generics<'a> {
+    bytes: &'a [u8],
+    ends: OnceCell<Vec<(usize, usize)>>,
+}
+
+impl<'a> Generics<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            ends: OnceCell::new(),
         }
     }
-    None
+
+    /// The end of the generic list whose `<` is at `open`, if it closes on the line before a `;`,
+    /// `{` or `}`; the `>` of `->` and `=>` closes none.
+    pub(crate) fn end(&self, open: usize) -> Option<usize> {
+        if self.bytes.get(open) != Some(&b'<') {
+            return None;
+        }
+        self.look_ahead(open)
+            .unwrap_or_else(|Undecided| self.paired_end(open))
+    }
+
+    /// `end` from the whole line's pairing; kept out of line, since only long lists reach it.
+    #[cold]
+    #[inline(never)]
+    fn paired_end(&self, open: usize) -> Option<usize> {
+        let ends = self.ends.get_or_init(|| pair(self.bytes));
+        let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
+        Some(ends[index].1)
+    }
+
+    /// `end` from the `LOOK_AHEAD` bytes from `open`, when they decide it.
+    fn look_ahead(&self, open: usize) -> Result<Option<usize>, Undecided> {
+        let mut depth = 0_usize;
+        let limit = open + LOOK_AHEAD;
+        for at in open..self.bytes.len().min(limit) {
+            match angle(self.bytes, at) {
+                Angle::Open => depth += 1,
+                Angle::Close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(Some(at + 1));
+                    }
+                }
+                Angle::Stop => return Ok(None),
+                Angle::Other => {}
+            }
+        }
+        if self.bytes.len() <= limit {
+            Ok(None)
+        } else {
+            Err(Undecided)
+        }
+    }
+}
+
+/// The look-ahead reached its limit with the list still open.
+struct Undecided;
+
+/// What the byte at `at` does to the generic lists open before it.
+enum Angle {
+    Open,
+    Close,
+    /// Closes none and ends them all: a `;`, `{` or `}`.
+    Stop,
+    Other,
+}
+
+fn angle(bytes: &[u8], at: usize) -> Angle {
+    match bytes[at] {
+        b'<' => Angle::Open,
+        b'>' if !matches!(
+            at.checked_sub(1).map(|before| bytes[before]),
+            Some(b'-' | b'=')
+        ) =>
+        {
+            Angle::Close
+        }
+        b';' | b'{' | b'}' => Angle::Stop,
+        _ => Angle::Other,
+    }
+}
+
+/// Every `<` whose list closes, with its end, as `(open, end)` in the line's order.
+fn pair(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut ends = Vec::new();
+    // Indices into `ends` of the lists still open.
+    let mut opens = Vec::new();
+    for at in 0..bytes.len() {
+        match angle(bytes, at) {
+            Angle::Open => {
+                opens.push(ends.len());
+                ends.push((at, None));
+            }
+            Angle::Close => {
+                if let Some(index) = opens.pop() {
+                    ends[index].1 = Some(at + 1);
+                }
+            }
+            Angle::Stop => opens.clear(),
+            Angle::Other => {}
+        }
+    }
+    // Open ones dropped, so a line of lists that never close searches an empty table.
+    ends.into_iter()
+        .filter_map(|(open, end)| Some((open, end?)))
+        .collect()
 }
 
 /// Scans a comment that ends at `closer` and does not nest, from `at` as one `Comment` from
@@ -189,3 +279,6 @@ impl Sink<'_> {
         end
     }
 }
+
+#[cfg(test)]
+mod tests;

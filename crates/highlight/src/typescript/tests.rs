@@ -4,7 +4,6 @@ use crate::TokenClass::{
     Type,
 };
 use crate::fixtures::{expect, tokens};
-use crate::scan::GENERIC_LIMIT;
 
 #[track_caller]
 fn check(text: &str, expected: &[(&str, TokenClass)]) {
@@ -279,25 +278,36 @@ fn a_member_after_its_modifiers_is_a_property_and_an_optional_one_annotates_its_
 }
 
 #[test]
-fn a_generic_call_closes_within_the_look_ahead_limit() {
+fn a_generic_call_closes_at_any_distance_on_its_line() {
     // `f<AAA…>(x)`, its list `len` bytes from `<` to `>`.
     let call = |len: usize| format!("f<{}>(x)", "A".repeat(len - 2));
-    assert_eq!(
-        tokens(TypeScript, &call(GENERIC_LIMIT))[0],
-        (0, 1, Function)
-    );
-    assert_eq!(
-        tokens(TypeScript, &call(GENERIC_LIMIT + 1))[0],
-        (1, 2, Operator)
-    );
+    for len in [2, 65, 4096] {
+        assert_eq!(tokens(TypeScript, &call(len))[0], (0, 1, Function), "{len}");
+    }
 }
 
 #[test]
 fn a_generic_list_does_not_close_past_a_semicolon_or_a_brace() {
-    for stop in [";", "{", "}"] {
-        let text = format!("a < b {stop} c > (d)");
-        assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
+    // Near the `<` and past the look-ahead, where the line's pairing answers.
+    for pad in [0, 100] {
+        for stop in [";", "{", "}"] {
+            let text = format!("a < b{} {stop} c > (d)", " ".repeat(pad));
+            assert_eq!(tokens(TypeScript, &text)[0], (2, 3, Operator), "{text:?}");
+        }
     }
+}
+
+#[test]
+fn a_long_generic_list_closes_at_its_own_angle() {
+    // The inner list closes first, the outer one past the look-ahead.
+    let text = format!("f<A<B>{}>(x)", ", C".repeat(40));
+    let tokens = tokens(TypeScript, &text);
+    assert_eq!(tokens[0], (0, 1, Function));
+    let close = text.len() - 4;
+    assert!(
+        tokens.contains(&(close, close + 1, Punctuation)),
+        "{tokens:?}"
+    );
 }
 
 /// The tokens of `let a = 2;`, a line after the one a test is about.

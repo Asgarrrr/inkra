@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use crate::TokenClass;
-use crate::scan::{Sink, drive, generic_end, is_all_caps, is_word, number, skip_spaces, word_end};
+use crate::scan::{Generics, Sink, drive, is_all_caps, is_word, number, skip_spaces, word_end};
 use crate::state::{LineState, Nest, Open, Prev};
 
 mod literals;
@@ -26,11 +26,11 @@ const BUILTIN_TYPES: [&str; 17] = [
 ];
 
 /// Whether `(` follows `at` on the line, past spaces and a turbofish `::<…>`.
-fn is_call(bytes: &[u8], at: usize) -> bool {
+fn is_call(bytes: &[u8], generics: &Generics, at: usize) -> bool {
     let mut at = skip_spaces(bytes, at);
     if bytes[at..].starts_with(b"::") {
         let open = skip_spaces(bytes, at + 2);
-        match generic_end(bytes, open) {
+        match generics.end(open) {
             Some(end) => at = skip_spaces(bytes, end),
             None => return false,
         }
@@ -48,6 +48,7 @@ struct Tokens<'a> {
     line: &'a str,
     sink: Sink<'a>,
     state: LineState,
+    generics: Generics<'a>,
 }
 
 impl Tokens<'_> {
@@ -141,7 +142,7 @@ impl Tokens<'_> {
         let bytes = self.line.as_bytes();
         let word = &self.line[name.start..name.end];
         let keyword = token == name.start && KEYWORDS.contains(&word);
-        let call = is_call(bytes, name.end);
+        let call = is_call(bytes, &self.generics, name.end);
         let path_segment = bytes[skip_spaces(bytes, name.end)..].starts_with(b"::");
         let (end, class) = if self.state.attribute.is_some() {
             (name.end, Some(TokenClass::Attribute))
@@ -199,6 +200,7 @@ pub(crate) fn lex(
         line,
         sink: Sink { start, out },
         state,
+        generics: Generics::new(line.as_bytes()),
     };
     let (at, mut open) = tokens.literal(state.open, 0, 0);
     drive(line.len(), at, |at| {

@@ -394,3 +394,12 @@ fn every_other_token_resets_the_look_behind() {
         (". \"s\" x", &[(0, 1, Operator), (2, 5, String)]),
     ]);
 }
+
+#[test]
+fn a_turbofish_closes_at_any_distance_on_its_line() {
+    let line = format!("f::<{}>()", "A".repeat(4096));
+    assert_eq!(
+        lexed(&line, 0)[0],
+        (ByteOffset::new(0)..ByteOffset::new(1), Function)
+    );
+}
