@@ -3,7 +3,7 @@
 //! spec, D2 and D4).
 
 use crate::TokenClass::{self, Operator, Punctuation};
-use crate::scan::{end_while, generic_end, is_ident_start, skip_spaces};
+use crate::scan::{end_while, is_ident_start, skip_spaces};
 use crate::state::{Nest, Prev};
 
 use super::{Tokens, is_ident};
@@ -36,7 +36,7 @@ impl Tokens<'_> {
         } else {
             letter
         };
-        if self.dialect.types && room && generic && generic_end(bytes, at).is_some() {
+        if self.dialect.types && room && generic && self.generics.end(at).is_some() {
             self.state.push(Nest::Generic);
             self.sink.push(at..at + 1, Punctuation);
             self.state.prev = Prev::Other;

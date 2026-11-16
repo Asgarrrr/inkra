@@ -1,6 +1,7 @@
 //! Byte scanning every lexer shares: words, spaces, numbers, quoted strings, and the line's token
 //! sink. Every byte a scan stops on is ASCII, so every end is a char boundary.
 
+use std::cell::OnceCell;
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -101,30 +102,55 @@ pub(crate) fn dotted_end(bytes: &[u8], at: usize) -> usize {
     end
 }
 
-/// Longer than a generic list written by hand; it keeps a line's lex linear in its length.
-pub(crate) const GENERIC_LIMIT: usize = 64;
+/// Where a line's generic lists close, paired in one pass the first time one is asked for, so
+/// a line lexes in linear time however far apart its `<` and `>` sit.
+pub(crate) struct Generics<'a> {
+    bytes: &'a [u8],
+    ends: OnceCell<Vec<(usize, usize)>>,
+}
 
-/// The end of the generic list whose `<` is at `open`, if it closes on the line within
-/// `GENERIC_LIMIT` bytes and before a `;`, `{` or `}`; the `>` of `->` and `=>` closes none.
-pub(crate) fn generic_end(bytes: &[u8], open: usize) -> Option<usize> {
-    if bytes.get(open) != Some(&b'<') {
-        return None;
+impl<'a> Generics<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            ends: OnceCell::new(),
+        }
     }
-    let mut depth = 0_usize;
-    for at in open..bytes.len().min(open + GENERIC_LIMIT) {
-        match bytes[at] {
-            b'<' => depth += 1,
-            b'>' if !matches!(bytes[at - 1], b'-' | b'=') => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at + 1);
+
+    /// The end of the generic list whose `<` is at `open`, if it closes on the line before a `;`,
+    /// `{` or `}`; the `>` of `->` and `=>` closes none.
+    pub(crate) fn end(&self, open: usize) -> Option<usize> {
+        if self.bytes.get(open) != Some(&b'<') {
+            return None;
+        }
+        let ends = self.ends.get_or_init(|| pair(self.bytes));
+        let index = ends.binary_search_by_key(&open, |&(open, _)| open).ok()?;
+        Some(ends[index].1)
+    }
+}
+
+/// Every `<` with its closing `>`, as `(open, end)` sorted by `open`.
+fn pair(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut opens = Vec::new();
+    let mut ends = Vec::new();
+    for (at, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'<' => opens.push(at),
+            b'>' if !matches!(
+                at.checked_sub(1).map(|before| bytes[before]),
+                Some(b'-' | b'=')
+            ) =>
+            {
+                if let Some(open) = opens.pop() {
+                    ends.push((open, at + 1));
                 }
             }
-            b';' | b'{' | b'}' => return None,
+            b';' | b'{' | b'}' => opens.clear(),
             _ => {}
         }
     }
-    None
+    ends.sort_unstable();
+    ends
 }
 
 /// Scans a comment that ends at `closer` and does not nest, from `at` as one `Comment` from

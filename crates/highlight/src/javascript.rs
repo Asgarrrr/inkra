@@ -10,7 +10,7 @@ use crate::TokenClass::{
     self, Attribute, Comment, Constant, Function, Keyword, Property, String, Type,
 };
 use crate::scan::{
-    Sink, block_comment, dotted_end, drive, end_while, generic_end, is_all_caps, is_ident_start,
+    Generics, Sink, block_comment, dotted_end, drive, end_while, is_all_caps, is_ident_start,
     is_word, number, quoted, skip_spaces,
 };
 use crate::state::{LineState, Nest, Open, Prev};
@@ -130,6 +130,7 @@ struct Tokens<'a> {
     sink: Sink<'a>,
     state: LineState,
     dialect: Dialect,
+    generics: Generics<'a>,
 }
 
 impl Tokens<'_> {
@@ -246,7 +247,9 @@ impl Tokens<'_> {
         let after = skip_spaces(bytes, end);
         let types = self.dialect.types;
         let generic_call = types
-            && generic_end(bytes, after)
+            && self
+                .generics
+                .end(after)
                 .is_some_and(|close| bytes.get(skip_spaces(bytes, close)) == Some(&b'('));
         let call = matches!(bytes.get(after), Some(b'(' | b'`')) || generic_call;
         let past_call = if generic_call {
@@ -349,6 +352,7 @@ pub(crate) fn lex_dialect(
         sink: Sink { start, out },
         state,
         dialect,
+        generics: Generics::new(line.as_bytes()),
     };
     let at = if let Open::BlockComment { .. } = state.open {
         tokens.block_comment(0, 0)

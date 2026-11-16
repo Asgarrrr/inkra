@@ -4,7 +4,6 @@ use crate::TokenClass::{
     Type,
 };
 use crate::fixtures::{expect, tokens};
-use crate::scan::GENERIC_LIMIT;
 
 #[track_caller]
 fn check(text: &str, expected: &[(&str, TokenClass)]) {
@@ -279,17 +278,12 @@ fn a_member_after_its_modifiers_is_a_property_and_an_optional_one_annotates_its_
 }
 
 #[test]
-fn a_generic_call_closes_within_the_look_ahead_limit() {
+fn a_generic_call_closes_at_any_distance_on_its_line() {
     // `f<AAA…>(x)`, its list `len` bytes from `<` to `>`.
     let call = |len: usize| format!("f<{}>(x)", "A".repeat(len - 2));
-    assert_eq!(
-        tokens(TypeScript, &call(GENERIC_LIMIT))[0],
-        (0, 1, Function)
-    );
-    assert_eq!(
-        tokens(TypeScript, &call(GENERIC_LIMIT + 1))[0],
-        (1, 2, Operator)
-    );
+    for len in [2, 65, 4096] {
+        assert_eq!(tokens(TypeScript, &call(len))[0], (0, 1, Function), "{len}");
+    }
 }
 
 #[test]
