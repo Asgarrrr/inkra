@@ -626,10 +626,11 @@ light. The look is tuned after it ships, as for code blocks.
 | Lex, Python | S3 medians: 1.91 us for 20 lines (657 B), 49.7 us for 500 lines (16.1 KB), 505 us for 5,000 lines (162 KB) | `cargo bench -p inkra-highlight --bench lex -- --quick`, group `lex_python`: a sample repeated to the Rust texts' line counts (S3 deviation 10) |
 | Lex, JSON | S3 medians: 0.42 us for 20 lines (471 B), 10.5 us for 500 lines (11.8 KB), 105 us for 5,000 lines (118 KB) | the same, group `lex_json` |
 | Lex, Bash | S3 medians: 0.95 us for 20 lines (531 B), 24.1 us for 500 lines (13.3 KB), 241 us for 5,000 lines (133 KB) | the same, group `lex_bash` |
-| Lex, JavaScript | S4 medians: 2.99 us for 20 lines (636 B), 68.4 us for 500 lines (14.7 KB), 686 us for 5,000 lines (146 KB) | the same, group `lex_javascript` (S4 deviation 13) |
-| Lex, TypeScript | S4 medians: 2.22 us for 20 lines (426 B), 62.4 us for 500 lines (11.2 KB), 624 us for 5,000 lines (111 KB) | the same, group `lex_typescript` |
-| Lex, CSS | S4 medians: 0.71 us for 20 lines (450 B), 17.6 us for 500 lines (11.3 KB), 177 us for 5,000 lines (113 KB) | the same, group `lex_css` |
-| Lex, HTML | S4 medians: 1.07 us for 20 lines (390 B), 26.6 us for 500 lines (9.8 KB), 268 us for 5,000 lines (98 KB) | the same, group `lex_html` |
+| Lex, JavaScript | S4 medians: 2.84 us for 20 lines (636 B), 65.2 us for 500 lines (14.7 KB), 653 us for 5,000 lines (146 KB) | the same, group `lex_javascript` (S4 deviation 13) |
+| Lex, TypeScript | S4 medians: 2.12 us for 20 lines (426 B), 59.0 us for 500 lines (11.2 KB), 592 us for 5,000 lines (111 KB) | the same, group `lex_typescript` |
+| Lex, CSS | S4 medians: 0.85 us for 20 lines (450 B), 21.2 us for 500 lines (11.3 KB), 211 us for 5,000 lines (113 KB) | the same, group `lex_css` |
+| Lex, HTML | S4 medians: 1.04 us for 20 lines (390 B), 26.0 us for 500 lines (9.8 KB), 260 us for 5,000 lines (98 KB) | the same, group `lex_html` |
+| Lex, one long line | linear in its length: S4 medians for unclosed generic lists, TypeScript `a<` 2.07 ms at 32 KiB and 4.18 ms at 64 KiB, Rust `a::<` 0.49 ms and 1.10 ms | the same, groups `lex_typescript_long_line` and `lex_rust_long_line` (S4 deviation 16) |
 | Build time | no C, no build script | clean build of `inkra-highlight` |
 | Keystroke outside a block | D7's merge; no lex | `app` planted-marks test |
 | One listener call | at most `MAIN_THREAD_BUDGET` bytes lexed and published, at most 0.5 ms by D10's definition; S1b: 64 KiB in 313.7 us (one block) and 366.8 us (many blocks) | `cargo bench -p inkra-highlight --bench listener`, D10 |
@@ -1237,7 +1238,7 @@ Zed's `highlights.scm` for its language, as in S3.
    is copied.
 2. **Templates, JSX and embedded languages live on the nesting stack.**
    `Nest` gains `Condition`, `Template`, `JsxTag`, `JsxClosingTag`, `JsxText`,
-   `Script` and `Style`, all without data. The top entry picks the mode: a
+   `Alias`, `Script` and `Style`, all without data. The top entry picks the mode: a
    template's text, a JSX tag, JSX children, or code. `${` and a JSX `{` push a
    `Brace`, and its `}` returns to the mode below. `LineState` stays 56 B and
    holds no heap. Past the stack's 16 entries, a line lexes as code.
@@ -1249,9 +1250,14 @@ Zed's `highlights.scm` for its language, as in S3.
 4. **D4's `<` rule, as built.** Where JSX is on, a `<` at an expression start
    opens a tag when a letter or a `>` follows, so `<>` opens a fragment. In
    TypeScript with JSX off, a `<` and a letter at an expression start open a
-   generic list, so `<T>(x: T) => x` is a generic arrow. A name before a
-   generic list that closes on its line and is followed by `(` is a
-   `Function` in TypeScript.
+   generic list, so `<T>(x: T) => x` is a generic arrow. TSX reads `<T,` and
+   `<T extends ` as type parameters, as TypeScript does in `.tsx` files. A
+   type alias's `=` and an annotation's `:` start a type, where `<` opens type
+   parameters in both dialects: `Alias` marks `type Name` up to its `=` and
+   never crosses a line. A generic list opens only where it closes on its
+   line (`generic_end`), so `Count < limit` compares and a list split across
+   lines is not lit. A name before such a list and `(` is a `Function` in
+   TypeScript.
 5. **A TypeScript annotation is lit in three places only.** After a
    parameter, after a name that `let`, `const` or `var` declares, and after a
    member's `?:`, the next name is a `Type`. An object key's value and a
@@ -1261,8 +1267,8 @@ Zed's `highlights.scm` for its language, as in S3.
 6. **Soft keywords are keywords only before an operand.** `as`, `from`,
    `get`, `of`, `set` and `static`, and TypeScript's sixteen, are keywords
    when a name, a quote, a backtick, a `{`, a `[`, a `*` or a `#` follows. So `type = 1` and
-   `x.of` stay names. A modifier such as `readonly` or `private` keeps the
-   key position, so the member after it is a `Property`.
+   `x.of` stay names. A modifier such as `readonly` or `private` starts a
+   key, after a decorator too, so the member after it is a `Property`.
 7. **JavaScript and TypeScript, by Zed.** `this` and `super` are plain.
    `true`, `false`, `null` and `undefined` are `Constant` (D4). A regex's
    flags are `Keyword`, `${` and its `}` are `Punctuation`, a ternary `?` is
@@ -1285,28 +1291,47 @@ Zed's `highlights.scm` for its language, as in S3.
 10. **CSS tells a declaration from a nested rule on its line.** An item is a
     declaration when the first `{`, `;` or `}` on its line is not a `{`. With
     none of the three, it is a declaration when its name is followed by `:`
-    and then a space or the line end. The same rule applies at the top level,
-    so a `.jsx` style object or a lone declaration still colours.
+    and then a space or the line end; inside a rule, a `:` with no space
+    after it counts too, unless a `,` ends the line as in a selector list. So
+    a rule's last `margin:0` is a declaration. The same rule applies at the
+    top level, so a `.jsx` style object or a lone declaration still colours.
 11. **HTML, as built.** `<!DOCTYPE html>` is a `Tag` between `Punctuation`.
     A `</script` or `</style` closes the embedded language anywhere on the
     line, in any case, even inside a string, as browsers do. An attribute
-    value stays a `String` even for `style` and `onclick`. An empty slice
-    before the closing tag is not handed to the embedded lexer. The closing
-    tag resets the line state, so a comment left open in a script ends there.
+    value stays a `String` even for `style` and `onclick`; an unquoted one
+    runs to a space or `>`, so `href=/about/team` is one value. A `/` not
+    followed by `>` ends no tag. The closing tag resets the line state, so a
+    comment left open in a script ends there.
 12. **Each new language has its own scene,** as in S3 deviation 1:
     `code-highlighting-javascript` (info word `jsx`), `-typescript`, `-tsx`,
     `-css` and `-html`. Each line fits the block's width, so no line scrolls.
 13. **The lex bench gains four groups,** as in S3 deviation 10: a sample
     repeated to 20, 500 and 5,000 lines. TSX has no group: it runs
-    TypeScript's code with one flag changed. On the S4 run, Rust's `lex` group
-    measured 756 us at 5,000 lines against 646 us at S1a, so the machine ran
-    about 15 % slower. JavaScript and TypeScript lex at about 4.7 and 5.6 us
-    per KB, against Rust's 4.5 at the same run. `MAIN_THREAD_BUDGET` was
-    measured with Rust text; TypeScript fills it about a quarter slower.
+    TypeScript's code with one flag changed. On the run after the review,
+    Rust's `lex` group measured 705 us at 5,000 lines against 646 us at S1a.
+    JavaScript and TypeScript lex at about 4.5 and 5.3 us per KB, against
+    Rust's 4.2 at the same run. `MAIN_THREAD_BUDGET` was measured with Rust
+    text; TypeScript fills it about a quarter slower. The CSS lexer as first
+    built measured 199 us at 5,000 lines on that run, against 211 us after
+    the review; the first S4 run gave 177 us.
 14. **`TokenClass` gains `Tag`.** D5 names eleven classes, but S1a built ten,
     as no lexer coloured a tag. `app` maps it to `syntax_tag`, which the theme
     already holds.
 15. **`scan.rs` gains the scans two lexers share.** `generic_end` moves from
-    `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript and
-    CSS, and `dotted_end` from `python.rs` for decorators. `entity_end` serves
-    HTML and JSX.
+    `rust.rs` for TypeScript, `block_comment` from `json.rs` for JavaScript,
+    CSS and, with its closer as a parameter, HTML's `<!--`, and `dotted_end`
+    from `python.rs` for decorators. `entity_end` serves HTML and JSX.
+    `end_while` is every name scan, and `Sink::token` pushes a token and
+    returns its end.
+16. **A generic list's look-ahead is bounded.** `generic_end` stops after
+    `GENERIC_LIMIT` (64) bytes and at a `;`, `{` or `}`, for TypeScript and
+    Rust alike. Unbounded, it scanned to the line end for every name before a
+    `<`, so one long line lexed in quadratic time. A longer list, or one
+    holding an object type, is not a generic call; its capitalised names stay
+    `Type`. A 64 KiB line of `a<` lexes in about twice the time of a 32 KiB
+    one (Cost). Its cost per byte is still about 15 times prose's: every `<`
+    walks the operator table.
+17. **JSX tag edges.** A self-closing `/ >` with spaces is one `Punctuation`,
+    and a `/` not followed by `>` ends no tag. A child tag past the nesting
+    room stays text: the stack could not store it, so its attributes would
+    lex as code.
