@@ -11,6 +11,14 @@ fn check(text: &str, expected: &[(&str, TokenClass)]) {
 }
 
 #[test]
+fn an_escape_in_a_template_skips_one_byte_wherever_it_sits() {
+    check(
+        r"`abcdef\`g` + x",
+        &[(r"`abcdef\`g`", String), ("+", Operator)],
+    );
+}
+
+#[test]
 fn comments_run_to_the_line_end_or_their_close_and_keep_the_look_behind() {
     check("a // b", &[("// b", Comment)]);
     check("a /* b */ c", &[("/* b */", Comment)]);
