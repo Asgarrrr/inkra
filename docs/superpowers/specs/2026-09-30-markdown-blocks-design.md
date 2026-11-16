@@ -1,8 +1,9 @@
 # Markdown blocks: quote bars, code backgrounds, task boxes
 
 Status: **S1 merged** (#56). S2 is superseded by
-`2026-11-07-code-blocks-design.md`. S3 refreshed 2026-11-11, see "S3 as
-planned"; not built.
+`2026-11-07-code-blocks-design.md`. S3 is superseded by
+`2026-11-16-task-boxes-design.md`; "S3 as
+planned" stays for its parser facts.
 
 ## Why
 
