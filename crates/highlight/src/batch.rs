@@ -9,7 +9,7 @@ use inkra_text::ByteOffset;
 use crate::plan::{MAIN_THREAD_BUDGET, Plan, plan};
 use crate::{TokenClass, block_tokens, info_language};
 
-/// The longest block, in bytes, fences included, that `batch` lexes; a longer one gets an empty chunk
+/// The longest block, in bytes, fences included, that is ever lexed; a longer one gets an empty chunk
 /// (D10, deviation 11).
 pub const BLOCK_LIMIT: usize = 262_144;
 

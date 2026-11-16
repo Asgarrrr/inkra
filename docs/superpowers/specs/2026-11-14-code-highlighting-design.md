@@ -648,15 +648,16 @@ light. The look is tuned after it ships, as for code blocks.
   `TASK_BYTES`; a first block over it still goes; `lex_backlog` gives the
   marks `block_marks` gives on the same blocks.
 - `inkra-highlight`, `#[test]` on `open_chunks` (D8): every block before the
-  deadline; past it, only the empty chunks of unknown-language blocks
-  (deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
+  deadline; past it, only the empty chunks of unknown-language blocks and of
+  blocks over `BLOCK_LIMIT` (deviation 11, S2b deviation 11); none over `OPEN_PARSE_LIMIT`, all at the limit.
 - `inkra-highlight`, Bash: `cat <<''` ended by an empty line; `cat <<A <<B`
   with both bodies; `<<-` with tab-indented tags.
 - `inkra-editor`: `Layer::chunks` returns the mapped chunk ranges, sorted,
   each with its tag, after random edits and publishes
   (`proptest`, beside the layer's own).
-- `inkra-editor`: a late publish maps each chunk as the fold of `map_chunk`
-  over every splice since did (deviation 12), after random edits
+- `inkra-editor`: `follow` maps a chunk as the fold of `map_chunk` over every
+  splice since (deviation 12), and a publish equals its changes placed one by
+  one with reached late chunks skipped (S2b deviation 1), after random edits
   (`proptest`).
 - `app`, headless `#[gpui::test]` against `MemFs`:
   - a block's runs carry the token colours; a revealed fence stays
