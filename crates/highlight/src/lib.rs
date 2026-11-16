@@ -17,6 +17,7 @@ mod fixtures;
 mod open;
 mod plan;
 mod rust;
+mod scan;
 mod state;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
