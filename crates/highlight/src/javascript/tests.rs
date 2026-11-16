@@ -542,3 +542,106 @@ fn a_tag_past_the_nesting_room_is_operators_and_the_next_line_still_colours() {
         .collect();
     check(&text, &expected);
 }
+
+#[test]
+fn a_function_name_is_a_function_with_its_parameters_on_the_next_line() {
+    check(
+        "function load\n(x) {}",
+        &[
+            ("function", Keyword),
+            ("load", Function),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("{", Punctuation),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_private_name_at_the_line_start_is_no_hashbang() {
+    check(
+        "#count = 0",
+        &[("#count", Property), ("=", Operator), ("0", Constant)],
+    );
+}
+
+#[test]
+fn a_key_named_constructor_is_a_property_and_a_key_value_stays_plain() {
+    check(
+        "({ constructor: 1, key: value })",
+        &[
+            ("(", Punctuation),
+            ("{", Punctuation),
+            ("constructor", Property),
+            (":", Punctuation),
+            ("1", Constant),
+            (",", Punctuation),
+            ("key", Property),
+            (":", Punctuation),
+            ("}", Punctuation),
+            (")", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn optional_chaining_at_the_line_end_takes_the_property_on_the_next_line() {
+    check("a?.\nb", &[("?.", Punctuation), ("b", Property)]);
+}
+
+#[test]
+fn a_dotted_tag_name_and_a_spaced_self_closing_slash() {
+    check(
+        "x = <a.b.c / d>t</a.b.c>;\ny = <br / >;",
+        &[
+            ("=", Operator),
+            ("<", Punctuation),
+            ("a", Tag),
+            (".", Punctuation),
+            ("b", Tag),
+            (".", Punctuation),
+            ("c", Tag),
+            ("d", Attribute),
+            (">", Punctuation),
+            ("</", Punctuation),
+            ("a", Tag),
+            (".", Punctuation),
+            ("b", Tag),
+            (".", Punctuation),
+            ("c", Tag),
+            (">", Punctuation),
+            (";", Punctuation),
+            ("=", Operator),
+            ("<", Punctuation),
+            ("br", Tag),
+            ("/ >", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_fragment_child_opens_and_a_child_past_the_nesting_room_stays_text() {
+    check(
+        "z = <a><>t</></a>;",
+        &[
+            ("=", Operator),
+            ("<", Punctuation),
+            ("a", Tag),
+            (">", Punctuation),
+            ("<", Punctuation),
+            (">", Punctuation),
+            ("</", Punctuation),
+            (">", Punctuation),
+            ("</", Punctuation),
+            ("a", Tag),
+            (">", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+    let room = crate::state::LineState::default().stack.len();
+    let opened = [("<", Punctuation), ("b", Tag), (">", Punctuation)];
+    let expected: Vec<_> = opened.iter().copied().cycle().take(3 * room).collect();
+    check(&format!("{}<i>", "<b>".repeat(room)), &expected);
+}

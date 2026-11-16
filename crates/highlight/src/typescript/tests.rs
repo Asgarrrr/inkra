@@ -483,3 +483,70 @@ fn a_generic_list_past_the_nesting_room_is_operators_and_the_next_line_still_col
         .collect();
     check(&text, &expected);
 }
+
+#[test]
+fn a_member_after_one_modifier_or_a_decorator_is_a_property() {
+    check(
+        "class A { @Input() private name: string }",
+        &[
+            ("class", Keyword),
+            ("A", Type),
+            ("{", Punctuation),
+            ("@Input", Attribute),
+            ("(", Punctuation),
+            (")", Punctuation),
+            ("private", Keyword),
+            ("name", Property),
+            (":", Punctuation),
+            ("string", Type),
+            ("}", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn a_generic_list_holds_keywords_and_literals_and_a_paren_closes_it() {
+    check(
+        "let p: Pick<T, keyof T> | Promise<undefined>;\n(X<B) > (c)",
+        &[
+            ("let", Keyword),
+            (":", Punctuation),
+            ("Pick", Type),
+            ("<", Punctuation),
+            ("T", Type),
+            (",", Punctuation),
+            ("keyof", Keyword),
+            ("T", Type),
+            (">", Punctuation),
+            ("|", Operator),
+            ("Promise", Type),
+            ("<", Punctuation),
+            ("undefined", Constant),
+            (">", Punctuation),
+            (";", Punctuation),
+            ("(", Punctuation),
+            ("X", Type),
+            ("<", Punctuation),
+            ("B", Type),
+            (")", Punctuation),
+            (">", Operator),
+            ("(", Punctuation),
+            (")", Punctuation),
+        ],
+    );
+}
+
+#[test]
+fn an_object_literal_value_is_no_annotation() {
+    check(
+        "x = { key: value };",
+        &[
+            ("=", Operator),
+            ("{", Punctuation),
+            ("key", Property),
+            (":", Punctuation),
+            ("}", Punctuation),
+            (";", Punctuation),
+        ],
+    );
+}

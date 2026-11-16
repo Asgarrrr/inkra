@@ -110,15 +110,11 @@ fn starts_operand(byte: Option<&u8>) -> bool {
     byte.is_some_and(|&byte| is_ident_start(byte) || b"$\"'`{[*#".contains(&byte))
 }
 
-/// The look-behind past a keyword after `prev`; a modifier keeps a key's start.
-fn after_keyword(keyword: &str, prev: Prev) -> Prev {
+/// The look-behind past a keyword; a modifier starts a key, after a decorator too.
+fn after_keyword(keyword: &str) -> Prev {
     match keyword {
         "abstract" | "async" | "declare" | "override" | "private" | "protected" | "public"
-        | "readonly" | "static"
-            if prev == Prev::KeyStart =>
-        {
-            Prev::KeyStart
-        }
+        | "readonly" | "static" => Prev::KeyStart,
         "function" => Prev::Fn,
         "class" | "enum" | "extends" | "implements" | "interface" | "namespace" | "new"
         | "type" => Prev::TypeKeyword,
@@ -173,13 +169,13 @@ impl Tokens<'_> {
             }
             b'.' if next.is_some_and(|byte| byte.is_ascii_digit()) => self.number(at),
             byte if byte.is_ascii_digit() => self.number(at),
-            b'@' if next.is_some_and(is_ident_start) => {
+            b'@' => {
                 let end = dotted_end(bytes, at + 1);
                 self.sink.push(at..end, Attribute);
                 self.state.prev = Prev::Other;
                 end
             }
-            b'#' if next.is_some_and(is_ident_start) => {
+            b'#' => {
                 let end = end_while(bytes, at + 1, is_ident);
                 let call = bytes.get(skip_spaces(bytes, end)) == Some(&b'(');
                 self.sink
@@ -276,7 +272,7 @@ impl Tokens<'_> {
         match word {
             _ if literal => (Some(Constant), Prev::ValueEnd),
             "this" | "super" => (None, Prev::ValueEnd),
-            _ if self.keyword(word, after) => (Some(Keyword), after_keyword(word, prev)),
+            _ if self.keyword(word, after) => (Some(Keyword), after_keyword(word)),
             "constructor" if call => (Some(Type), Prev::ValueEnd),
             _ if colon && prev == Prev::KeyStart && top == Some(Nest::Brace) => {
                 // `?:` cannot follow an object literal's key, so it marks a member's type.

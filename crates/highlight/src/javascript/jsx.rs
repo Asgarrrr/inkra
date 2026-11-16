@@ -2,7 +2,7 @@
 //! spec, D4).
 
 use crate::TokenClass::{Attribute, Punctuation, String, Tag};
-use crate::scan::{end_while, entity_end, is_ident_start, quoted};
+use crate::scan::{end_while, entity_end, is_ident_start, quoted, skip_spaces};
 use crate::state::{Nest, Prev};
 
 use super::{Tokens, is_ident};
@@ -21,19 +21,17 @@ impl Tokens<'_> {
     }
 
     /// A tag name from `at`: each `.`-separated part a `Tag`, as Zed colours a member expression.
-    fn tag_name(&mut self, mut at: usize) -> usize {
-        let bytes = self.line.as_bytes();
-        loop {
-            let end = end_while(bytes, at, is_name);
-            self.sink.push(at..end, Tag);
-            if bytes.get(end) != Some(&b'.')
-                || !bytes.get(end + 1).copied().is_some_and(is_ident_start)
-            {
-                return end;
-            }
-            self.sink.push(end..end + 1, Punctuation);
-            at = end + 1;
+    fn tag_name(&mut self, at: usize) -> usize {
+        let end = end_while(self.line.as_bytes(), at, |byte| {
+            is_name(byte) || byte == b'.'
+        });
+        let mut part = at;
+        for (len, _) in self.line[at..end].match_indices('.') {
+            self.sink.push(part..at + len, Tag);
+            self.sink.push(at + len..at + len + 1, Punctuation);
+            part = at + len + 1;
         }
+        self.sink.token(part..end, Tag)
     }
 
     /// What starts at `at` inside a tag: attributes, their values, an embedded `{…}`, the end.
@@ -46,11 +44,15 @@ impl Tokens<'_> {
                 self.state.prev = Prev::Other;
                 at + 1
             }
-            b'/' if bytes.get(at + 1) == Some(&b'>') => {
-                self.sink.push(at..at + 2, Punctuation);
+            b'/' => {
+                let close = skip_spaces(bytes, at + 1);
+                if bytes.get(close) != Some(&b'>') {
+                    return at + 1;
+                }
+                self.sink.push(at..close + 1, Punctuation);
                 self.state.pop();
                 self.state.prev = Prev::ValueEnd;
-                at + 2
+                close + 1
             }
             b'>' => {
                 self.sink.push(at..at + 1, Punctuation);

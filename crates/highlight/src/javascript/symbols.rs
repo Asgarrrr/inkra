@@ -95,8 +95,9 @@ impl Tokens<'_> {
             }
             [b':', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Annotation),
             [b':', ..] => (1, Some(Punctuation), Prev::Other),
-            [b'?', b'.', after, ..] if !after.is_ascii_digit() => (2, Some(Punctuation), Prev::Dot),
-            [b'?', b'.'] => (2, Some(Punctuation), Prev::Dot),
+            [b'?', b'.', after @ ..] if !after.first().is_some_and(u8::is_ascii_digit) => {
+                (2, Some(Punctuation), Prev::Dot)
+            }
             [b'?', ..] if prev == Prev::Param => (1, Some(Punctuation), Prev::Param),
             [b'.', b'.', b'.', ..] => (3, Some(Operator), Prev::Other),
             [b'.', ..] => (1, Some(Punctuation), Prev::Dot),
