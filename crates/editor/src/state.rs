@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use inkra_text::{Bias, Buffer, ByteOffset, Diff, Utf16Offset};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff, Hunk, Splice, Utf16Offset};
 
 use crate::selection::{Goal, Selection};
 
@@ -183,6 +183,18 @@ impl EditorState {
         self.selection.collapse_to(text_start, Goal::None);
     }
 
+    /// `edit_ungrouped`, the caret mapped: one at the splice's start lands past it (task boxes spec, D6).
+    pub fn splice(&mut self, buffer: &mut Buffer, splice: &Hunk) {
+        let caret = Splice {
+            at: splice.range.start,
+            removed_len: splice.range.end - splice.range.start,
+            inserted_len: splice.text.len(),
+        }
+        .map(self.cursor(), Bias::Right);
+        self.edit_ungrouped(buffer, splice.range.clone(), &splice.text);
+        self.selection.collapse_to(caret, Goal::None);
+    }
+
     /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a
     /// whole-line item is always a whole line, even pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
@@ -342,3 +354,6 @@ mod map_tests;
 
 #[cfg(test)]
 mod task_tests;
+
+#[cfg(test)]
+mod splice_tests;

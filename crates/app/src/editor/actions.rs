@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use gpui::{ClipboardItem, Context, Window, actions};
+use gpui::{ClipboardItem, Context, Div, InteractiveElement, Window, actions};
 use inkra_editor::{Copied, EditorState, LogicalMovement};
 
 use super::motion::Vertical;
@@ -26,6 +26,7 @@ actions!(
         FollowLink,
         FollowLinkInNewTab,
         FollowLinkInSplit,
+        ToggleTask,
     ]
 );
 
@@ -53,6 +54,26 @@ fn from_clipboard(item: &ClipboardItem) -> Option<Copied> {
     let whole_line =
         item.metadata().is_some_and(|marker| marker == WHOLE_LINE) && text.ends_with('\n');
     Some(Copied { text, whole_line })
+}
+
+/// The editor's own actions; `text_input::on_actions` binds those it shares with the name field.
+pub(super) fn on_actions(div: Div, cx: &mut Context<EditorView>) -> Div {
+    div.on_action(cx.listener(EditorView::copy))
+        .on_action(cx.listener(EditorView::cut))
+        .on_action(cx.listener(EditorView::paste))
+        .on_action(cx.listener(EditorView::up))
+        .on_action(cx.listener(EditorView::down))
+        .on_action(cx.listener(EditorView::select_up))
+        .on_action(cx.listener(EditorView::select_down))
+        .on_action(cx.listener(EditorView::doc_start))
+        .on_action(cx.listener(EditorView::doc_end))
+        .on_action(cx.listener(EditorView::newline))
+        .on_action(cx.listener(EditorView::undo))
+        .on_action(cx.listener(EditorView::redo))
+        .on_action(cx.listener(EditorView::follow_link))
+        .on_action(cx.listener(EditorView::follow_link_in_new_tab))
+        .on_action(cx.listener(EditorView::follow_link_in_split))
+        .on_action(cx.listener(EditorView::toggle_task))
 }
 
 impl EditorView {
@@ -142,6 +163,15 @@ impl EditorView {
         let text = self.input.buffer().read(cx).text();
         if let Some(link) = inkra_markdown::link_at(text, self.cursor()) {
             cx.emit(LinkFollowed { link, open });
+        }
+    }
+
+    /// A skipped line takes no lease: `as_mut` notifies, which would schedule an autosave.
+    fn toggle_task(&mut self, _: &ToggleTask, window: &mut Window, cx: &mut Context<Self>) {
+        let caret = self.cursor();
+        let text = self.input.buffer().read(cx).text();
+        if let [splice] = inkra_markdown::cycle_tasks(text, caret..caret).as_slice() {
+            self.edit_buffer(window, cx, |state, buffer| state.splice(buffer, splice));
         }
     }
 

@@ -101,6 +101,23 @@ fn cmd_enter_outside_a_link_does_nothing(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+/// `⌘↩` stays the link key: a caret just past a task's link follows it (task boxes spec, decision 4).
+#[gpui::test]
+fn cmd_enter_past_a_link_on_a_task_line_follows_it(cx: &mut TestAppContext) {
+    let note = "- [ ] Call [[Bob]]";
+    let (window, mut cx) = dispatching(cx, note);
+    cx.run_until_parked();
+    let (seen, _guard) = followed(&window, &mut cx);
+    cx.simulate_keystrokes("cmd-down cmd-enter");
+
+    assert_eq!(*seen.borrow(), [("Bob".to_owned(), Open::Here)]);
+    window
+        .update(&mut cx, |view, _, cx| {
+            assert_eq!(view.input.buffer().read(cx).text(), note, "no toggle");
+        })
+        .unwrap();
+}
+
 #[gpui::test]
 fn a_cmd_click_on_a_concealed_link_follows_it_and_leaves_the_caret(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, TEXT);
