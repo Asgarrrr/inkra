@@ -222,8 +222,9 @@ The marker is read from the line's text: leading `[ \t>]*`, then a bullet
 (`-`, `*`, `+`) or a number with `.` or `)`, then a checkbox. A checked or
 unchecked line changes only the middle byte. A plain line inserts `- [ ] `
 after its leading `[ \t>]*`; a bullet line inserts `[ ] ` after its bullet and
-space. Obsidian swaps a bullet for a checkbox the same way (forum 45383), and
-has turned plain text into a task since 0.13.24 (forum 14634).
+its blanks, at the item's content column (D10). Obsidian swaps a bullet for a
+checkbox the same way (forum 45383), and has turned plain text into a task
+since 0.13.24 (forum 14634).
 
 **The edit.** `inkra-markdown` computes the splices as data, a pure function
 of the text, the parse and the line range: no buffer, testable by proptest.
@@ -254,27 +255,30 @@ Each cycled line has its candidate splices, in order:
 A round applies every line's current candidate to one copy of the text and
 parses it once. A line whose shifted start then has a task in the target state
 keeps its splice; any other line moves to its next candidate, or drops out
-after its last.
+after its last. The first round in which every splice landed returns its
+batch. After three rounds the batch is empty.
 
-**No markup turns to text.** Amended 2026-11-17 after the T5 review. A round
-also fails a splice when any line of the copy opens fewer list items or block
-quotes than the same line of the text: `- [ ] ` before `> a` would make the
-quote text. The splice failed is the nearest cycled line's at or above the line
-that lost one: no splice holds a newline, so lines keep their indices, and a
+**No markup turns to text.** Amended 2026-11-17 after the T5 reviews. A round
+also fails a splice when a list item or block quote that opens in the text no
+longer opens at its byte in the copy: an item at its marker, a quote at its
+first `>`, each mapped through the splices before it, an insertion at the byte
+moving it after the inserted text. `- [ ] ` before `> a` makes the quote
+text. A count per line is weaker: a line can lose one `>` and gain another.
+The splice failed is the nearest cycled line's at or above the lost opener: a
 splice reaches only its own line and those below it, as `---\n>\n---` turning
-into front matter shows. The counts come from one pulldown-cmark pass of the
+into front matter shows. The openers come from one pulldown-cmark pass of the
 text, the skipped lines' pass, and one more pass of each round's copy. So
-`- > a` has no candidate that keeps its quote, and `⌘L` edits nothing. The first round in which every splice landed returns its batch.
-After three rounds the batch is empty.
+`- > a` has no candidate that keeps its quote, and `⌘L` edits nothing.
+Headings stay outside the invariant (Open questions, 4).
 
 The argument: a batch is returned only from a round whose own parse shows each
-of its lines a task in the target state, and no line with fewer items or quotes. Every splice lies inside its line, so
-the result holds by construction, whatever a splice does to its neighbour's
-laziness; the empty batch holds trivially. A failing round moves at least one
-line on through at most two candidates, so the rounds end. The cap of three
-covers the second candidates (round 2), then the batch without the lines no
-candidate makes a task (round 3). A longer chain edits nothing rather than
-guess.
+of its lines a task in the target state, and every opener of the text still
+opening at its byte. Every splice lies inside its line, so the result holds by
+construction, whatever a splice does to its neighbour's laziness; the empty
+batch holds trivially. A failing round moves at least one line on through at
+most two candidates, so the rounds end. The cap of three covers the second
+candidates (round 2), then the batch without the lines no candidate makes a
+task (round 3). A longer chain edits nothing rather than guess.
 
 So D1 and D6 stay one predicate, and the batch is judged whole: `a\n    b`
 selected cycles both lines, `b` nesting under the new item, though `b` alone
@@ -282,8 +286,8 @@ cannot be a task. Likewise `a\n2. b` becomes `- [ ] a\n2. [ ] b`: after the
 new item `2.` starts a list, though alone it is lazy and takes `- [ ] 2. b`. A
 `⌘L` costs the cached parse, one pulldown-cmark pass for the skipped lines,
 and at most three parses of the spliced copy, each with one more pass for its
-items and quotes. This replaces T4a's per-line
-reparse, which cost up to two parses per line and judged each line alone.
+openers. This replaces T4a's per-line reparse, which cost up to two parses per
+line and judged each line alone.
 
 ## D7. The struck text
 
@@ -410,12 +414,16 @@ concealed state stays the reveal's, so the box and the lead paint together.
 
 - A plain line's insertion goes after its innermost marker: past the leading
   `[ \t>]*`, every bullet or number followed by one to four blanks opens the
-  next, in turn (CommonMark 5.2), and the checkbox goes past the innermost's
-  first blank. `- 1. a` becomes `- 1. [ ] a`, a task item inside the outer one,
-  not `- [ ] 1. a`, whose `1. a` would be text; `-  - a` becomes `-  - [ ] a`.
-  The second candidate, `- [ ] ` after the leading `[ \t>]*`, is unchanged.
-- No splice turns markup into text (D6, amended after the T5 review): `- > a`
-  edits nothing.
+  next, in turn (CommonMark 5.2). The checkbox goes past all of the innermost
+  marker's one to four blanks, at its content column, so `-   a\n\n      b`
+  keeps `b` in the item; past one blank of five or more; after a space of its
+  own on an empty item `-`. `- 1. a` becomes `- 1. [ ] a`, a task item inside
+  the outer one, not `- [ ] 1. a`, whose `1. a` would be text; `-  - a`
+  becomes `-  - [ ] a`. The second candidate, `- [ ] ` after the leading
+  `[ \t>]*`, is unchanged.
+- No splice turns markup into text (D6, amended after the T5 reviews): every
+  item and quote of the text still opens at its byte, mapped through the
+  splices. `- > a` edits nothing.
 - A line holding a task that gets no box is skipped, like a code line: its
   checkbox cannot be cycled, and a box on its outer item would make two
   checkboxes. The skip pass (`Scan::new` in `cycle.rs`) collects the lines of
@@ -561,6 +569,10 @@ emits for every list item. T3 and T4a are independent of each other.
     `TaskListMarker`, and `⌘L` would add a second checkbox.
   - `show` moved from `shape.rs` to `runs.rs`, beside `line_runs`. `shape.rs`
     was at its line ceiling, and the `hidden` argument grows its closure.
+  - No markup turns to text, an invariant D10 did not state, added by the T5
+    reviews (D6): every item and quote of the text still opens at its byte in
+    the copy, mapped through the splices. A first count per line let a line
+    trade one `>` for another; the fuzzer found two such inputs, now pinned.
 
 ## Deferred
 
@@ -585,3 +597,7 @@ emits for every list item. T3 and T4a are independent of each other.
    marker.** Its text start is the conceal's end, and a caret at a conceal's
    end touches it (`crates/markdown/src/reveal.rs:15`). Recommended: accept;
    typing after it hides the marker again.
+4. **A heading is no opener, so `⌘L` on `# a` gives `- [ ] # a`**, and the
+   heading turns to the task's text. The invariant (D6) covers list items and
+   block quotes only. Owner question: keep this, or count headings as openers
+   so `# a` edits nothing? Behaviour unchanged until answered.

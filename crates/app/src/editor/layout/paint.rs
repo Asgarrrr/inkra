@@ -32,6 +32,7 @@ thread_local! {
 pub(crate) struct PaintedBox {
     /// In window coordinates.
     pub(crate) bounds: Bounds<Pixels>,
+    /// Whether it drew filled, the checked branch.
     pub(crate) checked: bool,
     /// The lead's text and window `x`.
     pub(crate) lead: Option<(String, Pixels)>,
@@ -216,13 +217,15 @@ impl DocumentLayout {
             log::warn!("failed to paint a task's lead: {err}");
         }
         #[cfg(test)]
-        PAINTED_BOXES.with(|painted| {
-            painted.borrow_mut().push(PaintedBox {
-                bounds,
-                checked,
-                lead: lead.map(|(lead, at)| (lead.text.to_string(), at.x)),
+        let record = |filled| {
+            PAINTED_BOXES.with(|painted| {
+                painted.borrow_mut().push(PaintedBox {
+                    bounds,
+                    checked: filled,
+                    lead: lead.map(|(lead, at)| (lead.text.to_string(), at.x)),
+                });
             });
-        });
+        };
         let colors = &self.theme.colors;
         if !checked {
             window.paint_quad(
@@ -230,9 +233,13 @@ impl DocumentLayout {
                     .border_widths(theme::TASK_BOX_BORDER)
                     .corner_radii(theme::TASK_BOX_RADIUS),
             );
+            #[cfg(test)]
+            record(false);
             return;
         }
         window.paint_quad(fill(bounds, colors.accent).corner_radii(theme::TASK_BOX_RADIUS));
+        #[cfg(test)]
+        record(true);
         let check = Bounds::centered_at(
             bounds.center(),
             size(theme::TASK_CHECK_SIZE, theme::TASK_CHECK_SIZE),

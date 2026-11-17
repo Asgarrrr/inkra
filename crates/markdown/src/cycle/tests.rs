@@ -1,4 +1,4 @@
-use inkra_text::{ByteOffset, Hunk};
+use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 use proptest::prelude::*;
 
 use pulldown_cmark::{Event, Parser, Tag};
@@ -49,7 +49,7 @@ fn a_checked_task_is_cleared_in_either_case() {
 }
 
 #[test]
-fn a_bullet_gains_a_checkbox_after_its_space() {
+fn a_bullet_gains_a_checkbox_after_its_blanks() {
     for (line, want) in [
         ("- a", "- [ ] a"),
         ("* a", "* [ ] a"),
@@ -58,7 +58,8 @@ fn a_bullet_gains_a_checkbox_after_its_space() {
         ("3) a", "3) [ ] a"),
         ("123456789. a", "123456789. [ ] a"),
         ("-\ta", "-\t[ ] a"),
-        ("-  a", "- [ ]  a"),
+        ("-  a", "-  [ ] a"),
+        ("-      ", "- [ ]      "),
         ("- ", "- [ ] "),
         ("- [ ]a", "- [ ] [ ]a"),
     ] {
@@ -89,6 +90,19 @@ fn a_nested_bullet_gains_a_checkbox_after_the_innermost_marker() {
 fn a_line_whose_markup_no_candidate_keeps_edits_nothing() {
     for line in ["- > a", "1. > a", "- - > a"] {
         assert_eq!(cycled_line(line), line, "{line:?}");
+    }
+    assert_eq!(cycled("a\n- > b", 2), "a\n- > b");
+}
+
+/// The checkbox keeps the item's content column, so its later paragraphs stay in the item.
+#[test]
+fn the_checkbox_goes_after_every_blank_of_the_innermost_marker() {
+    for (text, want) in [
+        ("-   a\n\n      b", "-   [ ] a\n\n      b"),
+        ("-   a\n\n      - c", "-   [ ] a\n\n      - c"),
+        ("- -  a", "- -  [ ] a"),
+    ] {
+        assert_eq!(cycled(text, 0), want, "{text:?}");
     }
 }
 
@@ -332,7 +346,7 @@ fn cycle_checked(
             text,
             after
         );
-        prop_assert!(keeps_markup(text, &after), "{:?} became {:?}", text, after);
+        prop_assert!(keeps_markup(text, &hunks), "{:?} became {:?}", text, after);
         let delta = after.len() - text.len();
         prop_assert_eq!(&after[..start], &text[..start]);
         prop_assert_eq!(&after[end + delta..], &text[end..]);
@@ -362,35 +376,35 @@ pub(super) fn task_markers(text: &str, start: usize) -> usize {
         .count()
 }
 
-/// The list items and block quotes that open on each line, by line index, the text read as
-/// `parse` reads it: an item at its marker, a quote at its first `>`.
-fn opens_per_line(text: &str) -> Vec<(usize, usize)> {
+/// Each list item and block quote that opens in `text`, read as `parse` reads it: whether it is
+/// an item, and its byte, an item's marker or a quote's first `>`.
+fn openers(text: &str) -> Vec<(bool, usize)> {
     let terminated = format!("{text}\n");
-    let mut lines = vec![(0, 0); text.matches('\n').count() + 2];
-    for (event, range) in Parser::new_ext(&terminated, options()).into_offset_iter() {
-        let skip: &[u8] = match event {
-            Event::Start(Tag::Item) => b" \t\n>",
-            Event::Start(Tag::BlockQuote(_)) => b" \t\n",
-            _ => continue,
-        };
-        let bytes = &terminated.as_bytes()[range.start..];
-        let at = range.start + bytes.iter().take_while(|byte| skip.contains(byte)).count();
-        let line = &mut lines[terminated[..at].matches('\n').count()];
-        match event {
-            Event::Start(Tag::Item) => line.0 += 1,
-            _ => line.1 += 1,
-        }
-    }
-    lines
+    Parser::new_ext(&terminated, options())
+        .into_offset_iter()
+        .filter_map(|(event, range)| {
+            let (item, skip): (bool, &[u8]) = match event {
+                Event::Start(Tag::Item) => (true, b" \t\n>"),
+                Event::Start(Tag::BlockQuote(_)) => (false, b" \t\n"),
+                _ => return None,
+            };
+            let bytes = &terminated.as_bytes()[range.start..];
+            Some((
+                item,
+                range.start + bytes.iter().take_while(|byte| skip.contains(byte)).count(),
+            ))
+        })
+        .collect()
 }
 
-/// Whether no line of `after`, `text` spliced within its lines, opens fewer items or quotes.
-pub(super) fn keeps_markup(text: &str, after: &str) -> bool {
-    let (before, now) = (opens_per_line(text), opens_per_line(after));
-    before
-        .iter()
-        .zip(&now)
-        .all(|(was, is)| is.0 >= was.0 && is.1 >= was.1)
+/// Whether every item and quote opening in `text` still opens in `text` spliced by `hunks`, at
+/// its byte mapped as an anchor after an insertion there.
+pub(super) fn keeps_markup(text: &str, hunks: &[Hunk]) -> bool {
+    let diff = Diff::new(Version::default(), hunks.to_vec());
+    let after = openers(&apply(text, hunks));
+    openers(text)
+        .into_iter()
+        .all(|(item, at)| after.contains(&(item, diff.map(ByteOffset::new(at), Bias::Right).get())))
 }
 
 /// Whether a code block, the front matter, a table or an HTML block holds a byte of `start..=end`.
@@ -471,10 +485,11 @@ proptest! {
                 .bytes()
                 .take_while(|byte| matches!(byte, b' ' | b'\t' | b'>'))
                 .count();
-            let mut plain = text.clone();
-            plain.insert_str(start + lead, "- [ ] ");
+            let at = ByteOffset::new(start + lead);
+            let insert = [Hunk { range: at..at, text: "- [ ] ".to_owned() }];
+            let plain = apply(&text, &insert);
             prop_assert!(
-                task_at(&plain, start).is_none() || !keeps_markup(&text, &plain),
+                task_at(&plain, start).is_none() || !keeps_markup(&text, &insert),
                 "{:?} at {:?}",
                 text,
                 caret

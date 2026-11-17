@@ -135,6 +135,34 @@ fn a_line_whose_bullet_does_not_land_takes_the_second_candidate() {
     assert_eq!(selected(text, 2..text.len()), "x\n- [ ] 2. b\n- [ ] c");
 }
 
+/// A lost quote fails the cycled line above it, not the line before that one.
+#[test]
+fn a_lost_quote_fails_its_own_line() {
+    assert_eq!(all("a\n- > b"), "- [ ] a\n- > b");
+}
+
+/// A line keeping its count of quotes or items can still lose one and gain another: each opener
+/// is checked at its own byte. Found by the fuzzer.
+#[test]
+fn an_opener_traded_for_another_on_its_line_is_lost() {
+    for (text, range, want) in [
+        (
+            "+]\n*\n>X1 \n9[-9-.a\n>-\t>[X\t\t",
+            8..25,
+            "+]\n*\n>- [ ] X1 \n- [ ] 9[-9-.a\n>-\t>[X\t\t",
+        ),
+        ("9 \n\n+\t>\n\t2.\tX\n*-", 6..11, "9 \n\n+\t>\n\t2.\tX\n*-"),
+    ] {
+        let hunks = cycle_tasks(text, &parse(text), at(range.start)..at(range.end));
+        assert!(
+            keeps_markup(text, &hunks),
+            "{text:?} became {:?}",
+            apply(text, &hunks)
+        );
+        assert_eq!(apply(text, &hunks), want, "{text:?}");
+    }
+}
+
 /// A line neither candidate makes a task drops out, and the rest still lands.
 #[test]
 fn a_line_no_candidate_lands_drops_out_of_the_batch() {
@@ -203,7 +231,7 @@ proptest! {
         let target = cycled.first().is_some_and(|&first| task_at(&text, starts[first]) == Some(false));
 
         let after = apply(&text, &hunks);
-        prop_assert!(keeps_markup(&text, &after), "{:?} became {:?}", text, after);
+        prop_assert!(keeps_markup(&text, &hunks), "{:?} became {:?}", text, after);
         let mut changed = vec![false; starts.len()];
         for hunk in &hunks {
             let index = text[..hunk.range.start.get()].matches('\n').count();
