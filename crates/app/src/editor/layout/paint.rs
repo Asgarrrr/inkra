@@ -5,7 +5,7 @@ use gpui::{
     fill, outline, point, px, size,
 };
 use inkra_markdown::Task;
-use inkra_text::Version;
+use inkra_text::{ByteOffset, Diff};
 
 use super::DocumentLayout;
 use super::prefix::Prefix;
@@ -200,20 +200,24 @@ impl DocumentLayout {
         PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, true)));
     }
 
-    /// The task whose box holds `local`, on a layout shaped from `version`: a layout older than the
-    /// buffer describes other text, which matching bytes would not reveal (task boxes spec, D5, G).
-    pub(crate) fn task_at(&self, local: Point<Pixels>, version: Version) -> Option<Task> {
-        if self.shaped_at.0 != version {
-            return None;
-        }
+    /// The flip of the task whose box holds `local`, and its text start, the gutter's end. The flip
+    /// is a diff from the text this layout shows, so `apply_diff` refuses it once the buffer moved
+    /// on: matching bytes would not prove the task is the same one (task boxes spec, D5, G).
+    pub(crate) fn task_at(&self, local: Point<Pixels>) -> Option<(Diff, ByteOffset)> {
         // Clamped to the nearest line: below its first row, its square misses.
         let (placed, _) = self.locate(self.row_for_y(local.y));
         let (square, boxed) = placed.line.task_box()?;
+        let gutter = placed.line.prefix.as_ref()?.range();
         square
             .contains(&(local - point(px(0.), placed.top)))
-            .then(|| Task {
-                checkbox: placed.start + boxed.checkbox.start..placed.start + boxed.checkbox.end,
-                checked: boxed.checked,
+            .then(|| {
+                let task = Task {
+                    checkbox: placed.start + boxed.checkbox.start
+                        ..placed.start + boxed.checkbox.end,
+                    checked: boxed.checked,
+                };
+                let flip = Diff::new(self.shaped_at.0, vec![task.flip()]);
+                (flip, placed.start + gutter.end)
             })
     }
 

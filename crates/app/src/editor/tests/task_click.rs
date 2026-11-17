@@ -68,8 +68,8 @@ fn a_click_on_a_box_toggles_it_and_puts_the_caret_on_its_text(cx: &mut TestAppCo
     assert_eq!(caret(&window, &mut cx), 6);
 }
 
-/// The caret lands where the parse ends the gutter, so the editor's text start and the
-/// markdown's agree: past one space or tab, and at the line's end with no text.
+/// The caret lands at the text start the layout holds, where the parse ends the gutter: past one
+/// space or tab, and at the line's end with no text.
 #[gpui::test]
 fn a_toggle_puts_the_caret_at_the_gutter_end(cx: &mut TestAppContext) {
     for note in [

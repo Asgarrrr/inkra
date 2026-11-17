@@ -27,8 +27,8 @@ pub struct Hunk {
     pub text: String,
 }
 
-/// The hunks that turn a buffer's text at one version into a new text, as Zed's `Diff`.
-/// Only [`diff`] builds one, so its hunks are in order, disjoint, and each edits something.
+/// The hunks that turn a buffer's text at one version into a new text, as Zed's `Diff`:
+/// in order and disjoint.
 #[derive(Debug)]
 pub struct Diff {
     base_version: Version,
@@ -36,6 +36,22 @@ pub struct Diff {
 }
 
 impl Diff {
+    /// # Panics
+    /// If a hunk starts before the one ahead of it ends.
+    #[must_use]
+    pub fn new(base_version: Version, hunks: Vec<Hunk>) -> Self {
+        assert!(
+            hunks
+                .windows(2)
+                .all(|pair| pair[0].range.end <= pair[1].range.start),
+            "hunks out of order: {hunks:?}"
+        );
+        Self {
+            base_version,
+            hunks,
+        }
+    }
+
     #[must_use]
     pub fn hunks(&self) -> &[Hunk] {
         &self.hunks
@@ -83,10 +99,7 @@ pub fn diff(base_version: Version, old: &str, new: &str) -> Diff {
             }
         },
     );
-    Diff {
-        base_version,
-        hunks,
-    }
+    Diff::new(base_version, hunks)
 }
 
 fn word_diffable(text: &str, lines: usize) -> bool {

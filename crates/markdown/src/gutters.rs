@@ -3,10 +3,10 @@
 
 use std::ops::Range;
 
-use inkra_text::ByteOffset;
+use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Tag};
 
-use crate::spans::{push, to_offsets};
+use crate::spans::{line_start, push, to_offsets};
 use crate::{Conceal, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,18 @@ pub struct Task {
     /// The three checkbox bytes.
     pub checkbox: Range<ByteOffset>,
     pub checked: bool,
+}
+
+impl Task {
+    /// Ticks or clears it by its middle byte alone, so `[X]` clears as `[x]` does (D5).
+    #[must_use]
+    pub fn flip(&self) -> Hunk {
+        let middle = self.checkbox.start + 1;
+        Hunk {
+            range: middle..middle + 1,
+            text: if self.checked { " " } else { "x" }.to_owned(),
+        }
+    }
 }
 
 /// Each list item's marker, decided at the item's first event that is not one `Start(Paragraph)`
@@ -112,7 +124,7 @@ impl Items {
 /// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
 /// line's `>`s and spaces; any other keeps its `•`.
 fn task_gutter(text: &str, marker: usize, task: Task, depth: usize) -> Option<Gutter> {
-    let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
+    let line = line_start(text, marker);
     let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
     let mut gutter = gutter(text, line..end, depth);
     let checkbox = task.checkbox.start.get();
@@ -130,11 +142,12 @@ fn task_gutter(text: &str, marker: usize, task: Task, depth: usize) -> Option<Gu
     })
 }
 
-/// An indented top-level item's range starts at its indentation.
+/// An item's marker: pulldown-cmark starts its range up to a tab's leftover columns early, back
+/// onto the line ending or quote marker before it, and a marker is never a blank or `>`.
 fn marker_start(text: &str, item: usize) -> usize {
     item + text.as_bytes()[item..]
         .iter()
-        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'>'))
         .count()
 }
 
@@ -164,9 +177,7 @@ fn gutters(text: &str, quotes: &[Range<usize>]) -> Vec<Gutter> {
             let Some(next) = rest.first() else {
                 break;
             };
-            start = text[..next.start]
-                .rfind('\n')
-                .map_or(0, |newline| newline + 1);
+            start = line_start(text, next.start);
         }
         let end = text[start..]
             .find('\n')

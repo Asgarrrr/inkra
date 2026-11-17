@@ -168,21 +168,6 @@ impl EditorState {
         }
     }
 
-    /// Ticks or clears the task whose checkbox is `checkbox`, as one step of its own, and puts the
-    /// caret at its text start (task boxes spec, D5). Edits nothing when those bytes are no checkbox.
-    pub fn toggle_task(&mut self, buffer: &mut Buffer, checkbox: Range<ByteOffset>) {
-        let middle = match buffer.slice(checkbox.clone()) {
-            "[ ]" => "x",
-            "[x]" | "[X]" => " ",
-            _ => return,
-        };
-        let at = checkbox.start + 1;
-        self.edit_ungrouped(buffer, at..at + 1, middle);
-        let spaced = buffer.text().as_bytes().get(checkbox.end.get());
-        let text_start = checkbox.end + usize::from(matches!(spaced, Some(b' ' | b'\t')));
-        self.selection.collapse_to(text_start, Goal::None);
-    }
-
     /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a
     /// whole-line item is always a whole line, even pasted straight back.
     fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
@@ -305,6 +290,16 @@ impl EditorState {
         true
     }
 
+    /// Applies `diff` as one undo step of its own and maps the selection through it; false, with
+    /// nothing changed, when the buffer moved past `diff`'s base.
+    pub fn apply_diff(&mut self, buffer: &mut Buffer, diff: &Diff) -> bool {
+        let applied = buffer.apply_diff(diff);
+        if applied {
+            self.map_through(diff);
+        }
+        applied
+    }
+
     /// Follows a change made outside the editor, with Zed's biases: a caret lands after a
     /// replacement, and a range never takes in text inserted at its edges.
     pub fn map_through(&mut self, diff: &Diff) {
@@ -341,4 +336,4 @@ mod tests;
 mod map_tests;
 
 #[cfg(test)]
-mod task_tests;
+mod apply_tests;

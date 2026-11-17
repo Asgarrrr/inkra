@@ -7,7 +7,7 @@ use crate::Quit;
 use crate::command_palette;
 use crate::editor::actions::{
     Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, FollowLinkInSplit, Newline,
-    Paste, Redo, SelectDown, SelectUp, Undo, Up,
+    Paste, Redo, SelectDown, SelectUp, ToggleTask, Undo, Up,
 };
 use crate::feature;
 use crate::field::{Cancel, Confirm};
@@ -62,6 +62,8 @@ fn core_bindings() -> Vec<KeyBinding> {
         // `enter` keeps shift on macOS, unlike a character key (gpui_macos `events.rs`).
         KeyBinding::new("cmd-shift-enter", FollowLinkInNewTab, editor),
         KeyBinding::new("cmd-alt-enter", FollowLinkInSplit, editor),
+        // Obsidian's key: `cmd-enter` stays the link's (task boxes spec, decision 4).
+        KeyBinding::new("cmd-l", ToggleTask, editor),
         KeyBinding::new("cmd-c", Copy, editor),
         KeyBinding::new("cmd-x", Cut, editor),
         KeyBinding::new("cmd-v", Paste, editor),

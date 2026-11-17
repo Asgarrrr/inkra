@@ -62,6 +62,13 @@ spaces). The pending-slot rule decides the item's marker (markdown-blocks,
 item 7; Zed `markdown.rs:3820-3836`). The parser facts table of
 markdown-blocks holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 
+`parse` reads the text's last line as if a `\n` ended it: a text without a
+final `\n` is parsed with one appended, so `- [ ]` there is a task with no
+text, as `- [ ]\n` is. No clamp is needed: no span or marker holds a `\n`,
+and every element range ends before its line ending, so no output reaches
+the added byte. A proptest pins it (`parse/tests/last_line.rs`). Amended
+2026-11-17 after T4a.
+
 Where the code goes (audit): `parse.rs` is 381 lines, so the pending slot and
 the task gutter are built in `gutters.rs` (125 lines). Task gutters merge into
 the quote gutters' post-pass (`parse.rs:122-123`) in line order.
@@ -137,7 +144,8 @@ O(lines) pass per keystroke for data each line already holds.
   check with `window.paint_svg` in `editor_background`. Both from
   `vendor/zed-reference/crates/gpui/src/window.rs` (`paint_quad` 4934,
   `paint_svg` 5235, `fill` 8128, `outline` 8140).
-- **Hit test.** `DocumentLayout::task_at(local) -> Option<Task>`: find the line
+- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>`,
+  the task's flip and its text start (D5): find the line
   under `local.y`, require **(F)** row 0 of that line with `y` inside the row
   (`row_for_y` clamps, `layout/mod.rs:252-265`, so a click below the last line
   would hit its box), require the task part concealed, then require `x` inside
@@ -159,18 +167,21 @@ after focusing and before the `⌘`-click link branch (46-59).
 - The click that activates an inactive window skips the box too
   (`first_mouse`). It only activates the window, as Electron's default does.
   Added 2026-11-17 by the owner after the T2 review.
-- **(G)** Before it edits, the click checks that the layout's version
-  (`shaped_at`, `layout/mod.rs:81-82`) equals the buffer's. After a reload,
-  the last layout describes the old text until the next render
+- **(G)** The click's edit is an `inkra_text::Diff` based at the layout's
+  version (`shaped_at`, `layout/mod.rs:81-82`), and `Buffer::apply_diff`
+  refuses a diff whose base is not the buffer's version. After a reload, the
+  last layout describes the old text until the next render
   (`editor/reload.rs:24-27`); three matching bytes would not prove the task is
-  the same one. A mismatch edits nothing. Zed only debug-asserts here
+  the same one. A mismatch edits nothing, and the click places the caret as
+  any click does. Zed only debug-asserts here
   (`markdown_preview_view.rs:1220`).
-- The edit replaces the middle byte (`x` for a space, a space for `x` or `X`)
-  through `edit_ungrouped` (`crates/editor/src/state.rs:78`), which runs
-  `Buffer::transact`: one undo step, merged with neither neighbour. It then
-  sets the caret to the text start, as a whole-line paste does
-  (`state.rs:159-165`). The byte count is unchanged, so the text start does
-  not shift.
+- The edit is `Task::flip`: the middle byte (`x` for a space, a space for `x`
+  or `X`), applied through `EditorState::apply_diff`. It runs one
+  `Buffer::transact`: one undo step, merged with neither neighbour. The click
+  then collapses the caret at the text start the layout holds, the gutter's
+  end, mapped through the flip. The byte count is unchanged, so the text start
+  does not shift. Amended 2026-11-17 after the cross-slice review: the editor
+  no longer restates the text-start rule of `gutters.rs`.
 - A double click toggles twice: each press is one click (decision 3).
 
 ## D6. `⌘L`, the cycle
@@ -183,11 +194,12 @@ its name; nothing else registers it.
 ends at column 0 of a later line drops that line, as Zed does
 (`vendor/zed-reference/crates/editor/src/editor.rs`, around 5595 and 12843).
 
-**Skipped lines.** Lines inside a code block, the front matter, or a table.
-`Markdown` records no table range (`parse.rs:12-24`), so the splice function
-runs its own pulldown-cmark pass with the shared options (`cmark.rs`) and
-collects the ranges of `Tag::CodeBlock`, `Tag::MetadataBlock` and
-`Tag::Table`. One pass per keystroke of `⌘L` is not a per-frame cost. In a
+**Skipped lines.** Lines inside a code block, the front matter, a table, or an
+HTML block. `Markdown` records no table range (`parse.rs:12-24`), so the splice
+function runs its own pulldown-cmark pass with the shared options (`cmark.rs`)
+and collects the ranges of `Tag::CodeBlock`, `Tag::MetadataBlock`,
+`Tag::Table` and `Tag::HtmlBlock`. HTML blocks amended 2026-11-17 after the
+T4a review: `⌘L` on `<div>` would make a task of it. One pass per keystroke of `⌘L` is not a per-frame cost. In a
 selection of more than one line, blank lines are skipped too. **(I)** Without
 this, `⌘A ⌘L` rewrites the YAML.
 
@@ -211,15 +223,15 @@ has turned plain text into a task since 0.13.24 (forum 14634).
 
 **The edit.** `inkra-markdown` computes the splices as data, a pure function
 of the text, the parse and the line range: no buffer, testable by proptest.
-`inkra-editor` gains a batch edit beside `edit_ungrouped`: one
-`Buffer::transact` that applies the splices back to front, then maps the
-selection's anchor and head through them. An offset after a splice shifts by
-its length delta, and an offset at an insertion's position moves after the
-inserted text: a caret at the start of `a` lands before `a` in `- [ ] a`, not
-before the `-`.
-`edited` collapses the selection (`state.rs:84-87`), so the batch sets the
-mapped selection itself: a second `⌘L` cycles the same lines, and typing after
-`⌘L` lands where the caret was.
+`⌘L` builds an `inkra_text::Diff` from them at the buffer's version and
+applies it through `EditorState::apply_diff`, the click's path:
+`Buffer::apply_diff` runs one `Buffer::transact` back to front, then
+`map_through` maps the selection with Zed's biases. An offset after a splice
+shifts by its length delta, and a caret at an insertion's position moves after
+the inserted text: a caret at the start of `a` lands before `a` in `- [ ] a`,
+not before the `-`. A caret on a replaced byte lands after it. A second `⌘L`
+cycles the same lines, and typing after `⌘L` lands where the caret was.
+Amended 2026-11-17 after the cross-slice review: no batch edit of its own.
 
 ## D7. The struck text
 
@@ -281,7 +293,7 @@ its alphabet already holds tasks.
 
 - `- [ ] a`, `- [x] a`, `- [X] a`, `* [ ] a`, `1. [ ] a`, `> - [ ] a`,
   `  - [ ] a`, `-    [ ] a`, loose `- [ ] a\n\n- [x] b`: a gutter with a task.
-- `- [ ]` at the end of the text and `- [ ]a`: no task. `- [ ]\n`: a task with
+- `- [ ]a`: no task. `- [ ]\n` and `- [ ]` at the end of the text: a task with
   no text. `-\n`: keeps its `•`. `- - [ ] a`: two `•`, no gutter task.
   `- a\n  - [ ] b`: the inner line has a gutter task.
 - The conceal covers the task part; a caret at 0 in `- [ ] a` touches it; a
@@ -302,8 +314,8 @@ its alphabet already holds tasks.
   state on every cycled line and leaves every other line byte-identical; the
   mapped selection stays inside the text and on a char boundary.
 
-`inkra-editor`: the batch edit is one undo step, merges with no neighbour,
-maps the selection; the one-byte toggle keeps the caret where it was set.
+`inkra-editor`: `apply_diff` is one undo step, merges with no neighbour, maps
+the selection, and edits nothing from a stale base.
 
 `app`, headless `#[gpui::test]` against `MemFs`:
 
@@ -366,7 +378,7 @@ emits for every list item. T3 and T4a are independent of each other.
   and writes all three bytes on toggle, debug-asserting lower-case `[x]`
   (`markdown_preview_view.rs:1201-1229`). Inkra paints a box over the
   concealed checkbox in the live editor, writes the middle byte so `[X]`
-  toggles too, checks the bytes before writing (G), and moves the caret. Zed's
+  toggles too, checks the version before writing (G), and moves the caret. Zed's
   editor has no toggle action; `⌘L` follows Obsidian.
 - **From markdown-blocks S3.** The conceal covers the task part (B); width is
   state-independent (C); boxes are found per line, not from a vector (E); no
@@ -375,14 +387,28 @@ emits for every list item. T3 and T4a are independent of each other.
   and the checkbox's `x` span in T1b, where paint first reads it: an unread
   field fails clippy's `dead_code`. `prefix.rs` is near 400 lines after T1a;
   T1b plans its split.
-- **From this spec, in T2.** `task_at` takes the buffer's version and answers
-  `None` on a mismatch, so the check (G) reads `shaped_at` where it lives;
-  `layout/mod.rs` is at its 400 lines and gains no accessor. The click passes
-  the version; a `GutterLayout`'s `Boxed` holds the checkbox from the line's
+- **From this spec, in T2.** `task_at` returns the task's flip as a `Diff`
+  at the layout's version, and its text start, the gutter's end; `apply_diff`
+  makes the check (G). `layout/mod.rs` is at its 400 lines and gains no
+  accessor. Amended 2026-11-17 after the cross-slice review: `task_at` took
+  the buffer's version and the editor re-checked the bytes, so (G) ran twice.
+  A `GutterLayout`'s `Boxed` holds the checkbox from the line's
   start, so a carried line stays line-relative. The hit test (F) is
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
+- **From this spec, in T4a.** A stopgap until T4b: with a selection, `⌘L`
+  cycles the line of the selection's head, and `map_through` maps the
+  selection: neither end takes in the inserted text. The task state comes from the parse, not from the line's text:
+  a line whose gutter has a task flips its checkbox; any other line takes the
+  first of D6's insertions (after its bullet, else `- [ ] ` after its leading
+  `[ \t>]*`) that the reparse makes an unchecked task, else no splice. So D1
+  and D6 are one predicate, and a lazy line (`a\n    b`) or a lazy `2. b`
+  is never given markers that box nothing. An empty item (`-`, `1.`)
+  gains ` [ ] `. A caret on a replaced byte lands after it, and an insertion
+  keeps D6's right bias, both by `map_through`. Amended 2026-11-17 after the
+  T4a review, and after the cross-slice review: the caret on a replaced byte
+  moved from before it to after it.
 
 ## Deferred
 
@@ -400,8 +426,9 @@ emits for every list item. T3 and T4a are independent of each other.
 1. **After `⌘Z` the caret sits inside the checkbox**, so the task part shows
    as text until the caret leaves. Recommended: accept; the reveal rule says
    so.
-2. **`- [ ]` with no newline at the end of the note is no task.** Recommended:
-   accept pulldown-cmark's behaviour; the box appears once a newline follows.
+2. **`- [ ]` with no newline at the end of the note is no task.** Decided:
+   reversed by the owner 2026-11-17 after T4a: the last line parses as if a
+   newline followed it (D1). `⌘L` on that line added a second checkbox.
 3. **A click on the box of a task with no text (`- [ ]\n`) reveals its
    marker.** Its text start is the conceal's end, and a caret at a conceal's
    end touches it (`crates/markdown/src/reveal.rs:15`). Recommended: accept;

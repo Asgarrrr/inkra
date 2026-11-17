@@ -2,8 +2,7 @@
 //! (task boxes spec, D9).
 
 use gpui::{AppContext, TestAppContext, px};
-use inkra_editor::{EditorState, Selection};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::{Buffer, ByteOffset, Diff};
 
 use super::{Inputs, assert_same};
 use crate::theme::builtin;
@@ -25,8 +24,8 @@ fn a_toggle_restyles_the_items_continuation_and_lazy_lines(cx: &mut TestAppConte
         };
         let before = inputs.layout(&buffer, None, window, cx);
         buffer.update(cx, |buffer, _| {
-            let checkbox = ByteOffset::new(2)..ByteOffset::new(5);
-            EditorState::new(Selection::at(end)).toggle_task(buffer, checkbox);
+            let task = inkra_markdown::parse(text).gutters[0].task.clone().unwrap();
+            assert!(buffer.apply_diff(&Diff::new(buffer.version(), vec![task.flip()])));
         });
         let carried = inputs.layout(&buffer, Some(&before), window, cx);
         assert_same(&carried, &inputs.layout(&buffer, None, window, cx)).unwrap();

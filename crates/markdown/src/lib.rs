@@ -1,6 +1,7 @@
 mod changed;
 mod cmark;
 mod content_lines;
+mod cycle;
 mod display;
 mod front_matter;
 mod gutters;
@@ -13,6 +14,7 @@ mod styles;
 
 pub use changed::changed;
 pub use content_lines::content_lines;
+pub use cycle::cycle_tasks;
 pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
 pub use gutters::{Gutter, Task};

@@ -21,6 +21,7 @@ const QUOTES: &str = "A paragraph before the quotes.\n\
                       - [ ] An open task\n\
                       - [x] A done task\n\
                       \x20\x20- [ ] A nested task\n\
+                      \t- [ ] A task nested by a tab\n\
                       1. [ ] An ordered task\n\
                       \n\
                       > - [ ] A quoted task\n\

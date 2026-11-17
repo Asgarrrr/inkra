@@ -53,8 +53,20 @@ pub struct CodeBlock {
 /// One pass over pulldown-cmark's events. A byte inside an element that no
 /// leaf covers is a marker (live-preview spec, D3). `text` is LF-only, as
 /// `Buffer` holds it: a `\r` would be styled as a marker.
+///
+/// The last line reads as if a `\n` ended it, so `- [ ]` there is a task as it is once Enter
+/// follows it (task boxes spec, D1). No output reaches the added byte: no span or marker holds a
+/// `\n`, and every element range ends before its line ending.
 #[must_use]
 pub fn parse(text: &str) -> Markdown {
+    if text.ends_with('\n') {
+        parse_terminated(text)
+    } else {
+        parse_terminated(&format!("{text}\n"))
+    }
+}
+
+fn parse_terminated(text: &str) -> Markdown {
     let mut out = Out {
         text,
         spans: Vec::new(),
@@ -208,7 +220,7 @@ fn language(text: &str, block: &Range<usize>, kind: &CodeBlockKind<'_>) -> Optio
 
 /// A container prefix or indent leads a line, not an element's syntax: the length of the leading
 /// `[ \t>]*` run when `piece` starts a line, else 0.
-fn line_start_prefix(text: &str, piece: &Range<usize>) -> usize {
+pub(crate) fn line_start_prefix(text: &str, piece: &Range<usize>) -> usize {
     if piece.start != 0 && text.as_bytes()[piece.start - 1] != b'\n' {
         return 0;
     }
