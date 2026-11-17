@@ -22,7 +22,12 @@ fn boxes(
         .unwrap();
     painted_boxes()
         .into_iter()
-        .map(|(bounds, checked, _)| (Bounds::new(bounds.origin - origin, bounds.size), checked))
+        .map(|task| {
+            (
+                Bounds::new(task.bounds.origin - origin, task.bounds.size),
+                task.checked,
+            )
+        })
         .collect()
 }
 

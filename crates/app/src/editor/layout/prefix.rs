@@ -78,6 +78,14 @@ impl Prefix {
         }
     }
 
+    /// A concealed task's lead, and its `x` (task boxes spec, D10).
+    pub(super) fn lead(&self) -> Option<(&ShapedLine, Pixels)> {
+        match self {
+            Self::Margin(_) => None,
+            Self::Gutter(gutter) => gutter.lead(),
+        }
+    }
+
     fn geometry(&self) -> Option<&Geometry> {
         match self {
             Self::Margin(_) => None,

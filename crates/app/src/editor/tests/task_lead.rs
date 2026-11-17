@@ -23,9 +23,9 @@ fn painted(window: &Handle, cx: &mut VisualTestContext) -> Vec<Painted> {
         .unwrap();
     painted_boxes()
         .into_iter()
-        .map(|(bounds, checked, lead)| {
-            let lead = lead.map(|(text, x)| (text, x - origin.x));
-            (bounds.center().x - origin.x, checked, lead)
+        .map(|task| {
+            let lead = task.lead.map(|(text, x)| (text, x - origin.x));
+            (task.bounds.center().x - origin.x, task.checked, lead)
         })
         .collect()
 }

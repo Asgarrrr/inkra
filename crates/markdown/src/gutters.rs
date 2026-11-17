@@ -166,7 +166,7 @@ fn task_gutter(
 
 /// An item's marker: pulldown-cmark starts its range up to a tab's leftover columns early, back
 /// onto the line ending or quote marker before it, and a marker is never a blank or `>`.
-fn marker_start(text: &str, item: usize) -> usize {
+pub(crate) fn marker_start(text: &str, item: usize) -> usize {
     item + text.as_bytes()[item..]
         .iter()
         .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'>'))

@@ -1,13 +1,14 @@
 use std::ops::Range;
 
 use gpui::{
-    App, BorderStyle, Bounds, ContentMask, Pixels, Point, TextAlign, TransformationMatrix, Window,
-    fill, outline, point, px, size,
+    App, BorderStyle, Bounds, ContentMask, Pixels, Point, ShapedLine, TextAlign,
+    TransformationMatrix, Window, fill, outline, point, px, size,
 };
 use inkra_text::{ByteOffset, Diff};
 
 use super::DocumentLayout;
-use super::prefix::{Prefix, TaskBox};
+use super::line::LineLayout;
+use super::prefix::Prefix;
 use crate::theme;
 use crate::ui::IconName;
 
@@ -25,9 +26,16 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// A task box's window bounds, whether it drew checked, and its lead's text and window `x`.
+/// A task box the last paint drew, and the lead it drew before it.
 #[cfg(test)]
-type PaintedBox = (Bounds<Pixels>, bool, Option<(String, Pixels)>);
+#[derive(Clone)]
+pub(crate) struct PaintedBox {
+    /// In window coordinates.
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) checked: bool,
+    /// The lead's text and window `x`.
+    pub(crate) lead: Option<(String, Pixels)>,
+}
 
 /// The lines and bars the last paint on this thread walked.
 #[cfg(test)]
@@ -150,9 +158,7 @@ impl DocumentLayout {
             {
                 log::warn!("failed to paint the prefix of line {index}: {err}");
             }
-            if let Some((square, task)) = line.task_box() {
-                self.paint_task(line_origin, line.row_height, square, task, window, cx);
-            }
+            self.paint_task(line_origin, line, window, cx);
         }
         let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
         for block in &self.code_blocks[blocks] {
@@ -171,43 +177,52 @@ impl DocumentLayout {
         }
     }
 
-    /// A concealed task on the line at `origin`: its lead, then its box (task boxes spec, D10).
+    /// Where the concealed task on `line`, at `origin`, paints its box and its lead (D10).
     fn paint_task(
         &self,
         origin: Point<Pixels>,
-        row_height: Pixels,
-        square: Bounds<Pixels>,
-        task: &TaskBox,
+        line: &LineLayout,
         window: &mut Window,
         cx: &mut App,
     ) {
-        if let Some((lead, x)) = &task.lead
-            && let Err(err) = lead.paint(
-                origin + point(*x, px(0.)),
-                row_height,
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            )
+        let Some((square, task)) = line.task_box() else {
+            return;
+        };
+        let lead = line.prefix.as_ref().and_then(Prefix::lead);
+        let lead = lead.map(|(lead, x)| (lead, origin + point(x, px(0.))));
+        self.paint_task_box(
+            square + origin,
+            task.checked,
+            lead,
+            line.row_height,
+            window,
+            cx,
+        );
+    }
+
+    /// The lead at its point, then the square `bounds`: an outline, or an accent fill with a check.
+    fn paint_task_box(
+        &self,
+        bounds: Bounds<Pixels>,
+        checked: bool,
+        lead: Option<(&ShapedLine, Point<Pixels>)>,
+        row_height: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some((lead, at)) = lead
+            && let Err(err) = lead.paint(at, row_height, TextAlign::Left, None, window, cx)
         {
             log::warn!("failed to paint a task's lead: {err}");
         }
-        self.paint_task_box(square + origin, task.checked, window, cx);
         #[cfg(test)]
-        {
-            let lead = task.lead.as_ref();
-            let lead = lead.map(|(lead, x)| (lead.text.to_string(), origin.x + *x));
-            PAINTED_BOXES.with(|painted| {
-                painted
-                    .borrow_mut()
-                    .push((square + origin, task.checked, lead));
+        PAINTED_BOXES.with(|painted| {
+            painted.borrow_mut().push(PaintedBox {
+                bounds,
+                checked,
+                lead: lead.map(|(lead, at)| (lead.text.to_string(), at.x)),
             });
-        }
-    }
-
-    /// The square `bounds`: an outline, or an accent fill with a check.
-    fn paint_task_box(&self, bounds: Bounds<Pixels>, checked: bool, window: &mut Window, cx: &App) {
+        });
         let colors = &self.theme.colors;
         if !checked {
             window.paint_quad(

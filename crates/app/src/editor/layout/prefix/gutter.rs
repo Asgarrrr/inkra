@@ -27,14 +27,17 @@ pub(in crate::editor::layout) struct TaskBox {
     /// The checkbox's `x` span, measured as the gutter's width.
     pub(in crate::editor::layout) x: Range<Pixels>,
     pub(in crate::editor::layout) checked: bool,
-    pub(in crate::editor::layout) lead: Lead,
+    /// The lead through its own conceals at the body size; `None` when blank.
+    lead: Option<Rc<ShapedLine>>,
 }
 
-/// A lead through its own conceals at the body size, and its `x`, the quote part's width; `None`
-/// when blank.
-pub(in crate::editor::layout) type Lead = Option<(Rc<ShapedLine>, Pixels)>;
-
 impl GutterLayout {
+    /// A concealed task's lead, painted at the task part's `x`, the quote part's width.
+    pub(super) fn lead(&self) -> Option<(&ShapedLine, Pixels)> {
+        let lead = self.task_box.as_ref()?.lead.as_deref()?;
+        Some((lead, self.geometry.quote_width))
+    }
+
     /// A revealed part maps `x` through its shape (as D12's margin); a concealed one lands on the text's start.
     pub(super) fn offset_for_x(&self, x: Pixels) -> usize {
         let index = self.shown.as_ref().and_then(|shown| shown.index_for_x(x));
@@ -110,8 +113,15 @@ pub(super) struct Geometry {
     quote_width: Pixels,
 }
 
-/// What a gutter's text measures to: its geometry, and its task's checkbox span and lead.
-type Measured = (Geometry, Option<(Range<Pixels>, Lead)>);
+/// What a gutter's text measures to, once per text.
+#[derive(Clone)]
+struct Measured {
+    geometry: Geometry,
+    /// The task's checkbox `x` span; `None` with no task.
+    checkbox: Option<Range<Pixels>>,
+    /// The task's lead through its conceals; `None` with no task or a blank lead.
+    lead: Option<Rc<ShapedLine>>,
+}
 
 /// What gutters share within one `shape_document`: the geometry of the line above, built or
 /// carried, which a lazy line takes, and each distinct gutter text's geometry, measured once.
@@ -156,7 +166,7 @@ impl<'a> GutterCarry<'a> {
         let body_size = self.body_size;
         let shaped =
             (reveal.quote || reveal.task).then(|| shape(&gutter.range, &[], source, body_size));
-        let (geometry, task) = if gutter.quotes.len() == gutter.depth {
+        let measured = if gutter.quotes.len() == gutter.depth {
             if let Some(measured) = self.measured.get(source) {
                 measured.clone()
             } else {
@@ -172,21 +182,33 @@ impl<'a> GutterCarry<'a> {
                 measured
             }
         } else {
-            (self.carried.clone(), None)
+            Measured {
+                geometry: self.carried.clone(),
+                checkbox: None,
+                lead: None,
+            }
         };
+        let Measured {
+            geometry,
+            checkbox,
+            lead,
+        } = measured;
         GutterLayout {
             len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
             geometry,
-            task_box: gutter.task.as_ref().zip(task).filter(|_| !reveal.task).map(
-                |(task, (x, lead))| {
+            task_box: gutter
+                .task
+                .as_ref()
+                .zip(checkbox)
+                .filter(|_| !reveal.task)
+                .map(|(task, x)| {
                     Box::new(TaskBox {
                         x,
                         checked: task.checked,
                         lead,
                     })
-                },
-            ),
+                }),
         }
     }
 }
@@ -209,14 +231,15 @@ fn measure(
         own = shape(&gutter.range, &[], &measured);
         &own
     };
-    let geometry = Geometry::measure(gutter, whole, split);
     let start = gutter.range.start;
-    let task = gutter.task.as_ref().map(|task| {
-        let x = whole.x_for_index(task.checkbox.start - start)
-            ..whole.x_for_index(task.checkbox.end - start);
+    let task = gutter.task.as_ref();
+    let checkbox = task.map(|task| {
+        whole.x_for_index(task.checkbox.start - start)..whole.x_for_index(task.checkbox.end - start)
+    });
+    let lead = task.and_then(|task| {
         let text = &source[task.start - start..task.run - start];
         let blank = text.bytes().all(|byte| matches!(byte, b' ' | b'\t'));
-        let lead = (!blank).then(|| {
+        (!blank).then(|| {
             let hidden: Vec<Hidden> = lead
                 .iter()
                 .map(|conceal| {
@@ -227,12 +250,14 @@ fn measure(
                     )
                 })
                 .collect();
-            let shaped = shape(&(task.start..task.run), &hidden, text);
-            (Rc::new(shaped), geometry.quote_width)
-        });
-        (x, lead)
+            Rc::new(shape(&(task.start..task.run), &hidden, text))
+        })
     });
-    (geometry, task)
+    Measured {
+        geometry: Geometry::measure(gutter, whole, split),
+        checkbox,
+        lead,
+    }
 }
 
 /// What a gutter measures: its text with its box's middle byte an `X`, the widest state, so every

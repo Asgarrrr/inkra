@@ -7,7 +7,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::cycle_tasks;
-use super::tests::{apply, free_line, in_block, task_at, task_markers};
+use super::tests::{apply, free_line, in_block, keeps_markup, task_at, task_markers};
 use crate::parse;
 
 fn at(offset: usize) -> ByteOffset {
@@ -203,6 +203,7 @@ proptest! {
         let target = cycled.first().is_some_and(|&first| task_at(&text, starts[first]) == Some(false));
 
         let after = apply(&text, &hunks);
+        prop_assert!(keeps_markup(&text, &after), "{:?} became {:?}", text, after);
         let mut changed = vec![false; starts.len()];
         for hunk in &hunks {
             let index = text[..hunk.range.start.get()].matches('\n').count();

@@ -22,7 +22,7 @@ mod toggle;
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",
     "## ", "===", "---", "*", "**", "_", "[[", "]]", "[l](u)", "#h", "- [ ] ", "- [x] ", "- ",
-    "    ", "\t", "é", "日",
+    "1. ", "    ", "\t", "é", "日",
 ];
 
 fn markdown(max: usize) -> impl Strategy<Value = String> {
@@ -312,8 +312,8 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
     };
     let task_box = |line: &super::LineLayout| {
         line.task_box().map(|(square, task)| {
-            let lead = task.lead.as_ref();
-            let lead = lead.map(|(lead, x)| (lead.text.to_string(), *x));
+            let lead = line.prefix.as_ref().and_then(super::prefix::Prefix::lead);
+            let lead = lead.map(|(lead, x)| (lead.text.to_string(), x));
             (square, task.x.clone(), task.checked, lead)
         })
     };

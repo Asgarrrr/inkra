@@ -254,11 +254,21 @@ Each cycled line has its candidate splices, in order:
 A round applies every line's current candidate to one copy of the text and
 parses it once. A line whose shifted start then has a task in the target state
 keeps its splice; any other line moves to its next candidate, or drops out
-after its last. The first round in which every splice landed returns its batch.
+after its last.
+
+**No markup turns to text.** Amended 2026-11-17 after the T5 review. A round
+also fails a splice when any line of the copy opens fewer list items or block
+quotes than the same line of the text: `- [ ] ` before `> a` would make the
+quote text. The splice failed is the nearest cycled line's at or above the line
+that lost one: no splice holds a newline, so lines keep their indices, and a
+splice reaches only its own line and those below it, as `---\n>\n---` turning
+into front matter shows. The counts come from one pulldown-cmark pass of the
+text, the skipped lines' pass, and one more pass of each round's copy. So
+`- > a` has no candidate that keeps its quote, and `⌘L` edits nothing. The first round in which every splice landed returns its batch.
 After three rounds the batch is empty.
 
 The argument: a batch is returned only from a round whose own parse shows each
-of its lines a task in the target state. Every splice lies inside its line, so
+of its lines a task in the target state, and no line with fewer items or quotes. Every splice lies inside its line, so
 the result holds by construction, whatever a splice does to its neighbour's
 laziness; the empty batch holds trivially. A failing round moves at least one
 line on through at most two candidates, so the rounds end. The cap of three
@@ -271,7 +281,8 @@ selected cycles both lines, `b` nesting under the new item, though `b` alone
 cannot be a task. Likewise `a\n2. b` becomes `- [ ] a\n2. [ ] b`: after the
 new item `2.` starts a list, though alone it is lazy and takes `- [ ] 2. b`. A
 `⌘L` costs the cached parse, one pulldown-cmark pass for the skipped lines,
-and at most three parses of the spliced copy. This replaces T4a's per-line
+and at most three parses of the spliced copy, each with one more pass for its
+items and quotes. This replaces T4a's per-line
 reparse, which cost up to two parses per line and judged each line alone.
 
 ## D7. The struck text
@@ -372,9 +383,11 @@ admits the lead's one-byte bullets between the quotes and the task conceal.
 
 **The paint.** A concealed task part paints its lead, then the box.
 
-- The lead is shaped from the gutter's text through its own active conceals,
-  so `- ` shows `• ` and `1. ` shows as typed, with the body's runs (`show` in
-  `layout/shape.rs`). It paints at the task part's `x`, the quote part's width.
+- The lead is shaped from the gutter's text through all its conceals, so `- `
+  shows `• ` and `1. ` shows as typed, with the body's runs (`show` in
+  `layout/runs.rs`). Every one lies inside the task part's element, so while the
+  task part is concealed they are all active: the set an `is_active` filter
+  would keep. It paints at the task part's `x`, the quote part's width.
   A blank lead shapes nothing.
 - The box stays centred on the checkbox's `x` span. In `1. [ ] a` it sits
   right after `1. `; in `- [ ] a` it still sits where `[` stands.
@@ -387,21 +400,25 @@ admits the lead's one-byte bullets between the quotes and the task conceal.
 
 **One task box in the layout.** `Geometry::checkbox` and `GutterLayout::boxed`
 describe one thing, measured in two places. They merge into one
-`Option<TaskBox>` on `GutterLayout`: the checkbox's `x` span, the checkbox from
-the line's start, `checked`, and the lead's shape. It is set only on a line
+`Option<TaskBox>` on `GutterLayout`: the checkbox's `x` span, `checked`, and
+the lead's shape. The lead's `x` is the geometry's quote part width, and the
+click flips the task of the layout's own parse, so `TaskBox` holds no offset. It is set only on a line
 holding its own task, never from carried geometry (D). The task part's
 concealed state stays the reveal's, so the box and the lead paint together.
 
 **`⌘L`.**
 
 - A plain line's insertion goes after its innermost marker: past the leading
-  `[ \t>]*`, every bullet or number with its one space or tab, in turn. `- 1. a`
-  becomes `- 1. [ ] a`, a task item inside the outer one, not `- [ ] 1. a`,
-  whose `1. a` would be text. The second candidate, `- [ ] ` after the
-  leading `[ \t>]*`, is unchanged.
+  `[ \t>]*`, every bullet or number followed by one to four blanks opens the
+  next, in turn (CommonMark 5.2), and the checkbox goes past the innermost's
+  first blank. `- 1. a` becomes `- 1. [ ] a`, a task item inside the outer one,
+  not `- [ ] 1. a`, whose `1. a` would be text; `-  - a` becomes `-  - [ ] a`.
+  The second candidate, `- [ ] ` after the leading `[ \t>]*`, is unchanged.
+- No splice turns markup into text (D6, amended after the T5 review): `- > a`
+  edits nothing.
 - A line holding a task that gets no box is skipped, like a code line: its
   checkbox cannot be cycled, and a box on its outer item would make two
-  checkboxes. The skip pass (`skipped()` in `cycle.rs`) collects the lines of
+  checkboxes. The skip pass (`Scan::new` in `cycle.rs`) collects the lines of
   its `TaskListMarker` events; a line whose gutter has a task is kept.
 
 ## Tests
@@ -429,8 +446,9 @@ concealed state stays the reveal's, so the box and the lead paint together.
   `depth` may be 0 with a non-empty range when `task` is set
   (`parse/tests/gutters.rs`, around 228-247).
 - The cycle: applying its splices to the text and reparsing gives the stated
-  state on every cycled line and leaves every other line byte-identical; the
-  mapped selection stays inside the text and on a char boundary.
+  state on every cycled line and leaves every other line byte-identical; no
+  line opens fewer items or quotes; the mapped selection stays inside the text
+  and on a char boundary.
 
 `inkra-editor`: `apply_diff` is one undo step, merges with no neighbour, maps
 the selection, and edits nothing from a stale base.
@@ -518,8 +536,8 @@ emits for every list item. T3 and T4a are independent of each other.
   makes the check (G). `layout/mod.rs` is at its 400 lines and gains no
   accessor. Amended 2026-11-17 after the cross-slice review: `task_at` took
   the buffer's version and the editor re-checked the bytes, so (G) ran twice.
-  A `GutterLayout`'s `Boxed` holds the checkbox from the line's
-  start, so a carried line stays line-relative. The hit test (F) is
+  A carried line holds no document offset of its task: since T5,
+  `task_at` reads the task from the layout's own parse. The hit test (F) is
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
@@ -529,6 +547,20 @@ emits for every list item. T3 and T4a are independent of each other.
   `2. [ ] b` and drops out, though `- [ ] 2. b` would let it nest. Moving only
   the first failing line would land it but cost a parse per line on `⌘A`; the
   cap of three parses wins. Added 2026-11-17 after the T4b review.
+- **From this spec, in T5.** Added 2026-11-17 after the T5 review.
+  - `TaskBox` holds no checkbox offset. `Task` gained `start` and `run`, so a
+    line-relative copy could not rebuild the whole `Task` to flip it. `task_at`
+    finds the task in the layout's own parse, `DocumentLayout::markdown`, by the
+    line's start; (G) is unchanged.
+  - The lead shapes through all its conceals, with no `is_active` filter. The
+    cache is keyed by gutter text, so the first line with that text may have its
+    task part revealed, and a filter would cache a raw lead. All are active
+    whenever the task part is concealed, so the set is the same.
+  - The skip pass reads the text with a final `\n`, as `parse` does (D1).
+    Without it, `- > - [ ]` on an unterminated last line has no
+    `TaskListMarker`, and `⌘L` would add a second checkbox.
+  - `show` moved from `shape.rs` to `runs.rs`, beside `line_runs`. `shape.rs`
+    was at its line ceiling, and the `hidden` argument grows its closure.
 
 ## Deferred
 

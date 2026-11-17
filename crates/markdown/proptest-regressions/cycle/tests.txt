@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc 57815daf28eefeb62f76f0f47106c9782719a3f2d5deb1fe27f8bb9475ed0099 # shrinks to front = false, blocks = [("a", false)], pick = Index(0), column = Index(0)
 cc a127bd99a44c57574b12cddd9a1477976b131ab5f5df3b1ac0ffc6b22dcb3f30 # shrinks to front = false, blocks = [("a", false), ("<div>\n- a\n</div>", true), ("```\na\n```", true), ("```\na\n```", true)], pick = Index(7094901566811366007), column = Index(0)
+cc ad8e322130d9338be7452706fb9b16d2990a28450a14e4253f810ad6f473b378 # shrinks to lines = ["* >"], newline = false, pick = Index(0), column = Index(0)
+cc 1fff7bd6c209cc5aa0b18b7e2e4b91e431bca50f76669f28057419a82f338cd1 # shrinks to lines = ["", "]", "---", ">", "---"], newline = false, pick = Index(3689348814741910324), column = Index(0)

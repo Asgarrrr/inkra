@@ -75,9 +75,20 @@ fn a_nested_bullet_gains_a_checkbox_after_the_innermost_marker() {
         ("1. - a", "1. - [ ] a"),
         ("> - * a", "> - * [ ] a"),
         ("- -", "- - [ ] "),
-        ("- > a", "- [ ] > a"),
+        ("-  - a", "-  - [ ] a"),
+        ("-   1. a", "-   1. [ ] a"),
+        ("-\t- a", "-\t- [ ] a"),
+        ("1.    - a", "1.    - [ ] a"),
     ] {
         assert_eq!(cycled_line(line), want, "{line:?}");
+    }
+}
+
+/// No candidate keeps the quote, so the line is left as it is rather than turn `>` to text.
+#[test]
+fn a_line_whose_markup_no_candidate_keeps_edits_nothing() {
+    for line in ["- > a", "1. > a", "- - > a"] {
+        assert_eq!(cycled_line(line), line, "{line:?}");
     }
 }
 
@@ -321,6 +332,7 @@ fn cycle_checked(
             text,
             after
         );
+        prop_assert!(keeps_markup(text, &after), "{:?} became {:?}", text, after);
         let delta = after.len() - text.len();
         prop_assert_eq!(&after[..start], &text[..start]);
         prop_assert_eq!(&after[end + delta..], &text[end..]);
@@ -348,6 +360,37 @@ pub(super) fn task_markers(text: &str, start: usize) -> usize {
             matches!(event, Event::TaskListMarker(_)) && line_start(&text, range.start) == start
         })
         .count()
+}
+
+/// The list items and block quotes that open on each line, by line index, the text read as
+/// `parse` reads it: an item at its marker, a quote at its first `>`.
+fn opens_per_line(text: &str) -> Vec<(usize, usize)> {
+    let terminated = format!("{text}\n");
+    let mut lines = vec![(0, 0); text.matches('\n').count() + 2];
+    for (event, range) in Parser::new_ext(&terminated, options()).into_offset_iter() {
+        let skip: &[u8] = match event {
+            Event::Start(Tag::Item) => b" \t\n>",
+            Event::Start(Tag::BlockQuote(_)) => b" \t\n",
+            _ => continue,
+        };
+        let bytes = &terminated.as_bytes()[range.start..];
+        let at = range.start + bytes.iter().take_while(|byte| skip.contains(byte)).count();
+        let line = &mut lines[terminated[..at].matches('\n').count()];
+        match event {
+            Event::Start(Tag::Item) => line.0 += 1,
+            _ => line.1 += 1,
+        }
+    }
+    lines
+}
+
+/// Whether no line of `after`, `text` spliced within its lines, opens fewer items or quotes.
+pub(super) fn keeps_markup(text: &str, after: &str) -> bool {
+    let (before, now) = (opens_per_line(text), opens_per_line(after));
+    before
+        .iter()
+        .zip(&now)
+        .all(|(was, is)| is.0 >= was.0 && is.1 >= was.1)
 }
 
 /// Whether a code block, the front matter, a table or an HTML block holds a byte of `start..=end`.
@@ -406,8 +449,8 @@ proptest! {
     }
 
     /// On any lines: a cycled line is a task in the next state; a line left as it is is no task,
-    /// and `- [ ] ` after its quotes and spaces makes none, unless a skipped block holds it or it
-    /// holds a checkbox with no box.
+    /// and `- [ ] ` after its quotes and spaces makes none or turns markup to text, unless a
+    /// skipped block holds it or it holds a checkbox with no box.
     #[test]
     fn a_free_form_line_cycles_or_cannot_be_a_task(
         lines in prop::collection::vec(free_line(), 1..6),
@@ -430,7 +473,12 @@ proptest! {
                 .count();
             let mut plain = text.clone();
             plain.insert_str(start + lead, "- [ ] ");
-            prop_assert_eq!(task_at(&plain, start), None, "{:?} at {:?}", text, caret);
+            prop_assert!(
+                task_at(&plain, start).is_none() || !keeps_markup(&text, &plain),
+                "{:?} at {:?}",
+                text,
+                caret
+            );
         }
     }
 }
