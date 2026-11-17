@@ -142,6 +142,14 @@ fn a_line_no_candidate_lands_drops_out_of_the_batch() {
     assert_eq!(selected(text, 2..text.len()), "x\n    2. b\n- [ ] c");
 }
 
+/// Every failing line moves on in the same round, so `c`, lazy under the failing `2. [ ] b`,
+/// runs out before `- [ ] 2. b` would let it nest (spec, Deviations, T4b).
+#[test]
+fn a_line_that_runs_out_before_its_neighbour_settles_drops_out() {
+    let text = "x\n2. b\n    c";
+    assert_eq!(selected(text, 2..text.len()), "x\n- [ ] 2. b\n    c");
+}
+
 /// The line indices `start..end` touches by (H).
 fn touched_lines(text: &str, start: usize, end: usize) -> Range<usize> {
     let index = |at: usize| text[..at].matches('\n').count();
@@ -215,6 +223,9 @@ proptest! {
                 );
             } else {
                 prop_assert_eq!(&after[line_from(&after, after_starts[index])], &text[old]);
+                if cycled.contains(&index) && task_at(&text, starts[index]) == Some(target) {
+                    prop_assert_eq!(task_at(&after, after_starts[index]), Some(target));
+                }
             }
         }
 

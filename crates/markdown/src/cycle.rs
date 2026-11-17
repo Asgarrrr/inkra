@@ -1,6 +1,5 @@
 //! `⌘L`: the splices that cycle the task state of the selection's lines (task boxes spec, D6).
 
-use std::iter;
 use std::ops::Range;
 use std::vec;
 
@@ -9,11 +8,11 @@ use pulldown_cmark::{Event, Parser, Tag};
 
 use crate::cmark::options;
 use crate::parse::line_start_prefix;
-use crate::spans::line_start;
+use crate::spans::{line_ranges, line_start};
 use crate::{Markdown, Task, parse};
 
-/// Parses of a spliced copy per `⌘L`: the second candidates, then the batch without the lines
-/// no candidate makes a task (D6, amended for T4b).
+/// Parses of a spliced copy per `⌘L`: the first candidates, the second ones, then the batch
+/// without the lines no candidate makes a task (D6, amended for T4b).
 const ROUNDS: usize = 3;
 
 /// One cycled line: its start and the splices still to try, in order.
@@ -72,11 +71,9 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>
 /// before the selection's end (H). Skipped blocks go, and blank lines when there are several.
 fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> {
     let first = line_start(text, selection.start.get());
-    let lines: Vec<Range<usize>> = iter::successors(Some(line_at(text, first)), |line| {
-        (line.end < text.len()).then(|| line_at(text, line.end + 1))
-    })
-    .take_while(|line| line.start == first || line.start < selection.end.get())
-    .collect();
+    let lines: Vec<Range<usize>> = line_ranges(text, first)
+        .take_while(|line| line.start == first || line.start < selection.end.get())
+        .collect();
     let several = lines.len() > 1;
     let mut blocks = skipped(text).peekable();
     lines
@@ -92,14 +89,6 @@ fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> 
             blocks.peek().is_none_or(|block| block.start > line.start)
         })
         .collect()
-}
-
-/// The line starting at `start`, without its newline.
-fn line_at(text: &str, start: usize) -> Range<usize> {
-    start
-        ..text[start..]
-            .find('\n')
-            .map_or(text.len(), |len| start + len)
 }
 
 /// The splices that could put `line` in the state `checked`, in order: a task's flip, or none when

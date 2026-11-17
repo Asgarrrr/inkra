@@ -302,7 +302,7 @@ pub(super) fn in_block(text: &str, start: usize, end: usize) -> bool {
 /// A free-form line, mostly markers, or one that opens a block.
 pub(super) fn free_line() -> impl Strategy<Value = String> {
     prop_oneof![
-        4 => "[ \t>*+1.)\\[\\]xXa-]{0,8}",
+        4 => "[ \t>*+129.)\\[\\]xXa-]{0,8}",
         1 => prop::sample::select(vec!["```", "<div>", "---", "| a |"]).prop_map(str::to_owned),
     ]
 }

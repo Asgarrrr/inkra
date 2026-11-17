@@ -434,6 +434,12 @@ emits for every list item. T3 and T4a are independent of each other.
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
+- **From this spec, in T4b.** Every failing line moves to its next candidate
+  in the same round, so a line can run out before the line above it settles:
+  with `2. b` and `    c` selected after `x`, `c` is lazy under the failing
+  `2. [ ] b` and drops out, though `- [ ] 2. b` would let it nest. Moving only
+  the first failing line would land it but cost a parse per line on `⌘A`; the
+  cap of three parses wins. Added 2026-11-17 after the T4b review.
 
 ## Deferred
 
