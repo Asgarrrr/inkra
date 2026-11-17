@@ -1,5 +1,6 @@
 //! `⌘L`: the splices that cycle the task state of the selection's lines (task boxes spec, D6).
 
+use std::borrow::Cow;
 use std::ops::Range;
 use std::vec;
 
@@ -30,11 +31,11 @@ impl Cycled {
 /// The splices that cycle the task state of every line `selection` touches, as `markdown`, the
 /// parse of `text`, reads it: each takes the state after the first cycled line's, and the whole
 /// batch, applied at once, reparses each changed line as a task in that state. None for a line
-/// inside a code block, the front matter, a table or an HTML block, nor for a blank line when
-/// the selection spans more than one.
+/// inside a code block, the front matter, a table or an HTML block, nor for a line holding a task
+/// with no box, nor for a blank line when the selection spans more than one.
 #[must_use]
 pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>) -> Vec<Hunk> {
-    let lines = cycled_lines(text, &selection);
+    let lines = cycled_lines(text, markdown, &selection);
     let Some(first) = lines.first() else {
         return Vec::new();
     };
@@ -68,14 +69,18 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>
 }
 
 /// The lines `selection` touches, each without its newline: the first, then every line starting
-/// before the selection's end (H). Skipped blocks go, and blank lines when there are several.
-fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> {
+/// before the selection's end (H). Skipped lines go, and blank lines when there are several.
+fn cycled_lines(
+    text: &str,
+    markdown: &Markdown,
+    selection: &Range<ByteOffset>,
+) -> Vec<Range<usize>> {
     let first = line_start(text, selection.start.get());
     let lines: Vec<Range<usize>> = line_ranges(text, first)
         .take_while(|line| line.start == first || line.start < selection.end.get())
         .collect();
     let several = lines.len() > 1;
-    let mut blocks = skipped(text).peekable();
+    let mut blocks = skipped(text, markdown).into_iter().peekable();
     lines
         .into_iter()
         .filter(|line| {
@@ -92,8 +97,8 @@ fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> 
 }
 
 /// The splices that could put `line` in the state `checked`, in order: a task's flip, or none when
-/// it is in that state already; any other line gains a checkbox after its bullet, else `- ` and a
-/// checkbox after its leading `[ \t>]*`.
+/// it is in that state already; any other line gains a checkbox after its innermost bullet, else
+/// `- ` and a checkbox after its leading `[ \t>]*`.
 fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool) -> Vec<Hunk> {
     if let Some(task) = task_at(markdown, line.start) {
         return (task.checked != checked)
@@ -103,7 +108,7 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let lead = line_start_prefix(text, &line);
-    bullet(&text.as_bytes()[line.start + lead..line.end])
+    innermost(&text.as_bytes()[line.start + lead..line.end])
         .map(|(at, space)| (lead + at, space))
         .into_iter()
         .chain([(lead, "- ")])
@@ -177,20 +182,39 @@ fn bullet(bytes: &[u8]) -> Option<(usize, &'static str)> {
     }
 }
 
-/// Each code block, front matter, table and HTML block, from its first line's start, in order: a
-/// fenced block in a list item starts at its fence, past the line's start. None holds another.
-fn skipped(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
-    Parser::new_ext(text, options())
+/// Where a checkbox goes after the leading bullets, each with its one space or tab, past the
+/// innermost (D10), and what goes before it; `None` with no bullet. A bullet takes a byte at least.
+fn innermost(bytes: &[u8]) -> Option<(usize, &'static str)> {
+    std::iter::successors(bullet(bytes), |&(at, _)| {
+        bullet(&bytes[at..]).map(|(len, before)| (at + len, before))
+    })
+    .take(bytes.len())
+    .last()
+}
+
+/// Each code block, front matter, table and HTML block, from its first line's start, then each
+/// line holding a task with no box (D10), in order: a fenced block in a list item starts at its
+/// fence, past the line's start. None holds another. The text reads as `parse` reads it (D1).
+fn skipped(text: &str, markdown: &Markdown) -> Vec<Range<usize>> {
+    let text = if text.ends_with('\n') {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(format!("{text}\n"))
+    };
+    Parser::new_ext(&text, options())
         .into_offset_iter()
-        .filter(|(event, _)| {
-            matches!(
-                event,
+        .filter_map(|(event, range)| {
+            let start = line_start(&text, range.start);
+            let skipped = match event {
                 Event::Start(
-                    Tag::CodeBlock(_) | Tag::MetadataBlock(_) | Tag::Table(_) | Tag::HtmlBlock
-                )
-            )
+                    Tag::CodeBlock(_) | Tag::MetadataBlock(_) | Tag::Table(_) | Tag::HtmlBlock,
+                ) => true,
+                Event::TaskListMarker(_) => task_at(markdown, start).is_none(),
+                _ => false,
+            };
+            skipped.then_some(start..range.end)
         })
-        .map(|(_, range)| line_start(text, range.start)..range.end)
+        .collect()
 }
 
 #[cfg(test)]

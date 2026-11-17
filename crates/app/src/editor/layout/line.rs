@@ -7,7 +7,7 @@ use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLin
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
-use super::prefix::{self, Boxed, Prefix};
+use super::prefix::{self, Prefix, TaskBox};
 use crate::theme::TASK_BOX_SIZE;
 
 #[cfg(test)]
@@ -102,11 +102,11 @@ impl LineLayout {
 
     /// The square a concealed task paints and a click hits, from the line's origin: centred on its
     /// checkbox and on row 0 (task boxes spec, D4).
-    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &Boxed)> {
-        let (checkbox, boxed) = self.prefix.as_ref()?.task_box()?;
-        let centre = point((checkbox.start + checkbox.end) / 2., self.row_height / 2.);
+    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &TaskBox)> {
+        let task = self.prefix.as_ref()?.task_box()?;
+        let centre = point((task.x.start + task.x.end) / 2., self.row_height / 2.);
         let square = Bounds::centered_at(centre, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
-        Some((square, boxed))
+        Some((square, task))
     }
 }
 

@@ -213,27 +213,31 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
 
 #[test]
 fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
-    let gutter = |end, quotes: &[usize], depth, task: Option<(Range<usize>, bool)>| Gutter {
+    let task = |lead: Range<usize>, checkbox, checked| Some((lead, checkbox, checked));
+    let gutter = |end, quotes: &[usize], depth, task: Option<(Range<usize>, _, bool)>| Gutter {
         range: offsets(0..end),
         quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
         depth,
-        quote_end: ByteOffset::new(4),
-        task: task.map(|(checkbox, checked)| Task {
+        task: task.map(|(lead, checkbox, checked)| Task {
+            start: ByteOffset::new(lead.start),
+            run: ByteOffset::new(lead.end),
             checkbox: offsets(checkbox),
             checked,
         }),
     };
     let old = Markdown {
-        gutters: vec![gutter(12, &[0, 2], 2, Some((6..9, false)))],
+        gutters: vec![gutter(12, &[0, 2], 2, task(4..4, 6..9, false))],
         ..Markdown::default()
     };
     for new in [
-        gutter(10, &[0, 2], 2, Some((6..9, false))),
-        gutter(12, &[0, 1], 2, Some((6..9, false))),
-        gutter(12, &[0], 2, Some((6..9, false))),
-        gutter(12, &[0, 2], 3, Some((6..9, false))),
-        gutter(12, &[0, 2], 2, Some((6..9, true))),
-        gutter(12, &[0, 2], 2, Some((7..10, false))),
+        gutter(10, &[0, 2], 2, task(4..4, 6..9, false)),
+        gutter(12, &[0, 1], 2, task(4..4, 6..9, false)),
+        gutter(12, &[0], 2, task(4..4, 6..9, false)),
+        gutter(12, &[0, 2], 3, task(4..4, 6..9, false)),
+        gutter(12, &[0, 2], 2, task(4..4, 6..9, true)),
+        gutter(12, &[0, 2], 2, task(4..4, 7..10, false)),
+        gutter(12, &[0, 2], 2, task(3..4, 6..9, false)),
+        gutter(12, &[0, 2], 2, task(4..6, 6..9, false)),
         gutter(12, &[0, 2], 2, None),
     ] {
         let new = Markdown {
@@ -326,10 +330,13 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
         .filter(|item| starts(item.range.start))
     {
         let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
-        let task = item
-            .task
-            .as_ref()
-            .map(|task| (span(&task.checkbox), task.checked));
+        let task = item.task.as_ref().map(|task| {
+            (
+                span(&(task.start..task.run)),
+                span(&task.checkbox),
+                task.checked,
+            )
+        });
         push(&(span(&item.range), quotes, item.depth, task));
     }
     if let Some(item) = markdown.headings.iter().find(|item| holds(&item.range)) {

@@ -7,7 +7,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::cycle_tasks;
-use super::tests::{apply, free_line, in_block, task_at};
+use super::tests::{apply, free_line, in_block, task_at, task_markers};
 use crate::parse;
 
 fn at(offset: usize) -> ByteOffset {
@@ -196,7 +196,8 @@ proptest! {
             .filter(|&index| {
                 let line = line(index);
                 let blank = text[line.clone()].bytes().all(|byte| matches!(byte, b' ' | b'\t'));
-                !(multi && blank || in_block(&text, line.start, line.end))
+                let unboxed = task_markers(&text, line.start) > 0 && task_at(&text, line.start).is_none();
+                !(multi && blank || in_block(&text, line.start, line.end) || unboxed)
             })
             .collect();
         let target = cycled.first().is_some_and(|&first| task_at(&text, starts[first]) == Some(false));

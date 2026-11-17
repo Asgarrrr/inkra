@@ -18,7 +18,7 @@ fn boxes(cx: &mut VisualTestContext) -> Vec<Bounds<Pixels>> {
     cx.run_until_parked();
     painted_boxes()
         .into_iter()
-        .map(|(bounds, _)| bounds)
+        .map(|(bounds, _, _)| bounds)
         .collect()
 }
 

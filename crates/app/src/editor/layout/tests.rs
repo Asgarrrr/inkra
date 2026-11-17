@@ -311,8 +311,11 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
         })
     };
     let task_box = |line: &super::LineLayout| {
-        line.task_box()
-            .map(|(square, boxed)| (square, boxed.clone()))
+        line.task_box().map(|(square, task)| {
+            let lead = task.lead.as_ref();
+            let lead = lead.map(|(lead, x)| (lead.text.to_string(), *x));
+            (square, task.x.clone(), task.checked, lead)
+        })
     };
     prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);
     prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);

@@ -6,6 +6,7 @@ use pulldown_cmark::{Event, Parser, Tag};
 use super::cycle_tasks;
 use crate::cmark::options;
 use crate::parse;
+use crate::spans::line_start;
 
 pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
     let mut out = text.to_owned();
@@ -30,7 +31,12 @@ fn cycled_line(text: &str) -> String {
 
 #[test]
 fn an_unchecked_task_is_checked() {
-    for (line, want) in [("- [ ] a", "- [x] a"), ("1. [ ] a", "1. [x] a")] {
+    for (line, want) in [
+        ("- [ ] a", "- [x] a"),
+        ("1. [ ] a", "1. [x] a"),
+        ("- - [ ] a", "- - [x] a"),
+        ("1. - [ ] a", "1. - [x] a"),
+    ] {
         assert_eq!(cycled_line(line), want, "{line:?}");
     }
 }
@@ -54,11 +60,49 @@ fn a_bullet_gains_a_checkbox_after_its_space() {
         ("-\ta", "-\t[ ] a"),
         ("-  a", "- [ ]  a"),
         ("- ", "- [ ] "),
-        ("- - [ ] a", "- [ ] - [ ] a"),
         ("- [ ]a", "- [ ] [ ]a"),
     ] {
         assert_eq!(cycled_line(line), want, "{line:?}");
     }
+}
+
+/// The checkbox goes after the innermost marker, so it makes a task of the inner item (D10).
+#[test]
+fn a_nested_bullet_gains_a_checkbox_after_the_innermost_marker() {
+    for (line, want) in [
+        ("- 1. a", "- 1. [ ] a"),
+        ("- - a", "- - [ ] a"),
+        ("1. - a", "1. - [ ] a"),
+        ("> - * a", "> - * [ ] a"),
+        ("- -", "- - [ ] "),
+        ("- > a", "- [ ] > a"),
+    ] {
+        assert_eq!(cycled_line(line), want, "{line:?}");
+    }
+}
+
+/// Its checkbox is no box's, so a second one would make two on the line (D10).
+#[test]
+fn a_task_with_no_box_is_skipped() {
+    for text in [
+        "- > - [ ] a",
+        "- > - [x] a\n",
+        "- > - [ ]",
+        "a\n- > - [ ] b",
+    ] {
+        for caret in (0..=text.len()).filter(|&at| text.is_char_boundary(at)) {
+            let line = text[..caret].rfind('\n').map_or(0, |at| at + 1);
+            if text[line..].starts_with('-') {
+                assert_eq!(cycled(text, caret), text, "{text:?} at {caret}");
+            }
+        }
+    }
+    let text = "a\n- > - [ ] b";
+    let all = ByteOffset::new(0)..ByteOffset::new(text.len());
+    assert_eq!(
+        apply(text, &cycle_tasks(text, &parse(text), all)),
+        "- [ ] a\n- > - [ ] b"
+    );
 }
 
 /// An empty item keeps its `•` (D1), so it is a bullet too.
@@ -270,6 +314,13 @@ fn cycle_checked(
             text,
             after
         );
+        prop_assert_eq!(
+            task_markers(&after, start),
+            1,
+            "{:?} became {:?}",
+            text,
+            after
+        );
         let delta = after.len() - text.len();
         prop_assert_eq!(&after[..start], &text[..start]);
         prop_assert_eq!(&after[end + delta..], &text[end..]);
@@ -282,6 +333,21 @@ fn cycle_checked(
         );
     }
     Ok(hunks)
+}
+
+/// The checkboxes pulldown-cmark reads on the line at `start`, the text read as `parse` reads it.
+pub(super) fn task_markers(text: &str, start: usize) -> usize {
+    let text = if text.ends_with('\n') {
+        text.to_owned()
+    } else {
+        format!("{text}\n")
+    };
+    Parser::new_ext(&text, options())
+        .into_offset_iter()
+        .filter(|(event, range)| {
+            matches!(event, Event::TaskListMarker(_)) && line_start(&text, range.start) == start
+        })
+        .count()
 }
 
 /// Whether a code block, the front matter, a table or an HTML block holds a byte of `start..=end`.
@@ -340,7 +406,8 @@ proptest! {
     }
 
     /// On any lines: a cycled line is a task in the next state; a line left as it is is no task,
-    /// and `- [ ] ` after its quotes and spaces makes none, unless a skipped block holds it.
+    /// and `- [ ] ` after its quotes and spaces makes none, unless a skipped block holds it or it
+    /// holds a checkbox with no box.
     #[test]
     fn a_free_form_line_cycles_or_cannot_be_a_task(
         lines in prop::collection::vec(free_line(), 1..6),
@@ -355,7 +422,8 @@ proptest! {
         let start = starts[pick.index(starts.len())];
         let end = text[start..].find('\n').map_or(text.len(), |len| start + len);
         let caret = caret_on(&text, start, end, column);
-        if cycle_checked(&text, start, end, caret)?.is_empty() && !in_block(&text, start, end) {
+        let edited = !cycle_checked(&text, start, end, caret)?.is_empty();
+        if !edited && !in_block(&text, start, end) && task_markers(&text, start) == 0 {
             let lead = text[start..end]
                 .bytes()
                 .take_while(|byte| matches!(byte, b' ' | b'\t' | b'>'))

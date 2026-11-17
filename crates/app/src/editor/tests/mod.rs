@@ -39,6 +39,7 @@ mod task_boxes;
 mod task_click;
 mod task_gutter;
 mod task_key;
+mod task_lead;
 mod wrap;
 
 pub(super) fn with_editor<R>(

@@ -438,7 +438,7 @@ const CATALOGUE: &[Scene] = &[
     },
     Scene {
         name: "markdown-blocks",
-        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, quoted with a lazy line at the quote's edge, and wrapped: each marker hidden under a box on its first row, open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line",
+        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line at the quote's edge, and wrapped: each task's own bullet hidden under a box on its first row, an ordered task's number before its box with no gap, `•` before the box of a task after a bullet, open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw",
         open: markdown_blocks::concealed,
     },
     Scene {

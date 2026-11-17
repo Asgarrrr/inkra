@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, point, px};
+use gpui::{Bounds, Pixels, TextRun, Window, point, px};
 use inkra_markdown::{CodeBlock, Conceal, DisplayLine, Gutter, Heading, Markdown, Span, is_active};
 use inkra_text::{Buffer, ByteOffset};
 
@@ -10,7 +10,7 @@ use super::blocks::{Blocks, Labels};
 use super::dirty::carry;
 use super::line::{LineLayout, LineShape, Placed};
 use super::prefix::{GutterCarry, Prefix, heading_opening, indent, line_prefix};
-use super::runs::{RunStyles, line_runs};
+use super::runs::{RunStyles, line_runs, show};
 use super::{DocumentLayout, LayoutInputs, rows::rows};
 use crate::theme;
 
@@ -211,7 +211,11 @@ impl Build<'_, '_> {
             heading_opening(heading, range, text, font_size, margin),
             line_conceals,
             selection,
-            |range, source, size| show(range, source, line_spans, marked, size, styles, window),
+            |range, hidden, source, size| {
+                show(
+                    range, hidden, source, line_spans, marked, size, styles, window,
+                )
+            },
         );
         let display = display_line(
             range,
@@ -429,24 +433,4 @@ fn display_line(
         within(range.start)..within(range.end),
         hidden.into_iter().chain(active),
     )
-}
-
-/// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
-/// `source` is what `range` shows: its own bytes, or as many others.
-fn show(
-    range: &Range<ByteOffset>,
-    source: &str,
-    spans: &[Span],
-    marked: Option<&Range<ByteOffset>>,
-    font_size: Pixels,
-    styles: &mut RunStyles<'_>,
-    window: &mut Window,
-) -> ShapedLine {
-    let len = range.end - range.start;
-    let identity = DisplayLine::new(ByteOffset::default()..ByteOffset::new(len), []);
-    let runs = line_runs(range, spans, marked, &identity, styles);
-    let text = SharedString::from(source.to_owned());
-    window
-        .text_system()
-        .shape_line(text, font_size, &runs, None)
 }
