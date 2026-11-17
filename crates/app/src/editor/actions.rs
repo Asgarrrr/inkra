@@ -168,12 +168,12 @@ impl EditorView {
         }
     }
 
-    /// A skipped line takes no lease: `as_mut` notifies, which would schedule an autosave.
+    /// An empty batch takes no lease: `as_mut` notifies, which would schedule an autosave.
     fn toggle_task(&mut self, _: &ToggleTask, window: &mut Window, cx: &mut Context<Self>) {
-        let caret = self.cursor();
+        let selected = self.input.state().selection().range();
         let markdown = parses::parsed(self.input.buffer(), cx);
         let buffer = self.input.buffer().read(cx);
-        let hunks = inkra_markdown::cycle_tasks(buffer.text(), &markdown, caret..caret);
+        let hunks = inkra_markdown::cycle_tasks(buffer.text(), &markdown, selected);
         if !hunks.is_empty() {
             let cycle = Diff::new(buffer.version(), hunks);
             self.edit_buffer(window, cx, |state, buffer| state.apply_diff(buffer, &cycle));

@@ -233,6 +233,43 @@ not before the `-`. A caret on a replaced byte lands after it. A second `⌘L`
 cycles the same lines, and typing after `⌘L` lands where the caret was.
 Amended 2026-11-17 after the cross-slice review: no batch edit of its own.
 
+**The batch, checked by one parse.** Amended 2026-11-17 for T4b. The lines
+are the selection's first line and every later line that starts before the
+selection's end, which is (H). A blank line holds only spaces and tabs. The
+state comes from the parse, not from the line's text: the target is checked
+when the first cycled line's gutter has an unchecked task, else unchecked.
+Each cycled line has its candidate splices, in order:
+
+- a task in the other state: its flip;
+- a task already in the target state: none;
+- any other line: the insertion after its bullet (D6's table; an empty item
+  `-` gains ` [ ] `), then `- [ ] ` after its leading `[ \t>]*`. The
+  checkbox holds the target's byte, so under a ticked first line `c` becomes
+  `- [x] c`.
+
+A round applies every line's current candidate to one copy of the text and
+parses it once. A line whose shifted start then has a task in the target state
+keeps its splice; any other line moves to its next candidate, or drops out
+after its last. The first round in which every splice landed returns its batch.
+After three rounds the batch is empty.
+
+The argument: a batch is returned only from a round whose own parse shows each
+of its lines a task in the target state. Every splice lies inside its line, so
+the result holds by construction, whatever a splice does to its neighbour's
+laziness; the empty batch holds trivially. A failing round moves at least one
+line on through at most two candidates, so the rounds end. The cap of three
+covers the second candidates (round 2), then the batch without the lines no
+candidate makes a task (round 3). A longer chain edits nothing rather than
+guess.
+
+So D1 and D6 stay one predicate, and the batch is judged whole: `a\n    b`
+selected cycles both lines, `b` nesting under the new item, though `b` alone
+cannot be a task. Likewise `a\n2. b` becomes `- [ ] a\n2. [ ] b`: after the
+new item `2.` starts a list, though alone it is lazy and takes `- [ ] 2. b`. A
+`⌘L` costs the cached parse, one pulldown-cmark pass for the skipped lines,
+and at most three parses of the spliced copy. This replaces T4a's per-line
+reparse, which cost up to two parses per line and judged each line alone.
+
 ## D7. The struck text
 
 `Styles` gains `DONE` (`crates/markdown/src/styles.rs`, next free bit
@@ -303,7 +340,7 @@ its alphabet already holds tasks.
   loose item, and no nested item, quote or code block inside the item.
 - The cycle: every row of D6's table; a selection ending at column 0; a code
   block, front matter and a table row skipped; a mixed selection lands on the
-  first line's next state.
+  first line's next state; a splice that changes the next line's laziness.
 
 `inkra-markdown`, proptest:
 
@@ -364,9 +401,9 @@ rendered and looked at.
    function with its table and skip rules and their proptest, a one-splice
    edit, the action and binding, the caret mapping, `cmd-l` and `cmd-enter`
    keystroke tests.
-6. **T4b, `⌘L` on a selection** (~0.5 d). The batch edit in `inkra-editor`,
-   the column-0 rule, the uniform next state, the mapped selection, the oracle
-   with batches.
+6. **T4b, `⌘L` on a selection** (~0.5 d). The batch checked by one parse
+   (D6, amended for T4b) through `apply_diff`, the column-0 rule, the uniform
+   next state, the mapped selection, the oracle with batches.
 
 T1a ships before anything else depends on it, because it changes what `parse`
 emits for every list item. T3 and T4a are independent of each other.
@@ -397,18 +434,12 @@ emits for every list item. T3 and T4a are independent of each other.
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
-- **From this spec, in T4a.** A stopgap until T4b: with a selection, `⌘L`
-  cycles the line of the selection's head, and `map_through` maps the
-  selection: neither end takes in the inserted text. The task state comes from the parse, not from the line's text:
-  a line whose gutter has a task flips its checkbox; any other line takes the
-  first of D6's insertions (after its bullet, else `- [ ] ` after its leading
-  `[ \t>]*`) that the reparse makes an unchecked task, else no splice. So D1
-  and D6 are one predicate, and a lazy line (`a\n    b`) or a lazy `2. b`
-  is never given markers that box nothing. An empty item (`-`, `1.`)
-  gains ` [ ] `. A caret on a replaced byte lands after it, and an insertion
-  keeps D6's right bias, both by `map_through`. Amended 2026-11-17 after the
-  T4a review, and after the cross-slice review: the caret on a replaced byte
-  moved from before it to after it.
+- **From this spec, in T4b.** Every failing line moves to its next candidate
+  in the same round, so a line can run out before the line above it settles:
+  with `2. b` and `    c` selected after `x`, `c` is lazy under the failing
+  `2. [ ] b` and drops out, though `- [ ] 2. b` would let it nest. Moving only
+  the first failing line would land it but cost a parse per line on `⌘A`; the
+  cap of three parses wins. Added 2026-11-17 after the T4b review.
 
 ## Deferred
 

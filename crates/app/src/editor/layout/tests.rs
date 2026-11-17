@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{App, AppContext, Entity, Pixels, TestAppContext, Window, px};
-use inkra_text::{Buffer, ByteOffset, Diff};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff};
 use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
@@ -59,6 +59,8 @@ enum Step {
     Drag(Index),
     /// A click on a task's box, picked among the text's tasks.
     Toggle(Index),
+    /// `⌘L` on a selection between two points: its batch as one `apply_diff`.
+    Cycle(Index, Index),
     Wrap(Option<f32>),
     Margin,
     CodeBlockWrap,
@@ -81,6 +83,7 @@ fn step() -> impl Strategy<Value = Step> {
         2 => any::<Index>().prop_map(Step::Caret),
         2 => any::<Index>().prop_map(Step::Drag),
         3 => any::<Index>().prop_map(Step::Toggle),
+        3 => (any::<Index>(), any::<Index>()).prop_map(|(a, b)| Step::Cycle(a, b)),
         1 => prop::sample::select(vec![None, Some(120.), Some(300.)]).prop_map(Step::Wrap),
         1 => Just(Step::Margin),
         1 => Just(Step::CodeBlockWrap),
@@ -206,6 +209,17 @@ impl Inputs {
                     assert!(buffer.apply_diff(&Diff::new(buffer.version(), vec![task.flip()])));
                     self.selection = text_start..text_start;
                 }
+                self.marked = None;
+            }
+            Step::Cycle(a, b) => {
+                let [a, b] = [*a, *b].map(|at| point(buffer, at));
+                let (start, end) = (a.min(b), a.max(b));
+                let markdown = inkra_markdown::parse(buffer.text());
+                let hunks = inkra_markdown::cycle_tasks(buffer.text(), &markdown, start..end);
+                let cycle = Diff::new(buffer.version(), hunks);
+                assert!(buffer.apply_diff(&cycle));
+                let start = cycle.map(start, Bias::Right);
+                self.selection = start..cycle.map(end, Bias::Left).max(start);
                 self.marked = None;
             }
             Step::Wrap(width) => self.wrap_width = width.map(px),

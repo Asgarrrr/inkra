@@ -1,4 +1,5 @@
-//! `⌘L` cycles the caret's line through the task states (task boxes spec, D6).
+//! `⌘L` cycles the caret's line, or every line of the selection, through the task states (task
+//! boxes spec, D6).
 
 use gpui::{TestAppContext, VisualTestContext, WindowHandle};
 
@@ -51,4 +52,33 @@ fn cmd_l_on_a_task_ending_the_note_ticks_it(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "- [ ] test\n- [ ]\n- [ ]");
     cx.simulate_keystrokes("cmd-down cmd-l");
     assert_eq!(text(&window, &mut cx), "- [ ] test\n- [ ]\n- [x]");
+}
+
+/// The selection ends at column 0 of `d`, which stays; each press is one undo step.
+#[gpui::test]
+fn cmd_l_on_a_selection_cycles_every_line_of_it(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "a\nb\nc\nd");
+    cx.simulate_keystrokes("cmd-up shift-down shift-down shift-down cmd-l");
+    assert_eq!(text(&window, &mut cx), "- [ ] a\n- [ ] b\n- [ ] c\nd");
+
+    cx.simulate_keystrokes("cmd-l");
+    assert_eq!(text(&window, &mut cx), "- [x] a\n- [x] b\n- [x] c\nd");
+    cx.simulate_keystrokes("cmd-l");
+    assert_eq!(text(&window, &mut cx), "- [ ] a\n- [ ] b\n- [ ] c\nd");
+
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text(&window, &mut cx), "- [x] a\n- [x] b\n- [x] c\nd");
+    cx.simulate_keystrokes("cmd-z cmd-z");
+    assert_eq!(text(&window, &mut cx), "a\nb\nc\nd");
+}
+
+/// (I): the front matter and the blank lines stay as they are.
+#[gpui::test]
+fn cmd_a_cmd_l_leaves_the_front_matter(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "---\ntitle: a\n---\n\nfirst\nsecond\n");
+    cx.simulate_keystrokes("cmd-a cmd-l");
+    assert_eq!(
+        text(&window, &mut cx),
+        "---\ntitle: a\n---\n\n- [ ] first\n- [ ] second\n"
+    );
 }

@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Tag};
 
-use crate::spans::{line_start, push, to_offsets};
+use crate::spans::{line_ranges, line_start, push, to_offsets};
 use crate::{Conceal, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,23 +171,22 @@ fn gutters(text: &str, quotes: &[Range<usize>]) -> Vec<Gutter> {
     // The end of each quote open on this line.
     let mut open: Vec<usize> = Vec::new();
     let mut rest = quotes;
-    let mut start = 0;
-    loop {
-        if open.is_empty() {
-            let Some(next) = rest.first() else {
-                break;
-            };
-            start = line_start(text, next.start);
-        }
-        let end = text[start..]
-            .find('\n')
-            .map_or(text.len(), |len| start + len);
+    let Some(first) = rest.first() else {
+        return gutters;
+    };
+    let first = line_start(text, first.start);
+    for Range { start, end } in line_ranges(text, first) {
         let entering = rest.iter().take_while(|quote| quote.start <= end).count();
+        if open.is_empty() && entering == 0 {
+            if rest.is_empty() {
+                break;
+            }
+            continue;
+        }
         open.extend(rest[..entering].iter().map(|quote| quote.end));
         rest = &rest[entering..];
         gutters.push(gutter(text, start..end, open.len()));
         open.retain(|&quote_end| end < quote_end);
-        start = end + 1;
     }
     gutters
 }
