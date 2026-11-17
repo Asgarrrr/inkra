@@ -6,8 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{App, AppContext, Entity, Pixels, TestAppContext, Window, px};
-use inkra_editor::{EditorState, Selection};
-use inkra_text::{Buffer, ByteOffset};
+use inkra_text::{Buffer, ByteOffset, Diff};
 use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
@@ -200,12 +199,12 @@ impl Inputs {
                 let tasks: Vec<_> = markdown
                     .gutters
                     .iter()
-                    .filter_map(|gutter| gutter.task.as_ref())
+                    .filter_map(|gutter| Some((gutter.task.as_ref()?, gutter.range.end)))
                     .collect();
                 if !tasks.is_empty() {
-                    let mut state = EditorState::new(Selection::at(self.selection.start));
-                    state.toggle_task(buffer, tasks[pick.index(tasks.len())].checkbox.clone());
-                    self.selection = state.selection().range();
+                    let (task, text_start) = tasks[pick.index(tasks.len())];
+                    assert!(buffer.apply_diff(&Diff::new(buffer.version(), vec![task.flip()])));
+                    self.selection = text_start..text_start;
                 }
                 self.marked = None;
             }

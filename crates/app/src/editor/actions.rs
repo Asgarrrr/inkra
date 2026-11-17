@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use gpui::{ClipboardItem, Context, Div, InteractiveElement, Window, actions};
 use inkra_editor::{Copied, EditorState, LogicalMovement};
+use inkra_text::Diff;
 
 use super::motion::Vertical;
 use super::parses;
@@ -171,9 +172,11 @@ impl EditorView {
     fn toggle_task(&mut self, _: &ToggleTask, window: &mut Window, cx: &mut Context<Self>) {
         let caret = self.cursor();
         let markdown = parses::parsed(self.input.buffer(), cx);
-        let text = self.input.buffer().read(cx).text();
-        if let [splice] = inkra_markdown::cycle_tasks(text, &markdown, caret..caret).as_slice() {
-            self.edit_buffer(window, cx, |state, buffer| state.splice(buffer, splice));
+        let buffer = self.input.buffer().read(cx);
+        let hunks = inkra_markdown::cycle_tasks(buffer.text(), &markdown, caret..caret);
+        if !hunks.is_empty() {
+            let cycle = Diff::new(buffer.version(), hunks);
+            self.edit_buffer(window, cx, |state, buffer| state.apply_diff(buffer, &cycle));
         }
     }
 

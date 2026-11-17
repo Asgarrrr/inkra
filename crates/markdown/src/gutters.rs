@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::ByteOffset;
+use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Tag};
 
 use crate::spans::{line_start, push, to_offsets};
@@ -30,6 +30,18 @@ pub struct Task {
     /// The three checkbox bytes.
     pub checkbox: Range<ByteOffset>,
     pub checked: bool,
+}
+
+impl Task {
+    /// Ticks or clears it by its middle byte alone, so `[X]` clears as `[x]` does (D5).
+    #[must_use]
+    pub fn flip(&self) -> Hunk {
+        let middle = self.checkbox.start + 1;
+        Hunk {
+            range: middle..middle + 1,
+            text: if self.checked { " " } else { "x" }.to_owned(),
+        }
+    }
 }
 
 /// Each list item's marker, decided at the item's first event that is not one `Start(Paragraph)`

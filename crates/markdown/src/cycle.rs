@@ -22,12 +22,7 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, lines: Range<ByteOffset>) ->
         .map_or(text.len(), |len| start + len);
     debug_assert!(lines.end.get() <= end, "a range across lines");
     if let Some(task) = task_at(markdown, start) {
-        let middle = task.checkbox.start + 1;
-        let mark = if task.checked { " " } else { "x" };
-        return vec![Hunk {
-            range: middle..middle + 1,
-            text: mark.to_owned(),
-        }];
+        return vec![task.flip()];
     }
     if skipped(text).any(|block| block.contains(&start)) {
         return Vec::new();
