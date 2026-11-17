@@ -233,14 +233,23 @@ directly inside the item, continuation and lazy lines included.
   `Open` and, in a loose item, to the already open paragraph's `Open`. Later
   paragraphs of the item inherit it through `Open::enter` (`parse.rs:255-258`).
 - **Not inherited by a block.** `DONE` is dropped when a list, a quote or a
-  code block opens inside the item. Nested items are not struck.
-- **Markers are not struck.** Gaps are styled `open.styles | MARKER`
-  (`parse.rs:303-305`), so a continuation line's indent and a revealed
-  marker's space carry `DONE`. `markdown_style`
-  (`crates/app/src/theme/markdown.rs`) strikes `DONE` only when `MARKER` is
-  absent, and colours it `md_marker`.
+  code block opens inside the item. Nested items are not struck. Any other
+  block of the item (a heading, a table, an HTML block) inherits it and is
+  struck. Added 2026-11-17 after the T3 review: these are the item's own text
+  as much as a paragraph is.
+- **Markers are not struck.** The contract: `DONE` is on every non-`MARKER`
+  span of the item's own text, and a `MARKER` span may carry it.
+  `markdown_style` (`crates/app/src/theme/markdown.rs`) strikes `DONE` only
+  when `MARKER` is absent, and colours it `md_marker`. Gaps are styled
+  `open.indent | MARKER`; the resolution adds `DONE` to `indent` too, so a
+  continuation line's indent carries it. A loose item's own marker does not:
+  its gap is styled before the slot resolves on the paragraph. Amended
+  2026-11-17 after the T3 review.
 - Continuation and lazy lines restyle through the span diff
   (`changed.rs:113-115`), so a toggle restyles every row of the item.
+- **A wrapped row strikes its trailing space.** The space that ends a wrapped
+  row is the item's text, so the line runs past the last word. Accepted by the
+  owner 2026-11-17 after T3.
 
 One predicate decides both the box and `DONE`: the pending slot resolving a
 task whose marker leads its line (D1). A task that gets no gutter (`- - [ ] a`, markdown-blocks item 13) gets neither box nor
@@ -277,9 +286,9 @@ its alphabet already holds tasks.
   `- a\n  - [ ] b`: the inner line has a gutter task.
 - The conceal covers the task part; a caret at 0 in `- [ ] a` touches it; a
   caret at the text start does not.
-- `DONE` on `- [x] a` covers `a` only; on a continuation line's text but not
-  its indent; on every paragraph of a loose item; not on a nested item, a
-  quote or a code block inside the item.
+- The struck text (`DONE` without `MARKER`) of `- [x] a` is `a` only; it
+  covers a continuation line's text but not its indent, every paragraph of a
+  loose item, and no nested item, quote or code block inside the item.
 - The cycle: every row of D6's table; a selection ending at column 0; a code
   block, front matter and a table row skipped; a mixed selection lands on the
   first line's next state.

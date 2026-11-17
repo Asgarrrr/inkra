@@ -38,6 +38,22 @@ fn strikethrough_is_struck() {
 }
 
 #[test]
+fn a_done_task_is_struck_and_dimmed_but_not_its_markers() {
+    let base = TextStyle::default();
+    let marker = Hsla::from(builtin::dark().colors.md_marker);
+    let done = markdown_style(&base, Styles::DONE);
+    assert!(done.strikethrough.is_some());
+    assert_eq!(done.color, marker);
+    assert_eq!(
+        markdown_style(&base, Styles::DONE | Styles::LINK).color,
+        marker
+    );
+    let gap = markdown_style(&base, Styles::DONE | Styles::MARKER);
+    assert!(gap.strikethrough.is_none());
+    assert_eq!(gap.color, marker);
+}
+
+#[test]
 fn a_heading_is_bold_at_the_body_size() {
     let base = TextStyle::default();
     let style = markdown_style(&base, Styles::heading(HeadingLevel::H1));

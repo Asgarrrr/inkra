@@ -18,6 +18,7 @@ use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
 
 mod layer;
+mod toggle;
 
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",

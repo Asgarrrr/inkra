@@ -30,6 +30,8 @@ impl Styles {
     pub const QUOTE: Self = Self(1 << 9);
     pub const FRONTMATTER: Self = Self(1 << 10);
     pub const CODE_BLOCK: Self = Self(1 << 11);
+    /// A checked task item's own text (task boxes spec, D7).
+    pub const DONE: Self = Self(1 << 12);
 
     #[must_use]
     pub fn heading(level: HeadingLevel) -> Self {
@@ -44,6 +46,11 @@ impl Styles {
     #[must_use]
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
+    }
+
+    #[must_use]
+    pub fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
     }
 
     #[must_use]
