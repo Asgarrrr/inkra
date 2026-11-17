@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b58bb2ac696a046207936f25544117696be9b4717fae62a01dc6262c1cbec861 # shrinks to lines = ["[>>", ""], newline = false, ends = (Index(0), Index(14757395258967641293))
+cc a93cdefcee344d937b93daedf21114b3cd45f4ee2d8556a1a24da57d27f0e881 # shrinks to lines = ["[", "\t"], newline = false, ends = (Index(9223372036854775808), Index(9223372036854775808))
+cc 60b94a07bf0a5e9eaf071cab2d02f4006b8762053eeb1a8a9a821df890be2190 # shrinks to lines = ["a1]", ">X]", ">", "XX)xx\t"], newline = true, ends = (Index(4099276460824344804), Index(0))

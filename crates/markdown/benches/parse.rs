@@ -1,7 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use inkra_markdown::parse;
+use inkra_markdown::{cycle_tasks, parse};
+use inkra_text::ByteOffset;
 
 /// Bytes: the live-preview spec's X1 table, then the sizes that set `OPEN_PARSE_LIMIT`.
 const SIZES: [usize; 6] = [5_000, 50_000, 500_000, 1_000_000, 2_000_000, 4_000_000];
@@ -45,5 +46,20 @@ fn bench_parse(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_parse);
+/// `⌘A ⌘L`: the batch over every line, from the cached parse (task boxes spec, D6).
+fn bench_cycle_all(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cycle_tasks_all");
+    for bytes in [50_000, 500_000] {
+        let note = build_note(bytes);
+        let markdown = parse(&note);
+        let all = ByteOffset::new(0)..ByteOffset::new(note.len());
+        group.throughput(Throughput::Bytes(note.len() as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &note, |b, note| {
+            b.iter(|| cycle_tasks(black_box(note), &markdown, all.clone()));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_parse, bench_cycle_all);
 criterion_main!(benches);

@@ -7,7 +7,7 @@ use super::cycle_tasks;
 use crate::cmark::options;
 use crate::parse;
 
-fn apply(text: &str, hunks: &[Hunk]) -> String {
+pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
     let mut out = text.to_owned();
     for hunk in hunks.iter().rev() {
         out.replace_range(hunk.range.start.get()..hunk.range.end.get(), &hunk.text);
@@ -231,7 +231,7 @@ fn skipped() -> impl Strategy<Value = (String, bool)> {
 }
 
 /// Whether the parse boxes the line starting at `start`, and checked.
-fn task_at(text: &str, start: usize) -> Option<bool> {
+pub(super) fn task_at(text: &str, start: usize) -> Option<bool> {
     parse(text)
         .gutters
         .into_iter()
@@ -285,7 +285,7 @@ fn cycle_checked(
 }
 
 /// Whether a code block, the front matter, a table or an HTML block holds a byte of `start..=end`.
-fn in_block(text: &str, start: usize, end: usize) -> bool {
+pub(super) fn in_block(text: &str, start: usize, end: usize) -> bool {
     Parser::new_ext(text, options())
         .into_offset_iter()
         .any(|(event, range)| {
@@ -300,7 +300,7 @@ fn in_block(text: &str, start: usize, end: usize) -> bool {
 }
 
 /// A free-form line, mostly markers, or one that opens a block.
-fn free_line() -> impl Strategy<Value = String> {
+pub(super) fn free_line() -> impl Strategy<Value = String> {
     prop_oneof![
         4 => "[ \t>*+1.)\\[\\]xXa-]{0,8}",
         1 => prop::sample::select(vec!["```", "<div>", "---", "| a |"]).prop_map(str::to_owned),

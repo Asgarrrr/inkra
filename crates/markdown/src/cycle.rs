@@ -1,6 +1,8 @@
-//! `⌘L`: the splices that cycle a line's task state (task boxes spec, D6).
+//! `⌘L`: the splices that cycle the task state of the selection's lines (task boxes spec, D6).
 
+use std::iter;
 use std::ops::Range;
+use std::vec;
 
 use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Parser, Tag};
@@ -10,41 +12,148 @@ use crate::parse::line_start_prefix;
 use crate::spans::line_start;
 use crate::{Markdown, Task, parse};
 
-/// The splices that cycle the task state of the lines `lines` touches, which lie on one line, as
-/// `markdown`, the parse of `text`, reads it: a task's checkbox flips, and any other line gains
-/// the first marker the reparse makes an unchecked task, else nothing. None for a line inside a
-/// code block, the front matter, a table or an HTML block.
+/// Parses of a spliced copy per `⌘L`: the second candidates, then the batch without the lines
+/// no candidate makes a task (D6, amended for T4b).
+const ROUNDS: usize = 3;
+
+/// One cycled line: its start and the splices still to try, in order.
+struct Cycled {
+    start: usize,
+    candidates: vec::IntoIter<Hunk>,
+}
+
+impl Cycled {
+    fn splice(&self) -> Option<&Hunk> {
+        self.candidates.as_slice().first()
+    }
+}
+
+/// The splices that cycle the task state of every line `selection` touches, as `markdown`, the
+/// parse of `text`, reads it: each takes the state after the first cycled line's, and the whole
+/// batch, applied at once, reparses each changed line as a task in that state. None for a line
+/// inside a code block, the front matter, a table or an HTML block, nor for a blank line when
+/// the selection spans more than one.
 #[must_use]
-pub fn cycle_tasks(text: &str, markdown: &Markdown, lines: Range<ByteOffset>) -> Vec<Hunk> {
-    let start = line_start(text, lines.start.get());
-    let end = text[start..]
-        .find('\n')
-        .map_or(text.len(), |len| start + len);
-    debug_assert!(lines.end.get() <= end, "a range across lines");
-    if let Some(task) = task_at(markdown, start) {
-        return vec![task.flip()];
-    }
-    if skipped(text).any(|block| block.contains(&start)) {
+pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>) -> Vec<Hunk> {
+    let lines = cycled_lines(text, &selection);
+    let Some(first) = lines.first() else {
         return Vec::new();
-    }
-    let lead = line_start_prefix(text, &(start..end));
-    bullet(&text.as_bytes()[start + lead..end])
-        .map(|(at, marker)| (lead + at, marker))
+    };
+    let checked = task_at(markdown, first.start).is_some_and(|task| !task.checked);
+    let mut cycled: Vec<Cycled> = lines
         .into_iter()
-        .chain([(lead, "- [ ] ")])
-        .map(|(at, marker)| {
-            let at = ByteOffset::new(start + at);
+        .map(|line| Cycled {
+            start: line.start,
+            candidates: candidates(text, markdown, line, checked).into_iter(),
+        })
+        .collect();
+    for _ in 0..ROUNDS {
+        cycled.retain(|line| line.splice().is_some());
+        if cycled.is_empty() {
+            break;
+        }
+        let landed = landed(text, &cycled, checked);
+        if landed.iter().all(|&landed| landed) {
+            return cycled
+                .into_iter()
+                .filter_map(|mut line| line.candidates.next())
+                .collect();
+        }
+        for (line, landed) in cycled.iter_mut().zip(landed) {
+            if !landed {
+                line.candidates.next();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// The lines `selection` touches, each without its newline: the first, then every line starting
+/// before the selection's end (H). Skipped blocks go, and blank lines when there are several.
+fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> {
+    let first = line_start(text, selection.start.get());
+    let lines: Vec<Range<usize>> = iter::successors(Some(line_at(text, first)), |line| {
+        (line.end < text.len()).then(|| line_at(text, line.end + 1))
+    })
+    .take_while(|line| line.start == first || line.start < selection.end.get())
+    .collect();
+    let several = lines.len() > 1;
+    let mut blocks = skipped(text).peekable();
+    lines
+        .into_iter()
+        .filter(|line| {
+            !(several
+                && text[line.clone()]
+                    .bytes()
+                    .all(|b| matches!(b, b' ' | b'\t')))
+        })
+        .filter(|line| {
+            while blocks.next_if(|block| block.end <= line.start).is_some() {}
+            blocks.peek().is_none_or(|block| block.start > line.start)
+        })
+        .collect()
+}
+
+/// The line starting at `start`, without its newline.
+fn line_at(text: &str, start: usize) -> Range<usize> {
+    start
+        ..text[start..]
+            .find('\n')
+            .map_or(text.len(), |len| start + len)
+}
+
+/// The splices that could put `line` in the state `checked`, in order: a task's flip, or none when
+/// it is in that state already; any other line gains a checkbox after its bullet, else `- ` and a
+/// checkbox after its leading `[ \t>]*`.
+fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool) -> Vec<Hunk> {
+    if let Some(task) = task_at(markdown, line.start) {
+        return (task.checked != checked)
+            .then(|| task.flip())
+            .into_iter()
+            .collect();
+    }
+    let checkbox = if checked { "[x] " } else { "[ ] " };
+    let lead = line_start_prefix(text, &line);
+    bullet(&text.as_bytes()[line.start + lead..line.end])
+        .map(|(at, space)| (lead + at, space))
+        .into_iter()
+        .chain([(lead, "- ")])
+        .map(|(at, before)| {
+            let at = ByteOffset::new(line.start + at);
             Hunk {
                 range: at..at,
-                text: marker.to_owned(),
+                text: format!("{before}{checkbox}"),
             }
         })
-        .find(|hunk| {
-            let mut spliced = text.to_owned();
-            spliced.insert_str(hunk.range.start.get(), &hunk.text);
-            task_at(&parse(&spliced), start).is_some_and(|task| !task.checked)
-        })
+        .collect()
+}
+
+/// Whether each line's current splice, applied with all the others to one copy, leaves the line
+/// a task in the state `checked`, as one parse of the copy reads it.
+fn landed(text: &str, cycled: &[Cycled], checked: bool) -> Vec<bool> {
+    let hunks: Vec<(usize, &Hunk)> = cycled
+        .iter()
+        .filter_map(|line| Some((line.start, line.splice()?)))
+        .collect();
+    let mut spliced = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (_, hunk) in &hunks {
+        spliced.push_str(&text[copied..hunk.range.start.get()]);
+        spliced.push_str(&hunk.text);
+        copied = hunk.range.end.get();
+    }
+    spliced.push_str(&text[copied..]);
+    let parsed = parse(&spliced);
+    // A splice lies inside its line, so a line moves by the growth of the splices before it.
+    let mut shift = 0;
+    hunks
         .into_iter()
+        .map(|(start, hunk)| {
+            let landed =
+                task_at(&parsed, start + shift).is_some_and(|task| task.checked == checked);
+            shift += hunk.text.len() - (hunk.range.end - hunk.range.start);
+            landed
+        })
         .collect()
 }
 
@@ -59,7 +168,8 @@ fn task_at(markdown: &Markdown, start: usize) -> Option<&Task> {
 }
 
 /// Where a checkbox goes after a leading bullet, `-`, `*`, `+` or one to nine digits and `.` or
-/// `)` (`CommonMark` 5.2): past its one space or tab, or with a space of its own on an empty item.
+/// `)` (`CommonMark` 5.2), and what goes before it: past its one space or tab, or a space of its
+/// own on an empty item.
 fn bullet(bytes: &[u8]) -> Option<(usize, &'static str)> {
     let digits = bytes
         .iter()
@@ -72,14 +182,14 @@ fn bullet(bytes: &[u8]) -> Option<(usize, &'static str)> {
         _ => return None,
     };
     match bytes.get(len) {
-        Some(b' ' | b'\t') => Some((len + 1, "[ ] ")),
-        None => Some((len, " [ ] ")),
+        Some(b' ' | b'\t') => Some((len + 1, "")),
+        None => Some((len, " ")),
         Some(_) => None,
     }
 }
 
-/// Each code block, front matter, table and HTML block, from its first line's start: a fenced
-/// block in a list item starts at its fence, past the line's start.
+/// Each code block, front matter, table and HTML block, from its first line's start, in order: a
+/// fenced block in a list item starts at its fence, past the line's start. None holds another.
 fn skipped(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
     Parser::new_ext(text, options())
         .into_offset_iter()
@@ -96,3 +206,6 @@ fn skipped(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod batch_tests;
