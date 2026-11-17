@@ -130,6 +130,8 @@ fn a_tab_indented_nested_item_has_its_marker() {
         vec![("-", "-", "•"), ("-", "-", "•")]
     );
     assert_eq!(struck("- a\n\t- [x] b"), ["b"]);
+    assert_eq!(tasks(">\t- [ ] b"), vec![(">\t- [ ] ", "[ ]", false)]);
+    assert_eq!(concealed(">\t- b"), vec![(">", ">", ""), ("-", "-", "•")]);
 }
 
 #[test]
