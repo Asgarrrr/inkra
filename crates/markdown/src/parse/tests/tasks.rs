@@ -120,6 +120,18 @@ fn a_nested_task_on_its_own_line_has_a_gutter() {
     );
 }
 
+/// pulldown-cmark starts a tab-indented item at the line ending before it.
+#[test]
+fn a_tab_indented_nested_item_has_its_marker() {
+    assert_eq!(tasks("- a\n\t- [ ] b"), vec![("\t- [ ] ", "[ ]", false)]);
+    assert_eq!(tasks("- a\n\n\t- [x] b"), vec![("\t- [x] ", "[x]", true)]);
+    assert_eq!(
+        concealed("- a\n\t- b"),
+        vec![("-", "-", "•"), ("-", "-", "•")]
+    );
+    assert_eq!(struck("- a\n\t- [x] b"), ["b"]);
+}
+
 #[test]
 fn the_task_conceal_covers_the_task_part_and_hides_an_ordered_number() {
     assert_eq!(concealed("- [ ] a"), vec![("- [ ]", "- [ ]", "")]);

@@ -180,11 +180,17 @@ fn a_line_no_marker_makes_a_task_edits_nothing() {
         ("a\n    - [ ] b", 2),
         ("a\n    b", 2),
         ("- a\n      - [ ] b", 4),
-        ("- a\n\t- [ ] b", 4),
         ("```\na\n", 6),
     ] {
         assert_eq!(cycled(text, caret), text, "{text:?} at {caret}");
     }
+}
+
+#[test]
+fn a_tab_indented_nested_item_cycles() {
+    assert_eq!(cycled("- a\n\t- [ ] b", 4), "- a\n\t- [x] b");
+    assert_eq!(cycled("- a\n\t- [x] b", 4), "- a\n\t- [ ] b");
+    assert_eq!(cycled("- a\n\t- b", 4), "- a\n\t- [ ] b");
 }
 
 /// A checkbox ending the text is a task, so it flips instead of gaining a second one.
