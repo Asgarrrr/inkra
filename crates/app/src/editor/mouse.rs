@@ -2,7 +2,7 @@ use gpui::{
     App, Context, DispatchPhase, Entity, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, Window, px,
 };
-use inkra_markdown::{Link, links};
+use inkra_markdown::{Link, Task, links};
 
 use super::{EditorView, LinkFollowed};
 use crate::open::Open;
@@ -31,6 +31,12 @@ impl EditorView {
             .min_by_key(|link| link.range.end - link.range.start)
     }
 
+    /// The task whose box the pointer is on, on a layout of the buffer's text.
+    fn task_under(&self, position: Point<Pixels>, cx: &App) -> Option<Task> {
+        let (layout, local) = self.input.hit_test(position)?;
+        layout.task_at(local, self.input.buffer().read(cx).version())
+    }
+
     pub(super) fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -42,7 +48,16 @@ impl EditorView {
             self.is_selecting = true;
             return;
         };
-        // Before `is_selecting`: a ⌘-click follows and must not start a drag selection.
+        // Before `is_selecting`, as a ⌘-click: a toggle starts no drag selection. `⌘` and `⇧` skip
+        // the box, to follow a link and extend the selection; a window's first click only activates it.
+        if !(event.modifiers.platform || event.modifiers.shift || event.first_mouse)
+            && let Some(task) = self.task_under(event.position, cx)
+        {
+            self.edit_buffer(window, cx, |state, buffer| {
+                state.toggle_task(buffer, task.checkbox);
+            });
+            return;
+        }
         if event.modifiers.platform
             && let Some(link) = self.link_under(event.position, cx)
         {

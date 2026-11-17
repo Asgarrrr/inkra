@@ -14,7 +14,7 @@ use inkra_text::ByteOffset;
 use gutter::{Geometry, GutterLayout, Reveal};
 use margin::{Hanging, Opening};
 
-pub(super) use gutter::GutterCarry;
+pub(super) use gutter::{Boxed, GutterCarry};
 pub(super) use margin::heading_opening;
 
 pub(super) enum Prefix {
@@ -67,11 +67,13 @@ impl Prefix {
         }
     }
 
-    /// The box over a concealed checkbox: its `x` span on row 0, and whether it is checked.
-    pub(super) fn task_box(&self) -> Option<(Range<Pixels>, bool)> {
+    /// The box over a concealed checkbox: its `x` span on row 0, and its task.
+    pub(super) fn task_box(&self) -> Option<(Range<Pixels>, &Boxed)> {
         match self {
             Self::Margin(_) => None,
-            Self::Gutter(gutter) => Some((gutter.geometry.checkbox.clone()?, gutter.boxed?)),
+            Self::Gutter(gutter) => {
+                Some((gutter.geometry.checkbox.clone()?, gutter.boxed.as_ref()?))
+            }
         }
     }
 

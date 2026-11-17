@@ -156,6 +156,9 @@ after focusing and before the `⌘`-click link branch (46-59).
   it starts no drag selection.
 - A click with `⌘` or `⇧` held skips the box: `⌘`-click keeps following
   links, `⇧`-click keeps extending the selection.
+- The click that activates an inactive window skips the box too
+  (`first_mouse`). It only activates the window, as Electron's default does.
+  Added 2026-11-17 by the owner after the T2 review.
 - **(G)** Before it edits, the click checks that the layout's version
   (`shaped_at`, `layout/mod.rs:81-82`) equals the buffer's. After a reload,
   the last layout describes the old text until the next render
@@ -363,6 +366,14 @@ emits for every list item. T3 and T4a are independent of each other.
   and the checkbox's `x` span in T1b, where paint first reads it: an unread
   field fails clippy's `dead_code`. `prefix.rs` is near 400 lines after T1a;
   T1b plans its split.
+- **From this spec, in T2.** `task_at` takes the buffer's version and answers
+  `None` on a mismatch, so the check (G) reads `shaped_at` where it lives;
+  `layout/mod.rs` is at its 400 lines and gains no accessor. The click passes
+  the version; a `GutterLayout`'s `Boxed` holds the checkbox from the line's
+  start, so a carried line stays line-relative. The hit test (F) is
+  containment in the painted square, which fits inside row 0
+  (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
+  has no separate row check.
 
 ## Deferred
 

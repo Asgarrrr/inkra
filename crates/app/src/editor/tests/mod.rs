@@ -36,6 +36,7 @@ mod shapes;
 mod split;
 mod swap;
 mod task_boxes;
+mod task_click;
 mod task_gutter;
 mod wrap;
 

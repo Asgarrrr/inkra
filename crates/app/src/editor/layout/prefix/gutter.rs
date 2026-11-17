@@ -18,8 +18,15 @@ pub(in crate::editor::layout) struct GutterLayout {
     /// `Some` only while a part is revealed (a caret touches a `>` or the task part, spec D2).
     pub(super) shown: Option<Box<Shown>>,
     pub(super) geometry: Geometry,
-    /// Whether the line's own task is checked, while its task part is concealed: a box paints.
-    pub(super) boxed: Option<bool>,
+    /// The line's own task, while its task part is concealed: a box paints.
+    pub(super) boxed: Option<Boxed>,
+}
+
+/// A concealed task: its checkbox from the line's start, never absolute, so its line carries.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::editor::layout) struct Boxed {
+    pub(in crate::editor::layout) checkbox: Range<usize>,
+    pub(in crate::editor::layout) checked: bool,
 }
 
 impl GutterLayout {
@@ -156,6 +163,7 @@ impl<'a> GutterCarry<'a> {
         } else {
             self.carried.clone()
         };
+        let start = gutter.range.start;
         GutterLayout {
             len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
@@ -164,7 +172,10 @@ impl<'a> GutterCarry<'a> {
                 .task
                 .as_ref()
                 .filter(|_| !reveal.task)
-                .map(|task| task.checked),
+                .map(|task| Boxed {
+                    checkbox: task.checkbox.start - start..task.checkbox.end - start,
+                    checked: task.checked,
+                }),
         }
     }
 }
