@@ -187,6 +187,13 @@ fn a_line_no_marker_makes_a_task_edits_nothing() {
     }
 }
 
+/// A checkbox ending the text is a task, so it flips instead of gaining a second one.
+#[test]
+fn a_task_ending_the_text_flips() {
+    let text = "- [ ] test\n- [ ]\n- [ ]";
+    assert_eq!(cycled(text, text.len()), "- [ ] test\n- [ ]\n- [x]");
+}
+
 /// A lazy `2.` is paragraph text, so it takes a bullet of its own.
 #[test]
 fn a_lazy_number_becomes_a_task_as_plain_text() {

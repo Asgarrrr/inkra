@@ -62,6 +62,13 @@ spaces). The pending-slot rule decides the item's marker (markdown-blocks,
 item 7; Zed `markdown.rs:3820-3836`). The parser facts table of
 markdown-blocks holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 
+`parse` reads the text's last line as if a `\n` ended it: a text without a
+final `\n` is parsed with one appended, so `- [ ]` there is a task with no
+text, as `- [ ]\n` is. No clamp is needed: no span or marker holds a `\n`,
+and every element range ends before its line ending, so no output reaches
+the added byte. A proptest pins it (`parse/tests/last_line.rs`). Amended
+2026-11-17 after T4a.
+
 Where the code goes (audit): `parse.rs` is 381 lines, so the pending slot and
 the task gutter are built in `gutters.rs` (125 lines). Task gutters merge into
 the quote gutters' post-pass (`parse.rs:122-123`) in line order.
@@ -282,7 +289,7 @@ its alphabet already holds tasks.
 
 - `- [ ] a`, `- [x] a`, `- [X] a`, `* [ ] a`, `1. [ ] a`, `> - [ ] a`,
   `  - [ ] a`, `-    [ ] a`, loose `- [ ] a\n\n- [x] b`: a gutter with a task.
-- `- [ ]` at the end of the text and `- [ ]a`: no task. `- [ ]\n`: a task with
+- `- [ ]a`: no task. `- [ ]\n` and `- [ ]` at the end of the text: a task with
   no text. `-\n`: keeps its `•`. `- - [ ] a`: two `•`, no gutter task.
   `- a\n  - [ ] b`: the inner line has a gutter task.
 - The conceal covers the task part; a caret at 0 in `- [ ] a` touches it; a
@@ -411,8 +418,9 @@ emits for every list item. T3 and T4a are independent of each other.
 1. **After `⌘Z` the caret sits inside the checkbox**, so the task part shows
    as text until the caret leaves. Recommended: accept; the reveal rule says
    so.
-2. **`- [ ]` with no newline at the end of the note is no task.** Recommended:
-   accept pulldown-cmark's behaviour; the box appears once a newline follows.
+2. **`- [ ]` with no newline at the end of the note is no task.** Decided:
+   reversed by the owner 2026-11-17 after T4a: the last line parses as if a
+   newline followed it (D1). `⌘L` on that line added a second checkbox.
 3. **A click on the box of a task with no text (`- [ ]\n`) reveals its
    marker.** Its text start is the conceal's end, and a caret at a conceal's
    end touches it (`crates/markdown/src/reveal.rs:15`). Recommended: accept;

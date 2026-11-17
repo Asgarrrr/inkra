@@ -44,3 +44,11 @@ fn cmd_l_on_a_task_ticks_it_then_clears_it(cx: &mut TestAppContext) {
     assert_eq!(text(&window, &mut cx), "x\n- [ ] a");
     assert_eq!(caret(&window, &mut cx), 9);
 }
+
+/// The last line has no newline, and its checkbox still flips instead of gaining a second one.
+#[gpui::test]
+fn cmd_l_on_a_task_ending_the_note_ticks_it(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "- [ ] test\n- [ ]\n- [ ]");
+    cx.simulate_keystrokes("cmd-down cmd-l");
+    assert_eq!(text(&window, &mut cx), "- [ ] test\n- [ ]\n- [x]");
+}

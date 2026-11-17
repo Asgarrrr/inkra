@@ -68,10 +68,16 @@ fn a_loose_task_is_decided_past_its_paragraph() {
 
 #[test]
 fn a_checkbox_pulldown_cmark_reads_as_text_is_no_task() {
-    assert_eq!(tasks("- [ ]"), vec![]);
-    assert_eq!(concealed("- [ ]"), vec![("-", "-", "•")]);
     assert_eq!(tasks("- [ ]a"), vec![]);
     assert_eq!(concealed("- [ ]a"), vec![("-", "-", "•")]);
+}
+
+/// The last line reads as if a newline ended it, so a checkbox there is a task with no text.
+#[test]
+fn a_checkbox_ending_the_text_is_a_task_with_no_text() {
+    assert_eq!(tasks("- [ ]"), vec![("- [ ]", "[ ]", false)]);
+    assert_eq!(tasks("a\n- [x]"), vec![("- [x]", "[x]", true)]);
+    assert_eq!(concealed("- [ ]"), vec![("- [ ]", "- [ ]", "")]);
 }
 
 #[test]

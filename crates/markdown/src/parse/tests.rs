@@ -787,4 +787,5 @@ proptest! {
 mod code_blocks;
 mod gutters;
 mod headings;
+mod last_line;
 mod tasks;
