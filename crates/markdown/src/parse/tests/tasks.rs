@@ -149,6 +149,10 @@ fn a_task_part_keeps_its_gap_style() {
     const D: Styles = Styles::DONE;
     assert_eq!(styled("> - [ ] a"), vec![("> - [ ] ", Q | M), ("a", Q)]);
     assert_eq!(styled("- [x] a"), vec![("- [x] ", D | M), ("a", D)]);
+    assert_eq!(
+        styled("- [x] a\n  b"),
+        vec![("- [x] ", D | M), ("a", D), ("  ", D | M), ("b", D)]
+    );
 }
 
 /// The text `DONE` strikes: its spans that are no marker (D7).
@@ -186,6 +190,7 @@ fn a_checked_task_strikes_its_continuation_lines_but_not_their_indent() {
 #[test]
 fn a_loose_checked_task_strikes_every_paragraph() {
     assert_eq!(struck("- [x] a\n\n  b\n\n  c"), ["a", "b", "c"]);
+    assert_eq!(struck("- [x] a\n\n  # h"), ["a", "h"]);
     assert_eq!(struck("- [x] a\n\n- [ ] b"), ["a"]);
     assert_eq!(struck("- [ ] a\n\n- [x] b"), ["b"]);
 }

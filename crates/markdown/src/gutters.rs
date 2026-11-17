@@ -45,7 +45,7 @@ pub(crate) struct Items {
 }
 
 impl Items {
-    /// Called with every event, in order, before the event's element opens: `open` elements are
+    /// Called with every event, in order, before the event's element opens: `opened` elements are
     /// open, the first `depth` of them leading quotes. Returns the index of a checked task item
     /// that gets a gutter, so it and the elements above it take `DONE` (task boxes spec, D7).
     pub(crate) fn event(
@@ -53,7 +53,7 @@ impl Items {
         text: &str,
         event: &Event<'_>,
         range: &Range<usize>,
-        open: usize,
+        opened: usize,
         depth: usize,
     ) -> Option<usize> {
         let mut done = None;
@@ -79,7 +79,7 @@ impl Items {
             }
         }
         if let Event::Start(Tag::Item) = event {
-            self.pending = Some((range.start, open));
+            self.pending = Some((range.start, opened));
         }
         done
     }

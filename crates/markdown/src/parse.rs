@@ -70,8 +70,9 @@ pub fn parse(text: &str) -> Markdown {
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let depth = open.iter().take_while(|open| open.leading).count();
         if let Some(item) = items.event(text, &event, &range, open.len(), depth) {
-            for open in &mut open[item..] {
-                open.styles |= Styles::DONE;
+            for element in &mut open[item..] {
+                element.styles |= Styles::DONE;
+                element.indent |= Styles::DONE;
             }
         }
         let current = open.last().cloned();
