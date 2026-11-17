@@ -54,7 +54,7 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   After changing `highlight` logic, run the diff command with
   `-p inkra-highlight --test-package inkra-highlight -f 'crates/highlight/src/**/*.rs'`.
   After changing `app` logic, run it with `-j 2 -p inkra-app --test-package inkra-app
-  -f 'crates/app/src/**/*.rs' -- --lib -- editor field shell shot`, then rerun any miss on
+  -f 'crates/app/src/**/*.rs' -- --lib -- editor field shell shot theme`, then rerun any miss on
   the full suite. The full suite times a mutant out after ~6 min, and a runaway layout walk
   fills 48 GB well before that.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`

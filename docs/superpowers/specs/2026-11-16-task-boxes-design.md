@@ -247,6 +247,9 @@ directly inside the item, continuation and lazy lines included.
   2026-11-17 after the T3 review.
 - Continuation and lazy lines restyle through the span diff
   (`changed.rs:113-115`), so a toggle restyles every row of the item.
+- **A wrapped row strikes its trailing space.** The space that ends a wrapped
+  row is the item's text, so the line runs past the last word. Accepted by the
+  owner 2026-11-17 after T3.
 
 One predicate decides both the box and `DONE`: the pending slot resolving a
 task whose marker leads its line (D1). A task that gets no gutter (`- - [ ] a`, markdown-blocks item 13) gets neither box nor
