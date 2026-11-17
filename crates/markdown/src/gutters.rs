@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Tag};
 
-use crate::spans::{push, to_offsets};
+use crate::spans::{line_start, push, to_offsets};
 use crate::{Conceal, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,7 +112,7 @@ impl Items {
 /// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
 /// line's `>`s and spaces; any other keeps its `•`.
 fn task_gutter(text: &str, marker: usize, task: Task, depth: usize) -> Option<Gutter> {
-    let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
+    let line = line_start(text, marker);
     let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
     let mut gutter = gutter(text, line..end, depth);
     let checkbox = task.checkbox.start.get();
@@ -164,9 +164,7 @@ fn gutters(text: &str, quotes: &[Range<usize>]) -> Vec<Gutter> {
             let Some(next) = rest.first() else {
                 break;
             };
-            start = text[..next.start]
-                .rfind('\n')
-                .map_or(0, |newline| newline + 1);
+            start = line_start(text, next.start);
         }
         let end = text[start..]
             .find('\n')

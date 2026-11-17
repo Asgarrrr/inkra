@@ -1,7 +1,10 @@
 use inkra_text::{ByteOffset, Hunk};
 use proptest::prelude::*;
 
+use pulldown_cmark::{Event, Parser, Tag};
+
 use super::cycle_tasks;
+use crate::cmark::options;
 use crate::parse;
 
 fn apply(text: &str, hunks: &[Hunk]) -> String {
@@ -15,7 +18,7 @@ fn apply(text: &str, hunks: &[Hunk]) -> String {
 /// `text` after `⌘L` with the caret at `caret`.
 fn cycled(text: &str, caret: usize) -> String {
     let at = ByteOffset::new(caret);
-    apply(text, &cycle_tasks(text, at..at))
+    apply(text, &cycle_tasks(text, &parse(text), at..at))
 }
 
 /// `text`'s one line cycled, the same from a caret at its start as at its end.
@@ -52,7 +55,16 @@ fn a_bullet_gains_a_checkbox_after_its_space() {
         ("-  a", "- [ ]  a"),
         ("- ", "- [ ] "),
         ("- - [ ] a", "- [ ] - [ ] a"),
+        ("- [ ]a", "- [ ] [ ]a"),
     ] {
+        assert_eq!(cycled_line(line), want, "{line:?}");
+    }
+}
+
+/// An empty item keeps its `•` (D1), so it is a bullet too.
+#[test]
+fn an_empty_item_gains_a_checkbox_after_a_space() {
+    for (line, want) in [("-", "- [ ] "), ("1.", "1. [ ] "), ("*", "* [ ] ")] {
         assert_eq!(cycled_line(line), want, "{line:?}");
     }
 }
@@ -92,7 +104,7 @@ fn a_task_reads_past_its_quotes_and_the_spaces_after_its_bullet() {
     for (line, want) in [
         ("-    [ ] a", "-    [x] a"),
         ("> 1. [x] a", "> 1. [ ] a"),
-        ("  - [X]", "  - [ ]"),
+        ("  - [X] b", "  - [ ] b"),
         ("- [y] a", "- [ ] [y] a"),
         ("- [ x] a", "- [ ] [ x] a"),
     ] {
@@ -121,10 +133,10 @@ fn only_the_carets_line_changes() {
     );
 }
 
-/// Every line of a code block, the front matter or a table, from its first line's start; a fence
-/// in a list item starts past it.
+/// Every line of a code block, the front matter, a table or an HTML block, from its first line's
+/// start; a fence in a list item starts past it.
 #[test]
-fn a_code_block_the_front_matter_and_a_table_are_skipped() {
+fn a_code_block_the_front_matter_a_table_and_html_are_skipped() {
     for (text, from) in [
         ("```\na\n\n```\n", 0),
         ("```\na", 0),
@@ -132,6 +144,8 @@ fn a_code_block_the_front_matter_and_a_table_are_skipped() {
         ("    a\n\n    b\n", 0),
         ("---\na: b\n---\n", 0),
         ("| a |\n|---|\n| b |\n", 0),
+        ("<div>\n- [ ] a\n</div>", 0),
+        ("<!--\na\n-->", 0),
     ] {
         for caret in (from..text.len()).filter(|&at| text.is_char_boundary(at)) {
             assert_eq!(cycled(text, caret), text, "{text:?} at {caret}");
@@ -159,6 +173,26 @@ fn the_line_after_a_skipped_block_cycles() {
     }
 }
 
+/// A line no marker makes a task, as the parse reads it, is left as it is.
+#[test]
+fn a_line_no_marker_makes_a_task_edits_nothing() {
+    for (text, caret) in [
+        ("a\n    - [ ] b", 2),
+        ("a\n    b", 2),
+        ("- a\n      - [ ] b", 4),
+        ("- a\n\t- [ ] b", 4),
+        ("```\na\n", 6),
+    ] {
+        assert_eq!(cycled(text, caret), text, "{text:?} at {caret}");
+    }
+}
+
+/// A lazy `2.` is paragraph text, so it takes a bullet of its own.
+#[test]
+fn a_lazy_number_becomes_a_task_as_plain_text() {
+    assert_eq!(cycled("a\n2. b", 2), "a\n- [ ] 2. b");
+}
+
 /// One line of a generated note: a prefix and a body, each starting a new block after a blank
 /// line, so the parse reads every line alone.
 fn line() -> impl Strategy<Value = (String, bool)> {
@@ -177,6 +211,8 @@ fn skipped() -> impl Strategy<Value = (String, bool)> {
         "```\na\n```",
         "~~~ rust\n- a\n~~~",
         "| a |\n|---|\n| - b |",
+        // A `<div>` block runs on through the blank line after it, which then cannot cycle.
+        "<!--\n- a\n-->",
     ])
     .prop_map(|block| (block.to_owned(), true))
 }
@@ -191,9 +227,76 @@ fn task_at(text: &str, start: usize) -> Option<bool> {
         .map(|task| task.checked)
 }
 
+/// A caret on the line `start..end` of `text`, picked by `column`.
+fn caret_on(text: &str, start: usize, end: usize, column: prop::sample::Index) -> ByteOffset {
+    let carets: Vec<usize> = (start..=end)
+        .filter(|&at| text.is_char_boundary(at))
+        .collect();
+    ByteOffset::new(carets[column.index(carets.len())])
+}
+
+/// `⌘L` from `caret` on the line `start..end`: a splice leaves the line a task in the state after
+/// its own, as the parse reads both, and every other line untouched. Returns the splices.
+fn cycle_checked(
+    text: &str,
+    start: usize,
+    end: usize,
+    caret: ByteOffset,
+) -> Result<Vec<Hunk>, TestCaseError> {
+    let hunks = cycle_tasks(text, &parse(text), caret..caret);
+    prop_assert!(hunks.len() <= 1);
+    let before = task_at(text, start);
+    if let [hunk] = hunks.as_slice() {
+        prop_assert!(start <= hunk.range.start.get() && hunk.range.end.get() <= end);
+        let after = apply(text, &hunks);
+        let next = before == Some(false);
+        prop_assert_eq!(
+            task_at(&after, start),
+            Some(next),
+            "{:?} became {:?}",
+            text,
+            after
+        );
+        let delta = after.len() - text.len();
+        prop_assert_eq!(&after[..start], &text[..start]);
+        prop_assert_eq!(&after[end + delta..], &text[end..]);
+    } else {
+        prop_assert!(
+            before.is_none(),
+            "a task in {:?} at {:?} did not flip",
+            text,
+            caret
+        );
+    }
+    Ok(hunks)
+}
+
+/// Whether a code block, the front matter, a table or an HTML block holds a byte of `start..=end`.
+fn in_block(text: &str, start: usize, end: usize) -> bool {
+    Parser::new_ext(text, options())
+        .into_offset_iter()
+        .any(|(event, range)| {
+            matches!(
+                event,
+                Event::Start(
+                    Tag::CodeBlock(_) | Tag::MetadataBlock(_) | Tag::Table(_) | Tag::HtmlBlock
+                )
+            ) && range.start <= end
+                && start < range.end
+        })
+}
+
+/// A free-form line, mostly markers, or one that opens a block.
+fn free_line() -> impl Strategy<Value = String> {
+    prop_oneof![
+        4 => "[ \t>*+1.)\\[\\]xXa-]{0,8}",
+        1 => prop::sample::select(vec!["```", "<div>", "---", "| a |"]).prop_map(str::to_owned),
+    ]
+}
+
 proptest! {
-    /// The caret's line reparses as the task state after its own, every other line untouched; a
-    /// line of a skipped block, front matter included, edits nothing.
+    /// Every line outside a skipped block, each one block apart, cycles; front matter included,
+    /// no line of a skipped block edits.
     #[test]
     fn a_cycled_line_reparses_as_the_next_state(
         front in any::<bool>(),
@@ -218,22 +321,35 @@ proptest! {
         }
         let (start, skipped) = lines[pick.index(lines.len())];
         let end = start + text[start..].find('\n').expect("every line ends in a newline");
-        let carets: Vec<usize> = (start..=end).filter(|&at| text.is_char_boundary(at)).collect();
-        let caret = ByteOffset::new(carets[column.index(carets.len())]);
+        let caret = caret_on(&text, start, end, column);
+        let hunks = cycle_checked(&text, start, end, caret)?;
+        prop_assert_eq!(hunks.is_empty(), skipped, "{:?} at {:?}", text, caret);
+    }
 
-        let hunks = cycle_tasks(&text, caret..caret);
-        if skipped {
-            prop_assert!(hunks.is_empty(), "{:?} at {:?}", text, caret);
-            return Ok(());
+    /// On any lines: a cycled line is a task in the next state; a line left as it is is no task,
+    /// and `- [ ] ` after its quotes and spaces makes none, unless a skipped block holds it.
+    #[test]
+    fn a_free_form_line_cycles_or_cannot_be_a_task(
+        lines in prop::collection::vec(free_line(), 1..6),
+        newline in any::<bool>(),
+        pick in any::<prop::sample::Index>(),
+        column in any::<prop::sample::Index>(),
+    ) {
+        let text = lines.join("\n") + if newline { "\n" } else { "" };
+        let starts: Vec<usize> = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(at, _)| at + 1))
+            .collect();
+        let start = starts[pick.index(starts.len())];
+        let end = text[start..].find('\n').map_or(text.len(), |len| start + len);
+        let caret = caret_on(&text, start, end, column);
+        if cycle_checked(&text, start, end, caret)?.is_empty() && !in_block(&text, start, end) {
+            let lead = text[start..end]
+                .bytes()
+                .take_while(|byte| matches!(byte, b' ' | b'\t' | b'>'))
+                .count();
+            let mut plain = text.clone();
+            plain.insert_str(start + lead, "- [ ] ");
+            prop_assert_eq!(task_at(&plain, start), None, "{:?} at {:?}", text, caret);
         }
-        prop_assert_eq!(hunks.len(), 1);
-        let hunk = &hunks[0];
-        prop_assert!(start <= hunk.range.start.get() && hunk.range.end.get() <= end);
-        let after = apply(&text, &hunks);
-        let next = task_at(&text, start) == Some(false);
-        prop_assert_eq!(task_at(&after, start), Some(next), "{:?} became {:?}", text, after);
-        let delta = after.len() - text.len();
-        prop_assert_eq!(&after[..start], &text[..start]);
-        prop_assert_eq!(&after[end + delta..], &text[end..]);
     }
 }

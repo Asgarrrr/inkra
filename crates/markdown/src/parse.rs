@@ -208,7 +208,7 @@ fn language(text: &str, block: &Range<usize>, kind: &CodeBlockKind<'_>) -> Optio
 
 /// A container prefix or indent leads a line, not an element's syntax: the length of the leading
 /// `[ \t>]*` run when `piece` starts a line, else 0.
-fn line_start_prefix(text: &str, piece: &Range<usize>) -> usize {
+pub(crate) fn line_start_prefix(text: &str, piece: &Range<usize>) -> usize {
     if piece.start != 0 && text.as_bytes()[piece.start - 1] != b'\n' {
         return 0;
     }

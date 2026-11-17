@@ -42,6 +42,14 @@ fn a_caret_before_the_splice_stays_and_one_after_shifts() {
     assert_eq!(spliced("- [ ] a", 2, &tick).1.cursor(), at(2));
 }
 
+/// A flip moves no text, so a caret on the middle byte stays before it.
+#[test]
+fn a_caret_on_a_replaced_byte_stays_before_it() {
+    let (buffer, state) = spliced("- [ ] a", 3, &hunk(3..4, "x"));
+    assert_eq!(buffer.text(), "- [x] a");
+    assert_eq!(state.cursor(), at(3));
+}
+
 #[test]
 fn a_splice_is_one_step_that_merges_with_no_typing() {
     let mut buffer = Buffer::new("a");
@@ -62,7 +70,8 @@ fn a_splice_is_one_step_that_merges_with_no_typing() {
 }
 
 proptest! {
-    /// The caret keeps the text after it, and the text before it when the splice lies past it.
+    /// The caret keeps the text after it past the splice, and the text before it short of the
+    /// splice; inside a replacement it moves to its start.
     #[test]
     fn the_caret_keeps_its_text(
         text in "[ a-zé\n]{0,8}",
@@ -77,13 +86,13 @@ proptest! {
         let after = buffer.text();
         let cursor = state.cursor().get();
         prop_assert!(after.is_char_boundary(cursor));
-        if caret < start {
+        if caret < start || (caret == start && start < end) {
             prop_assert_eq!(cursor, caret);
+        } else if caret < end {
+            prop_assert_eq!(cursor, start);
         } else {
-            prop_assert!(cursor >= start + inserted.len());
-        }
-        if caret >= end {
             prop_assert_eq!(&after[cursor..], &text[caret..]);
+            prop_assert!(cursor >= start + inserted.len());
         }
     }
 }

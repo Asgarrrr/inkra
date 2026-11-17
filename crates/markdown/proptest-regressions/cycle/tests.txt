@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 57815daf28eefeb62f76f0f47106c9782719a3f2d5deb1fe27f8bb9475ed0099 # shrinks to front = false, blocks = [("a", false)], pick = Index(0), column = Index(0)
+cc a127bd99a44c57574b12cddd9a1477976b131ab5f5df3b1ac0ffc6b22dcb3f30 # shrinks to front = false, blocks = [("a", false), ("<div>\n- a\n</div>", true), ("```\na\n```", true), ("```\na\n```", true)], pick = Index(7094901566811366007), column = Index(0)

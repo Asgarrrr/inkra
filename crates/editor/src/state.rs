@@ -183,14 +183,19 @@ impl EditorState {
         self.selection.collapse_to(text_start, Goal::None);
     }
 
-    /// `edit_ungrouped`, the caret mapped: one at the splice's start lands past it (task boxes spec, D6).
+    /// `edit_ungrouped`, the caret mapped: past an insertion at it, before a replacement (task boxes spec, D6).
     pub fn splice(&mut self, buffer: &mut Buffer, splice: &Hunk) {
+        let bias = if splice.range.is_empty() {
+            Bias::Right
+        } else {
+            Bias::Left
+        };
         let caret = Splice {
             at: splice.range.start,
             removed_len: splice.range.end - splice.range.start,
             inserted_len: splice.text.len(),
         }
-        .map(self.cursor(), Bias::Right);
+        .map(self.cursor(), bias);
         self.edit_ungrouped(buffer, splice.range.clone(), &splice.text);
         self.selection.collapse_to(caret, Goal::None);
     }

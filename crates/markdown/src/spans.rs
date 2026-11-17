@@ -46,6 +46,11 @@ pub(crate) fn lines(text: &str, range: Range<usize>) -> impl Iterator<Item = Ran
         })
 }
 
+/// The start of the line holding `at`.
+pub(crate) fn line_start(text: &str, at: usize) -> usize {
+    text[..at].rfind('\n').map_or(0, |newline| newline + 1)
+}
+
 pub(crate) fn to_offsets(range: Range<usize>) -> Range<ByteOffset> {
     ByteOffset::new(range.start)..ByteOffset::new(range.end)
 }

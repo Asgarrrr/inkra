@@ -183,11 +183,12 @@ its name; nothing else registers it.
 ends at column 0 of a later line drops that line, as Zed does
 (`vendor/zed-reference/crates/editor/src/editor.rs`, around 5595 and 12843).
 
-**Skipped lines.** Lines inside a code block, the front matter, or a table.
-`Markdown` records no table range (`parse.rs:12-24`), so the splice function
-runs its own pulldown-cmark pass with the shared options (`cmark.rs`) and
-collects the ranges of `Tag::CodeBlock`, `Tag::MetadataBlock` and
-`Tag::Table`. One pass per keystroke of `⌘L` is not a per-frame cost. In a
+**Skipped lines.** Lines inside a code block, the front matter, a table, or an
+HTML block. `Markdown` records no table range (`parse.rs:12-24`), so the splice
+function runs its own pulldown-cmark pass with the shared options (`cmark.rs`)
+and collects the ranges of `Tag::CodeBlock`, `Tag::MetadataBlock`,
+`Tag::Table` and `Tag::HtmlBlock`. HTML blocks amended 2026-11-17 after the
+T4a review: `⌘L` on `<div>` would make a task of it. One pass per keystroke of `⌘L` is not a per-frame cost. In a
 selection of more than one line, blank lines are skipped too. **(I)** Without
 this, `⌘A ⌘L` rewrites the YAML.
 
@@ -383,6 +384,16 @@ emits for every list item. T3 and T4a are independent of each other.
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
+- **From this spec, in T4a.** A stopgap until T4b: with a selection, `⌘L`
+  cycles the line of the selection's head, and the selection collapses to the
+  mapped caret. The task state comes from the parse, not from the line's text:
+  a line whose gutter has a task flips its checkbox; any other line takes the
+  first of D6's insertions (after its bullet, else `- [ ] ` after its leading
+  `[ \t>]*`) that the reparse makes an unchecked task, else no splice. So D1
+  and D6 are one predicate, and a lazy line (`a\n    b`) or a lazy `2. b`
+  is never given markers that box nothing. An empty item (`-`, `1.`)
+  gains ` [ ] `. A replaced byte keeps a caret on it before it; an insertion
+  keeps D6's right bias. Amended 2026-11-17 after the T4a review.
 
 ## Deferred
 

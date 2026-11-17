@@ -4,6 +4,7 @@ use gpui::{ClipboardItem, Context, Div, InteractiveElement, Window, actions};
 use inkra_editor::{Copied, EditorState, LogicalMovement};
 
 use super::motion::Vertical;
+use super::parses;
 use super::{EditorView, LinkFollowed};
 use crate::open::Open;
 use crate::text_input::InputHost;
@@ -169,8 +170,9 @@ impl EditorView {
     /// A skipped line takes no lease: `as_mut` notifies, which would schedule an autosave.
     fn toggle_task(&mut self, _: &ToggleTask, window: &mut Window, cx: &mut Context<Self>) {
         let caret = self.cursor();
+        let markdown = parses::parsed(self.input.buffer(), cx);
         let text = self.input.buffer().read(cx).text();
-        if let [splice] = inkra_markdown::cycle_tasks(text, caret..caret).as_slice() {
+        if let [splice] = inkra_markdown::cycle_tasks(text, &markdown, caret..caret).as_slice() {
             self.edit_buffer(window, cx, |state, buffer| state.splice(buffer, splice));
         }
     }
