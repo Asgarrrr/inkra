@@ -42,6 +42,10 @@ Taken by the owner on 2026-11-16.
   `- [ ]`.
 - **text start**: the first byte after the checkbox and its one space or tab;
   the line's end for an item with no text.
+- **box run**: what the box replaces (D10): a bullet task's bullet through its
+  checkbox, an ordered task's checkbox alone.
+- **lead**: the task part before the box run (D10). Blank in `- [ ] a` and
+  `  - [ ] a`; `1. ` in `1. [ ] a` and in `1. - [ ] a`; `- ` in `- - [ ] a`.
 
 ## D1. The data
 
@@ -56,9 +60,8 @@ pub struct Task {
 }
 ```
 
-A line gets a `Gutter` when it is quoted or starts a task item whose marker
-leads its line (markdown-blocks, item 13: before the bullet only quotes and
-spaces). The pending-slot rule decides the item's marker (markdown-blocks,
+A line gets a `Gutter` when it is quoted or starts a task item that gets a
+box: D10's rule, which replaces markdown-blocks item 13. The pending-slot rule decides the item's marker (markdown-blocks,
 item 7; Zed `markdown.rs:3820-3836`). The parser facts table of
 markdown-blocks holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 
@@ -87,7 +90,8 @@ at 0, nothing revealed, and typing landed before a hidden bullet.
 - A caret anywhere in the task part, leading spaces included, reveals it.
 - A caret at the text start does not touch the checkbox, so after a click the
   box stays painted.
-- Replacement `""`. An ordered task hides its number with the rest.
+- Replacement `""`. The conceal's marker is the box run, not the whole task
+  part: an ordered task keeps its number (D10). Amended 2026-11-17 after T4b.
 - The quote part and the task part reveal separately (S1 review): in
   `> - [ ] a` a caret on `>` reveals the quote part only.
 
@@ -301,8 +305,8 @@ directly inside the item, continuation and lazy lines included.
   owner 2026-11-17 after T3.
 
 One predicate decides both the box and `DONE`: the pending slot resolving a
-task whose marker leads its line (D1). A task that gets no gutter (`- - [ ] a`, markdown-blocks item 13) gets neither box nor
-strike, so `⌘L` can never make a struck line without a box.
+task that gets a box (D10). A task that gets none (`- > - [ ] a`) gets neither
+box nor strike, so `⌘L` can never make a struck line without a box.
 
 ## D8. Theme
 
@@ -324,6 +328,82 @@ line keeps a stale box or a stale strike. The layout oracle of the
 incremental-draw spec (D10) gains toggles and `⌘L` batches in its alphabet;
 its alphabet already holds tasks.
 
+## D10. The markers before the box
+
+Added 2026-11-17 after T4b, by the owner: "la spec est mauvaise". Until then a
+concealed task part painted nothing but its box, so `1. [ ] a` lost its number
+and showed a gap where it stood. Markdown-blocks item 13 also gave no box to
+`- - [ ] a` or `1. - [ ] a`, and `⌘L` on them added a second checkbox. The
+number is content, the order of the steps. Only the task's own bullet gives way
+to the box, as Obsidian draws it.
+
+**The box rule.** A task item gets a box when its line holds all its leading
+quotes and, between the quote part's end and the item's marker, no `>`.
+CommonMark opens a list item mid-line only after container markers, so that gap
+holds only spaces, tabs and the markers of items that open on the line. `- [ ] a`,
+`  - [ ] a`, `> - [ ] a`, `1. [ ] a`, `- - [ ] a` and `1. - [ ] a` get a box.
+`- > - [ ] a` and `- a\n  > - [ ] b` do not: a quote inside a list item has no
+gutter (markdown-blocks, As built item 1).
+
+**The data.** `Gutter::quote_end` moves into `Task`, the one place it differs
+from `range.end`:
+
+```rust
+pub struct Task {
+    /// Where the task part starts: past the quote part's last `>` and its blank.
+    pub start: ByteOffset,
+    /// Where the box run starts: the bullet, or an ordered task's checkbox.
+    pub run: ByteOffset,
+    pub checkbox: Range<ByteOffset>,
+    pub checked: bool,
+}
+```
+
+The quote part ends at `task.start` on a task line and at `range.end` on any
+other gutter.
+
+**The conceals.** The task conceal's element stays the task part, so a caret
+anywhere in it reveals all of it raw (D2). Its marker becomes the box run.
+The markers of the outer items in the lead keep their own conceals: a bullet's
+`•`. Those conceals now start inside the gutter, so they are its own: the
+`debug_assert!` in `line_prefix` counts the quotes, the lead's bullets, then the
+task conceal, in marker order. The G-property in `parse/tests/gutters.rs`
+admits the lead's one-byte bullets between the quotes and the task conceal.
+
+**The paint.** A concealed task part paints its lead, then the box.
+
+- The lead is shaped from the gutter's text through its own active conceals,
+  so `- ` shows `• ` and `1. ` shows as typed, with the body's runs (`show` in
+  `layout/shape.rs`). It paints at the task part's `x`, the quote part's width.
+  A blank lead shapes nothing.
+- The box stays centred on the checkbox's `x` span. In `1. [ ] a` it sits
+  right after `1. `; in `- [ ] a` it still sits where `[` stands.
+- The width is unchanged: the raw text with the `X` (C). No reveal moves text,
+  and a `•` narrower than `-` paints inside the gutter.
+- A click on the lead lands as on a concealed part, at the text start. Only
+  the box toggles (D4).
+- The lead is measured once per distinct gutter text, with the geometry
+  (`GutterCarry::measured`); it depends only on that text at the body size.
+
+**One task box in the layout.** `Geometry::checkbox` and `GutterLayout::boxed`
+describe one thing, measured in two places. They merge into one
+`Option<TaskBox>` on `GutterLayout`: the checkbox's `x` span, the checkbox from
+the line's start, `checked`, and the lead's shape. It is set only on a line
+holding its own task, never from carried geometry (D). The task part's
+concealed state stays the reveal's, so the box and the lead paint together.
+
+**`⌘L`.**
+
+- A plain line's insertion goes after its innermost marker: past the leading
+  `[ \t>]*`, every bullet or number with its one space or tab, in turn. `- 1. a`
+  becomes `- 1. [ ] a`, a task item inside the outer one, not `- [ ] 1. a`,
+  whose `1. a` would be text. The second candidate, `- [ ] ` after the
+  leading `[ \t>]*`, is unchanged.
+- A line holding a task that gets no box is skipped, like a code line: its
+  checkbox cannot be cycled, and a box on its outer item would make two
+  checkboxes. The skip pass (`skipped()` in `cycle.rs`) collects the lines of
+  its `TaskListMarker` events; a line whose gutter has a task is kept.
+
 ## Tests
 
 `inkra-markdown`, by example:
@@ -331,7 +411,8 @@ its alphabet already holds tasks.
 - `- [ ] a`, `- [x] a`, `- [X] a`, `* [ ] a`, `1. [ ] a`, `> - [ ] a`,
   `  - [ ] a`, `-    [ ] a`, loose `- [ ] a\n\n- [x] b`: a gutter with a task.
 - `- [ ]a`: no task. `- [ ]\n` and `- [ ]` at the end of the text: a task with
-  no text. `-\n`: keeps its `•`. `- - [ ] a`: two `•`, no gutter task.
+  no text. `-\n`: keeps its `•`. `- - [ ] a`: a gutter task with the outer `•` in its
+  lead (D10); `- > - [ ] a`: no gutter task.
   `- a\n  - [ ] b`: the inner line has a gutter task.
 - The conceal covers the task part; a caret at 0 in `- [ ] a` touches it; a
   caret at the text start does not.
@@ -404,6 +485,14 @@ rendered and looked at.
 6. **T4b, `⌘L` on a selection** (~0.5 d). The batch checked by one parse
    (D6, amended for T4b) through `apply_diff`, the column-0 rule, the uniform
    next state, the mapped selection, the oracle with batches.
+7. **T5, the markers before the box** (~0.5 d). D10: the box rule, `Task`'s
+   `start` and `run`, the box-run conceal, the lead's paint, one `TaskBox`,
+   `⌘L` after the innermost marker and the unboxed-task skip. Tests:
+   `1. [ ] a` keeps `1.` and its box follows it; `- - [ ] a` paints `•` and a
+   box; `1. - [ ] a` paints `1.` and a box; `- > - [ ] a` gets no box and
+   `⌘L` leaves it; a caret in the lead reveals the whole task part raw;
+   toggling keeps the width; `⌘L` on `- 1. a` gives `- 1. [ ] a`. The scene
+   gains `1. [ ] a`, `- - [ ] a`, `1. - [x] a` and a revealed ordered task.
 
 T1a ships before anything else depends on it, because it changes what `parse`
 emits for every list item. T3 and T4a are independent of each other.
