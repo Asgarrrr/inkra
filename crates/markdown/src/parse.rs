@@ -68,9 +68,14 @@ pub fn parse(text: &str) -> Markdown {
     let mut code_blocks = Vec::new();
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
+        let depth = open.iter().take_while(|open| open.leading).count();
+        if let Some(item) = items.event(text, &event, &range, open.len(), depth) {
+            for open in &mut open[item..] {
+                open.styles |= Styles::DONE;
+            }
+        }
         let current = open.last().cloned();
         let styles = current.as_ref().map_or(Styles::NONE, |open| open.styles);
-        items.event(text, &event, &range);
         match event {
             Event::Start(tag) => {
                 out.markers_until(range.start, current.as_ref());
@@ -254,7 +259,11 @@ struct Open {
 impl Open {
     /// The element `tag` starts inside `parent`, the innermost open one.
     fn enter(text: &str, tag: &Tag<'_>, range: &Range<usize>, parent: Option<&Open>) -> Self {
-        let inherited = parent.map_or(Styles::NONE, |open| open.styles);
+        let mut inherited = parent.map_or(Styles::NONE, |open| open.styles);
+        // A checked item's own text is struck; a block nested in it is not (task boxes spec, D7).
+        if matches!(tag, Tag::List(_) | Tag::BlockQuote(_) | Tag::CodeBlock(_)) {
+            inherited = inherited.without(Styles::DONE);
+        }
         let styles = inherited | tag_styles(tag);
         Self {
             styles,

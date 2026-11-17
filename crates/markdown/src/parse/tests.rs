@@ -237,7 +237,11 @@ fn list_markers_are_dimmed() {
     assert_eq!(styled("1. a\n2) b"), vec![("1. ", M), ("2) ", M)]);
     assert_eq!(
         styled("- [ ] t\n- [x] u"),
-        vec![("- [ ] ", M), ("- [x] ", M)]
+        vec![
+            ("- [ ] ", M),
+            ("- [x] ", Styles::DONE | M),
+            ("u", Styles::DONE)
+        ]
     );
 }
 

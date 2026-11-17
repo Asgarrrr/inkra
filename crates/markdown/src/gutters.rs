@@ -37,78 +37,97 @@ pub struct Task {
 /// right inside another, so skipping every `Start(Paragraph)` skips one.
 #[derive(Default)]
 pub(crate) struct Items {
-    /// The open item's start.
-    pending: Option<usize>,
-    /// Each task item's marker start, in document order.
-    tasks: Vec<(usize, Task)>,
+    /// The open item's start and its index in the open elements.
+    pending: Option<(usize, usize)>,
+    /// Each task gutter, in line order.
+    tasks: Vec<Gutter>,
     bullets: Vec<Conceal>,
 }
 
 impl Items {
-    /// Called with every event, in order.
-    pub(crate) fn event(&mut self, text: &str, event: &Event<'_>, range: &Range<usize>) {
-        if let Some(item) = self.pending.take() {
+    /// Called with every event, in order, before the event's element opens: `open` elements are
+    /// open, the first `depth` of them leading quotes. Returns the index of a checked task item
+    /// that gets a gutter, so it and the elements above it take `DONE` (task boxes spec, D7).
+    pub(crate) fn event(
+        &mut self,
+        text: &str,
+        event: &Event<'_>,
+        range: &Range<usize>,
+        open: usize,
+        depth: usize,
+    ) -> Option<usize> {
+        let mut done = None;
+        if let Some((item, index)) = self.pending.take() {
             let marker = marker_start(text, item);
             match event {
-                Event::Start(Tag::Paragraph) => self.pending = Some(item),
+                Event::Start(Tag::Paragraph) => self.pending = Some((item, index)),
                 // The range may start with spaces; the checkbox is its last three bytes.
-                Event::TaskListMarker(checked) => self.tasks.push((
-                    marker,
-                    Task {
+                Event::TaskListMarker(checked) => {
+                    let task = Task {
                         checkbox: to_offsets(range.end - 3..range.end),
                         checked: *checked,
-                    },
-                )),
+                    };
+                    match task_gutter(text, marker, task, depth) {
+                        Some(gutter) => {
+                            done = checked.then_some(index);
+                            self.tasks.push(gutter);
+                        }
+                        None => self.bullets.extend(bullet(text, marker)),
+                    }
+                }
                 _ => self.bullets.extend(bullet(text, marker)),
             }
         }
         if let Event::Start(Tag::Item) = event {
-            self.pending = Some(range.start);
+            self.pending = Some((range.start, open));
         }
+        done
     }
 
-    /// The gutters, the tasks merged into the quote gutters in line order, and the bullets' conceals.
-    /// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
-    /// line's `>`s and spaces; any other keeps its `•`.
+    /// The gutters, each task gutter in place of its line's quote gutter, and the bullets' conceals.
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
     ) -> (Vec<Gutter>, Vec<Conceal>) {
-        let Self {
-            tasks, mut bullets, ..
-        } = self;
         let mut quote_gutters = gutters(text, quotes).into_iter().peekable();
-        let mut out = Vec::with_capacity(quote_gutters.len() + tasks.len());
-        for (marker, task) in tasks {
-            let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
+        let mut out = Vec::with_capacity(quote_gutters.len() + self.tasks.len());
+        for task in self.tasks {
+            let line = task.range.start;
             out.extend(std::iter::from_fn(|| {
-                quote_gutters.next_if(|gutter| gutter.range.start.get() < line)
+                quote_gutters.next_if(|gutter| gutter.range.start < line)
             }));
-            let mut gutter = quote_gutters
-                .next_if(|gutter| gutter.range.start.get() == line)
-                .unwrap_or_else(|| gutter_at(line, 0));
-            let checkbox = task.checkbox.start.get();
-            let leads = gutter.quotes.len() == gutter.depth
-                && text
-                    .get(gutter.range.end.get()..marker)
-                    .is_some_and(|gap| gap.bytes().all(|byte| matches!(byte, b' ' | b'\t')))
-                && !text[marker..checkbox].contains('\n');
-            if leads {
-                let end = task.checkbox.end.get();
-                let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));
-                gutter.range.end = ByteOffset::new(end + usize::from(blank));
-                gutter.task = Some(task);
-            } else {
-                bullets.extend(bullet(text, marker));
-            }
-            if gutter.depth > 0 || gutter.task.is_some() {
-                out.push(gutter);
-            }
+            let replaced = quote_gutters.next_if(|gutter| gutter.range.start == line);
+            debug_assert!(
+                replaced.is_none_or(|replaced| replaced.quote_end == task.quote_end),
+                "a task's quote part differs from its line's"
+            );
+            out.push(task);
         }
         out.extend(quote_gutters);
-        (out, bullets)
+        (out, self.bullets)
     }
+}
+
+/// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
+/// line's `>`s and spaces; any other keeps its `•`.
+fn task_gutter(text: &str, marker: usize, task: Task, depth: usize) -> Option<Gutter> {
+    let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
+    let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
+    let mut gutter = gutter(text, line..end, depth);
+    let checkbox = task.checkbox.start.get();
+    let leads = gutter.quotes.len() == gutter.depth
+        && text
+            .get(gutter.range.end.get()..marker)
+            .is_some_and(|gap| gap.bytes().all(|byte| matches!(byte, b' ' | b'\t')))
+        && !text[marker..checkbox].contains('\n');
+    leads.then(|| {
+        let end = task.checkbox.end.get();
+        let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));
+        gutter.range.end = ByteOffset::new(end + usize::from(blank));
+        gutter.task = Some(task);
+        gutter
+    })
 }
 
 /// An indented top-level item's range starts at its indentation.

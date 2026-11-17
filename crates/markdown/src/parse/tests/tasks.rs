@@ -146,6 +146,62 @@ fn a_caret_in_the_task_part_reveals_it_and_one_at_the_text_start_does_not() {
 fn a_task_part_keeps_its_gap_style() {
     const Q: Styles = Styles::QUOTE;
     const M: Styles = Styles::MARKER;
+    const D: Styles = Styles::DONE;
     assert_eq!(styled("> - [ ] a"), vec![("> - [ ] ", Q | M), ("a", Q)]);
-    assert_eq!(styled("- [x] a"), vec![("- [x] ", M)]);
+    assert_eq!(styled("- [x] a"), vec![("- [x] ", D | M), ("a", D)]);
+}
+
+/// The text `DONE` strikes: its spans that are no marker (D7).
+fn struck(text: &str) -> Vec<&str> {
+    parse(text)
+        .spans
+        .iter()
+        .filter(|span| span.styles.contains(Styles::DONE) && !span.styles.contains(Styles::MARKER))
+        .map(|span| &text[span.range.start.get()..span.range.end.get()])
+        .collect()
+}
+
+#[test]
+fn a_checked_task_strikes_its_own_text_only() {
+    assert_eq!(struck("- [x] a"), ["a"]);
+    assert_eq!(
+        struck(
+            "- [X] a
+b"
+        ),
+        ["a", "b"]
+    );
+    assert_eq!(struck("1. [x] a"), ["a"]);
+    assert_eq!(struck("> - [x] a"), ["a"]);
+    assert_eq!(struck("- [ ] a"), [""; 0]);
+    assert_eq!(struck("- a"), [""; 0]);
+}
+
+#[test]
+fn a_checked_task_strikes_its_continuation_lines_but_not_their_indent() {
+    assert_eq!(struck("- [x] a\n  b"), ["a", "b"]);
+    assert_eq!(struck("> - [x] a\n>   b"), ["a", "b"]);
+}
+
+#[test]
+fn a_loose_checked_task_strikes_every_paragraph() {
+    assert_eq!(struck("- [x] a\n\n  b\n\n  c"), ["a", "b", "c"]);
+    assert_eq!(struck("- [x] a\n\n- [ ] b"), ["a"]);
+    assert_eq!(struck("- [ ] a\n\n- [x] b"), ["b"]);
+}
+
+#[test]
+fn a_checked_task_does_not_strike_a_block_inside_it() {
+    assert_eq!(struck("- [x] a\n  - [ ] b"), ["a"]);
+    assert_eq!(struck("- [x] a\n  - b"), ["a"]);
+    assert_eq!(struck("- [x] a\n\n  > b"), ["a"]);
+    assert_eq!(struck("- [x] a\n\n  ```\n  b\n  ```"), ["a"]);
+    assert_eq!(struck("- [x] a\n\n        b"), ["a"]);
+    assert_eq!(struck("- [ ] a\n  - [x] b"), ["b"]);
+}
+
+#[test]
+fn a_checked_task_with_no_gutter_strikes_nothing() {
+    assert_eq!(struck("- - [x] a"), [""; 0]);
+    assert_eq!(struck("- > - [x] a"), [""; 0]);
 }

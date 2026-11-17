@@ -4,7 +4,8 @@ use inkra_markdown::Styles;
 use super::{CODE_FONT_FAMILY, Theme};
 
 /// `Marker` goes last so a marker stays dimmed inside a link or a heading; it
-/// keeps weight and style so its width matches the text around it.
+/// keeps weight and style so its width matches the text around it. A checked
+/// task's text is struck and dimmed, its markers only dimmed (task boxes spec, D7).
 pub(crate) fn markdown_style(base: &TextStyle, styles: Styles, theme: &Theme) -> TextStyle {
     let colors = &theme.colors;
     let mut style = base.clone();
@@ -18,7 +19,8 @@ pub(crate) fn markdown_style(base: &TextStyle, styles: Styles, theme: &Theme) ->
     if styles.contains(Styles::EMPHASIS) {
         style.font_style = FontStyle::Italic;
     }
-    if styles.contains(Styles::STRIKETHROUGH) {
+    let done = styles.contains(Styles::DONE) && !styles.contains(Styles::MARKER);
+    if styles.contains(Styles::STRIKETHROUGH) || done {
         style.strikethrough = Some(StrikethroughStyle {
             thickness: px(1.),
             color: None,
@@ -38,7 +40,7 @@ pub(crate) fn markdown_style(base: &TextStyle, styles: Styles, theme: &Theme) ->
     if styles.contains(Styles::CODE_BLOCK) {
         style.color = colors.md_code_block.into();
     }
-    if styles.contains(Styles::FRONTMATTER) || styles.contains(Styles::MARKER) {
+    if done || styles.contains(Styles::FRONTMATTER) || styles.contains(Styles::MARKER) {
         style.color = colors.md_marker.into();
     }
     style
