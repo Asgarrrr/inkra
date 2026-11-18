@@ -1003,8 +1003,7 @@ at. T1a through T5 are merged (History).
      the revealed ordered task read raw in a widened gutter, its text right of the box column.
    - T6b does not merge alone. In the real UI font its slot is the box, so the text touches the box
      (History). It merges together with T6c1 and T6c2.
-10. **T6c1, the slots** (~1 d). Stacked on T6b: `task-boxes-t6c1` on `task-boxes-t6b`. Open
-    question 10 must be decided first.
+10. **T6c1, the slots** (~1 d). Stacked on T6b: `task-boxes-t6c1` on `task-boxes-t6b`.
     - `inkra-markdown`:
       - `Open::gutter` (D11).
       - `gutter` counts columns before each `>` (D1).
@@ -1323,8 +1322,9 @@ Newest last. Each entry says what changed and why.
      under 1 px to spare (D8).
    - The alternatives are 8 px, which gives a 24 px slot, or 12 px, which is mockup C's gap scaled
      with the text.
-10. **How a line holds more than one width key** (T6c). Open; it decides `ItemPart`'s data before
-    T6c1 starts.
+10. **How a line holds more than one width key** (T6c). Decided on 2026-11-19 as recommended:
+    `numbers: Vec<WidthKey>`, exact at any depth. The parse gate (3%) checks its allocations; past
+    it, the keys move to one shared vector that each `ItemPart` indexes by range.
     - A line under two ordered lists, as in `10. a\n    1) b\n       c`, has a number slot for each.
       Each takes its own list's width, so the line needs both keys.
     - Recommended: `numbers: Vec<WidthKey>`, as D1 states. It is exact at any depth. It allocates
