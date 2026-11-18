@@ -111,8 +111,9 @@ pub struct Structure {
     pub items: Vec<ListItem>,
     /// Each block quote's start, where pulldown-cmark starts its range, in document order.
     pub quotes: Vec<ByteOffset>,
-    /// Each code block, front matter, table and HTML block, from its first line's start to its
-    /// last line's end, and each line holding a task with no box. Sorted; none holds another.
+    /// Each code block, front matter, table, HTML block and ATX heading, from its first line's
+    /// start to its last line's end, and each line holding a task with no box. Sorted; none holds
+    /// another.
     pub skipped: Vec<Range<ByteOffset>>,
 }
 
@@ -341,8 +342,12 @@ Zed does (`vendor/zed-reference/crates/editor/src/editor.rs`, around 5595 and 12
 **Skipped lines.** A line whose start lies in a range of `structure.skipped`, ends included (D1).
 **(I)** Without the front matter there, `⌘A ⌘L` rewrites the YAML. A line holding a task with no
 box is there too: its checkbox cannot be cycled, and a box on its outer item would make two
-checkboxes. In a selection of more than one line, a blank line, of spaces and tabs only, is skipped
-as well.
+checkboxes. An ATX heading's line is there too, so `# a`, `- # a` and `> # a` edit nothing: after
+a checkbox, pulldown-cmark reads `# a` as the task's text, and the heading would turn to text. A
+setext heading is not skipped. `a\n- ` is one, and `- ` typed under a line then `⌘L` must still
+give `a\n- [ ] ` (the fallback). So `⌘L` on the `a` of `a\n===` still turns the heading to text;
+level 0 accepts it. In a selection of more than one line, a blank line, of spaces and tabs only, is
+skipped as well.
 
 **The target.** The first cycled line decides it: checked when that line holds an unchecked task
 (`Markdown::task_at`), else unchecked. Every cycled line takes the target, so a mixed selection
@@ -542,10 +547,11 @@ the lead shows them (D3).
 - `Structure` (T6a): `- a` holds an item at `-` with content 2; `- 1. a` two items, the inner one's
   content 5; `-` an item with content 1; `  -\t ` content 5; `> - a` a quote at 0 and an item at 2;
   `- > a` an item at 0 and a quote at 2; `a\n-` no item. `skipped` holds a code block, the front
-  matter, a table, an HTML block and an unboxed task's line, each from its first line's start and
-  without its last `\n`.
+  matter, a table, an HTML block, an ATX heading (`# a`, and `- # a` from the line's start) and an
+  unboxed task's line, each from its first line's start and without its last `\n`. A setext heading
+  is not in it.
 - The cycle: every row of D6's table; a selection ending at column 0; a code block, front matter, a
-  table row and an HTML block skipped; a mixed selection lands on the first line's next state; a
+  table row, an HTML block and `# a`, `- # a`, `> # a` skipped; a mixed selection lands on the first line's next state; a
   splice that changes the next line's laziness; a lost quote fails its own line.
 - The fallback (T6a): `a\n- ` and `a\n-`, caret on the second line, give `a\n- [ ] `, as on `main`;
   `a\n -\t  ` gives `a\n -\t  [ ] `, as on `main`, which only the pad gives; `- - -` gives
@@ -706,6 +712,8 @@ Newest last. Each entry says what changed and why.
     in `structure.rs`. With it, `- - -` gives `- [ ] - - -`, since pulldown-cmark reads it as a
     thematic break.
   - Open question 6 is decided as recommended: `- [ ] ` is offered only where no item opens.
+  - Open question 4 is decided: an ATX heading's line is skipped, so `# a` edits nothing. A
+    setext heading is not, since `a\n- ` is one.
 - **The T6 review's minor findings** (2026-11-18). `TaskShape`'s box `x` is one field. The column
   carry is checked against `LineStart`. pulldown-cmark reads a tab, a vertical tab or a form feed
   as an unchecked middle byte, so the checkbox term and decision 5 say so, and D5 records that a
@@ -811,9 +819,9 @@ Newest last. Each entry says what changed and why.
    gutter. A typed space conceals it again. A letter typed right after the checkbox makes the
    line text, as `- [x]a` is no task. Recommended: accept for level 0; list continuation
    (Deferred) writes the space.
-4. **A heading is no opener, so `⌘L` on `# a` gives `- [ ] # a`**, and the heading turns to the
-   task's text. The invariant (D6) covers list items and block quotes only. Owner question: keep
-   this, or count headings as openers so `# a` edits nothing? Behaviour unchanged until answered.
+4. **`⌘L` on `# a` gave `- [ ] # a`**, and the heading turned to the task's text. Decided by the
+   owner on 2026-11-18: an ATX heading's line is skipped (D6), so `# a` edits nothing. A setext
+   heading is not, so the `- ` typed under a line still cycles.
 5. **A marker the parse reads as no item** (T6a). Decided by the owner on 2026-11-18: the
    fallback (D6) reads such a line through pulldown-cmark, and `cycle.rs` keeps no marker grammar.
    Without it, `a\n-` gave `a\n- [ ] -`, and `a\n2. b` both selected gave `- [ ] a\n- [ ] 2. b`.
