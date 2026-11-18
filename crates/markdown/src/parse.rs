@@ -19,7 +19,7 @@ pub struct Markdown {
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
-    /// starting a task item whose marker leads it.
+    /// starting a task item that gets a box (D10).
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,

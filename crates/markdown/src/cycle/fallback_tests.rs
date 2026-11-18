@@ -36,10 +36,40 @@ fn the_fallback_counts_columns_from_the_lines_start() {
     assert_eq!(selected("a\n  -\t  ", 2, 2), "a\n  -\t  [ ] ");
 }
 
-/// pulldown-cmark reads `- - -` as a thematic break, so no item gives a content start.
+/// The fallback takes the innermost item it reads, as a line where an item opens does: a new item
+/// above lets each of these lines open its items (D6).
+#[test]
+fn the_fallback_takes_the_innermost_item() {
+    let texts = ["a\n\t- - b", "a\n\t* - b", "a\n2. 3. b"];
+    let all = texts.map(|text| selected(text, 0, text.len()));
+    assert_eq!(
+        all,
+        [
+            "- [ ] a\n\t- - [ ] b",
+            "- [ ] a\n\t* - [ ] b",
+            "- [ ] a\n2. 3. [ ] b"
+        ]
+    );
+}
+
+/// An opened item's blanks count in columns from the line's start, through the openers before its
+/// marker, as the fallback's do (D6).
+#[test]
+fn a_content_start_counts_columns_from_the_lines_start() {
+    for (text, caret, want) in [
+        ("> -\t  ", 0, "> -\t  [ ] "),
+        ("- a\n\n  -\t  ", 6, "- a\n\n  -\t  [ ] "),
+        ("- a\n\n -\t  ", 6, "- a\n\n -\t  [ ] "),
+    ] {
+        assert_eq!(selected(text, caret, caret), want, "{text:?}");
+    }
+}
+
+/// pulldown-cmark reads a thematic break before a list marker, so no item gives a content start.
 #[test]
 fn a_thematic_break_becomes_a_task_as_plain_text() {
     assert_eq!(selected("- - -", 0, 0), "- [ ] - - -");
+    assert_eq!(selected("* **", 0, 0), "- [ ] * **");
 }
 
 /// After a checkbox the heading would read as the task's text.

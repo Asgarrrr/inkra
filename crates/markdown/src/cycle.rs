@@ -7,7 +7,7 @@ use inkra_text::{ByteOffset, Hunk};
 
 use crate::parse::line_start_prefix;
 use crate::spans::{line_ranges, line_start};
-use crate::structure::{ListItem, Structure, column_after, first_item};
+use crate::structure::{Structure, innermost_item};
 use crate::{Markdown, parse};
 
 /// Parses of a spliced copy per `⌘L`: the first candidates, the second ones, then the batch
@@ -117,11 +117,11 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let items = &markdown.structure.items;
-    let innermost = items[..items.partition_point(|item| item.marker.end.get() <= line.end)]
+    let innermost = items[..items.partition_point(|marker| (..line.end).contains(&marker.get()))]
         .last()
-        .filter(|item| item.marker.start.get() >= line.start);
-    let splices: Vec<(usize, &str)> = if let Some(item) = innermost {
-        vec![after_marker(item)]
+        .filter(|marker| marker.get() >= line.start);
+    let splices: Vec<(usize, &str)> = if let Some(marker) = innermost {
+        vec![checkbox_at(text, line.start, marker.get())]
     } else {
         let lead = line_start_prefix(text, &line);
         fallback(text, &line, lead)
@@ -141,26 +141,48 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
         .collect()
 }
 
-/// Where a checkbox goes in `item`, and what goes before it: an empty item gains a space of its own.
-fn after_marker(item: &ListItem) -> (usize, &'static str) {
-    let space = if item.content == item.marker.end {
-        " "
-    } else {
-        ""
-    };
-    (item.content.get(), space)
+/// Where a checkbox goes after the item marker at `marker`, on the line starting at `line`, and
+/// what goes before it: the content start (D6). Its blanks count in columns from the line's start;
+/// one to four go before it, of five or more only one, and an empty item gains a space of its own.
+fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) {
+    let bytes = text.as_bytes();
+    // A bullet is one byte, a number its digits and the `.` or `)` after them.
+    let digits = bytes[marker..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit());
+    let end = marker + 1 + digits.count();
+    let blanks = bytes[end..]
+        .iter()
+        .take(5)
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let after = column_after(0, &bytes[line..end]);
+    match column_after(after, &bytes[end..end + blanks]) - after {
+        0 => (end, " "),
+        1..=4 => (end + blanks, ""),
+        _ => (end + 1, ""),
+    }
 }
 
-/// Where the first item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes, puts
-/// a checkbox. The pass starts its tab stops at its text, so the text follows `c mod 4` spaces, `c`
-/// the prefix's columns: every tab stops where it does in the line, and the pad opens no code (D6).
+/// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).
+fn column_after(column: usize, bytes: &[u8]) -> usize {
+    bytes.iter().fold(column, |column, &byte| match byte {
+        b'\t' => column + 4 - column % 4,
+        _ => column + 1,
+    })
+}
+
+/// Where the innermost item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes,
+/// puts a checkbox. The pass starts its tab stops at its text, so the text follows `c mod 4` spaces,
+/// `c` the prefix's columns: every tab stops where it does in the line, and the pad opens no code
+/// (D6).
 fn fallback(text: &str, line: &Range<usize>, lead: usize) -> Option<(usize, &'static str)> {
     #[cfg(test)]
     counted(&FALLBACKS);
     let from = line.start + lead;
     let pad = column_after(0, &text.as_bytes()[line.start..from]) % 4;
     let piece = format!("{:pad$}{}\n", "", &text[from..line.end]);
-    let (at, before) = after_marker(&first_item(&piece)?);
+    let (at, before) = checkbox_at(&piece, 0, innermost_item(&piece)?);
     Some((from + at - pad, before))
 }
 
@@ -200,14 +222,8 @@ fn landed(text: &str, before: &Structure, cycled: &[Cycled], checked: bool) -> V
         })
         .collect();
     let after = &parsed.structure;
-    let items = before.items.iter().map(|item| item.marker.start.get());
-    let items = moved(items, &hunks).filter(|&(_, to)| {
-        let to = ByteOffset::new(to);
-        after
-            .items
-            .binary_search_by_key(&to, |item| item.marker.start)
-            .is_err()
-    });
+    let items = moved(before.items.iter().map(|item| item.get()), &hunks)
+        .filter(|&(_, to)| after.items.binary_search(&ByteOffset::new(to)).is_err());
     let quotes = before.quotes.iter().map(|quote| quote.get());
     let quotes = moved(quotes, &hunks)
         .filter(|&(_, to)| after.quotes.binary_search(&ByteOffset::new(to)).is_err());

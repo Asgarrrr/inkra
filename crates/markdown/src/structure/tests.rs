@@ -1,19 +1,11 @@
-use std::ops::Range;
-
 use inkra_text::ByteOffset;
 
 use crate::parse;
 
-/// Each item's marker and content start.
-fn items(text: &str) -> Vec<(Range<usize>, usize)> {
-    let structure = parse(text).structure;
-    let items = structure.items.into_iter();
-    items
-        .map(|item| {
-            let marker = item.marker.start.get()..item.marker.end.get();
-            (marker, item.content.get())
-        })
-        .collect()
+/// Each item's marker.
+fn items(text: &str) -> Vec<usize> {
+    let items = parse(text).structure.items.into_iter();
+    items.map(ByteOffset::get).collect()
 }
 
 fn quotes(text: &str) -> Vec<usize> {
@@ -28,32 +20,20 @@ fn skipped(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The marker past a tab's leftover columns and past the quote markers before it on its line.
 #[test]
-fn an_item_holds_its_marker_and_its_content_start() {
+fn an_item_holds_its_marker() {
     for (text, want) in [
-        ("- a", vec![(0..1, 2)]),
-        ("- 1. a", vec![(0..1, 2), (2..4, 5)]),
-        ("-", vec![(0..1, 1)]),
-        ("  -\t ", vec![(2..3, 5)]),
-        ("12) a", vec![(0..3, 4)]),
-        ("-   a", vec![(0..1, 4)]),
-        ("-     a", vec![(0..1, 2)]),
-        ("-\t  ", vec![(0..1, 2)]),
+        ("- a", vec![0]),
+        ("- 1. a", vec![0, 2]),
+        ("-", vec![0]),
+        ("  -\t ", vec![2]),
+        ("12) a", vec![0]),
+        ("- > - a", vec![0, 4]),
+        ("-\t- a", vec![0, 2]),
+        (">\t- a", vec![2]),
+        ("- a\n\n  -\t  ", vec![0, 7]),
         ("a\n-", vec![]),
-    ] {
-        assert_eq!(items(text), want, "{text:?}");
-    }
-}
-
-/// Columns count from the line's start, through the openers before the marker.
-#[test]
-fn an_items_blanks_count_in_columns_from_the_lines_start() {
-    for (text, want) in [
-        ("- > - a", vec![(0..1, 2), (4..5, 6)]),
-        ("- >\t- a", vec![(0..1, 2), (4..5, 6)]),
-        (">\t- a", vec![(2..3, 4)]),
-        ("- a\n\n  -\t  ", vec![(0..1, 2), (7..8, 11)]),
-        ("- a\n\n -\t  ", vec![(0..1, 2), (6..7, 10)]),
     ] {
         assert_eq!(items(text), want, "{text:?}");
     }
@@ -61,14 +41,8 @@ fn an_items_blanks_count_in_columns_from_the_lines_start() {
 
 #[test]
 fn a_quote_and_an_item_open_in_document_order() {
-    assert_eq!(
-        (quotes("> - a"), items("> - a")),
-        (vec![0], vec![(2..3, 4)])
-    );
-    assert_eq!(
-        (quotes("- > a"), items("- > a")),
-        (vec![2], vec![(0..1, 2)])
-    );
+    assert_eq!((quotes("> - a"), items("> - a")), (vec![0], vec![2]));
+    assert_eq!((quotes("- > a"), items("- > a")), (vec![2], vec![0]));
 }
 
 #[test]

@@ -82,11 +82,11 @@ gutter's range runs through the checkbox and its one space or tab. The quote par
 
 - **The marker.** The pending-slot rule decides an item's marker (markdown-blocks, S3 correction 7;
   Zed `vendor/zed-reference/crates/markdown/src/markdown.rs:3820-3836`). `Items`
-  (`gutters.rs:59-128`) resolves it at the item's first event that is not one `Start(Paragraph)`.
+  (`gutters.rs:71-150`) resolves it at the item's first event that is not one `Start(Paragraph)`.
   The parser facts table of markdown-blocks holds for pulldown-cmark 0.13.6
   (`Cargo.lock:4068-4069`).
 - **The merge.** Task gutters take their line's place among the quote gutters, in line order, after
-  the parse's one pass (`Items::gutters`, called at `crates/markdown/src/parse.rs:140`).
+  the parse's one pass (`Items::gutters`, called at `crates/markdown/src/parse.rs:145`).
 - **One line.** pulldown-cmark reads a checkbox only on its item's marker line. It scans the task
   marker right after the list marker, and only when the rest of that line is not blank
   (`pulldown-cmark-0.13.6/src/firstpass.rs:139-161`). `task_gutter` states this as a
@@ -103,12 +103,12 @@ gutter's range runs through the checkbox and its one space or tab. The quote par
   box.
 
 **The structure `⌘L` reads.** `Markdown` has `structure: Structure`, filled in the parse's one
-pulldown-cmark pass (`parse.rs:82-139`):
+pulldown-cmark pass (`parse.rs:86-144`):
 
 ```rust
 pub struct Structure {
-    /// Each list item that opens, in document order.
-    pub items: Vec<ListItem>,
+    /// Each list item's marker, the bullet or the first digit, in document order.
+    pub items: Vec<ByteOffset>,
     /// Each block quote's start, where pulldown-cmark starts its range, in document order.
     pub quotes: Vec<ByteOffset>,
     /// Each code block, front matter, table, HTML block and ATX heading, from its first line's
@@ -116,17 +116,13 @@ pub struct Structure {
     /// another.
     pub skipped: Vec<Range<ByteOffset>>,
 }
-
-pub struct ListItem {
-    /// The bullet, or the digits and their `.` or `)`.
-    pub marker: Range<ByteOffset>,
-    /// The content start (D6); the marker's end when the line ends there.
-    pub content: ByteOffset,
-}
 ```
 
-- `crates/markdown/src/structure.rs` holds both types and the collector the parse loop calls once
-  per event. `parse.rs` is at 384 of its 400 lines, so it gains only the field and the call.
+- `crates/markdown/src/structure.rs` holds the type and the collector the parse loop calls once
+  per element it opens, in its `Event::Start` arm. `parse.rs` is at 390 of its 400 lines, so it
+  gains only the field and the call.
+- An item holds its marker only. `⌘L` reads the content start of the one item it needs per line,
+  from the line's start (D6), so the parse reads no blank after a marker.
 - `Items` decides the box, so it records each line holding a task with no box. The parse merges
   those lines into `skipped`, in order.
 - A range in `skipped` ends before its last `\n`, as a `CodeBlock`'s does, so no offset reaches
@@ -134,19 +130,19 @@ pub struct ListItem {
 - The layout reads none of `structure`, so `changed` compares none of it.
 
 **Its cost per keystroke.** It adds no scan. The parse loop already visits every event; the
-structure adds one push per item, quote and skipped block. An item's content start reads the
-blanks after its marker, at most five bytes. Its column counts from the line's start: every byte
-is one column, and a tab stops at the next multiple of 4. The collector carries the column from the
-previous opener on the line, an item or a quote, counting every byte up to the marker. So a line's
-prefix is read once. The 500 KB note
-of the parse bench (`crates/markdown/benches/parse.rs`) holds about 4,800 items, 1,200 quotes and
-1,200 skipped blocks. That is about 7,200 pushes and 145 KB, beside a parse of 5.58 ms on 8b9db360.
+structure adds one push per item, quote and skipped range. The 500 KB note of the parse bench
+(`crates/markdown/benches/parse.rs`) holds about 4,800 items, 1,200 quotes and 2,400 skipped
+ranges, a code block and an ATX heading per section. That is about 8,400 pushes and 90 KB, beside a
+parse of 5.58 ms on 8b9db360. Measured on T6a, alternating with 003bbe95, the collector costs 1.5 to
+2% of `parse` (History).
 
-**The column carry matches pulldown-cmark.** `LineStart` counts a tab's width from the byte after
-the last tab it scanned, which lies on a stop, so its stops count from the line's start too
-(`pulldown-cmark-0.13.6/src/scanners.rs:160-187`, the tab at 173-181).
+**Columns count from the line's start, as in pulldown-cmark.** `⌘L` counts an item's blanks in
+columns from its line's start: every byte is one column, and a tab stops at the next multiple of 4.
+`LineStart` counts a tab's width from the byte after the last tab it scanned, which lies on a stop,
+so its stops count from the line's start too (`pulldown-cmark-0.13.6/src/scanners.rs:160-187`, the
+tab at 173-181).
 
-- A quote between two items counts as bytes: in `- > - a`, the carry from the outer `-` passes the
+- A quote between two items counts as bytes: in `- > - a`, the count passes the outer `-`, the
   blank, the `>` and its blank, and the inner `-` sits at column 4.
 - A tab after a `>` needs no special case. The `>` takes one of its columns, and `LineStart` keeps
   the rest as indent before the next marker (`spaces_remaining`, line 181). In `- >\t- a` the tab
@@ -156,14 +152,14 @@ the last tab it scanned, which lies on a stop, so its stops count from the line'
 ## D2. The conceal
 
 **(B)** The task conceal's element is the task part; its marker is the box run
-(`gutter_conceals`, `gutters.rs:255-278`). A marker must lie inside its element
+(`gutter_conceals`, `gutters.rs:280-303`). A marker must lie inside its element
 (`parse/tests.rs:627-631`). With the checkbox alone as the element, `⌃A` on `- [ ] a` put the caret
 at 0, revealed nothing, and typing landed before a hidden bullet.
 
 - A caret anywhere in the task part, leading blanks included, reveals it.
 - A caret at the text start does not touch the checkbox, so after a click the box stays painted.
 - The replacement is `""`. The lead keeps its own conceals: a bullet in it shows `•` (`bullet`,
-  `gutters.rs:181-192`), and a number shows as typed.
+  `gutters.rs:206-217`), and a number shows as typed.
 - The quote part and the task part reveal apart (markdown-blocks S1 review): in `> - [ ] a` a caret
   on `>` reveals the quote part only.
 - A revealed task part reads raw, its lead included (D3).
@@ -176,7 +172,7 @@ G-property in `parse/tests/gutters.rs` admits the lead's one-byte bullets betwee
 
 The gutter is a hanging indent: the line's text, wrapped rows included, starts at its right edge
 (markdown-blocks D3). `line_prefix` (`prefix.rs:111-180`) builds it from the line's `Gutter` and
-its own conceals. `GutterCarry::layout` (`crates/app/src/editor/layout/prefix/gutter.rs:155-213`)
+its own conceals. `GutterCarry::layout` (`crates/app/src/editor/layout/prefix/gutter.rs:159-208`)
 measures it, once per distinct gutter text within a `shape_document`.
 
 **Concealed.** While the task part is concealed, the gutter is the quote part, then the lead, then
@@ -225,7 +221,7 @@ task part, which paints there raw, as a revealed `**` paints raw.
   stays right. It is the line past the gutter in both states, with the same conceals; the lead's
   bullets and the box run stay the gutter's own, so they hide nothing in it.
 - `Shown` holds the raw shape of the gutter's text, split at `quote_end` when one part alone
-  shows, by the split code that exists (`Shown::new`, `prefix/gutter.rs:66-91`, through
+  shows, by the split code that exists (`Shown::new`, `prefix/gutter.rs:72-97`, through
   `ShapedLine::split_at`). The task part alone paints at the quote part's width; both parts paint at
   `x` 0.
 - The width is the raw width of the gutter's text: the quote part, the task part, and the one space
@@ -235,7 +231,7 @@ task part, which paints there raw, as a revealed `**` paints raw.
   indent (`line_wrap`, `crates/app/src/editor/layout/shape.rs:347-357`), so a long task rewraps when
   its task part reveals, as a paragraph does when its `**` does.
 - The caret and a click in the task part map through `Shown`, as they do today
-  (`GutterLayout::offset_for_x`, `prefix/gutter.rs:41-45`). A click on a concealed quote part lands
+  (`GutterLayout::offset_for_x`, `prefix/gutter.rs:47-51`). A click on a concealed quote part lands
   at the text start.
 - The quote part keeps its behaviour. Revealed, its raw text paints in the gutter at `x` 0;
   concealed, only its bars do. Its raw width is its concealed width, so a reveal of the quote part
@@ -244,13 +240,13 @@ task part, which paints there raw, as a revealed `**` paints raw.
   so the text may move by that pixel, as after any typed byte.
 
 **Where the raw width comes from.** `layout` already shapes the gutter's whole text raw while a part
-is revealed, to paint it (`prefix/gutter.rs:167-168`). With the task part revealed, the line's
+is revealed, to paint it (`prefix/gutter.rs:171-172`). With the task part revealed, the line's
 `Geometry` takes that shape's width. So the raw width costs no shape of its own, and it is the
 line's, never cached.
 
 **The records.**
 
-- `Measured` (`prefix/gutter.rs:116-124`) is what one gutter text measures to, concealed: its
+- `Measured` (`prefix/gutter.rs:122-128`) is what one gutter text measures to, concealed: its
   `Geometry`, and `task: Option<TaskShape>`, the task's measured shape. `measure` never reads
   `Reveal`. So two lines with the same gutter text, one revealed and one concealed, share one
   concealed geometry, and the revealed one widens only its own.
@@ -258,17 +254,17 @@ line's, never cached.
   lead's shape. The concealed width is `x` plus the box slot.
 - `GutterLayout` (`prefix/gutter.rs:15-23`) holds `task_box: Option<Box<TaskBox>>`: the line's
   `TaskShape` and its own `checked`, set only while its task part is concealed.
-- `Geometry` (`prefix/gutter.rs:106-114`) holds the width, the bars' `x` and the quote part's
+- `Geometry` (`prefix/gutter.rs:112-120`) holds the width, the bars' `x` and the quote part's
   width. A concealed task line's width ends at the box slot's right; a revealed one's at the raw
   text's end.
-- `Shown` (`prefix/gutter.rs:57-104`) keeps its split, as above.
+- `Shown` (`prefix/gutter.rs:63-110`) keeps its split, as above.
 - The 256-byte assertion on `LineLayout` (`crates/app/src/editor/layout/line.rs:95-96`) stays the
   check. `TaskBox` and `Shown` stay boxed, and T6 adds no inline field.
 - The doc comment on `LineLayout::prefix` (`line.rs:89`) says "no reveal re-wraps the line". The
   prefix stays out of the shaped text in both states, but a task part's reveal changes the indent,
   so the line rewraps. T6b updates the comment.
 
-**(D) A lazy line carries the quote part only.** `GutterCarry::pass` (`prefix/gutter.rs:145-153`)
+**(D) A lazy line carries the quote part only.** `GutterCarry::pass` (`prefix/gutter.rs:149-157`)
 carries `Geometry::quote_part`, and `layout` gives it to a lazy line. Under `> - [ ] a\n  b`, line
 `b` takes the quote part's width and paints no box. A box comes from the line's own `task`, never
 from carried geometry. A revealed task line keeps its quote part's width in `Geometry`, so a reveal
@@ -280,7 +276,7 @@ No box vector. **(E)** A vector built in `shape_document` beside `bars` would be
 pass per keystroke, for data each line already holds. `layout/mod.rs` also stands at the 400-line
 limit of an unlisted file (`scripts/line-ceilings.sh:7`).
 
-- **The square.** `LineLayout::task_box` (`line.rs:103-110`) gives the square a concealed task
+- **The square.** `LineLayout::task_box` (`line.rs:103-111`) gives the square a concealed task
   paints and a click hits: `TASK_BOX_SIZE` wide from `TaskShape`'s `x`, centred on row 0.
 - **Paint.** The visible-line loop calls `paint_task` on each line
   (`crates/app/src/editor/layout/paint.rs:182-202`). It paints the lead at the quote part's width,
@@ -289,7 +285,7 @@ limit of an unlisted file (`scripts/line-ceilings.sh:7`).
   gutter, after the selection (`crates/app/src/text_input/paint.rs:103-106`). gpui:
   `vendor/zed-reference/crates/gpui/src/window.rs`, `paint_quad` 4934, `paint_svg` 5235, `fill`
   8128, `outline` 8140.
-- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:263-280`)
+- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:263-275`)
   returns the task's flip and its text start (D5). It finds the line under `local.y` and requires
   `local` inside its square. **(F)** `row_for_y` clamps
   (`crates/app/src/editor/layout/mod.rs:251-265`), so the square, not the line lookup, rejects a
@@ -319,7 +315,7 @@ The check icon is Lucide `check` in `crates/app/assets/icons/`, `IconName::Check
   (`crates/app/src/editor/reload.rs:24-26`). Three matching bytes would not prove the task is the
   same one. A mismatch edits nothing, and the click places the caret as any click does. Zed only
   debug-asserts here (`vendor/zed-reference/crates/markdown_preview/src/markdown_preview_view.rs:1220`).
-- The edit is `Task::flip` (`gutters.rs:44-54`): the middle byte, `x` for an unchecked one, a
+- The edit is `Task::flip` (`gutters.rs:59-69`): the middle byte, `x` for an unchecked one, a
   space for `x` or `X`. So `[\t]`, which pulldown-cmark reads as unchecked, flips to `[x]`, and a
   flip back writes `[ ]`: the tab is not restored. A vertical tab or a form feed goes the same way. `EditorState::apply_diff` runs one `Buffer::transact`: one undo step, merged with neither
   neighbour. The click then collapses the caret at the text start the layout holds, mapped through
@@ -373,7 +369,7 @@ task since 0.13.24 (forum 14634).
    its own. This is the line's only candidate.
 3. A line where no item opens: first the checkbox at the fallback's content start, when the
    fallback finds an item; then `- [ ] ` after the line's leading `[ \t>]*` (`line_start_prefix`,
-   `parse.rs:221-231`).
+   `parse.rs:229-237`).
 
 `- [ ] ` is offered only where no item opens (Open question 6, decided). On a line where an item
 opens it would land at the first item's marker, which would then read as the new task's text, so
@@ -384,8 +380,8 @@ line where no item opens has two.
 otherwise: a setext underline (`a\n-`), an empty item that cannot interrupt a paragraph (`a\n- `),
 or a lazy number (`a\n2. b`). The fallback runs one pulldown-cmark pass, through the structure
 collector, on that line's text after its leading `[ \t>]*`. It reads the text as `parse` reads a last
-line. The first item it finds gives the content start, mapped back by the prefix's length (Open
-question 5, decided).
+line. The innermost item it finds, the last that opens, gives the content start, as candidate 2
+takes it, mapped back by the prefix's length (Open question 5, decided).
 
 - No marker grammar lives in `cycle.rs` or `structure.rs`: pulldown-cmark reads every marker.
 - Columns count from the line's start, but the pass starts its tab stops at the text it is given.
@@ -395,15 +391,17 @@ question 5, decided).
   well. So `a\n -\t  ` gives `a\n -\t  [ ] `, as on `main`. In the line the tab spans two
   columns, so the blanks span four. Without the pad the tab would span three, the blanks five, and
   the checkbox would go past the tab alone.
-- The candidates are built once, before the first round (`cycle.rs:46-52`). So the fallback costs
+- The candidates are built once, before the first round (`cycle.rs:44-51`). So the fallback costs
   one pass of O(line) per cycled line where no item opens, once per `⌘L`.
-- It reads the first item, not the innermost. After a paragraph line, `2. 3. b` tries
-  `2. [ ] 3. b`, which fails, since a lazy `2.` is text. The line then lands `- [ ] 2. 3. b`, as on
-  `main`.
-- `- - -` is a thematic break, alone as well as in the note: pulldown-cmark tries the break before
-  the list marker (`pulldown-cmark-0.13.6/src/scanners.rs:315-322`). So the fallback finds no item,
-  and the line takes `- [ ] - - -`. `main` gives `- - - [ ] `, three nested items. This is the one
-  `⌘L` output T6a changes.
+- It reads the innermost item, as candidate 2 does. After a paragraph line, `2. 3. b` tries
+  `2. 3. [ ] b`, which fails, since a lazy `2.` is text. The line then lands `- [ ] 2. 3. b`, as on
+  `main`. Under a new item, `a\n2. 3. b` selected gives `- [ ] a\n2. 3. [ ] b`, and `a\n\t- - b`
+  gives `- [ ] a\n\t- - [ ] b`, as on `main`.
+- A thematic break of `-` or `*` reads as one alone as well as in the note: pulldown-cmark tries
+  the break before the list marker (`pulldown-cmark-0.13.6/src/scanners.rs:315-322`). So the
+  fallback finds no item, and the line takes `- [ ] ` in front: `- - -` gives `- [ ] - - -`, and
+  `* **` gives `- [ ] * **`. `main` gives `- - - [ ] `, three nested items. A thematic break is the
+  one `⌘L` output T6a changes.
 
 **The content start.** It follows `CommonMark` 5.2 for an item that starts with a paragraph.
 Blanks after the marker count in columns, a tab stopping at the next multiple of 4 from the line's
@@ -463,8 +461,8 @@ item's own text: every paragraph directly inside the item, continuation and lazy
 
 - **Set where the marker is decided.** The pending slot (D1) resolves after `Start(Item)`, or after
   one `Start(Paragraph)` in a loose item. When it resolves a checked task that gets a box, `DONE`
-  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:84-89`).
-  Later paragraphs inherit it through `Open::enter` (`parse.rs:274-293`).
+  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:88-93`).
+  Later paragraphs inherit it through `Open::enter` (`parse.rs:280-299`).
 - **Not inherited by a block.** `Open::enter` drops `DONE` when a list, a quote or a code block
   opens inside the item, so nested items are not struck. Any other block of the item, a heading, a
   table or an HTML block, inherits it and is struck: it is the item's own text as much as a
@@ -513,7 +511,7 @@ body, where mockup C had 10 px. A distinct box colour waits for a theme that ask
 ## D10. The lead and the box rule
 
 **The box rule.** A task item gets a box when its line holds all its leading quotes and, between
-the quote part's end and the item's marker, no `>` (`task_gutter`, `gutters.rs:130-165`).
+the quote part's end and the item's marker, no `>` (`task_gutter`, `gutters.rs:152-190`).
 CommonMark opens a list item mid-line only after container markers, so that gap holds only blanks
 and the markers of items that open on the line.
 
@@ -544,9 +542,8 @@ the lead shows them (D3).
   line's text but not its indent, every paragraph of a loose item, and no nested item, quote or
   code block inside the item.
 - `Markdown::task_at` finds a task by its line's start, and nothing at any other byte (T6a).
-- `Structure` (T6a): `- a` holds an item at `-` with content 2; `- 1. a` two items, the inner one's
-  content 5; `-` an item with content 1; `  -\t ` content 5; `> - a` a quote at 0 and an item at 2;
-  `- > a` an item at 0 and a quote at 2; `a\n-` no item. `skipped` holds a code block, the front
+- `Structure` (T6a): `- a` holds an item at 0; `- 1. a` items at 0 and 2; `  -\t ` an item at 2;
+  `> - a` a quote at 0 and an item at 2; `- > a` an item at 0 and a quote at 2; `a\n-` no item. `skipped` holds a code block, the front
   matter, a table, an HTML block, an ATX heading (`# a`, and `- # a` from the line's start) and an
   unboxed task's line, each from its first line's start and without its last `\n`. A setext heading
   is not in it.
@@ -555,8 +552,11 @@ the lead shows them (D3).
   splice that changes the next line's laziness; a lost quote fails its own line.
 - The fallback (T6a): `a\n- ` and `a\n-`, caret on the second line, give `a\n- [ ] `, as on `main`;
   `a\n -\t  ` gives `a\n -\t  [ ] `, as on `main`, which only the pad gives; `- - -` gives
-  `- [ ] - - -`, where `main` gives `- - - [ ] `. No current test holds any of these lines
-  (`crates/markdown/src/cycle/tests.rs`, `batch_tests.rs`).
+  `- [ ] - - -` and `* **` gives `- [ ] * **`, where `main` gives `- - - [ ] `. Under `⌘A`,
+  `a\n\t- - b`, `a\n\t* - b` and `a\n2. 3. b` take the checkbox after their innermost item, as on
+  `main`. No current test holds any of these lines (`crates/markdown/src/cycle/tests.rs`,
+  `batch_tests.rs`).
+- The content start (T6a): `> -\t  ` gives `> -\t  [ ] `, its blanks counted from the line's start.
 - The cycle's passes (T6a), counted under `cfg(test)`: a batch of flips only runs none; `⌘A ⌘L` on
   `a\nb` runs one parse of the copy and one fallback pass per line; on `- a\n- b` it runs one parse
   and no fallback pass.
@@ -627,11 +627,12 @@ at. T1a through T5 are merged (History).
 6. **T4b, `⌘L` on a selection** (#77).
 7. **T5, the markers before the box** (#78).
 8. **T6a, one parse** (~0.5 d). Open questions 5 and 6 are decided. It changes one `⌘L` output,
-   `- - -` (D6), and nothing else visible.
-   - `inkra-markdown`: `Structure` and `ListItem` in `structure.rs`, `Markdown::structure` and
+   a thematic break of `-` or `*` (D6), and nothing else visible.
+   - `inkra-markdown`: `Structure` in `structure.rs`, `Markdown::structure` and
      `Markdown::task_at` (D1). `cycle.rs` reads them and loses `Scan`, `Openers`, `Marker`,
-     `marker`, `innermost`, `column_after`, `terminated` and its own `task_at` (D6). It gains the
-     fallback, which runs the structure collector, and offers `- [ ] ` only where no item opens.
+     `marker`, `innermost`, `terminated` and its own `task_at` (D6). It reads the content start of
+     the one item it needs per line, and gains the fallback, which runs the structure collector, and
+     offers `- [ ] ` only where no item opens.
      A round of flips only parses nothing. `task_gutter`'s newline guard becomes a `debug_assert!`
      (D1).
    - `app`: `DocumentLayout::task_at` calls `Markdown::task_at`. `Measured`'s `checkbox` and `lead`
@@ -709,8 +710,8 @@ Newest last. Each entry says what changed and why.
   - Open question 5 is decided: the fallback (D6). No marker grammar lives in `cycle.rs` or
     `structure.rs`. Without it, `a\n-` gave `a\n- [ ] -` and `a\n2. b` both selected gave
     `- [ ] a\n- [ ] 2. b`; the recommended marker reader would have restated `CommonMark`'s grammar
-    in `structure.rs`. With it, `- - -` gives `- [ ] - - -`, since pulldown-cmark reads it as a
-    thematic break.
+    in `structure.rs`. With it, a thematic break of `-` or `*` takes `- [ ] ` in front: `- - -`
+    gives `- [ ] - - -`, since pulldown-cmark reads it as a thematic break.
   - Open question 6 is decided as recommended: `- [ ] ` is offered only where no item opens.
   - Open question 4 is decided: an ATX heading's line is skipped, so `# a` edits nothing. A
     setext heading is not, since `a\n- ` is one.
@@ -718,6 +719,11 @@ Newest last. Each entry says what changed and why.
   carry is checked against `LineStart`. pulldown-cmark reads a tab, a vertical tab or a form feed
   as an unchecked middle byte, so the checkbox term and decision 5 say so, and D5 records that a
   flip does not restore a tab. Stale lines in `paint.rs` and `mouse.rs` are updated.
+- **The T6a review** (2026-11-18). The fallback read the first item, so `a\n\t- - b` selected
+  lost `main`'s nested task; it reads the innermost, as candidate 2 does. `parse` ran about 3%
+  slower, so an item now holds its marker only, and `⌘L` reads the one content start it needs per
+  line from the line's start. `parse` is then 1.5 to 2% slower than on 003bbe95. Without the
+  collector call it matches 003bbe95, and no single arm of the collector holds the difference (D1).
 
 **Reversed decisions.**
 
@@ -825,7 +831,7 @@ Newest last. Each entry says what changed and why.
 5. **A marker the parse reads as no item** (T6a). Decided by the owner on 2026-11-18: the
    fallback (D6) reads such a line through pulldown-cmark, and `cycle.rs` keeps no marker grammar.
    Without it, `a\n-` gave `a\n- [ ] -`, and `a\n2. b` both selected gave `- [ ] a\n- [ ] 2. b`.
-   The one output that changes is `- - -` (History).
+   The one output that changes is a thematic break of `-` or `*`, as `- - -` (History).
 6. **Candidate 3 never lands on a line where an item opens** (T6a). Decided by the owner on
    2026-11-18, as recommended: `- [ ] ` is offered only where no item opens (D6). No current test
    changes.
