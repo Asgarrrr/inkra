@@ -17,6 +17,7 @@ use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
 
 mod layer;
+mod task_slot;
 mod toggle;
 
 const TOKENS: &[&str] = &[
@@ -319,7 +320,7 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
         line.task_box().map(|(square, task)| {
             let lead = line.prefix.as_ref().and_then(super::prefix::Prefix::lead);
             let lead = lead.map(|(lead, x)| (lead.text.to_string(), x));
-            (square, task.shape.x.clone(), task.checked, lead)
+            (square, task.shape.x, task.checked, lead)
         })
     };
     prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);

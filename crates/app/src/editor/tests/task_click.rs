@@ -140,9 +140,17 @@ fn a_quoted_task_toggles(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_click_on_a_revealed_checkbox_places_the_caret_and_edits_nothing(cx: &mut TestAppContext) {
     let (window, mut cx) = editor(cx, "- [ ] a\nbody");
-    let centre = only_box(&mut cx).center();
+    let y = only_box(&mut cx).center().y;
     cx.simulate_keystrokes("cmd-up");
     assert_eq!(boxes(&mut cx), [], "the caret at 0 reveals the task part");
+    // The box sits where the bullet does, so the click aims at the revealed middle byte.
+    let centre = window
+        .update(&mut cx, |view, _, _| {
+            let layout = view.input.last_layout().unwrap();
+            let x = view.text_bounds().unwrap().origin.x + layout.x_for_offset(at(3));
+            point(x + px(2.), y)
+        })
+        .unwrap();
     let placed = window
         .update(&mut cx, |view, _, _| view.input.offset_at(centre).unwrap())
         .unwrap();

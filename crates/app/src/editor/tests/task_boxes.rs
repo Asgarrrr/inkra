@@ -1,5 +1,5 @@
 //! Task boxes (task boxes spec, D4's paint): one per line whose task part is concealed. Headless, a
-//! body glyph is 10.8 px, so a box centres on the checkbox's middle glyph at a multiple of it.
+//! body glyph is 10.8 px, so a box's left edge, right after the lead, sits at a multiple of it.
 
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, WindowHandle, px, size};
 
@@ -31,15 +31,15 @@ fn boxes(
         .collect()
 }
 
-/// A box of its size centred on `x` and on the first row of the line whose top is `top`.
+/// A box of its size from `x`, centred on the first row of the line whose top is `top`.
 fn assert_box(bounds: Bounds<Pixels>, x: f32, top: f32) {
     assert_eq!(bounds.size, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
-    assert_x(bounds.center().x, x);
+    assert_x(bounds.left(), x);
     assert_eq!(bounds.center().y, px(top + LINE_HEIGHT / 2.));
 }
 
-/// The box centres on the checkbox's middle glyph, the `X` it is measured with, on row 0 of a
-/// wrapped line; every state paints at the same bounds, and only a checked one fills.
+/// The box sits in the bullet's place, on row 0 of a wrapped line; every state paints at the same
+/// bounds, and only a checked one fills.
 #[gpui::test]
 fn a_concealed_checkbox_paints_one_box_per_state(cx: &mut TestAppContext) {
     let wrapped = "aaaa ".repeat(20);
@@ -56,7 +56,7 @@ fn a_concealed_checkbox_paints_one_box_per_state(cx: &mut TestAppContext) {
         assert_eq!(boxes.len(), 1, "{text}");
         let (bounds, painted) = boxes[0];
         assert_eq!(painted, checked, "{text}");
-        assert_box(bounds, 3.5 * GLYPH, 0.);
+        assert_box(bounds, 0., 0.);
     }
 }
 
@@ -73,7 +73,7 @@ fn a_box_lies_inside_its_gutter(cx: &mut TestAppContext) {
         .unwrap();
     assert_eq!(boxes.len(), 1);
     let (bounds, _) = boxes[0];
-    assert_box(bounds, 4.5 * GLYPH, 0.);
+    assert_box(bounds, 3. * GLYPH, 0.);
     assert!(bounds.left() >= px(0.), "{bounds:?}");
     assert!(
         bounds.right() <= text,
@@ -101,7 +101,7 @@ fn a_quoted_task_keeps_its_box_and_its_lazy_line_has_none(cx: &mut TestAppContex
     cx.simulate_keystrokes("cmd-down");
     let concealed = boxes(&window, &mut cx);
     assert_eq!(concealed.len(), 1);
-    assert_box(concealed[0].0, 5.5 * GLYPH, 0.);
+    assert_box(concealed[0].0, 2. * GLYPH, 0.);
     cx.simulate_keystrokes("cmd-up");
     assert_eq!(boxes(&window, &mut cx), concealed);
     cx.simulate_keystrokes("right right");
@@ -115,7 +115,7 @@ fn each_task_paints_its_box_on_its_own_line(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-down");
     let boxes = boxes(&window, &mut cx);
     assert_eq!(boxes.len(), 2);
-    assert_box(boxes[0].0, 3.5 * GLYPH, 0.);
-    assert_box(boxes[1].0, 3.5 * GLYPH, LINE_HEIGHT);
+    assert_box(boxes[0].0, 0., 0.);
+    assert_box(boxes[1].0, 0., LINE_HEIGHT);
     assert_eq!((boxes[0].1, boxes[1].1), (false, true));
 }

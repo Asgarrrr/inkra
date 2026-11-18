@@ -19,6 +19,9 @@ const QUOTES: &str = "A paragraph before the quotes.\n\
                       Body text after the quotes.\n\
                       \n\
                       - [ ] An open task\n\
+                      \x20\x20- [ ] A task under the open task\n\
+                      \x20\x20- A bullet under the open task\n\
+                      - A plain bullet beside the tasks\n\
                       - [x] A done task\n\
                       \x20\x20- [ ] A nested task\n\
                       \t- [ ] A task nested by a tab\n\

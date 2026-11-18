@@ -1,7 +1,6 @@
 //! A quote's or task's gutter: its width and bars, measured once per text, its revealed part, and a
 //! concealed task's box and lead (markdown blocks spec, D3; task boxes spec, D3, D10).
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
@@ -11,6 +10,7 @@ use inkra_markdown::{Conceal, Gutter};
 use inkra_text::ByteOffset;
 
 use super::{Hidden, Prefix};
+use crate::theme::TASK_BOX_SIZE;
 
 pub(in crate::editor::layout) struct GutterLayout {
     /// From the line's start, where a gutter starts.
@@ -28,11 +28,11 @@ pub(in crate::editor::layout) struct TaskBox {
     pub(in crate::editor::layout) checked: bool,
 }
 
-/// What a task measures to with its gutter's text, in every state (task boxes spec, D3).
+/// What a task measures to with its gutter's text, concealed, in every state (task boxes spec, D3).
 #[derive(Clone)]
 pub(in crate::editor::layout) struct TaskShape {
-    /// The checkbox's `x` span, measured as the gutter's width.
-    pub(in crate::editor::layout) x: Range<Pixels>,
+    /// The box's left: the quote part's width plus the lead's.
+    pub(in crate::editor::layout) x: Pixels,
     /// The lead through its own conceals at the body size; `None` when blank.
     lead: Option<Rc<ShapedLine>>,
 }
@@ -109,7 +109,8 @@ impl Shown {
     }
 }
 
-/// A gutter's text start and bars, and the quote part's width, carried to lazy lines (spec D3).
+/// A gutter's text start and bars, and the quote part's width, carried to lazy lines (spec D3). A
+/// task line's text starts past its box slot while concealed, past its raw text while revealed.
 #[derive(Clone, Default)]
 pub(super) struct Geometry {
     pub(super) width: Pixels,
@@ -119,7 +120,7 @@ pub(super) struct Geometry {
     quote_width: Pixels,
 }
 
-/// What a gutter's text measures to, once per text.
+/// What a gutter's text measures to concealed, once per text.
 #[derive(Clone)]
 struct Measured {
     geometry: Geometry,
@@ -135,6 +136,8 @@ pub(in crate::editor::layout) struct GutterCarry<'a> {
     /// spec, D10); most are `> ` or `> > `.
     measured: HashMap<&'a str, Measured>,
     body_size: Pixels,
+    /// The box slot, measured at the first task.
+    slot: Option<Pixels>,
 }
 
 impl<'a> GutterCarry<'a> {
@@ -143,6 +146,7 @@ impl<'a> GutterCarry<'a> {
             carried: Geometry::default(),
             measured: HashMap::new(),
             body_size,
+            slot: None,
         }
     }
 
@@ -158,7 +162,7 @@ impl<'a> GutterCarry<'a> {
 
     /// `source` is the gutter's text and `lead` its lead's conceals. A gutter holding all its `>`
     /// measures itself; a lazy one takes the carried geometry. Only a revealed part keeps a shape,
-    /// to paint it.
+    /// to paint it, and a revealed task part widens the gutter to that shape.
     pub(super) fn layout(
         &mut self,
         gutter: &Gutter,
@@ -177,9 +181,8 @@ impl<'a> GutterCarry<'a> {
                 let measured = measure(
                     gutter,
                     source,
-                    shaped.as_ref(),
-                    reveal.split,
                     lead,
+                    &mut self.slot,
                     |range, hidden, text| shape(range, hidden, text, body_size),
                 );
                 self.measured.insert(source, measured.clone());
@@ -191,7 +194,9 @@ impl<'a> GutterCarry<'a> {
                 task: None,
             }
         };
-        let Measured { geometry, task } = measured;
+        let Measured { mut geometry, task } = measured;
+        let raw = shaped.as_ref().filter(|_| reveal.task);
+        geometry.width = raw.map_or(geometry.width, ShapedLine::width);
         GutterLayout {
             len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
@@ -208,31 +213,22 @@ impl<'a> GutterCarry<'a> {
     }
 }
 
-/// The geometry of `source`, measured on `measured_text`, with `shaped` when that is `source`
-/// itself; a task's checkbox span on the same shape, and its lead through `lead`, its conceals.
+/// The concealed geometry of `source`: its quote part on its own text, then a task's lead through
+/// `lead`, its conceals, and the box slot, which `slot` holds once measured.
 fn measure(
     gutter: &Gutter,
     source: &str,
-    shaped: Option<&ShapedLine>,
-    split: usize,
     lead: &[Conceal],
+    slot: &mut Option<Pixels>,
     mut shape: impl FnMut(&Range<ByteOffset>, &[Hidden], &str) -> ShapedLine,
 ) -> Measured {
-    let measured = measured_text(source, gutter);
-    let own;
-    let whole = if let (Some(shaped), Cow::Borrowed(_)) = (shaped, &measured) {
-        shaped
-    } else {
-        own = shape(&gutter.range, &[], &measured);
-        &own
-    };
     let start = gutter.range.start;
+    let split = gutter.quote_end() - start;
+    let quote = (split > 0).then(|| shape(&(start..start + split), &[], &source[..split]));
+    let mut geometry = Geometry::measure(gutter, quote.as_ref());
     let task = gutter.task.as_ref().map(|task| {
-        let x = whole.x_for_index(task.checkbox.start - start)
-            ..whole.x_for_index(task.checkbox.end - start);
         let text = &source[task.start - start..task.run - start];
-        let blank = text.bytes().all(|byte| matches!(byte, b' ' | b'\t'));
-        let lead = (!blank).then(|| {
+        let shaped = (!text.is_empty()).then(|| {
             let hidden: Vec<Hidden> = lead
                 .iter()
                 .map(|conceal| {
@@ -243,41 +239,44 @@ fn measure(
                     )
                 })
                 .collect();
-            Rc::new(shape(&(task.start..task.run), &hidden, text))
+            shape(&(task.start..task.run), &hidden, text)
         });
-        TaskShape { x, lead }
-    });
-    Measured {
-        geometry: Geometry::measure(gutter, whole, split),
-        task,
-    }
-}
-
-/// What a gutter measures: its text with its box's middle byte an `X`, the widest state, so every
-/// state paints inside one width and a toggle never changes it (task boxes spec, D3, C).
-pub(super) fn measured_text<'s>(source: &'s str, gutter: &Gutter) -> Cow<'s, str> {
-    match &gutter.task {
-        Some(task) => {
-            let middle = task.checkbox.start - gutter.range.start + 1;
-            let mut text = source.to_owned();
-            text.replace_range(middle..=middle, "X");
-            Cow::Owned(text)
+        let x = geometry.quote_width + shaped.as_ref().map_or(px(0.), ShapedLine::width);
+        let slot = *slot.get_or_insert_with(|| {
+            // The box run carries only styles that keep a glyph's advance, so any task's measures
+            // the slot for all.
+            let run = task.run..gutter.range.end;
+            let hidden = [(
+                ByteOffset::default()..ByteOffset::new(run.end - run.start),
+                "• ",
+            )];
+            let bullet = shape(&run, &hidden, &source[task.run - start..]);
+            bullet.width().max(TASK_BOX_SIZE)
+        });
+        geometry.width = x + slot;
+        let blank = text.bytes().all(|byte| matches!(byte, b' ' | b'\t'));
+        TaskShape {
+            x,
+            lead: shaped.filter(|_| !blank).map(Rc::new),
         }
-        None => Cow::Borrowed(source),
-    }
+    });
+    Measured { geometry, task }
 }
 
 impl Geometry {
-    fn measure(gutter: &Gutter, shaped: &ShapedLine, split: usize) -> Self {
+    /// From the quote part's own shape; `None` when it is empty.
+    fn measure(gutter: &Gutter, quote: Option<&ShapedLine>) -> Self {
         let start = gutter.range.start;
+        let x = |index| quote.map_or(px(0.), |shaped| shaped.x_for_index(index));
+        let quote_width = quote.map_or(px(0.), ShapedLine::width);
         Self {
-            width: shaped.width(),
+            width: quote_width,
             bars: gutter
                 .quotes
                 .iter()
-                .map(|quote| shaped.x_for_index(*quote - start))
+                .map(|quote| x(*quote - start))
                 .collect(),
-            quote_width: shaped.x_for_index(split),
+            quote_width,
         }
     }
 

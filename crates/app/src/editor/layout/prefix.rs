@@ -70,7 +70,7 @@ impl Prefix {
         }
     }
 
-    /// The box over a concealed checkbox, and the lead before it.
+    /// A concealed task's box, in its bullet's place after the lead.
     pub(super) fn task_box(&self) -> Option<&TaskBox> {
         match self {
             Self::Margin(_) => None,
@@ -183,6 +183,3 @@ pub(super) fn line_prefix<'a, 'c>(
 pub(super) fn indent(prefix: Option<&Prefix>) -> Pixels {
     prefix.map_or(px(0.), Prefix::indent)
 }
-
-#[cfg(test)]
-mod tests;

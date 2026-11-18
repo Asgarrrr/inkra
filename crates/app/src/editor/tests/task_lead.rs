@@ -11,10 +11,10 @@ const GLYPH: f32 = 0.6 * 18.;
 
 type Handle = WindowHandle<EditorView>;
 
-/// A painted task's box centre, whether it is checked, and its lead's text and `x`.
+/// A painted task's box left edge, whether it is checked, and its lead's text and `x`.
 type Painted = (Pixels, bool, Option<(String, Pixels)>);
 
-/// Each task the last paint drew, from the text's origin: its box's centre `x`, whether it is
+/// Each task the last paint drew, from the text's origin: its box's left edge, whether it is
 /// checked, and the lead painted before it.
 fn painted(window: &Handle, cx: &mut VisualTestContext) -> Vec<Painted> {
     cx.run_until_parked();
@@ -25,12 +25,12 @@ fn painted(window: &Handle, cx: &mut VisualTestContext) -> Vec<Painted> {
         .into_iter()
         .map(|task| {
             let lead = task.lead.map(|(text, x)| (text, x - origin.x));
-            (task.bounds.center().x - origin.x, task.checked, lead)
+            (task.bounds.left() - origin.x, task.checked, lead)
         })
         .collect()
 }
 
-/// The one task painted: its box's centre, its state, and its lead's text and `x`.
+/// The one task painted: its box's left edge, its state, and its lead's text and `x`.
 fn only(window: &Handle, cx: &mut VisualTestContext) -> Painted {
     let painted = painted(window, cx);
     assert_eq!(painted.len(), 1, "{painted:?}");
@@ -50,17 +50,17 @@ fn editor(cx: &mut TestAppContext, text: &str) -> (Handle, VisualTestContext) {
     (window, cx)
 }
 
-/// `note`'s one task paints `lead` at `lead_x` glyphs, and its box centred at `centre` glyphs.
+/// `note`'s one task paints `lead` at `lead_x` glyphs, and its box from `left` glyphs.
 fn assert_task(
     cx: &mut TestAppContext,
     note: &str,
     lead: Option<(&str, f32)>,
-    centre: f32,
+    left: f32,
     checked: bool,
 ) {
     let (window, mut cx) = editor(cx, note);
     let (x, painted, painted_lead) = only(&window, &mut cx);
-    assert_x(x, centre * GLYPH);
+    assert_x(x, left * GLYPH);
     assert_eq!(painted, checked, "{note:?}");
     let painted_lead = painted_lead.map(|(text, x)| (text, (x / px(GLYPH)).round()));
     let lead = lead.map(|(text, x)| (text.to_owned(), x));
@@ -69,29 +69,29 @@ fn assert_task(
 
 #[gpui::test]
 fn an_ordered_task_paints_its_number_then_its_box(cx: &mut TestAppContext) {
-    assert_task(cx, "1. [ ] a\nbody", Some(("1. ", 0.)), 4.5, false);
-    assert_task(cx, "12) [x] a\nbody", Some(("12) ", 0.)), 5.5, true);
+    assert_task(cx, "1. [ ] a\nbody", Some(("1. ", 0.)), 3., false);
+    assert_task(cx, "12) [x] a\nbody", Some(("12) ", 0.)), 4., true);
 }
 
 #[gpui::test]
 fn a_task_after_a_bullet_paints_a_dot_then_its_box(cx: &mut TestAppContext) {
-    assert_task(cx, "- - [ ] a\nbody", Some(("• ", 0.)), 5.5, false);
-    assert_task(cx, "1. - [x] a\nbody", Some(("1. ", 0.)), 6.5, true);
-    assert_task(cx, "- 1. [ ] a\nbody", Some(("• 1. ", 0.)), 6.5, false);
+    assert_task(cx, "- - [ ] a\nbody", Some(("• ", 0.)), 2., false);
+    assert_task(cx, "1. - [x] a\nbody", Some(("1. ", 0.)), 3., true);
+    assert_task(cx, "- 1. [ ] a\nbody", Some(("• 1. ", 0.)), 5., false);
 }
 
 /// The lead starts at the task part, right of the quote part.
 #[gpui::test]
 fn a_quoted_lead_paints_at_the_task_parts_x(cx: &mut TestAppContext) {
-    assert_task(cx, "> 1. [ ] a\nbody", Some(("1. ", 2.)), 6.5, false);
-    assert_task(cx, "> - - [ ] a\nbody", Some(("• ", 2.)), 7.5, false);
+    assert_task(cx, "> 1. [ ] a\nbody", Some(("1. ", 2.)), 5., false);
+    assert_task(cx, "> - - [ ] a\nbody", Some(("• ", 2.)), 4., false);
 }
 
-/// A lead of blanks, or none, shapes nothing.
+/// A lead of blanks paints nothing but keeps its width before the box; an empty one takes none.
 #[gpui::test]
 fn a_blank_lead_paints_nothing(cx: &mut TestAppContext) {
-    assert_task(cx, "- [ ] a\nbody", None, 3.5, false);
-    assert_task(cx, "- a\n  - [ ] b\nbody", None, 5.5, false);
+    assert_task(cx, "- [ ] a\nbody", None, 0., false);
+    assert_task(cx, "- a\n  - [ ] b\nbody", None, 2., false);
 }
 
 /// A caret on the number reveals the whole task part raw, so neither the lead nor the box paints.

@@ -86,7 +86,7 @@ pub(super) struct LineLayout {
     pub(super) display: DisplayLine,
     pub(super) rows: Vec<Row>,
     pub(super) row_height: Pixels,
-    /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
+    /// Kept out of the shaped text in both states; a task part's reveal widens it, so the line rewraps.
     pub(super) prefix: Option<Prefix>,
     /// The language a block's opening line shows at its right.
     pub(super) label: Option<Rc<ShapedLine>>,
@@ -100,13 +100,12 @@ impl LineLayout {
         prefix::indent(self.prefix.as_ref())
     }
 
-    /// The square a concealed task paints and a click hits, from the line's origin: centred on its
-    /// checkbox and on row 0 (task boxes spec, D4).
+    /// The square a concealed task paints and a click hits, from the line's origin: from its
+    /// shape's `x`, centred on row 0 (task boxes spec, D4).
     pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &TaskBox)> {
         let task = self.prefix.as_ref()?.task_box()?;
-        let x = &task.shape.x;
-        let centre = point((x.start + x.end) / 2., self.row_height / 2.);
-        let square = Bounds::centered_at(centre, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
+        let top = (self.row_height - TASK_BOX_SIZE) / 2.;
+        let square = Bounds::new(point(task.shape.x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE));
         Some((square, task))
     }
 }

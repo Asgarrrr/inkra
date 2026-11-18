@@ -29,23 +29,47 @@ fn geometry(
         .unwrap()
 }
 
-/// `cmd-up` puts the caret on the `-`: the task part paints in the gutter, and the text keeps every
-/// row and every x, its wrapped row's included.
+/// `cmd-up` puts the caret on the `-`: the gutter widens to the raw task part, so row 0's text and
+/// every wrapped row start the raw width less the concealed width further right.
 #[gpui::test]
-fn revealing_a_task_part_moves_no_text(cx: &mut TestAppContext) {
-    let text = format!("- [ ] {}\nbody", "aaaa ".repeat(20));
+fn revealing_a_task_part_widens_its_gutter(cx: &mut TestAppContext) {
+    let text = format!("- [ ] {}\nbody", "aaaa ".repeat(40));
     let (window, mut cx) = dispatching(cx, &text);
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-down");
-    let (shown, concealed, xs) = geometry(&window, &mut cx, &[6, 66]);
+    let (shown, concealed) = row_starts(&window, &mut cx);
     assert_eq!(shown, None);
-    assert!(concealed.len() > 3, "the line wraps: {concealed:?}");
-    assert_x(xs[0], 6. * GLYPH);
-    assert_x(xs[1], 6. * GLYPH);
+    assert!(concealed.len() > 2, "the line wraps: {concealed:?}");
+    for &x in &concealed {
+        assert_x(x, 2. * GLYPH);
+    }
     cx.simulate_keystrokes("cmd-up");
-    let (shown, revealed, revealed_xs) = geometry(&window, &mut cx, &[6, 66]);
+    let (shown, revealed) = row_starts(&window, &mut cx);
     assert_eq!(shown, Some(("- [ ] ".to_owned(), px(0.))));
-    assert_eq!((revealed, revealed_xs), (concealed, xs));
+    assert!(revealed.len() > 2, "the line wraps: {revealed:?}");
+    for &x in &revealed {
+        assert_x(x - concealed[0], 6. * GLYPH - 2. * GLYPH);
+    }
+}
+
+/// The `x` of each row start of line 0, the text's start on row 0, and what its prefix paints.
+fn row_starts(
+    window: &WindowHandle<EditorView>,
+    cx: &mut VisualTestContext,
+) -> (Option<(String, Pixels)>, Vec<Pixels>) {
+    window
+        .update(cx, |view, _, _| {
+            let layout = view.input.last_layout().unwrap();
+            let last = layout.row_for_offset(at(6 + 200));
+            let wrapped = (1..=last).map(|row| layout.offset_on_row(row, px(0.)));
+            let xs = std::iter::once(at(6))
+                .chain(wrapped)
+                .map(|offset| layout.x_for_offset(offset))
+                .collect();
+            let shown = layout.prefix_shown(0).map(|(text, x)| (text.to_owned(), x));
+            (shown, xs)
+        })
+        .unwrap()
 }
 
 /// `[ ]` becomes `[x]` in the buffer: the line keeps its task gutter and its width.
@@ -72,12 +96,13 @@ fn toggling_a_task_keeps_its_gutter_width(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert_eq!(line, "a", "the marker stays in the gutter, out of the text");
-    assert_x(unchecked[0], 6. * GLYPH);
+    assert_x(unchecked[0], 2. * GLYPH);
     assert_eq!(checked, unchecked);
 }
 
-/// `> - [ ] a` with the lazy line `  b`: a caret on the `>` paints the quote part alone, one at the
-/// bullet the task part alone at its own `x`, and `b`'s line starts at the quote part's edge.
+/// `> - [ ] a` with the lazy line `  b`: a caret on the `>` paints the quote part alone and moves no
+/// text, one at the bullet the task part alone at its own `x`, its text at the raw part's end, and
+/// `b`'s line starts at the quote part's edge.
 #[gpui::test]
 fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> - [ ] a\n  b\n\nbody");
@@ -85,7 +110,7 @@ fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-down");
     let (shown, _, xs) = geometry(&window, &mut cx, &[8, 10]);
     assert_eq!(shown, None);
-    assert_x(xs[0], 8. * GLYPH);
+    assert_x(xs[0], 4. * GLYPH);
     assert_x(xs[1], 2. * GLYPH);
     cx.simulate_keystrokes("cmd-up");
     let (shown, _, quote_xs) = geometry(&window, &mut cx, &[8, 10]);
@@ -96,7 +121,8 @@ fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     let (text, x) = shown.unwrap();
     assert_eq!(text, "- [ ] ");
     assert_x(x, 2. * GLYPH);
-    assert_eq!(task_xs, xs);
+    assert_x(task_xs[0], 8. * GLYPH);
+    assert_eq!(task_xs[1], xs[1]);
     cx.simulate_keystrokes("shift-left");
     let (shown, _, _) = geometry(&window, &mut cx, &[]);
     assert_eq!(shown, Some(("> - [ ] ".to_owned(), px(0.))));
@@ -140,7 +166,7 @@ fn a_shown_part_maps_its_offsets_where_they_stand(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-up");
     let (caret, task_start) = xs(&mut cx);
     assert_x(caret, 0.);
-    assert_x(task_start, 8. * GLYPH);
+    assert_x(task_start, 4. * GLYPH);
     cx.simulate_keystrokes("right right right");
     let (caret, task_start) = xs(&mut cx);
     assert_x(caret, 3. * GLYPH);
