@@ -400,8 +400,8 @@ takes it, mapped back by the prefix's length (Open question 5, decided).
 - A thematic break of `-` or `*` reads as one alone as well as in the note: pulldown-cmark tries
   the break before the list marker (`pulldown-cmark-0.13.6/src/scanners.rs:315-322`). So the
   fallback finds no item, and the line takes `- [ ] ` in front: `- - -` gives `- [ ] - - -`, and
-  `* **` gives `- [ ] * **`. `main` gives `- - - [ ] `, three nested items. A thematic break is the
-  one `⌘L` output T6a changes.
+  `* **` gives `- [ ] * **`. `main` gave `- - - [ ] `, three nested items, and `* [ ] **`. With the
+  skipped ATX headings (above), these are the `⌘L` outputs T6a changes.
 
 **The content start.** It follows `CommonMark` 5.2 for an item that starts with a paragraph.
 Blanks after the marker count in columns, a tab stopping at the next multiple of 4 from the line's
@@ -552,7 +552,7 @@ the lead shows them (D3).
   splice that changes the next line's laziness; a lost quote fails its own line.
 - The fallback (T6a): `a\n- ` and `a\n-`, caret on the second line, give `a\n- [ ] `, as on `main`;
   `a\n -\t  ` gives `a\n -\t  [ ] `, as on `main`, which only the pad gives; `- - -` gives
-  `- [ ] - - -` and `* **` gives `- [ ] * **`, where `main` gives `- - - [ ] `. Under `⌘A`,
+  `- [ ] - - -` and `* **` gives `- [ ] * **`, where `main` gives `- - - [ ] ` and `* [ ] **`. Under `⌘A`,
   `a\n\t- - b`, `a\n\t* - b` and `a\n2. 3. b` take the checkbox after their innermost item, as on
   `main`. No current test holds any of these lines (`crates/markdown/src/cycle/tests.rs`,
   `batch_tests.rs`).
@@ -626,8 +626,8 @@ at. T1a through T5 are merged (History).
 5. **T4a, `⌘L` on one line** (#76).
 6. **T4b, `⌘L` on a selection** (#77).
 7. **T5, the markers before the box** (#78).
-8. **T6a, one parse** (~0.5 d). Open questions 5 and 6 are decided. It changes one `⌘L` output,
-   a thematic break of `-` or `*` (D6), and nothing else visible.
+8. **T6a, one parse** (~0.5 d). Open questions 5 and 6 are decided. It changes two `⌘L` outputs,
+   on a thematic break of `-` or `*` and on an ATX heading's line (D6), and nothing else visible.
    - `inkra-markdown`: `Structure` in `structure.rs`, `Markdown::structure` and
      `Markdown::task_at` (D1). `cycle.rs` reads them and loses `Scan`, `Openers`, `Marker`,
      `marker`, `innermost`, `terminated` and its own `task_at` (D6). It reads the content start of
