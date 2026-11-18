@@ -111,7 +111,9 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let lead = line_start_prefix(text, &line);
-    innermost(&text.as_bytes()[line.start + lead..line.end])
+    let bytes = text.as_bytes();
+    let column = column_after(0, &bytes[line.start..line.start + lead]);
+    innermost(&bytes[line.start + lead..line.end], column)
         .map(|(at, space)| (lead + at, space))
         .into_iter()
         .chain([(lead, "- ")])
@@ -185,9 +187,28 @@ fn task_at(markdown: &Markdown, start: usize) -> Option<&Task> {
         .and_then(|gutter| gutter.task.as_ref())
 }
 
-/// A leading list marker, `-`, `*`, `+` or one to nine digits and `.` or `)` (`CommonMark` 5.2):
-/// its length, and the blanks after it, up to five; `None` when a byte other than a blank follows.
-fn marker(bytes: &[u8]) -> Option<(usize, usize)> {
+/// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).
+fn column_after(column: usize, bytes: &[u8]) -> usize {
+    bytes.iter().fold(column, |column, &byte| match byte {
+        b'\t' => column + 4 - column % 4,
+        _ => column + 1,
+    })
+}
+
+/// A leading list marker at `column`.
+#[derive(Clone, Copy)]
+struct Marker {
+    column: usize,
+    len: usize,
+    /// The blank bytes after it, up to five.
+    blanks: usize,
+    /// The columns those blanks span.
+    width: usize,
+}
+
+/// `-`, `*`, `+` or one to nine digits and `.` or `)` (`CommonMark` 5.2), then blanks; `None` when
+/// a byte other than a blank follows.
+fn marker(bytes: &[u8], column: usize) -> Option<Marker> {
     let digits = bytes
         .iter()
         .take(9)
@@ -203,27 +224,36 @@ fn marker(bytes: &[u8]) -> Option<(usize, usize)> {
         .take(5)
         .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
         .count();
-    (blanks > 0 || len == bytes.len()).then_some((len, blanks))
+    let end = column + len;
+    let width = column_after(end, &bytes[len..len + blanks]) - end;
+    (blanks > 0 || len == bytes.len()).then_some(Marker {
+        column,
+        len,
+        blanks,
+        width,
+    })
 }
 
-/// Where a checkbox goes after the innermost of the leading markers, and what goes before it;
-/// `None` with no marker. A marker opens another past one to four blanks (`CommonMark` 5.2); the
-/// checkbox goes there too, at the content's column, past one blank of five or more, or after a
-/// space of its own on an empty item.
-fn innermost(bytes: &[u8]) -> Option<(usize, &'static str)> {
-    let first = (0, marker(bytes)?);
-    let (at, (len, blanks)) = std::iter::successors(Some(first), |&(at, (len, blanks))| {
-        let next = at + len + blanks;
-        marker(&bytes[next..])
-            .filter(|_| (1..=4).contains(&blanks))
+/// Where a checkbox goes after the innermost of the leading markers, which start at `column`, and
+/// what goes before it; `None` with no marker. A marker opens another past one to four columns of
+/// blanks (`CommonMark` 5.2); the checkbox goes there too, at the content's column, past one blank
+/// of five columns or more, or after a space of its own on an empty item.
+fn innermost(bytes: &[u8], column: usize) -> Option<(usize, &'static str)> {
+    let first = (0, marker(bytes, column)?);
+    let (at, last) = std::iter::successors(Some(first), |&(at, outer)| {
+        let next = at + outer.len + outer.blanks;
+        let column = outer.column + outer.len + outer.width;
+        marker(&bytes[next..], column)
+            .filter(|_| (1..=4).contains(&outer.width))
             .map(|marker| (next, marker))
     })
     .take(bytes.len())
     .last()?;
-    Some(match blanks {
-        0 => (at + len, " "),
-        1..=4 => (at + len + blanks, ""),
-        _ => (at + len + 1, ""),
+    let end = at + last.len;
+    Some(match last.width {
+        0 => (end, " "),
+        1..=4 => (end + last.blanks, ""),
+        _ => (end + 1, ""),
     })
 }
 

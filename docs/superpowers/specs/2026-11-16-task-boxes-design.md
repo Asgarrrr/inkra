@@ -413,11 +413,13 @@ concealed state stays the reveal's, so the box and the lead paint together.
 **`⌘L`.**
 
 - A plain line's insertion goes after its innermost marker: past the leading
-  `[ \t>]*`, every bullet or number followed by one to four blanks opens the
-  next, in turn (CommonMark 5.2). The checkbox goes past all of the innermost
-  marker's one to four blanks, at its content column, so `-   a\n\n      b`
-  keeps `b` in the item; past one blank of five or more; after a space of its
-  own on an empty item `-`. `- 1. a` becomes `- 1. [ ] a`, a task item inside
+  `[ \t>]*`, every bullet or number followed by one to four columns of blanks
+  opens the next, in turn (CommonMark 5.2). Blanks count in columns, a tab
+  stopping at the next multiple of 4 from the line's start, as pulldown-cmark
+  reads them. The checkbox goes past all of the innermost marker's blanks when
+  they span one to four columns, at its content column, so `-   a\n\n      b`
+  keeps `b` in the item; past one blank when they span five or more, so
+  `-\t  ` becomes `-\t[ ]   `; after a space of its own on an empty item `-`. `- 1. a` becomes `- 1. [ ] a`, a task item inside
   the outer one, not `- [ ] 1. a`, whose `1. a` would be text; `-  - a`
   becomes `-  - [ ] a`. The second candidate, `- [ ] ` after the leading
   `[ \t>]*`, is unchanged.
