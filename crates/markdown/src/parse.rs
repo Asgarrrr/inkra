@@ -4,6 +4,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
 use crate::cmark::options;
+use open::Open;
 use crate::content_lines::shape;
 use crate::gutters::{Items, cut, gutter_conceals};
 use crate::spans::{backtick_runs, lines, push, to_offsets};
@@ -171,34 +172,6 @@ fn parse_terminated(text: &str) -> Markdown {
     }
 }
 
-fn tag_styles(tag: &Tag<'_>) -> Styles {
-    match tag {
-        Tag::Heading { level, .. } => Styles::heading(*level),
-        Tag::Strong => Styles::STRONG,
-        Tag::Emphasis => Styles::EMPHASIS,
-        Tag::Strikethrough => Styles::STRIKETHROUGH,
-        Tag::CodeBlock(_) => Styles::CODE | Styles::CODE_BLOCK,
-        Tag::Link { .. } | Tag::Image { .. } => Styles::LINK,
-        Tag::BlockQuote(_) => Styles::QUOTE,
-        Tag::MetadataBlock(_) => Styles::FRONTMATTER,
-        _ => Styles::NONE,
-    }
-}
-
-/// The range whose touch reveals this element's markers, or `None` when they never hide (spec D2).
-/// A fenced block's fences hide too (code-blocks spec, D2).
-fn concealable(text: &str, tag: &Tag<'_>, range: &Range<usize>) -> Option<Range<usize>> {
-    matches!(
-        tag,
-        Tag::Strong
-            | Tag::Emphasis
-            | Tag::Strikethrough
-            | Tag::Link { .. }
-            | Tag::CodeBlock(CodeBlockKind::Fenced(_))
-    )
-    .then(|| without_line_ending(text, range))
-}
-
 /// The first word of a fenced block's info string, as source text: the opening line from the
 /// fence, past its run and the blanks after it. It splits at ASCII bytes only, so both ends stay on
 /// char boundaries.
@@ -259,56 +232,6 @@ fn opening_sequence(heading: &str) -> Option<usize> {
         .count();
     let atx = (1..=6).contains(&hashes) && (blanks > 0 || hashes == heading.len());
     atx.then_some(hashes + blanks)
-}
-
-/// An open element: the union of its and its ancestors' tags, its end, and its range when its
-/// markers can hide.
-#[derive(Clone)]
-struct Open {
-    styles: Styles,
-    /// What a line-start prefix in this element carries: the parent's styles in a code block or a
-    /// code span, so its indents match the opening line's.
-    indent: Styles,
-    end: usize,
-    element: Option<Range<usize>>,
-    /// A quote whose ancestors are all quotes.
-    leading: bool,
-}
-
-impl Open {
-    /// The element `tag` starts inside `parent`, the innermost open one.
-    fn enter(text: &str, tag: &Tag<'_>, range: &Range<usize>, parent: Option<&Open>) -> Self {
-        let mut inherited = parent.map_or(Styles::NONE, |open| open.styles);
-        // A checked item's own text is struck; a block nested in it is not (task boxes spec, D7).
-        if matches!(tag, Tag::List(_) | Tag::BlockQuote(_) | Tag::CodeBlock(_)) {
-            inherited = inherited.without(Styles::DONE);
-        }
-        let styles = inherited | tag_styles(tag);
-        Self {
-            styles,
-            indent: if matches!(tag, Tag::CodeBlock(_)) {
-                inherited
-            } else {
-                styles
-            },
-            end: range.end,
-            element: concealable(text, tag, range),
-            // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
-            leading: matches!(tag, Tag::BlockQuote(_)) && parent.is_none_or(|open| open.leading),
-        }
-    }
-
-    /// A code span, backticks included: no tag opens it, and its backticks always hide.
-    fn code_span(range: &Range<usize>, parent: Option<&Open>) -> Self {
-        let inherited = parent.map_or(Styles::NONE, |open| open.styles);
-        Self {
-            styles: inherited | Styles::CODE,
-            indent: inherited,
-            end: range.end,
-            element: Some(range.clone()),
-            leading: false,
-        }
-    }
 }
 
 struct Out<'a> {
@@ -385,6 +308,8 @@ impl Out<'_> {
         push(&mut self.spans, range, styles);
     }
 }
+
+mod open;
 
 #[cfg(test)]
 mod tests;
