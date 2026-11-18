@@ -265,12 +265,7 @@ impl DocumentLayout {
         let (placed, _) = self.locate(self.row_for_y(local.y));
         let (square, _) = placed.line.task_box()?;
         let gutter = placed.line.prefix.as_ref()?.range();
-        let gutters = &self.markdown.gutters;
-        let task = gutters
-            .get(gutters.partition_point(|gutter| gutter.range.start < placed.start))
-            .filter(|gutter| gutter.range.start == placed.start)?
-            .task
-            .as_ref()?;
+        let task = self.markdown.task_at(placed.start)?;
         square
             .contains(&(local - point(px(0.), placed.top)))
             .then(|| {

@@ -57,7 +57,7 @@ enum Step {
     Caret(Index),
     /// The selection's end moves to a point and its start stays, as a drag does.
     Drag(Index),
-    /// A click on a task's box, picked among the text's tasks.
+    /// A click on a concealed task's box, picked among the carried layout's.
     Toggle(Index),
     /// `⌘L` on a selection between two points: its batch as one `apply_diff`.
     Cycle(Index, Index),
@@ -148,7 +148,8 @@ struct Inputs {
 }
 
 impl Inputs {
-    fn apply(&mut self, buffer: &mut Buffer, step: &Step) {
+    /// `layout` is the carried layout, the one a click lands on.
+    fn apply(&mut self, buffer: &mut Buffer, step: &Step, layout: &DocumentLayout) {
         match step {
             Step::Splice(edit) | Step::Unsynced(edit) => {
                 let (range, inserted) = resolve(buffer.text(), edit);
@@ -198,15 +199,19 @@ impl Inputs {
                 self.selection = anchor.min(head)..anchor.max(head);
             }
             Step::Toggle(pick) => {
-                let markdown = inkra_markdown::parse(buffer.text());
-                let tasks: Vec<_> = markdown
-                    .gutters
+                let boxes: Vec<_> = layout
+                    .lines
                     .iter()
-                    .filter_map(|gutter| Some((gutter.task.as_ref()?, gutter.range.end)))
+                    .filter_map(|placed| {
+                        let (square, _) = placed.line.task_box()?;
+                        Some(square.center() + gpui::point(px(0.), placed.top))
+                    })
                     .collect();
-                if !tasks.is_empty() {
-                    let (task, text_start) = tasks[pick.index(tasks.len())];
-                    assert!(buffer.apply_diff(&Diff::new(buffer.version(), vec![task.flip()])));
+                if !boxes.is_empty() {
+                    let click = boxes[pick.index(boxes.len())];
+                    let (flip, text_start) = layout.task_at(click).expect("a box takes its click");
+                    assert!(buffer.apply_diff(&flip));
+                    let text_start = flip.map(text_start, Bias::Right);
                     self.selection = text_start..text_start;
                 }
                 self.marked = None;
@@ -314,7 +319,7 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
         line.task_box().map(|(square, task)| {
             let lead = line.prefix.as_ref().and_then(super::prefix::Prefix::lead);
             let lead = lead.map(|(lead, x)| (lead.text.to_string(), x));
-            (square, task.x.clone(), task.checked, lead)
+            (square, task.shape.x.clone(), task.checked, lead)
         })
     };
     prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);
@@ -367,7 +372,7 @@ fn check(
         if let Step::Paint(paint) = step {
             layer::apply(paint, &buffer, &seen, cx);
         }
-        buffer.update(cx, |buffer, _| inputs.apply(buffer, step));
+        buffer.update(cx, |buffer, _| inputs.apply(buffer, step, &layout));
         let synced = !matches!(step, Step::Unsynced(_));
         if synced {
             decorations::sync(&buffer, cx);

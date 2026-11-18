@@ -20,6 +20,20 @@ fn tasks(text: &str) -> Vec<(&str, &str, bool)> {
         .collect()
 }
 
+/// A quote gutter holds no task, and no byte past a line's start finds one (T6a).
+#[test]
+fn task_at_finds_a_task_by_its_lines_start_only() {
+    let text = "> a\n- [ ] b\n  1. [x] c\nd";
+    let markdown = parse(text);
+    let found: Vec<(usize, usize, bool)> = (0..=text.len())
+        .filter_map(|at| {
+            let task = markdown.task_at(ByteOffset::new(at))?;
+            Some((at, task.checkbox.start.get(), task.checked))
+        })
+        .collect();
+    assert_eq!(found, [(4, 6, false), (12, 17, true)]);
+}
+
 #[test]
 fn a_task_item_has_a_gutter_through_its_checkbox_and_one_space() {
     assert_eq!(tasks("- [ ] a"), vec![("- [ ] ", "[ ]", false)]);
