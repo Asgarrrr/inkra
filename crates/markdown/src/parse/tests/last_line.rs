@@ -26,12 +26,14 @@ fn offsets(markdown: &Markdown) -> Vec<usize> {
     }
     for gutter in &markdown.gutters {
         range(&gutter.range);
-        range(&(gutter.quote_end..gutter.quote_end));
         gutter
             .quotes
             .iter()
             .for_each(|&quote| range(&(quote..quote + 1)));
-        gutter.task.iter().for_each(|task| range(&task.checkbox));
+        if let Some(task) = &gutter.task {
+            range(&(task.start..task.run));
+            range(&task.checkbox);
+        }
     }
     all
 }

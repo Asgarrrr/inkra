@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use gpui::{HighlightStyle, TextRun, TextStyle, UnderlineStyle, px};
+use gpui::{
+    HighlightStyle, Pixels, ShapedLine, SharedString, TextRun, TextStyle, UnderlineStyle, Window,
+    px,
+};
 use inkra_markdown::{DisplayLine, Span, Styles};
 use inkra_text::ByteOffset;
 
+use super::prefix::Hidden;
 use crate::decorations::Drawn;
 use crate::theme::{self, ColorToken, Theme};
 
@@ -135,6 +139,35 @@ pub(super) fn line_runs(
         runs.push(styles.run(RunStyles::key(Styles::NONE, false, None), 0));
     }
     runs
+}
+
+/// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
+/// `source` is what `range` holds: its own bytes, or as many others; `hidden` is what it shows
+/// otherwise, from `range`'s start.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the body's shaping inputs, borrowed apart from the build that owns them"
+)]
+pub(super) fn show(
+    range: &Range<ByteOffset>,
+    hidden: &[Hidden],
+    source: &str,
+    spans: &[Span],
+    marked: Option<&Range<ByteOffset>>,
+    font_size: Pixels,
+    styles: &mut RunStyles<'_>,
+    window: &mut Window,
+) -> ShapedLine {
+    let len = range.end - range.start;
+    let display = DisplayLine::new(
+        ByteOffset::default()..ByteOffset::new(len),
+        hidden.iter().cloned(),
+    );
+    let runs = line_runs(range, spans, marked, &display, styles);
+    let text = SharedString::from(display.text(source).into_owned());
+    window
+        .text_system()
+        .shape_line(text, font_size, &runs, None)
 }
 
 #[cfg(test)]

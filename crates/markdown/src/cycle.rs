@@ -1,5 +1,6 @@
 //! `⌘L`: the splices that cycle the task state of the selection's lines (task boxes spec, D6).
 
+use std::borrow::Cow;
 use std::ops::Range;
 use std::vec;
 
@@ -7,6 +8,7 @@ use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Parser, Tag};
 
 use crate::cmark::options;
+use crate::gutters::marker_start;
 use crate::parse::line_start_prefix;
 use crate::spans::{line_ranges, line_start};
 use crate::{Markdown, Task, parse};
@@ -15,7 +17,7 @@ use crate::{Markdown, Task, parse};
 /// without the lines no candidate makes a task (D6, amended for T4b).
 const ROUNDS: usize = 3;
 
-/// One cycled line: its start and the splices still to try, in order.
+/// One cycled line: its start, and the splices still to try, in order.
 struct Cycled {
     start: usize,
     candidates: vec::IntoIter<Hunk>,
@@ -29,12 +31,14 @@ impl Cycled {
 
 /// The splices that cycle the task state of every line `selection` touches, as `markdown`, the
 /// parse of `text`, reads it: each takes the state after the first cycled line's, and the whole
-/// batch, applied at once, reparses each changed line as a task in that state. None for a line
-/// inside a code block, the front matter, a table or an HTML block, nor for a blank line when
-/// the selection spans more than one.
+/// batch, applied at once, reparses each changed line as a task in that state, and every item and
+/// quote still opens at its byte, so no markup turns to text. None for a line inside
+/// a code block, the front matter, a table or an HTML block, nor for a line holding a task with
+/// no box, nor for a blank line when the selection spans more than one.
 #[must_use]
 pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>) -> Vec<Hunk> {
-    let lines = cycled_lines(text, &selection);
+    let scan = Scan::new(text, markdown);
+    let lines = cycled_lines(text, &scan.skipped, &selection);
     let Some(first) = lines.first() else {
         return Vec::new();
     };
@@ -51,7 +55,7 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>
         if cycled.is_empty() {
             break;
         }
-        let landed = landed(text, &cycled, checked);
+        let landed = landed(text, &scan, &cycled, checked);
         if landed.iter().all(|&landed| landed) {
             return cycled
                 .into_iter()
@@ -68,14 +72,18 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>
 }
 
 /// The lines `selection` touches, each without its newline: the first, then every line starting
-/// before the selection's end (H). Skipped blocks go, and blank lines when there are several.
-fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> {
+/// before the selection's end (H). Skipped lines go, and blank lines when there are several.
+fn cycled_lines(
+    text: &str,
+    skipped: &[Range<usize>],
+    selection: &Range<ByteOffset>,
+) -> Vec<Range<usize>> {
     let first = line_start(text, selection.start.get());
     let lines: Vec<Range<usize>> = line_ranges(text, first)
         .take_while(|line| line.start == first || line.start < selection.end.get())
         .collect();
     let several = lines.len() > 1;
-    let mut blocks = skipped(text).peekable();
+    let mut blocks = skipped.iter().peekable();
     lines
         .into_iter()
         .filter(|line| {
@@ -92,8 +100,8 @@ fn cycled_lines(text: &str, selection: &Range<ByteOffset>) -> Vec<Range<usize>> 
 }
 
 /// The splices that could put `line` in the state `checked`, in order: a task's flip, or none when
-/// it is in that state already; any other line gains a checkbox after its bullet, else `- ` and a
-/// checkbox after its leading `[ \t>]*`.
+/// it is in that state already; any other line gains a checkbox after its innermost bullet, else
+/// `- ` and a checkbox after its leading `[ \t>]*`.
 fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool) -> Vec<Hunk> {
     if let Some(task) = task_at(markdown, line.start) {
         return (task.checked != checked)
@@ -103,7 +111,9 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let lead = line_start_prefix(text, &line);
-    bullet(&text.as_bytes()[line.start + lead..line.end])
+    let bytes = text.as_bytes();
+    let column = column_after(0, &bytes[line.start..line.start + lead]);
+    innermost(&bytes[line.start + lead..line.end], column)
         .map(|(at, space)| (lead + at, space))
         .into_iter()
         .chain([(lead, "- ")])
@@ -118,15 +128,14 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
 }
 
 /// Whether each line's current splice, applied with all the others to one copy, leaves the line
-/// a task in the state `checked`, as one parse of the copy reads it.
-fn landed(text: &str, cycled: &[Cycled], checked: bool) -> Vec<bool> {
-    let hunks: Vec<(usize, &Hunk)> = cycled
-        .iter()
-        .filter_map(|line| Some((line.start, line.splice()?)))
-        .collect();
+/// a task in the state `checked` as one parse of the copy reads it. An item or quote of `before`,
+/// the pass of `text`, that no longer opens at its byte in the copy fails the nearest cycled line
+/// at or above it: a splice reaches its own line and those below. Every cycled line has a splice.
+fn landed(text: &str, before: &Scan, cycled: &[Cycled], checked: bool) -> Vec<bool> {
+    let hunks: Vec<&Hunk> = cycled.iter().filter_map(Cycled::splice).collect();
     let mut spliced = String::with_capacity(text.len());
     let mut copied = 0;
-    for (_, hunk) in &hunks {
+    for hunk in &hunks {
         spliced.push_str(&text[copied..hunk.range.start.get()]);
         spliced.push_str(&hunk.text);
         copied = hunk.range.end.get();
@@ -135,15 +144,37 @@ fn landed(text: &str, cycled: &[Cycled], checked: bool) -> Vec<bool> {
     let parsed = parse(&spliced);
     // A splice lies inside its line, so a line moves by the growth of the splices before it.
     let mut shift = 0;
-    hunks
-        .into_iter()
-        .map(|(start, hunk)| {
+    let mut landed: Vec<bool> = cycled
+        .iter()
+        .zip(&hunks)
+        .map(|(line, hunk)| {
             let landed =
-                task_at(&parsed, start + shift).is_some_and(|task| task.checked == checked);
+                task_at(&parsed, line.start + shift).is_some_and(|task| task.checked == checked);
             shift += hunk.text.len() - (hunk.range.end - hunk.range.start);
             landed
         })
-        .collect()
+        .collect();
+    let after = Openers::new(&spliced);
+    let items = moved(&before.openers.items, &hunks).filter(|(_, to)| !after.has_item(*to));
+    let quotes = moved(&before.openers.quotes, &hunks).filter(|(_, to)| !after.has_quote(*to));
+    for (at, _) in items.chain(quotes) {
+        let blamed = cycled.partition_point(|line| line.start <= at);
+        landed[blamed.saturating_sub(1)] = false;
+    }
+    landed
+}
+
+/// Each byte of `at`, sorted, and where it lands in the copy `hunks` make: after an insertion at
+/// it.
+fn moved<'a>(at: &'a [usize], hunks: &'a [&Hunk]) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut hunks = hunks.iter().peekable();
+    let mut shift = 0;
+    at.iter().map(move |&at| {
+        while let Some(hunk) = hunks.next_if(|hunk| hunk.range.end.get() <= at) {
+            shift += hunk.text.len() - (hunk.range.end - hunk.range.start);
+        }
+        (at, at + shift)
+    })
 }
 
 /// The task whose gutter starts at the line start `start`.
@@ -156,10 +187,28 @@ fn task_at(markdown: &Markdown, start: usize) -> Option<&Task> {
         .and_then(|gutter| gutter.task.as_ref())
 }
 
-/// Where a checkbox goes after a leading bullet, `-`, `*`, `+` or one to nine digits and `.` or
-/// `)` (`CommonMark` 5.2), and what goes before it: past its one space or tab, or a space of its
-/// own on an empty item.
-fn bullet(bytes: &[u8]) -> Option<(usize, &'static str)> {
+/// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).
+fn column_after(column: usize, bytes: &[u8]) -> usize {
+    bytes.iter().fold(column, |column, &byte| match byte {
+        b'\t' => column + 4 - column % 4,
+        _ => column + 1,
+    })
+}
+
+/// A leading list marker at `column`.
+#[derive(Clone, Copy)]
+struct Marker {
+    column: usize,
+    len: usize,
+    /// The blank bytes after it, up to five.
+    blanks: usize,
+    /// The columns those blanks span.
+    width: usize,
+}
+
+/// `-`, `*`, `+` or one to nine digits and `.` or `)` (`CommonMark` 5.2), then blanks; `None` when
+/// a byte other than a blank follows.
+fn marker(bytes: &[u8], column: usize) -> Option<Marker> {
     let digits = bytes
         .iter()
         .take(9)
@@ -170,27 +219,122 @@ fn bullet(bytes: &[u8]) -> Option<(usize, &'static str)> {
         (1.., Some(b'.' | b')')) => digits + 1,
         _ => return None,
     };
-    match bytes.get(len) {
-        Some(b' ' | b'\t') => Some((len + 1, "")),
-        None => Some((len, " ")),
-        Some(_) => None,
+    let blanks = bytes[len..]
+        .iter()
+        .take(5)
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let end = column + len;
+    let width = column_after(end, &bytes[len..len + blanks]) - end;
+    (blanks > 0 || len == bytes.len()).then_some(Marker {
+        column,
+        len,
+        blanks,
+        width,
+    })
+}
+
+/// Where a checkbox goes after the innermost of the leading markers, which start at `column`, and
+/// what goes before it; `None` with no marker. A marker opens another past one to four columns of
+/// blanks (`CommonMark` 5.2); the checkbox goes there too, at the content's column, past one blank
+/// of five columns or more, or after a space of its own on an empty item.
+fn innermost(bytes: &[u8], column: usize) -> Option<(usize, &'static str)> {
+    let first = (0, marker(bytes, column)?);
+    let (at, last) = std::iter::successors(Some(first), |&(at, outer)| {
+        let next = at + outer.len + outer.blanks;
+        let column = outer.column + outer.len + outer.width;
+        marker(&bytes[next..], column)
+            .filter(|_| (1..=4).contains(&outer.width))
+            .map(|marker| (next, marker))
+    })
+    .take(bytes.len())
+    .last()?;
+    let end = at + last.len;
+    Some(match last.width {
+        0 => (end, " "),
+        1..=4 => (end + last.blanks, ""),
+        _ => (end + 1, ""),
+    })
+}
+
+/// What one pulldown-cmark pass reads of a text, as `parse` reads it (D1).
+struct Scan {
+    /// Each code block, front matter, table and HTML block from its first line's start, and each
+    /// line holding a task with no box (D10), in document order: a fenced block in a list item
+    /// starts at its fence, past the line's start. None holds another.
+    skipped: Vec<Range<usize>>,
+    openers: Openers,
+}
+
+impl Scan {
+    fn new(text: &str, markdown: &Markdown) -> Self {
+        let text = terminated(text);
+        let mut scan = Self {
+            skipped: Vec::new(),
+            openers: Openers::default(),
+        };
+        for (event, range) in Parser::new_ext(&text, options()).into_offset_iter() {
+            let start = line_start(&text, range.start);
+            match event {
+                Event::Start(
+                    Tag::CodeBlock(_) | Tag::MetadataBlock(_) | Tag::Table(_) | Tag::HtmlBlock,
+                ) => scan.skipped.push(start..range.end),
+                Event::TaskListMarker(_) if task_at(markdown, start).is_none() => {
+                    scan.skipped.push(start..range.end);
+                }
+                event => scan.openers.push(&text, &event, range.start),
+            }
+        }
+        debug_assert!(scan.openers.items.is_sorted() && scan.openers.quotes.is_sorted());
+        scan
     }
 }
 
-/// Each code block, front matter, table and HTML block, from its first line's start, in order: a
-/// fenced block in a list item starts at its fence, past the line's start. None holds another.
-fn skipped(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
-    Parser::new_ext(text, options())
-        .into_offset_iter()
-        .filter(|(event, _)| {
-            matches!(
-                event,
-                Event::Start(
-                    Tag::CodeBlock(_) | Tag::MetadataBlock(_) | Tag::Table(_) | Tag::HtmlBlock
-                )
-            )
-        })
-        .map(|(_, range)| line_start(text, range.start)..range.end)
+/// The bytes where list items and block quotes open in a text, as `parse` reads it.
+#[derive(Default)]
+struct Openers {
+    /// Each item's marker, in document order, so sorted: a nested opener starts past its parent.
+    items: Vec<usize>,
+    /// Each quote's `>`, where pulldown-cmark starts its range, sorted the same way.
+    quotes: Vec<usize>,
+}
+
+impl Openers {
+    fn new(text: &str) -> Self {
+        let text = terminated(text);
+        let mut openers = Self::default();
+        for (event, range) in Parser::new_ext(&text, options()).into_offset_iter() {
+            openers.push(&text, &event, range.start);
+        }
+        debug_assert!(openers.items.is_sorted() && openers.quotes.is_sorted());
+        openers
+    }
+
+    fn has_item(&self, at: usize) -> bool {
+        self.items.binary_search(&at).is_ok()
+    }
+
+    fn has_quote(&self, at: usize) -> bool {
+        self.quotes.binary_search(&at).is_ok()
+    }
+
+    /// Records the opener `event` starts at `start`, if any.
+    fn push(&mut self, text: &str, event: &Event, start: usize) {
+        match event {
+            Event::Start(Tag::Item) => self.items.push(marker_start(text, start)),
+            Event::Start(Tag::BlockQuote(_)) => self.quotes.push(start),
+            _ => {}
+        }
+    }
+}
+
+/// `text` as `parse` reads it, ending with a newline (D1).
+fn terminated(text: &str) -> Cow<'_, str> {
+    if text.ends_with('\n') {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(format!("{text}\n"))
+    }
 }
 
 #[cfg(test)]

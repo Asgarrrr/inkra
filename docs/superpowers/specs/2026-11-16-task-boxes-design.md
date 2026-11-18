@@ -42,6 +42,10 @@ Taken by the owner on 2026-11-16.
   `- [ ]`.
 - **text start**: the first byte after the checkbox and its one space or tab;
   the line's end for an item with no text.
+- **box run**: what the box replaces (D10): a bullet task's bullet through its
+  checkbox, an ordered task's checkbox alone.
+- **lead**: the task part before the box run (D10). Blank in `- [ ] a` and
+  `  - [ ] a`; `1. ` in `1. [ ] a` and in `1. - [ ] a`; `- ` in `- - [ ] a`.
 
 ## D1. The data
 
@@ -56,9 +60,8 @@ pub struct Task {
 }
 ```
 
-A line gets a `Gutter` when it is quoted or starts a task item whose marker
-leads its line (markdown-blocks, item 13: before the bullet only quotes and
-spaces). The pending-slot rule decides the item's marker (markdown-blocks,
+A line gets a `Gutter` when it is quoted or starts a task item that gets a
+box: D10's rule, which replaces markdown-blocks item 13. The pending-slot rule decides the item's marker (markdown-blocks,
 item 7; Zed `markdown.rs:3820-3836`). The parser facts table of
 markdown-blocks holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 
@@ -87,7 +90,8 @@ at 0, nothing revealed, and typing landed before a hidden bullet.
 - A caret anywhere in the task part, leading spaces included, reveals it.
 - A caret at the text start does not touch the checkbox, so after a click the
   box stays painted.
-- Replacement `""`. An ordered task hides its number with the rest.
+- Replacement `""`. The conceal's marker is the box run, not the whole task
+  part: an ordered task keeps its number (D10). Amended 2026-11-17 after T4b.
 - The quote part and the task part reveal separately (S1 review): in
   `> - [ ] a` a caret on `>` reveals the quote part only.
 
@@ -218,8 +222,9 @@ The marker is read from the line's text: leading `[ \t>]*`, then a bullet
 (`-`, `*`, `+`) or a number with `.` or `)`, then a checkbox. A checked or
 unchecked line changes only the middle byte. A plain line inserts `- [ ] `
 after its leading `[ \t>]*`; a bullet line inserts `[ ] ` after its bullet and
-space. Obsidian swaps a bullet for a checkbox the same way (forum 45383), and
-has turned plain text into a task since 0.13.24 (forum 14634).
+its blanks, at the item's content column (D10). Obsidian swaps a bullet for a
+checkbox the same way (forum 45383), and has turned plain text into a task
+since 0.13.24 (forum 14634).
 
 **The edit.** `inkra-markdown` computes the splices as data, a pure function
 of the text, the parse and the line range: no buffer, testable by proptest.
@@ -250,25 +255,39 @@ Each cycled line has its candidate splices, in order:
 A round applies every line's current candidate to one copy of the text and
 parses it once. A line whose shifted start then has a task in the target state
 keeps its splice; any other line moves to its next candidate, or drops out
-after its last. The first round in which every splice landed returns its batch.
-After three rounds the batch is empty.
+after its last. The first round in which every splice landed returns its
+batch. After three rounds the batch is empty.
+
+**No markup turns to text.** Amended 2026-11-17 after the T5 reviews. A round
+also fails a splice when a list item or block quote that opens in the text no
+longer opens at its byte in the copy: an item at its marker, a quote at its
+first `>`, each mapped through the splices before it, an insertion at the byte
+moving it after the inserted text. `- [ ] ` before `> a` makes the quote
+text. A count per line is weaker: a line can lose one `>` and gain another.
+The splice failed is the nearest cycled line's at or above the lost opener: a
+splice reaches only its own line and those below it, as `---\n>\n---` turning
+into front matter shows. The openers come from one pulldown-cmark pass of the
+text, the skipped lines' pass, and one more pass of each round's copy. So
+`- > a` has no candidate that keeps its quote, and `⌘L` edits nothing.
+Headings stay outside the invariant (Open questions, 4).
 
 The argument: a batch is returned only from a round whose own parse shows each
-of its lines a task in the target state. Every splice lies inside its line, so
-the result holds by construction, whatever a splice does to its neighbour's
-laziness; the empty batch holds trivially. A failing round moves at least one
-line on through at most two candidates, so the rounds end. The cap of three
-covers the second candidates (round 2), then the batch without the lines no
-candidate makes a task (round 3). A longer chain edits nothing rather than
-guess.
+of its lines a task in the target state, and every opener of the text still
+opening at its byte. Every splice lies inside its line, so the result holds by
+construction, whatever a splice does to its neighbour's laziness; the empty
+batch holds trivially. A failing round moves at least one line on through at
+most two candidates, so the rounds end. The cap of three covers the second
+candidates (round 2), then the batch without the lines no candidate makes a
+task (round 3). A longer chain edits nothing rather than guess.
 
 So D1 and D6 stay one predicate, and the batch is judged whole: `a\n    b`
 selected cycles both lines, `b` nesting under the new item, though `b` alone
 cannot be a task. Likewise `a\n2. b` becomes `- [ ] a\n2. [ ] b`: after the
 new item `2.` starts a list, though alone it is lazy and takes `- [ ] 2. b`. A
 `⌘L` costs the cached parse, one pulldown-cmark pass for the skipped lines,
-and at most three parses of the spliced copy. This replaces T4a's per-line
-reparse, which cost up to two parses per line and judged each line alone.
+and at most three parses of the spliced copy, each with one more pass for its
+openers. This replaces T4a's per-line reparse, which cost up to two parses per
+line and judged each line alone.
 
 ## D7. The struck text
 
@@ -301,8 +320,8 @@ directly inside the item, continuation and lazy lines included.
   owner 2026-11-17 after T3.
 
 One predicate decides both the box and `DONE`: the pending slot resolving a
-task whose marker leads its line (D1). A task that gets no gutter (`- - [ ] a`, markdown-blocks item 13) gets neither box nor
-strike, so `⌘L` can never make a struck line without a box.
+task that gets a box (D10). A task that gets none (`- > - [ ] a`) gets neither
+box nor strike, so `⌘L` can never make a struck line without a box.
 
 ## D8. Theme
 
@@ -324,6 +343,94 @@ line keeps a stale box or a stale strike. The layout oracle of the
 incremental-draw spec (D10) gains toggles and `⌘L` batches in its alphabet;
 its alphabet already holds tasks.
 
+## D10. The markers before the box
+
+Added 2026-11-17 after T4b, by the owner: "la spec est mauvaise". Until then a
+concealed task part painted nothing but its box, so `1. [ ] a` lost its number
+and showed a gap where it stood. Markdown-blocks item 13 also gave no box to
+`- - [ ] a` or `1. - [ ] a`, and `⌘L` on them added a second checkbox. The
+number is content, the order of the steps. Only the task's own bullet gives way
+to the box, as Obsidian draws it.
+
+**The box rule.** A task item gets a box when its line holds all its leading
+quotes and, between the quote part's end and the item's marker, no `>`.
+CommonMark opens a list item mid-line only after container markers, so that gap
+holds only spaces, tabs and the markers of items that open on the line. `- [ ] a`,
+`  - [ ] a`, `> - [ ] a`, `1. [ ] a`, `- - [ ] a` and `1. - [ ] a` get a box.
+`- > - [ ] a` and `- a\n  > - [ ] b` do not: a quote inside a list item has no
+gutter (markdown-blocks, As built item 1).
+
+**The data.** `Gutter::quote_end` moves into `Task`, the one place it differs
+from `range.end`:
+
+```rust
+pub struct Task {
+    /// Where the task part starts: past the quote part's last `>` and its blank.
+    pub start: ByteOffset,
+    /// Where the box run starts: the bullet, or an ordered task's checkbox.
+    pub run: ByteOffset,
+    pub checkbox: Range<ByteOffset>,
+    pub checked: bool,
+}
+```
+
+The quote part ends at `task.start` on a task line and at `range.end` on any
+other gutter.
+
+**The conceals.** The task conceal's element stays the task part, so a caret
+anywhere in it reveals all of it raw (D2). Its marker becomes the box run.
+The markers of the outer items in the lead keep their own conceals: a bullet's
+`•`. Those conceals now start inside the gutter, so they are its own: the
+`debug_assert!` in `line_prefix` counts the quotes, the lead's bullets, then the
+task conceal, in marker order. The G-property in `parse/tests/gutters.rs`
+admits the lead's one-byte bullets between the quotes and the task conceal.
+
+**The paint.** A concealed task part paints its lead, then the box.
+
+- The lead is shaped from the gutter's text through all its conceals, so `- `
+  shows `• ` and `1. ` shows as typed, with the body's runs (`show` in
+  `layout/runs.rs`). Every one lies inside the task part's element, so while the
+  task part is concealed they are all active: the set an `is_active` filter
+  would keep. It paints at the task part's `x`, the quote part's width.
+  A blank lead shapes nothing.
+- The box stays centred on the checkbox's `x` span. In `1. [ ] a` it sits
+  right after `1. `; in `- [ ] a` it still sits where `[` stands.
+- The width is unchanged: the raw text with the `X` (C). No reveal moves text,
+  and a `•` narrower than `-` paints inside the gutter.
+- A click on the lead lands as on a concealed part, at the text start. Only
+  the box toggles (D4).
+- The lead is measured once per distinct gutter text, with the geometry
+  (`GutterCarry::measured`); it depends only on that text at the body size.
+
+**One task box in the layout.** `Geometry::checkbox` and `GutterLayout::boxed`
+describe one thing, measured in two places. They merge into one
+`Option<TaskBox>` on `GutterLayout`: the checkbox's `x` span, `checked`, and
+the lead's shape. The lead's `x` is the geometry's quote part width, and the
+click flips the task of the layout's own parse, so `TaskBox` holds no offset. It is set only on a line
+holding its own task, never from carried geometry (D). The task part's
+concealed state stays the reveal's, so the box and the lead paint together.
+
+**`⌘L`.**
+
+- A plain line's insertion goes after its innermost marker: past the leading
+  `[ \t>]*`, every bullet or number followed by one to four columns of blanks
+  opens the next, in turn (CommonMark 5.2). Blanks count in columns, a tab
+  stopping at the next multiple of 4 from the line's start, as pulldown-cmark
+  reads them. The checkbox goes past all of the innermost marker's blanks when
+  they span one to four columns, at its content column, so `-   a\n\n      b`
+  keeps `b` in the item; past one blank when they span five or more, so
+  `-\t  ` becomes `-\t[ ]   `; after a space of its own on an empty item `-`. `- 1. a` becomes `- 1. [ ] a`, a task item inside
+  the outer one, not `- [ ] 1. a`, whose `1. a` would be text; `-  - a`
+  becomes `-  - [ ] a`. The second candidate, `- [ ] ` after the leading
+  `[ \t>]*`, is unchanged.
+- No splice turns markup into text (D6, amended after the T5 reviews): every
+  item and quote of the text still opens at its byte, mapped through the
+  splices. `- > a` edits nothing.
+- A line holding a task that gets no box is skipped, like a code line: its
+  checkbox cannot be cycled, and a box on its outer item would make two
+  checkboxes. The skip pass (`Scan::new` in `cycle.rs`) collects the lines of
+  its `TaskListMarker` events; a line whose gutter has a task is kept.
+
 ## Tests
 
 `inkra-markdown`, by example:
@@ -331,7 +438,8 @@ its alphabet already holds tasks.
 - `- [ ] a`, `- [x] a`, `- [X] a`, `* [ ] a`, `1. [ ] a`, `> - [ ] a`,
   `  - [ ] a`, `-    [ ] a`, loose `- [ ] a\n\n- [x] b`: a gutter with a task.
 - `- [ ]a`: no task. `- [ ]\n` and `- [ ]` at the end of the text: a task with
-  no text. `-\n`: keeps its `•`. `- - [ ] a`: two `•`, no gutter task.
+  no text. `-\n`: keeps its `•`. `- - [ ] a`: a gutter task with the outer `•` in its
+  lead (D10); `- > - [ ] a`: no gutter task.
   `- a\n  - [ ] b`: the inner line has a gutter task.
 - The conceal covers the task part; a caret at 0 in `- [ ] a` touches it; a
   caret at the text start does not.
@@ -348,8 +456,9 @@ its alphabet already holds tasks.
   `depth` may be 0 with a non-empty range when `task` is set
   (`parse/tests/gutters.rs`, around 228-247).
 - The cycle: applying its splices to the text and reparsing gives the stated
-  state on every cycled line and leaves every other line byte-identical; the
-  mapped selection stays inside the text and on a char boundary.
+  state on every cycled line and leaves every other line byte-identical; no
+  line opens fewer items or quotes; the mapped selection stays inside the text
+  and on a char boundary.
 
 `inkra-editor`: `apply_diff` is one undo step, merges with no neighbour, maps
 the selection, and edits nothing from a stale base.
@@ -404,6 +513,14 @@ rendered and looked at.
 6. **T4b, `⌘L` on a selection** (~0.5 d). The batch checked by one parse
    (D6, amended for T4b) through `apply_diff`, the column-0 rule, the uniform
    next state, the mapped selection, the oracle with batches.
+7. **T5, the markers before the box** (~0.5 d). D10: the box rule, `Task`'s
+   `start` and `run`, the box-run conceal, the lead's paint, one `TaskBox`,
+   `⌘L` after the innermost marker and the unboxed-task skip. Tests:
+   `1. [ ] a` keeps `1.` and its box follows it; `- - [ ] a` paints `•` and a
+   box; `1. - [ ] a` paints `1.` and a box; `- > - [ ] a` gets no box and
+   `⌘L` leaves it; a caret in the lead reveals the whole task part raw;
+   toggling keeps the width; `⌘L` on `- 1. a` gives `- 1. [ ] a`. The scene
+   gains `1. [ ] a`, `- - [ ] a`, `1. - [x] a` and a revealed ordered task.
 
 T1a ships before anything else depends on it, because it changes what `parse`
 emits for every list item. T3 and T4a are independent of each other.
@@ -429,8 +546,8 @@ emits for every list item. T3 and T4a are independent of each other.
   makes the check (G). `layout/mod.rs` is at its 400 lines and gains no
   accessor. Amended 2026-11-17 after the cross-slice review: `task_at` took
   the buffer's version and the editor re-checked the bytes, so (G) ran twice.
-  A `GutterLayout`'s `Boxed` holds the checkbox from the line's
-  start, so a carried line stays line-relative. The hit test (F) is
+  A carried line holds no document offset of its task: since T5,
+  `task_at` reads the task from the layout's own parse. The hit test (F) is
   containment in the painted square, which fits inside row 0
   (`TASK_BOX_SIZE` 16 px, the smallest row that holds a task 28 px), so it
   has no separate row check.
@@ -440,6 +557,24 @@ emits for every list item. T3 and T4a are independent of each other.
   `2. [ ] b` and drops out, though `- [ ] 2. b` would let it nest. Moving only
   the first failing line would land it but cost a parse per line on `⌘A`; the
   cap of three parses wins. Added 2026-11-17 after the T4b review.
+- **From this spec, in T5.** Added 2026-11-17 after the T5 review.
+  - `TaskBox` holds no checkbox offset. `Task` gained `start` and `run`, so a
+    line-relative copy could not rebuild the whole `Task` to flip it. `task_at`
+    finds the task in the layout's own parse, `DocumentLayout::markdown`, by the
+    line's start; (G) is unchanged.
+  - The lead shapes through all its conceals, with no `is_active` filter. The
+    cache is keyed by gutter text, so the first line with that text may have its
+    task part revealed, and a filter would cache a raw lead. All are active
+    whenever the task part is concealed, so the set is the same.
+  - The skip pass reads the text with a final `\n`, as `parse` does (D1).
+    Without it, `- > - [ ]` on an unterminated last line has no
+    `TaskListMarker`, and `⌘L` would add a second checkbox.
+  - `show` moved from `shape.rs` to `runs.rs`, beside `line_runs`. `shape.rs`
+    was at its line ceiling, and the `hidden` argument grows its closure.
+  - No markup turns to text, an invariant D10 did not state, added by the T5
+    reviews (D6): every item and quote of the text still opens at its byte in
+    the copy, mapped through the splices. A first count per line let a line
+    trade one `>` for another; the fuzzer found two such inputs, now pinned.
 
 ## Deferred
 
@@ -464,3 +599,7 @@ emits for every list item. T3 and T4a are independent of each other.
    marker.** Its text start is the conceal's end, and a caret at a conceal's
    end touches it (`crates/markdown/src/reveal.rs:15`). Recommended: accept;
    typing after it hides the marker again.
+4. **A heading is no opener, so `⌘L` on `# a` gives `- [ ] # a`**, and the
+   heading turns to the task's text. The invariant (D6) covers list items and
+   block quotes only. Owner question: keep this, or count headings as openers
+   so `# a` edits nothing? Behaviour unchanged until answered.

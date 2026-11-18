@@ -1,5 +1,5 @@
 //! Gutters: each quoted line's `>` prefix, found from the parse (markdown blocks spec, D1), and a
-//! task item's marker through its checkbox when it leads its line (task boxes spec, D1).
+//! task item's markers through its checkbox when it gets a box (task boxes spec, D1, D10).
 
 use std::ops::Range;
 
@@ -18,18 +18,27 @@ pub struct Gutter {
     pub quotes: Vec<ByteOffset>,
     /// The leading quotes that contain the line, `>` or not; 0 on a task line outside a quote.
     pub depth: usize,
-    /// The quote part's end, past its last `>` and the one space or tab after it; where a task
-    /// part starts, and `range.end` with no task.
-    pub quote_end: ByteOffset,
-    /// Set only on a line that holds all its `>`.
+    /// The task the line starts, when it gets a box: the line holds all its `>` (D10).
     pub task: Option<Task>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
+    /// Where the task part starts: past the quote part's last `>` and its blank.
+    pub start: ByteOffset,
+    /// Where the box run starts: the bullet, or an ordered task's checkbox.
+    pub run: ByteOffset,
     /// The three checkbox bytes.
     pub checkbox: Range<ByteOffset>,
     pub checked: bool,
+}
+
+impl Gutter {
+    /// The quote part's end, past its last `>` and the one space or tab after it.
+    #[must_use]
+    pub fn quote_end(&self) -> ByteOffset {
+        self.task.as_ref().map_or(self.range.end, |task| task.start)
+    }
 }
 
 impl Task {
@@ -75,11 +84,8 @@ impl Items {
                 Event::Start(Tag::Paragraph) => self.pending = Some((item, index)),
                 // The range may start with spaces; the checkbox is its last three bytes.
                 Event::TaskListMarker(checked) => {
-                    let task = Task {
-                        checkbox: to_offsets(range.end - 3..range.end),
-                        checked: *checked,
-                    };
-                    match task_gutter(text, marker, task, depth) {
+                    let checkbox = range.end - 3..range.end;
+                    match task_gutter(text, marker, checkbox, *checked, depth) {
                         Some(gutter) => {
                             done = checked.then_some(index);
                             self.tasks.push(gutter);
@@ -111,7 +117,7 @@ impl Items {
             }));
             let replaced = quote_gutters.next_if(|gutter| gutter.range.start == line);
             debug_assert!(
-                replaced.is_none_or(|replaced| replaced.quote_end == task.quote_end),
+                replaced.is_none_or(|replaced| replaced.quote_end() == task.quote_end()),
                 "a task's quote part differs from its line's"
             );
             out.push(task);
@@ -121,40 +127,61 @@ impl Items {
     }
 }
 
-/// A task gets a gutter when its marker leads its line (S3 correction 13): before it, only the
-/// line's `>`s and spaces; any other keeps its `•`.
-fn task_gutter(text: &str, marker: usize, task: Task, depth: usize) -> Option<Gutter> {
+/// A task gets a box when its line holds all its `>` and none stands between the quote part and its
+/// marker: a list item opens mid-line only after container markers, so the lead holds blanks and
+/// the markers of items opening on the line (D10). Any other keeps its `•`.
+fn task_gutter(
+    text: &str,
+    marker: usize,
+    checkbox: Range<usize>,
+    checked: bool,
+    depth: usize,
+) -> Option<Gutter> {
     let line = line_start(text, marker);
     let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
     let mut gutter = gutter(text, line..end, depth);
-    let checkbox = task.checkbox.start.get();
-    let leads = gutter.quotes.len() == gutter.depth
+    let start = gutter.range.end;
+    let boxed = gutter.quotes.len() == gutter.depth
         && text
-            .get(gutter.range.end.get()..marker)
-            .is_some_and(|gap| gap.bytes().all(|byte| matches!(byte, b' ' | b'\t')))
-        && !text[marker..checkbox].contains('\n');
-    leads.then(|| {
-        let end = task.checkbox.end.get();
-        let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));
-        gutter.range.end = ByteOffset::new(end + usize::from(blank));
-        gutter.task = Some(task);
+            .get(start.get()..marker)
+            .is_some_and(|lead| !lead.contains('>'))
+        && !text[marker..checkbox.start].contains('\n');
+    boxed.then(|| {
+        let blank = matches!(text.as_bytes().get(checkbox.end), Some(b' ' | b'\t'));
+        gutter.range.end = ByteOffset::new(checkbox.end + usize::from(blank));
+        let run = if is_bullet(text, marker) {
+            marker
+        } else {
+            checkbox.start
+        };
+        gutter.task = Some(Task {
+            start,
+            run: ByteOffset::new(run),
+            checkbox: to_offsets(checkbox),
+            checked,
+        });
         gutter
     })
 }
 
 /// An item's marker: pulldown-cmark starts its range up to a tab's leftover columns early, back
 /// onto the line ending or quote marker before it, and a marker is never a blank or `>`.
-fn marker_start(text: &str, item: usize) -> usize {
+pub(crate) fn marker_start(text: &str, item: usize) -> usize {
     item + text.as_bytes()[item..]
         .iter()
         .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'>'))
         .count()
 }
 
+/// An ordered item's marker starts with a digit (`CommonMark` 5.2), a bullet item's does not.
+fn is_bullet(text: &str, marker: usize) -> bool {
+    matches!(text.as_bytes().get(marker), Some(b'-' | b'*' | b'+'))
+}
+
 /// The element is the bullet byte alone, so a caret at the item's content does not reveal it. An
-/// ordered item's marker starts with a digit (`CommonMark` 5.2), so it keeps its number.
+/// ordered item keeps its number.
 fn bullet(text: &str, marker: usize) -> Option<Conceal> {
-    matches!(text.as_bytes().get(marker), Some(b'-' | b'*' | b'+')).then(|| {
+    is_bullet(text, marker).then(|| {
         let bullet = to_offsets(marker..marker + 1);
         Conceal {
             element: bullet.clone(),
@@ -196,7 +223,6 @@ fn gutter_at(start: usize, depth: usize) -> Gutter {
         range: to_offsets(start..start),
         quotes: Vec::new(),
         depth,
-        quote_end: ByteOffset::new(start),
         task: None,
     }
 }
@@ -223,13 +249,13 @@ fn gutter(text: &str, line: Range<usize>, depth: usize) -> Gutter {
         end += usize::from(matches!(bytes.get(end), Some(b' ' | b'\t')));
     }
     gutter.range.end = ByteOffset::new(line.start + end);
-    gutter.quote_end = gutter.range.end;
     gutter
 }
 
 /// One conceal per `>`, all with the element from the gutter's start through its last `>`, so a
 /// line's `>`s reveal together and a caret after the last one's space reveals none. A task's
-/// conceal follows, its element and marker the task part, so the two parts reveal apart (D2).
+/// conceal follows, its element the task part, so the two parts reveal apart (D2), and its marker
+/// the box run: the lead's markers keep their own conceals (D10).
 pub(crate) fn gutter_conceals(gutters: &[Gutter]) -> impl Iterator<Item = Conceal> + '_ {
     gutters.iter().flat_map(|gutter| {
         let last = gutter
@@ -242,13 +268,10 @@ pub(crate) fn gutter_conceals(gutters: &[Gutter]) -> impl Iterator<Item = Concea
             marker: quote..quote + 1,
             replacement: "",
         });
-        let task = gutter.task.as_ref().map(|task| {
-            let part = gutter.quote_end..task.checkbox.end;
-            Conceal {
-                element: part.clone(),
-                marker: part,
-                replacement: "",
-            }
+        let task = gutter.task.as_ref().map(|task| Conceal {
+            element: task.start..task.checkbox.end,
+            marker: task.run..task.checkbox.end,
+            replacement: "",
         });
         quotes.chain(task)
     })
@@ -268,7 +291,7 @@ pub(crate) fn cut(text: &str, spans: &mut Vec<Span>, gutters: &[Gutter]) {
     // A lazy line or a task outside a quote has no quote part; a note with none keeps its spans.
     let mut gutters = gutters
         .iter()
-        .map(|gutter| gutter.range.start.get()..gutter.quote_end.get())
+        .map(|gutter| gutter.range.start.get()..gutter.quote_end().get())
         .filter(|part| !part.is_empty())
         .peekable();
     if gutters.peek().is_none() {

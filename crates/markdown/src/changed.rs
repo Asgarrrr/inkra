@@ -152,7 +152,9 @@ impl Item for Gutter {
                 .all(|(&old, &new)| map(old, Bias::Right) == new)
             && match (&self.task, &new.task) {
                 (Some(old), Some(new)) => {
-                    mapped(&old.checkbox, &map) == new.checkbox && old.checked == new.checked
+                    mapped(&(old.start..old.run), &map) == (new.start..new.run)
+                        && mapped(&old.checkbox, &map) == new.checkbox
+                        && old.checked == new.checked
                 }
                 (old, new) => old.is_none() && new.is_none(),
             }

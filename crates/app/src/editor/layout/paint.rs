@@ -1,13 +1,13 @@
 use std::ops::Range;
 
 use gpui::{
-    App, BorderStyle, Bounds, ContentMask, Pixels, Point, TextAlign, TransformationMatrix, Window,
-    fill, outline, point, px, size,
+    App, BorderStyle, Bounds, ContentMask, Pixels, Point, ShapedLine, TextAlign,
+    TransformationMatrix, Window, fill, outline, point, px, size,
 };
-use inkra_markdown::Task;
 use inkra_text::{ByteOffset, Diff};
 
 use super::DocumentLayout;
+use super::line::LineLayout;
 use super::prefix::Prefix;
 use crate::theme;
 use crate::ui::IconName;
@@ -22,8 +22,20 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
     static PAINTED_TOPS: std::cell::RefCell<Vec<Pixels>> =
         const { std::cell::RefCell::new(Vec::new()) };
-    static PAINTED_BOXES: std::cell::RefCell<Vec<(Bounds<Pixels>, bool)>> =
+    static PAINTED_BOXES: std::cell::RefCell<Vec<PaintedBox>> =
         const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A task box the last paint drew, and the lead it drew before it.
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct PaintedBox {
+    /// In window coordinates.
+    pub(crate) bounds: Bounds<Pixels>,
+    /// Whether it drew filled, the checked branch.
+    pub(crate) checked: bool,
+    /// The lead's text and window `x`.
+    pub(crate) lead: Option<(String, Pixels)>,
 }
 
 /// The lines and bars the last paint on this thread walked.
@@ -50,9 +62,9 @@ pub(crate) fn painted_clips() -> Vec<(Pixels, Bounds<Pixels>)> {
     PAINTED_CLIPS.with(|painted| painted.borrow().clone())
 }
 
-/// Each task box the last paint on this thread drew: its window bounds, and whether it drew checked.
+/// Each task box the last paint on this thread drew, and the lead before it.
 #[cfg(test)]
-pub(crate) fn painted_boxes() -> Vec<(Bounds<Pixels>, bool)> {
+pub(crate) fn painted_boxes() -> Vec<PaintedBox> {
     PAINTED_BOXES.with(|painted| painted.borrow().clone())
 }
 
@@ -147,9 +159,7 @@ impl DocumentLayout {
             {
                 log::warn!("failed to paint the prefix of line {index}: {err}");
             }
-            if let Some((square, boxed)) = line.task_box() {
-                self.paint_task_box(square + line_origin, boxed.checked, window, cx);
-            }
+            self.paint_task(line_origin, line, window, cx);
         }
         let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
         for block in &self.code_blocks[blocks] {
@@ -168,8 +178,54 @@ impl DocumentLayout {
         }
     }
 
-    /// The square `bounds`: an outline, or an accent fill with a check.
-    fn paint_task_box(&self, bounds: Bounds<Pixels>, checked: bool, window: &mut Window, cx: &App) {
+    /// Where the concealed task on `line`, at `origin`, paints its box and its lead (D10).
+    fn paint_task(
+        &self,
+        origin: Point<Pixels>,
+        line: &LineLayout,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some((square, task)) = line.task_box() else {
+            return;
+        };
+        let lead = line.prefix.as_ref().and_then(Prefix::lead);
+        let lead = lead.map(|(lead, x)| (lead, origin + point(x, px(0.))));
+        self.paint_task_box(
+            square + origin,
+            task.checked,
+            lead,
+            line.row_height,
+            window,
+            cx,
+        );
+    }
+
+    /// The lead at its point, then the square `bounds`: an outline, or an accent fill with a check.
+    fn paint_task_box(
+        &self,
+        bounds: Bounds<Pixels>,
+        checked: bool,
+        lead: Option<(&ShapedLine, Point<Pixels>)>,
+        row_height: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some((lead, at)) = lead
+            && let Err(err) = lead.paint(at, row_height, TextAlign::Left, None, window, cx)
+        {
+            log::warn!("failed to paint a task's lead: {err}");
+        }
+        #[cfg(test)]
+        let record = |filled| {
+            PAINTED_BOXES.with(|painted| {
+                painted.borrow_mut().push(PaintedBox {
+                    bounds,
+                    checked: filled,
+                    lead: lead.map(|(lead, at)| (lead.text.to_string(), at.x)),
+                });
+            });
+        };
         let colors = &self.theme.colors;
         if !checked {
             window.paint_quad(
@@ -178,10 +234,12 @@ impl DocumentLayout {
                     .corner_radii(theme::TASK_BOX_RADIUS),
             );
             #[cfg(test)]
-            PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, false)));
+            record(false);
             return;
         }
         window.paint_quad(fill(bounds, colors.accent).corner_radii(theme::TASK_BOX_RADIUS));
+        #[cfg(test)]
+        record(true);
         let check = Bounds::centered_at(
             bounds.center(),
             size(theme::TASK_CHECK_SIZE, theme::TASK_CHECK_SIZE),
@@ -196,26 +254,26 @@ impl DocumentLayout {
         ) {
             log::warn!("failed to paint a task's check: {err}");
         }
-        #[cfg(test)]
-        PAINTED_BOXES.with(|painted| painted.borrow_mut().push((bounds, true)));
     }
 
-    /// The flip of the task whose box holds `local`, and its text start, the gutter's end. The flip
-    /// is a diff from the text this layout shows, so `apply_diff` refuses it once the buffer moved
-    /// on: matching bytes would not prove the task is the same one (task boxes spec, D5, G).
+    /// The flip of the task whose box holds `local`, and its text start, the gutter's end. The task
+    /// is the one this layout's parse holds and the flip a diff from the text it shows, so
+    /// `apply_diff` refuses it once the buffer moved on: matching bytes would not prove the task is
+    /// the same one (task boxes spec, D5, G).
     pub(crate) fn task_at(&self, local: Point<Pixels>) -> Option<(Diff, ByteOffset)> {
         // Clamped to the nearest line: below its first row, its square misses.
         let (placed, _) = self.locate(self.row_for_y(local.y));
-        let (square, boxed) = placed.line.task_box()?;
+        let (square, _) = placed.line.task_box()?;
         let gutter = placed.line.prefix.as_ref()?.range();
+        let gutters = &self.markdown.gutters;
+        let task = gutters
+            .get(gutters.partition_point(|gutter| gutter.range.start < placed.start))
+            .filter(|gutter| gutter.range.start == placed.start)?
+            .task
+            .as_ref()?;
         square
             .contains(&(local - point(px(0.), placed.top)))
             .then(|| {
-                let task = Task {
-                    checkbox: placed.start + boxed.checkbox.start
-                        ..placed.start + boxed.checkbox.end,
-                    checked: boxed.checked,
-                };
                 let flip = Diff::new(self.shaped_at.0, vec![task.flip()]);
                 (flip, placed.start + gutter.end)
             })
