@@ -224,7 +224,8 @@ fn measure(
 ) -> Measured {
     let start = gutter.range.start;
     let split = gutter.quote_end() - start;
-    let quote = (split > 0).then(|| shape(&(start..start + split), &[], &source[..split]));
+    let quote =
+        (!gutter.quotes.is_empty()).then(|| shape(&(start..start + split), &[], &source[..split]));
     let mut geometry = Geometry::measure(gutter, quote.as_ref());
     let task = gutter.task.as_ref().map(|task| {
         let text = &source[task.start - start..task.run - start];
@@ -264,7 +265,7 @@ fn measure(
 }
 
 impl Geometry {
-    /// From the quote part's own shape; `None` when it is empty.
+    /// From the quote part's own shape; `None` with no `>`.
     fn measure(gutter: &Gutter, quote: Option<&ShapedLine>) -> Self {
         let start = gutter.range.start;
         let x = |index| quote.map_or(px(0.), |shaped| shaped.x_for_index(index));
