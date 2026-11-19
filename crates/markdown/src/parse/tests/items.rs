@@ -205,9 +205,11 @@ fn an_items_other_lines_hide_their_blanks_below_its_hang_column() {
     assert_eq!(numbers("10. a\n    b"), vec![vec![key(2, b'.')]; 2]);
 }
 
+/// Blanks show nothing, so an item part with no mark has no conceal to reveal (D2).
 #[test]
-fn an_items_blanks_conceal_whole_and_an_empty_part_not_at_all() {
-    assert_eq!(concealed("- a\n  b"), [("-", "-", ""), ("  ", "  ", "")]);
+fn an_item_part_with_no_mark_has_no_conceal() {
+    assert_eq!(concealed("- a\n  b"), [("-", "-", "")]);
+    assert_eq!(concealed("- [ ] a\n      b"), [("- [ ]", "- [ ]", "")]);
     assert_eq!(concealed("- a\nb"), [("-", "-", "")]);
 }
 

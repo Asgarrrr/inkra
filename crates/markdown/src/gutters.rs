@@ -235,7 +235,7 @@ impl Blanks<'_> {
 /// One conceal per `>`, all with the element from the gutter's start through its last `>`, so a
 /// line's `>`s reveal together and a caret after the last one's space reveals none. An item part's
 /// conceal follows, so the two parts reveal apart: its element and marker run through its last
-/// mark, or over the whole part when it has none, and an empty part has none (D2).
+/// mark. A part with no mark has none, as blanks show nothing to reveal (D2).
 pub(crate) fn gutter_conceals<'g>(
     text: &'g str,
     gutters: &'g [Gutter],
@@ -253,8 +253,7 @@ pub(crate) fn gutter_conceals<'g>(
         });
         let item = gutter.item.as_ref().and_then(|item| {
             let part = &text[item.start.get()..gutter.range.end.get()];
-            let marked = part.trim_end_matches([' ', '\t']).len();
-            let end = item.start + if marked == 0 { part.len() } else { marked };
+            let end = item.start + part.trim_end_matches([' ', '\t']).len();
             (item.start < end).then_some(Conceal {
                 element: item.start..end,
                 marker: item.start..end,

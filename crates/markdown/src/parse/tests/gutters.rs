@@ -266,9 +266,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             .filter(|conceal| gutter.range.contains(&conceal.marker.start))
             .collect();
         if let Some(item) = &gutter.item {
-            let own = (item.start < gutter.range.end)
-                .then(|| inside.pop())
-                .flatten();
+            let own = inside.pop_if(|conceal| conceal.marker.start == item.start);
             item_is_well_formed(text, gutter, item, own)?;
         }
         for (conceal, quote) in inside.iter().zip(&gutter.quotes) {
@@ -281,7 +279,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
 }
 
 /// G5: an item part follows its line's `>` and the quote part's blank, and holds no `>`. On an
-/// item's other line it is blanks only, all concealed, with no conceal when empty. On a marker
+/// item's other line it is blanks only, with no conceal: blanks show nothing to reveal. On a marker
 /// line, which holds all its `>`, it ends at most one space or tab past its last mark or checkbox,
 /// and its conceal hides it through that mark (D1, D2, D11).
 fn item_is_well_formed(
@@ -301,9 +299,7 @@ fn item_is_well_formed(
     let marked = part.trim_end_matches([' ', '\t']);
     if marked.is_empty() {
         prop_assert!(item.task.is_none(), "{gutter:?} in {text:?}");
-        let whole = conceal.map(|conceal| (conceal.element.clone(), conceal.marker.clone()));
-        let range = item.start..gutter.range.end;
-        prop_assert_eq!(whole, (!part.is_empty()).then(|| (range.clone(), range)));
+        prop_assert!(conceal.is_none(), "{gutter:?} in {text:?}");
         return Ok(());
     }
     prop_assert_eq!(gutter.quotes.len(), gutter.depth);

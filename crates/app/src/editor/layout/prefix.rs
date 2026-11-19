@@ -127,10 +127,11 @@ pub(super) fn line_prefix<'a, 'c>(
     let (own, rest) = conceals.split_at(own);
     // A gap conceal skips a line's leading `[ \t>]*` and a heading's own marker is the only conceal
     // before `opening.end`, so every conceal before the prefix's end is the prefix's own: a gutter's
-    // `>`s, then its item part's one conceal when it is not empty (task boxes spec, D2).
+    // `>`s, then its item part's one conceal when it has a mark (task boxes spec, D2).
     debug_assert!(match gutter {
-        Some((gutter, _)) => {
-            let item = gutter.item.is_some() && gutter.quote_end() < gutter.range.end;
+        Some((gutter, source)) => {
+            let part = &source[gutter.quote_end() - gutter.range.start..];
+            let item = gutter.item.is_some() && !part.trim_end_matches([' ', '\t']).is_empty();
             own.len() == gutter.quotes.len() + usize::from(item)
         }
         None =>

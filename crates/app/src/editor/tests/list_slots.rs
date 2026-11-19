@@ -264,18 +264,33 @@ fn a_code_block_in_an_item_starts_at_its_text(cx: &mut TestAppContext) {
     assert_eq!((text[1], text[2]), (text[0], text[0]));
 }
 
-/// Home on a continuation line reveals its blanks, right-aligned against the text, and a letter
-/// typed there lands before them.
+/// An item part with no mark never reveals: blanks show nothing. A caret at a held line's start
+/// or at its text leaves the text where it is, however many blanks the part hides (D2).
 #[gpui::test]
-fn home_on_a_continuation_line_lands_left_of_its_text(cx: &mut TestAppContext) {
+fn a_held_lines_blanks_never_reveal(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "- [ ] a\n      b\n\nbody");
+    let concealed = xs(&window, &mut cx, &[14]);
+    for (keys, caret) in [("cmd-up down home", 8), ("end left", 14)] {
+        cx.simulate_keystrokes(keys);
+        let at = window.update(&mut cx, |view, _, _| view.cursor().get());
+        assert_eq!(at.unwrap(), caret, "{keys}");
+        assert_eq!(
+            xs(&window, &mut cx, &[caret, 14]),
+            [concealed[0]; 2],
+            "{keys}"
+        );
+        assert_eq!(pieces(&window, &mut cx, 1), [], "{keys}");
+    }
+}
+
+/// Home on a continuation line lands at its start, which sits at its text, and a letter typed
+/// there lands before its blanks.
+#[gpui::test]
+fn home_on_a_continuation_line_lands_before_its_blanks(cx: &mut TestAppContext) {
     let (window, mut cx) = editor(cx, "- a\n  b\n\nbody");
-    let concealed = xs(&window, &mut cx, &[6]);
     cx.simulate_keystrokes("cmd-up down home");
     let caret = window.update(&mut cx, |view, _, _| view.cursor().get());
     assert_eq!(caret.unwrap(), 4);
-    let revealed = xs(&window, &mut cx, &[4, 6]);
-    assert_eq!(revealed[1], concealed[0]);
-    assert!(revealed[0] < revealed[1], "{revealed:?}");
     cx.simulate_keystrokes("x");
     let text = window.update(&mut cx, |view, _, cx| {
         view.buffer().read(cx).text().to_owned()
