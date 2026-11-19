@@ -168,8 +168,9 @@ pub(crate) fn gutter_at(start: usize, depth: usize) -> Gutter {
 
 /// One `>` per open quote, outermost first. Blanks count in columns as pulldown-cmark's `LineStart`
 /// counts them (D1): a `>` takes up to three columns before it, entering a tab whole
-/// (`parse.rs:1515-1518`); a quote opens only within three (`firstpass.rs:109-114`), where the same
-/// scan finds it. The first `>` missing makes the line lazy from there on.
+/// (`pulldown-cmark-0.13.6/src/parse.rs:1515-1518`); a quote opens only within three
+/// (`pulldown-cmark-0.13.6/src/firstpass.rs:109-114`), where the same scan finds it. The first `>`
+/// missing makes the line lazy from there on.
 fn gutter(text: &str, line: Range<usize>, depth: usize) -> Gutter {
     let mut blanks = Blanks {
         bytes: &text.as_bytes()[line.clone()],

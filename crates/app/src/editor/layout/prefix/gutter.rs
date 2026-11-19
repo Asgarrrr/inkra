@@ -89,8 +89,9 @@ impl Shown {
         })
     }
 
-    /// Left of the column lands as on the first glyph; left of a piece, or at its end, `None`, as
-    /// `x_for_index` reads it.
+    /// Left of the column lands as on the first glyph of a piece at 0. Left of a later piece, as in
+    /// the gap before a right-aligned item part, or at a piece's end, `None`: the caller lands on
+    /// the text start.
     fn index_for_x(&self, x: Pixels) -> Option<usize> {
         self.pieces.iter().flatten().find_map(|piece| {
             let within = piece.shaped.closest_index_for_x(x - piece.x);

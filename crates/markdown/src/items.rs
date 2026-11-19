@@ -21,14 +21,22 @@ struct Record {
     task: Option<Task>,
 }
 
+/// The open item whose marker waits for its next event.
+struct Pending {
+    /// Its range's start.
+    start: usize,
+    /// Its index in the open elements.
+    index: usize,
+    /// Its index in `Items::records` when it is a gutter item.
+    record: Option<usize>,
+}
+
 /// Each list item's marker, decided at the item's first event that is not one `Start(Paragraph)`
 /// (markdown blocks spec, S3 correction 7): a gutter item's box, or else the `•` of any other
 /// bullet. No paragraph opens right inside another, so skipping every `Start(Paragraph)` skips one.
 #[derive(Default)]
 pub(crate) struct Items {
-    /// The open item's start, its index in the open elements, and its record when it is a gutter
-    /// item.
-    pending: Option<(usize, usize, Option<usize>)>,
+    pending: Option<Pending>,
     /// The items opened so far: the next one's index in `structure.items`.
     count: usize,
     records: Vec<Record>,
@@ -55,10 +63,10 @@ impl Items {
         gutter: bool,
     ) -> Option<usize> {
         let mut done = None;
-        if let Some((item, index, record)) = self.pending.take() {
-            let marker = marker_start(text, item);
-            match (event, record) {
-                (Event::Start(Tag::Paragraph), _) => self.pending = Some((item, index, record)),
+        if let Some(pending) = self.pending.take() {
+            let marker = marker_start(text, pending.start);
+            match (event, pending.record) {
+                (Event::Start(Tag::Paragraph), _) => self.pending = Some(pending),
                 // The range may start with spaces; the checkbox is its last three bytes.
                 (Event::TaskListMarker(checked), Some(record)) => {
                     let checkbox = range.end - 3..range.end;
@@ -71,7 +79,7 @@ impl Items {
                         checkbox: to_offsets(checkbox),
                         checked: *checked,
                     });
-                    done = checked.then_some(index);
+                    done = checked.then_some(pending.index);
                 }
                 (Event::TaskListMarker(_), None) => {
                     self.bullets.extend(bullet(text, marker));
@@ -117,7 +125,11 @@ impl Items {
                     });
                     self.records.len() - 1
                 });
-                self.pending = Some((range.start, opened, record));
+                self.pending = Some(Pending {
+                    start: range.start,
+                    index: opened,
+                    record,
+                });
                 self.count += 1;
             }
             _ => {}
