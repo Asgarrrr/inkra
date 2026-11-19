@@ -9,7 +9,7 @@ use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
-use crate::spans::{line_ranges, line_start, to_offsets};
+use crate::spans::{line_start, to_offsets};
 
 /// A gutter item as the parse met it.
 struct Record {
@@ -280,17 +280,22 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
     /// hides its blanks below the innermost item's hang column. A blank line takes no item part,
     /// unless a code block holds it (D11). Stops where no item holds the line.
     fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
-        if from >= to || self.held.is_empty() {
-            return;
-        }
         let text = self.text;
         let bytes = text.as_bytes();
-        for Range { start: line, end } in line_ranges(text, from).take_while(|line| line.start < to)
-        {
+        let mut next = from;
+        // Holders are released and checked before the line's end is searched, so an empty hold
+        // scans nothing.
+        while next < to {
+            let line = next;
             self.release(line);
             let Some(innermost) = self.held.last_mut() else {
                 return;
             };
+            let end = bytes[line..]
+                .iter()
+                .position(|&byte| byte == b'\n')
+                .map_or(text.len(), |len| line + len);
+            next = end + 1;
             let hang = *innermost
                 .hang
                 .get_or_insert_with(|| column_after(0, &bytes[innermost.marker_line.clone()]));
