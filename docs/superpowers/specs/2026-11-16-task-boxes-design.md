@@ -365,14 +365,14 @@ moves and deletions take `snap: impl Fn(ByteOffset, Bias) -> ByteOffset`.
 `InputHost::snap` (`crates/app/src/text_input.rs:194-195`) hands out an owned closure, and each
 action captures it in its `move_cursor` or `edit_buffer` closure. So the gates keep their shape,
 and an action that needs no snap (typing, cut, undo, `⌘A`) does not name one. `EditorView`'s
-clones its parse's `Rc` (`crates/app/src/editor/mod.rs:407-410`); `NameField`'s is
+clones its parse's `Rc` (`crates/app/src/editor/mod.rs:366-369`); `NameField`'s is
 `inkra_editor::no_snap`, the identity. No trait is added: a function has one shape, and
 `NameField` needs no type to say "no atoms".
 
 The invariant, "no caret rests inside an atom". One function, `Markdown::snap`, enforces it at two
 moments. Each moment exists for a reason the other cannot cover:
 
-- **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:307-322`), which
+- **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:241-256`), which
   every move reaches, snaps the head with the action's bias, then clips it. The action chooses the
   bias, not the direction of the move: Home moves left but lands at the text start.
   - `Bias::Left`: Left, `⇧←`, and Backspace's range start.
@@ -380,13 +380,13 @@ moments. Each moment exists for a reason the other cannot cover:
     drag, and `select_range`.
   - End, `⌃E`, `⌘↑` and `⌘↓` never land inside an atom, which ends at a line's text start. They
     snap anyway, so no action needs a proof.
-  - `EditorState::remove` (`state.rs:231-251`) builds its range from the snapped grapheme step. So
+  - `EditorState::remove` (`state.rs:165-185`) builds its range from the snapped grapheme step. So
     Backspace and Delete remove the atom whole.
   - `move_` picks `Bias::Left` for `Left` alone; `move_to` and `move_vertically` pick
     `Bias::Right`.
-- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:134-161`) is the
+- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:135-162`) is the
   one place where the parse changes. After it takes a new parse, it snaps the selection through
-  `EditorState::snap` (`state.rs:324-337`): a caret with `Bias::Right`, a range's start with
+  `EditorState::snap` (`state.rs:258-271`): a caret with `Bias::Right`, a range's start with
   `Bias::Left` and its end with `Bias::Right`. An edit places its caret before the new text is
   parsed, so `place` cannot see the new atoms. This covers typing, paste, undo, redo, a reload, a
   write from outside, and a pinned selection's reset.
@@ -1517,6 +1517,9 @@ Newest last. Each entry says what changed and why.
     held quoted line's quote part.
   - `ItemPart::marked` replaced the conceal's trim of the part's text as the one "has a mark"
     predicate, so `Markdown::snap` reads it without the text.
+  - The snap pushed two files past their line ceilings, so each split by concern: `EditorState`'s
+    copy, cut and paste moved to `crates/editor/src/state/clipboard.rs`, and `EditorView`'s pin to
+    `crates/app/src/editor/pin.rs`.
   - The review's other findings: `paint_marks` measures the font only at a line's first text mark;
     the HTML example of D11 hides two blanks on both lines, and a test pins the second; the fence
     set of D11 and Terms names all three lines with no text event; the M3 test's descent reason is
