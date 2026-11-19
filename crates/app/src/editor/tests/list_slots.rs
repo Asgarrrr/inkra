@@ -1,13 +1,14 @@
 //! List slots (task boxes spec, D3, D4, D11): nesting by level, one number width per list, a mark's
-//! baseline, wrapped rows, and the raw item part ending at the text start. Each `x` is compared
-//! with another line's measured `x` or with the slot's constants.
+//! baseline, wrapped rows, the raw item part ending at the text start, and an item's other lines
+//! starting at its text. Each `x` is compared with another line's measured `x` or with the slot's
+//! constants.
 
 use gpui::{Pixels, TestAppContext, VisualTestContext, WindowHandle, px};
 
 use super::{assert_x, at, dispatching};
 use crate::editor::EditorView;
-use crate::editor::layout::painted_marks;
-use crate::theme::{LIST_SLOT_GAP, TASK_BOX_SIZE};
+use crate::editor::layout::{painted_boxes, painted_marks};
+use crate::theme::{CODE_BLOCK_OUTSET, LIST_SLOT_GAP, TASK_BOX_SIZE};
 
 type Handle = WindowHandle<EditorView>;
 
@@ -216,4 +217,89 @@ fn a_selection_over_both_parts_paints_two_pieces(cx: &mut TestAppContext) {
     assert_eq!(pieces[0].1, px(0.));
     assert_eq!(pieces[1].2, concealed[0]);
     assert!(pieces[1].1 > pieces[0].2, "{pieces:?}");
+}
+
+/// A continuation line, a lazy line, a later paragraph and a line indented by a tab's width start
+/// at the item's text, in a quote and out of one (D11).
+#[gpui::test]
+fn an_items_other_lines_start_at_its_text(cx: &mut TestAppContext) {
+    for (note, a, b) in [
+        ("- a\n  b\n\nbody", 2, 6),
+        ("- a\nb\n\nbody", 2, 4),
+        ("- a\n\n  b\n\nbody", 2, 7),
+        ("-\ta\n    b\n\nbody", 2, 8),
+        ("> - a\nb\n\nbody", 4, 6),
+        ("- a\n  - b\n  c\n\nbody", 8, 12),
+        ("8. a\n9. b\n10. c\n    d\n\nbody", 14, 20),
+    ] {
+        let (window, mut cx) = editor(cx, note);
+        let text = xs(&window, &mut cx, &[a, b]);
+        assert_eq!(text[1], text[0], "{note:?}");
+    }
+}
+
+/// A quoted task's lazy line carries the quote part, takes a blank slot, and paints no box.
+#[gpui::test]
+fn a_quoted_tasks_lazy_line_starts_under_its_text(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "> - [ ] a\nb\n\nbody");
+    let text = xs(&window, &mut cx, &[8, 10]);
+    assert_eq!(text[1], text[0]);
+    cx.run_until_parked();
+    assert_eq!(painted_boxes().len(), 1);
+}
+
+/// A fenced block in an item starts its background at the item's text, and a caret on its empty
+/// line sits there, inside the background.
+#[gpui::test]
+fn a_code_block_in_an_item_starts_at_its_text(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "- a\n\n  ```\n  x\n\n  ```\n\nbody");
+    let text = xs(&window, &mut cx, &[2, 13, 15]);
+    let background = window
+        .update(&mut cx, |view, _, _| {
+            view.input.last_layout().unwrap().block_backgrounds()
+        })
+        .unwrap();
+    assert_eq!(background.len(), 1, "{background:?}");
+    assert_eq!(background[0].left(), text[0] - CODE_BLOCK_OUTSET);
+    assert_eq!((text[1], text[2]), (text[0], text[0]));
+}
+
+/// Home on a continuation line reveals its blanks, right-aligned against the text, and a letter
+/// typed there lands before them.
+#[gpui::test]
+fn home_on_a_continuation_line_lands_left_of_its_text(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "- a\n  b\n\nbody");
+    let concealed = xs(&window, &mut cx, &[6]);
+    cx.simulate_keystrokes("cmd-up down home");
+    let caret = window.update(&mut cx, |view, _, _| view.cursor().get());
+    assert_eq!(caret.unwrap(), 4);
+    let revealed = xs(&window, &mut cx, &[4, 6]);
+    assert_eq!(revealed[1], concealed[0]);
+    assert!(revealed[0] < revealed[1], "{revealed:?}");
+    cx.simulate_keystrokes("x");
+    let text = window.update(&mut cx, |view, _, cx| {
+        view.buffer().read(cx).text().to_owned()
+    });
+    assert_eq!(text.unwrap(), "- a\nx  b\n\nbody");
+}
+
+/// A wrapped continuation line's rows all start at the item's text.
+#[gpui::test]
+fn a_wrapped_continuation_lines_rows_start_at_its_text(cx: &mut TestAppContext) {
+    let text = format!("- a\n  {}\nbody", "aaaa ".repeat(40));
+    let (window, mut cx) = editor(cx, &text);
+    cx.run_until_parked();
+    let (a, starts) = window
+        .update(&mut cx, |view, _, _| {
+            let layout = view.input.last_layout().unwrap();
+            let first = layout.row_for_offset(at(6));
+            let last = layout.row_for_offset(at(6 + 200));
+            let wrapped = (first + 1..=last).map(|row| layout.offset_on_row(row, px(0.)));
+            let starts = std::iter::once(at(6)).chain(wrapped);
+            let starts: Vec<_> = starts.map(|offset| layout.x_for_offset(offset)).collect();
+            (layout.x_for_offset(at(2)), starts)
+        })
+        .unwrap();
+    assert!(starts.len() > 2, "the line wraps: {starts:?}");
+    assert!(starts.iter().all(|&x| x == a), "{a:?}: {starts:?}");
 }
