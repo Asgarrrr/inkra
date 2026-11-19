@@ -8,12 +8,13 @@ use gpui::{
     ClipboardItem, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext,
     WindowHandle, point, px,
 };
+use inkra_editor::Selection;
 use inkra_text::Bias;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
 use super::{at, close, dispatching};
-use crate::editor::EditorView;
+use crate::editor::{EditorView, ViewState};
 use crate::text_input::InputHost;
 
 type Handle = WindowHandle<EditorView>;
@@ -196,6 +197,38 @@ fn enter_typing_and_paste_at_an_atoms_edges(cx: &mut TestAppContext) {
     }
 }
 
+/// A saved view is clipped, never parsed: an atom may cover its offsets now.
+#[gpui::test]
+fn a_restored_selection_lands_off_an_atom(cx: &mut TestAppContext) {
+    for (text, edge, start) in [(HELD, 3, 6), (QUOTED, 5, 10), (CODE, 14, 17)] {
+        let inside = edge + 1;
+        for (selection, landed, reversed) in [
+            (Selection::at(at(inside)), start..start, false),
+            (
+                Selection::new(at(inside)..at(start - 1), true),
+                edge..start,
+                true,
+            ),
+        ] {
+            let (window, mut cx) = editor(cx, text, 0);
+            window
+                .update(&mut cx, |view, _, cx| {
+                    let saved = ViewState {
+                        selection,
+                        ..view.view_state()
+                    };
+                    view.restore(saved, cx);
+                })
+                .unwrap();
+            assert_eq!(
+                state(&window, &mut cx),
+                (text.to_owned(), landed, reversed),
+                "{text:?}"
+            );
+        }
+    }
+}
+
 const TOKENS: &[&str] = &[
     "- ", "- [ ] ", "1. ", "> ", "  ", "    ", "\t", "a", "a  ", "\n", "\n- a", "\n\n", "```",
 ];
@@ -226,22 +259,41 @@ const KEYS: &[&str] = &[
     "cmd-shift-z",
 ];
 
-/// After every key, neither end of the selection lies inside an atom of the text as it stands.
+/// What follows a key: a view saved or restored as a tab switch or back and forward do.
+#[derive(Clone, Copy, Debug)]
+enum Then {
+    Nothing,
+    Save,
+    Restore,
+}
+
+/// After every step, neither end of the selection lies inside an atom of the text as it stands.
 fn check(
     cx: &mut TestAppContext,
     text: &str,
     caret: usize,
     keys: &[&str],
+    thens: &[Then],
 ) -> Result<(), TestCaseError> {
     let (window, mut cx) = editor(cx, text, caret);
     cx.write_to_clipboard(ClipboardItem::new_string("\n- c\n  ".to_owned()));
-    for key in keys {
+    let mut saved = window
+        .update(&mut cx, |view, _, _| view.view_state())
+        .unwrap();
+    for (key, then) in keys.iter().zip(thens) {
         cx.simulate_keystrokes(key);
+        window
+            .update(&mut cx, |view, _, cx| match then {
+                Then::Nothing => {}
+                Then::Save => saved = view.view_state(),
+                Then::Restore => view.restore(saved.clone(), cx),
+            })
+            .unwrap();
         let (text, selection, _) = state(&window, &mut cx);
         let markdown = inkra_markdown::parse(&text);
         for end in [selection.start, selection.end] {
             let rests = markdown.snap(at(end), Bias::Left) == at(end);
-            prop_assert!(rests, "{text:?}: {selection:?} after {key}");
+            prop_assert!(rests, "{text:?}: {selection:?} after {key} then {then:?}");
         }
     }
     close(&mut cx);
@@ -249,7 +301,7 @@ fn check(
 }
 
 #[gpui::test]
-fn no_key_leaves_an_end_of_the_selection_inside_an_atom(cx: &mut TestAppContext) {
+fn no_step_leaves_an_end_of_the_selection_inside_an_atom(cx: &mut TestAppContext) {
     let cx = RefCell::new(cx);
     let config = Config {
         cases: 512,
@@ -259,13 +311,17 @@ fn no_key_leaves_an_end_of_the_selection_inside_an_atom(cx: &mut TestAppContext)
     let text = prop::collection::vec(prop::sample::select(TOKENS), 0..12)
         .prop_map(|tokens| tokens.concat());
     let keys = prop::collection::vec(prop::sample::select(KEYS), 1..10);
-    let strategy = (text, any::<prop::sample::Index>(), keys);
-    let result = TestRunner::new(config).run(&strategy, |(text, caret, keys)| {
+    let then =
+        prop_oneof![4 => Just(Then::Nothing), 1 => Just(Then::Save), 1 => Just(Then::Restore)];
+    let thens = prop::collection::vec(then, 9);
+    let strategy = (text, any::<prop::sample::Index>(), keys, thens);
+    let result = TestRunner::new(config).run(&strategy, |(text, caret, keys, thens)| {
         check(
             &mut cx.borrow_mut(),
             &text,
             caret.index(text.len() + 1),
             &keys,
+            &thens,
         )
     });
     if let Err(failure) = result {

@@ -6,14 +6,15 @@ use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
 use super::{
-    ab_focused, activate, at, check, editor, finish_trash, open, scroll_to, select, showing,
-    start_trash, tab_files, tall_notes, text_of, trash, view_of,
+    ab_focused, activate, at, check, editor, finish_trash, open, scroll_to, select, shell_focused,
+    showing, start_trash, tab_files, tall_notes, text_of, trash, view_of,
 };
 use crate::bootstrap::{Launch, root};
 use crate::feature::Registry;
 use crate::file_kind::FileKind;
 use crate::keymap::key_bindings;
 use crate::shell::NextTab;
+use crate::test_support;
 use crate::text_input::InputHost;
 
 #[gpui::test]
@@ -131,6 +132,26 @@ fn two_tabs_on_one_note_keep_their_own_carets(cx: &mut TestAppContext) {
         editor(&window, &mut cx).update(&mut cx, |editor, _| editor.cursor()),
         at(3)
     );
+}
+
+/// The other tab's edit makes its caret's blanks an atom (task boxes spec, D2).
+#[gpui::test]
+fn a_switch_lands_a_caret_its_note_hid_off_the_blanks(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "a\n  b");
+    let (window, notes, mut cx) = shell_focused(cx, &fs);
+    let a = test_support::entry_id(&notes, &mut cx, "a");
+    open(&window, &mut cx, a);
+    select(&window, &mut cx, 2..2);
+    cx.simulate_keystrokes("cmd-t");
+    open(&window, &mut cx, a);
+    select(&window, &mut cx, 0..0);
+    cx.simulate_input("- ");
+
+    cx.simulate_keystrokes("ctrl-tab");
+    cx.simulate_input("x");
+
+    assert_eq!(text_of(&window, &mut cx, a), "- a\n  xb");
 }
 
 /// T5.

@@ -113,10 +113,10 @@ impl EditorView {
             (Selection::at(ByteOffset::new(0)), None, Vec::new()),
             |view| (view.selection, Some(view.top), view.scrolls),
         );
-        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
-        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
+        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         self.refresh(cx);
     }
 
@@ -146,8 +146,7 @@ impl EditorView {
                 }
             }
             // An edit places its caret on text not yet parsed (task boxes spec, D2).
-            let markdown = &self.markdown;
-            self.input.snap(|offset, bias| markdown.snap(offset, bias));
+            self.snap_selection(cx);
         }
         let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
             self.is_block_start(offset)

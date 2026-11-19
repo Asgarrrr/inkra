@@ -369,8 +369,8 @@ clones its parse's `Rc` (`crates/app/src/editor/mod.rs:366-369`); `NameField`'s 
 `inkra_editor::no_snap`, the identity. No trait is added: a function has one shape, and
 `NameField` needs no type to say "no atoms".
 
-The invariant, "no caret rests inside an atom". One function, `Markdown::snap`, enforces it at two
-moments. Each moment exists for a reason the other cannot cover:
+The invariant, "no caret rests inside an atom". One function, `Markdown::snap`, enforces it at three
+moments. Each moment exists for a reason the others cannot cover:
 
 - **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:241-256`), which
   every move reaches, snaps the head with the action's bias, then clips it. The action chooses the
@@ -384,12 +384,21 @@ moments. Each moment exists for a reason the other cannot cover:
     Backspace and Delete remove the atom whole.
   - `move_` picks `Bias::Left` for `Left` alone; `move_to` and `move_vertically` pick
     `Bias::Right`.
-- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:135-162`) is the
+- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:135-161`) is the
   one place where the parse changes. After it takes a new parse, it snaps the selection through
+  `EditorView::snap_selection` (`crates/app/src/editor/swap.rs:38-46`), which calls
   `EditorState::snap` (`state.rs:258-271`): a caret with `Bias::Right`, a range's start with
   `Bias::Left` and its end with `Bias::Right`. An edit places its caret before the new text is
   parsed, so `place` cannot see the new atoms. This covers typing, paste, undo, redo, a reload, a
   write from outside, and a pinned selection's reset.
+- **When a saved selection comes back.** `EditorView::swap_view` (`swap.rs:12-36`) is the one
+  sequence that resets the selection: `restore` and `open_buffer` both go through it. A saved
+  selection is clipped, never snapped, and the text may have changed since it was saved: the other
+  tab on the same note typed `- ` before its blanks, or back and forward reach a `Place::File`
+  saved before an edit. So `swap_view` snaps right after the swap, before the pin re-parks the
+  selection. It snaps only against the parse of the bound buffer's version: `open_buffer` clears
+  `parsed_at` before the swap, and its `refresh` snaps after the new parse. `restore` never parses,
+  so a write that bypassed the notify waits for the `refresh` that reads it.
 
 The cost per keystroke. The parse adds nothing: the atoms are read from `gutters`, which the parse
 already builds. A move adds one binary search over `gutters`, and an edit one more after its parse.
@@ -1187,11 +1196,18 @@ constants, never with a glyph's computed width.
   - a click and a drag over the hidden blanks land at it;
   - `enter`, a letter and `cmd-v` at both edges, and `delete` at a marker line's start, leave the
     caret at the edge or past the atom the edit makes;
+  - a restored view whose caret, or a reversed range's two ends, lie inside the atom lands at the
+    text start, or at the edge and the text start, reversed still;
   - the property: on random notes of items, quotes, fences and blanks, after each key of a random
     sequence from these bindings, `end`, `ctrl-e`, `cmd-up`, `cmd-down`, `tab`, `space`, `cmd-z`
-    and `cmd-shift-z`, neither end of the selection lies inside an atom. With the snap after the
-    parse removed, 256 cases missed it and 1024 found it. Its seeds, one per removed snap, sit in
+    and `cmd-shift-z`, each followed by nothing, a saved view or a restore of the last saved one,
+    neither end of the selection lies inside an atom. With the snap after the parse removed, 256
+    cases missed it and 1024 found it; without the snap in `swap_view`, the first cases found it.
+    The seeds found with each snap removed sit in
     `crates/app/proptest-regressions/editor/tests/atoms.txt`, and it runs 512 cases.
+- Atoms across tabs (D2, `shell/tests/tabs.rs`): two tabs on `a\n  b`, the first with its caret at
+  `2`; the second types `- ` at `0`, so the first tab's anchors map inside the new atom. Back on the
+  first tab, `x` gives `- a\n  xb`.
   - `end`, `ctrl-e`, `cmd-right`, `cmd-up` and `cmd-down` get no test of their own: none can land
     inside an atom, which ends at a text start, so no bug in their snap could show. The property
     covers them.
@@ -1524,6 +1540,9 @@ Newest last. Each entry says what changed and why.
     the HTML example of D11 hides two blanks on both lines, and a test pins the second; the fence
     set of D11 and Terms names all three lines with no text event; the M3 test's descent reason is
     the sign of `FontMetrics::descent`.
+  - The review of 0227fbf9 found a third moment: a restore and a switch to another tab on the same
+    note reset the selection to saved offsets that no snap had seen, so `x` typed there landed
+    before the blanks. `swap_view` now snaps after the swap (D2).
   - The parse records leaf text events only while a list is open, which the cross-slice review's
     entry above had dropped as a filter no test could see. This one is cheaper: it reads the list
     stack the parse keeps anyway.
