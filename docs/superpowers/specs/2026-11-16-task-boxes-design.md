@@ -146,7 +146,7 @@ pub enum ItemMarker {
   item's first event that is not one `Start(Paragraph)`. The parser facts table of markdown-blocks
   holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 - **The records.**
-  - `Items` lives in `crates/markdown/src/items.rs` (`items.rs:39-57`); T6c1 moved it out of
+  - `Items` lives in `crates/markdown/src/items.rs` (`items.rs:39-55`); T6c1 moved it out of
     `gutters.rs`. Each ordered list's width key is in `Items::list_keys`.
   - At each gutter item's `Start(Item)` it records the item's range and its index in
     `structure.items`, which already holds the marker (D1, the structure). So no record repeats the
@@ -154,8 +154,8 @@ pub enum ItemMarker {
   - It keeps one record per open list. At `End(List)` that record holds the list's width key: the
     most digits of any of its markers, which `Items` counted at each `Start(Item)`, and its
     delimiter. So the parse learns a list's width key at `End(List)`, in its one pass.
-  - It records each text event of a code or HTML block that a gutter item holds as a `LeafText`
-    (`items.rs:62-66`, pushed in `Items::event` at 110-119): its start, and the leftover columns an
+  - It records each text event of a code or HTML block as a `LeafText`
+    (`items.rs:60-64`, pushed in `Items::event` at 108-115): its start, and the leftover columns an
     empty event carries (D11).
 - **The walk.**
   - After the parse's one pass, one walk over the lines builds every gutter. It builds the quote
@@ -165,9 +165,9 @@ pub enum ItemMarker {
     is back-filled.
   - The walk visits only lines inside a leading quote or a gutter item. It jumps from one container
     to the next.
-  - The walk is `Items::gutters` (`items.rs:170-236`). It returns an `ItemGutters`
-    (`items.rs:266-275`). It takes the quote lines from `quote_gutters` (`gutters.rs:135-158`) and
-    adds the item part with `item_part` (`items.rs:240-262`). A line's items are the records whose
+  - The walk is `Items::gutters` (`items.rs:165-231`). It returns an `ItemGutters`
+    (`items.rs:261-270`). It takes the quote lines from `quote_gutters` (`gutters.rs:135-158`) and
+    adds the item part with `item_part` (`items.rs:235-257`). A line's items are the records whose
     marker stands on it, by `line_start`.
   - Between two marker lines, `Walk::held_lines` (`crates/markdown/src/items/walk.rs:56-101`)
     visits each line that the held items hold, and stops at the first line that none holds. `Held`
@@ -257,9 +257,10 @@ parse of 5.58 ms on 8b9db360. Measured on T6a, alternating with 003bbe95, the co
   before it searches the line's end. So a call that holds nothing searches no line end.
 - The hang column is computed once per marker line, from that line's item part, and kept in
   `Held`. A blank line outside a code block pays nothing for it.
-- A code or HTML block's text event costs one push when a gutter item holds it, and its held line
-  reads that record once (D11). The bench note's code blocks lie outside every item, so they push
-  nothing.
+- Each text event of a code or HTML block costs one push of 16 bytes, and a held line reads its
+  record once (D11). The bench note holds one such event per section, about 1,200 on 500 KB. A
+  filter to the events that gutter items hold saved those pushes, but no test could see it: it
+  changed no gutter, so mutants found it untestable.
 - T6a's 8,400 pushes cost 1.5 to 2% of `parse` (History), so T6c may sit close to its gate.
 - **The parse gate.** `markdown_parse/500000` stays within 3% of `task-boxes-t6b`, measured in
   alternating rounds. Past the gate, profile before merging.
@@ -311,7 +312,7 @@ Behaviour:
   before the hidden blanks and reveals nothing: the caret paints at the text's `x`, and a letter
   typed there lands before the blanks.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:305-314`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:300-309`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
@@ -808,7 +809,7 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/items.rs:296-301`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:291-296`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
@@ -823,8 +824,8 @@ HTML block's text, which is a leaf's text.
   start, holding those columns as spaces: a split tab's other columns, or an HTML block's own
   indent on its first line. A fence line gets no event.
 - So a line's **leaf text start** is the column of its first text event, less the columns an empty
-  event holds: `column_after(0, line..start) - leftover`. The parse records each event a gutter
-  item holds as a `LeafText` in `Items::event`, in its one pass (D1).
+  event holds: `column_after(0, line..start) - leftover`. The parse records each such event as a
+  `LeafText` in `Items::event`, in its one pass (D1).
 - The item part of a line with a leaf text start is its blanks from the quote part's end whose
   column end is at or before that column. So a tab hides only when all its columns lie before the
   text, and a split tab stays in the text.
@@ -849,7 +850,7 @@ HTML block's text, which is a leaf's text.
   indented, quoted and item-nested blocks, and a quote marker before the leftover columns, as in
   `- >```\n\t\t>`, stays a marker.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
-  (`items.rs:288-293`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  (`items.rs:283-288`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
@@ -870,7 +871,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `crates/markdown/src/items.rs:279-284`).
+  (`marker_start`, `crates/markdown/src/items.rs:274-279`).
 
 Only a marker line's item part has a conceal (D2), so a row whose line opens no item has none.
 
@@ -937,6 +938,9 @@ Only a marker line's item part has a conceal (D2), so a row whose line opens no 
     M2).
   - An HTML block's lines hide their blanks up to their leaf text start: in `- [ ] a\n\n   <div>\n   x`
     the first hides two blanks (cross-slice review).
+  - In `- a\n  ```\n  x\n  ```\n  b\n    c`, `c`'s line hides two blanks: a paragraph after a
+    block takes the hang column. In `- a\n\n  <!--\n\n  -->`, the blank line inside the HTML block
+    gets an empty item part, as a code block's blank line does.
   - In `- >```\n\t\t>` and `2) >~~~\n\t\t>`, the second line's `>` stays a quote marker, not code
     text; both panicked a debug build before the cross-slice review (M1).
 - No item part covers a byte of a leaf's text: a `CODE_BLOCK` span or an HTML event's range, on
@@ -1342,6 +1346,8 @@ Newest last. Each entry says what changed and why.
     line's item part at its first `CODE_BLOCK` span, so `- a\n\n\t\tx\n\t\ty` hid two tabs on one
     line and one on the next. Both are replaced by the leaf text start, read from pulldown-cmark's
     own text events (D11). `Out::text` and its assertion are gone, and the walk searches no span.
+    The parse first recorded only the events that gutter items hold; mutants showed that filter
+    changed no gutter, so every event is recorded.
   - **M3.** An empty item's mark painted about 6 px high: the line's baseline came from its shape,
     which reports no ascent for a line with no glyph. It now comes from the line's fonts' metrics
     (D4).
