@@ -1,9 +1,10 @@
 //! What sits left of a line's text: a heading's hanging marker (live-preview spec, D12) or a
-//! quote's or task's gutter (markdown blocks spec, D3; task boxes spec, D3). Offsets count from the
-//! line's start, where both start.
+//! quote's or list item's gutter (markdown blocks spec, D3; task boxes spec, D3). Offsets count
+//! from the line's start, where both start.
 
 mod gutter;
 mod margin;
+mod marks;
 
 use std::ops::Range;
 
@@ -11,19 +12,18 @@ use gpui::{Pixels, ShapedLine, px};
 use inkra_markdown::{Conceal, Gutter, is_active};
 use inkra_text::ByteOffset;
 
+use super::runs::Shape;
 use gutter::{Geometry, GutterLayout, Reveal};
 use margin::{Hanging, Opening};
 
-pub(super) use gutter::{GutterCarry, TaskBox};
+pub(super) use gutter::GutterCarry;
 pub(super) use margin::heading_opening;
-
-/// A range a shape hides or replaces, from the shaped range's start.
-pub(super) type Hidden = (Range<ByteOffset>, &'static str);
+pub(super) use marks::{Mark, Paint};
 
 pub(super) enum Prefix {
     /// A heading's opening marker, left of the column.
     Margin(Hanging),
-    /// A quote or task prefix; the line's text starts at its width on every row.
+    /// A quote or list item prefix; the line's text starts at its width on every row.
     Gutter(GutterLayout),
 }
 
@@ -70,19 +70,11 @@ impl Prefix {
         }
     }
 
-    /// A concealed task's box, in its bullet's place after the lead.
-    pub(super) fn task_box(&self) -> Option<&TaskBox> {
+    /// A concealed item part's marks, the box last (task boxes spec, D3).
+    pub(super) fn marks(&self) -> &[Mark] {
         match self {
-            Self::Margin(_) => None,
-            Self::Gutter(gutter) => gutter.task_box.as_deref(),
-        }
-    }
-
-    /// A concealed task's lead, and its `x` (task boxes spec, D10).
-    pub(super) fn lead(&self) -> Option<(&ShapedLine, Pixels)> {
-        match self {
-            Self::Margin(_) => None,
-            Self::Gutter(gutter) => gutter.lead(),
+            Self::Margin(_) => &[],
+            Self::Gutter(gutter) => gutter.marks.as_deref().unwrap_or_default(),
         }
     }
 
@@ -93,33 +85,38 @@ impl Prefix {
         }
     }
 
-    /// What paints outside the text, and at which `x`; `None` while concealed.
-    pub(super) fn shown(&self) -> Option<(&ShapedLine, Pixels)> {
-        match self {
-            Self::Margin(hanging) => hanging
-                .shaped
-                .as_deref()
-                .map(|shaped| (shaped, -shaped.width())),
-            Self::Gutter(gutter) => gutter
-                .shown
-                .as_deref()
-                .map(|shown| (&shown.shaped, shown.x)),
-        }
+    /// The pieces that paint outside the text, and at which `x`; none while concealed.
+    pub(super) fn shown(&self) -> impl Iterator<Item = (&ShapedLine, Pixels)> {
+        let pieces = match self {
+            Self::Margin(hanging) => [
+                hanging
+                    .shaped
+                    .as_deref()
+                    .map(|shaped| (shaped, -shaped.width())),
+                None,
+            ],
+            Self::Gutter(gutter) => gutter.shown.as_deref().map_or([None, None], |shown| {
+                shown
+                    .pieces
+                    .each_ref()
+                    .map(|piece| piece.as_ref().map(|piece| (&piece.shaped, piece.x)))
+            }),
+        };
+        pieces.into_iter().flatten()
     }
 }
 
 /// The conceals starting in a prefix are its own, and one the caret touches reveals it; returns the
 /// prefix, relative to the line's start, and the conceals left for the text. A revealed marker
 /// wider than `margin` gets no prefix and leaves its conceal to the text, so it shows inline
-/// (live-preview spec, D13). `shape` shapes a range from the text it is given, of the range's length,
-/// through what it hides.
+/// (live-preview spec, D13).
 pub(super) fn line_prefix<'a, 'c>(
     gutter: Option<(&Gutter, &'a str)>,
     carry: &mut GutterCarry<'a>,
     opening: Option<Opening<'_>>,
     conceals: &'c [Conceal],
     selection: &Range<ByteOffset>,
-    mut shape: impl FnMut(&Range<ByteOffset>, &[Hidden], &str, Pixels) -> ShapedLine,
+    mut shape: impl FnMut(Shape<'_>) -> ShapedLine,
 ) -> (Option<Prefix>, &'c [Conceal]) {
     let own = gutter
         .map(|(gutter, _)| &gutter.range)
@@ -130,16 +127,11 @@ pub(super) fn line_prefix<'a, 'c>(
     let (own, rest) = conceals.split_at(own);
     // A gap conceal skips a line's leading `[ \t>]*` and a heading's own marker is the only conceal
     // before `opening.end`, so every conceal before the prefix's end is the prefix's own: a gutter's
-    // `>`s, its lead's bullets, then its box run (task boxes spec, D10).
+    // `>`s, then its item part's one conceal when it is not empty (task boxes spec, D2).
     debug_assert!(match gutter {
         Some((gutter, _)) => {
-            let lead = gutter.task.as_ref().map_or(0, |task| {
-                let lead = task.start..task.run;
-                own.iter()
-                    .filter(|conceal| lead.contains(&conceal.marker.start))
-                    .count()
-            });
-            own.len() == gutter.quotes.len() + lead + usize::from(gutter.task.is_some())
+            let item = gutter.item.is_some() && gutter.quote_end() < gutter.range.end;
+            own.len() == gutter.quotes.len() + usize::from(item)
         }
         None =>
             own.len() <= 1
@@ -149,14 +141,13 @@ pub(super) fn line_prefix<'a, 'c>(
     });
     let revealed = |own: &[Conceal]| own.iter().any(|conceal| !is_active(conceal, selection));
     if let Some((gutter, source)) = gutter {
-        let (quotes, task) = own.split_at(gutter.quotes.len().min(own.len()));
+        let (quotes, item) = own.split_at(gutter.quotes.len().min(own.len()));
         let reveal = Reveal {
             quote: revealed(quotes),
-            task: revealed(task),
+            item: revealed(item),
             split: gutter.quote_end() - gutter.range.start,
         };
-        let lead = task.split_last().map_or(&[][..], |(_, lead)| lead);
-        let layout = carry.layout(gutter, source, reveal, lead, &mut shape);
+        let layout = carry.layout(gutter, source, reveal, &mut shape);
         return (Some(Prefix::Gutter(layout)), rest);
     }
     let Some(Opening {
@@ -168,7 +159,13 @@ pub(super) fn line_prefix<'a, 'c>(
     else {
         return (None, rest);
     };
-    let shaped = revealed(own).then(|| Box::new(shape(&range, &[], source, font_size)));
+    let shaped = revealed(own).then(|| {
+        Box::new(shape(Shape::Source {
+            range: &range,
+            source,
+            size: font_size,
+        }))
+    });
     if shaped
         .as_ref()
         .is_some_and(|shaped| shaped.width() > margin)

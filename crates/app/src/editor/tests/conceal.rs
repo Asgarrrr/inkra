@@ -97,23 +97,25 @@ fn a_wikilink_shows_its_alias(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+/// A bullet sits in its slot, out of the text, whether the caret touches it or not (task boxes
+/// spec, D3).
 #[gpui::test]
-fn a_bullet_shows_a_dot_unless_the_caret_is_on_it(cx: &mut TestAppContext) {
+fn a_bullet_stays_out_of_the_text_with_the_caret_on_it(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "- a\nx");
     cx.run_until_parked();
     window
-        .update(&mut cx, |view, _, _| assert_eq!(shown(view, 0), "• a"))
+        .update(&mut cx, |view, _, _| assert_eq!(shown(view, 0), "a"))
         .unwrap();
     cx.simulate_keystrokes("cmd-up right right");
     window
         .update(&mut cx, |view, _, _| {
             assert_eq!(view.cursor(), at(2));
-            assert_eq!(shown(view, 0), "• a");
+            assert_eq!(shown(view, 0), "a");
         })
         .unwrap();
     cx.simulate_keystrokes("cmd-up");
     window
-        .update(&mut cx, |view, _, _| assert_eq!(shown(view, 0), "- a"))
+        .update(&mut cx, |view, _, _| assert_eq!(shown(view, 0), "a"))
         .unwrap();
 }
 

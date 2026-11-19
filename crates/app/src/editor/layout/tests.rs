@@ -17,13 +17,13 @@ use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
 
 mod layer;
-mod task_slot;
+mod list_width;
 mod toggle;
 
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",
     "## ", "===", "---", "*", "**", "_", "[[", "]]", "[l](u)", "#h", "- [ ] ", "- [x] ", "- ",
-    "1. ", "    ", "\t", "é", "日",
+    "1. ", "9. ", "10. ", "2) ", "* ", "    ", "  ", "\t", "é", "日",
 ];
 
 fn markdown(max: usize) -> impl Strategy<Value = String> {
@@ -305,9 +305,10 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
     );
     let prefix = |line: &super::LineLayout| {
         line.prefix.as_ref().map(|prefix| {
-            let shown = prefix
+            let shown: Vec<_> = prefix
                 .shown()
-                .map(|(shaped, x)| (shaped.text.to_string(), x));
+                .map(|(shaped, x)| (shaped.text.to_string(), x))
+                .collect();
             (
                 prefix.range(),
                 prefix.indent(),
@@ -316,14 +317,17 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
             )
         })
     };
-    let task_box = |line: &super::LineLayout| {
-        line.task_box().map(|(square, task)| {
-            let lead = line.prefix.as_ref().and_then(super::prefix::Prefix::lead);
-            let lead = lead.map(|(lead, x)| (lead.text.to_string(), x));
-            (square, task.shape.x, task.checked, lead)
-        })
+    let marks = |line: &super::LineLayout| {
+        let marks = line.prefix.iter().flat_map(super::prefix::Prefix::marks);
+        marks
+            .map(|mark| match &mark.paint {
+                super::prefix::Paint::Text(shaped) => (mark.x, Some(shaped.text.to_string()), None),
+                super::prefix::Paint::Box { checked } => (mark.x, None, Some(*checked)),
+            })
+            .collect::<Vec<_>>()
     };
-    prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);
+    prop_assert_eq!(marks(carried), marks(fresh), "marks at {}", at);
+    prop_assert_eq!(carried.task_box(), fresh.task_box(), "task box at {}", at);
     prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);
     let label = |line: &super::LineLayout| line.label.as_ref().map(|label| label.text.to_string());
     prop_assert_eq!(label(carried), label(fresh), "label at {}", at);

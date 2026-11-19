@@ -6,7 +6,8 @@ use proptest::prelude::*;
 
 use super::changed;
 use crate::{
-    CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, Task, parse,
+    CodeBlock, Conceal, Gutter, Heading, HeadingLevel, ItemPart, Markdown, Span, Styles, Task,
+    WidthKey, parse,
 };
 
 /// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it,
@@ -213,31 +214,46 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
 
 #[test]
 fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
-    let task = |lead: Range<usize>, checkbox, checked| Some((lead, checkbox, checked));
-    let gutter = |end, quotes: &[usize], depth, task: Option<(Range<usize>, _, bool)>| Gutter {
+    let task = |checkbox, checked| {
+        Some(Task {
+            checkbox: offsets(checkbox),
+            checked,
+        })
+    };
+    let key = |digits| WidthKey {
+        digits,
+        delimiter: b'.',
+    };
+    let item = |start, indent, numbers: &[u8], task| {
+        Some(ItemPart {
+            start: ByteOffset::new(start),
+            indent,
+            numbers: numbers.iter().copied().map(key).collect(),
+            task,
+        })
+    };
+    let gutter = |end, quotes: &[usize], depth, item| Gutter {
         range: offsets(0..end),
         quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
         depth,
-        task: task.map(|(lead, checkbox, checked)| Task {
-            start: ByteOffset::new(lead.start),
-            run: ByteOffset::new(lead.end),
-            checkbox: offsets(checkbox),
-            checked,
-        }),
+        item,
     };
     let old = Markdown {
-        gutters: vec![gutter(12, &[0, 2], 2, task(4..4, 6..9, false))],
+        gutters: vec![gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, false)))],
         ..Markdown::default()
     };
     for new in [
-        gutter(10, &[0, 2], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0, 1], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0, 2], 3, task(4..4, 6..9, false)),
-        gutter(12, &[0, 2], 2, task(4..4, 6..9, true)),
-        gutter(12, &[0, 2], 2, task(4..4, 7..10, false)),
-        gutter(12, &[0, 2], 2, task(3..4, 6..9, false)),
-        gutter(12, &[0, 2], 2, task(4..6, 6..9, false)),
+        gutter(10, &[0, 2], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 1], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 3, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, true))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], task(7..10, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], None)),
+        gutter(12, &[0, 2], 2, item(3, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 2, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[2], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1, 1], task(6..9, false))),
         gutter(12, &[0, 2], 2, None),
     ] {
         let new = Markdown {
@@ -330,14 +346,14 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
         .filter(|item| starts(item.range.start))
     {
         let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
-        let task = item.task.as_ref().map(|task| {
-            (
-                span(&(task.start..task.run)),
-                span(&task.checkbox),
-                task.checked,
-            )
+        let part = item.item.as_ref().map(|part| {
+            let task = part
+                .task
+                .as_ref()
+                .map(|task| (span(&task.checkbox), task.checked));
+            (rel(part.start), part.indent, &part.numbers, task)
         });
-        push(&(span(&item.range), quotes, item.depth, task));
+        push(&(span(&item.range), quotes, item.depth, part));
     }
     if let Some(item) = markdown.headings.iter().find(|item| holds(&item.range)) {
         let marker = item.marker.as_ref().filter(|marker| starts(marker.start));
@@ -373,6 +389,9 @@ fn fragment() -> impl Strategy<Value = String> {
         Just("- ".to_string()),
         Just("- [ ] ".to_string()),
         Just("- [x] ".to_string()),
+        Just("1. ".to_string()),
+        Just("10. ".to_string()),
+        Just("  ".to_string()),
         Just("===\n".to_string()),
         Just("---\n".to_string()),
         Just("**".to_string()),

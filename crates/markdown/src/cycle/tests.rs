@@ -310,7 +310,7 @@ pub(super) fn task_at(text: &str, start: usize) -> Option<bool> {
         .gutters
         .into_iter()
         .find(|gutter| gutter.range.start.get() == start)
-        .and_then(|gutter| gutter.task)
+        .and_then(|gutter| gutter.item?.task)
         .map(|task| task.checked)
 }
 

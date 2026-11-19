@@ -30,9 +30,9 @@ fn offsets(markdown: &Markdown) -> Vec<usize> {
             .quotes
             .iter()
             .for_each(|&quote| range(&(quote..quote + 1)));
-        if let Some(task) = &gutter.task {
-            range(&(task.start..task.run));
-            range(&task.checkbox);
+        if let Some(item) = &gutter.item {
+            range(&(item.start..item.start));
+            item.task.iter().for_each(|task| range(&task.checkbox));
         }
     }
     let structure = &markdown.structure;

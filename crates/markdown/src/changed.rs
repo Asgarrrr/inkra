@@ -150,11 +150,18 @@ impl Item for Gutter {
                 .iter()
                 .zip(&new.quotes)
                 .all(|(&old, &new)| map(old, Bias::Right) == new)
-            && match (&self.task, &new.task) {
+            && match (&self.item, &new.item) {
                 (Some(old), Some(new)) => {
-                    mapped(&(old.start..old.run), &map) == (new.start..new.run)
-                        && mapped(&old.checkbox, &map) == new.checkbox
-                        && old.checked == new.checked
+                    map(old.start, Bias::Right) == new.start
+                        && old.indent == new.indent
+                        && old.numbers == new.numbers
+                        && match (&old.task, &new.task) {
+                            (Some(old), Some(new)) => {
+                                mapped(&old.checkbox, &map) == new.checkbox
+                                    && old.checked == new.checked
+                            }
+                            (old, new) => old.is_none() && new.is_none(),
+                        }
                 }
                 (old, new) => old.is_none() && new.is_none(),
             }

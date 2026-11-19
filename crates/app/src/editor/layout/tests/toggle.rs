@@ -24,7 +24,12 @@ fn a_toggle_restyles_the_items_continuation_and_lazy_lines(cx: &mut TestAppConte
         };
         let before = inputs.layout(&buffer, None, window, cx);
         buffer.update(cx, |buffer, _| {
-            let task = inkra_markdown::parse(text).gutters[0].task.clone().unwrap();
+            let task = inkra_markdown::parse(text).gutters[0]
+                .item
+                .clone()
+                .unwrap()
+                .task
+                .unwrap();
             assert!(buffer.apply_diff(&Diff::new(buffer.version(), vec![task.flip()])));
         });
         let carried = inputs.layout(&buffer, Some(&before), window, cx);

@@ -1,5 +1,5 @@
-//! The box slot where the box is wider than `• ` (task boxes spec, D3): headless, `• ` is 1.2 times
-//! the body size, so at 12 px it is 14.4 px, under `TASK_BOX_SIZE`.
+//! A number that fits a slot keeps the standard slot (task boxes spec, D3): headless, a glyph is
+//! 0.6 times the body size, so at 12 px `1.` and the gap fit one slot.
 
 use std::rc::Rc;
 
@@ -8,13 +8,13 @@ use inkra_text::{Buffer, ByteOffset};
 
 use super::super::{BlockScrolls, LayoutInputs, shape_document};
 use crate::decorations::Drawn;
-use crate::theme::{TASK_BOX_SIZE, builtin};
+use crate::theme::builtin;
 
 #[gpui::test]
-fn a_box_wider_than_a_bullet_is_the_slot(cx: &mut TestAppContext) {
+fn a_number_that_fits_a_slot_starts_its_text_where_a_bullet_does(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     cx.update(|window, _| {
-        let text = "- [ ] a\n- b\n\nbody";
+        let text = "1. a\n\n- b\n\nbody";
         let buffer = Buffer::new(text);
         let markdown = Rc::new(inkra_markdown::parse(text));
         let end = ByteOffset::new(text.len());
@@ -37,10 +37,7 @@ fn a_box_wider_than_a_bullet_is_the_slot(cx: &mut TestAppContext) {
             None,
             window,
         );
-        let bullet_text = layout.x_for_offset(ByteOffset::new(10));
-        assert!(bullet_text < TASK_BOX_SIZE, "`• ` is {bullet_text:?}");
-        let (square, _) = layout.lines[0].line.task_box().unwrap();
-        assert_eq!(square.left(), px(0.));
-        assert_eq!(layout.x_for_offset(ByteOffset::new(6)), square.right());
+        let x = |offset| layout.x_for_offset(ByteOffset::new(offset));
+        assert_eq!(x(3), x(8));
     });
 }

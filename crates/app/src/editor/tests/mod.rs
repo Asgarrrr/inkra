@@ -26,6 +26,7 @@ mod gutter;
 mod hanging;
 mod headings;
 mod inline_marker;
+mod list_slots;
 mod margin;
 mod markdown;
 mod paint;

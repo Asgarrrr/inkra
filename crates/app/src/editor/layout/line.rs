@@ -7,7 +7,7 @@ use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLin
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
-use super::prefix::{self, Prefix, TaskBox};
+use super::prefix::{self, Paint, Prefix};
 use crate::theme::TASK_BOX_SIZE;
 
 #[cfg(test)]
@@ -86,7 +86,8 @@ pub(super) struct LineLayout {
     pub(super) display: DisplayLine,
     pub(super) rows: Vec<Row>,
     pub(super) row_height: Pixels,
-    /// Kept out of the shaped text in both states; a task part's reveal widens it, so the line rewraps.
+    /// Kept out of the shaped text in both states; an item part's reveal can widen it, so the line
+    /// rewraps.
     pub(super) prefix: Option<Prefix>,
     /// The language a block's opening line shows at its right.
     pub(super) label: Option<Rc<ShapedLine>>,
@@ -100,13 +101,16 @@ impl LineLayout {
         prefix::indent(self.prefix.as_ref())
     }
 
-    /// The square a concealed task paints and a click hits, from the line's origin: from its
-    /// shape's `x`, centred on row 0 (task boxes spec, D4).
-    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &TaskBox)> {
-        let task = self.prefix.as_ref()?.task_box()?;
+    /// The square a concealed box paints and a click hits, from the line's origin, and whether it
+    /// is checked: from its slot's left, centred on row 0 (task boxes spec, D4).
+    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, bool)> {
+        let mark = self.prefix.as_ref()?.marks().last()?;
+        let Paint::Box { checked } = mark.paint else {
+            return None;
+        };
         let top = (self.row_height - TASK_BOX_SIZE) / 2.;
-        let square = Bounds::new(point(task.shape.x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE));
-        Some((square, task))
+        let square = Bounds::new(point(mark.x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE));
+        Some((square, checked))
     }
 }
 

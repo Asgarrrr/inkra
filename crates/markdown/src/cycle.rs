@@ -5,6 +5,7 @@ use std::vec;
 
 use inkra_text::{ByteOffset, Hunk};
 
+use crate::items::{column_after, marker_end};
 use crate::parse::line_start_prefix;
 use crate::spans::{line_ranges, line_start};
 use crate::structure::{Structure, innermost_item};
@@ -146,11 +147,7 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
 /// one to four go before it, of five or more only one, and an empty item gains a space of its own.
 fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) {
     let bytes = text.as_bytes();
-    // A bullet is one byte, a number its digits and the `.` or `)` after them.
-    let digits = bytes[marker..]
-        .iter()
-        .take_while(|byte| byte.is_ascii_digit());
-    let end = marker + 1 + digits.count();
+    let end = marker_end(text, marker);
     let blanks = bytes[end..]
         .iter()
         .take(5)
@@ -162,14 +159,6 @@ fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) 
         1..=4 => (end + blanks, ""),
         _ => (end + 1, ""),
     }
-}
-
-/// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).
-fn column_after(column: usize, bytes: &[u8]) -> usize {
-    bytes.iter().fold(column, |column, &byte| match byte {
-        b'\t' => column + 4 - column % 4,
-        _ => column + 1,
-    })
 }
 
 /// Where the innermost item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes,

@@ -4,12 +4,13 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag};
 
 use crate::cmark::options;
-use open::Open;
 use crate::content_lines::shape;
-use crate::gutters::{Items, cut, gutter_conceals};
+use crate::gutters::{cut, gutter_conceals};
+use crate::items::Items;
 use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::structure::Collector;
 use crate::{Conceal, Gutter, Structure, Styles};
+use open::Open;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Markdown {
@@ -20,7 +21,7 @@ pub struct Markdown {
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
-    /// starting a task item that gets a box (D10).
+    /// holding a gutter item's marker (task boxes spec, D11).
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
@@ -85,8 +86,8 @@ fn parse_terminated(text: &str) -> Markdown {
     let mut structure = Collector::default();
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
-        let depth = open.iter().take_while(|open| open.leading).count();
-        if let Some(item) = items.event(text, &event, &range, open.len(), depth) {
+        let gutter = Open::in_gutter(open.last());
+        if let Some(item) = items.event(text, &event, &range, open.len(), gutter) {
             for element in &mut open[item..] {
                 element.styles |= Styles::DONE;
                 element.indent |= Styles::DONE;
@@ -143,7 +144,7 @@ fn parse_terminated(text: &str) -> Markdown {
             _ => {}
         }
     }
-    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes);
+    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes, structure.items());
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
@@ -159,7 +160,7 @@ fn parse_terminated(text: &str) -> Markdown {
         .collect();
     let mut conceals = out.conceals;
     conceals.append(&mut bullets);
-    conceals.extend(gutter_conceals(&gutters));
+    conceals.extend(gutter_conceals(text, &gutters));
     // A few sorted runs: the stable sort merges them in near-linear time.
     conceals.sort_by_key(|conceal| conceal.marker.start);
     Markdown {

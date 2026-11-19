@@ -20,17 +20,27 @@ pub(super) struct Open {
     pub(super) element: Option<Range<usize>>,
     /// A quote whose ancestors are all quotes.
     pub(super) leading: bool,
+    /// A leading quote, or a list or an item whose ancestors are leading quotes, gutter items and
+    /// their lists: one whose markers show in slots (task boxes spec, D11).
+    gutter: bool,
 }
 
 impl Open {
     /// The element `tag` starts inside `parent`, the innermost open one.
-    pub(super) fn enter(text: &str, tag: &Tag<'_>, range: &Range<usize>, parent: Option<&Open>) -> Self {
+    pub(super) fn enter(
+        text: &str,
+        tag: &Tag<'_>,
+        range: &Range<usize>,
+        parent: Option<&Open>,
+    ) -> Self {
         let mut inherited = parent.map_or(Styles::NONE, |open| open.styles);
         // A checked item's own text is struck; a block nested in it is not (task boxes spec, D7).
         if matches!(tag, Tag::List(_) | Tag::BlockQuote(_) | Tag::CodeBlock(_)) {
             inherited = inherited.without(Styles::DONE);
         }
         let styles = inherited | tag_styles(tag);
+        // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
+        let leading = matches!(tag, Tag::BlockQuote(_)) && parent.is_none_or(|open| open.leading);
         Self {
             styles,
             indent: if matches!(tag, Tag::CodeBlock(_)) {
@@ -40,9 +50,14 @@ impl Open {
             },
             end: range.end,
             element: concealable(text, tag, range),
-            // A quote leads its line's prefix when every ancestor is a quote; a list item breaks it.
-            leading: matches!(tag, Tag::BlockQuote(_)) && parent.is_none_or(|open| open.leading),
+            leading,
+            gutter: leading || matches!(tag, Tag::List(_) | Tag::Item) && Self::in_gutter(parent),
         }
+    }
+
+    /// Whether a list or an item opening inside `parent` is in the gutter.
+    pub(super) fn in_gutter(parent: Option<&Open>) -> bool {
+        parent.is_none_or(|open| open.gutter)
     }
 
     /// A code span, backticks included: no tag opens it, and its backticks always hide.
@@ -54,6 +69,7 @@ impl Open {
             end: range.end,
             element: Some(range.clone()),
             leading: false,
+            gutter: false,
         }
     }
 }

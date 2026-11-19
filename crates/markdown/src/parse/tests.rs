@@ -402,7 +402,7 @@ fn a_heading_inside_a_container_conceals_its_opening_sequence() {
     );
     assert_eq!(
         concealed("- # a\n"),
-        vec![("-", "-", "•"), ("# ", "# a", "")]
+        vec![("-", "-", ""), ("# ", "# a", "")]
     );
     assert_eq!(concealed("  # ind"), vec![("# ", "# ind", "")]);
 }
@@ -524,25 +524,22 @@ fn images_stay_visible() {
 }
 
 #[test]
-fn unordered_bullets_become_dots_and_numbers_stay() {
-    assert_eq!(
-        concealed("- a\n- b"),
-        vec![("-", "-", "•"), ("-", "-", "•")]
-    );
-    assert_eq!(concealed("* a"), vec![("*", "*", "•")]);
-    assert_eq!(concealed("1. a"), vec![]);
+fn list_markers_hide_in_their_item_part() {
+    assert_eq!(concealed("- a\n- b"), vec![("-", "-", ""), ("-", "-", "")]);
+    assert_eq!(concealed("* a"), vec![("*", "*", "")]);
+    assert_eq!(concealed("1. a"), vec![("1.", "1.", "")]);
     assert_eq!(concealed("- [ ] t"), vec![("- [ ]", "- [ ]", "")]);
-    assert_eq!(concealed("> - a"), vec![(">", ">", ""), ("-", "-", "•")]);
+    assert_eq!(concealed("> - a"), vec![(">", ">", ""), ("-", "-", "")]);
     assert_eq!(
         concealed("- a\n  - b"),
-        vec![("-", "-", "•"), ("-", "-", "•")]
+        vec![("-", "-", ""), ("  -", "  -", "")]
     );
 }
 
 #[test]
-fn an_indented_bullet_is_found_past_the_indentation() {
-    assert_eq!(concealed("  - a"), vec![("-", "-", "•")]);
-    assert_eq!(concealed("   * a"), vec![("*", "*", "•")]);
+fn an_indented_markers_conceal_holds_its_indentation() {
+    assert_eq!(concealed("  - a"), vec![("  -", "  -", "")]);
+    assert_eq!(concealed("   * a"), vec![("   *", "   *", "")]);
 }
 
 #[test]
@@ -787,5 +784,6 @@ proptest! {
 mod code_blocks;
 mod gutters;
 mod headings;
+mod items;
 mod last_line;
 mod tasks;

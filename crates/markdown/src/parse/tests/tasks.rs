@@ -1,4 +1,4 @@
-//! Task gutters (task boxes spec, D1, D2 and D10): a task item with a box.
+//! Task gutters (task boxes spec, D1, D2 and D10): a gutter item's task gets a box.
 
 use inkra_text::ByteOffset;
 
@@ -12,7 +12,7 @@ fn tasks(text: &str) -> Vec<(&str, &str, bool)> {
         .gutters
         .iter()
         .filter_map(|gutter| {
-            let task = gutter.task.as_ref()?;
+            let task = gutter.item.as_ref()?.task.as_ref()?;
             let range = gutter.range.start.get()..gutter.range.end.get();
             let checkbox = task.checkbox.start.get()..task.checkbox.end.get();
             Some((&text[range], &text[checkbox], task.checked))
@@ -83,7 +83,7 @@ fn a_loose_task_is_decided_past_its_paragraph() {
 #[test]
 fn a_checkbox_pulldown_cmark_reads_as_text_is_no_task() {
     assert_eq!(tasks("- [ ]a"), vec![]);
-    assert_eq!(concealed("- [ ]a"), vec![("-", "-", "•")]);
+    assert_eq!(concealed("- [ ]a"), vec![("-", "-", "")]);
 }
 
 /// The last line reads as if a newline ended it, so a checkbox there is a task with no text.
@@ -101,56 +101,32 @@ fn a_task_with_no_text_ends_its_gutter_at_the_checkbox() {
 }
 
 #[test]
-fn an_empty_item_keeps_its_dot() {
+fn an_empty_item_hides_its_bullet_in_its_slot() {
     assert_eq!(tasks("-\n"), vec![]);
-    assert_eq!(concealed("-\n"), vec![("-", "-", "•")]);
+    assert_eq!(concealed("-\n"), vec![("-", "-", "")]);
 }
 
-/// Each task's lead and box run (D10).
-fn leads(text: &str) -> Vec<(&str, &str)> {
-    parse(text)
-        .gutters
-        .iter()
-        .filter_map(|gutter| {
-            let task = gutter.task.as_ref()?;
-            let (start, run, end) = (task.start.get(), task.run.get(), task.checkbox.end.get());
-            Some((&text[start..run], &text[run..end]))
-        })
-        .collect()
-}
-
+/// The item conceal hides every marker of the item part through the checkbox (D2).
 #[test]
-fn the_box_runs_from_the_bullet_or_an_ordered_tasks_checkbox() {
-    assert_eq!(leads("- [ ] a"), vec![("", "- [ ]")]);
-    assert_eq!(leads("  - [ ] a"), vec![("  ", "- [ ]")]);
-    assert_eq!(leads("-    [ ] a"), vec![("", "-    [ ]")]);
-    assert_eq!(leads("> - [ ] a"), vec![("", "- [ ]")]);
-    assert_eq!(leads("1. [ ] a"), vec![("1. ", "[ ]")]);
-    assert_eq!(leads("3) [x] a"), vec![("3) ", "[x]")]);
-    assert_eq!(leads("> 1. [ ] a"), vec![("1. ", "[ ]")]);
-}
-
-#[test]
-fn a_task_after_other_items_markers_gets_a_box_with_them_in_its_lead() {
-    assert_eq!(tasks("- - [ ] a"), vec![("- - [ ] ", "[ ]", false)]);
-    assert_eq!(leads("- - [ ] a"), vec![("- ", "- [ ]")]);
-    assert_eq!(tasks("1. - [x] a"), vec![("1. - [x] ", "[x]", true)]);
-    assert_eq!(leads("1. - [x] a"), vec![("1. ", "- [x]")]);
-    assert_eq!(leads("- 1. [ ] a"), vec![("- 1. ", "[ ]")]);
-    assert_eq!(leads("> - - [ ] a"), vec![("- ", "- [ ]")]);
-}
-
-/// The lead's bullet keeps its `•`; the task conceal hides the box run, revealed by the task part.
-#[test]
-fn the_lead_keeps_its_conceals_and_the_task_conceal_hides_the_box_run() {
+fn the_item_conceal_hides_every_marker_through_the_checkbox() {
+    assert_eq!(concealed("  - [ ] a"), vec![("  - [ ]", "  - [ ]", "")]);
+    assert_eq!(concealed("-    [ ] a"), vec![("-    [ ]", "-    [ ]", "")]);
+    assert_eq!(concealed("3) [x] a"), vec![("3) [x]", "3) [x]", "")]);
     assert_eq!(
-        concealed("- - [ ] a"),
-        vec![("-", "-", "•"), ("- [ ]", "- - [ ]", "")]
+        concealed("> 1. [ ] a"),
+        vec![(">", ">", ""), ("1. [ ]", "1. [ ]", "")]
     );
-    assert_eq!(concealed("1. - [ ] a"), vec![("- [ ]", "1. - [ ]", "")]);
+}
+
+#[test]
+fn a_task_after_other_items_markers_gets_a_box_in_one_item_part() {
+    assert_eq!(tasks("- - [ ] a"), vec![("- - [ ] ", "[ ]", false)]);
+    assert_eq!(tasks("1. - [x] a"), vec![("1. - [x] ", "[x]", true)]);
+    assert_eq!(concealed("- - [ ] a"), vec![("- - [ ]", "- - [ ]", "")]);
+    assert_eq!(concealed("1. - [ ] a"), vec![("1. - [ ]", "1. - [ ]", "")]);
     assert_eq!(
         concealed("> - - [ ] a"),
-        vec![(">", ">", ""), ("-", "-", "•"), ("- [ ]", "- - [ ]", "")]
+        vec![(">", ">", ""), ("- - [ ]", "- - [ ]", "")]
     );
 }
 
@@ -171,11 +147,12 @@ fn a_task_behind_a_quote_inside_an_item_gets_no_box() {
 }
 
 #[test]
-fn a_quoted_line_keeps_its_quote_gutter_under_a_task_with_no_box() {
+fn a_quoted_line_keeps_its_gutter_under_a_task_with_no_box() {
     let gutters = parse("> - > - [ ] a").gutters;
     assert_eq!(gutters.len(), 1);
-    assert_eq!(gutters[0].range, ByteOffset::new(0)..ByteOffset::new(2));
-    assert_eq!((gutters[0].depth, gutters[0].task.clone()), (1, None));
+    assert_eq!(gutters[0].range, ByteOffset::new(0)..ByteOffset::new(4));
+    let task = gutters[0].item.as_ref().map(|item| item.task.clone());
+    assert_eq!((gutters[0].depth, task), (1, Some(None)));
 }
 
 #[test]
@@ -183,7 +160,7 @@ fn a_nested_task_on_its_own_line_has_a_gutter() {
     assert_eq!(tasks("- a\n  - [ ] b"), vec![("  - [ ] ", "[ ]", false)]);
     assert_eq!(
         concealed("- a\n  - [ ] b"),
-        vec![("-", "-", "•"), ("- [ ]", "  - [ ]", "")]
+        vec![("-", "-", ""), ("  - [ ]", "  - [ ]", "")]
     );
 }
 
@@ -194,18 +171,17 @@ fn a_tab_indented_nested_item_has_its_marker() {
     assert_eq!(tasks("- a\n\n\t- [x] b"), vec![("\t- [x] ", "[x]", true)]);
     assert_eq!(
         concealed("- a\n\t- b"),
-        vec![("-", "-", "•"), ("-", "-", "•")]
+        vec![("-", "-", ""), ("\t-", "\t-", "")]
     );
     assert_eq!(struck("- a\n\t- [x] b"), ["b"]);
     assert_eq!(tasks(">\t- [ ] b"), vec![(">\t- [ ] ", "[ ]", false)]);
-    assert_eq!(concealed(">\t- b"), vec![(">", ">", ""), ("-", "-", "•")]);
+    assert_eq!(concealed(">\t- b"), vec![(">", ">", ""), ("-", "-", "")]);
 }
 
 #[test]
-fn the_task_conceal_covers_the_task_part_and_keeps_an_ordered_number() {
+fn the_item_conceal_covers_an_ordered_tasks_number() {
     assert_eq!(concealed("- [ ] a"), vec![("- [ ]", "- [ ]", "")]);
-    assert_eq!(concealed("1. [x] a"), vec![("[x]", "1. [x]", "")]);
-    assert_eq!(concealed("  - [ ] a"), vec![("- [ ]", "  - [ ]", "")]);
+    assert_eq!(concealed("1. [x] a"), vec![("1. [x]", "1. [x]", "")]);
 }
 
 #[test]

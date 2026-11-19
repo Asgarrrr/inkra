@@ -303,5 +303,8 @@ pub(crate) const TASK_BOX_BORDER: Pixels = px(1.5);
 /// The check inside a done task's box.
 pub(crate) const TASK_CHECK_SIZE: Pixels = px(12.);
 
+/// The space after a list slot's mark or box, mockup C's 10 px (task boxes spec, D8).
+pub(crate) const LIST_SLOT_GAP: Pixels = px(10.);
+
 #[cfg(test)]
 mod tests;

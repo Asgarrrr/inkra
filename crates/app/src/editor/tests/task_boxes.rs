@@ -1,5 +1,5 @@
-//! Task boxes (task boxes spec, D4's paint): one per line whose task part is concealed. Headless, a
-//! body glyph is 10.8 px, so a box's left edge, right after the lead, sits at a multiple of it.
+//! Task boxes (task boxes spec, D4's paint): one per line whose item part is concealed, in the
+//! slot after its marks. Headless, a body glyph is 10.8 px.
 
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, WindowHandle, px, size};
 
@@ -7,7 +7,7 @@ use super::geometry::LINE_HEIGHT;
 use super::{assert_x, at, dispatching};
 use crate::editor::EditorView;
 use crate::editor::layout::painted_boxes;
-use crate::theme::TASK_BOX_SIZE;
+use crate::theme::{LIST_SLOT_GAP, TASK_BOX_SIZE};
 
 const GLYPH: f32 = 0.6 * 18.;
 
@@ -60,7 +60,8 @@ fn a_concealed_checkbox_paints_one_box_per_state(cx: &mut TestAppContext) {
     }
 }
 
-/// The box lies inside the gutter: right of the line's start and left of its text.
+/// The box lies inside the gutter, in the last slot: right of the line's start and one slot left
+/// of its text.
 #[gpui::test]
 fn a_box_lies_inside_its_gutter(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "1. [ ] a\nbody");
@@ -73,7 +74,7 @@ fn a_box_lies_inside_its_gutter(cx: &mut TestAppContext) {
         .unwrap();
     assert_eq!(boxes.len(), 1);
     let (bounds, _) = boxes[0];
-    assert_box(bounds, 3. * GLYPH, 0.);
+    assert_box(bounds, f32::from(text - TASK_BOX_SIZE - LIST_SLOT_GAP), 0.);
     assert!(bounds.left() >= px(0.), "{bounds:?}");
     assert!(
         bounds.right() <= text,
