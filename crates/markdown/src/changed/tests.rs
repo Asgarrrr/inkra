@@ -6,7 +6,8 @@ use proptest::prelude::*;
 
 use super::changed;
 use crate::{
-    CodeBlock, Conceal, Gutter, Heading, HeadingLevel, Markdown, Span, Styles, Task, parse,
+    CodeBlock, Conceal, Gutter, Heading, HeadingLevel, ItemPart, Markdown, Span, Styles, Task,
+    WidthKey, parse,
 };
 
 /// `old` with `removed` bytes at `at` replaced by `inserted`, and what `changed` answers for it,
@@ -83,6 +84,48 @@ fn a_heading_level_change_is_a_change() {
 #[test]
 fn a_gutter_gaining_a_quote_is_a_change() {
     assert_eq!(answered("> a\n> b\n\nc", 4, 0, ">"), [(4, 7)]);
+}
+
+/// Nine items, the eighth with a child, then a paragraph.
+const NINE: &str = "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n   - x\n9. i\n\nz";
+
+/// Only the lines whose gutter changed (task boxes spec, T6c1): the bullet's line, not `- b`.
+#[test]
+fn a_bullet_turned_into_a_number_dirties_its_line_alone() {
+    assert_eq!(answered("- a\n\n- b\n\nz", 0, 1, "1."), [(0, 3)]);
+}
+
+/// `- b` becomes `- a`'s child: its own gutter changes, `- a`'s does not.
+#[test]
+fn two_blanks_before_a_bullet_dirty_its_line_alone() {
+    assert_eq!(answered("- a\n- b\n\nz", 4, 0, "  "), [(4, 8)]);
+}
+
+/// The blank line ends the item: both lazy lines lose their gutter, and `- a` keeps its own.
+#[test]
+fn a_blank_line_that_ends_an_item_dirties_the_lines_it_releases() {
+    assert_eq!(answered("- a\nb\nc\n\nz", 4, 0, "\n"), [(4, 5), (7, 7)]);
+}
+
+/// The new list's keys come first in `width_keys`, so the old list's item parts index other keys.
+#[test]
+fn an_ordered_list_typed_above_another_leaves_its_lines_clean() {
+    assert_eq!(answered("a\n\n1. b\n   c\n", 0, 0, "1. x\n\n"), [(0, 6)]);
+}
+
+/// `10.` widens the list's width key: every item part of the list and its child, each once, and
+/// not the paragraph after it.
+#[test]
+fn a_tenth_item_dirties_every_line_of_its_list() {
+    let lines = (0..8).map(|item| (5 * item, 5 * item + 3));
+    let mut list: Vec<_> = lines.collect();
+    list.extend([(40, 45), (47, 50), (51, 57)]);
+    assert_eq!(answered(NINE, 51, 0, "\n10. j"), list);
+}
+
+#[test]
+fn a_letter_in_the_eighth_item_dirties_its_line_alone() {
+    assert_eq!(answered(NINE, 39, 0, "x"), [(39, 40)]);
 }
 
 #[test]
@@ -213,38 +256,55 @@ fn a_conceal_before_the_edit_that_changes_any_field_is_a_change() {
 
 #[test]
 fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
-    let task = |lead: Range<usize>, checkbox, checked| Some((lead, checkbox, checked));
-    let gutter = |end, quotes: &[usize], depth, task: Option<(Range<usize>, _, bool)>| Gutter {
-        range: offsets(0..end),
-        quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
-        depth,
-        task: task.map(|(lead, checkbox, checked)| Task {
-            start: ByteOffset::new(lead.start),
-            run: ByteOffset::new(lead.end),
+    let task = |checkbox, checked| {
+        Some(Task {
             checkbox: offsets(checkbox),
             checked,
-        }),
+        })
     };
-    let old = Markdown {
-        gutters: vec![gutter(12, &[0, 2], 2, task(4..4, 6..9, false))],
+    let key = |digits| WidthKey {
+        digits,
+        delimiter: b'.',
+    };
+    let item = |start, indent, numbers: &'static [u8], task| Some((start, indent, numbers, task));
+    let gutter = |end, quotes: &[usize], depth, item: Option<(_, _, &[u8], _)>| Markdown {
+        gutters: vec![Gutter {
+            range: offsets(0..end),
+            quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
+            depth,
+            item: item.clone().map(|(start, indent, numbers, task)| ItemPart {
+                start: ByteOffset::new(start),
+                indent,
+                keys: 0..numbers.len(),
+                task,
+                marked: true,
+            }),
+        }],
+        width_keys: item.map_or_else(Vec::new, |(_, _, numbers, _)| {
+            numbers.iter().copied().map(key).collect()
+        }),
         ..Markdown::default()
     };
+    let old = gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, false)));
     for new in [
-        gutter(10, &[0, 2], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0, 1], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0], 2, task(4..4, 6..9, false)),
-        gutter(12, &[0, 2], 3, task(4..4, 6..9, false)),
-        gutter(12, &[0, 2], 2, task(4..4, 6..9, true)),
-        gutter(12, &[0, 2], 2, task(4..4, 7..10, false)),
-        gutter(12, &[0, 2], 2, task(3..4, 6..9, false)),
-        gutter(12, &[0, 2], 2, task(4..6, 6..9, false)),
+        gutter(10, &[0, 2], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 1], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0], 2, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 3, item(4, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, true))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], task(7..10, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1], None)),
+        gutter(12, &[0, 2], 2, item(3, 1, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 2, &[1], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[2], task(6..9, false))),
+        gutter(12, &[0, 2], 2, item(4, 1, &[1, 1], task(6..9, false))),
         gutter(12, &[0, 2], 2, None),
+        {
+            let mut held = old.clone();
+            held.gutters[0].item.as_mut().unwrap().marked = false;
+            held
+        },
     ] {
-        let new = Markdown {
-            gutters: vec![new],
-            ..Markdown::default()
-        };
-
         assert_eq!(typed_after(&old, &new)[0].0, 0, "{new:?}");
     }
 }
@@ -330,14 +390,15 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
         .filter(|item| starts(item.range.start))
     {
         let quotes: Vec<_> = item.quotes.iter().map(|&quote| rel(quote)).collect();
-        let task = item.task.as_ref().map(|task| {
-            (
-                span(&(task.start..task.run)),
-                span(&task.checkbox),
-                task.checked,
-            )
+        let part = item.item.as_ref().map(|part| {
+            let task = part
+                .task
+                .as_ref()
+                .map(|task| (span(&task.checkbox), task.checked));
+            let numbers = &markdown.width_keys[part.keys.clone()];
+            (rel(part.start), part.indent, numbers, task)
         });
-        push(&(span(&item.range), quotes, item.depth, task));
+        push(&(span(&item.range), quotes, item.depth, part));
     }
     if let Some(item) = markdown.headings.iter().find(|item| holds(&item.range)) {
         let marker = item.marker.as_ref().filter(|marker| starts(marker.start));
@@ -373,6 +434,9 @@ fn fragment() -> impl Strategy<Value = String> {
         Just("- ".to_string()),
         Just("- [ ] ".to_string()),
         Just("- [x] ".to_string()),
+        Just("1. ".to_string()),
+        Just("10. ".to_string()),
+        Just("  ".to_string()),
         Just("===\n".to_string()),
         Just("---\n".to_string()),
         Just("**".to_string()),

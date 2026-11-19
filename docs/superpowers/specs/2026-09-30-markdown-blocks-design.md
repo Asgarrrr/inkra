@@ -155,6 +155,9 @@ once per line. A heading inside a quote is shaped larger, but its gutter
 matches the body lines around it, so bars of equal depth align. A lazy line
 takes the width and bar positions of the gutter above it.
 
+Superseded in a list item by task boxes D3 and D11 (`2026-11-16-task-boxes-design.md`): a lazy
+line carries the quote part only, takes its own item part, and starts at the item's text.
+
 **What paints in the gutter:**
 
 - a bar per quote level, at the `x` of that level's `>`, over all the line's

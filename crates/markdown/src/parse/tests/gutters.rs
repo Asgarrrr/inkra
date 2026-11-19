@@ -4,7 +4,7 @@ use proptest::prelude::*;
 
 use super::super::parse;
 use super::{concealed, styled, syntax_fragment};
-use crate::{Conceal, Gutter, Styles, Task};
+use crate::{Conceal, Gutter, ItemPart, Styles};
 
 /// Each gutter as its text, its `>` offsets and its depth.
 fn gutters(text: &str) -> Vec<(&str, Vec<usize>, usize)> {
@@ -26,7 +26,7 @@ fn every_quoted_line_has_a_gutter() {
         vec![("> ", vec![0], 1), ("> ", vec![4], 1)]
     );
     assert_eq!(gutters("a\n> b"), vec![("> ", vec![2], 1)]);
-    assert_eq!(gutters("plain\n- a"), vec![]);
+    assert_eq!(gutters("plain\n> > b").len(), 1);
 }
 
 #[test]
@@ -78,6 +78,21 @@ fn one_space_or_tab_after_a_marker_joins_the_gutter() {
     assert_eq!(gutters(">a"), vec![(">", vec![0], 1)]);
 }
 
+/// A tab counts to the next tab stop and a `>` takes up to three columns before it, as
+/// pulldown-cmark 0.13.6 reads them: each `>` here is the one it parses as a marker (D1).
+#[test]
+fn a_tab_counts_its_columns_before_and_after_a_marker() {
+    let tab_leads = "> a\n\t> b";
+    assert_eq!(gutters(tab_leads)[1], ("\t>", vec![5], 1));
+    let tab_and_space = "> a\n\t > b";
+    assert_eq!(gutters(tab_and_space)[1], ("", vec![], 1));
+    assert_eq!(gutters(">\t> b"), vec![(">\t> ", vec![0, 2], 2)]);
+    let four_columns = ">\t> a\n>\t  > b";
+    assert_eq!(gutters(four_columns)[1], (">\t", vec![6], 2));
+    let short_tab = "> > a\n\t>  \t> b";
+    assert_eq!(gutters(short_tab)[1], ("\t>  \t> ", vec![7, 11], 2));
+}
+
 #[test]
 fn a_fence_in_a_quote_takes_one_marker_per_quote() {
     assert_eq!(
@@ -96,12 +111,15 @@ fn an_indented_code_block_keeps_its_indent_out_of_the_gutter() {
 }
 
 #[test]
-fn a_quote_inside_a_list_item_has_no_gutter() {
-    assert_eq!(gutters("- > a\n  > b"), vec![]);
-    assert_eq!(gutters("> - > a"), vec![("> ", vec![0], 1)]);
+fn a_quote_inside_a_list_item_has_no_quote_part() {
+    assert_eq!(
+        gutters("- > a\n  > b"),
+        vec![("- ", vec![], 0), ("  ", vec![], 0)]
+    );
+    assert_eq!(gutters("> - > a"), vec![("> - ", vec![0], 1)]);
     assert_eq!(
         gutters("> - a\n>   b"),
-        vec![("> ", vec![0], 1), ("> ", vec![6], 1)]
+        vec![("> - ", vec![0], 1), (">   ", vec![6], 1)]
     );
 }
 
@@ -176,7 +194,7 @@ fn a_lines_markers_conceal_together() {
     assert_eq!(concealed("> > x"), vec![(">", "> >", ""), (">", "> >", "")]);
     assert_eq!(concealed("  > a"), vec![(">", "  >", "")]);
     assert_eq!(concealed("> a\nb"), vec![(">", ">", "")]);
-    assert_eq!(concealed("- > a"), vec![("-", "-", "•")]);
+    assert_eq!(concealed("- > a"), vec![("-", "-", "")]);
 }
 
 /// The gap rule's prefix skip consumes a superset of a gutter, so its markers start at or past the gutter's end.
@@ -226,12 +244,12 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
         );
         prop_assert!(start <= end && end <= line_end, "{gutter:?} in {text:?}");
         prop_assert!(
-            1 <= gutter.depth || gutter.task.is_some(),
+            1 <= gutter.depth || gutter.item.is_some(),
             "{gutter:?} in {text:?}"
         );
         prop_assert!(gutter.quotes.len() <= gutter.depth);
         prop_assert_eq!(
-            gutter.quotes.is_empty() && gutter.task.is_none(),
+            gutter.quotes.is_empty() && gutter.quote_end() == gutter.range.end,
             start == end
         );
         for quote in &gutter.quotes {
@@ -247,19 +265,9 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             .iter()
             .filter(|conceal| gutter.range.contains(&conceal.marker.start))
             .collect();
-        if let Some(task) = &gutter.task {
-            task_is_well_formed(text, gutter, task, inside.pop())?;
-            let lead = inside.split_off(gutter.quotes.len().min(inside.len()));
-            for conceal in lead {
-                let bullet = conceal.marker.start.get();
-                prop_assert!(task.start <= conceal.marker.start && conceal.marker.end <= task.run);
-                prop_assert_eq!(&conceal.element, &conceal.marker);
-                prop_assert_eq!(
-                    (conceal.marker.end.get(), conceal.replacement),
-                    (bullet + 1, "•")
-                );
-                prop_assert!(matches!(text.as_bytes()[bullet], b'-' | b'*' | b'+'));
-            }
+        if let Some(item) = &gutter.item {
+            let own = inside.pop_if(|conceal| conceal.marker.start == item.start);
+            item_is_well_formed(text, gutter, item, own)?;
         }
         for (conceal, quote) in inside.iter().zip(&gutter.quotes) {
             prop_assert_eq!(conceal.marker.clone(), *quote..*quote + 1);
@@ -270,47 +278,52 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
     Ok(())
 }
 
-/// G5: a task gutter holds all its `>`, its quote part's blank, a lead with no `>`, its box run,
-/// and at most one space or tab after the checkbox; its last conceal hides the box run and reveals
-/// with the task part (D10).
-fn task_is_well_formed(
+/// G5: an item part follows its line's `>` and the quote part's blank, and holds no `>`. On an
+/// item's other line it is blanks only, with no conceal: blanks show nothing to reveal. On a marker
+/// line, which holds all its `>`, it ends at most one space or tab past its last mark or checkbox,
+/// and its conceal hides it through that mark (D1, D2, D11).
+fn item_is_well_formed(
     text: &str,
     gutter: &Gutter,
-    task: &Task,
+    item: &ItemPart,
     conceal: Option<&Conceal>,
 ) -> Result<(), TestCaseError> {
-    let (start, end) = (task.checkbox.start.get(), task.checkbox.end.get());
-    prop_assert_eq!(gutter.quotes.len(), gutter.depth);
-    let checkbox: &[&str] = if task.checked {
-        &["[x]", "[X]"]
-    } else {
-        &["[ ]"]
-    };
-    prop_assert!(
-        checkbox.contains(&&text[start..end]),
-        "{task:?} in {text:?}"
-    );
-    let tail = &text[end..gutter.range.end.get()];
-    prop_assert!(["", " ", "\t"].contains(&tail), "{gutter:?} in {text:?}");
-    let conceal = conceal.ok_or_else(|| TestCaseError::fail("no task conceal"))?;
-    prop_assert_eq!(&conceal.element, &(task.start..task.checkbox.end));
-    prop_assert_eq!(&conceal.marker, &(task.run..task.checkbox.end));
     let quote_end = gutter
         .quotes
         .last()
         .map_or(gutter.range.start.get(), |q| q.get() + 1);
-    let blank = &text[quote_end..task.start.get()];
+    let blank = &text[quote_end..item.start.get()];
     prop_assert!(["", " ", "\t"].contains(&blank), "{gutter:?} in {text:?}");
-    let lead = &text[task.start.get()..task.run.get()];
-    prop_assert!(!lead.contains(['>', '\n']), "{gutter:?} in {text:?}");
-    let run = &text[task.run.get()..start];
-    if run.is_empty() {
-        let number = lead.trim_end_matches([' ', '\t']);
-        prop_assert!(number.ends_with(['.', ')']), "{gutter:?} in {text:?}");
-    } else {
-        let (bullet, blanks) = run.split_at(1);
-        prop_assert!(["-", "*", "+"].contains(&bullet), "{gutter:?} in {text:?}");
-        prop_assert!(blanks.bytes().all(|byte| matches!(byte, b' ' | b'\t')));
+    let part = &text[item.start.get()..gutter.range.end.get()];
+    prop_assert!(!part.contains(['>', '\n']), "{gutter:?} in {text:?}");
+    let marked = part.trim_end_matches([' ', '\t']);
+    if marked.is_empty() {
+        prop_assert!(item.task.is_none(), "{gutter:?} in {text:?}");
+        prop_assert!(conceal.is_none(), "{gutter:?} in {text:?}");
+        return Ok(());
     }
+    prop_assert_eq!(gutter.quotes.len(), gutter.depth);
+    prop_assert!(
+        ["", " ", "\t"].contains(&&part[marked.len()..]),
+        "{gutter:?} in {text:?}"
+    );
+    if let Some(task) = &item.task {
+        let (start, end) = (task.checkbox.start.get(), task.checkbox.end.get());
+        let checkbox: &[&str] = if task.checked {
+            &["[x]", "[X]"]
+        } else {
+            &["[ ]"]
+        };
+        prop_assert!(
+            checkbox.contains(&&text[start..end]),
+            "{task:?} in {text:?}"
+        );
+        prop_assert_eq!(end, item.start.get() + marked.len());
+    }
+    let conceal = conceal.ok_or_else(|| TestCaseError::fail("no item conceal"))?;
+    let end = item.start + marked.len();
+    prop_assert_eq!(&conceal.element, &(item.start..end));
+    prop_assert_eq!(&conceal.marker, &(item.start..end));
+    prop_assert_eq!(conceal.replacement, "");
     Ok(())
 }

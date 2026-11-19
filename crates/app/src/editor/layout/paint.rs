@@ -1,14 +1,14 @@
 use std::ops::Range;
 
 use gpui::{
-    App, BorderStyle, Bounds, ContentMask, Pixels, Point, ShapedLine, TextAlign,
-    TransformationMatrix, Window, fill, outline, point, px, size,
+    App, BorderStyle, Bounds, ContentMask, Pixels, Point, TextAlign, TransformationMatrix, Window,
+    fill, outline, point, px, size,
 };
 use inkra_text::{ByteOffset, Diff};
 
 use super::DocumentLayout;
 use super::line::LineLayout;
-use super::prefix::Prefix;
+use super::prefix::{Paint, Prefix};
 use crate::theme;
 use crate::ui::IconName;
 
@@ -24,18 +24,29 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
     static PAINTED_BOXES: std::cell::RefCell<Vec<PaintedBox>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static PAINTED_MARKS: std::cell::RefCell<Vec<PaintedMark>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// A task box the last paint drew, and the lead it drew before it.
+/// A task box the last paint drew.
 #[cfg(test)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct PaintedBox {
     /// In window coordinates.
     pub(crate) bounds: Bounds<Pixels>,
     /// Whether it drew filled, the checked branch.
     pub(crate) checked: bool,
-    /// The lead's text and window `x`.
-    pub(crate) lead: Option<(String, Pixels)>,
+}
+
+/// A `•` or a number the last paint drew, in window coordinates.
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct PaintedMark {
+    pub(crate) text: String,
+    pub(crate) left: Pixels,
+    pub(crate) right: Pixels,
+    /// Its baseline's `y`, as gpui sets it.
+    pub(crate) baseline: Pixels,
 }
 
 /// The lines and bars the last paint on this thread walked.
@@ -62,10 +73,41 @@ pub(crate) fn painted_clips() -> Vec<(Pixels, Bounds<Pixels>)> {
     PAINTED_CLIPS.with(|painted| painted.borrow().clone())
 }
 
-/// Each task box the last paint on this thread drew, and the lead before it.
+/// Each task box the last paint on this thread drew.
 #[cfg(test)]
 pub(crate) fn painted_boxes() -> Vec<PaintedBox> {
     PAINTED_BOXES.with(|painted| painted.borrow().clone())
+}
+
+/// Each `•` and number the last paint on this thread drew.
+#[cfg(test)]
+pub(crate) fn painted_marks() -> Vec<PaintedMark> {
+    PAINTED_MARKS.with(|painted| painted.borrow().clone())
+}
+
+#[cfg(test)]
+impl DocumentLayout {
+    /// Whether line `line`'s prefix paints its source text.
+    pub(crate) fn prefix_painted(&self, line: usize) -> bool {
+        !self.prefix_shown(line).is_empty()
+    }
+
+    /// Each piece of source text line `line`'s prefix paints, and its left and right `x` relative
+    /// to the text.
+    pub(crate) fn prefix_shown(&self, line: usize) -> Vec<(&str, Pixels, Pixels)> {
+        let prefix = self.lines[line].line.prefix.iter();
+        let shown = prefix.flat_map(Prefix::shown);
+        shown
+            .map(|(shaped, x)| (shaped.text.as_ref(), x, x + shaped.width()))
+            .collect()
+    }
+
+    /// Line `line`'s top, row height, and font size.
+    pub(crate) fn row_metrics(&self, line: usize) -> (Pixels, Pixels, Pixels) {
+        let placed = &self.lines[line];
+        let line = &placed.line;
+        (placed.top, line.row_height, line.shape.font_size)
+    }
 }
 
 impl DocumentLayout {
@@ -100,6 +142,8 @@ impl DocumentLayout {
         PAINTED_TOPS.with(|painted| painted.borrow_mut().clear());
         #[cfg(test)]
         PAINTED_BOXES.with(|painted| painted.borrow_mut().clear());
+        #[cfg(test)]
+        PAINTED_MARKS.with(|painted| painted.borrow_mut().clear());
         for bar in &self.bars[bars] {
             window.paint_quad(fill(*bar + origin, self.theme.colors.md_quote_bar));
         }
@@ -147,19 +191,19 @@ impl DocumentLayout {
             if let Err(err) = painted {
                 log::warn!("failed to paint line {index}: {err}");
             }
-            if let Some((shaped, x)) = line.prefix.as_ref().and_then(Prefix::shown)
-                && let Err(err) = shaped.paint(
+            for (shaped, x) in line.prefix.iter().flat_map(Prefix::shown) {
+                if let Err(err) = shaped.paint(
                     line_origin + point(x, px(0.)),
                     line.row_height,
                     TextAlign::Left,
                     None,
                     window,
                     cx,
-                )
-            {
-                log::warn!("failed to paint the prefix of line {index}: {err}");
+                ) {
+                    log::warn!("failed to paint the prefix of line {index}: {err}");
+                }
             }
-            self.paint_task(line_origin, line, window, cx);
+            self.paint_marks(line_origin, line, window, cx);
         }
         let blocks = self.blocks_in(mask.top() - origin.y, mask.bottom() - origin.y);
         for block in &self.code_blocks[blocks] {
@@ -178,51 +222,70 @@ impl DocumentLayout {
         }
     }
 
-    /// Where the concealed task on `line`, at `origin`, paints its box and its lead (D10).
-    fn paint_task(
+    /// Each concealed mark of `line`, at `origin`: a `•` or a number with its baseline on the
+    /// text's row-0 baseline, the box centred on row 0 (task boxes spec, D4).
+    fn paint_marks(
         &self,
         origin: Point<Pixels>,
         line: &LineLayout,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let Some((square, task)) = line.task_box() else {
+        let Some(prefix) = &line.prefix else {
             return;
         };
-        let lead = line.prefix.as_ref().and_then(Prefix::lead);
-        let lead = lead.map(|(lead, x)| (lead, origin + point(x, px(0.))));
-        self.paint_task_box(
-            square + origin,
-            task.checked,
-            lead,
-            line.row_height,
-            window,
-            cx,
-        );
+        let row_height = line.row_height;
+        // gpui's baseline: half the leading, then the ascent (`text_system/line.rs:557-558`).
+        let baseline =
+            |ascent: Pixels, descent: Pixels| (row_height - ascent - descent) / 2. + ascent;
+        // A line of boxes alone never measures its font.
+        let mut text_baseline = None;
+        for mark in prefix.marks() {
+            match &mark.paint {
+                Paint::Text(shaped) => {
+                    let text_baseline = *text_baseline.get_or_insert_with(|| {
+                        let (ascent, descent) = line.text_metrics(window);
+                        baseline(ascent, descent)
+                    });
+                    let mark_baseline = baseline(shaped.ascent, shaped.descent);
+                    let at = origin + point(mark.x, text_baseline - mark_baseline);
+                    #[cfg(test)]
+                    PAINTED_MARKS.with(|painted| {
+                        painted.borrow_mut().push(PaintedMark {
+                            text: shaped.text.to_string(),
+                            left: at.x,
+                            right: at.x + shaped.width(),
+                            baseline: at.y + mark_baseline,
+                        });
+                    });
+                    if let Err(err) =
+                        shaped.paint(at, row_height, TextAlign::Left, None, window, cx)
+                    {
+                        log::warn!("failed to paint a list mark: {err}");
+                    }
+                }
+                Paint::Box { checked } => {
+                    let square = line.box_square(mark.x) + origin;
+                    self.paint_task_box(square, *checked, window, cx);
+                }
+            }
+        }
     }
 
-    /// The lead at its point, then the square `bounds`: an outline, or an accent fill with a check.
+    /// The square `bounds`: an outline, or an accent fill with a check.
     fn paint_task_box(
         &self,
         bounds: Bounds<Pixels>,
         checked: bool,
-        lead: Option<(&ShapedLine, Point<Pixels>)>,
-        row_height: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) {
-        if let Some((lead, at)) = lead
-            && let Err(err) = lead.paint(at, row_height, TextAlign::Left, None, window, cx)
-        {
-            log::warn!("failed to paint a task's lead: {err}");
-        }
         #[cfg(test)]
         let record = |filled| {
             PAINTED_BOXES.with(|painted| {
                 painted.borrow_mut().push(PaintedBox {
                     bounds,
                     checked: filled,
-                    lead: lead.map(|(lead, at)| (lead.text.to_string(), at.x)),
                 });
             });
         };
@@ -263,7 +326,7 @@ impl DocumentLayout {
     pub(crate) fn task_at(&self, local: Point<Pixels>) -> Option<(Diff, ByteOffset)> {
         // Clamped to the nearest line: below its first row, its square misses.
         let (placed, _) = self.locate(self.row_for_y(local.y));
-        let (square, _) = placed.line.task_box()?;
+        let square = placed.line.task_box()?;
         let gutter = placed.line.prefix.as_ref()?.range();
         let task = self.markdown.task_at(placed.start)?;
         square

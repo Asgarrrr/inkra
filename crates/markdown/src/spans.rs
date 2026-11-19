@@ -51,6 +51,11 @@ pub(crate) fn line_start(text: &str, at: usize) -> usize {
     text[..at].rfind('\n').map_or(0, |newline| newline + 1)
 }
 
+/// The end of the line holding `at`, before its `\n`.
+pub(crate) fn line_end(text: &str, at: usize) -> usize {
+    text[at..].find('\n').map_or(text.len(), |len| at + len)
+}
+
 /// Each line from the line start `from` on, without its newline. Built on `split`, so the walk
 /// stays finite whatever its offsets do: no mutant can grow a caller's collection unbounded.
 pub(crate) fn line_ranges(text: &str, from: usize) -> impl Iterator<Item = Range<usize>> + '_ {

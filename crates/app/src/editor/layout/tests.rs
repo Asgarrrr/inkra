@@ -11,18 +11,21 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
-use super::line::Placed;
 use super::{BlockScrolls, DocumentLayout, LayoutInputs, line_build_count, shape_document};
 use crate::decorations;
 use crate::theme::{Appearance, Theme, builtin};
 
 mod layer;
+mod list_width;
+mod same;
 mod toggle;
+
+use same::assert_same;
 
 const TOKENS: &[&str] = &[
     "a", "word ", " ", "\n", "\n", "\n\n", "```", "```rust", "`", "> ", "> > ", ">", "  > ", "# ",
     "## ", "===", "---", "*", "**", "_", "[[", "]]", "[l](u)", "#h", "- [ ] ", "- [x] ", "- ",
-    "1. ", "    ", "\t", "é", "日",
+    "1. ", "9. ", "10. ", "2) ", "* ", "    ", "  ", "\t", "é", "日", "\n  ", "- a\nb",
 ];
 
 fn markdown(max: usize) -> impl Strategy<Value = String> {
@@ -203,7 +206,7 @@ impl Inputs {
                     .lines
                     .iter()
                     .filter_map(|placed| {
-                        let (square, _) = placed.line.task_box()?;
+                        let square = placed.line.task_box()?;
                         Some(square.center() + gpui::point(px(0.), placed.top))
                     })
                     .collect();
@@ -279,75 +282,6 @@ impl Inputs {
         };
         shape_document(&inputs, previous, window)
     }
-}
-
-fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
-    let at = carried.start;
-    prop_assert_eq!(carried.start, fresh.start);
-    prop_assert_eq!(carried.top, fresh.top, "top at {}", at);
-    prop_assert_eq!(carried.first_row, fresh.first_row, "first row at {}", at);
-    prop_assert_eq!(carried.block, fresh.block, "block at {}", at);
-    let (carried, fresh) = (&*carried.line, &*fresh.line);
-    prop_assert_eq!(carried.len, fresh.len, "len at {}", at);
-    prop_assert_eq!(carried.row_height, fresh.row_height, "row height at {}", at);
-    let rows = |line: &super::LineLayout| {
-        let rows = line.rows.iter();
-        rows.map(|row| (row.start, row.caret_end, row.start_x))
-            .collect::<Vec<_>>()
-    };
-    prop_assert_eq!(rows(carried), rows(fresh), "rows at {}", at);
-    prop_assert_eq!(
-        format!("{:?}", carried.display),
-        format!("{:?}", fresh.display),
-        "display at {}",
-        at
-    );
-    let prefix = |line: &super::LineLayout| {
-        line.prefix.as_ref().map(|prefix| {
-            let shown = prefix
-                .shown()
-                .map(|(shaped, x)| (shaped.text.to_string(), x));
-            (
-                prefix.range(),
-                prefix.indent(),
-                prefix.bars().to_vec(),
-                shown,
-            )
-        })
-    };
-    let task_box = |line: &super::LineLayout| {
-        line.task_box().map(|(square, task)| {
-            let lead = line.prefix.as_ref().and_then(super::prefix::Prefix::lead);
-            let lead = lead.map(|(lead, x)| (lead.text.to_string(), x));
-            (square, task.shape.x.clone(), task.checked, lead)
-        })
-    };
-    prop_assert_eq!(task_box(carried), task_box(fresh), "task box at {}", at);
-    prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);
-    let label = |line: &super::LineLayout| line.label.as_ref().map(|label| label.text.to_string());
-    prop_assert_eq!(label(carried), label(fresh), "label at {}", at);
-    prop_assert!(carried.shape.same_args(&fresh.shape), "shape at {}", at);
-    Ok(())
-}
-
-fn assert_same(carried: &DocumentLayout, fresh: &DocumentLayout) -> Result<(), TestCaseError> {
-    prop_assert_eq!(carried.lines.len(), fresh.lines.len());
-    for (carried, fresh) in carried.lines.iter().zip(&fresh.lines) {
-        assert_line(carried, fresh)?;
-    }
-    prop_assert_eq!(carried.row_count, fresh.row_count);
-    prop_assert_eq!(carried.height, fresh.height);
-    prop_assert_eq!(&carried.bars, &fresh.bars);
-    let blocks = |layout: &DocumentLayout| {
-        let blocks = layout.code_blocks.iter().map(|block| {
-            let label = block.label.as_ref();
-            let label = label.map(|(at, shaped)| (*at, shaped.text.to_string()));
-            (block.start, block.max, block.background, label)
-        });
-        blocks.collect::<Vec<_>>()
-    };
-    prop_assert_eq!(blocks(carried), blocks(fresh));
-    Ok(())
 }
 
 fn check(

@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use inkra_text::{Bias, ByteOffset, Splice};
 
-use crate::{CodeBlock, Conceal, Gutter, Heading, Markdown, Span};
+use crate::{CodeBlock, Conceal, Gutter, Heading, Markdown, Span, WidthKey};
 
 /// The bytes of `new`'s text outside which every line reads the same items as before `edit`, which
 /// turned `old`'s text into `new`'s; in no order, the edit's own bytes included. Each vector splits
@@ -15,27 +15,36 @@ use crate::{CodeBlock, Conceal, Gutter, Heading, Markdown, Span};
 #[must_use]
 pub fn changed(old: &Markdown, new: &Markdown, edit: Splice) -> Vec<Range<ByteOffset>> {
     let mut dirty = vec![edit.at..edit.at + edit.inserted_len];
-    middle(&old.spans, &new.spans, edit, &mut dirty);
-    middle(&old.conceals, &new.conceals, edit, &mut dirty);
-    middle(&old.gutters, &new.gutters, edit, &mut dirty);
-    middle(&old.headings, &new.headings, edit, &mut dirty);
-    middle(&old.code_blocks, &new.code_blocks, edit, &mut dirty);
+    let keys = [old.width_keys.as_slice(), new.width_keys.as_slice()];
+    middle(&old.spans, &new.spans, keys, edit, &mut dirty);
+    middle(&old.conceals, &new.conceals, keys, edit, &mut dirty);
+    middle(&old.gutters, &new.gutters, keys, edit, &mut dirty);
+    middle(&old.headings, &new.headings, keys, edit, &mut dirty);
+    middle(&old.code_blocks, &new.code_blocks, keys, edit, &mut dirty);
     dirty
 }
 
-fn middle<T: Item>(old: &[T], new: &[T], edit: Splice, dirty: &mut Vec<Range<ByteOffset>>) {
+fn middle<T: Item>(
+    old: &[T],
+    new: &[T],
+    keys: [&[WidthKey]; 2],
+    edit: Splice,
+    dirty: &mut Vec<Range<ByteOffset>>,
+) {
     let removed_end = edit.at + edit.removed_len;
     let prefix = old
         .iter()
         .zip(new)
-        .take_while(|(old, new)| old.extent().end <= edit.at && old.same(new, |offset, _| offset))
+        .take_while(|(old, new)| {
+            old.extent().end <= edit.at && old.same(new, keys, |offset, _| offset)
+        })
         .count();
     let shift = |offset: ByteOffset, _| offset + edit.inserted_len - edit.removed_len;
     let suffix = old[prefix..]
         .iter()
         .rev()
         .zip(new[prefix..].iter().rev())
-        .take_while(|(old, new)| old.extent().start >= removed_end && old.same(new, shift))
+        .take_while(|(old, new)| old.extent().start >= removed_end && old.same(new, keys, shift))
         .count();
     let (old, new) = (
         &old[prefix..old.len() - suffix],
@@ -46,7 +55,7 @@ fn middle<T: Item>(old: &[T], new: &[T], edit: Splice, dirty: &mut Vec<Range<Byt
     let (mut was, mut is) = (0, 0);
     while was < old.len() || is < new.len() {
         let order = match (old.get(was), new.get(is)) {
-            (Some(old), Some(new)) if old.same(new, moved) => {
+            (Some(old), Some(new)) if old.same(new, keys, moved) => {
                 was += 1;
                 is += 1;
                 continue;
@@ -86,8 +95,14 @@ trait Item {
         edit.map(reach.start, Bias::Left)..edit.map(reach.end, Bias::Right)
     }
 
-    /// Whether the layout reads `self`, each offset moved by `map`, as it reads `new`.
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool;
+    /// Whether the layout reads `self`, each offset moved by `map`, as it reads `new`; `keys` are
+    /// the width keys of `self`'s parse, then of `new`'s.
+    fn same(
+        &self,
+        new: &Self,
+        keys: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool;
 
     /// The new text whose lines read `old`, which `edit` moved onto `new`'s key, or `new`.
     fn differ(old: &Self, new: &Self, edit: Splice, dirty: &mut Vec<Range<ByteOffset>>) {
@@ -110,7 +125,12 @@ impl Item for Span {
         self.range.clone()
     }
 
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool {
+    fn same(
+        &self,
+        new: &Self,
+        _: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool {
         mapped(&self.range, map) == new.range && self.styles == new.styles
     }
 }
@@ -129,7 +149,12 @@ impl Item for Conceal {
         self.marker.clone()
     }
 
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool {
+    fn same(
+        &self,
+        new: &Self,
+        _: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool {
         mapped(&self.element, &map) == new.element
             && mapped(&self.marker, map) == new.marker
             && self.replacement == new.replacement
@@ -141,7 +166,12 @@ impl Item for Gutter {
         self.range.clone()
     }
 
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool {
+    fn same(
+        &self,
+        new: &Self,
+        keys: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool {
         mapped(&self.range, &map) == new.range
             && self.depth == new.depth
             && self.quotes.len() == new.quotes.len()
@@ -150,11 +180,19 @@ impl Item for Gutter {
                 .iter()
                 .zip(&new.quotes)
                 .all(|(&old, &new)| map(old, Bias::Right) == new)
-            && match (&self.task, &new.task) {
+            && match (&self.item, &new.item) {
                 (Some(old), Some(new)) => {
-                    mapped(&(old.start..old.run), &map) == (new.start..new.run)
-                        && mapped(&old.checkbox, &map) == new.checkbox
-                        && old.checked == new.checked
+                    map(old.start, Bias::Right) == new.start
+                        && old.indent == new.indent
+                        && old.marked == new.marked
+                        && keys[0][old.keys.clone()] == keys[1][new.keys.clone()]
+                        && match (&old.task, &new.task) {
+                            (Some(old), Some(new)) => {
+                                mapped(&old.checkbox, &map) == new.checkbox
+                                    && old.checked == new.checked
+                            }
+                            (old, new) => old.is_none() && new.is_none(),
+                        }
                 }
                 (old, new) => old.is_none() && new.is_none(),
             }
@@ -166,7 +204,12 @@ impl Item for Heading {
         self.range.clone()
     }
 
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool {
+    fn same(
+        &self,
+        new: &Self,
+        _: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool {
         mapped(&self.range, &map) == new.range
             && self.level == new.level
             && self.marker.as_ref().map(|marker| mapped(marker, &map)) == new.marker
@@ -187,7 +230,12 @@ impl Item for CodeBlock {
         dirty.push(was.min(is)..was.max(is));
     }
 
-    fn same(&self, new: &Self, map: impl Fn(ByteOffset, Bias) -> ByteOffset) -> bool {
+    fn same(
+        &self,
+        new: &Self,
+        _: [&[WidthKey]; 2],
+        map: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) -> bool {
         mapped(&self.range, &map) == new.range
             && self
                 .language

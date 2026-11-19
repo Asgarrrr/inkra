@@ -1,49 +1,28 @@
-//! A quote's or task's gutter: its width and bars, measured once per text, its revealed part, and a
-//! concealed task's box and lead (markdown blocks spec, D3; task boxes spec, D3, D10).
+//! A quote's or list item's gutter: the quote part's width and bars, measured once per text, the
+//! item part's slots, and the revealed parts (markdown blocks spec, D3; task boxes spec, D3).
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{Pixels, ShapedLine, px};
-use inkra_markdown::{Conceal, Gutter};
-use inkra_text::ByteOffset;
+use inkra_markdown::{Gutter, WidthKey};
 
-use super::{Hidden, Prefix};
+use super::Prefix;
+use super::marks::{Mark, Marks};
+use crate::editor::layout::runs::Shape;
 
 pub(in crate::editor::layout) struct GutterLayout {
     /// From the line's start, where a gutter starts.
     pub(super) len: usize,
-    /// `Some` only while a part is revealed (a caret touches a `>` or the task part, spec D2).
+    /// `Some` only while a part is revealed (a caret touches a `>` or the item part, spec D2).
     pub(super) shown: Option<Box<Shown>>,
     pub(super) geometry: Geometry,
-    /// The line's own task, while its task part is concealed: its lead and box paint.
-    pub(super) task_box: Option<Box<TaskBox>>,
-}
-
-/// A concealed task's shape and state, from the line's own task, never carried (D10).
-pub(in crate::editor::layout) struct TaskBox {
-    pub(in crate::editor::layout) shape: TaskShape,
-    pub(in crate::editor::layout) checked: bool,
-}
-
-/// What a task measures to with its gutter's text, in every state (task boxes spec, D3).
-#[derive(Clone)]
-pub(in crate::editor::layout) struct TaskShape {
-    /// The checkbox's `x` span, measured as the gutter's width.
-    pub(in crate::editor::layout) x: Range<Pixels>,
-    /// The lead through its own conceals at the body size; `None` when blank.
-    lead: Option<Rc<ShapedLine>>,
+    /// The line's own item part's marks while it is concealed; never carried (task boxes spec,
+    /// D3).
+    pub(super) marks: Option<Box<[Mark]>>,
 }
 
 impl GutterLayout {
-    /// A concealed task's lead, painted at the task part's `x`, the quote part's width.
-    pub(super) fn lead(&self) -> Option<(&ShapedLine, Pixels)> {
-        let lead = self.task_box.as_ref()?.shape.lead.as_deref()?;
-        Some((lead, self.geometry.quote_width))
-    }
-
     /// A revealed part maps `x` through its shape (as D12's margin); a concealed one lands on the text's start.
     pub(super) fn offset_for_x(&self, x: Pixels) -> usize {
         let index = self.shown.as_ref().and_then(|shown| shown.index_for_x(x));
@@ -51,104 +30,115 @@ impl GutterLayout {
     }
 }
 
-/// Which parts of a gutter a caret touches, and the byte, from the gutter's start, where its task
+/// Which parts of a gutter a caret touches, and the byte, from the gutter's start, where its item
 /// part starts: its length when it has none.
 #[derive(Clone, Copy)]
 pub(super) struct Reveal {
     pub(super) quote: bool,
-    pub(super) task: bool,
+    pub(super) item: bool,
     pub(super) split: usize,
 }
 
-/// The revealed part of a gutter's text at the body size, or the whole text when both parts are: its
-/// bytes from `from`, painted at `x`, where they stand in the whole (task boxes spec, D3).
+/// The revealed parts of a gutter's text at the body size, each its own piece: the quote part at 0,
+/// the item part ending at the text start (task boxes spec, D3).
 pub(super) struct Shown {
+    pub(super) pieces: [Option<Piece>; 2],
+}
+
+pub(super) struct Piece {
     pub(super) shaped: ShapedLine,
+    /// Where its bytes start in the gutter's text.
     from: usize,
     pub(super) x: Pixels,
 }
 
 impl Shown {
-    /// One whole shape of the gutter's text, split at the task part when only one part shows.
-    fn new(shaped: ShapedLine, reveal: Reveal) -> Self {
-        let left = reveal.quote || reveal.split == 0;
-        let right = reveal.task || reveal.split == shaped.len();
-        if left && right {
-            return Self {
-                shaped,
-                from: 0,
-                x: px(0.),
-            };
-        }
-        let (quote, task) = shaped.split_at(reveal.split);
-        if left {
-            Self {
-                shaped: quote,
-                from: 0,
-                x: px(0.),
+    /// The revealed pieces of `shaped`, the whole raw text; a revealed item part widens `geometry`
+    /// to the quote part plus its raw advance where that is wider.
+    fn new(shaped: ShapedLine, reveal: Reveal, geometry: &mut Geometry) -> Self {
+        let (quote, item) = match reveal.split {
+            0 => (None, Some(shaped)),
+            split if split == shaped.len() => (Some(shaped), None),
+            split => {
+                let (quote, item) = shaped.split_at(split);
+                (Some(quote), Some(item))
             }
-        } else {
-            Self {
-                x: quote.width(),
-                shaped: task,
+        };
+        let quote = quote.filter(|_| reveal.quote).map(|shaped| Piece {
+            shaped,
+            from: 0,
+            x: px(0.),
+        });
+        let item = item.filter(|_| reveal.item).map(|shaped| {
+            geometry.width = geometry.width.max(geometry.quote_width + shaped.width());
+            Piece {
+                x: geometry.width - shaped.width(),
+                shaped,
                 from: reveal.split,
             }
+        });
+        Self {
+            pieces: [quote, item],
         }
     }
 
     pub(super) fn x_for_index(&self, index: usize) -> Option<Pixels> {
-        let within = index.checked_sub(self.from)?;
-        (within < self.shaped.len()).then(|| self.x + self.shaped.x_for_index(within))
+        self.pieces.iter().flatten().find_map(|piece| {
+            let within = index.checked_sub(piece.from)?;
+            (within < piece.shaped.len()).then(|| piece.x + piece.shaped.x_for_index(within))
+        })
     }
 
-    /// Left of the column lands as on the first glyph, as before the split; left of the shown part,
-    /// or at its end, `None`, as `x_for_index` reads it.
+    /// Left of the column lands as on the first glyph of a piece at 0. Left of a later piece, as in
+    /// the gap before a right-aligned item part, or at a piece's end, `None`: the caller lands on
+    /// the text start.
     fn index_for_x(&self, x: Pixels) -> Option<usize> {
-        let within = self.shaped.closest_index_for_x(x - self.x);
-        (self.x <= x.max(px(0.)) && within < self.shaped.len()).then_some(self.from + within)
+        self.pieces.iter().flatten().find_map(|piece| {
+            let within = piece.shaped.closest_index_for_x(x - piece.x);
+            (piece.x <= x.max(px(0.)) && within < piece.shaped.len()).then_some(piece.from + within)
+        })
     }
 }
 
 /// A gutter's text start and bars, and the quote part's width, carried to lazy lines (spec D3).
+/// Concealed, a marker line's text starts past its slots; revealed, past its raw item part where
+/// that is wider.
 #[derive(Clone, Default)]
 pub(super) struct Geometry {
     pub(super) width: Pixels,
     /// Each `>`'s `x`, outermost first.
     pub(super) bars: Rc<[Pixels]>,
-    /// Where the task part starts; `width` with no task.
+    /// Where the item part starts; `width` with no item part.
     quote_width: Pixels,
 }
 
-/// What a gutter's text measures to, once per text.
-#[derive(Clone)]
-struct Measured {
-    geometry: Geometry,
-    /// `None` with no task.
-    task: Option<TaskShape>,
-}
-
 /// What gutters share within one `shape_document`: the geometry of the line above, built or
-/// carried, which a lazy line takes, and each distinct gutter text's geometry, measured once.
+/// carried, which a lazy line takes, each distinct quote part's geometry, measured once, the marks'
+/// shapes, and the width keys the item parts index.
 pub(in crate::editor::layout) struct GutterCarry<'a> {
     carried: Geometry,
-    /// Geometry and the lead depend only on the gutter's text at the body size (spec D3; task boxes
-    /// spec, D10); most are `> ` or `> > `.
-    measured: HashMap<&'a str, Measured>,
+    /// Geometry depends only on the quote part's text at the body size (spec D3); most are `> ` or
+    /// `> > `.
+    quotes: HashMap<&'a str, Geometry>,
+    marks: Marks<'a>,
+    width_keys: &'a [WidthKey],
     body_size: Pixels,
 }
 
 impl<'a> GutterCarry<'a> {
-    pub(in crate::editor::layout) fn new(body_size: Pixels) -> Self {
+    pub(in crate::editor::layout) fn new(body_size: Pixels, width_keys: &'a [WidthKey]) -> Self {
         Self {
             carried: Geometry::default(),
-            measured: HashMap::new(),
+            quotes: HashMap::new(),
+            marks: Marks::default(),
+            width_keys,
             body_size,
         }
     }
 
     /// Every line laid out passes here, in order. A line with no gutter passes none on, so a lazy
     /// line reads only the line above, which the walk builds or carries first (D7). It carries the
-    /// quote part only: a task's marker is its own line's (task boxes spec, D3).
+    /// quote part only: an item part is its own line's (task boxes spec, D3).
     pub(in crate::editor::layout) fn pass(&mut self, prefix: Option<&Prefix>) {
         self.carried = prefix
             .and_then(Prefix::geometry)
@@ -156,128 +146,78 @@ impl<'a> GutterCarry<'a> {
             .unwrap_or_default();
     }
 
-    /// `source` is the gutter's text and `lead` its lead's conceals. A gutter holding all its `>`
-    /// measures itself; a lazy one takes the carried geometry. Only a revealed part keeps a shape,
-    /// to paint it.
+    /// `source` is the gutter's text. A gutter holding all its `>` measures its quote part; a lazy
+    /// one takes the carried geometry. The item part adds its slots; only a revealed part keeps a
+    /// shape, to paint it.
     pub(super) fn layout(
         &mut self,
         gutter: &Gutter,
         source: &'a str,
         reveal: Reveal,
-        lead: &[Conceal],
-        mut shape: impl FnMut(&Range<ByteOffset>, &[Hidden], &str, Pixels) -> ShapedLine,
+        mut shape: impl FnMut(Shape<'_>) -> ShapedLine,
     ) -> GutterLayout {
-        let body_size = self.body_size;
-        let shaped =
-            (reveal.quote || reveal.task).then(|| shape(&gutter.range, &[], source, body_size));
-        let measured = if gutter.quotes.len() == gutter.depth {
-            if let Some(measured) = self.measured.get(source) {
-                measured.clone()
+        let size = self.body_size;
+        let shaped = (reveal.quote || reveal.item).then(|| {
+            shape(Shape::Source {
+                range: &gutter.range,
+                source,
+                size,
+            })
+        });
+        let mut geometry = if gutter.quotes.len() == gutter.depth {
+            let quote = &source[..reveal.split];
+            if let Some(geometry) = self.quotes.get(quote) {
+                geometry.clone()
             } else {
-                let measured = measure(
-                    gutter,
-                    source,
-                    shaped.as_ref(),
-                    reveal.split,
-                    lead,
-                    |range, hidden, text| shape(range, hidden, text, body_size),
-                );
-                self.measured.insert(source, measured.clone());
-                measured
+                let start = gutter.range.start;
+                let shaped = (!gutter.quotes.is_empty()).then(|| {
+                    shape(Shape::Source {
+                        range: &(start..start + reveal.split),
+                        source: quote,
+                        size,
+                    })
+                });
+                let geometry = Geometry::measure(gutter, shaped.as_ref());
+                self.quotes.insert(quote, geometry.clone());
+                geometry
             }
         } else {
-            Measured {
-                geometry: self.carried.clone(),
-                task: None,
-            }
+            self.carried.clone()
         };
-        let Measured { geometry, task } = measured;
+        let marks = gutter.item.as_ref().map(|item| {
+            let part = &source[reveal.split..];
+            let keys = &self.width_keys[item.keys.clone()];
+            let (marks, width) =
+                self.marks
+                    .layout(item, keys, part, geometry.quote_width, |text| {
+                        shape(Shape::Mark { text, size })
+                    });
+            geometry.width = width;
+            marks
+        });
         GutterLayout {
             len: source.len(),
-            shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
+            shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal, &mut geometry))),
             geometry,
-            task_box: gutter.task.as_ref().zip(task).filter(|_| !reveal.task).map(
-                |(task, shape)| {
-                    Box::new(TaskBox {
-                        shape,
-                        checked: task.checked,
-                    })
-                },
-            ),
+            marks: marks.filter(|_| !reveal.item).map(Vec::into_boxed_slice),
         }
-    }
-}
-
-/// The geometry of `source`, measured on `measured_text`, with `shaped` when that is `source`
-/// itself; a task's checkbox span on the same shape, and its lead through `lead`, its conceals.
-fn measure(
-    gutter: &Gutter,
-    source: &str,
-    shaped: Option<&ShapedLine>,
-    split: usize,
-    lead: &[Conceal],
-    mut shape: impl FnMut(&Range<ByteOffset>, &[Hidden], &str) -> ShapedLine,
-) -> Measured {
-    let measured = measured_text(source, gutter);
-    let own;
-    let whole = if let (Some(shaped), Cow::Borrowed(_)) = (shaped, &measured) {
-        shaped
-    } else {
-        own = shape(&gutter.range, &[], &measured);
-        &own
-    };
-    let start = gutter.range.start;
-    let task = gutter.task.as_ref().map(|task| {
-        let x = whole.x_for_index(task.checkbox.start - start)
-            ..whole.x_for_index(task.checkbox.end - start);
-        let text = &source[task.start - start..task.run - start];
-        let blank = text.bytes().all(|byte| matches!(byte, b' ' | b'\t'));
-        let lead = (!blank).then(|| {
-            let hidden: Vec<Hidden> = lead
-                .iter()
-                .map(|conceal| {
-                    let within = |offset| ByteOffset::new(offset - task.start);
-                    (
-                        within(conceal.marker.start)..within(conceal.marker.end),
-                        conceal.replacement,
-                    )
-                })
-                .collect();
-            Rc::new(shape(&(task.start..task.run), &hidden, text))
-        });
-        TaskShape { x, lead }
-    });
-    Measured {
-        geometry: Geometry::measure(gutter, whole, split),
-        task,
-    }
-}
-
-/// What a gutter measures: its text with its box's middle byte an `X`, the widest state, so every
-/// state paints inside one width and a toggle never changes it (task boxes spec, D3, C).
-pub(super) fn measured_text<'s>(source: &'s str, gutter: &Gutter) -> Cow<'s, str> {
-    match &gutter.task {
-        Some(task) => {
-            let middle = task.checkbox.start - gutter.range.start + 1;
-            let mut text = source.to_owned();
-            text.replace_range(middle..=middle, "X");
-            Cow::Owned(text)
-        }
-        None => Cow::Borrowed(source),
     }
 }
 
 impl Geometry {
-    fn measure(gutter: &Gutter, shaped: &ShapedLine, split: usize) -> Self {
+    /// From the quote part's own shape; `None` with no `>`.
+    fn measure(gutter: &Gutter, quote: Option<&ShapedLine>) -> Self {
         let start = gutter.range.start;
+        let x = |index| quote.map_or(px(0.), |shaped| shaped.x_for_index(index));
+        let quote_width = quote.map_or(px(0.), ShapedLine::width);
         Self {
-            width: shaped.width(),
+            width: quote_width,
             bars: gutter
                 .quotes
                 .iter()
-                .map(|quote| shaped.x_for_index(*quote - start))
+                .map(|quote| x(*quote - start))
                 .collect(),
-            quote_width: shaped.x_for_index(split),
+            quote_width,
         }
     }
 

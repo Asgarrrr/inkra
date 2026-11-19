@@ -3,11 +3,13 @@
 
 use std::rc::Rc;
 
-use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, size};
+use gpui::{
+    Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px, size,
+};
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
-use super::prefix::{self, Prefix, TaskBox};
+use super::prefix::{self, Paint, Prefix};
 use crate::theme::TASK_BOX_SIZE;
 
 #[cfg(test)]
@@ -25,7 +27,7 @@ pub(crate) fn line_shape_count() -> usize {
 pub(super) struct LineShape {
     pub(super) wrapped: WrappedLine,
     text: SharedString,
-    font_size: Pixels,
+    pub(super) font_size: Pixels,
     pub(super) runs: Vec<TextRun>,
     wrap: Option<Pixels>,
 }
@@ -86,7 +88,8 @@ pub(super) struct LineLayout {
     pub(super) display: DisplayLine,
     pub(super) rows: Vec<Row>,
     pub(super) row_height: Pixels,
-    /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
+    /// Kept out of the shaped text in both states; an item part's reveal can widen it, so the line
+    /// rewraps.
     pub(super) prefix: Option<Prefix>,
     /// The language a block's opening line shows at its right.
     pub(super) label: Option<Rc<ShapedLine>>,
@@ -100,14 +103,37 @@ impl LineLayout {
         prefix::indent(self.prefix.as_ref())
     }
 
-    /// The square a concealed task paints and a click hits, from the line's origin: centred on its
-    /// checkbox and on row 0 (task boxes spec, D4).
-    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &TaskBox)> {
-        let task = self.prefix.as_ref()?.task_box()?;
-        let x = &task.shape.x;
-        let centre = point((x.start + x.end) / 2., self.row_height / 2.);
-        let square = Bounds::centered_at(centre, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
-        Some((square, task))
+    /// The square a concealed box paints and a click hits, from the line's origin: from its slot's
+    /// left, centred on row 0 (task boxes spec, D4).
+    pub(super) fn task_box(&self) -> Option<Bounds<Pixels>> {
+        let mark = self.prefix.as_ref()?.marks().last()?;
+        matches!(mark.paint, Paint::Box { .. }).then(|| self.box_square(mark.x))
+    }
+
+    /// The text's ascent and descent: the largest of its runs' fonts at its size, as `gpui_apple`
+    /// lays a line out (`text_system.rs:567-570`). An empty line keeps one run, and its shape, with
+    /// no glyph, reports neither (task boxes spec, D4).
+    pub(super) fn text_metrics(&self, window: &Window) -> (Pixels, Pixels) {
+        let text_system = window.text_system();
+        let size = self.shape.font_size;
+        self.shape
+            .runs
+            .iter()
+            .fold((px(0.), px(0.)), |(ascent, descent), run| {
+                let font = text_system.resolve_font(&run.font);
+                // A font's descent lies below the baseline, so it is negative.
+                let below = -text_system.descent(font, size);
+                (
+                    ascent.max(text_system.ascent(font, size)),
+                    descent.max(below),
+                )
+            })
+    }
+
+    /// The box's square at `x`, centred on row 0.
+    pub(super) fn box_square(&self, x: Pixels) -> Bounds<Pixels> {
+        let top = (self.row_height - TASK_BOX_SIZE) / 2.;
+        Bounds::new(point(x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE))
     }
 }
 

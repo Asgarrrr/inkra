@@ -19,7 +19,7 @@ use gpui::{
     Window,
 };
 use inkra_editor::{EditorState, Selection};
-use inkra_text::{Buffer, ByteOffset, Diff, Utf16Offset};
+use inkra_text::{Bias, Buffer, ByteOffset, Diff, Utf16Offset};
 
 use crate::editor::layout::DocumentLayout;
 use crate::one_line::one_line;
@@ -159,6 +159,11 @@ impl TextInput {
         self.last_layout = Some(layout);
     }
 
+    /// Moves the selection out of what `snap` forbids, after the text changed.
+    pub(crate) fn snap(&mut self, snap: impl Fn(ByteOffset, Bias) -> ByteOffset) {
+        self.state.snap(snap);
+    }
+
     /// A change from disk: the selection and the composition follow their text.
     pub(crate) fn map_through(&mut self, diff: &Diff) {
         self.state.map_through(diff);
@@ -186,6 +191,8 @@ pub(crate) trait InputHost: Render + Sized {
     fn after_edit(&mut self, edited: bool, window: &mut Window, cx: &mut Context<Self>);
     /// After every `move_cursor`; `old` is the selection before the move.
     fn after_move(&mut self, old: Range<ByteOffset>, window: &mut Window, cx: &mut Context<Self>);
+    /// Where a caret may rest in the text as last parsed, for `EditorState`'s moves and deletions.
+    fn snap(&self) -> impl Fn(ByteOffset, Bias) -> ByteOffset + 'static;
 
     /// The only path that mutates the text. The lease notifies the buffer's
     /// observers on drop; it is dropped before `after_edit`, which may read the buffer.

@@ -7,7 +7,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Parser, Tag};
 
 use crate::cmark::options;
-use crate::gutters::marker_start;
+use crate::items::marker_start;
 use crate::parse::without_line_ending;
 use crate::spans::{line_start, to_offsets};
 
@@ -48,6 +48,11 @@ impl Collector {
             }
             _ => {}
         }
+    }
+
+    /// Each item's marker so far, in document order.
+    pub(crate) fn items(&self) -> &[ByteOffset] {
+        &self.structure.items
     }
 
     /// The structure, with `unboxed`, the lines holding a task with no box, merged into `skipped`.

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use gpui::{WindowHandle, point, px};
 
+use super::Scene;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -35,7 +36,7 @@ second line
 
 Body text after the blocks."#;
 
-pub(super) fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(BLOCKS);
     stage.focus(window);
     stage.keys(window, "cmd-up");
@@ -45,7 +46,7 @@ pub(super) fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-pub(super) fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(BLOCKS);
     stage.focus(window);
     stage.keys(window, "cmd-up");
@@ -55,7 +56,7 @@ pub(super) fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 /// `settings.json` written after the open: the watcher reloads it, as in a live edit.
-pub(super) fn wrapped(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn wrapped(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_vault(&[("blocks.md", BLOCKS)]);
     stage.click_tree_row(window, 0.);
     stage.focus(window);
@@ -72,3 +73,21 @@ fn scroll_blocks(stage: &mut Stage, window: WindowHandle<AppShell>) {
         stage.scroll(window, at, point(px(x), px(0.)));
     }
 }
+
+pub(super) const SCENES: [Scene; 3] = [
+    Scene {
+        name: "code-blocks",
+        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a long line on one row scrolled 240 px and clipped at the background, in a quote past its bars with a long line scrolled 120 px, in a list at the fence column, no language, indented; the language label right-aligned in the opening row; the pointer over the rust block shows its 3 px scroll bar, and the quoted block's bar lingers from its swipe on the test clock",
+        open: concealed,
+    },
+    Scene {
+        name: "code-blocks-revealed",
+        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background and stops at its edges; the caret, scrolled out at column 0, paints nothing",
+        open: revealed,
+    },
+    Scene {
+        name: "code-blocks-wrap",
+        shows: "code_block_wrap on, written to settings.json after the open: every long line wraps inside its background, nothing is clipped, the quoted block wraps past its bars",
+        open: wrapped,
+    },
+];

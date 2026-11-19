@@ -122,14 +122,16 @@ impl EditorView {
     }
 
     pub(super) fn doc_start(&mut self, _: &DocStart, window: &mut Window, cx: &mut Context<Self>) {
+        let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::DocStart, false);
+            state.move_(buffer, LogicalMovement::DocStart, false, snap);
         });
     }
 
     pub(super) fn doc_end(&mut self, _: &DocEnd, window: &mut Window, cx: &mut Context<Self>) {
+        let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, LogicalMovement::DocEnd, false);
+            state.move_(buffer, LogicalMovement::DocEnd, false, snap);
         });
     }
 

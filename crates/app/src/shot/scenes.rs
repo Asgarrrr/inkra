@@ -437,31 +437,6 @@ const CATALOGUE: &[Scene] = &[
         open: command_palette::theme_picker,
     },
     Scene {
-        name: "markdown-blocks",
-        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line at the quote's edge, and wrapped: each task's own bullet hidden under a box on its first row, an ordered task's number before its box with no gap, `•` before the box of a task after a bullet, open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw",
-        open: markdown_blocks::concealed,
-    },
-    Scene {
-        name: "markdown-blocks-revealed",
-        shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
-        open: markdown_blocks::revealed,
-    },
-    Scene {
-        name: "code-blocks",
-        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a long line on one row scrolled 240 px and clipped at the background, in a quote past its bars with a long line scrolled 120 px, in a list at the fence column, no language, indented; the language label right-aligned in the opening row; the pointer over the rust block shows its 3 px scroll bar, and the quoted block's bar lingers from its swipe on the test clock",
-        open: code_blocks::concealed,
-    },
-    Scene {
-        name: "code-blocks-revealed",
-        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background and stops at its edges; the caret, scrolled out at column 0, paints nothing",
-        open: code_blocks::revealed,
-    },
-    Scene {
-        name: "code-blocks-wrap",
-        shows: "code_block_wrap on, written to settings.json after the open: every long line wraps inside its background, nothing is clipped, the quoted block wraps past its bars",
-        open: code_blocks::wrapped,
-    },
-    Scene {
         name: "todo-marks",
         shows: "three TODOs in the warning colour from a decoration layer, one inside **bold** with the caret in it: its revealed `**` stay dimmed",
         open: decorations::todo_marks,
@@ -469,7 +444,11 @@ const CATALOGUE: &[Scene] = &[
 ];
 
 pub(crate) fn catalogue() -> impl Iterator<Item = &'static Scene> {
-    CATALOGUE.iter().chain(&code_highlighting::SCENES)
+    CATALOGUE
+        .iter()
+        .chain(&markdown_blocks::SCENES)
+        .chain(&code_blocks::SCENES)
+        .chain(&code_highlighting::SCENES)
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {

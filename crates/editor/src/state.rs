@@ -5,6 +5,10 @@ use inkra_text::{Bias, Buffer, ByteOffset, Diff, Utf16Offset};
 
 use crate::selection::{Goal, Selection};
 
+pub use clipboard::Copied;
+
+mod clipboard;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalMovement {
     Left,
@@ -21,10 +25,10 @@ enum Direction {
     Forward,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Copied {
-    pub text: String,
-    pub whole_line: bool,
+/// The snap of a host whose caret may rest at every offset.
+#[must_use]
+pub fn no_snap(offset: ByteOffset, _: Bias) -> ByteOffset {
+    offset
 }
 
 #[derive(Debug, Clone)]
@@ -133,88 +137,43 @@ impl EditorState {
         if let Some(selected) = selected_utf16 {
             let inserted_at = buffer.to_utf16(start);
             let cursor = buffer.from_utf16(inserted_at + selected.end);
-            self.move_to(buffer, cursor, false);
+            // On the new text, which the host snaps once it parses it.
+            self.move_to(buffer, cursor, false, no_snap);
         }
     }
 
-    /// What `⌘C` takes. Read-only: a copy must not repaint or mark the note dirty.
-    #[must_use]
-    pub fn copy(&self, buffer: &Buffer) -> Copied {
-        self.target(buffer).1
+    /// `snap` moves an offset where no caret may rest to the edge its bias picks, so a step over
+    /// such a run removes it whole.
+    pub fn backspace(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.remove(buffer, now, Direction::Backward, snap);
     }
 
-    /// `copy`, then removes what it took in a step of its own, so it can't swallow adjacent typing.
-    pub fn cut(&mut self, buffer: &mut Buffer) -> Copied {
-        let (range, copied) = self.target(buffer);
-        self.edit_ungrouped(buffer, range, "");
-        copied
+    pub fn delete(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.remove(buffer, now, Direction::Forward, snap);
     }
 
-    pub fn paste(&mut self, buffer: &mut Buffer, copied: &Copied) {
-        // An empty paste must not replace the selection with nothing.
-        if copied.text.is_empty() {
-            return;
-        }
-
-        if copied.whole_line && self.selection.is_empty() {
-            let caret = self.cursor();
-            let start = self.line(buffer).start;
-            self.edit_ungrouped(buffer, start..start, &copied.text);
-            // The insertion sits before the caret, so it keeps its column; `edit_ungrouped` alone would reset it to line start.
-            self.selection
-                .collapse_to(caret + copied.text.len(), Goal::None);
-        } else {
-            self.edit_ungrouped(buffer, self.selection.range(), &copied.text);
-        }
-    }
-
-    /// On an unterminated last line, the text gains a `\n` the range doesn't cover, so a
-    /// whole-line item is always a whole line, even pasted straight back.
-    fn target(&self, buffer: &Buffer) -> (Range<ByteOffset>, Copied) {
-        if !self.selection.is_empty() {
-            let range = self.selection.range();
-            let text = buffer.slice(range.start..range.end).to_string();
-            return (
-                range,
-                Copied {
-                    text,
-                    whole_line: false,
-                },
-            );
-        }
-
-        let line = self.line(buffer);
-        // `line_range` stops before the newline, so at most one terminator byte follows it.
-        let terminated = line.end < buffer.len();
-        let end = if terminated { line.end + 1 } else { line.end };
-        let mut text = buffer.slice(line.start..end).to_string();
-        if !terminated {
-            text.push('\n');
-        }
-
-        (
-            line.start..end,
-            Copied {
-                text,
-                whole_line: true,
-            },
-        )
-    }
-
-    pub fn backspace(&mut self, buffer: &mut Buffer, now: Instant) {
-        self.remove(buffer, now, Direction::Backward);
-    }
-
-    pub fn delete(&mut self, buffer: &mut Buffer, now: Instant) {
-        self.remove(buffer, now, Direction::Forward);
-    }
-
-    fn remove(&mut self, buffer: &mut Buffer, now: Instant, direction: Direction) {
+    fn remove(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        direction: Direction,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
         let range = if self.selection.is_empty() {
             let cursor = self.cursor();
             match direction {
-                Direction::Backward => buffer.previous_grapheme(cursor)..cursor,
-                Direction::Forward => cursor..buffer.next_grapheme(cursor),
+                Direction::Backward => snap(buffer.previous_grapheme(cursor), Bias::Left)..cursor,
+                Direction::Forward => cursor..snap(buffer.next_grapheme(cursor), Bias::Right),
             }
         } else {
             self.selection.range()
@@ -225,7 +184,14 @@ impl EditorState {
         }
     }
 
-    pub fn move_(&mut self, buffer: &Buffer, movement: LogicalMovement, extend: bool) {
+    /// `snap` as `backspace` takes it: a step left lands at the run's start, any other at its end.
+    pub fn move_(
+        &mut self,
+        buffer: &Buffer,
+        movement: LogicalMovement,
+        extend: bool,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
         let collapsing = !extend && !self.selection.is_empty();
         let target = match movement {
             LogicalMovement::Left if collapsing => self.selection.start(),
@@ -238,7 +204,11 @@ impl EditorState {
             LogicalMovement::DocStart => ByteOffset::new(0),
             LogicalMovement::DocEnd => buffer.len(),
         };
-        self.move_to(buffer, target, extend);
+        let bias = match movement {
+            LogicalMovement::Left => Bias::Left,
+            _ => Bias::Right,
+        };
+        self.place(buffer, target, bias, extend, Goal::None, snap);
     }
 
     fn line(&self, buffer: &Buffer) -> Range<ByteOffset> {
@@ -246,8 +216,15 @@ impl EditorState {
     }
 
     /// Clears the goal column; a vertical move that must keep one uses `move_vertically` instead.
-    pub fn move_to(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool) {
-        self.place(buffer, offset, extend, Goal::None);
+    /// Lands past a run `snap` forbids, as Home lands at a line's text.
+    pub fn move_to(
+        &mut self,
+        buffer: &Buffer,
+        offset: ByteOffset,
+        extend: bool,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.place(buffer, offset, Bias::Right, extend, Goal::None, snap);
     }
 
     pub fn move_vertically(
@@ -256,16 +233,40 @@ impl EditorState {
         offset: ByteOffset,
         extend: bool,
         goal: Goal,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
     ) {
-        self.place(buffer, offset, extend, goal);
+        self.place(buffer, offset, Bias::Right, extend, goal, snap);
     }
 
-    fn place(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool, goal: Goal) {
-        let offset = buffer.clip(offset);
+    fn place(
+        &mut self,
+        buffer: &Buffer,
+        offset: ByteOffset,
+        bias: Bias,
+        extend: bool,
+        goal: Goal,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        let offset = buffer.clip(snap(offset, bias));
         if extend {
             self.selection.set_head(offset, goal);
         } else {
             self.selection.collapse_to(offset, goal);
+        }
+    }
+
+    /// After the text changed: a caret lands at the end of a run `snap` forbids, a range widens
+    /// over it at both ends.
+    pub fn snap(&mut self, snap: impl Fn(ByteOffset, Bias) -> ByteOffset) {
+        let range = self.selection.range();
+        let snapped = if range.is_empty() {
+            let caret = snap(range.start, Bias::Right);
+            caret..caret
+        } else {
+            snap(range.start, Bias::Left)..snap(range.end, Bias::Right)
+        };
+        if snapped != range {
+            self.selection = Selection::new(snapped, self.selection.reversed());
         }
     }
 
@@ -337,3 +338,6 @@ mod map_tests;
 
 #[cfg(test)]
 mod apply_tests;
+
+#[cfg(test)]
+mod snap_tests;

@@ -17,7 +17,9 @@ pub(crate) use blocks::label_shape_count;
 #[cfg(test)]
 pub(crate) use line::line_shape_count;
 #[cfg(test)]
-pub(crate) use paint::{painted, painted_blocks, painted_boxes, painted_clips, painted_tops};
+pub(crate) use paint::{
+    painted, painted_blocks, painted_boxes, painted_clips, painted_marks, painted_tops,
+};
 pub(crate) use scrolls::BlockScrolls;
 pub(crate) use shape::shape_document;
 #[cfg(test)]
@@ -188,19 +190,6 @@ impl DocumentLayout {
                 Some((*at, shaped.text.to_string()))
             })
             .collect()
-    }
-
-    /// Whether line `line`'s prefix paints its source text.
-    #[cfg(test)]
-    pub(crate) fn prefix_painted(&self, line: usize) -> bool {
-        self.prefix_shown(line).is_some()
-    }
-
-    /// The source text line `line`'s prefix paints, and its `x` relative to the text.
-    #[cfg(test)]
-    pub(crate) fn prefix_shown(&self, line: usize) -> Option<(&str, Pixels)> {
-        let prefix = self.lines[line].line.prefix.as_ref()?;
-        prefix.shown().map(|(shaped, x)| (shaped.text.as_ref(), x))
     }
 
     pub(crate) fn height(&self) -> Pixels {

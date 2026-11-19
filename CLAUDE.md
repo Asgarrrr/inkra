@@ -138,7 +138,8 @@ Read the spec before changing its area:
   markdown styling and concealment
 - `docs/superpowers/specs/2026-09-30-markdown-blocks-design.md` — quote
   gutters and bars, code backgrounds; its S3 is superseded by
-  `2026-11-16-task-boxes-design.md` — the box, the click, the strike, `⌘L`
+  `2026-11-16-task-boxes-design.md` — the box, the click, the strike, `⌘L`; list items in the
+  gutter: slots, nesting, an item's other lines
 - `docs/superpowers/specs/2026-11-07-code-blocks-design.md` — fenced and
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
 - `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's

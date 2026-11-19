@@ -8,7 +8,6 @@ use gpui::{
 use inkra_markdown::{DisplayLine, Span, Styles};
 use inkra_text::ByteOffset;
 
-use super::prefix::Hidden;
 use crate::decorations::Drawn;
 use crate::theme::{self, ColorToken, Theme};
 
@@ -141,33 +140,50 @@ pub(super) fn line_runs(
     runs
 }
 
-/// Shaped through `line_runs` like the body, so its weight, dim and IME underline match.
-/// `source` is what `range` holds: its own bytes, or as many others; `hidden` is what it shows
-/// otherwise, from `range`'s start.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the body's shaping inputs, borrowed apart from the build that owns them"
-)]
+/// What a prefix shapes.
+#[derive(Clone, Copy)]
+pub(super) enum Shape<'s> {
+    /// A range of the line, `source` being its bytes, through `line_runs` like the body, so its
+    /// weight, dim and IME underline match.
+    Source {
+        range: &'s Range<ByteOffset>,
+        source: &'s str,
+        size: Pixels,
+    },
+    /// A `•`, a number or a width key's widest number, styled `MARKER` alone: `MARKER` colours a
+    /// run whatever else it carries, so the text alone keys the shape (task boxes spec, D3).
+    Mark { text: &'s str, size: Pixels },
+}
+
 pub(super) fn show(
-    range: &Range<ByteOffset>,
-    hidden: &[Hidden],
-    source: &str,
+    shape: Shape<'_>,
     spans: &[Span],
     marked: Option<&Range<ByteOffset>>,
-    font_size: Pixels,
     styles: &mut RunStyles<'_>,
     window: &mut Window,
 ) -> ShapedLine {
-    let len = range.end - range.start;
-    let display = DisplayLine::new(
-        ByteOffset::default()..ByteOffset::new(len),
-        hidden.iter().cloned(),
-    );
-    let runs = line_runs(range, spans, marked, &display, styles);
-    let text = SharedString::from(display.text(source).into_owned());
+    let (text, size, runs) = match shape {
+        Shape::Source {
+            range,
+            source,
+            size,
+        } => {
+            let len = range.end - range.start;
+            let display = DisplayLine::new(ByteOffset::default()..ByteOffset::new(len), []);
+            (
+                source,
+                size,
+                line_runs(range, spans, marked, &display, styles),
+            )
+        }
+        Shape::Mark { text, size } => {
+            let key = RunStyles::key(Styles::MARKER, false, None);
+            (text, size, vec![styles.run(key, text.len())])
+        }
+    };
     window
         .text_system()
-        .shape_line(text, font_size, &runs, None)
+        .shape_line(SharedString::from(text.to_owned()), size, &runs, None)
 }
 
 #[cfg(test)]

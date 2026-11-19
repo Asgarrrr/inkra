@@ -6,6 +6,7 @@ mod motion;
 mod mouse;
 mod parked;
 pub(crate) mod parses;
+mod pin;
 mod reload;
 mod swap;
 #[cfg(test)]
@@ -25,7 +26,7 @@ use gpui::{
 };
 use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
-use inkra_text::{Buffer, ByteOffset, Version};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
 
 use crate::decorations;
 use crate::open::Open;
@@ -112,10 +113,10 @@ impl EditorView {
             (Selection::at(ByteOffset::new(0)), None, Vec::new()),
             |view| (view.selection, Some(view.top), view.scrolls),
         );
-        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
-        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
+        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         self.refresh(cx);
     }
 
@@ -144,6 +145,8 @@ impl EditorView {
                     self.input.reset_state(peeked);
                 }
             }
+            // An edit places its caret on text not yet parsed (task boxes spec, D2).
+            self.snap_selection(cx);
         }
         let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
             self.is_block_start(offset)
@@ -155,48 +158,6 @@ impl EditorView {
                 }
             });
         }
-    }
-
-    /// Seals the undo group even with no edit, as `capture` does, and parks the selection.
-    pub(crate) fn pin(&mut self, cx: &mut Context<Self>) {
-        if self.pinned.is_some() {
-            return;
-        }
-        let selection = self.input.state().selection();
-        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
-        let pinned = self.input.buffer().update(cx, |buffer, _| {
-            buffer.finalize_transaction();
-            ParkedSelection::park(selection, buffer)
-        });
-        self.pinned = Some(pinned);
-    }
-
-    pub(crate) fn unpin(&mut self, cx: &mut Context<Self>) {
-        self.drop_pin(cx);
-    }
-
-    pub(crate) fn is_pinned(&self) -> bool {
-        self.pinned.is_some()
-    }
-
-    /// Forgets the anchors unread: every buffer version already reset the selection to them.
-    fn drop_pin(&mut self, cx: &mut App) -> bool {
-        let Some(pinned) = self.pinned.take() else {
-            return false;
-        };
-        let _ = self
-            .input
-            .buffer()
-            .update(cx, |buffer, _| pinned.unpark(buffer));
-        true
-    }
-
-    /// The selection as anchors in the bound buffer, unsealed: the pin it replaces already sealed.
-    fn park_selection(&self, cx: &mut App) -> ParkedSelection {
-        let selection = self.input.state().selection();
-        self.input
-            .buffer()
-            .update(cx, |buffer, _| ParkedSelection::park(selection, buffer))
     }
 
     /// Covers writes that bypass `edit_buffer`; tests make them today.
@@ -399,6 +360,11 @@ impl InputHost for EditorView {
             self.reshape(window, cx);
         }
         self.reveal_cursor(Reveal::Minimal, cx);
+    }
+
+    fn snap(&self) -> impl Fn(ByteOffset, Bias) -> ByteOffset + 'static {
+        let markdown = Rc::clone(&self.markdown);
+        move |offset, bias| markdown.snap(offset, bias)
     }
 }
 

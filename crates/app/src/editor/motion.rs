@@ -23,9 +23,12 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, buffer.clip_grapheme(range.start, Bias::Left), false);
-            state.move_to(buffer, buffer.clip_grapheme(range.end, Bias::Right), true);
+            let start = buffer.clip_grapheme(range.start, Bias::Left);
+            let end = buffer.clip_grapheme(range.end, Bias::Right);
+            state.move_to(buffer, start, false, &snap);
+            state.move_to(buffer, end, true, &snap);
         });
         // Over the gate's minimal reveal: the last reveal decides the offset, before any paint.
         self.reveal_cursor(Reveal::Center, cx);
@@ -42,9 +45,10 @@ impl EditorView {
             return;
         };
         let goal = self.input.state().selection().goal();
+        let snap = self.snap();
         if let Some((offset, goal)) = vertical(layout.as_ref(), self.cursor(), goal, direction) {
             self.move_cursor(window, cx, |state, buffer| {
-                state.move_vertically(buffer, offset, extend, goal);
+                state.move_vertically(buffer, offset, extend, goal, snap);
             });
             return;
         }
@@ -55,7 +59,7 @@ impl EditorView {
             Vertical::Down => LogicalMovement::DocEnd,
         };
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_(buffer, movement, extend);
+            state.move_(buffer, movement, extend, snap);
         });
     }
 }

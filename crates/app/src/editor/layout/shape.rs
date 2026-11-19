@@ -64,7 +64,7 @@ pub(crate) fn shape_document(
         text,
         styles: RunStyles::new(style, theme, &inputs.decorations),
         labels: Labels::new(style, theme),
-        gutter_carry: GutterCarry::new(body_size),
+        gutter_carry: GutterCarry::new(body_size, &markdown.width_keys),
         body: (body_size, body_height),
         spans: &markdown.spans,
         conceals: &markdown.conceals,
@@ -211,11 +211,7 @@ impl Build<'_, '_> {
             heading_opening(heading, range, text, font_size, margin),
             line_conceals,
             selection,
-            |range, hidden, source, size| {
-                show(
-                    range, hidden, source, line_spans, marked, size, styles, window,
-                )
-            },
+            |shape| show(shape, line_spans, marked, styles, window),
         );
         let display = display_line(
             range,
@@ -404,8 +400,8 @@ fn line_items<'a, T>(
     line
 }
 
-/// Over the line's own offsets. The prefix never enters the shaped text, so no reveal can re-wrap
-/// its line.
+/// Over the line's own offsets. The prefix never enters the shaped text, so a reveal changes only
+/// the wrap width, where it widens a gutter.
 fn display_line(
     range: &Range<ByteOffset>,
     conceals: &[Conceal],
