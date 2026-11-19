@@ -229,6 +229,8 @@ fn a_code_blocks_lines_take_the_item_part_and_other_blank_lines_none() {
         gutters.map(|gutter| gutter.range.start.get()).collect()
     };
     assert_eq!(starts(text), [0, 5, 11, 15, 18, 25]);
+    // An open fence ends at its last blank line's start, which it still holds.
+    assert_eq!(starts("- a\n\n  ```\n  x\n\n"), [0, 5, 11, 15]);
     assert_eq!(starts("- a\n\n  b"), [0, 5]);
     assert_eq!(starts("> - a\n>\n>   b").len(), 3);
     assert_eq!(line_part("> - a\n>\n>   b", 1), None);
