@@ -106,7 +106,10 @@ const LISTS: &str = "8. Eight\n\
 fn caret_on_a_nested_bullet(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(LISTS);
     stage.focus(window);
-    stage.keys(window, "cmd-up down down down down down down down down home");
+    stage.keys(
+        window,
+        "cmd-up down down down down down down down down home",
+    );
     window
 }
 
