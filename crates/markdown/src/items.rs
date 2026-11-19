@@ -197,11 +197,9 @@ impl Items {
             gutter.range.end = ByteOffset::new(end);
             gutter.item = Some(item);
             walk.out.push(gutter);
-            walk.held.extend(opening.iter().map(|record| Held {
-                record,
-                marker_line: line..end,
-                hang: None,
-            }));
+            let hang = column_after(0, &text.as_bytes()[line..end]);
+            walk.held
+                .extend(opening.iter().map(|record| Held { record, hang }));
             next = text.as_bytes()[end..]
                 .iter()
                 .position(|&byte| byte == b'\n')
@@ -242,10 +240,8 @@ impl Items {
 /// A gutter item holding the lines the walk visits.
 struct Held<'r> {
     record: &'r Record,
-    /// From its marker line's start through that line's item part.
-    marker_line: Range<usize>,
-    /// The column after its marker line's item part, computed at its first other line (D11).
-    hang: Option<usize>,
+    /// The column after its marker line's item part (D11).
+    hang: usize,
 }
 
 /// The walk's cursors, each moving forward only: the quote lines not yet given out, the code
@@ -287,12 +283,11 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
         let text = self.text;
         let bytes = text.as_bytes();
         let mut next = from;
-        // Holders are released and checked before the line's end is searched, so an empty hold
-        // scans nothing.
+        // Holders are released and checked first: an empty hold searches no line end (D1).
         while next < to {
             let line = next;
             self.release(line);
-            let Some(innermost) = self.held.last_mut() else {
+            let Some(&Held { hang, .. }) = self.held.last() else {
                 return;
             };
             let end = bytes[line..]
@@ -300,9 +295,6 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
                 .position(|&byte| byte == b'\n')
                 .map_or(text.len(), |len| line + len);
             next = end + 1;
-            let hang = *innermost
-                .hang
-                .get_or_insert_with(|| column_after(0, &bytes[innermost.marker_line.clone()]));
             let quoted = self.quote_line(line);
             let start = quoted
                 .as_ref()
