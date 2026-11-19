@@ -20,8 +20,8 @@ pub struct Markdown {
     pub conceals: Vec<Conceal>,
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
-    /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
-    /// held by a gutter item (task boxes spec, D11).
+    /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or held
+    /// by a gutter item and not blank outside a code block (task boxes spec, D11).
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
