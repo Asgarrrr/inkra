@@ -41,12 +41,12 @@ pub(super) struct Marks<'a> {
 }
 
 impl<'a> Marks<'a> {
-    /// The marks of `item`, whose text is `part` and whose width keys are `numbers`, from `x`, and
+    /// The marks of `item`, whose text is `part` and whose width keys are `keys`, from `x`, and
     /// the text start past its slots. `shape` shapes a mark's text.
     pub(super) fn layout(
         &mut self,
         item: &ItemPart,
-        numbers: &[WidthKey],
+        keys: &[WidthKey],
         part: &'a str,
         x: Pixels,
         mut shape: impl FnMut(&str) -> ShapedLine,
@@ -57,7 +57,7 @@ impl<'a> Marks<'a> {
             .filter(|mark| matches!(mark, ItemMarker::Number(_)))
             .count();
         // The blank slots' keys come first, then one per number mark, in order (D1).
-        let (blank, mut keys) = numbers.split_at(numbers.len() - numbered);
+        let (blank, mut marked_keys) = keys.split_at(keys.len() - numbered);
         let blank_slots: Pixels =
             std::iter::repeat_n(standard_slot(), item.indent - blank.len()).sum();
         let blank_numbers: Pixels = blank
@@ -71,10 +71,10 @@ impl<'a> Marks<'a> {
                 ItemMarker::Bullet => ("•", standard_slot()),
                 ItemMarker::Number(range) => {
                     let text = &part[range.start - item.start..range.end - item.start];
-                    let [key, rest @ ..] = keys else {
+                    let [key, rest @ ..] = marked_keys else {
                         unreachable!("the parse gives each number mark its key (D1)");
                     };
-                    keys = rest;
+                    marked_keys = rest;
                     (text, self.slot(*key, &mut |text| advances(&shape(text))))
                 }
             };

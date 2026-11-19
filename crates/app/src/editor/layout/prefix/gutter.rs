@@ -186,10 +186,10 @@ impl<'a> GutterCarry<'a> {
         };
         let marks = gutter.item.as_ref().map(|item| {
             let part = &source[reveal.split..];
-            let numbers = &self.width_keys[item.numbers.clone()];
+            let keys = &self.width_keys[item.keys.clone()];
             let (marks, width) =
                 self.marks
-                    .layout(item, numbers, part, geometry.quote_width, |text| {
+                    .layout(item, keys, part, geometry.quote_width, |text| {
                         shape(Shape::Mark { text, size })
                     });
             geometry.width = width;

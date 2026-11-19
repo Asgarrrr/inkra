@@ -184,7 +184,7 @@ impl Item for Gutter {
                 (Some(old), Some(new)) => {
                     map(old.start, Bias::Right) == new.start
                         && old.indent == new.indent
-                        && keys[0][old.numbers.clone()] == keys[1][new.numbers.clone()]
+                        && keys[0][old.keys.clone()] == keys[1][new.keys.clone()]
                         && match (&old.task, &new.task) {
                             (Some(old), Some(new)) => {
                                 mapped(&old.checkbox, &map) == new.checkbox

@@ -275,7 +275,7 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
             item: item.clone().map(|(start, indent, numbers, task)| ItemPart {
                 start: ByteOffset::new(start),
                 indent,
-                numbers: 0..numbers.len(),
+                keys: 0..numbers.len(),
                 task,
             }),
         }],
@@ -389,7 +389,7 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
                 .task
                 .as_ref()
                 .map(|task| (span(&task.checkbox), task.checked));
-            let numbers = &markdown.width_keys[part.numbers.clone()];
+            let numbers = &markdown.width_keys[part.keys.clone()];
             (rel(part.start), part.indent, numbers, task)
         });
         push(&(span(&item.range), quotes, item.depth, part));

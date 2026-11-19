@@ -28,8 +28,8 @@ pub struct ItemPart {
     /// on an earlier line (D11).
     pub indent: usize,
     /// Where `Markdown::width_keys` holds the width key of each number slot on the line, blank or
-    /// marked, in slot order; empty under no ordered list (D3, Open question 10).
-    pub numbers: Range<usize>,
+    /// marked, in slot order; empty under no ordered list (D1, D3).
+    pub keys: Range<usize>,
     /// The box, when the innermost gutter item opening on the line is a task.
     pub task: Option<Task>,
 }

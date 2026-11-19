@@ -23,7 +23,7 @@ pub struct Markdown {
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or held
     /// by a gutter item and not blank outside a code block (task boxes spec, D11).
     pub gutters: Vec<Gutter>,
-    /// The width keys of every item part, each indexed by its `numbers` (task boxes spec, D1).
+    /// The width keys of every item part, each indexed by its `keys` (task boxes spec, D1).
     pub width_keys: Vec<WidthKey>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
@@ -149,9 +149,8 @@ fn parse_terminated(text: &str) -> Markdown {
     let blocks = code_blocks
         .iter()
         .map(|(range, _)| range.start.get()..range.end.get());
-    let (gutters, width_keys, mut bullets, unboxed) =
-        items.gutters(text, &quotes, structure.items(), blocks);
-    cut(text, &mut out.spans, &gutters);
+    let mut walked = items.gutters(text, &quotes, structure.items(), blocks);
+    cut(text, &mut out.spans, &walked.gutters);
     let code_blocks = code_blocks
         .into_iter()
         .map(|(range, language)| {
@@ -165,18 +164,18 @@ fn parse_terminated(text: &str) -> Markdown {
         })
         .collect();
     let mut conceals = out.conceals;
-    conceals.append(&mut bullets);
-    conceals.extend(gutter_conceals(text, &gutters));
+    conceals.append(&mut walked.bullets);
+    conceals.extend(gutter_conceals(text, &walked.gutters));
     // A few sorted runs: the stable sort merges them in near-linear time.
     conceals.sort_by_key(|conceal| conceal.marker.start);
     Markdown {
         spans: out.spans,
         conceals,
         headings,
-        gutters,
-        width_keys,
+        gutters: walked.gutters,
+        width_keys: walked.width_keys,
         code_blocks,
-        structure: structure.finish(unboxed),
+        structure: structure.finish(walked.unboxed),
     }
 }
 

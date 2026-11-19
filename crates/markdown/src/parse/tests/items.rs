@@ -89,7 +89,7 @@ fn a_quoted_item_part_starts_past_the_quote_part() {
 /// Each line's width keys, in slot order.
 fn numbers(text: &str) -> Vec<Vec<WidthKey>> {
     let markdown = parse(text);
-    let keys = |item: &ItemPart| markdown.width_keys[item.numbers.clone()].to_vec();
+    let keys = |item: &ItemPart| markdown.width_keys[item.keys.clone()].to_vec();
     markdown
         .gutters
         .iter()
@@ -155,7 +155,7 @@ fn an_item_part_with_no_mark_has_no_mark_and_an_empty_one_no_conceal() {
     let item = ItemPart {
         start,
         indent: 1,
-        numbers: 0..0,
+        keys: 0..0,
         task: None,
     };
     assert_eq!(item.marks("  ").count(), 0);

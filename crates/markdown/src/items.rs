@@ -9,7 +9,7 @@ use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
-use crate::spans::{line_start, to_offsets};
+use crate::spans::{line_end, line_start, to_offsets};
 
 /// A gutter item as the parse met it.
 struct Record {
@@ -17,7 +17,7 @@ struct Record {
     end: usize,
     /// Its index in `structure.items`, which holds its marker.
     marker: usize,
-    /// Its list's index in `Items::numbers`; `None` in a bullet list.
+    /// Its list's index in `Items::list_keys`; `None` in a bullet list.
     list: Option<usize>,
     task: Option<Task>,
 }
@@ -42,8 +42,8 @@ pub(crate) struct Items {
     count: usize,
     records: Vec<Record>,
     /// Each ordered list's width key, in document order.
-    numbers: Vec<WidthKey>,
-    /// Each open list's index in `numbers`, `None` for a bullet list, innermost last.
+    list_keys: Vec<WidthKey>,
+    /// Each open list's index in `list_keys`, `None` for a bullet list, innermost last.
     open: Vec<Option<usize>>,
     bullets: Vec<Conceal>,
     /// Each line holding a task with no box, in line order, without its `\n`.
@@ -99,9 +99,8 @@ impl Items {
                 }
                 (Event::TaskListMarker(_), None) => {
                     self.bullets.extend(bullet(text, marker));
-                    let line = line_start(text, marker);
-                    let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
-                    self.unboxed.push(line..end);
+                    self.unboxed
+                        .push(line_start(text, marker)..line_end(text, marker));
                 }
                 (_, None) => self.bullets.extend(bullet(text, marker)),
                 (_, Some(_)) => {}
@@ -119,9 +118,9 @@ impl Items {
                 });
             }
             Event::Start(Tag::List(first)) => {
-                self.open.push(first.map(|_| self.numbers.len()));
+                self.open.push(first.map(|_| self.list_keys.len()));
                 if first.is_some() {
-                    self.numbers.push(WidthKey {
+                    self.list_keys.push(WidthKey {
                         digits: 0,
                         delimiter: b'.',
                     });
@@ -135,7 +134,7 @@ impl Items {
                 if let Some(list) = list {
                     let marker = marker_start(text, range.start);
                     let end = marker_end(text, marker) - 1;
-                    let key = &mut self.numbers[list];
+                    let key = &mut self.list_keys[list];
                     // `CommonMark` caps a number at nine digits.
                     key.digits = key
                         .digits
@@ -164,8 +163,8 @@ impl Items {
         done
     }
 
-    /// The gutters, each held line's item part after its quote part, the width keys their item
-    /// parts index, the bullets' conceals, and the lines holding a task with no box. `quotes` are
+    /// The gutters, each held line's item part after its quote part, and what the parse keeps
+    /// beside them. `quotes` are
     /// the leading quotes' ranges, `items` every item's marker and `blocks` every code block's
     /// range without its last `\n`, all in document order. One walk, after the parse's one pass,
     /// so every width key is final (D1).
@@ -175,7 +174,7 @@ impl Items {
         quotes: &[Range<usize>],
         items: &[ByteOffset],
         blocks: impl Iterator<Item = Range<usize>>,
-    ) -> (Vec<Gutter>, Vec<WidthKey>, Vec<Conceal>, Vec<Range<usize>>) {
+    ) -> ItemGutters {
         let quote_lines = quote_gutters(text, quotes);
         let mut walk = Walk {
             text,
@@ -225,14 +224,16 @@ impl Items {
             let hang = column_after(0, &text.as_bytes()[line..end]);
             walk.held
                 .extend(opening.iter().map(|record| Held { record, hang }));
-            next = text.as_bytes()[end..]
-                .iter()
-                .position(|&byte| byte == b'\n')
-                .map_or(text.len(), |len| end + len + 1);
+            next = line_end(text, end) + 1;
         }
         walk.held_lines(&self, next, text.len());
         walk.out.extend(walk.quote_lines);
-        (walk.out, walk.keys, self.bullets, self.unboxed)
+        ItemGutters {
+            gutters: walk.out,
+            width_keys: walk.keys,
+            bullets: self.bullets,
+            unboxed: self.unboxed,
+        }
     }
 
     /// The item part from `start` of a line that `held` hold and on which `opening` open; its
@@ -251,15 +252,27 @@ impl Items {
             held.iter()
                 .map(|held| held.record)
                 .chain(opening)
-                .filter_map(|item| item.list.map(|list| self.numbers[list])),
+                .filter_map(|item| item.list.map(|list| self.list_keys[list])),
         );
         ItemPart {
             start,
             indent: held.iter().map(|held| columns(held.record)).sum(),
-            numbers: first..keys.len(),
+            keys: first..keys.len(),
             task: opening.last().and_then(|item| item.task.clone()),
         }
     }
+}
+
+/// What the item walk gives the parse.
+pub(crate) struct ItemGutters {
+    /// Every line's gutter, quoted or held, sorted by line.
+    pub(crate) gutters: Vec<Gutter>,
+    /// The width keys the item parts index.
+    pub(crate) width_keys: Vec<WidthKey>,
+    /// The bullets' conceals.
+    pub(crate) bullets: Vec<Conceal>,
+    /// The lines holding a task with no box.
+    pub(crate) unboxed: Vec<Range<usize>>,
 }
 
 /// A gutter item holding the lines the walk visits.
@@ -316,10 +329,7 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
             let Some(&Held { hang, .. }) = self.held.last() else {
                 return;
             };
-            let end = bytes[line..]
-                .iter()
-                .position(|&byte| byte == b'\n')
-                .map_or(text.len(), |len| line + len);
+            let end = line_end(text, line);
             next = end + 1;
             let quoted = self.quote_line(line);
             let start = quoted
