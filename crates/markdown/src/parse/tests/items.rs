@@ -110,6 +110,10 @@ fn a_list_gives_every_number_slot_its_longest_numbers_key() {
         [vec![key(2, b'.')], vec![key(2, b'.')]]
     );
     assert_eq!(numbers("- a\n  1) b"), [vec![], vec![key(1, b')')]]);
+    assert_eq!(
+        numbers("- a\n  1) b\n- c"),
+        [vec![], vec![key(1, b')')], vec![]]
+    );
     assert_eq!(numbers("- a\n- b"), [vec![], vec![]]);
 }
 

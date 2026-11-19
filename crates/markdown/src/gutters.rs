@@ -149,10 +149,9 @@ pub(crate) fn quote_gutters(text: &str, quotes: &[Range<usize>]) -> Vec<Gutter> 
             }
             continue;
         }
-        let continued = open.len();
         open.extend(rest[..entering].iter().map(|quote| quote.end));
         rest = &rest[entering..];
-        gutters.push(gutter(text, start..end, open.len(), continued));
+        gutters.push(gutter(text, start..end, open.len()));
         open.retain(|&quote_end| end < quote_end);
     }
     gutters
@@ -167,12 +166,11 @@ pub(crate) fn gutter_at(start: usize, depth: usize) -> Gutter {
     }
 }
 
-/// One `>` per open quote, outermost first; the first `continued` continue a quote from an earlier
-/// line. Blanks count in columns as pulldown-cmark's `LineStart` counts them (D1): a continued
-/// quote takes up to three columns before its `>`, entering a tab whole (`parse.rs:1515-1518`); an
-/// opening one needs its blanks within three (`firstpass.rs:109-114`). The first `>` missing makes
-/// the line lazy from there on.
-fn gutter(text: &str, line: Range<usize>, depth: usize, continued: usize) -> Gutter {
+/// One `>` per open quote, outermost first. Blanks count in columns as pulldown-cmark's `LineStart`
+/// counts them (D1): a `>` takes up to three columns before it, entering a tab whole
+/// (`parse.rs:1515-1518`); a quote opens only within three (`firstpass.rs:109-114`), where the same
+/// scan finds it. The first `>` missing makes the line lazy from there on.
+fn gutter(text: &str, line: Range<usize>, depth: usize) -> Gutter {
     let mut blanks = Blanks {
         bytes: &text.as_bytes()[line.clone()],
         at: 0,
@@ -180,15 +178,10 @@ fn gutter(text: &str, line: Range<usize>, depth: usize, continued: usize) -> Gut
         left: 0,
     };
     let mut gutter = gutter_at(line.start, depth);
-    for level in 0..depth {
+    for _ in 0..depth {
         let save = blanks;
-        let found = if level < continued {
-            blanks.scan(3);
-            true
-        } else {
-            blanks.scan(4) > 0
-        };
-        if !found || blanks.bytes.get(blanks.at) != Some(&b'>') {
+        blanks.scan(3);
+        if blanks.bytes.get(blanks.at) != Some(&b'>') {
             blanks = save;
             break;
         }
@@ -213,8 +206,8 @@ struct Blanks<'b> {
 }
 
 impl Blanks<'_> {
-    /// Takes up to `columns` columns of blanks; returns how many it did not find.
-    fn scan(&mut self, columns: usize) -> usize {
+    /// Takes up to `columns` columns of blanks.
+    fn scan(&mut self, columns: usize) {
         let taken = self.left.min(columns);
         self.left -= taken;
         let mut columns = columns - taken;
@@ -235,7 +228,6 @@ impl Blanks<'_> {
                 _ => break,
             }
         }
-        columns
     }
 }
 

@@ -78,6 +78,21 @@ fn one_space_or_tab_after_a_marker_joins_the_gutter() {
     assert_eq!(gutters(">a"), vec![(">", vec![0], 1)]);
 }
 
+/// A tab counts to the next tab stop and a `>` takes up to three columns before it, as
+/// pulldown-cmark 0.13.6 reads them: each `>` here is the one it parses as a marker (D1).
+#[test]
+fn a_tab_counts_its_columns_before_and_after_a_marker() {
+    let tab_leads = "> a\n\t> b";
+    assert_eq!(gutters(tab_leads)[1], ("\t>", vec![5], 1));
+    let tab_and_space = "> a\n\t > b";
+    assert_eq!(gutters(tab_and_space)[1], ("", vec![], 1));
+    assert_eq!(gutters(">\t> b"), vec![(">\t> ", vec![0, 2], 2)]);
+    let four_columns = ">\t> a\n>\t  > b";
+    assert_eq!(gutters(four_columns)[1], (">\t", vec![6], 2));
+    let short_tab = "> > a\n\t>  \t> b";
+    assert_eq!(gutters(short_tab)[1], ("\t>  \t> ", vec![7, 11], 2));
+}
+
 #[test]
 fn a_fence_in_a_quote_takes_one_marker_per_quote() {
     assert_eq!(
