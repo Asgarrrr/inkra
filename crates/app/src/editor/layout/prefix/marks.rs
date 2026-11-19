@@ -9,6 +9,8 @@ use inkra_markdown::{ItemMarker, ItemPart, WidthKey};
 
 use crate::theme::{LIST_SLOT_GAP, TASK_BOX_SIZE};
 
+const DIGITS: &str = "0123456789";
+
 /// The standard slot: the box and its gap.
 fn standard_slot() -> Pixels {
     TASK_BOX_SIZE + LIST_SLOT_GAP
@@ -105,13 +107,11 @@ impl<'a> Marks<'a> {
             return slot;
         }
         let digit = *self.widest_digit.get_or_insert_with(|| {
-            const DIGITS: &str = "0123456789";
             let digits = shape(DIGITS);
-            let advance = |index: usize| digits.x_for_index(index + 1) - digits.x_for_index(index);
-            let widest = DIGITS
-                .char_indices()
-                .max_by_key(|&(index, _)| advance(index));
-            widest.map_or('0', |(_, digit)| digit)
+            let starts: Vec<Pixels> = (0..=DIGITS.len())
+                .map(|index| digits.x_for_index(index))
+                .collect();
+            widest_digit(&starts)
         });
         let mut widest: String = std::iter::repeat_n(digit, usize::from(key.digits)).collect();
         widest.push(char::from(key.delimiter));
@@ -120,3 +120,16 @@ impl<'a> Marks<'a> {
         slot
     }
 }
+
+/// The digit of `DIGITS` with the widest advance; `starts` holds each glyph's `x`, then the end.
+fn widest_digit(starts: &[Pixels]) -> char {
+    let advances = starts.windows(2).map(|pair| pair[1] - pair[0]);
+    let widest = DIGITS
+        .chars()
+        .zip(advances)
+        .max_by_key(|&(_, advance)| advance);
+    widest.map_or('0', |(digit, _)| digit)
+}
+
+#[cfg(test)]
+mod tests;
