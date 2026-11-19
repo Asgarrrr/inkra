@@ -195,6 +195,7 @@ fn an_items_other_lines_hide_their_blanks_below_its_hang_column() {
         ("> - a\nb", 1, "", 1),
         ("1. [ ] a\n   b", 1, "   ", 2),
         ("- a\n  > - b", 1, "  ", 1),
+        ("- a\n  ```\n  x\n  ```\n  b\n    c", 5, "  ", 1),
     ] {
         assert_eq!(
             line_part(text, line),
@@ -281,6 +282,7 @@ fn an_html_line_in_an_item_hides_its_blanks_up_to_its_html() {
         ("- [ ] a\n\n  <div>\n      x\n  </div>", 3, "  "),
         ("- [ ] a\n\n  <div>\n      x\n  </div>", 4, "  "),
         ("- [ ] a\n\n   <div>\n   x", 2, "  "),
+        ("- a\n\n  <!--\n\n  -->", 3, ""),
     ] {
         assert_eq!(
             line_part(text, line),

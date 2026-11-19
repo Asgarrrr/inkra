@@ -48,11 +48,9 @@ pub(crate) struct Items {
     bullets: Vec<Conceal>,
     /// Each line holding a task with no box, in line order, without its `\n`.
     unboxed: Vec<Range<usize>>,
-    /// The furthest end of a gutter item opened so far: no gutter item holds a line past it.
-    held_until: usize,
     /// Whether a code or an HTML block is open.
     in_leaf: bool,
-    /// Each text event of a code or an HTML block a gutter item holds, in order (D11).
+    /// Each text event of a code or an HTML block, in order (D11).
     leaf_texts: Vec<LeafText>,
 }
 
@@ -109,9 +107,7 @@ impl Items {
         match event {
             Event::Start(Tag::CodeBlock(_) | Tag::HtmlBlock) => self.in_leaf = true,
             Event::End(TagEnd::CodeBlock | TagEnd::HtmlBlock) => self.in_leaf = false,
-            Event::Text(leaf) | Event::Html(leaf)
-                if self.in_leaf && range.start < self.held_until =>
-            {
+            Event::Text(leaf) | Event::Html(leaf) if self.in_leaf => {
                 self.leaf_texts.push(LeafText {
                     start: range.start,
                     leftover: if range.is_empty() { leaf.len() } else { 0 },
@@ -142,7 +138,6 @@ impl Items {
                     key.delimiter = text.as_bytes()[end];
                 }
                 let record = gutter.then(|| {
-                    self.held_until = self.held_until.max(range.end);
                     self.records.push(Record {
                         end: range.end,
                         marker: self.count,
