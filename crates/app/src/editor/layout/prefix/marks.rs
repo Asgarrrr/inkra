@@ -50,27 +50,31 @@ impl<'a> Marks<'a> {
         x: Pixels,
         mut shape: impl FnMut(&str) -> ShapedLine,
     ) -> (Vec<Mark>, Pixels) {
-        let numbered = item
-            .marks(part)
+        let marked: Vec<ItemMarker> = item.marks(part).collect();
+        let numbered = marked
+            .iter()
             .filter(|mark| matches!(mark, ItemMarker::Number(_)))
             .count();
-        // The blank slots' keys come first (D1).
-        let (blank, keys) = item.numbers.split_at(item.numbers.len() - numbered);
-        let mut keys = keys.iter();
+        // The blank slots' keys come first, then one per number mark, in order (D1).
+        let (blank, mut keys) = item.numbers.split_at(item.numbers.len() - numbered);
         let blank_slots: Pixels =
             std::iter::repeat_n(standard_slot(), item.indent - blank.len()).sum();
-        let blank_numbers: Pixels = blank.iter().map(|&key| self.slot(key, &mut shape)).sum();
+        let blank_numbers: Pixels = blank
+            .iter()
+            .map(|&key| self.slot(key, &mut |text| advances(&shape(text))))
+            .sum();
         let mut left = x + blank_slots + blank_numbers;
         let mut marks = Vec::new();
-        for mark in item.marks(part) {
+        for mark in marked {
             let (text, slot) = match &mark {
                 ItemMarker::Bullet => ("•", standard_slot()),
                 ItemMarker::Number(range) => {
                     let text = &part[range.start - item.start..range.end - item.start];
-                    let slot = keys
-                        .next()
-                        .map_or(standard_slot(), |&key| self.slot(key, &mut shape));
-                    (text, slot)
+                    let [key, rest @ ..] = keys else {
+                        unreachable!("the parse gives each number mark its key (D1)");
+                    };
+                    keys = rest;
+                    (text, self.slot(*key, &mut |text| advances(&shape(text))))
                 }
             };
             let shaped = Rc::clone(
@@ -102,32 +106,37 @@ impl<'a> Marks<'a> {
     }
 
     /// A number slot of `key`: its widest number and the gap, never narrower than a standard slot.
-    fn slot(&mut self, key: WidthKey, shape: &mut impl FnMut(&str) -> ShapedLine) -> Pixels {
+    /// `advances` gives each glyph's advance in a text.
+    fn slot(&mut self, key: WidthKey, advances: &mut impl FnMut(&str) -> Vec<Pixels>) -> Pixels {
         if let Some(&slot) = self.numbers.get(&key) {
             return slot;
         }
-        let digit = *self.widest_digit.get_or_insert_with(|| {
-            let digits = shape(DIGITS);
-            let starts: Vec<Pixels> = (0..=DIGITS.len())
-                .map(|index| digits.x_for_index(index))
-                .collect();
-            widest_digit(&starts)
-        });
+        let digit = *self
+            .widest_digit
+            .get_or_insert_with(|| widest_digit(&advances(DIGITS)));
         let mut widest: String = std::iter::repeat_n(digit, usize::from(key.digits)).collect();
         widest.push(char::from(key.delimiter));
-        let slot = (shape(&widest).width() + LIST_SLOT_GAP).max(standard_slot());
+        let width: Pixels = advances(&widest).into_iter().sum();
+        let slot = (width + LIST_SLOT_GAP).max(standard_slot());
         self.numbers.insert(key, slot);
         slot
     }
 }
 
-/// The digit of `DIGITS` with the widest advance; `starts` holds each glyph's `x`, then the end.
-fn widest_digit(starts: &[Pixels]) -> char {
-    let advances = starts.windows(2).map(|pair| pair[1] - pair[0]);
+/// Each glyph's advance in `shaped`, for an ASCII text.
+fn advances(shaped: &ShapedLine) -> Vec<Pixels> {
+    let x = |index| shaped.x_for_index(index);
+    (0..shaped.len())
+        .map(|index| x(index + 1) - x(index))
+        .collect()
+}
+
+/// The digit of `DIGITS` with the widest of `advances`, one per digit.
+fn widest_digit(advances: &[Pixels]) -> char {
     let widest = DIGITS
         .chars()
         .zip(advances)
-        .max_by_key(|&(_, advance)| advance);
+        .max_by_key(|&(_, &advance)| advance);
     widest.map_or('0', |(digit, _)| digit)
 }
 

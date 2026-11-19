@@ -1,11 +1,24 @@
-use gpui::px;
+use gpui::{Pixels, px};
+use inkra_markdown::WidthKey;
 
-use super::widest_digit;
+use super::{Marks, standard_slot};
+use crate::theme::LIST_SLOT_GAP;
 
-/// `1` advances widest, and no digit after it as wide, so neither the last digit nor the widest
-/// `x` wins.
+/// Glyph advances where `7` is widest, and no digit after it as wide.
+fn advances(text: &str) -> Vec<Pixels> {
+    let advance = |glyph| px(if glyph == '7' { 20. } else { 5. });
+    text.chars().map(advance).collect()
+}
+
+/// A number slot measures its widest digit, not the last nor the first, repeated per digit.
 #[test]
-fn the_widest_digit_has_the_largest_advance() {
-    let starts = [0., 5., 15., 20., 25., 30., 35., 40., 45., 50., 55.].map(px);
-    assert_eq!(widest_digit(&starts), '1');
+fn a_number_slot_holds_its_widest_digits_and_the_gap() {
+    let mut marks = Marks::default();
+    let two = WidthKey {
+        digits: 2,
+        delimiter: b'.',
+    };
+    let slot = marks.slot(two, &mut advances);
+    assert_eq!(slot, px(20. + 20. + 5.) + LIST_SLOT_GAP);
+    assert!(slot > standard_slot());
 }
