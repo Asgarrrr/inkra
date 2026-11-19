@@ -56,8 +56,8 @@ By the owner, on 2026-11-16 unless dated.
 - **marker line**: the line that holds an item's marker.
 - **item part**: the gutter's bytes past the quote part, on a line that a gutter item holds. On a
   marker line it runs through the last mark and one space or tab. On any other line it is its
-  leading blanks: below the hang column, or before the code text on a code block's line (D11). It
-  never covers a byte of a code block's text. It is hidden in both states.
+  leading blanks: below the hang column, or before the fence or the code text on a code block's
+  line (D11). It never covers a byte of a code block's text. It is hidden in both states.
 - **slot**: an area `TASK_BOX_SIZE + LIST_SLOT_GAP` wide, the standard slot. A number's slot takes
   its list's number width instead, never narrower than the standard slot (D3). An item part is a
   row of slots.
@@ -162,10 +162,10 @@ pub enum ItemMarker {
     `quote_gutters` (`gutters.rs:135-156`) and adds the item part with `item_part`
     (`items.rs:215-237`). A line's items are the records whose marker stands on it, by
     `line_start`.
-  - Between two marker lines, `Walk::held_lines` (`items.rs:282-332`) visits each line that the
+  - Between two marker lines, `Walk::held_lines` (`items.rs:282-334`) visits each line that the
     held items hold, and stops at the first line that none holds. `Held` (`items.rs:241-245`)
     keeps each held item's marker line and its hang column.
-  - `Walk::in_block` (`items.rs:335-338`) tells a blank line inside a code block from any other.
+  - `Walk::in_block` (`items.rs:337-340`) tells a blank line inside a code block from any other.
     It reads the parse's code block ranges, in order, so the walk passes each block once.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
   `LineStart` does (`Blanks`, `gutters.rs:200-232`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
@@ -799,22 +799,24 @@ code block, a table, and a quote inside the item.
 **A code block's line** takes another limit: an item part never covers a byte of a code block's
 text.
 
-- Its item part is its blanks from the quote part's end up to its code text. The code text starts
-  at the line's first span that is `CODE_BLOCK` and not `MARKER` (`code_text`, `items.rs:343-352`).
-  That is where pulldown-cmark starts the line's text, past the container's indent and the fence's.
+- Its item part is its blanks from the quote part's end up to the line's first byte that the code
+  block styles, its fence or its code text: the first `CODE_BLOCK` span on the line
+  (`block_start`, `items.rs:345-352`). pulldown-cmark starts it past the container's indent and the
+  fence's.
 - So in `- [ ] a\n\n  ```\n  def f():\n      return 1`, the hang column is 6, but `return`'s line
   hides two blanks and keeps its four columns of code indent.
-- A fence's own indent hides too: in `- a\n\n     ```\n     x\n       y`, `x`'s line hides five
-  blanks and `y`'s line five of seven.
+- A fence's own indent hides too: in `- a\n\n     ```\n     x\n       y`, the fence's line and
+  `x`'s line hide five blanks, and `y`'s line five of seven. So a revealed fence stands over its
+  code.
 - A tab that a container splits gives the code its other columns. pulldown-cmark reports them as an
   empty text right after the tab, so the parse styles the tab as code text (`Out::text`,
   `crates/markdown/src/parse.rs:293-302`). In `- a\n  ```\n\tx`, the tab stays.
 - Only blanks hide. In `- a\n  > -     x`, the inner item's code text lies past `> -`, and the item
   part is `  `.
-- A line of a code block with no code text, a fence line or a blank line, takes the hang column.
-- The code text comes from the parse, not from a column the walk derives, because pulldown-cmark
-  has already removed the fence's indent and split the tab. Only a held line inside a code block
-  searches for it.
+- A blank line of a code block, with no code text, takes the hang column.
+- The limit comes from the parse's spans, not from a column the walk derives, because
+  pulldown-cmark has already removed the fence's indent and split the tab. Only a held line inside
+  a code block searches for it. The search stops at the first span past the line's end.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
   (`items.rs:365-370`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
@@ -890,9 +892,10 @@ own item part (D3, D).
   - `-\ta\n\tb` hides the tab, and `-\ta\n    b` hides the four spaces.
   - `-   a\n    b` hides two of the four blanks.
   - `- a\n\n  b` gives the blank line no gutter.
-  - A code block's line hides its blanks up to its code text: in a task, under `1. [ ]`, under an
-    outer item after its inner one closed, with a split tab, with a fence indented past its item,
-    in a quote, and under a held line's own `> -` (D11).
+  - A code block's line hides its blanks up to its fence or its code text: in a task, under
+    `1. [ ]`, under an outer item after its inner one closed, with a split tab, with a fence
+    indented past its item (its fence line too), in a quote, and under a held line's own `> -`
+    (D11).
 - No item part covers a byte of a `CODE_BLOCK` span, on items holding code blocks (T6c2).
 - `changed` (T6c1, T6c2): each of these edits dirties the lines whose gutter changed, and only
   those:
@@ -1267,8 +1270,8 @@ Newest last. Each entry says what changed and why.
     faster over 3 rounds, with 1.6 to 2.9% fewer instructions per iteration.
   - The review found a code block in a task losing its indent. Under `- [ ] a`, the code line
     `      return 1` hid all six blanks, the hang column of `- [ ] `, so `return` painted under
-    `def`. A code block's line now hides only the blanks before its code
-    text, and the parse styles a split tab as code text (D11, Deviations).
+    `def`. A code block's line now hides only the blanks before its fence or its code text, and
+    the parse styles a split tab as code text (D11, Deviations).
   - The held-lines property now also checks that a held line where no gutter item opens holds
     blanks only. It caught a first form of the fix, which ended the item part at the code text even
     past a held line's own `> -`.
@@ -1390,7 +1393,8 @@ Newest last. Each entry says what changed and why.
 - **From this spec, in T6c2.** D11 as first built hid every held line's blanks below the hang
   column, a code block's lines included. A task's hang column is 6 while its text starts at column
   2, so its code lost up to four columns of its own indent (History, the T6c2 review). A code
-  block's line now stops at its code text, which the walk reads from the parse's spans.
+  block's line now stops at its fence or its code text, which the walk reads from the parse's
+  spans.
   - The parse now styles a tab that a container splits as code text, where it was an indent
     marker. pulldown-cmark gives that tab's other columns to the code.
 - **From markdown-blocks D3.** A lazy line in an item starts at the item's text. Its quote part is
