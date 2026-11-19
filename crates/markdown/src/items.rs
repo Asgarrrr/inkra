@@ -198,9 +198,10 @@ impl Items {
                 marker_line: line..end,
                 hang: None,
             }));
-            next = line_ranges(text, line)
-                .next()
-                .map_or(text.len(), |line| line.end + 1);
+            next = text.as_bytes()[end..]
+                .iter()
+                .position(|&byte| byte == b'\n')
+                .map_or(text.len(), |len| end + len + 1);
         }
         walk.held_lines(&self, next, text.len());
         walk.out.extend(walk.quote_lines);
@@ -267,6 +268,9 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
     /// hides its blanks below the innermost item's hang column. A blank line takes no item part,
     /// unless a code block holds it (D11). Stops where no item holds the line.
     fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
+        if from >= to || self.held.is_empty() {
+            return;
+        }
         let text = self.text;
         let bytes = text.as_bytes();
         for Range { start: line, end } in line_ranges(text, from).take_while(|line| line.start < to)
