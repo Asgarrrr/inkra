@@ -1278,7 +1278,7 @@ Newest last. Each entry says what changed and why.
   - `Held::hang` is computed at the marker line. Against the lazy form it measured +0.17% at
     500000, the median of 6 rounds' deltas, within noise.
   - Measured after the review fixes in 12 alternating rounds against `task-boxes-t6b`:
-    `markdown_parse/500000` +1.9% on the median, +0.4 to +3.3% per round. Over 6 alternating
+    `markdown_parse/500000` +1.6% on the median, −0.2 to +2.8% per round. Over 6 alternating
     layout rounds, the cases run −0.1 to +2.5% on the median, with 1.7 to 2.9% fewer instructions
     per iteration; wall time swung by up to 5% between runs of 3 rounds.
 
