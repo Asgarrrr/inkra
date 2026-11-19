@@ -1050,7 +1050,7 @@ constants, never with a glyph's computed width.
   be clicked; the `⌘L` step still cycles revealed tasks.
 
 Scenes: `markdown-lists` and `markdown-lists-end`, on one note (`LISTS`,
-`crates/app/src/shot/scenes/markdown_blocks.rs:56-103`), in that file's `SCENES` (121-142) beside
+`crates/app/src/shot/scenes/markdown_blocks.rs:56-103`), in that file's `SCENES` (124-145) beside
 the `markdown-blocks` scenes. `scenes.rs` sits at its line ceiling, so the note gets no module of
 its own. The note does not fit one window: `markdown-lists` shows its start, `markdown-lists-end`
 its end. Together they show:
@@ -1068,7 +1068,7 @@ its end. Together they show:
 - the caret on a nested bullet's `-`, with its raw `  - ` ending at its text, which does not move.
 
 Re-render `markdown-blocks` (`crates/app/src/shot/scenes/markdown_blocks.rs:7-38`, its `shows` at
-124-129) and the concealment scene, `editor-concealed` (`scenes.rs:119-123`). The box now has its gap, and
+127 and 132) and the concealment scene, `editor-concealed` (`scenes.rs:119-123`). The box now has its gap, and
 the quoted task's lazy line starts under its text. Re-render `code-blocks` too, for its block in a
 list. To render and look: `cargo run -p inkra-app --features shot --example shot markdown-lists`.
 
