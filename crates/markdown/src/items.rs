@@ -7,9 +7,9 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Tag, TagEnd};
 
-use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
 use crate::spans::{line_start, to_offsets};
+use crate::{Conceal, Span, Styles};
 
 /// A gutter item as the parse met it.
 struct Record {
@@ -141,18 +141,20 @@ impl Items {
     /// The gutters, each held line's item part after its quote part, the width keys their item
     /// parts index, the bullets' conceals, and the lines holding a task with no box. `quotes` are
     /// the leading quotes' ranges, `items` every item's marker and `blocks` every code block's
-    /// range without its last `\n`, all in document order. One walk, after the parse's one pass,
-    /// so every width key is final (D1).
+    /// range without its last `\n`, all in document order; `spans` are the parse's. One walk, after
+    /// the parse's one pass, so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
         items: &[ByteOffset],
         blocks: impl Iterator<Item = Range<usize>>,
+        spans: &[Span],
     ) -> (Vec<Gutter>, Vec<WidthKey>, Vec<Conceal>, Vec<Range<usize>>) {
         let quote_lines = quote_gutters(text, quotes);
         let mut walk = Walk {
             text,
+            spans,
             out: Vec::with_capacity(quote_lines.len() + self.records.len()),
             quote_lines: quote_lines.into_iter().peekable(),
             blocks: blocks.peekable(),
@@ -251,6 +253,7 @@ struct Held<'r> {
 /// width keys so far.
 struct Walk<'t, 'r, B: Iterator<Item = Range<usize>>> {
     text: &'t str,
+    spans: &'t [Span],
     quote_lines: Peekable<std::vec::IntoIter<Gutter>>,
     blocks: Peekable<B>,
     held: Vec<Held<'r>>,
@@ -276,9 +279,10 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
             .next_if(|gutter| gutter.range.start.get() == line)
     }
 
-    /// The lines from the line start `from` to `to` that an item holds, where no item opens: each
-    /// hides its blanks below the innermost item's hang column. A blank line takes no item part,
-    /// unless a code block holds it (D11). Stops where no item holds the line.
+    /// The lines from the line start `from` to `to` that an item holds, where no item opens: a
+    /// code line hides its blanks before its code text, any other its blanks below the innermost
+    /// item's hang column. A blank line takes no item part, unless a code block holds it (D11).
+    /// Stops where no item holds the line.
     fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
         let text = self.text;
         let bytes = text.as_bytes();
@@ -303,23 +307,30 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
             let start = quoted
                 .as_ref()
                 .map_or(line, |gutter| gutter.range.end.get());
-            let blank = bytes[start..end]
-                .iter()
-                .all(|&byte| matches!(byte, b' ' | b'\t'));
-            if blank && !self.in_block(line, end) {
+            let is_blank = |byte: &u8| matches!(byte, b' ' | b'\t');
+            let in_block = self.in_block(line, end);
+            if bytes[start..end].iter().all(is_blank) && !in_block {
                 self.out.extend(quoted);
                 continue;
             }
-            let column = column_after(0, &bytes[line..start]);
-            let blanks = bytes[start..end]
-                .iter()
-                .scan(column, |column, &byte| {
-                    let at = *column;
-                    *column = column_after(at, &[byte]);
-                    Some((at, byte))
-                })
-                .take_while(|&(at, byte)| at < hang && matches!(byte, b' ' | b'\t'))
-                .count();
+            let code = in_block.then(|| code_text(self.spans, line, end)).flatten();
+            let blanks = if let Some(code) = code {
+                bytes[start..code]
+                    .iter()
+                    .take_while(|byte| is_blank(byte))
+                    .count()
+            } else {
+                let column = column_after(0, &bytes[line..start]);
+                bytes[start..end]
+                    .iter()
+                    .scan(column, |column, byte| {
+                        let at = *column;
+                        *column = column_after(at, &[*byte]);
+                        Some((at, byte))
+                    })
+                    .take_while(|&(at, byte)| at < hang && is_blank(byte))
+                    .count()
+            };
             let mut gutter = quoted.unwrap_or_else(|| gutter_at(line, 0));
             gutter.item =
                 Some(items.item_part(ByteOffset::new(start), &self.held, &[], &mut self.keys));
@@ -333,6 +344,19 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
         while self.blocks.next_if(|block| block.end < line).is_some() {}
         self.blocks.peek().is_some_and(|block| block.start <= end)
     }
+}
+
+/// The first code text byte on the line from `line` to `end`: where pulldown-cmark starts a code
+/// block's line past the container's and the fence's indent (D11).
+fn code_text(spans: &[Span], line: usize, end: usize) -> Option<usize> {
+    let first = spans.partition_point(|span| span.range.end.get() <= line);
+    spans[first..]
+        .iter()
+        .take_while(|span| span.range.start.get() < end)
+        .find(|span| {
+            span.styles.contains(Styles::CODE_BLOCK) && !span.styles.contains(Styles::MARKER)
+        })
+        .map(|span| span.range.start.get())
 }
 
 /// An item's marker: pulldown-cmark starts its range up to a tab's leftover columns early, back

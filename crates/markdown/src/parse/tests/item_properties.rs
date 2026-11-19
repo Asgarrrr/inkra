@@ -8,7 +8,7 @@ use pulldown_cmark::{Event, Parser, Tag};
 use super::super::parse;
 use super::syntax_fragment;
 use crate::cmark::options;
-use crate::{Gutter, ItemMarker, Markdown};
+use crate::{Gutter, ItemMarker, Markdown, Styles};
 
 /// A gutter item as the oracle reads it: its marker, the mark its line should show for it, whether
 /// it is a task, and its range's end.
@@ -114,11 +114,16 @@ fn gutter_on(markdown: &Markdown, line: usize) -> Option<&Gutter> {
 }
 
 /// Every line a gutter item holds that is not blank, of blanks and `>` only, holds an item part,
-/// and no other line holds one (D11).
+/// and no other line holds one; one where no gutter item opens holds blanks only (D11).
 fn held_lines_hold_an_item_part(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
+    let items = gutter_items(text);
+    let marker_lines: Vec<usize> = items
+        .iter()
+        .map(|(marker, _, _, _)| text[..*marker].rfind('\n').map_or(0, |newline| newline + 1))
+        .collect();
     let mut held = Vec::new();
-    for (marker, _, _, end) in gutter_items(text) {
+    for &(marker, _, _, end) in &items {
         let mut line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
         while line < end.min(text.len() + 1) {
             let line_end = text[line..].find('\n').map_or(text.len(), |len| line + len);
@@ -145,11 +150,72 @@ fn held_lines_hold_an_item_part(text: &str) -> Result<(), TestCaseError> {
             line,
             text
         );
+        let part = &text[gutter.quote_end().get()..gutter.range.end.get()];
+        prop_assert!(
+            marker_lines.contains(&line) || part.bytes().all(|byte| b" \t".contains(&byte)),
+            "item part {:?} at {} in {:?}",
+            part,
+            line,
+            text
+        );
     }
     Ok(())
 }
 
+/// No item part covers a byte of a code block's text or fences (D11).
+fn no_item_part_covers_code(text: &str) -> Result<(), TestCaseError> {
+    let markdown = parse(text);
+    let code: Vec<_> = markdown
+        .spans
+        .iter()
+        .filter(|span| span.styles.contains(Styles::CODE_BLOCK))
+        .map(|span| span.range.start.get()..span.range.end.get())
+        .collect();
+    for gutter in &markdown.gutters {
+        let Some(item) = &gutter.item else { continue };
+        let part = item.start.get()..gutter.range.end.get();
+        prop_assert!(
+            code.iter()
+                .all(|span| span.end <= part.start || part.end <= span.start),
+            "item part {:?} covers code in {:?}",
+            part,
+            text
+        );
+    }
+    Ok(())
+}
+
+/// Items holding code blocks: markers, blanks and tabs that indent a fence or a code line.
+fn item_code_fragment() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just("- ".to_string()),
+        Just("- [ ] ".to_string()),
+        Just("1. [ ] ".to_string()),
+        Just("> ".to_string()),
+        Just(" ".to_string()),
+        Just("  ".to_string()),
+        Just("\t".to_string()),
+        Just("```\n".to_string()),
+        Just("x".to_string()),
+        Just("\n".to_string()),
+    ]
+}
+
 proptest! {
+    #[test]
+    fn no_item_part_covers_code_in_items_holding_code(
+        fragments in prop::collection::vec(item_code_fragment(), 0..40)
+    ) {
+        no_item_part_covers_code(&fragments.concat())?;
+    }
+
+    #[test]
+    fn held_lines_hold_an_item_part_in_items_holding_code(
+        fragments in prop::collection::vec(item_code_fragment(), 0..40)
+    ) {
+        held_lines_hold_an_item_part(&fragments.concat())?;
+    }
+
     #[test]
     fn held_lines_hold_an_item_part_on_block_constructs(
         fragments in prop::collection::vec(syntax_fragment(), 0..40)

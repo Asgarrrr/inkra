@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc df700fc88391d0c8e1a7e463fea7de9a6be68c1ec8e625af1a48d02dddb6fa01 # shrinks to fragments = ["**", "```\n", "- ", "| a | b |\n|---|---|\n"]
 cc 69d0f016d5edaf0106bc7db4c7c8f1f7491a382fc6e6909480f4f1cf505e1903 # shrinks to text = "* .\nx"
+cc 207b390c41a9591429e3ffce4fbc31d80196ee2d444551718af347586f73aefe # shrinks to fragments = ["- [ ] ", "\n", "  ", "```\n", "  ", " ", "x"]
+cc e03cfab058f89e88b47cd671d006508b4980c2414a7e6620473b0c80450fe3d9 # shrinks to fragments = ["- [ ] ", "```\n", "  ", "> ", " ", "\t", "- "]
