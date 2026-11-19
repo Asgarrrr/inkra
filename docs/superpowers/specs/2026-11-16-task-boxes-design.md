@@ -80,6 +80,8 @@ T6c retires these terms: task part, box run, lead, box slot.
 ## D1. The data
 
 `Gutter` (`crates/markdown/src/gutters.rs:12-21`) trades `task` for `item: Option<ItemPart>`.
+`Markdown` gains `width_keys: Vec<WidthKey>`, one vector for the note that every
+`ItemPart::numbers` indexes (Open question 10).
 
 ```rust
 pub struct ItemPart {
@@ -88,9 +90,9 @@ pub struct ItemPart {
     /// Its blank slots: one per column of each gutter item holding the line whose marker stands
     /// on an earlier line (D11).
     pub indent: usize,
-    /// The width key of each number slot on the line, blank or marked, in slot order; empty,
-    /// and unallocated, under no ordered list (D3, Open question 10).
-    pub numbers: Vec<WidthKey>,
+    /// Where `Markdown::width_keys` holds the width key of each number slot on the line, blank or
+    /// marked, in slot order; empty under no ordered list (D3, Open question 10).
+    pub numbers: Range<usize>,
     /// The box, when the innermost gutter item opening on the line is a task.
     pub task: Option<Task>,
 }
@@ -130,8 +132,8 @@ pub enum ItemMarker {
   ordered task's number stays. On a line that is not a marker line, the item part holds only
   blanks, so it yields none. So `app` holds no bullet grammar.
 - **Slot order.** A line's slots are its `indent` blank slots, then one slot per mark in order, then
-  the box. The number slots take the keys of `numbers` in that order: the blank ones first, then
-  one per `ItemMarker::Number`.
+  the box. The number slots take the keys that `numbers` indexes in that order: the blank ones
+  first, then one per `ItemMarker::Number`.
 - **`Task` loses `start` and `run`.** The item part's start and its marks now hold that data. The
   item conceal covers the box's bytes (D2). `Task::flip` is unchanged.
 - **The marker.** The pending-slot rule decides an item's marker (markdown-blocks, S3 correction 7;
@@ -150,18 +152,19 @@ pub enum ItemMarker {
 - **The walk.**
   - After the parse's one pass, one walk over the lines builds every gutter. It builds the quote
     part with `gutter` (`gutters.rs:174-192`), then the item part (D11).
-  - It copies each holding list's width key into `numbers`. The pass has ended, so every key is
-    final, and no line is back-filled.
+  - It appends each holding list's width key to `Markdown::width_keys`, one vector for the whole
+    note, and `numbers` holds their range. The pass has ended, so every key is final, and no line
+    is back-filled.
   - The walk visits only lines inside a leading quote or a gutter item. It jumps from one container
     to the next.
-  - The walk is `Items::gutters` (`items.rs:145-208`). It takes the quote lines from
+  - The walk is `Items::gutters` (`items.rs:146-211`). It takes the quote lines from
     `quote_gutters` (`gutters.rs:135-156`) and adds the item part with `item_part`
-    (`items.rs:211-225`). A line's items are the records whose marker stands on it, by
+    (`items.rs:215-237`). A line's items are the records whose marker stands on it, by
     `line_start`.
-  - Between two marker lines, `Walk::held_lines` (`items.rs:269-308`) visits each line that the
-    held items hold, and stops at the first line that none holds. `Held` (`items.rs:229-235`)
+  - Between two marker lines, `Walk::held_lines` (`items.rs:282-324`) visits each line that the
+    held items hold, and stops at the first line that none holds. `Held` (`items.rs:241-247`)
     keeps each held item's marker line and its hang column.
-  - `Walk::in_block` (`items.rs:310-313`) tells a blank line inside a code block from any other.
+  - `Walk::in_block` (`items.rs:327-330`) tells a blank line inside a code block from any other.
     It reads the parse's code block ranges, in order, so the walk passes each block once.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
   `LineStart` does (`Blanks`, `gutters.rs:200-232`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
@@ -186,13 +189,13 @@ pub enum ItemMarker {
 - **One lookup.** `Markdown::task_at(line_start) -> Option<&Task>` (`gutters.rs:107-118`) returns
   `gutter.item?.task` for the gutter that starts at the line's start. It finds that gutter by binary search over `gutters`.
   `cycle.rs`, `DocumentLayout::task_at` and the tests call it.
-- **(A) Change detection.** `Gutter::same` (`crates/markdown/src/changed.rs:144-168`) compares the
-  item part: its mapped start, its `indent`, its `numbers`, and its task's mapped checkbox and
-  `checked`. Without it, a toggle, a nesting change or a list that gains a digit would leave a
+- **(A) Change detection.** `Gutter::same` (`crates/markdown/src/changed.rs:169-199`) compares the
+  item part: its mapped start, its `indent`, the width keys its `numbers` indexes in each parse, and
+  its task's mapped checkbox and `checked`. Without it, a toggle, a nesting change or a list that gains a digit would leave a
   carried line stale. `changed` walks no new vector (D9).
 
 **The structure `⌘L` reads.** `Markdown` has `structure: Structure`, filled in the parse's one
-pulldown-cmark pass (`parse.rs:88-145`):
+pulldown-cmark pass (`parse.rs:90-147`):
 
 ```rust
 pub struct Structure {
@@ -235,7 +238,8 @@ parse of 5.58 ms on 8b9db360. Measured on T6a, alternating with 003bbe95, the co
 - The gutter-item records reuse `structure.items` for their markers, so no record repeats one.
 - T6c adds about 9,400 pushes: the item and list records, about 3,600 gutters of about 90 bytes,
   and about 1,200 item conceals. A `marks` vector would have added 3,600 more (History).
-- It also allocates `numbers` once per line under an ordered list: about 1,200 on the bench note.
+- A line under an ordered list allocates no key vector of its own: its keys go to the shared
+  `Markdown::width_keys` (Open question 10).
 - Outside a quote, a line's `quotes` stays an empty `Vec`, which allocates nothing.
 - The hang column is computed only for an item that has a line besides its marker line. The bench
   note has none, so the bench understates T6c2 on notes with long items.
@@ -287,7 +291,7 @@ Behaviour:
 - Home goes to the line's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:84-103`). So
   it reveals the item part, as it revealed a bullet.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:344-353`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:361-370`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
@@ -303,8 +307,8 @@ gutter's own conceals: its quotes, then at most one for its item part. The G-pro
 The gutter is a hanging indent: the line's text, wrapped rows included, starts at its right edge
 (markdown-blocks D3). `line_prefix` (`crates/app/src/editor/layout/prefix.rs:113-152`) builds it
 from the line's `Gutter` and its own conceals. `GutterCarry::layout`
-(`crates/app/src/editor/layout/prefix/gutter.rs:150-199`) measures it, and `Marks::layout`
-(`prefix/marks.rs:46-106`) lays out the item part's slots and marks.
+(`crates/app/src/editor/layout/prefix/gutter.rs:152-205`) measures it, and `Marks::layout`
+(`prefix/marks.rs:46-107`) lays out the item part's slots and marks.
 
 **Concealed.** The gutter is the quote part, then the slots of the item part.
 
@@ -337,7 +341,7 @@ from the line's `Gutter` and its own conceals. `GutterCarry::layout`
   right edge. So the dots of one list line up.
 - So the text of one ordered list starts at one `x`. Its children and its other lines start at that
   text, because their blank slots for the list's column take the same width.
-- **The key.** The width comes from the width key in `ItemPart::numbers` (D1): the digit count of the
+- **The key.** The width comes from the width key that `ItemPart::numbers` indexes (D1): the digit count of the
   list's longest number, and its delimiter.
   - It is the smallest key the layout can measure without the list's other lines. A marker's range
     would point at another line, which `show` cannot shape with this line's runs. A copy of the
@@ -396,12 +400,12 @@ a mark's colour (D7). So a toggle never rewraps a concealed line.
   - Its raw width equals its concealed width.
 
 **Where the raw width comes from.** `layout` already shapes the gutter's whole text raw while a part
-is revealed, to paint it (`prefix/gutter.rs:158-164`). So the raw width costs no extra shape. It
+is revealed, to paint it (`prefix/gutter.rs:160-166`). So the raw width costs no extra shape. It
 belongs to the line and is never cached.
 
 **The records.**
 
-- `Measured` is gone. `GutterCarry::quotes` (`prefix/gutter.rs:118-125`) maps each quote part's
+- `Measured` is gone. `GutterCarry::quotes` (`prefix/gutter.rs:118-126`) maps each quote part's
   text to its `Geometry`. `Geometry::measure` never reads `Reveal`.
 - `GutterLayout` (`prefix/gutter.rs:14-23`) replaces `task_box` with the line's concealed marks
   (`Mark`, `prefix/marks.rs`). Each
@@ -418,7 +422,7 @@ belongs to the line and is never cached.
 
 **(D) A lazy line carries the quote part only.**
 
-- `GutterCarry::pass` (`prefix/gutter.rs:140-145`) carries `Geometry::quote_part`. `layout` gives it
+- `GutterCarry::pass` (`prefix/gutter.rs:142-147`) carries `Geometry::quote_part`. `layout` gives it
   to a line that misses some of its `>`.
 - The item part is never carried: each line gets its own from the parse (D11).
 - Under `> - [ ] a\nb`, line `b` takes the quote part's width plus one blank slot. So it starts
@@ -534,7 +538,7 @@ task since 0.13.24 (forum 14634).
    its own. This is the line's only candidate.
 3. A line where no item opens: first the checkbox at the fallback's content start, when the
    fallback finds an item; then `- [ ] ` after the line's leading `[ \t>]*` (`line_start_prefix`,
-   `parse.rs:203-211`).
+   `parse.rs:208-216`).
 
 `- [ ] ` is offered only where no item opens (Open question 6, decided). On a line where an item
 opens it would land at the first item's marker, which would then read as the new task's text, so
@@ -626,7 +630,7 @@ item's own text: every paragraph directly inside the item, continuation and lazy
 
 - **Set where the marker is decided.** The pending slot (D1) resolves after `Start(Item)`, or after
   one `Start(Paragraph)` in a loose item. When it resolves a checked task that gets a box, `DONE`
-  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:90-95`).
+  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:92-97`).
   Later paragraphs inherit it through `Open::enter` (`parse/open.rs:30-56`).
 - **Not inherited by a block.** `Open::enter` drops `DONE` when a list, a quote or a code block
   opens inside the item, so nested items are not struck. Any other block of the item, a heading, a
@@ -638,7 +642,7 @@ item's own text: every paragraph directly inside the item, continuation and lazy
   `open.indent | MARKER`; the resolution adds `DONE` to `indent` too, so a continuation line's
   indent carries it. A loose item's own marker does not: its gap is styled before the slot
   resolves on the paragraph.
-- Continuation and lazy lines restyle through the span diff (`changed.rs:113-115`), so a toggle
+- Continuation and lazy lines restyle through the span diff (`changed.rs:127-134`), so a toggle
   restyles every row of the item.
 - **A wrapped row strikes its trailing space.** The space that ends a wrapped row is the item's
   text, so the line runs past the last word.
@@ -680,7 +684,8 @@ A distinct box colour waits for a theme that asks for one.
 - **A nesting change.** `Gutter::same` compares the item part. An edit that changes nesting, such as
   two blanks typed before `- b`, changes the gutters of exactly the lines whose item part changed.
   The middle walk dirties those lines, so no carry rule is added.
-- **A list's width key.** Every line under an ordered list holds its key (D1). So a ninth item
+- **A list's width key.** Every line under an ordered list indexes its key (D1), and `Gutter::same`
+  compares the keys each parse's `width_keys` holds there, not the ranges. So a ninth item
   becoming a tenth changes the key of every line in the list and under it, and the list rebuilds
   once. An edit that keeps every list's longest digit count dirties no other line.
 - **No marks vector.** A mark changes only through an edit on its own line, which is dirty already,
@@ -773,14 +778,14 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/items.rs:335-340`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:352-357`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
 - The walk computes an item's hang column the first time it meets such a line, and keeps it in
   `Held::hang`.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
-  (`items.rs:327-332`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  (`items.rs:344-349`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
@@ -800,7 +805,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `crates/markdown/src/items.rs:318-323`).
+  (`marker_start`, `crates/markdown/src/items.rs:335-340`).
 
 | Text | Line | Item part | Slots |
 |---|---|---|---|
@@ -1210,8 +1215,16 @@ Newest last. Each entry says what changed and why.
   - Measured in alternating rounds against `task-boxes-t6b`. The layout cases are 3.6 to 6.1%
     faster on the median of 8 rounds, and 1.8 to 2.8% fewer instructions per iteration.
     `markdown_parse/500000` is 5.7% slower, past its 3% gate; T6c1 alone is 1.5 to 1.9% slower.
-  - The parse gate is open. A profile puts most of the difference in the walk: its line scans
-    and its per-line setup. Merging waits on a decision (D1, the parse gate).
+  - A profile put most of the difference in the walk: its line scans and its per-line setup.
+  - Two changes closed the gate. The walk finds a marker line's next line by a byte search, and
+    `held_lines` returns at once when no item is held or no line lies between two marker lines.
+    The keys moved to one shared vector, Open question 10's fallback: `Markdown::width_keys`, which
+    each `ItemPart::numbers` indexes by range. `Gutter::same` compares the keys each parse holds
+    there, so a list typed above another leaves the other's lines clean.
+  - Measured after them in 6 alternating rounds against `task-boxes-t6b`: `markdown_parse/500000`
+    +2.5% on the median, +2.0 to +3.5% per round. In 3 rounds of three: T6b 2.924 ms, T6c1
+    2.960 ms (+1.3%), T6c2 2.973 ms (+1.7%). The layout cases stay 4.7 to 11% faster over 3
+    rounds, with 1.6 to 2.9% fewer instructions per iteration.
 
 **Reversed decisions.**
 
@@ -1382,11 +1395,13 @@ Newest last. Each entry says what changed and why.
      with the text.
 10. **How a line holds more than one width key** (T6c). Decided on 2026-11-19 as recommended:
     `numbers: Vec<WidthKey>`, exact at any depth. The parse gate (3%) checks its allocations; past
-    it, the keys move to one shared vector that each `ItemPart` indexes by range.
+    it, the keys move to one shared vector that each `ItemPart` indexes by range. Closed in T6c2:
+    the gate measured 5.7%, so the fallback is taken. `Markdown::width_keys` holds every line's
+    keys, and `numbers` is their range (D1, History).
     - A line under two ordered lists, as in `10. a\n    1) b\n       c`, has a number slot for each.
       Each takes its own list's width, so the line needs both keys.
-    - Recommended: `numbers: Vec<WidthKey>`, as D1 states. It is exact at any depth. It allocates
-      once per line under an ordered list, about 1,200 times on the parse bench's note (D1).
+    - Recommended: `numbers: Vec<WidthKey>`, as D1 first stated. It is exact at any depth. It
+      allocates once per line under an ordered list, about 1,200 times on the parse bench's note.
     - The alternative is one `Option<WidthKey>`, for the innermost ordered list. It allocates
       nothing. An outer ordered list's slots then take the standard width, so a line under two
       ordered lists starts off its parent's text when the outer list has wide numbers.
