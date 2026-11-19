@@ -7,7 +7,8 @@ use crate::cmark::options;
 use crate::content_lines::shape;
 use crate::gutters::{Items, cut, gutter_conceals};
 use crate::spans::{backtick_runs, lines, push, to_offsets};
-use crate::{Conceal, Gutter, Styles};
+use crate::structure::Collector;
+use crate::{Conceal, Gutter, Structure, Styles};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Markdown {
@@ -18,10 +19,12 @@ pub struct Markdown {
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
-    /// starting a task item whose marker leads it.
+    /// starting a task item that gets a box (D10).
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
+    /// What `⌘L` reads; the layout reads none of it (task boxes spec, D1).
+    pub structure: Structure,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +81,7 @@ fn parse_terminated(text: &str) -> Markdown {
     let mut quotes = Vec::new();
     let mut items = Items::default();
     let mut code_blocks = Vec::new();
+    let mut structure = Collector::default();
 
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         let depth = open.iter().take_while(|open| open.leading).count();
@@ -91,6 +95,7 @@ fn parse_terminated(text: &str) -> Markdown {
         let styles = current.as_ref().map_or(Styles::NONE, |open| open.styles);
         match event {
             Event::Start(tag) => {
+                structure.start(text, &tag, &range);
                 out.markers_until(range.start, current.as_ref());
                 if let Tag::Heading { level, .. } = tag {
                     let heading = heading_text(text, &range);
@@ -137,7 +142,7 @@ fn parse_terminated(text: &str) -> Markdown {
             _ => {}
         }
     }
-    let (gutters, mut bullets) = items.gutters(text, &quotes);
+    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes);
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
@@ -162,6 +167,7 @@ fn parse_terminated(text: &str) -> Markdown {
         headings,
         gutters,
         code_blocks,
+        structure: structure.finish(unboxed),
     }
 }
 
@@ -239,7 +245,7 @@ fn heading_text(text: &str, range: &Range<usize>) -> Range<usize> {
 }
 
 /// A block's range ends after its last `\n`; a gutter must not reach the line after it.
-fn without_line_ending(text: &str, range: &Range<usize>) -> Range<usize> {
+pub(crate) fn without_line_ending(text: &str, range: &Range<usize>) -> Range<usize> {
     range.start..range.end - usize::from(text[..range.end].ends_with('\n'))
 }
 

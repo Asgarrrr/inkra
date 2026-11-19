@@ -35,6 +35,10 @@ fn offsets(markdown: &Markdown) -> Vec<usize> {
             range(&task.checkbox);
         }
     }
+    let structure = &markdown.structure;
+    let openers = structure.items.iter().chain(&structure.quotes);
+    openers.for_each(|&opener| range(&(opener..opener)));
+    structure.skipped.iter().for_each(&mut range);
     all
 }
 

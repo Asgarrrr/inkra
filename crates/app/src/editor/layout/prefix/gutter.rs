@@ -22,11 +22,17 @@ pub(in crate::editor::layout) struct GutterLayout {
     pub(super) task_box: Option<Box<TaskBox>>,
 }
 
-/// A concealed task's box and the lead before it, from the line's own task, never carried (D10).
+/// A concealed task's shape and state, from the line's own task, never carried (D10).
 pub(in crate::editor::layout) struct TaskBox {
+    pub(in crate::editor::layout) shape: TaskShape,
+    pub(in crate::editor::layout) checked: bool,
+}
+
+/// What a task measures to with its gutter's text, in every state (task boxes spec, D3).
+#[derive(Clone)]
+pub(in crate::editor::layout) struct TaskShape {
     /// The checkbox's `x` span, measured as the gutter's width.
     pub(in crate::editor::layout) x: Range<Pixels>,
-    pub(in crate::editor::layout) checked: bool,
     /// The lead through its own conceals at the body size; `None` when blank.
     lead: Option<Rc<ShapedLine>>,
 }
@@ -34,7 +40,7 @@ pub(in crate::editor::layout) struct TaskBox {
 impl GutterLayout {
     /// A concealed task's lead, painted at the task part's `x`, the quote part's width.
     pub(super) fn lead(&self) -> Option<(&ShapedLine, Pixels)> {
-        let lead = self.task_box.as_ref()?.lead.as_deref()?;
+        let lead = self.task_box.as_ref()?.shape.lead.as_deref()?;
         Some((lead, self.geometry.quote_width))
     }
 
@@ -117,10 +123,8 @@ pub(super) struct Geometry {
 #[derive(Clone)]
 struct Measured {
     geometry: Geometry,
-    /// The task's checkbox `x` span; `None` with no task.
-    checkbox: Option<Range<Pixels>>,
-    /// The task's lead through its conceals; `None` with no task or a blank lead.
-    lead: Option<Rc<ShapedLine>>,
+    /// `None` with no task.
+    task: Option<TaskShape>,
 }
 
 /// What gutters share within one `shape_document`: the geometry of the line above, built or
@@ -184,31 +188,22 @@ impl<'a> GutterCarry<'a> {
         } else {
             Measured {
                 geometry: self.carried.clone(),
-                checkbox: None,
-                lead: None,
+                task: None,
             }
         };
-        let Measured {
-            geometry,
-            checkbox,
-            lead,
-        } = measured;
+        let Measured { geometry, task } = measured;
         GutterLayout {
             len: source.len(),
             shown: shaped.map(|shaped| Box::new(Shown::new(shaped, reveal))),
             geometry,
-            task_box: gutter
-                .task
-                .as_ref()
-                .zip(checkbox)
-                .filter(|_| !reveal.task)
-                .map(|(task, x)| {
+            task_box: gutter.task.as_ref().zip(task).filter(|_| !reveal.task).map(
+                |(task, shape)| {
                     Box::new(TaskBox {
-                        x,
+                        shape,
                         checked: task.checked,
-                        lead,
                     })
-                }),
+                },
+            ),
         }
     }
 }
@@ -232,14 +227,12 @@ fn measure(
         &own
     };
     let start = gutter.range.start;
-    let task = gutter.task.as_ref();
-    let checkbox = task.map(|task| {
-        whole.x_for_index(task.checkbox.start - start)..whole.x_for_index(task.checkbox.end - start)
-    });
-    let lead = task.and_then(|task| {
+    let task = gutter.task.as_ref().map(|task| {
+        let x = whole.x_for_index(task.checkbox.start - start)
+            ..whole.x_for_index(task.checkbox.end - start);
         let text = &source[task.start - start..task.run - start];
         let blank = text.bytes().all(|byte| matches!(byte, b' ' | b'\t'));
-        (!blank).then(|| {
+        let lead = (!blank).then(|| {
             let hidden: Vec<Hidden> = lead
                 .iter()
                 .map(|conceal| {
@@ -251,12 +244,12 @@ fn measure(
                 })
                 .collect();
             Rc::new(shape(&(task.start..task.run), &hidden, text))
-        })
+        });
+        TaskShape { x, lead }
     });
     Measured {
         geometry: Geometry::measure(gutter, whole, split),
-        checkbox,
-        lead,
+        task,
     }
 }
 

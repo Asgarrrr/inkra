@@ -7,7 +7,7 @@ use inkra_text::{ByteOffset, Hunk};
 use pulldown_cmark::{Event, Tag};
 
 use crate::spans::{line_ranges, line_start, push, to_offsets};
-use crate::{Conceal, Span, Styles};
+use crate::{Conceal, Markdown, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gutter {
@@ -41,6 +41,21 @@ impl Gutter {
     }
 }
 
+impl Markdown {
+    /// The task whose gutter starts at the line start `line_start` (D1).
+    #[must_use]
+    pub fn task_at(&self, line_start: ByteOffset) -> Option<&Task> {
+        let at = self
+            .gutters
+            .partition_point(|gutter| gutter.range.start < line_start);
+        self.gutters
+            .get(at)
+            .filter(|gutter| gutter.range.start == line_start)?
+            .task
+            .as_ref()
+    }
+}
+
 impl Task {
     /// Ticks or clears it by its middle byte alone, so `[X]` clears as `[x]` does (D5).
     #[must_use]
@@ -63,6 +78,8 @@ pub(crate) struct Items {
     /// Each task gutter, in line order.
     tasks: Vec<Gutter>,
     bullets: Vec<Conceal>,
+    /// Each line holding a task with no box, in line order, without its `\n`.
+    unboxed: Vec<Range<usize>>,
 }
 
 impl Items {
@@ -85,12 +102,16 @@ impl Items {
                 // The range may start with spaces; the checkbox is its last three bytes.
                 Event::TaskListMarker(checked) => {
                     let checkbox = range.end - 3..range.end;
-                    match task_gutter(text, marker, checkbox, *checked, depth) {
-                        Some(gutter) => {
-                            done = checked.then_some(index);
-                            self.tasks.push(gutter);
-                        }
-                        None => self.bullets.extend(bullet(text, marker)),
+                    let line = line_start(text, marker);
+                    let line = line..text[line..].find('\n').map_or(text.len(), |len| line + len);
+                    if let Some(gutter) =
+                        task_gutter(text, line.clone(), marker, checkbox, *checked, depth)
+                    {
+                        done = checked.then_some(index);
+                        self.tasks.push(gutter);
+                    } else {
+                        self.bullets.extend(bullet(text, marker));
+                        self.unboxed.push(line);
                     }
                 }
                 _ => self.bullets.extend(bullet(text, marker)),
@@ -102,12 +123,13 @@ impl Items {
         done
     }
 
-    /// The gutters, each task gutter in place of its line's quote gutter, and the bullets' conceals.
+    /// The gutters, each task gutter in place of its line's quote gutter, the bullets' conceals, and
+    /// the lines holding a task with no box.
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
-    ) -> (Vec<Gutter>, Vec<Conceal>) {
+    ) -> (Vec<Gutter>, Vec<Conceal>, Vec<Range<usize>>) {
         let mut quote_gutters = gutters(text, quotes).into_iter().peekable();
         let mut out = Vec::with_capacity(quote_gutters.len() + self.tasks.len());
         for task in self.tasks {
@@ -123,7 +145,7 @@ impl Items {
             out.push(task);
         }
         out.extend(quote_gutters);
-        (out, self.bullets)
+        (out, self.bullets, self.unboxed)
     }
 }
 
@@ -132,20 +154,23 @@ impl Items {
 /// the markers of items opening on the line (D10). Any other keeps its `•`.
 fn task_gutter(
     text: &str,
+    line: Range<usize>,
     marker: usize,
     checkbox: Range<usize>,
     checked: bool,
     depth: usize,
 ) -> Option<Gutter> {
-    let line = line_start(text, marker);
-    let end = text[line..].find('\n').map_or(text.len(), |len| line + len);
-    let mut gutter = gutter(text, line..end, depth);
+    // pulldown-cmark scans a task marker only on its item's marker line (D1).
+    debug_assert!(
+        !text[marker..checkbox.start].contains('\n'),
+        "a checkbox off its marker's line"
+    );
+    let mut gutter = gutter(text, line, depth);
     let start = gutter.range.end;
     let boxed = gutter.quotes.len() == gutter.depth
         && text
             .get(start.get()..marker)
-            .is_some_and(|lead| !lead.contains('>'))
-        && !text[marker..checkbox.start].contains('\n');
+            .is_some_and(|lead| !lead.contains('>'));
     boxed.then(|| {
         let blank = matches!(text.as_bytes().get(checkbox.end), Some(b' ' | b'\t'));
         gutter.range.end = ByteOffset::new(checkbox.end + usize::from(blank));

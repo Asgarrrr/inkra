@@ -9,7 +9,7 @@ use gpui::{
 use super::geometry::LINE_HEIGHT;
 use super::{at, dispatching};
 use crate::editor::EditorView;
-use crate::editor::layout::painted_boxes;
+use crate::editor::layout::{line_build_count, painted_boxes};
 
 type Handle = WindowHandle<EditorView>;
 
@@ -66,6 +66,33 @@ fn a_click_on_a_box_toggles_it_and_puts_the_caret_on_its_text(cx: &mut TestAppCo
     click_box(&mut cx);
     assert_eq!(text(&window, &mut cx), "- [ ] a\nbody");
     assert_eq!(caret(&window, &mut cx), 6);
+}
+
+/// An ordered task's box stands for its checkbox alone, after its number (T6a).
+#[gpui::test]
+fn a_click_on_an_ordered_tasks_box_toggles_it(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "1. [ ] a\nbody");
+    click_box(&mut cx);
+    assert_eq!(text(&window, &mut cx), "1. [x] a\nbody");
+    assert_eq!(caret(&window, &mut cx), 7);
+}
+
+/// A carried line holds no document offset: its task is found where the line starts now (D4).
+#[gpui::test]
+fn a_click_on_a_carried_lines_box_after_an_edit_above_toggles_it(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "a\n- [ ] b\nbody");
+    cx.simulate_keystrokes("cmd-up");
+    let before = line_build_count();
+    cx.simulate_input("xyz");
+    let centre = only_box(&mut cx).center();
+    assert_eq!(
+        line_build_count() - before,
+        3,
+        "only the edited line rebuilds"
+    );
+    click(&mut cx, centre);
+    assert_eq!(text(&window, &mut cx), "xyza\n- [x] b\nbody");
+    assert_eq!(caret(&window, &mut cx), 11);
 }
 
 /// The caret lands at the text start the layout holds, where the parse ends the gutter: past one

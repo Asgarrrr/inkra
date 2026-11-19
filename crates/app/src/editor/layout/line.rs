@@ -104,7 +104,8 @@ impl LineLayout {
     /// checkbox and on row 0 (task boxes spec, D4).
     pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, &TaskBox)> {
         let task = self.prefix.as_ref()?.task_box()?;
-        let centre = point((task.x.start + task.x.end) / 2., self.row_height / 2.);
+        let x = &task.shape.x;
+        let centre = point((x.start + x.end) / 2., self.row_height / 2.);
         let square = Bounds::centered_at(centre, size(TASK_BOX_SIZE, TASK_BOX_SIZE));
         Some((square, task))
     }
