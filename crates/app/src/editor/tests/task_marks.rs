@@ -158,9 +158,9 @@ fn blank_slots_paint_nothing(app: &mut TestAppContext) {
     );
 }
 
-/// A caret on the number reveals the whole task part raw, so neither the lead nor the box paints.
+/// A caret on the number reveals the whole item part raw, so neither the marks nor the box paint.
 #[gpui::test]
-fn a_caret_in_the_lead_reveals_the_task_part_raw(cx: &mut TestAppContext) {
+fn a_caret_on_the_marks_reveals_the_item_part_raw(cx: &mut TestAppContext) {
     for (note, keys, raw) in [
         ("1. [ ] a\nbody", "cmd-up right", "1. [ ] "),
         ("- - [ ] a\nbody", "cmd-up", "- - [ ] "),

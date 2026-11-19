@@ -48,7 +48,7 @@ fn geometry(
 /// `cmd-up` puts the caret on the `-`: the gutter widens to the raw item part, so row 0's text and
 /// every wrapped row start the raw width less one slot further right.
 #[gpui::test]
-fn revealing_a_task_part_widens_its_gutter(cx: &mut TestAppContext) {
+fn revealing_an_item_part_widens_its_gutter(cx: &mut TestAppContext) {
     let text = format!("- [ ] {}\nbody", "aaaa ".repeat(40));
     let (window, mut cx) = dispatching(cx, &text);
     cx.run_until_parked();
@@ -123,7 +123,7 @@ fn toggling_a_task_keeps_its_gutter_width(cx: &mut TestAppContext) {
 /// text, one at the bullet the item part alone at its own `x`, its text at the raw part's end, and
 /// `b`'s line starts under `a`, its blanks hidden. A selection over both paints each part apart.
 #[gpui::test]
-fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
+fn the_quote_part_and_the_item_part_reveal_apart(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> - [ ] a\n  b\n\nbody");
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-down");
@@ -158,7 +158,7 @@ fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     assert_eq!(both_xs[0], task_xs[0]);
 }
 
-/// With the task part revealed, a click on its `[` lands on it, and one in the concealed quote part
+/// With the item part revealed, a click on its `[` lands on it, and one in the concealed quote part
 /// on the text's start.
 #[gpui::test]
 fn a_click_lands_through_the_revealed_part_only(cx: &mut TestAppContext) {
@@ -204,9 +204,9 @@ fn a_shown_part_maps_its_offsets_where_they_stand(cx: &mut TestAppContext) {
 }
 
 /// With the quote part shown: left of the column lands on the `>`, past its space's start on the
-/// text, not on the concealed task part.
+/// text, not on the concealed item part.
 #[gpui::test]
-fn a_click_on_a_shown_quote_part_stays_out_of_the_task_part(cx: &mut TestAppContext) {
+fn a_click_on_a_shown_quote_part_stays_out_of_the_item_part(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> - [ ] a\nbody");
     cx.run_until_parked();
     let text = window

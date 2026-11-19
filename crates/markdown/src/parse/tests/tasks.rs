@@ -131,7 +131,7 @@ fn a_task_after_other_items_markers_gets_a_box_in_one_item_part() {
 }
 
 #[test]
-fn a_caret_in_the_lead_reveals_the_task_part() {
+fn a_caret_on_the_marks_reveals_the_item_part() {
     let conceals = parse("1. [ ] a").conceals;
     let caret = |at| ByteOffset::new(at)..ByteOffset::new(at);
     assert_eq!(conceals.len(), 1);

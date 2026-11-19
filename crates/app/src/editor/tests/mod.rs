@@ -40,7 +40,7 @@ mod task_boxes;
 mod task_click;
 mod task_gutter;
 mod task_key;
-mod task_lead;
+mod task_marks;
 mod task_widths;
 mod wrap;
 

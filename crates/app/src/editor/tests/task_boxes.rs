@@ -82,9 +82,9 @@ fn a_box_lies_inside_its_gutter(cx: &mut TestAppContext) {
     );
 }
 
-/// A caret in the task part shows the checkbox as text, so no box paints over it.
+/// A caret in the item part shows the checkbox as text, so no box paints over it.
 #[gpui::test]
-fn a_revealed_task_part_paints_no_box(cx: &mut TestAppContext) {
+fn a_revealed_item_part_paints_no_box(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "- [ ] a\nbody");
     cx.simulate_keystrokes("cmd-down cmd-up");
     assert_eq!(boxes(&window, &mut cx), []);

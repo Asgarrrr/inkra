@@ -49,7 +49,7 @@ fn click_box(cx: &mut VisualTestContext) {
     click(cx, centre);
 }
 
-/// The editor on `text` with the caret on its last line, off every task part.
+/// The editor on `text` with the caret on its last line, off every item part.
 fn editor(cx: &mut TestAppContext, text: &str) -> (Handle, VisualTestContext) {
     let (window, mut cx) = dispatching(cx, text);
     cx.simulate_keystrokes("cmd-down");
@@ -142,7 +142,7 @@ fn a_click_on_a_revealed_checkbox_places_the_caret_and_edits_nothing(cx: &mut Te
     let (window, mut cx) = editor(cx, "- [ ] a\nbody");
     let y = only_box(&mut cx).center().y;
     cx.simulate_keystrokes("cmd-up");
-    assert_eq!(boxes(&mut cx), [], "the caret at 0 reveals the task part");
+    assert_eq!(boxes(&mut cx), [], "the caret at 0 reveals the item part");
     // The box sits where the bullet does, so the click aims at the revealed middle byte.
     let centre = window
         .update(&mut cx, |view, _, _| {

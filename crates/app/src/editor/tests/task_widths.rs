@@ -98,10 +98,10 @@ fn a_quoted_task_lines_up_with_a_quoted_bullet(cx: &mut TestAppContext) {
     assert_eq!(xs[1], xs[0]);
 }
 
-/// A caret in the task part paints it raw at its shown `x`: the caret sits on its byte, and a
+/// A caret in the item part paints it raw at its shown `x`: the caret sits on its byte, and a
 /// selection from it into the text runs to the text's byte past the raw part.
 #[gpui::test]
-fn a_caret_and_a_selection_in_a_revealed_task_part_sit_at_its_shown_x(cx: &mut TestAppContext) {
+fn a_caret_and_a_selection_in_a_revealed_item_part_sit_at_its_shown_x(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> - [ ] ab\nbody");
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-up right right right");
