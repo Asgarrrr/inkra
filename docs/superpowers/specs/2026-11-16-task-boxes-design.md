@@ -995,19 +995,20 @@ constants, never with a glyph's computed width.
 
 Scenes: `markdown-lists` and `markdown-lists-end`, on one note (`LISTS`,
 `crates/app/src/shot/scenes/markdown_blocks.rs:58-100`), in that file's `SCENES` (118-139) beside
-the `markdown-blocks` scenes. `scenes.rs` sits at its line ceiling, so the note gets no module of its
-own. The note does not fit one window: `markdown-lists` shows its start, `markdown-lists-end` its
-end. Together they show:
+the `markdown-blocks` scenes. `scenes.rs` sits at its line ceiling, so the note gets no module of
+its own. The note does not fit one window: `markdown-lists` shows its start, `markdown-lists-end`
+its end. Together they show:
 
 - bullets three levels deep, nested by two spaces, by four spaces and by a tab;
 - a wrapped bullet;
 - a bullet with a continuation line and a lazy line;
 - tasks beside bullets;
-- an ordered list from 8 to 11, which crosses 10, with a child under 10;
+- an ordered list from 8 to 11, which crosses 10, with a child under 10; the child and 11 fall
+  between the two windows since the code block gained two lines;
 - a list of `1)` to `3)`;
 - an ordered task with a child;
 - a bullet holding a heading;
-- a code block in an item, with a blank line;
+- a code block in a task, with a blank line and a line indented past the code's own start;
 - the caret on a nested bullet's `-`, with its raw `  - ` ending at its text, which does not move.
 
 Re-render `markdown-blocks` (`crates/app/src/shot/scenes/markdown_blocks.rs:7-38`, its `shows` at
@@ -1264,9 +1265,9 @@ Newest last. Each entry says what changed and why.
     `markdown_parse/500000` +2.8% on the median, +1.7 to +4.2% per round. In 3 rounds of three:
     T6b 2.924 ms, T6c1 2.960 ms (+1.3%), T6c2 2.973 ms (+1.7%). The layout cases stay 4.7 to 11%
     faster over 3 rounds, with 1.6 to 2.9% fewer instructions per iteration.
-  - The review found a code block in a task losing its indent. In `- [ ] a\n\n  ```\n  def f():\n
-    return 1`, the line `      return 1` hid all six blanks, the hang column of `- [ ] `, so
-    `return` painted under `def`. A code block's line now hides only the blanks before its code
+  - The review found a code block in a task losing its indent. Under `- [ ] a`, the code line
+    `      return 1` hid all six blanks, the hang column of `- [ ] `, so `return` painted under
+    `def`. A code block's line now hides only the blanks before its code
     text, and the parse styles a split tab as code text (D11, Deviations).
   - The held-lines property now also checks that a held line where no gutter item opens holds
     blanks only. It caught a first form of the fix, which ended the item part at the code text even
