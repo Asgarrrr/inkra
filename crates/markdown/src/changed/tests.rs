@@ -86,6 +86,36 @@ fn a_gutter_gaining_a_quote_is_a_change() {
     assert_eq!(answered("> a\n> b\n\nc", 4, 0, ">"), [(4, 7)]);
 }
 
+/// Nine items, the eighth with a child, then a paragraph.
+const NINE: &str = "1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n7. g\n8. h\n   - x\n9. i\n\nz";
+
+/// Only the lines whose gutter changed (task boxes spec, T6c1): the bullet's line, not `- b`.
+#[test]
+fn a_bullet_turned_into_a_number_dirties_its_line_alone() {
+    assert_eq!(answered("- a\n\n- b\n\nz", 0, 1, "1."), [(0, 3)]);
+}
+
+/// `- b` becomes `- a`'s child: its own gutter changes, `- a`'s does not.
+#[test]
+fn two_blanks_before_a_bullet_dirty_its_line_alone() {
+    assert_eq!(answered("- a\n- b\n\nz", 4, 0, "  "), [(4, 8)]);
+}
+
+/// `10.` widens the list's width key: every item part of the list and its child, each once, and
+/// not the paragraph after it.
+#[test]
+fn a_tenth_item_dirties_every_line_of_its_list() {
+    let lines = (0..8).map(|item| (5 * item, 5 * item + 3));
+    let mut list: Vec<_> = lines.collect();
+    list.extend([(40, 45), (47, 50), (51, 57)]);
+    assert_eq!(answered(NINE, 51, 0, "\n10. j"), list);
+}
+
+#[test]
+fn a_letter_in_the_eighth_item_dirties_its_line_alone() {
+    assert_eq!(answered(NINE, 39, 0, "x"), [(39, 40)]);
+}
+
 #[test]
 fn a_link_losing_its_target_reaches_its_old_markers() {
     assert_eq!(answered("a [t](u) b\n\nc", 5, 3, ""), [(2, 5)]);
