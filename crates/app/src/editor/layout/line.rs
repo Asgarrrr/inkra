@@ -3,7 +3,9 @@
 
 use std::rc::Rc;
 
-use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, size};
+use gpui::{
+    Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px, size,
+};
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
@@ -25,7 +27,7 @@ pub(crate) fn line_shape_count() -> usize {
 pub(super) struct LineShape {
     pub(super) wrapped: WrappedLine,
     text: SharedString,
-    font_size: Pixels,
+    pub(super) font_size: Pixels,
     pub(super) runs: Vec<TextRun>,
     wrap: Option<Pixels>,
 }
@@ -109,6 +111,26 @@ impl LineLayout {
             return None;
         };
         Some((self.box_square(mark.x), checked))
+    }
+
+    /// The text's ascent and descent: the largest of its runs' fonts at its size, as `gpui_apple`
+    /// lays a line out (`text_system.rs:567-570`). An empty line keeps one run, and its shape, with
+    /// no glyph, reports neither (task boxes spec, D4).
+    pub(super) fn text_metrics(&self, window: &Window) -> (Pixels, Pixels) {
+        let text_system = window.text_system();
+        let size = self.shape.font_size;
+        self.shape
+            .runs
+            .iter()
+            .fold((px(0.), px(0.)), |(ascent, descent), run| {
+                let font = text_system.resolve_font(&run.font);
+                // A font's descent lies below the baseline, so it is negative.
+                let below = -text_system.descent(font, size);
+                (
+                    ascent.max(text_system.ascent(font, size)),
+                    descent.max(below),
+                )
+            })
     }
 
     /// The box's square at `x`, centred on row 0.

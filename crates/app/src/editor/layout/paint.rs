@@ -102,16 +102,11 @@ impl DocumentLayout {
             .collect()
     }
 
-    /// Line `line`'s top, row height, and its text's ascent and descent.
-    pub(crate) fn row_metrics(&self, line: usize) -> (Pixels, Pixels, Pixels, Pixels) {
+    /// Line `line`'s top, row height, and font size.
+    pub(crate) fn row_metrics(&self, line: usize) -> (Pixels, Pixels, Pixels) {
         let placed = &self.lines[line];
-        let text = &placed.line.shape.wrapped.unwrapped_layout;
-        (
-            placed.top,
-            placed.line.row_height,
-            text.ascent,
-            text.descent,
-        )
+        let line = &placed.line;
+        (placed.top, line.row_height, line.shape.font_size)
     }
 }
 
@@ -243,8 +238,8 @@ impl DocumentLayout {
         // gpui's baseline: half the leading, then the ascent (`text_system/line.rs:557-558`).
         let baseline =
             |ascent: Pixels, descent: Pixels| (row_height - ascent - descent) / 2. + ascent;
-        let text = &line.shape.wrapped.unwrapped_layout;
-        let text_baseline = baseline(text.ascent, text.descent);
+        let (ascent, descent) = line.text_metrics(window);
+        let text_baseline = baseline(ascent, descent);
         for mark in prefix.marks() {
             match &mark.paint {
                 Paint::Text(shaped) => {
