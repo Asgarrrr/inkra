@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{Pixels, ShapedLine, px};
-use inkra_markdown::Gutter;
+use inkra_markdown::{Gutter, WidthKey};
 
 use super::Prefix;
 use super::marks::{Mark, Marks};
@@ -113,23 +113,25 @@ pub(super) struct Geometry {
 }
 
 /// What gutters share within one `shape_document`: the geometry of the line above, built or
-/// carried, which a lazy line takes, each distinct quote part's geometry, measured once, and the
-/// marks' shapes.
+/// carried, which a lazy line takes, each distinct quote part's geometry, measured once, the marks'
+/// shapes, and the width keys the item parts index.
 pub(in crate::editor::layout) struct GutterCarry<'a> {
     carried: Geometry,
     /// Geometry depends only on the quote part's text at the body size (spec D3); most are `> ` or
     /// `> > `.
     quotes: HashMap<&'a str, Geometry>,
     marks: Marks<'a>,
+    width_keys: &'a [WidthKey],
     body_size: Pixels,
 }
 
 impl<'a> GutterCarry<'a> {
-    pub(in crate::editor::layout) fn new(body_size: Pixels) -> Self {
+    pub(in crate::editor::layout) fn new(body_size: Pixels, width_keys: &'a [WidthKey]) -> Self {
         Self {
             carried: Geometry::default(),
             quotes: HashMap::new(),
             marks: Marks::default(),
+            width_keys,
             body_size,
         }
     }
@@ -184,9 +186,12 @@ impl<'a> GutterCarry<'a> {
         };
         let marks = gutter.item.as_ref().map(|item| {
             let part = &source[reveal.split..];
-            let (marks, width) = self.marks.layout(item, part, geometry.quote_width, |text| {
-                shape(Shape::Mark { text, size })
-            });
+            let numbers = &self.width_keys[item.numbers.clone()];
+            let (marks, width) =
+                self.marks
+                    .layout(item, numbers, part, geometry.quote_width, |text| {
+                        shape(Shape::Mark { text, size })
+                    });
             geometry.width = width;
             marks
         });

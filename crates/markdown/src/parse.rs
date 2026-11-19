@@ -9,7 +9,7 @@ use crate::gutters::{cut, gutter_conceals};
 use crate::items::Items;
 use crate::spans::{backtick_runs, lines, push, to_offsets};
 use crate::structure::Collector;
-use crate::{Conceal, Gutter, Structure, Styles};
+use crate::{Conceal, Gutter, Structure, Styles, WidthKey};
 use open::Open;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -23,6 +23,8 @@ pub struct Markdown {
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or held
     /// by a gutter item and not blank outside a code block (task boxes spec, D11).
     pub gutters: Vec<Gutter>,
+    /// The width keys of every item part, each indexed by its `numbers` (task boxes spec, D1).
+    pub width_keys: Vec<WidthKey>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
     /// What `⌘L` reads; the layout reads none of it (task boxes spec, D1).
@@ -147,7 +149,8 @@ fn parse_terminated(text: &str) -> Markdown {
     let blocks = code_blocks
         .iter()
         .map(|(range, _)| range.start.get()..range.end.get());
-    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes, structure.items(), blocks);
+    let (gutters, width_keys, mut bullets, unboxed) =
+        items.gutters(text, &quotes, structure.items(), blocks);
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
@@ -171,6 +174,7 @@ fn parse_terminated(text: &str) -> Markdown {
         conceals,
         headings,
         gutters,
+        width_keys,
         code_blocks,
         structure: structure.finish(unboxed),
     }

@@ -107,6 +107,12 @@ fn a_blank_line_that_ends_an_item_dirties_the_lines_it_releases() {
     assert_eq!(answered("- a\nb\nc\n\nz", 4, 0, "\n"), [(4, 5), (7, 7)]);
 }
 
+/// The new list's keys come first in `width_keys`, so the old list's item parts index other keys.
+#[test]
+fn an_ordered_list_typed_above_another_leaves_its_lines_clean() {
+    assert_eq!(answered("a\n\n1. b\n   c\n", 0, 0, "1. x\n\n"), [(0, 6)]);
+}
+
 /// `10.` widens the list's width key: every item part of the list and its child, each once, and
 /// not the paragraph after it.
 #[test]
@@ -260,24 +266,25 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
         digits,
         delimiter: b'.',
     };
-    let item = |start, indent, numbers: &[u8], task| {
-        Some(ItemPart {
-            start: ByteOffset::new(start),
-            indent,
-            numbers: numbers.iter().copied().map(key).collect(),
-            task,
-        })
-    };
-    let gutter = |end, quotes: &[usize], depth, item| Gutter {
-        range: offsets(0..end),
-        quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
-        depth,
-        item,
-    };
-    let old = Markdown {
-        gutters: vec![gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, false)))],
+    let item = |start, indent, numbers: &'static [u8], task| Some((start, indent, numbers, task));
+    let gutter = |end, quotes: &[usize], depth, item: Option<(_, _, &[u8], _)>| Markdown {
+        gutters: vec![Gutter {
+            range: offsets(0..end),
+            quotes: quotes.iter().copied().map(ByteOffset::new).collect(),
+            depth,
+            item: item.clone().map(|(start, indent, numbers, task)| ItemPart {
+                start: ByteOffset::new(start),
+                indent,
+                numbers: 0..numbers.len(),
+                task,
+            }),
+        }],
+        width_keys: item.map_or_else(Vec::new, |(_, _, numbers, _)| {
+            numbers.iter().copied().map(key).collect()
+        }),
         ..Markdown::default()
     };
+    let old = gutter(12, &[0, 2], 2, item(4, 1, &[1], task(6..9, false)));
     for new in [
         gutter(10, &[0, 2], 2, item(4, 1, &[1], task(6..9, false))),
         gutter(12, &[0, 1], 2, item(4, 1, &[1], task(6..9, false))),
@@ -292,11 +299,6 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
         gutter(12, &[0, 2], 2, item(4, 1, &[1, 1], task(6..9, false))),
         gutter(12, &[0, 2], 2, None),
     ] {
-        let new = Markdown {
-            gutters: vec![new],
-            ..Markdown::default()
-        };
-
         assert_eq!(typed_after(&old, &new)[0].0, 0, "{new:?}");
     }
 }
@@ -387,7 +389,8 @@ fn on_line(markdown: &Markdown, line: &Range<usize>) -> Vec<String> {
                 .task
                 .as_ref()
                 .map(|task| (span(&task.checkbox), task.checked));
-            (rel(part.start), part.indent, &part.numbers, task)
+            let numbers = &markdown.width_keys[part.numbers.clone()];
+            (rel(part.start), part.indent, numbers, task)
         });
         push(&(span(&item.range), quotes, item.depth, part));
     }

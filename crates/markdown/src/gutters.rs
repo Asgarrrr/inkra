@@ -27,9 +27,9 @@ pub struct ItemPart {
     /// Its blank slots: one per column of each gutter item holding the line whose marker stands
     /// on an earlier line (D11).
     pub indent: usize,
-    /// The width key of each number slot on the line, blank or marked, in slot order; empty,
-    /// and unallocated, under no ordered list (D3, Open question 10).
-    pub numbers: Vec<WidthKey>,
+    /// Where `Markdown::width_keys` holds the width key of each number slot on the line, blank or
+    /// marked, in slot order; empty under no ordered list (D3, Open question 10).
+    pub numbers: Range<usize>,
     /// The box, when the innermost gutter item opening on the line is a task.
     pub task: Option<Task>,
 }

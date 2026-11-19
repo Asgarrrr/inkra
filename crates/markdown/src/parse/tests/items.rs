@@ -91,10 +91,12 @@ fn a_quoted_item_part_starts_past_the_quote_part() {
 
 /// Each line's width keys, in slot order.
 fn numbers(text: &str) -> Vec<Vec<WidthKey>> {
-    parse(text)
+    let markdown = parse(text);
+    let keys = |item: &ItemPart| markdown.width_keys[item.numbers.clone()].to_vec();
+    markdown
         .gutters
-        .into_iter()
-        .map(|gutter| gutter.item.map(|item| item.numbers).unwrap_or_default())
+        .iter()
+        .map(|gutter| gutter.item.as_ref().map(keys).unwrap_or_default())
         .collect()
 }
 
@@ -156,7 +158,7 @@ fn an_item_part_with_no_mark_has_no_mark_and_an_empty_one_no_conceal() {
     let item = ItemPart {
         start,
         indent: 1,
-        numbers: Vec::new(),
+        numbers: 0..0,
         task: None,
     };
     assert_eq!(item.marks("  ").count(), 0);

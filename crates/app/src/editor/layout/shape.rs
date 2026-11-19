@@ -64,7 +64,7 @@ pub(crate) fn shape_document(
         text,
         styles: RunStyles::new(style, theme, &inputs.decorations),
         labels: Labels::new(style, theme),
-        gutter_carry: GutterCarry::new(body_size),
+        gutter_carry: GutterCarry::new(body_size, &markdown.width_keys),
         body: (body_size, body_height),
         spans: &markdown.spans,
         conceals: &markdown.conceals,

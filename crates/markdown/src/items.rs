@@ -138,17 +138,18 @@ impl Items {
         done
     }
 
-    /// The gutters, each held line's item part after its quote part, the bullets' conceals, and
-    /// the lines holding a task with no box. `quotes` are the leading quotes' ranges, `items` every
-    /// item's marker and `blocks` every code block's range without its last `\n`, all in document
-    /// order. One walk, after the parse's one pass, so every width key is final (D1).
+    /// The gutters, each held line's item part after its quote part, the width keys their item
+    /// parts index, the bullets' conceals, and the lines holding a task with no box. `quotes` are
+    /// the leading quotes' ranges, `items` every item's marker and `blocks` every code block's
+    /// range without its last `\n`, all in document order. One walk, after the parse's one pass,
+    /// so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
         items: &[ByteOffset],
         blocks: impl Iterator<Item = Range<usize>>,
-    ) -> (Vec<Gutter>, Vec<Conceal>, Vec<Range<usize>>) {
+    ) -> (Vec<Gutter>, Vec<WidthKey>, Vec<Conceal>, Vec<Range<usize>>) {
         let quote_lines = quote_gutters(text, quotes);
         let mut walk = Walk {
             text,
@@ -156,6 +157,7 @@ impl Items {
             quote_lines: quote_lines.into_iter().peekable(),
             blocks: blocks.peekable(),
             held: Vec::new(),
+            keys: Vec::new(),
         };
         let mut rest = self.records.as_slice();
         // The first line past the last marker line.
@@ -183,7 +185,7 @@ impl Items {
                 !text[gutter.range.end.get()..marker].contains('>'),
                 "a `>` between the quote part and a marker"
             );
-            let item = self.item_part(gutter.range.end, &walk.held, opening);
+            let item = self.item_part(gutter.range.end, &walk.held, opening, &mut walk.keys);
             let end = item.task.as_ref().map_or_else(
                 || marker_end(text, items[last.marker].get()),
                 |task| task.checkbox.end.get(),
@@ -205,22 +207,31 @@ impl Items {
         }
         walk.held_lines(&self, next, text.len());
         walk.out.extend(walk.quote_lines);
-        (walk.out, self.bullets, self.unboxed)
+        (walk.out, walk.keys, self.bullets, self.unboxed)
     }
 
-    /// The item part from `start` of a line that `held` hold and on which `opening` open.
-    fn item_part(&self, start: ByteOffset, held: &[Held<'_>], opening: &[Record]) -> ItemPart {
+    /// The item part from `start` of a line that `held` hold and on which `opening` open; its
+    /// width keys go to the end of `keys`.
+    fn item_part(
+        &self,
+        start: ByteOffset,
+        held: &[Held<'_>],
+        opening: &[Record],
+        keys: &mut Vec<WidthKey>,
+    ) -> ItemPart {
         // An ordered task shows its number and its box; any other item one mark (D11).
         let columns = |item: &Record| 1 + usize::from(item.list.is_some() && item.task.is_some());
+        let first = keys.len();
+        keys.extend(
+            held.iter()
+                .map(|held| held.record)
+                .chain(opening)
+                .filter_map(|item| item.list.map(|list| self.numbers[list])),
+        );
         ItemPart {
             start,
             indent: held.iter().map(|held| columns(held.record)).sum(),
-            numbers: held
-                .iter()
-                .map(|held| held.record)
-                .chain(opening)
-                .filter_map(|item| item.list.map(|list| self.numbers[list]))
-                .collect(),
+            numbers: first..keys.len(),
             task: opening.last().and_then(|item| item.task.clone()),
         }
     }
@@ -236,14 +247,15 @@ struct Held<'r> {
 }
 
 /// The walk's cursors, each moving forward only: the quote lines not yet given out, the code
-/// blocks not yet passed, the gutter items holding the line, outermost first, and the gutters so
-/// far.
+/// blocks not yet passed, the gutter items holding the line, outermost first, and the gutters and
+/// width keys so far.
 struct Walk<'t, 'r, B: Iterator<Item = Range<usize>>> {
     text: &'t str,
     quote_lines: Peekable<std::vec::IntoIter<Gutter>>,
     blocks: Peekable<B>,
     held: Vec<Held<'r>>,
     out: Vec<Gutter>,
+    keys: Vec<WidthKey>,
 }
 
 impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
@@ -304,7 +316,8 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
                 .take_while(|&(at, byte)| at < hang && matches!(byte, b' ' | b'\t'))
                 .count();
             let mut gutter = quoted.unwrap_or_else(|| gutter_at(line, 0));
-            gutter.item = Some(items.item_part(ByteOffset::new(start), &self.held, &[]));
+            gutter.item =
+                Some(items.item_part(ByteOffset::new(start), &self.held, &[], &mut self.keys));
             gutter.range.end = ByteOffset::new(start + blanks);
             self.out.push(gutter);
         }
