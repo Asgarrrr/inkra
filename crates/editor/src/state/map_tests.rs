@@ -72,7 +72,7 @@ fn a_marked_range_keeps_its_text_and_one_removed_is_dropped() {
 fn the_goal_resets() {
     let mut state = EditorState::new(Selection::at(at(0)));
     let buffer = Buffer::new("ab");
-    state.move_vertically(&buffer, at(1), false, Goal::Column(7.));
+    state.move_vertically(&buffer, at(1), false, Goal::Column(7.), no_snap);
     state.map_through(&diff(Version::default(), "ab", "ab\n"));
     assert_eq!(state.selection().goal(), Goal::None);
 }

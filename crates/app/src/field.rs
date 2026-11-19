@@ -8,8 +8,8 @@ use gpui::{
     FocusHandle, Focusable, GlobalElementId, InteractiveElement, IntoElement, LayoutId, Pixels,
     Render, Style, Styled, Window, actions, point, prelude::*, px, relative,
 };
-use inkra_editor::Selection;
-use inkra_text::{Buffer, ByteOffset};
+use inkra_editor::{Selection, no_snap};
+use inkra_text::{Bias, Buffer, ByteOffset};
 
 use crate::decorations::Drawn;
 use crate::editor::layout::{BlockScrolls, LayoutInputs, shape_document};
@@ -93,6 +93,10 @@ impl InputHost for NameField {
     }
 
     fn after_move(&mut self, _: Range<ByteOffset>, _: &mut Window, _: &mut Context<Self>) {}
+
+    fn snap(&self) -> impl Fn(ByteOffset, Bias) -> ByteOffset + 'static {
+        no_snap
+    }
 }
 
 impl Focusable for NameField {

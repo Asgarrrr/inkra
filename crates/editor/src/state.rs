@@ -21,6 +21,12 @@ enum Direction {
     Forward,
 }
 
+/// The snap of a host whose caret may rest at every offset.
+#[must_use]
+pub fn no_snap(offset: ByteOffset, _: Bias) -> ByteOffset {
+    offset
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Copied {
     pub text: String,
@@ -133,7 +139,8 @@ impl EditorState {
         if let Some(selected) = selected_utf16 {
             let inserted_at = buffer.to_utf16(start);
             let cursor = buffer.from_utf16(inserted_at + selected.end);
-            self.move_to(buffer, cursor, false);
+            // On the new text, which the host snaps once it parses it.
+            self.move_to(buffer, cursor, false, no_snap);
         }
     }
 
@@ -201,20 +208,38 @@ impl EditorState {
         )
     }
 
-    pub fn backspace(&mut self, buffer: &mut Buffer, now: Instant) {
-        self.remove(buffer, now, Direction::Backward);
+    /// `snap` moves an offset where no caret may rest to the edge its bias picks, so a step over
+    /// such a run removes it whole.
+    pub fn backspace(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.remove(buffer, now, Direction::Backward, snap);
     }
 
-    pub fn delete(&mut self, buffer: &mut Buffer, now: Instant) {
-        self.remove(buffer, now, Direction::Forward);
+    pub fn delete(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.remove(buffer, now, Direction::Forward, snap);
     }
 
-    fn remove(&mut self, buffer: &mut Buffer, now: Instant, direction: Direction) {
+    fn remove(
+        &mut self,
+        buffer: &mut Buffer,
+        now: Instant,
+        direction: Direction,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
         let range = if self.selection.is_empty() {
             let cursor = self.cursor();
             match direction {
-                Direction::Backward => buffer.previous_grapheme(cursor)..cursor,
-                Direction::Forward => cursor..buffer.next_grapheme(cursor),
+                Direction::Backward => snap(buffer.previous_grapheme(cursor), Bias::Left)..cursor,
+                Direction::Forward => cursor..snap(buffer.next_grapheme(cursor), Bias::Right),
             }
         } else {
             self.selection.range()
@@ -225,7 +250,14 @@ impl EditorState {
         }
     }
 
-    pub fn move_(&mut self, buffer: &Buffer, movement: LogicalMovement, extend: bool) {
+    /// `snap` as `backspace` takes it: a step left lands at the run's start, any other at its end.
+    pub fn move_(
+        &mut self,
+        buffer: &Buffer,
+        movement: LogicalMovement,
+        extend: bool,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
         let collapsing = !extend && !self.selection.is_empty();
         let target = match movement {
             LogicalMovement::Left if collapsing => self.selection.start(),
@@ -238,7 +270,11 @@ impl EditorState {
             LogicalMovement::DocStart => ByteOffset::new(0),
             LogicalMovement::DocEnd => buffer.len(),
         };
-        self.move_to(buffer, target, extend);
+        let bias = match movement {
+            LogicalMovement::Left => Bias::Left,
+            _ => Bias::Right,
+        };
+        self.place(buffer, target, bias, extend, Goal::None, snap);
     }
 
     fn line(&self, buffer: &Buffer) -> Range<ByteOffset> {
@@ -246,8 +282,15 @@ impl EditorState {
     }
 
     /// Clears the goal column; a vertical move that must keep one uses `move_vertically` instead.
-    pub fn move_to(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool) {
-        self.place(buffer, offset, extend, Goal::None);
+    /// Lands past a run `snap` forbids, as Home lands at a line's text.
+    pub fn move_to(
+        &mut self,
+        buffer: &Buffer,
+        offset: ByteOffset,
+        extend: bool,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        self.place(buffer, offset, Bias::Right, extend, Goal::None, snap);
     }
 
     pub fn move_vertically(
@@ -256,16 +299,40 @@ impl EditorState {
         offset: ByteOffset,
         extend: bool,
         goal: Goal,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
     ) {
-        self.place(buffer, offset, extend, goal);
+        self.place(buffer, offset, Bias::Right, extend, goal, snap);
     }
 
-    fn place(&mut self, buffer: &Buffer, offset: ByteOffset, extend: bool, goal: Goal) {
-        let offset = buffer.clip(offset);
+    fn place(
+        &mut self,
+        buffer: &Buffer,
+        offset: ByteOffset,
+        bias: Bias,
+        extend: bool,
+        goal: Goal,
+        snap: impl Fn(ByteOffset, Bias) -> ByteOffset,
+    ) {
+        let offset = buffer.clip(snap(offset, bias));
         if extend {
             self.selection.set_head(offset, goal);
         } else {
             self.selection.collapse_to(offset, goal);
+        }
+    }
+
+    /// After the text changed: a caret lands at the end of a run `snap` forbids, a range widens
+    /// over it at both ends.
+    pub fn snap(&mut self, snap: impl Fn(ByteOffset, Bias) -> ByteOffset) {
+        let range = self.selection.range();
+        let snapped = if range.is_empty() {
+            let caret = snap(range.start, Bias::Right);
+            caret..caret
+        } else {
+            snap(range.start, Bias::Left)..snap(range.end, Bias::Right)
+        };
+        if snapped != range {
+            self.selection = Selection::new(snapped, self.selection.reversed());
         }
     }
 
@@ -337,3 +404,6 @@ mod map_tests;
 
 #[cfg(test)]
 mod apply_tests;
+
+#[cfg(test)]
+mod snap_tests;

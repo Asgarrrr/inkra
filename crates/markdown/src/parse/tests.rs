@@ -781,6 +781,7 @@ proptest! {
 
 }
 
+mod atoms;
 mod code_blocks;
 mod gutters;
 mod headings;

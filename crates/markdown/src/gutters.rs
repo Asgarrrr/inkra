@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::{ByteOffset, Hunk};
+use inkra_text::{Bias, ByteOffset, Hunk};
 
 use crate::spans::{line_ranges, line_start, push, to_offsets};
 use crate::{Conceal, Markdown, Span, Styles};
@@ -32,6 +32,8 @@ pub struct ItemPart {
     pub keys: Range<usize>,
     /// The box, when the innermost gutter item opening on the line is a task.
     pub task: Option<Task>,
+    /// Whether it holds a mark: on a marker line alone, as a marker is never empty (D2).
+    pub marked: bool,
 }
 
 /// What a list's number width depends on: its longest number (D3).
@@ -115,6 +117,34 @@ impl Markdown {
             .as_ref()?
             .task
             .as_ref()
+    }
+
+    /// `offset`, or an atom's edge when it lies inside one: its start, the end of the line before,
+    /// for `Bias::Left`, and its text start for `Bias::Right`. An atom is an item part with no
+    /// mark that holds a blank; its inside runs from the `\n` before it through its quote part
+    /// and its blanks (D2).
+    #[must_use]
+    pub fn snap(&self, offset: ByteOffset, bias: Bias) -> ByteOffset {
+        // The one gutter whose line can hold `offset` inside: the first ending at or past it.
+        let at = self
+            .gutters
+            .partition_point(|gutter| gutter.range.end < offset);
+        let Some(gutter) = self.gutters.get(at) else {
+            return offset;
+        };
+        let atom = gutter
+            .item
+            .as_ref()
+            .is_some_and(|item| !item.marked && item.start < gutter.range.end);
+        // An atom's line is never the first: a marker line holds it.
+        if !atom || offset < gutter.range.start || offset >= gutter.range.end {
+            return offset;
+        }
+        let edge = gutter.range.start - 1;
+        match bias {
+            Bias::Left => edge,
+            Bias::Right => gutter.range.end,
+        }
     }
 }
 
@@ -251,14 +281,14 @@ pub(crate) fn gutter_conceals<'g>(
             marker: quote..quote + 1,
             replacement: "",
         });
-        let item = gutter.item.as_ref().and_then(|item| {
+        let item = gutter.item.as_ref().filter(|item| item.marked).map(|item| {
             let part = &text[item.start.get()..gutter.range.end.get()];
             let end = item.start + part.trim_end_matches([' ', '\t']).len();
-            (item.start < end).then_some(Conceal {
+            Conceal {
                 element: item.start..end,
                 marker: item.start..end,
                 replacement: "",
-            })
+            }
         });
         quotes.chain(item)
     })

@@ -11,7 +11,7 @@ fn the_selection_is_reported_in_utf16_units_not_bytes(cx: &mut TestAppContext) {
     with_editor(cx, "a😀b", |view, window, cx| {
         // 'a'@0, '😀'@1..5 (2 UTF-16 units), 'b'@5.
         view.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, at(5), false);
+            state.move_to(buffer, at(5), false, inkra_editor::no_snap);
         });
         let selection = view.selected_text_range(true, window, cx).unwrap();
         assert_eq!(selection.range, 3..3);
@@ -125,7 +125,7 @@ fn composition_on_a_later_line_marks_and_commits_there(cx: &mut TestAppContext) 
     window
         .update(&mut cx, |view, window, cx| {
             view.move_cursor(window, cx, |state, buffer| {
-                state.move_to(buffer, at(8), false);
+                state.move_to(buffer, at(8), false, inkra_editor::no_snap);
             });
             view.replace_and_mark_text_in_range(None, "か", Some(1..1), window, cx);
             assert_eq!(view.input.buffer().read(cx).text(), "aaa\nbbb\nか");

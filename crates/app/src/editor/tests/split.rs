@@ -60,8 +60,10 @@ fn select(view: &Entity<EditorView>, range: std::ops::Range<usize>, cx: &mut Vis
         let buffer = buffer.read(cx);
         view.input
             .state_mut()
-            .move_to(buffer, at(range.start), false);
-        view.input.state_mut().move_to(buffer, at(range.end), true);
+            .move_to(buffer, at(range.start), false, inkra_editor::no_snap);
+        view.input
+            .state_mut()
+            .move_to(buffer, at(range.end), true, inkra_editor::no_snap);
     });
 }
 

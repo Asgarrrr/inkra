@@ -25,7 +25,7 @@ use gpui::{
 };
 use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
-use inkra_text::{Buffer, ByteOffset, Version};
+use inkra_text::{Bias, Buffer, ByteOffset, Version};
 
 use crate::decorations;
 use crate::open::Open;
@@ -144,6 +144,9 @@ impl EditorView {
                     self.input.reset_state(peeked);
                 }
             }
+            // An edit places its caret on text not yet parsed (task boxes spec, D2).
+            let markdown = &self.markdown;
+            self.input.snap(|offset, bias| markdown.snap(offset, bias));
         }
         let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
             self.is_block_start(offset)
@@ -399,6 +402,11 @@ impl InputHost for EditorView {
             self.reshape(window, cx);
         }
         self.reveal_cursor(Reveal::Minimal, cx);
+    }
+
+    fn snap(&self) -> impl Fn(ByteOffset, Bias) -> ByteOffset + 'static {
+        let markdown = Rc::clone(&self.markdown);
+        move |offset, bias| markdown.snap(offset, bias)
     }
 }
 

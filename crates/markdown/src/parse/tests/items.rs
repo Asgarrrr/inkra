@@ -157,6 +157,7 @@ fn an_item_part_with_no_mark_has_no_mark_and_an_empty_one_no_conceal() {
         indent: 1,
         keys: 0..0,
         task: None,
+        marked: false,
     };
     assert_eq!(item.marks("  ").count(), 0);
     let gutter = Gutter {

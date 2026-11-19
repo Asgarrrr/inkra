@@ -41,7 +41,7 @@ fn a_move_that_reveals_reshapes_before_the_next_frame(cx: &mut TestAppContext) {
     window
         .update(&mut cx, |view, window, cx| {
             view.move_cursor(window, cx, |state, buffer| {
-                state.move_to(buffer, at(3), false);
+                state.move_to(buffer, at(3), false, inkra_editor::no_snap);
             });
             assert_eq!(shown(view, 0), "a **b** c");
         })

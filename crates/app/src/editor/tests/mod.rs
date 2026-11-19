@@ -9,6 +9,7 @@ use inkra_text::{Buffer, ByteOffset};
 use super::EditorView;
 use crate::keymap::key_bindings;
 
+mod atoms;
 mod carry;
 mod clipboard;
 mod code_block_anchors;

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use inkra_editor::{EditorState, Goal, LogicalMovement, ParkedSelection, Selection};
+use inkra_editor::{EditorState, Goal, LogicalMovement, ParkedSelection, Selection, no_snap};
 use inkra_text::{Buffer, ByteOffset, Hunk, Version, diff};
 use proptest::prelude::*;
 
@@ -132,13 +132,13 @@ proptest! {
                     let range = state.selection().range();
                     state.edit(&mut buffer, now, range, &text);
                 }
-                Gesture::Backspace => state.backspace(&mut buffer, now),
-                Gesture::Delete => state.delete(&mut buffer, now),
+                Gesture::Backspace => state.backspace(&mut buffer, now, no_snap),
+                Gesture::Delete => state.delete(&mut buffer, now, no_snap),
                 Gesture::Move(movement, extend) => {
-                    state.move_(&buffer, movement.into(), extend);
+                    state.move_(&buffer, movement.into(), extend, no_snap);
                 }
                 Gesture::MoveTo(at, extend) => {
-                    state.move_to(&buffer, ByteOffset::new(at % (buffer.len().get() + 1)), extend);
+                    state.move_to(&buffer, ByteOffset::new(at % (buffer.len().get() + 1)), extend, no_snap);
                 }
                 Gesture::SelectAll => state.select_all(&buffer),
                 Gesture::Undo => {
@@ -164,8 +164,8 @@ proptest! {
         let mut buffer = Buffer::new(text.clone());
         let mut state = EditorState::new(Selection::at(ByteOffset::new(0)));
 
-        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false);
-        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true);
+        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false, no_snap);
+        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true, no_snap);
 
         let range = state.selection().range();
         let mut expected = text;
@@ -192,8 +192,8 @@ proptest! {
 
         let mut buffer = Buffer::new(text.clone());
         let mut state = EditorState::new(Selection::at(ByteOffset::new(0)));
-        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false);
-        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true);
+        state.move_to(&buffer, ByteOffset::new(anchor % (text.len() + 1)), false, no_snap);
+        state.move_to(&buffer, ByteOffset::new(head % (text.len() + 1)), true, no_snap);
 
         let selection = state.selection().range();
         let line = buffer.line_range(buffer.line_for_offset(state.cursor()));

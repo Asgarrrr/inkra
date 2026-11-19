@@ -490,8 +490,12 @@ fn a_reveal_waiting_through_a_reload_centres_by_the_new_text(cx: &mut TestAppCon
             // In the text before the reload, which `on_buffer_reloaded` maps it from.
             let buffer = view.input.buffer().clone();
             let buffer = buffer.read(cx);
-            view.input.state_mut().move_to(buffer, at(50), false);
-            view.input.state_mut().move_to(buffer, at(54), true);
+            view.input
+                .state_mut()
+                .move_to(buffer, at(50), false, inkra_editor::no_snap);
+            view.input
+                .state_mut()
+                .move_to(buffer, at(54), true, inkra_editor::no_snap);
             view.viewport.request(ScrollTo::Cursor(Reveal::Center));
             let buffer = view.input.buffer().clone();
             view.on_buffer_reloaded(buffer, &Reloaded(diff), cx);

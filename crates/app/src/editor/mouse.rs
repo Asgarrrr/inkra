@@ -51,12 +51,13 @@ impl EditorView {
         };
         // Before `is_selecting`, as a ⌘-click: a toggle starts no drag selection. `⌘` and `⇧` skip
         // the box, to follow a link and extend the selection; a window's first click only activates it.
+        let snap = self.snap();
         if !(event.modifiers.platform || event.modifiers.shift || event.first_mouse)
             && let Some((flip, text_start)) = self.task_under(event.position)
             && self.edit_buffer(window, cx, |state, buffer| {
                 let applied = state.apply_diff(buffer, &flip);
                 if applied {
-                    state.move_to(buffer, flip.map(text_start, Bias::Right), false);
+                    state.move_to(buffer, flip.map(text_start, Bias::Right), false, &snap);
                 }
                 applied
             })
@@ -80,7 +81,7 @@ impl EditorView {
         self.is_selecting = true;
         let extend = event.modifiers.shift;
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, extend);
+            state.move_to(buffer, offset, extend, snap);
         });
     }
 
@@ -106,8 +107,9 @@ impl EditorView {
         let Some(offset) = self.input.offset_at(event.position) else {
             return;
         };
+        let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, true);
+            state.move_to(buffer, offset, true, snap);
         });
     }
 

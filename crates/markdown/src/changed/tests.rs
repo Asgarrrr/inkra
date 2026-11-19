@@ -277,6 +277,7 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
                 indent,
                 keys: 0..numbers.len(),
                 task,
+                marked: true,
             }),
         }],
         width_keys: item.map_or_else(Vec::new, |(_, _, numbers, _)| {
@@ -298,6 +299,11 @@ fn a_gutter_before_the_edit_that_changes_any_field_is_a_change() {
         gutter(12, &[0, 2], 2, item(4, 1, &[2], task(6..9, false))),
         gutter(12, &[0, 2], 2, item(4, 1, &[1, 1], task(6..9, false))),
         gutter(12, &[0, 2], 2, None),
+        {
+            let mut held = old.clone();
+            held.gutters[0].item.as_mut().unwrap().marked = false;
+            held
+        },
     ] {
         assert_eq!(typed_after(&old, &new)[0].0, 0, "{new:?}");
     }

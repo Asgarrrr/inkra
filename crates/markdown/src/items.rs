@@ -253,6 +253,7 @@ impl Items {
             indent: held.iter().map(|held| columns(held.record)).sum(),
             keys: first..keys.len(),
             task: opening.last().and_then(|item| item.task.clone()),
+            marked: !opening.is_empty(),
         }
     }
 }
