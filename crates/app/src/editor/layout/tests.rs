@@ -204,7 +204,7 @@ impl Inputs {
                     .lines
                     .iter()
                     .filter_map(|placed| {
-                        let (square, _) = placed.line.task_box()?;
+                        let square = placed.line.task_box()?;
                         Some(square.center() + gpui::point(px(0.), placed.top))
                     })
                     .collect();
@@ -327,7 +327,6 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
             .collect::<Vec<_>>()
     };
     prop_assert_eq!(marks(carried), marks(fresh), "marks at {}", at);
-    prop_assert_eq!(carried.task_box(), fresh.task_box(), "task box at {}", at);
     prop_assert_eq!(prefix(carried), prefix(fresh), "prefix at {}", at);
     let label = |line: &super::LineLayout| line.label.as_ref().map(|label| label.text.to_string());
     prop_assert_eq!(label(carried), label(fresh), "label at {}", at);

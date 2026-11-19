@@ -322,7 +322,7 @@ impl DocumentLayout {
     pub(crate) fn task_at(&self, local: Point<Pixels>) -> Option<(Diff, ByteOffset)> {
         // Clamped to the nearest line: below its first row, its square misses.
         let (placed, _) = self.locate(self.row_for_y(local.y));
-        let (square, _) = placed.line.task_box()?;
+        let square = placed.line.task_box()?;
         let gutter = placed.line.prefix.as_ref()?.range();
         let task = self.markdown.task_at(placed.start)?;
         square

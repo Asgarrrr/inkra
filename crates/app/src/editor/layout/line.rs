@@ -103,14 +103,11 @@ impl LineLayout {
         prefix::indent(self.prefix.as_ref())
     }
 
-    /// The square a concealed box paints and a click hits, from the line's origin, and whether it
-    /// is checked: from its slot's left, centred on row 0 (task boxes spec, D4).
-    pub(super) fn task_box(&self) -> Option<(Bounds<Pixels>, bool)> {
+    /// The square a concealed box paints and a click hits, from the line's origin: from its slot's
+    /// left, centred on row 0 (task boxes spec, D4).
+    pub(super) fn task_box(&self) -> Option<Bounds<Pixels>> {
         let mark = self.prefix.as_ref()?.marks().last()?;
-        let Paint::Box { checked } = mark.paint else {
-            return None;
-        };
-        Some((self.box_square(mark.x), checked))
+        matches!(mark.paint, Paint::Box { .. }).then(|| self.box_square(mark.x))
     }
 
     /// The text's ascent and descent: the largest of its runs' fonts at its size, as `gpui_apple`
