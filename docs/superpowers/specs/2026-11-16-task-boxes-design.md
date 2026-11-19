@@ -5,7 +5,7 @@ on 2026-11-18, then reshaped them the same day through the answers to the T6 rev
 questions 5 and 6. In the real font, T6b as built glued a task's text to its box. The owner then
 moved bullets into the box's slot (decision 7). T6c is designed, and the owner decided its Open
 questions 7 and 8 on 2026-11-18/19. Open question 9 waits on the rendered scene. Open question 10
-decides the data before T6c1 starts. This spec replaces S3 of
+decides the data before T6c1 starts. T6c1 and T6c2 are built (History). This spec replaces S3 of
 `2026-09-30-markdown-blocks-design.md` ("S3 as planned", 2026-11-11), whose parser facts and
 pending-slot rule it cites rather than copies. An audit and an advisor review (Opus) of that plan
 found the defects this spec fixes; they are cited by letter (A–I). D1–D11 state the design as it
@@ -139,7 +139,7 @@ pub enum ItemMarker {
   item's first event that is not one `Start(Paragraph)`. The parser facts table of markdown-blocks
   holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 - **The records.**
-  - `Items` lives in `crates/markdown/src/items.rs` (`items.rs:38-50`); T6c1 moved it out of
+  - `Items` lives in `crates/markdown/src/items.rs` (`items.rs:39-51`); T6c1 moved it out of
     `gutters.rs`.
   - At each gutter item's `Start(Item)` it records the item's range and its index in
     `structure.items`, which already holds the marker (D1, the structure). So no record repeats the
@@ -154,10 +154,15 @@ pub enum ItemMarker {
     final, and no line is back-filled.
   - The walk visits only lines inside a leading quote or a gutter item. It jumps from one container
     to the next.
-  - The walk is `Items::gutters` (`items.rs:144-197`). It takes the quote lines from
+  - The walk is `Items::gutters` (`items.rs:145-208`). It takes the quote lines from
     `quote_gutters` (`gutters.rs:135-156`) and adds the item part with `item_part`
-    (`items.rs:200-214`). A line's items are the records whose marker stands on it, by
+    (`items.rs:211-225`). A line's items are the records whose marker stands on it, by
     `line_start`.
+  - Between two marker lines, `Walk::held_lines` (`items.rs:269-308`) visits each line that the
+    held items hold, and stops at the first line that none holds. `Held` (`items.rs:229-235`)
+    keeps each held item's marker line and its hang column.
+  - `Walk::in_block` (`items.rs:310-313`) tells a blank line inside a code block from any other.
+    It reads the parse's code block ranges, in order, so the walk passes each block once.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
   `LineStart` does (`Blanks`, `gutters.rs:200-232`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
   `pulldown-cmark-0.13.6/src/firstpass.rs:109-114`).
@@ -282,7 +287,7 @@ Behaviour:
 - Home goes to the line's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:84-103`). So
   it reveals the item part, as it revealed a bullet.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:245-254`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:344-353`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
@@ -768,13 +773,14 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/items.rs:236-241`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:335-340`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
-- The walk computes an item's hang column the first time it meets such a line.
+- The walk computes an item's hang column the first time it meets such a line, and keeps it in
+  `Held::hang`.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
-  (`items.rs:228-233`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  (`items.rs:327-332`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
@@ -794,7 +800,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `crates/markdown/src/items.rs:219-224`).
+  (`marker_start`, `crates/markdown/src/items.rs:318-323`).
 
 | Text | Line | Item part | Slots |
 |---|---|---|---|
@@ -1191,6 +1197,21 @@ Newest last. Each entry says what changed and why.
     their module first, to make room in `scenes.rs`.
   - Measured in alternating rounds against `task-boxes-t6b`: `markdown_parse/500000` +1.6%, every
     layout case within 5%.
+- **T6c2, an item's other lines** (2026-11-19, `task-boxes-t6c2`). Every line a gutter item holds
+  starts at its text.
+  - Between two marker lines, `Walk::held_lines` visits the held lines and stops at the first
+    line that no item holds. A blank line takes an item part only inside a code block, which
+    `Walk::in_block` reads from the parse's code block ranges.
+  - `app` gained no code: a line with blank slots only lays out by T6c1's.
+  - The held-lines property checks both directions: a held line that is not blank has an item
+    part, and no other line has one.
+  - T6c1's interim values moved: the code block in an item starts its background at the item's
+    text, and the quoted task's lazy line `  b` starts under `a`.
+  - Measured in alternating rounds against `task-boxes-t6b`. The layout cases are 3.6 to 6.1%
+    faster on the median of 8 rounds, and 1.8 to 2.8% fewer instructions per iteration.
+    `markdown_parse/500000` is 5.7% slower, past its 3% gate; T6c1 alone is 1.5 to 1.9% slower.
+  - The parse gate is open. A profile puts most of the difference in the walk: its line scans
+    and its per-line setup. Merging waits on a decision (D1, the parse gate).
 
 **Reversed decisions.**
 
