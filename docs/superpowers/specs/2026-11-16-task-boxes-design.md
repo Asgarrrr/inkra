@@ -324,6 +324,112 @@ gutter's own conceals: its quotes, then one for its item part when that part has
 G-property in `parse/tests/gutters.rs` checks the same count, and that a part with no mark has no
 conceal.
 
+**Amendment draft: hidden blanks are an atom** (2026-11-19, the owner's decision after the review
+of c217357e; design only, awaiting the owner's go). It replaces the Home bullet above.
+
+The rule. An item part with no mark that holds at least one blank is an **atom**: no caret rests
+inside it, and a caret move or a deletion steps over it whole. Its edges are the previous line's
+end and the text start. So its inside runs from the `\n` before the line through the last hidden
+blank: on `- a\n  b`, offsets 4 and 5 are inside, and 3 and 6 are its edges.
+
+- Left from the text start goes to the previous line's end; Right from there comes back. Shift
+  extends over the atom the same way.
+- Backspace at the text start deletes the `\n` and the blanks, so `- a\n  b` becomes `- ab`. Delete
+  at the previous line's end does the same.
+- Home, `⌃A`, a click, a drag, Up and Down land at the text start.
+- On a quoted line, the inside also covers the quote part: `> - a\n>   b` joins to `> - ab`. A caret
+  at the quote part's end paints at the text start's `x` too, so it would rest unseen. This is
+  open: the owner's words name the item part only (Open question 11).
+- The atom covers the item part of every held line with no mark: a paragraph's later lines, a lazy
+  line with blanks, and a code or HTML block's lines, whose hidden blanks end at the leaf text
+  start (D11). An empty item part, as on line 2 of `- a\nb`, is no atom.
+
+The data. `Markdown::snap(offset, bias) -> ByteOffset` in `gutters.rs`, beside `gutter_conceals`.
+It returns `offset` outside every atom. Inside one, it returns the atom's start edge for
+`Bias::Left` and its text start for `Bias::Right`. It finds the gutter by one binary search, as
+`Markdown::task_at` does, and builds no vector. One predicate decides both "this item part has a
+mark", for the conceal, and "this item part is an atom". So the two can never disagree.
+
+The seam. `inkra-editor` reads no markdown, so it takes the snap as a function. `EditorState`'s
+moves and deletions take `snap: impl Fn(ByteOffset, Bias) -> ByteOffset`. `InputHost` passes it
+to the closures of `move_cursor` and `edit_buffer`. `EditorView`'s comes from its current parse;
+`NameField`'s is the identity. No trait is added: a function has one shape, and `NameField` needs
+no type to say "no atoms".
+
+The invariant, "no caret rests inside an atom". One function, `Markdown::snap`, enforces it at two
+moments. Each moment exists for a reason the other cannot cover:
+
+- **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:263-270`), which
+  every move reaches, snaps the head with the action's bias. The action chooses the bias, not the
+  direction of the move: Home moves left but lands at the text start.
+  - `Bias::Left`: Left, `⇧←`, and Backspace's range start.
+  - `Bias::Right`: Right, `⇧→`, Delete's range end, Home, `⌃A`, Up, Down, `⇧↑`, `⇧↓`, a click, a
+    drag, and `select_range`.
+  - End, `⌃E`, `⌘↑` and `⌘↓` never land inside an atom, which ends at a line's text start. They
+    snap anyway, so no action needs a proof.
+  - `EditorState::remove` (`state.rs:212-226`) builds its range from the snapped grapheme step. So
+    Backspace and Delete remove the atom whole.
+- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:134-158`) is the
+  one place where the parse changes. After it takes a new parse, it snaps the selection: a caret
+  with `Bias::Right`, a range's start with `Bias::Left` and its end with `Bias::Right`. An edit
+  places its caret before the new text is parsed, so `place` cannot see the new atoms. This covers
+  typing, paste, undo, redo, a reload, a write from outside, and a pinned selection's reset.
+
+The cost per keystroke. The parse adds nothing: the atoms are read from `gutters`, which the parse
+already builds. A move adds one binary search over `gutters`, and an edit one more after its parse.
+Neither allocates.
+
+The actions it touches: `Left`, `Right`, `SelectLeft`, `SelectRight`, `Backspace`, `Delete`, `Home`,
+`End`, `LineStart`, `LineEnd` (`text_input/actions.rs`); `Up`, `Down`, `SelectUp`, `SelectDown`,
+`DocStart`, `DocEnd` (`editor/actions.rs`, `motion.rs:34-60`); the click and the drag
+(`editor/mouse.rs:48-84`, `97-112`); `select_range` (`motion.rs:20-32`); the platform's marked
+text selection (`EditorState::mark_and_replace_in_range`); and `character_index_for_point`. Word
+moves (`⌥←`, `⌥→`, `⌥⌫`) do not exist yet (word-wise editing spec, proposed). When they land, they
+go through `place` and `remove` with their direction's bias, so they need no rule of their own.
+
+Zed's precedent.
+
+- Zed keeps the caret out of a fold with one clip. `FoldSnapshot::clip_point` snaps a point inside
+  a fold's placeholder to its start for `Bias::Left`, and to its end otherwise
+  (`vendor/zed-reference/crates/editor/src/display_map/fold_map.rs:1079-1100`).
+  `DisplaySnapshot::clip_point` chains every map's clip (`display_map.rs:2188-2194`).
+- Its moves step one column, then clip with the move's bias: `left` with `Bias::Left`, `right` with
+  `Bias::Right` (`movement.rs:39-81`). A line start clips with `Bias::Right` (`movement.rs:213`).
+  A vertical move clips with `Bias::Left`, then `Bias::Right` when that left its row
+  (`movement.rs:145-150`).
+- Its Backspace selects `movement::left` and deletes the selection (`editor.rs:5267-5323`), and its
+  Delete uses `movement::right` (5325-5339). So a deletion at a fold's edge removes the fold whole,
+  as Backspace here removes the atom.
+
+Deviations from Zed.
+
+- Zed moves in display coordinates, where a fold is one column wide. Inkra moves in buffer offsets
+  and snaps them, because `inkra-editor` has no display map. The result is the same for an atom
+  with no width.
+- Zed keeps selections as buffer anchors and clips them when it converts them to display points.
+  So it needs no snap after an edit. Inkra's selection is a pair of offsets, so it snaps once after
+  the parse.
+- A vertical move snaps with `Bias::Right` alone. The atom's start edge lies on the line above, so
+  `Bias::Left` would always leave the row.
+
+Risks.
+
+- Backspace at a code line's text start in an item joins it to the line above. In a code block that
+  can surprise, because an editor usually deletes indent there. The owner's rule covers every
+  markless item part, code lines included.
+- The quoted case (Open question 11) changes what Backspace removes on a held quoted line.
+- A selection set past the gates (`state_mut` in tests) can sit inside an atom until the next move
+  or edit. No user path does this.
+- `refresh` also runs inside `render`, where a snap changes the selection outside `move_cursor`,
+  so no `after_move` runs. The layout still sees the snapped selection. `reshape` calls `refresh`
+  before it shapes, and the element's measure reshapes when the conceals the selection touches
+  differ (`is_shaped_from`, `crates/app/src/editor/layout/mod.rs:115-125`).
+
+Tests (STEP B, test-first). `Markdown::snap` by example in `inkra-markdown`. In `app`, one
+`simulate_keystrokes` test per binding above, on `- a\n  b`, `> - a\n>   b` and a code line in a
+task. Also a click and a drag on the hidden blanks, Backspace and Delete at both edges, and undo
+after the join. The layout oracle also asserts that no caret rests inside an atom after any step.
+
 ## D3. The gutter and its width
 
 The gutter is a hanging indent: the line's text, wrapped rows included, starts at its right edge
@@ -1555,3 +1661,13 @@ Newest last. Each entry says what changed and why.
     - The rejected alternative was one `Option<WidthKey>`, for the innermost ordered list. An outer
       ordered list's slots then take the standard width, so a line under two ordered lists starts
       off its parent's text when the outer list has wide numbers.
+11. **Does a held quoted line's atom cover its quote part?** (D2, the atom amendment draft.) Open,
+    for the owner.
+    - Recommended: yes. The atom runs from the previous line's end to the text start, so
+      `> - a\n>   b` joins to `> - ab` on Backspace. A caret at the quote part's end paints at the
+      text start's `x`, so a smaller atom leaves one unseen resting place. Deleting only the blanks
+      gives `> - a\n>b`, which looks the same, the case the owner ruled out.
+    - Its cost: on such a line, no caret reaches the `>`, so the quote part reveals only under a
+      selection.
+    - The alternative: the atom covers the item part only. Left from the text start stops at the
+      quote part's end, unseen, and Backspace there removes the blanks alone.
